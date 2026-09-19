@@ -35,7 +35,8 @@ defmodule KilnCMS.Forms.AutoresponderWorker do
         |> subject(subject)
         |> html_body(body)
         |> Mail.ensure_message_id("form-autoresponder-#{id}")
-        |> Mail.deliver_for_worker()
+        # Through the site's own relay when it has one (#1322).
+        |> Mail.deliver_for_worker(org_id: tenant)
 
       # Form deleted or the autoresponder switched off since it was queued —
       # nothing to send. (Not an error: the visitor's submission still

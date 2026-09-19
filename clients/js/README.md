@@ -1,9 +1,11 @@
 # @kiln-cms/client
 
 Official JS/TS client for the [KilnCMS](https://github.com/The-Verscienta/kiln_cms)
-delivery APIs — the JSON:API read surface at `/api/json/*`, per-type and hybrid
-search, fired artifacts at `/api/content/:type/:slug` (including `?as_of=`
-point-in-time reads), and preview tokens. Ships with **`kiln-types`**, a
+APIs — the JSON:API read surface at `/api/json/*`, the JSON:API **write**
+surface (create, update, workflow transitions, soft-delete), per-type and
+hybrid search, fired artifacts at `/api/content/:type/:slug` (including
+`?as_of=` point-in-time reads), preview tokens, and a minimal GraphQL helper
+for `/gql`. Ships with **`kiln-types`**, a
 generator that turns a running site's `GET /api/schema` into TypeScript
 declarations — admin-defined dynamic content types and custom fields included.
 
@@ -18,7 +20,10 @@ at a time. See Kiln's
 Zero runtime dependencies; needs Node 18+ (native `fetch`) or any runtime with
 the WHATWG fetch API. ESM only.
 
-> **Not yet published to npm.** Until it is, consume it from a checkout with
+> **Publishing is prepared, not yet done.** The package metadata and the
+> release workflow are in place (see [Releasing](#releasing)), but the first
+> publish to npm is a manual maintainer step. Until it happens, consume the
+> client from a checkout with
 > `"@kiln-cms/client": "file:../path/to/clients/js"` (run `npm run build` in
 > `clients/js` first) — that is exactly what
 > [`examples/astro-blog`](../../examples/astro-blog) does.
@@ -136,10 +141,9 @@ A degraded embedding backend _stalls_ the semantic routes without failing them
 far too late to be useful). Callers with a keyword fallback should bound
 `semanticSearch()` and `search()` well above their healthy latency.
 
-Errors: any non-2xx response throws `KilnHttpError` (`status`, `url`, parsed
-`body`); narrow with `isKilnHttpError(err)`. `one()` resolves `null` instead
-for an empty match, and `artifact()` retries a cold-cache 503 once before
-throwing.
+`one()` resolves `null` for an empty match, and `artifact()` retries a
+cold-cache 503 once before throwing; everything else that fails throws — see
+[Errors](#errors).
 
 ## API surface
 
@@ -157,6 +161,15 @@ throwing.
 | `mintPreview(type, id)`              | `POST /api/content/:type/:id/preview-token`         | server side; `{token, url, expires_at, …}`              |
 | `preview(token)`                     | `GET /preview/:token`                               | one draft, signed 15-minute token                       |
 | `schema(opts)`                       | `GET /api/schema`                                   | the live delivery schema; feed it to `emitTypes`        |
+| `create(plural, attrs, opts)`        | `POST /api/json/:plural`                            | a draft; `:read_write` key, editor+                     |
+| `update(plural, id, attrs, opts)`    | `PATCH /api/json/:plural/:id`                       | re-fires if published; editor+                          |
+| `transition(plural, id, verb, opts)` | `PATCH /api/json/:plural/:id/<verb>`                | empty resource object; wrappers below                   |
+| `submitForReview(plural, id)`        | `PATCH …/:id/submit-for-review`                     | draft → in_review; editor+                              |
+| `returnToDraft(plural, id)`          | `PATCH …/:id/return-to-draft`                       | in_review → draft; admin                                |
+| `publish(plural, id)`                | `PATCH …/:id/publish`                               | fires artifacts; admin                                  |
+| `unpublish(plural, id)`              | `PATCH …/:id/unpublish`                             | purges artifacts; admin                                 |
+| `delete(plural, id)`                 | `DELETE /api/json/:plural/:id`                      | reversible soft-delete; admin                           |
+| `graphql(query, variables, opts)`    | `POST /gql`                                         | resolves to `data`; `errors` throw `KilnGraphQLError`   |
 
 Dynamic (admin-created) types go through the shared `entries` surface:
 `kiln.list("entries", { filter: { type_name: "product" } })`; their artifacts
@@ -165,6 +178,129 @@ are addressed by type name like compiled types
 `kiln.list("type-definitions", { filter: { name: "product" } })` — it needs an
 editor-or-above key, and `include: ["field_definitions"]` adds each type's
 custom-field schema.
+
+## Writing content
+
+The write methods drive Kiln's JSON:API write surface (see
+[`docs/json-api.md` → Writing](../../docs/json-api.md#writing-330)). They need
+a **`:read_write` API key** — editor-or-above to create, update and submit for
+review; admin to return to draft, publish, unpublish and delete — and throw
+`KilnConfigError` without sending anything when the client has no `apiKey`.
+That key is the opposite of the `:viewer` key delivery reads want, so hold
+separate clients rather than one widened key:
+
+```ts
+const kiln = createClient({ baseUrl, apiKey: process.env.KILN_READ_KEY }); // :viewer
+const writer = createClient({ baseUrl, apiKey: process.env.KILN_WRITE_KEY }); // editor, :read_write
+const admin = createClient({ baseUrl, apiKey: process.env.KILN_ADMIN_KEY }); // admin, :read_write
+
+// Always created as a draft, attributed to the key's owner.
+const post = await writer.create("posts", {
+  title: "Written over the API",
+  slug: "hello-api",
+  body_markdown: "# Hello\n\nFrom the SDK.", // or block_tree: [...], not both
+  tag_ids: [newsTagId],
+});
+
+// Only what you send changes. `tag_ids` REPLACES the set; merge with
+// add_tag_ids / remove_tag_ids instead (not both styles in one call).
+await writer.update("posts", post.id, { add_tag_ids: [featuredTagId] });
+
+await writer.submitForReview("posts", post.id);
+await admin.publish("posts", post.id); // fires the artifacts
+await admin.delete("posts", post.id); // reversible soft-delete
+```
+
+- The first argument is the plural route, as for reads. The JSON:API `type`
+  the server validates is derived from it (`entries` → `entry`); pass
+  `{ type: "person" }` for an irregular plural.
+- A dynamic-type entry is created on `"entries"` with its
+  `type_definition_id` — look it up with
+  `kiln.one("type-definitions", { name: "product" })` (editor-or-above key).
+- Editing published content re-fires its artifacts; draft edits do not.
+- When rewriting a body with `block_tree`, echo each block's `_id` (read them
+  with `fields: { post: ["block_ids"] }`) so the server can tell an edit from
+  a replacement.
+- `transition(plural, id, verb)` takes any verb (`"publish"`,
+  `"submit_for_review"`, …) and kebab-cases it into the route, so a verb a
+  newer server adds is reachable before a client release names it.
+
+## GraphQL
+
+```ts
+const { postBySlug } = await kiln.graphql<{ postBySlug: { title: string } | null }>(
+  `query ($slug: String!, $locale: String!) { postBySlug(slug: $slug, locale: $locale) { title } }`,
+  { slug: "hello-world", locale: "en" },
+);
+```
+
+A minimal helper, not a GraphQL client: it posts `{query, variables,
+operationName?}` to `/gql`, sends the API key if the client has one (the
+published-content queries need none), resolves to `data`, and throws
+`KilnGraphQLError` (`graphqlErrors`, partial `data`) when the response has a
+top-level `errors` array. No codegen, no cache. Ash **mutations** report a
+refused write inside `data` — the payload's own `errors` field next to
+`result: null` — so select `errors { message code }` on mutations and check it.
+
+## Errors
+
+Everything the client throws is a `KilnError` (`status`, `code`, the JSON:API
+`errors` array, `retryAfter` in seconds). HTTP failures are a `KilnHttpError`
+(`status`, `url`, parsed `body` — unchanged from 0.1, so `isKilnHttpError(err)`
+still narrows) refined by status:
+
+| Class                 | When                                                                                                                             |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `KilnAuthError`       | 401 (no/invalid/expired key) · 403 (the key's owner lacks the right — a `:read` key writing, an editor publishing)               |
+| `KilnNotFoundError`   | 404                                                                                                                              |
+| `KilnValidationError` | 400 / 422 — `pointers` (`/data/attributes/slug`) and `fieldErrors()`. AshJsonApi answers most attribute errors with 400, not 422 |
+| `KilnConflictError`   | 409 — a transition from the wrong state (`code: "invalid_state_transition"`, `currentState`) or a lost race                      |
+| `KilnRateLimitError`  | 429 — wait `retryAfter` seconds                                                                                                  |
+| `KilnServerError`     | 5xx (a 503 may carry `retryAfter`)                                                                                               |
+| `KilnNetworkError`    | no response at all (DNS, refused, TLS); the original error is `cause`                                                            |
+| `KilnGraphQLError`    | `/gql` answered with top-level `errors`                                                                                          |
+| `KilnConfigError`     | refused client-side — a write with no `apiKey` (`code: "missing_api_key"`)                                                       |
+
+Aborts are not wrapped: a `signal` (or the client's timeout) rejects with the
+platform's `AbortError` / `TimeoutError`, exactly as `fetch` does. The API key
+is only ever sent as the `Authorization` header — no error carries it.
+
+```ts
+try {
+  await admin.publish("posts", id);
+} catch (error) {
+  if (error instanceof KilnConflictError && error.currentState === "published") return;
+  throw error;
+}
+```
+
+## Releasing
+
+Publishing runs from `.github/workflows/release-clients.yml`, triggered only
+by a tag named `client-js-vX.Y.Z` (it cannot match the core's `vX.Y.Z` release
+tags). The workflow checks the tag equals `package.json`'s `version`, runs the
+same lint/build/test/`astro check` gate as CI, `npm pack`s the package, and —
+after approval in the `npm` environment — attests the tarball's build
+provenance and publishes that same tarball with
+`npm publish --provenance --access public`.
+
+1. Bump `version` in `package.json` (then `npm install --package-lock-only`
+   here and in `examples/astro-blog`, whose lockfile records it), add a
+   `CHANGELOG.md` entry, and merge.
+2. Tag the merge commit `client-js-vX.Y.Z` and push the tag.
+3. Approve the run in the `npm` environment.
+
+One-time setup a maintainer must do before the first run can succeed:
+
+- **npm:** create the `@kiln-cms` organization (the scope) on npmjs.com — a
+  free org is enough for public packages — and a granular access token with
+  publish rights to it.
+- **GitHub:** create an environment named **`npm`** (Settings →
+  Environments), add required reviewers, and store the token there as the
+  environment secret **`NPM_TOKEN`**.
+
+`prepublishOnly` runs lint, build and test, so even an accidental
+`npm publish` from a checkout has to pass the gate first.
 
 ## Development
 

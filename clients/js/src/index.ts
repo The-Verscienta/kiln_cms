@@ -1,5 +1,21 @@
 export { createClient, KilnClient, type KilnClientOptions } from "./client.js";
-export { KilnHttpError, isKilnHttpError } from "./errors.js";
+export {
+  KilnAuthError,
+  KilnConfigError,
+  KilnConflictError,
+  KilnError,
+  KilnGraphQLError,
+  KilnHttpError,
+  KilnNetworkError,
+  KilnNotFoundError,
+  KilnRateLimitError,
+  KilnServerError,
+  KilnValidationError,
+  isKilnError,
+  isKilnHttpError,
+  type GraphQLErrorObject,
+  type KilnErrorObject,
+} from "./errors.js";
 export { flattenDocument, refKey, rel, resolve } from "./jsonapi.js";
 export { emitTypes, type SchemaDocument } from "./generator.js";
 export type {
@@ -13,6 +29,8 @@ export type {
   Filter,
   FilterScalar,
   FilterSpec,
+  GraphQLOptions,
+  GraphQLResponse,
   HybridSearchOptions,
   HybridSearchResult,
   IncludedMap,
@@ -29,4 +47,6 @@ export type {
   SearchOptions,
   Surface,
   WebArtifact,
+  WorkflowVerb,
+  WriteOptions,
 } from "./types.js";

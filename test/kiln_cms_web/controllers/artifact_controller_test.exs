@@ -55,6 +55,9 @@ defmodule KilnCMSWeb.ArtifactControllerTest do
     assert [etag] = get_resp_header(served, "etag")
     assert etag =~ ~r/^".+"$/
     assert [_last_modified] = get_resp_header(served, "last-modified")
+    # The site's surrogate key, so a `KILN_CDN_PURGE_URL` purge reaches it.
+    assert [keys] = get_resp_header(served, "surrogate-key")
+    assert keys =~ "kiln-org-"
 
     # Revalidating with the same ETag returns 304 with an empty body.
     not_modified =

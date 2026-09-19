@@ -237,7 +237,7 @@ defmodule KilnCMSWeb.OverviewLive do
 
   # Site-wide translation coverage: of every {kind, slug} group, the share
   # with a variant in each configured locale. nil on single-locale sites (and
-  # on empty sites), which the xun tile renders as “—”.
+  # on empty sites), which the Translations tile renders as “—”.
   defp coverage(rows) do
     locales = I18n.locales()
 

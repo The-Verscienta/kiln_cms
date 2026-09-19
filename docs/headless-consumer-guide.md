@@ -13,12 +13,15 @@ the Swagger UI / OpenAPI spec links (#319).
 **Building in Elixir?** Use the official client,
 [`kiln_client`](https://github.com/The-Verscienta/kiln_cms/blob/main/clients/elixir/kiln_client/README.md)
 — it wraps the JSON:API reads, search, and artifact surfaces with the safe
-defaults below (published-only reads, `Req.Test`-stubbable) already encoded.
+defaults below (published-only reads, `Req.Test`-stubbable) already encoded,
+plus the [JSON:API writes](json-api.md#writing-330) (create, update, workflow
+transitions, soft-delete — a `:read_write` key required) and a small `/gql`
+helper.
 
 **Building in JS/TS?** Use the official client,
 [`@kiln-cms/client`](https://github.com/The-Verscienta/kiln_cms/blob/main/clients/js/README.md)
 — the same surfaces and safe defaults as the Elixir client (published-only
-reads, injectable `fetch`), plus
+reads, writes, GraphQL, injectable `fetch`), plus
 preview tokens, `?as_of=` point-in-time reads, and a bundled `kiln-types`
 generator that emits per-site TypeScript types from `GET /api/schema` (dynamic
 content types and custom fields included). `examples/astro-blog` consumes it
@@ -105,7 +108,9 @@ up, so any content at all is at least `1` and only genuinely empty content is
 **Rule of thumb:** render published bodies from the **artifact** surface (it has
 CDN cache headers — `Cache-Control`/`ETag`/`Last-Modified`, see #188); use
 **JSON:API/GraphQL** for discovery, lists, filtering, taxonomy, and search; use
-**preview tokens** to share an unpublished draft.
+**preview tokens** to share an unpublished draft. The artifact, JSON:API,
+GraphQL `GET` and search surfaces are all CDN-cacheable when read anonymously —
+see [Caching](#caching).
 
 ### Draft mode with a preview token
 
@@ -167,6 +172,38 @@ Two independent defenses; use both:
 Treat "what can this credential see" as part of its blast radius: a leaked
 editor-keyed delivery config exposes drafts, and an admin-keyed one exposes
 every paying member's content as well — not just rate-limit headroom.
+
+## Caching
+
+Anonymous reads of the main delivery surfaces are shared-cacheable: fired
+artifacts (`public, max-age=300`), and JSON:API, GraphQL queries over `GET` and
+`/api/search` (`public, max-age=60, stale-while-revalidate=60`). Each carries an
+`ETag`; send it back as `If-None-Match` and an unchanged response is a bodyless
+`304`. The full table, the headers and CDN setup are in
+[api.md → Caching and CDNs](api.md#caching-and-cdns).
+
+What that means for a front end:
+
+* **Read delivery anonymously if you want it cached.** Any credential — an
+  `Authorization` header (including a delivery API key), an unlock grant, even a
+  cookie — makes the response `private, no-store`. That is deliberate: an
+  editor's token sees drafts on the same URLs, so its answer must not land in a
+  shared cache. If a build or server needs a key, keep it off the requests your
+  CDN serves to readers ([Delivery sites](#delivery-sites-an-api-key-widens-what-you-see)
+  has the other reason to).
+* **Query GraphQL with `GET` for cacheable reads.** `POST /gql` is never cached.
+  Put the document (and `variables`, JSON-encoded) in the query string — a
+  document sent in a `GET` body is never cached — and a query that returns
+  `errors` is not cached either.
+* **A publish shows up within the `max-age`**, or at once if the operator set
+  `KILN_CDN_PURGE_URL`, which purges the site's `Surrogate-Key`/`Cache-Tag` on
+  every publish, unpublish and live edit (not on taxonomy or schema edits,
+  which age out). Static builds and ISR should still
+  rebuild from [webhooks](webhooks.md); the purge only covers the CDN in front of
+  Kiln.
+* **Don't build your own ETag from fields.** Kiln's is a digest of the response
+  body, so it already changes whenever anything in the body does — keying on
+  `updatedAt` or an id misses changes that do not touch them.
 
 ## Analytics: your fetches are what get counted
 
