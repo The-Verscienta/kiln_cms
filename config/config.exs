@@ -673,6 +673,12 @@ config :ash_json_api,
   authorize_update_destroy_with_error?: true
 
 config :ash,
+  # Ash 3.33 refuses to compile until this is chosen. `:codepoints` is what
+  # the SQL data layer counts, so a `max_length` validated in Elixir and one
+  # enforced atomically in Postgres agree, and a value's stored size is
+  # bounded (a grapheme can carry unbounded combining characters; `:mixed`
+  # keeps the old grapheme count and that gap).
+  default_string_length_count: :codepoints,
   allow_forbidden_field_for_relationships_by_default?: true,
   include_embedded_source_by_default?: false,
   show_keysets_for_all_actions?: false,

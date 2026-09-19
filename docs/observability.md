@@ -59,8 +59,10 @@ sustained gap between them is a backpressure signal, not a bug.
 
 Useful Grafana panel: `sum(rate(kiln_cms_analytics_view_count[5m])) by (type)`.
 
-Referrer attribution, funnels and export are designed on top of this event but
-not built — see [`advanced-analytics-plan.md`](./advanced-analytics-plan.md).
+Referrer attribution, funnels and CSV/JSON export are built (#618–#622), but
+not on this event: they read the stored analytics tables, not the telemetry
+stream. Referrer attribution is off by default (`KILN_ANALYTICS_REFERRERS`).
+See [`advanced-analytics-plan.md`](./advanced-analytics-plan.md).
 
 ## Where the metrics go
 
