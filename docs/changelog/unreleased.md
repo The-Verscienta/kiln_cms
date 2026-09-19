@@ -7,6 +7,24 @@ carries the reasoning.
 
 ## Added
 
+<a id="the-official-sdks-write-speak-graphql-and-are-ready-to-publish"></a>
+
+- **The official SDKs write, speak GraphQL, and are ready to publish.**
+  `@kiln-cms/client` 0.2.0 and `kiln_client` 0.3.0 gain the JSON:API write
+  surface (#330) — `create`, `update`, the four routed workflow transitions
+  (`submit_for_review`, `return_to_draft`, `publish`, `unpublish`) behind one
+  generic `transition`, and the reversible soft-delete — each refusing
+  client-side, before any request, when no API key is configured. Both add a
+  minimal `graphql(query, variables)` helper for `/gql`, and typed errors that
+  map 401/403, 404, 400/422 (with field pointers), 409 (with the record's
+  current state), 429 (with `Retry-After`) and 5xx to distinct classes (JS) or
+  `:reason` atoms (Elixir); the Elixir read functions keep their existing
+  `{:http_status, …}` errors. A new `release-clients.yml` workflow publishes
+  either SDK from its own tag (`client-js-vX.Y.Z`, `kiln_client-vX.Y.Z`) —
+  version-checked, gated on an `npm`/`hex` environment, with npm provenance and
+  a build-provenance attestation. Nothing is published yet: the first release
+  needs the one-time registry setup described in each client's README.
+
 <a id="one-click-deploy-templates-for-render-railway-flyio-and-digitalocean"></a>
 
 - **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**
