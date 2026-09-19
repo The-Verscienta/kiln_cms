@@ -60,6 +60,7 @@ carries the reasoning.
   could publish unreviewed (docs/mcp.md). The JS client (0.2.0) and Elixir
   client (0.3.0) gain `uploadMedia`/`upload_media`, URL import, metadata
   updates and the direct-upload flow. Docs: `docs/api.md` → "Uploading media".
+  ([#1576](https://github.com/The-Verscienta/kiln_cms/pull/1576))
 
 ## Fixed
 

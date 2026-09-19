@@ -64,7 +64,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Upload media over the API: `POST /api/media`, URL imports, presigned direct
   uploads, metadata `PATCH`, and SDK support.**
-  ([long form](docs/changelog/unreleased.md#upload-media-over-the-api))
+  ([#1576](https://github.com/The-Verscienta/kiln_cms/pull/1576) · [long form](docs/changelog/unreleased.md#upload-media-over-the-api))
 
 ### Fixed
 
