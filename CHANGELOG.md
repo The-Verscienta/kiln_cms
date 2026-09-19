@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **The GraphQL schema and the OpenAPI document are committed, and a production
+  site hands its own to an API key.**
+  ([#567](https://github.com/The-Verscienta/kiln_cms/issues/567), [#1567](https://github.com/The-Verscienta/kiln_cms/issues/1567) · [long form](docs/changelog/unreleased.md#the-graphql-schema-and-the-openapi-document-are-committed-and-a-production-site))
+
 - **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#one-click-deploy-templates-for-render-railway-flyio-and-digitalocean))
 
@@ -66,7 +70,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Buttons, links, badges and fields that rendered unstyled now look like what
   they are.**
-  ([long form](docs/changelog/unreleased.md#buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they))
+  ([#1531](https://github.com/The-Verscienta/kiln_cms/issues/1531) · [long form](docs/changelog/unreleased.md#buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they))
 
 - **A PaaS health check no longer gets a redirect, and `PHX_HOST` falls back to
   the platform's hostname.**
