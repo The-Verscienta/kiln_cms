@@ -74,7 +74,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A request on a host that names no site no longer reads the database for the
   default site every time.**
-  ([long form](docs/changelog/unreleased.md#a-request-on-a-host-that-names-no-site-no-longer-reads-the-database-for-the))
+  ([#1580](https://github.com/The-Verscienta/kiln_cms/pull/1580) · [long form](docs/changelog/unreleased.md#a-request-on-a-host-that-names-no-site-no-longer-reads-the-database-for-the))
 
 ## [0.9.0] - 2026-09-18
 
