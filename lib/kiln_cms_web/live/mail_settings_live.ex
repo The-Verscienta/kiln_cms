@@ -364,7 +364,7 @@ defmodule KilnCMSWeb.MailSettingsLive do
   defp provider_hint(:database),
     do:
       gettext(
-        "Zero-ops default: generate a key right here. Encrypted with a key derived from SECRET_KEY_BASE — rotating that secret orphans the key."
+        "Zero-ops default: generate a key right here. Encrypted with a key derived from SECRET_KEY_BASE — rotate that secret only as the secrets rotation guide describes, or the key is lost."
       )
 
   defp pointer_value(%{dkim_key_provider: :env, dkim_key_provider_config: config}, :env),

@@ -4,21 +4,22 @@ defmodule KilnCMS.CMS.CalendarRequeryMonitor do
   `:calendar_changed` bursts (#1336) — the one signal that answers whether the
   mailbox drain holds under real production write bursts.
 
-  ## Why this exists rather than a metric
+  ## Why this exists as well as a metric
 
-  `KilnCMSWeb.Telemetry.metrics/0` already declares
-  `summary("kiln_cms.calendar.requery.messages", …)`. In production that
-  declaration reaches **nobody**: LiveDashboard is compiled out with
-  `dev_routes`, the reporter child in `KilnCMSWeb.Telemetry.init/1` is
-  commented out, and no `telemetry_metrics_prometheus`/`_statsd` dependency
-  exists — so `:telemetry.execute/3` dispatches to an empty handler list. A
-  `Telemetry.Metrics` entry is a declaration of intent; on its own it is not
-  instrumentation. That mistake is what got #678 withdrawn after its threat-model
-  note claimed a counter "can be alerted on" when it was visible nowhere.
+  `KilnCMSWeb.Telemetry.metrics/0` declares
+  `distribution("kiln_cms.calendar.requery.messages", …)`, but that reaches an
+  operator only when they have turned on the opt-in Prometheus exporter
+  (`KILN_METRICS_ENABLED`, `KilnCMSWeb.Metrics`) and scrape it — and a stock
+  install does neither. When this monitor was written there was no exporter at
+  all, and a `Telemetry.Metrics` entry on its own is a declaration of intent, not
+  instrumentation. That mistake is what got #678 withdrawn after its
+  threat-model note claimed a counter "can be alerted on" when it was visible
+  nowhere.
 
-  So this attaches a real handler and writes to `Logger`, which reaches stdout
-  and therefore the deployment's log viewer today. Settling the reporter
-  question properly is tracked separately.
+  So this attaches its own handler and writes to `Logger`, which reaches stdout
+  and therefore every deployment's log viewer. It also keeps what the exported
+  histogram deliberately drops: the per-org breakdown, which would be an
+  unbounded label (#1362).
 
   ## What it logs
 

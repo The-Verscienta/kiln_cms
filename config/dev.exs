@@ -69,6 +69,11 @@ config :kiln_cms, KilnCMSWeb.Endpoint,
     ]
   ]
 
+# A site's own SMTP relay (#1322) may point at a Mailpit/MailHog on localhost
+# in development. Never in production: there the relay host is chosen by a site
+# admin and must not reach the private network — see `KilnCMS.Mail.SiteRelay`.
+config :kiln_cms, KilnCMS.Mail.SiteRelay, allow_private_hosts: true
+
 # Enable dev routes for dashboard and mailbox
 config :kiln_cms, dev_routes: true, token_signing_secret: "DYgVqiH9UCH9+tNBUTSxpjj9sjIclKww"
 

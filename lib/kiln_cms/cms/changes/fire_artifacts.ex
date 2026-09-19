@@ -4,7 +4,7 @@ defmodule KilnCMS.CMS.Changes.FireArtifacts do
 
   Runs in `after_transaction` so it sees the committed record, then enqueues a
   `KilnCMS.Firing.FireWorker` (queue `:firing`) and returns — the publish action
-  no longer blocks on the 3-surface render + artifact upserts + reference
+  no longer blocks on the per-surface render + artifact upserts + reference
   rebuild (perf #201). Delivery and the artifact API fall back to a live render
   on a miss, so content is served in the brief window before the artifact lands.
   Enqueue failures are logged but never fail the action.

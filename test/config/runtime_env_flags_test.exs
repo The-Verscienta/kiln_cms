@@ -63,6 +63,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_FEDERATION_ENABLED
             KILN_MEDIA_ROOT MEDIA_DIR S3_PUBLIC_BASE_URL
             AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+            KILN_METRICS_ENABLED KILN_METRICS_PORT KILN_METRICS_BIND KILN_METRICS_TOKEN
           ) ++ Map.keys(@prod_env)
 
   setup do
@@ -836,6 +837,59 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
                config,
                [:kiln_cms, :config_warnings]
              )
+    end
+  end
+
+  describe "KILN_METRICS_* (#1362)" do
+    # Each variable writes only when set to something readable, so the compiled
+    # defaults in config/config.exs (off, 9568, loopback, no token) stand
+    # otherwise — the exporter must never switch itself on, or widen its bind,
+    # from a value nobody could read.
+    defp metrics_config(vars) do
+      {config, stderr} = eval_io(vars, :prod)
+      {get_in(config, [:kiln_cms, KilnCMSWeb.Metrics]) || [], stderr}
+    end
+
+    test "unset writes nothing" do
+      assert {[], _stderr} = metrics_config(%{})
+    end
+
+    test "on-spellings enable the exporter, off-spellings disable it" do
+      for value <- ["true", "ON", " 1 "] do
+        assert {[enabled: true], _} = metrics_config(%{"KILN_METRICS_ENABLED" => value})
+      end
+
+      assert {[enabled: false], _} = metrics_config(%{"KILN_METRICS_ENABLED" => "false"})
+    end
+
+    test "an unrecognized KILN_METRICS_ENABLED leaves it off and warns" do
+      assert {[], stderr} = metrics_config(%{"KILN_METRICS_ENABLED" => "yes please"})
+      assert stderr =~ "KILN_METRICS_ENABLED is set to"
+    end
+
+    test "the port is a positive integer or the default" do
+      assert {[port: 9100], _} = metrics_config(%{"KILN_METRICS_PORT" => "9100"})
+
+      assert {[], stderr} = metrics_config(%{"KILN_METRICS_PORT" => "http"})
+      assert stderr =~ "KILN_METRICS_PORT is set to"
+    end
+
+    test "the bind is loopback or all, and anything else keeps loopback" do
+      assert {[bind: :all], _} = metrics_config(%{"KILN_METRICS_BIND" => "All"})
+      assert {[bind: :loopback], _} = metrics_config(%{"KILN_METRICS_BIND" => "loopback"})
+
+      # An address is not a choice this reads — guessing at it could widen the
+      # bind, so it keeps the default and says so.
+      assert {[], stderr} = metrics_config(%{"KILN_METRICS_BIND" => "0.0.0.0"})
+      assert stderr =~ "KILN_METRICS_BIND is set to"
+    end
+
+    test "a token is trimmed, and a blank one is unset rather than an empty secret" do
+      assert {[token: "s3cret"], _} = metrics_config(%{"KILN_METRICS_TOKEN" => " s3cret\n"})
+
+      for value <- ["", "  "] do
+        assert {[], _} = metrics_config(%{"KILN_METRICS_TOKEN" => value})
+      end
     end
   end
 
