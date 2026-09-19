@@ -27,7 +27,8 @@ into whichever one holds the read.
 > sit outside the `config_env() == :prod` fragments — are:
 >
 > `PHX_SERVER`, `PORT`, `CSP_IMG_SRC`, `UNSPLASH_ACCESS_KEY`, `CORS_ORIGINS`,
-> `KILN_READING_TIME_WPM`, `VISUAL_EDITING_ENABLED`, `KILN_LINK_CHECK_CRON` /
+> `KILN_READING_TIME_WPM`, `VISUAL_EDITING_ENABLED`, the `KILN_API_CACHE*` and
+> `KILN_CDN_PURGE_*` groups, `KILN_LINK_CHECK_CRON` /
 > `KILN_LINK_CHECK_USER_AGENT`, `KILN_TASK_DIGEST_CRON`,
 > `KILN_OCCURRENCE_SWEEP_CRON` / `KILN_OCCURRENCE_BACKFILL_ON_BOOT`,
 > `PRESENTATION_PREVIEW_URL`, the `KILN_UPDATE_*`
@@ -134,6 +135,22 @@ exists and is merely closed.
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
 | `API_DOCS_ENABLED` | on outside prod, **off in prod** | Serve `GET /api/json/open_api` and `GET /api/json/swaggerui`. Turn it on for a deployment that publishes a public API. | [`config/runtime/prod/web.exs:112`](../config/runtime/prod/web.exs#L112) |
+
+### API caching and CDN purge
+
+Anonymous reads of JSON:API, GraphQL `GET` and `/api/search` are marked
+`public` with a body `ETag`, so a CDN in front of Kiln can answer them; any
+request carrying a credential is `private, no-store` (see
+[api.md](api.md#caching-and-cdns)). Read in every environment.
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `KILN_API_CACHE` | `true` | Set to an off-spelling to keep anonymous JSON:API/GraphQL/search responses at Plug's `private` default instead of `public`. Credentialed responses are `private, no-store` and every response carries `Vary: Accept, Authorization, Origin` either way. Parsed by the shared [on/off rules](#boolean-variables). See [`KilnCMSWeb.Plugs.PublicCache`](../lib/kiln_cms_web/plugs/public_cache.ex). | [`config/runtime/delivery.exs:54`](../config/runtime/delivery.exs#L54) |
+| `KILN_API_CACHE_MAX_AGE` | `60` | `max-age`, in seconds, on a cacheable anonymous API response. Without `KILN_CDN_PURGE_URL` this is how stale a publish can look through a CDN. Positive integer. | [`config/runtime/delivery.exs:58`](../config/runtime/delivery.exs#L58) |
+| `KILN_API_CACHE_SWR` | `60` | `stale-while-revalidate`, in seconds: how long a cache may keep serving an expired response while it refetches. Positive integer. | [`config/runtime/delivery.exs:62`](../config/runtime/delivery.exs#L62) |
+| `KILN_CDN_PURGE_URL` | unset | When set, every `<type>.published`/`.unpublished`/`.updated` (and `release.published`) `POST`s the site's surrogate key here: body `{"tags": ["kiln-org-<id>"]}` (Cloudflare purge-by-tag) and header `Surrogate-Key: kiln-org-<id>` (Fastly purge-by-key). Coalesced per site, retried with backoff, sent through `KilnCMS.SafeFetch` — so in production it must be an `https://` URL that resolves to a public address. Unset, cached responses age out on `KILN_API_CACHE_MAX_AGE`. See [`KilnCMS.CDN`](../lib/kiln_cms/cdn.ex). | [`config/runtime/delivery.exs:73`](../config/runtime/delivery.exs#L73) |
+| `KILN_CDN_PURGE_TOKEN` | unset | Credential for the purge request. Resolved at call time through the `KilnCMS.Keys` env provider; never logged. | [`config/runtime/delivery.exs:79`](../config/runtime/delivery.exs#L79) |
+| `KILN_CDN_PURGE_TOKEN_HEADER` | `authorization` | Header the token goes in. `authorization` sends `Bearer <token>` (Cloudflare API tokens); any other name sends the bare token in that header, e.g. `fastly-key` for Fastly. | [`config/runtime/delivery.exs:82`](../config/runtime/delivery.exs#L82) |
 
 ### multi-tenancy (#336)
 
@@ -694,7 +711,7 @@ production.
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
 | `MIX_TEST_PARTITION` | unset | Suffix appended to the test database name for partitioned test runs — also what keeps two concurrent worktrees off the same database. | [`config/runtime.exs:211`](../config/runtime.exs#L211) |
-| `KILN_STRICT_TEST` | unset | Set to an on-spelling (`true`/`1`/`yes`/`on`) to select the strict-tenancy CI leg: `:strict_tenancy` is flipped on so tenancy scoping compiles fail-closed, and the suite runs **only** the `strict_tenancy`-tagged tests. Uses the same spellings as every other flag in this document, via the standalone [`config/strict_test_flag.exs`](../config/strict_test_flag.exs) (#646) — it can't call `KilnCMS.Config.Env` directly because it's read in `config/test.exs`, which cannot call project modules. An unrecognized value stays non-strict **and warns on stderr**, like every other flag: without that the strict leg runs zero tests and exits 0, which is indistinguishable from never having invoked it. | [`config/test.exs:351`](../config/test.exs#L351) |
+| `KILN_STRICT_TEST` | unset | Set to an on-spelling (`true`/`1`/`yes`/`on`) to select the strict-tenancy CI leg: `:strict_tenancy` is flipped on so tenancy scoping compiles fail-closed, and the suite runs **only** the `strict_tenancy`-tagged tests. Uses the same spellings as every other flag in this document, via the standalone [`config/strict_test_flag.exs`](../config/strict_test_flag.exs) (#646) — it can't call `KilnCMS.Config.Env` directly because it's read in `config/test.exs`, which cannot call project modules. An unrecognized value stays non-strict **and warns on stderr**, like every other flag: without that the strict leg runs zero tests and exits 0, which is indistinguishable from never having invoked it. | [`config/test.exs:354`](../config/test.exs#L354) |
 | `KILN_ML` | unset | Set to an on-spelling (`true`/`1`/`yes`/`on`) to put the optional ML stack — Bumblebee, Nx and EXLA — into the dependency tree (#1321). Unset, `mix deps.get` fetches 102 MB instead of 773 MB and skips a one-time 110 MB XLA archive download, because semantic search ships disabled. Read in `mix.exs` (it decides `deps/0`) and in `config/dev.exs` / `config/test.exs` (which point Nx at `EXLA.Backend` only when it is on), so like `KILN_STRICT_TEST` it goes through a standalone snippet — [`config/ml_flag.exs`](../config/ml_flag.exs) — that cannot call `KilnCMS.Config.Env`. It is a **build-time** flag: it must be set for `mix deps.get` and `mix compile`, and exporting it afterwards changes nothing on its own. `KilnCMS.Search.ML.available?/0` reports what actually compiled, and `mix kiln.ml.note` prints it. An unrecognized value stays off **and warns on stderr**. | [`config/ml_flag.exs:37`](../config/ml_flag.exs#L37) |
 | `POSTGRES_USER` | `postgres` | E2E database user. | [`config/e2e.exs:28`](../config/e2e.exs#L28) |
 | `POSTGRES_PASSWORD` | `postgres` | E2E database password. | [`config/e2e.exs:29`](../config/e2e.exs#L29) |
@@ -757,6 +774,7 @@ connection (#606), and `VISUAL_EDITING_ENABLED=False` left the bridge on.
 ### Count variables
 
 The variables that hold a **positive integer** — `KILN_READING_TIME_WPM`,
+`KILN_API_CACHE_MAX_AGE`, `KILN_API_CACHE_SWR`,
 `KILN_ANALYTICS_LOW_COUNT_THRESHOLD`, `KILN_EXPERIMENTS_STICKY_DAYS`,
 `BACKUP_KEEP_DAYS` and `BACKUP_STALE_AFTER_HOURS` — go through the same module,
 as `Env.positive_integer/1` (#1009). Before that each had hand-rolled its own
