@@ -4,9 +4,10 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
 
   Enqueued by `KilnCMS.Notifications` (one job per recipient). Builds the
   Swoosh email for the event and delivers it via
-  `KilnCMS.Mail.deliver_for_worker/2`: permanent (5xx) failures cancel the
-  job, transient failures raise and Oban retries on the same greylist-aware
-  backoff as `KilnCMS.Mail.DeliveryWorker`.
+  `KilnCMS.Mail.deliver_for_worker/2`: a permanent (5xx) reject of the message
+  cancels the job; transient failures, and the relay refusing our AUTH, TLS or
+  sender, raise and Oban retries on the same greylist-aware backoff as
+  `KilnCMS.Mail.DeliveryWorker`.
 
   Subject/body are `Kiln.Tokens` patterns (#468) rather than hand-interpolated
   strings — `@templates` below is still the one place that owns the actual

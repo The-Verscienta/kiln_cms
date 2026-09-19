@@ -64,9 +64,13 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **A relay refusing the operator's password no longer suppresses every
+  recipient.**
+  ([long form](docs/changelog/unreleased.md#a-relay-refusing-the-operators-password-no-longer-suppresses-every-recipient))
+
 - **Buttons, links, badges and fields that rendered unstyled now look like what
   they are.**
-  ([long form](docs/changelog/unreleased.md#buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they))
+  ([#1531](https://github.com/The-Verscienta/kiln_cms/issues/1531) · [long form](docs/changelog/unreleased.md#buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they))
 
 - **A PaaS health check no longer gets a redirect, and `PHX_HOST` falls back to
   the platform's hostname.**

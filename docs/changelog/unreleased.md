@@ -36,6 +36,27 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="a-relay-refusing-the-operators-password-no-longer-suppresses-every-recipient"></a>
+
+- **A relay refusing the operator's password no longer suppresses every
+  recipient.** gen_smtp reports a failed AUTH (`auth_failed`), a missing TLS
+  stack and a 5xx to MAIL FROM as permanent failures, and mail delivery treated
+  every permanent failure as a hard bounce: it cancelled the job and put the
+  recipient on the instance-wide suppression list. A rotated `SMTP_PASSWORD`
+  therefore stopped mail, password resets included, to everyone the queue
+  tried, until an admin removed each address from `/editor/mail`. Now a reject
+  suppresses the recipient only when it arrives in the mail transaction with an
+  enhanced status saying the address is dead (`5.1.1`, `5.1.2`, `5.1.3`,
+  `5.1.6`, `5.1.10`, `5.2.1`). A permanent refusal of our own side (anything
+  while opening the session: banner, EHLO, STARTTLS, AUTH; or a sender or AUTH
+  reply: `5.1.7`, `5.1.8`, `5.7.8`, `530`, `535`, SPF/DKIM/DMARC `5.7.20` to
+  `5.7.26`) retries on the usual ~16h schedule and raises one aggregated alert
+  (`Logger.error`, a Sentry message and `[:kiln_cms, :mail, :relay_refused]`
+  telemetry, at most every 15 minutes), so the mail goes out once the relay is
+  fixed. Any other 5xx (a spam filter, a full mailbox, a bare `550`) still
+  cancels the message but no longer suppresses the address. Addresses a relay
+  failure already suppressed stay on the list: clear them from `/editor/mail`.
+
 <a id="buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they"></a>
 
 - **Buttons, links, badges and fields that rendered unstyled now look like what
