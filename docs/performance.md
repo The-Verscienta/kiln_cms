@@ -46,7 +46,7 @@ These are origin-side targets (excluding network/CDN). The delivery path is desi
   second node that would clear its own empty caches and start draining
   production Oban queues on the way.
 - **Publish returns before firing.** The publish transition enqueues a `Firing.FireWorker`
-  (queue `:firing`) instead of rendering 3 surfaces inline, so the publish response isn't
+  (queue `:firing`) instead of rendering every surface inline, so the publish response isn't
   blocked on firing. Delivery falls back to a live render on miss; the artifact API answers
   `503` + `Retry-After` for the brief window before the artifact lands.
 - **Analytics never block or exhaust the pool.** `track_view` and search-query recording run
