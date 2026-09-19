@@ -68,6 +68,10 @@ defmodule KilnCMSWeb.OpenApi do
 
     * **GraphQL** delivery + search at `POST /gql` (`docs/headless-graphql-api.md`).
     * **Fired artifacts** (rendered block tree) at `GET /api/content/:type/:slug`.
+    * **Media upload** at `POST /api/media` (multipart), `POST /api/media/import-url`
+      and the presigned direct-upload pair under `/api/media/uploads`
+      (`docs/api.md` → "Uploading media"). Metadata edits are the JSON:API
+      `PATCH /api/json/media-items/{id}` below.
     * **Outbound webhooks** (HMAC-signed) on publish/unpublish/update.
     * **Signed preview URLs** for unpublished content at `GET /preview/:token`.
   """
@@ -80,7 +84,11 @@ defmodule KilnCMSWeb.OpenApi do
   def modify(spec, conn, _opts) do
     %{
       spec
-      | paths: spec.paths |> Map.merge(auth_paths()) |> Map.merge(delivery_paths()),
+      | paths:
+          spec.paths
+          |> Map.merge(auth_paths())
+          |> Map.merge(delivery_paths())
+          |> Map.merge(media_paths()),
         info: %{
           spec.info
           | title: "KilnCMS Headless API",
@@ -306,6 +314,341 @@ defmodule KilnCMSWeb.OpenApi do
           responses: %{
             200 => %OpenApiSpex.Response{description: "The draft document"},
             404 => %OpenApiSpex.Response{description: "Invalid or expired preview link"}
+          }
+        }
+      }
+    }
+  end
+
+  # The media upload API (`KilnCMSWeb.MediaUploadController`) — plain Phoenix
+  # routes like the two above, so AshJsonApi cannot derive them. Every
+  # operation needs a `:read_write` key (or JWT) on an editor/admin account;
+  # the refusals share `KilnCMSWeb.ApiError`'s envelope and its `code`s are the
+  # ones docs/api.md's "Upload errors" table lists.
+  defp media_paths do
+    %{
+      "/api/media" => %OpenApiSpex.PathItem{
+        post: %OpenApiSpex.Operation{
+          tags: ["Media"],
+          operationId: "uploadMedia",
+          summary: "Upload a file to the media library",
+          description:
+            "Multipart upload of one `file`, with optional metadata. The file is " <>
+              "byte-sniffed (its name and `Content-Type` are ignored), size-capped " <>
+              "per kind (images 10 MB, documents 25 MB, captions 2 MB, audio " <>
+              "100 MB, video 500 MB), metadata-stripped, stored and recorded as " <>
+              "the credential's user — the media library's own pipeline. The " <>
+              "caller is authorized **before** the body is read. Rate limited by " <>
+              "the `media_upload` bucket on top of `api`.",
+          security: [%{"bearerAuth" => []}],
+          requestBody: %OpenApiSpex.RequestBody{
+            required: true,
+            content: %{
+              "multipart/form-data" => %OpenApiSpex.MediaType{
+                schema: %OpenApiSpex.Schema{
+                  type: :object,
+                  required: [:file],
+                  properties:
+                    Map.merge(media_metadata_properties(), %{
+                      file: %OpenApiSpex.Schema{type: :string, format: :binary},
+                      "tag_ids[]": %OpenApiSpex.Schema{
+                        type: :array,
+                        items: %OpenApiSpex.Schema{type: :string, format: :uuid},
+                        description: "Tag ids, one repeated field per id"
+                      }
+                    })
+                    |> Map.delete(:tag_ids)
+                }
+              }
+            }
+          },
+          responses:
+            media_created_responses(%{
+              413 => error_response("Over the cap for the file's kind (`too_large`)"),
+              415 => error_response("Not a kind the library accepts (`unsupported_media_type`)"),
+              422 =>
+                error_response(
+                  "`missing_file`, `invalid_parameter`, `create_failed`, `encrypted`, " <>
+                    "`strip_unavailable` or `strip_failed`"
+                ),
+              502 => error_response("The object store refused the write (`storage_failed`)"),
+              503 =>
+                error_response(
+                  "Out of temp disk to strip a video (`insufficient_storage`) — see `Retry-After`"
+                )
+            })
+        }
+      },
+      "/api/media/import-url" => %OpenApiSpex.PathItem{
+        post: %OpenApiSpex.Operation{
+          tags: ["Media"],
+          operationId: "importMediaFromUrl",
+          summary: "Import a file from a public URL",
+          description:
+            "The server fetches `url` through its SSRF-guarded fetcher — public " <>
+              "http(s) addresses only, resolved once and connected to by address, " <>
+              "up to three redirects each re-validated, at most 25 MB — and " <>
+              "ingests it exactly like an upload.",
+          security: [%{"bearerAuth" => []}],
+          requestBody:
+            json_body(
+              [:url],
+              Map.merge(media_metadata_properties(), %{
+                url: %OpenApiSpex.Schema{type: :string, format: :uri},
+                filename: %OpenApiSpex.Schema{
+                  type: :string,
+                  description: "Name to record instead of the one the URL's path implies"
+                }
+              })
+            ),
+          responses:
+            media_created_responses(%{
+              413 => error_response("Over the kind's cap, or the 25 MB import cap (`too_large`)"),
+              415 => error_response("Not a kind the library accepts (`unsupported_media_type`)"),
+              422 =>
+                error_response(
+                  "`unsafe_url` (not a public address), `fetch_failed` (no 2xx), " <>
+                    "`invalid_parameter`, `create_failed`, or a strip refusal"
+                )
+            })
+        }
+      },
+      "/api/media/uploads" => %OpenApiSpex.PathItem{
+        post: %OpenApiSpex.Operation{
+          tags: ["Media"],
+          operationId: "beginDirectUpload",
+          summary: "Start a direct upload: get a presigned PUT URL",
+          description:
+            "For files too large to send through the app. Returns a URL to " <>
+              "`PUT` exactly `byte_size` bytes to (in the deployment's private " <>
+              "bucket, valid 15 minutes, the length signed in — send `headers` as " <>
+              "given) and a `token` for `POST /api/media/uploads/complete`, valid " <>
+              "one hour for the same user on the same site. Needs S3 storage " <>
+              "with a private bucket; otherwise 501.",
+          security: [%{"bearerAuth" => []}],
+          requestBody:
+            json_body([:filename, :byte_size], %{
+              filename: %OpenApiSpex.Schema{type: :string},
+              byte_size: %OpenApiSpex.Schema{
+                type: :integer,
+                minimum: 1,
+                description: "The file's exact size in bytes"
+              }
+            }),
+          responses:
+            auth_error_responses(%{
+              201 => %OpenApiSpex.Response{
+                description: "Upload issued",
+                content: %{
+                  "application/json" => %OpenApiSpex.MediaType{schema: direct_upload_schema()}
+                }
+              },
+              413 => error_response("`byte_size` is over the largest upload cap (`too_large`)"),
+              422 =>
+                error_response("Missing or invalid `filename`/`byte_size` (`invalid_parameter`)"),
+              501 =>
+                error_response(
+                  "This deployment can't presign — no S3 private bucket (`direct_uploads_unavailable`)"
+                )
+            })
+        }
+      },
+      "/api/media/uploads/complete" => %OpenApiSpex.PathItem{
+        post: %OpenApiSpex.Operation{
+          tags: ["Media"],
+          operationId: "completeDirectUpload",
+          summary: "Finish a direct upload",
+          description:
+            "Runs the staged object through the same pipeline as " <>
+              "`POST /api/media`, then deletes the staged copy whatever the " <>
+              "outcome. A token completes once. Metadata is set here.",
+          security: [%{"bearerAuth" => []}],
+          requestBody:
+            json_body(
+              [:token],
+              Map.put(media_metadata_properties(), :token, %OpenApiSpex.Schema{
+                type: :string,
+                description: "The `token` from `POST /api/media/uploads`"
+              })
+            ),
+          responses:
+            media_created_responses(%{
+              413 => error_response("Over the cap for the file's kind (`too_large`)"),
+              415 => error_response("Not a kind the library accepts (`unsupported_media_type`)"),
+              422 =>
+                error_response(
+                  "`invalid_upload_token`, `not_uploaded` (nothing staged, or already " <>
+                    "completed), `size_mismatch`, `invalid_parameter`, `create_failed`, " <>
+                    "or a strip refusal"
+                ),
+              501 => error_response("No S3 private bucket (`direct_uploads_unavailable`)")
+            })
+        }
+      }
+    }
+  end
+
+  # The metadata every upload route accepts (JSON spelling; multipart sends the
+  # same names as form fields, `tag_ids[]` repeated).
+  defp media_metadata_properties do
+    %{
+      alt: %OpenApiSpex.Schema{type: :string},
+      caption: %OpenApiSpex.Schema{type: :string},
+      decorative: %OpenApiSpex.Schema{
+        type: :boolean,
+        description: "A decorative image correctly has no alt text"
+      },
+      focal_x: %OpenApiSpex.Schema{type: :number, minimum: 0, maximum: 1, default: 0.5},
+      focal_y: %OpenApiSpex.Schema{type: :number, minimum: 0, maximum: 1, default: 0.5},
+      tag_ids: %OpenApiSpex.Schema{
+        type: :array,
+        items: %OpenApiSpex.Schema{type: :string, format: :uuid},
+        description: "Tags on this site to attach"
+      }
+    }
+  end
+
+  defp json_body(required, properties) do
+    %OpenApiSpex.RequestBody{
+      required: true,
+      content: %{
+        "application/json" => %OpenApiSpex.MediaType{
+          schema: %OpenApiSpex.Schema{type: :object, required: required, properties: properties}
+        }
+      }
+    }
+  end
+
+  defp media_created_responses(errors) do
+    auth_error_responses(
+      Map.put(errors, 201, %OpenApiSpex.Response{
+        description:
+          "Created. `Location` names the item's JSON:API route; the body is the " <>
+            "same resource object `GET /api/json/media-items/{id}` serves, plus " <>
+            "`kind` and `meta.processing`.",
+        headers: %{
+          "location" => %OpenApiSpex.Header{
+            description: "`/api/json/media-items/{id}`",
+            schema: %OpenApiSpex.Schema{type: :string}
+          }
+        },
+        content: %{"application/json" => %OpenApiSpex.MediaType{schema: media_item_schema()}}
+      })
+    )
+  end
+
+  # 401/403/429 answer every media route the same way.
+  defp auth_error_responses(responses) do
+    Map.merge(
+      %{
+        401 => error_response("No credential (`unauthorized`)"),
+        403 =>
+          error_response("A read-only key, or an account that can't create media (`forbidden`)"),
+        429 => error_response("`media_upload` or `api` bucket spent — see `Retry-After`")
+      },
+      responses
+    )
+  end
+
+  defp error_response(description) do
+    %OpenApiSpex.Response{
+      description: description,
+      content: %{"application/json" => %OpenApiSpex.MediaType{schema: error_schema()}}
+    }
+  end
+
+  # `KilnCMSWeb.ApiError`'s envelope.
+  defp error_schema do
+    %OpenApiSpex.Schema{
+      type: :object,
+      properties: %{
+        errors: %OpenApiSpex.Schema{
+          type: :array,
+          items: %OpenApiSpex.Schema{
+            type: :object,
+            properties: %{
+              status: %OpenApiSpex.Schema{type: :string, description: "Numeric HTTP status"},
+              code: %OpenApiSpex.Schema{type: :string, description: "Stable token to branch on"},
+              detail: %OpenApiSpex.Schema{type: :string}
+            }
+          }
+        }
+      }
+    }
+  end
+
+  defp media_item_schema do
+    nullable = fn type -> %OpenApiSpex.Schema{type: type, nullable: true} end
+
+    %OpenApiSpex.Schema{
+      type: :object,
+      properties: %{
+        data: %OpenApiSpex.Schema{
+          type: :object,
+          properties: %{
+            type: %OpenApiSpex.Schema{type: :string, enum: ["media_item"]},
+            id: %OpenApiSpex.Schema{type: :string, format: :uuid},
+            attributes: %OpenApiSpex.Schema{
+              type: :object,
+              properties: %{
+                filename: %OpenApiSpex.Schema{type: :string},
+                content_type: nullable.(:string),
+                kind: %OpenApiSpex.Schema{
+                  type: :string,
+                  enum: ["image", "video", "audio", "captions", "document"]
+                },
+                byte_size: nullable.(:integer),
+                width: nullable.(:integer),
+                height: nullable.(:integer),
+                duration_seconds: nullable.(:number),
+                url: nullable.(:string),
+                variants: %OpenApiSpex.Schema{type: :object},
+                alt: nullable.(:string),
+                caption: nullable.(:string),
+                decorative: %OpenApiSpex.Schema{type: :boolean},
+                focal_x: %OpenApiSpex.Schema{type: :number},
+                focal_y: %OpenApiSpex.Schema{type: :number},
+                audience: %OpenApiSpex.Schema{type: :string},
+                download_count: %OpenApiSpex.Schema{type: :integer},
+                uploaded_by_id: %OpenApiSpex.Schema{type: :string, format: :uuid, nullable: true}
+              }
+            },
+            relationships: %OpenApiSpex.Schema{type: :object},
+            links: %OpenApiSpex.Schema{type: :object},
+            meta: %OpenApiSpex.Schema{
+              type: :object,
+              properties: %{
+                processing: %OpenApiSpex.Schema{
+                  type: :boolean,
+                  description:
+                    "`true` while an A/V file's metadata strip is pending — `url` " <>
+                      "serves nothing until it finishes"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  end
+
+  defp direct_upload_schema do
+    %OpenApiSpex.Schema{
+      type: :object,
+      properties: %{
+        data: %OpenApiSpex.Schema{
+          type: :object,
+          properties: %{
+            token: %OpenApiSpex.Schema{type: :string},
+            upload_url: %OpenApiSpex.Schema{type: :string, format: :uri},
+            method: %OpenApiSpex.Schema{type: :string, enum: ["PUT"]},
+            headers: %OpenApiSpex.Schema{
+              type: :object,
+              additionalProperties: %OpenApiSpex.Schema{type: :string},
+              description: "Signed headers — send exactly these with the PUT"
+            },
+            expires_at: %OpenApiSpex.Schema{type: :string, format: :"date-time"},
+            max_bytes: %OpenApiSpex.Schema{type: :integer}
           }
         }
       }
