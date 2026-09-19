@@ -23,6 +23,7 @@ defmodule KilnCMS.Firing.StaticExport do
           web.html                                     # :web surface (html body)
           json.json                                    # :json surface
           json_ld.json                                 # :json_ld surface
+          llm.md                                       # :llm surface (Markdown)
 
   `<type>` is the public content type (`page`/`post`/dynamic name); `<locale>`
   is always present. `index.json` lists every exported document with its path,
