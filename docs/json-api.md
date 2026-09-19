@@ -586,6 +586,13 @@ admin-set nested value (a field behind `editable_by`), a non-admin write that
 drops the ids is **refused** (#954), with the error naming this surface. The
 fired `:json` artifact carries the same `_id`s for published content.
 
+### Retrying a write safely
+
+Send an `Idempotency-Key` header and a retry of the same `POST` or `PATCH`
+replays the first attempt's response instead of creating a second document or
+running a second transition. See
+[api.md](api.md) → *Idempotent writes*.
+
 ### Re-fire semantics
 
 Firing (immutable per-surface artifact regeneration) is bound to `:publish`, so

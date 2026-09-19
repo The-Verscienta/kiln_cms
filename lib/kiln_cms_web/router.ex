@@ -62,6 +62,8 @@ defmodule KilnCMSWeb.Router do
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
     plug KilnCMSWeb.Plugs.ApiKeyAuth
+    # A mutation is a `POST` like any other — see the JSON:API pipeline.
+    plug KilnCMSWeb.Plugs.Idempotency
     plug AshGraphql.Plug
   end
 
@@ -109,6 +111,9 @@ defmodule KilnCMSWeb.Router do
   # already go through `KilnCMSWeb.Params` (#751).
   pipeline :ash_json_api do
     plug KilnCMSWeb.Plugs.AshJsonApiParams
+    # `Idempotency-Key` on a write: claim it, or replay what the first attempt
+    # answered. Runs after the auth plugs above — the key is scoped to the actor.
+    plug KilnCMSWeb.Plugs.Idempotency
   end
 
   # Headless sign-in — exchanges credentials for a bearer token (issue #37).

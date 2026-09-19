@@ -42,6 +42,7 @@ your deployment.
 | Paid memberships | `billing_memberships` | Pseudonymous | Status, period end, and the payment provider's customer/subscription ids. See [Paid memberships](memberships.md). |
 | Entitlement audit trail | `billing_membership_events` | Pseudonymous | Status transitions and the audience delta, with the causing provider event id. `actor_id` nulled on erasure. |
 | Recorded payment webhooks | `billing_webhook_events` | Yes (transient) | The provider's full event payload, which can carry a customer email and amounts. Purged on retention and by the staging scrub. |
+| Idempotency keys | `idempotent_requests` | Pseudonymous (transient) | One row per `Idempotency-Key` a caller used on a write ([api.md](api.md)), holding the key, the acting user's id, a hash of the request and **the response that was sent** — so it carries whatever that response did. Pruned hourly, 24-hour lifetime. |
 | Aggregate view counts | `content_views` | No | One upserting counter per content item — no visitor data. |
 | Daily view buckets | `content_view_days` | No | One counter per content item per UTC day, for 7d/30d trends — no visitor data. Purged on retention (below). |
 | Daily referrer buckets | `referrer_days` | No | One counter per content item per coarse source category (`direct`/`internal`/`search`/`social`/`other`) per UTC day — never a raw referrer URL or host. Off by default (`KILN_ANALYTICS_REFERRERS`, #619); turning it back off stops new writes but does not clear rows already recorded — those still age out on the retention purge (below). |

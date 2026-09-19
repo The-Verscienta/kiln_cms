@@ -284,6 +284,12 @@ curl -s http://localhost:4000/gql \
   -d '{"query":"mutation($id:ID!){ publishPost(id:$id){ result{ id state } errors{ message } } }","variables":{"id":"<uuid>"}}'
 ```
 
+### Retrying a mutation safely
+
+`POST /gql` honours `Idempotency-Key` like the JSON:API writes: a retry with the
+same key and the same request body replays the first response. See
+[api.md](api.md) → *Idempotent writes*.
+
 ### Re-fire semantics
 
 Firing (the immutable per-surface artifact regeneration) is bound to the

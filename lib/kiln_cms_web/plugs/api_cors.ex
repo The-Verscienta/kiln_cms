@@ -30,8 +30,16 @@ defmodule KilnCMSWeb.Plugs.ApiCORS do
   @corsica Corsica.init(
              origins: {KilnCMSWeb.CORS, :allowed_origin?, []},
              allow_methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-             allow_headers: ["authorization", "content-type", "x-api-key"],
-             expose_headers: ["retry-after"],
+             allow_headers: [
+               "authorization",
+               "content-type",
+               "x-api-key",
+               # A browser front end that cannot send `Idempotency-Key`, or read
+               # back whether a response was a replay, cannot retry a write
+               # safely at all.
+               "idempotency-key"
+             ],
+             expose_headers: ["retry-after", "idempotency-replayed"],
              max_age: 600
            )
 
