@@ -93,7 +93,7 @@ carries the reasoning.
   complexity cap was an `Absinthe.Plug` option on the `/gql` forward, so the
   GraphQL socket never had one. An anonymous `/ws/gql` client could send
   queries, mutations and subscriptions of any cost. Setting the option on the
-  socket would not have been enough: `Absinthe.Phoenix.Channel` replaces a
+  socket would not have been enough: Absinthe.Phoenix.Channel replaces a
   socket's options after its first document. Both transports now build their
   document pipeline with `KilnCMSWeb.GraphqlLimits`, which pins the complexity
   cap (200) and a token limit (2,000) over any option a caller passes, and adds
