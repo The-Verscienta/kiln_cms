@@ -9054,6 +9054,21 @@ msgstr ""
 msgid "Re-enable federation"
 msgstr ""
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-key"
+msgstr ""
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-key this actor? The handle stays the same, but its signing key is replaced. Followers are sent the new key, and some remote servers may keep the old one until they re-fetch the actor. Deliveries to those servers fail until they do."
+msgstr ""
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-keyed. Followers are being sent the new key; some servers may keep the old one until they re-fetch this actor."
+msgstr ""
+
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reaches a page"
@@ -10704,6 +10719,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Signed out of every session."
+msgstr ""
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Signing key"
 msgstr ""
 
 #: lib/kiln_cms_web/live/webhook_live.ex
@@ -13699,12 +13719,12 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
-msgid "Zero-ops default: generate a key right here. Encrypted with a key derived from SECRET_KEY_BASE — rotating that secret orphans the key."
+msgid "Zero-ops default: generate a key right here. Encrypted with a key derived from SECRET_KEY_BASE — rotate that secret only as the secrets rotation guide describes, or the key is lost."
 msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
-msgid "Zero-ops default: paste the secret here. Encrypted with a key derived from SECRET_KEY_BASE — rotating that secret orphans it."
+msgid "Zero-ops default: paste the secret here. Encrypted with a key derived from SECRET_KEY_BASE — rotate that secret only as the secrets rotation guide describes, or it is lost."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/shared.ex
@@ -14284,6 +14304,11 @@ msgstr ""
 msgid "read"
 msgstr ""
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "readable"
+msgstr ""
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "recorded content views"
@@ -14568,6 +14593,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "unreadable"
+msgstr ""
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "unreadable — deliveries fail. SECRET_KEY_BASE was probably rotated without re-encrypting; see the secrets rotation guide, or re-key."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex

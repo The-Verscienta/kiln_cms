@@ -144,7 +144,7 @@ defmodule KilnCMS.Social.Account do
       public?: true,
       constraints: [max_length: KilnCMS.Limits.url()]
 
-    attribute :credential_encrypted, :binary do
+    attribute :credential_encrypted, KilnCMS.Keys.Vault.Ciphertext do
       writable? false
       public? false
       sensitive? true
@@ -180,9 +180,9 @@ defmodule KilnCMS.Social.Account do
   @doc """
   The decrypted credential, or `nil` when it cannot be read.
 
-  `nil` rather than raising: `secret_key_base` rotating (or a restored backup
-  from another deployment) must stop this account posting, not crash every
-  publish that happens to match a rule.
+  `nil` rather than raising: `secret_key_base` rotated without the
+  re-encryption step (or a restored backup from another deployment) must stop
+  this account posting, not crash every publish that happens to match a rule.
   """
   @spec credential(t()) :: String.t() | nil
   def credential(%{credential_encrypted: nil}), do: nil

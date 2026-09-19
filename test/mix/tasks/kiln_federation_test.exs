@@ -1,6 +1,6 @@
 defmodule Mix.Tasks.Kiln.FederationTest do
   @moduledoc """
-  `mix kiln.federation status|enable|disable` (#491) — the only way to turn a
+  `mix kiln.federation status|enable|disable|rekey` (#491, #1487) — the only way to turn a
   site's fediverse identity on, since phase 1 has no admin screen.
 
   The task had no test at all. The claim worth holding it to is the one its
@@ -225,9 +225,64 @@ defmodule Mix.Tasks.Kiln.FederationTest do
     end
   end
 
+  describe "rekey (#1487)" do
+    test "replaces the key, keeps the handle, and queues the actor Update" do
+      org = OrgFixtures.org("fedrekey")
+      Federation.run(["enable", "--org-id", org.id, "--origin", "https://r.example.com"])
+      minted = settings(org.id)
+
+      Federation.run(["rekey", "--org-id", org.id])
+      out = output()
+
+      assert out =~ "Re-keyed."
+      # The honest caveat: an Update is a request, not a guarantee.
+      assert out =~ "Some remote servers may keep the old key"
+
+      rekeyed = settings(org.id)
+      assert rekeyed.origin == minted.origin
+      assert rekeyed.username == minted.username
+      refute rekeyed.public_key_pem == minted.public_key_pem
+
+      assert [_job] =
+               Oban.Job
+               |> KilnCMS.Repo.all()
+               |> Enum.filter(
+                 &(&1.worker == "KilnCMS.Federation.ActorUpdateWorker" and
+                     &1.args["org_id"] == org.id)
+               )
+    end
+
+    test "a site that never enabled federation has nothing to re-key" do
+      org = OrgFixtures.org("fedrekeynever")
+
+      assert_raise Mix.Error, ~r/never enabled/, fn ->
+        Federation.run(["rekey", "--org-id", org.id])
+      end
+    end
+
+    test "status says when the key is unreadable, the fault nothing else shows" do
+      org = OrgFixtures.org("fedkeyline")
+      Federation.run(["enable", "--org-id", org.id, "--origin", "https://k.example.com"])
+
+      Federation.run(["status", "--org-id", org.id])
+      assert output() =~ "Key:        readable"
+
+      KilnCMS.Repo.query!(
+        "UPDATE site_federation SET private_key_encrypted = $1 WHERE id = $2",
+        [
+          KilnCMS.Keys.Vault.encrypt("pem", "another-secret-" <> String.duplicate("q", 64)),
+          Ecto.UUID.dump!(settings(org.id).id)
+        ]
+      )
+
+      Federation.run(["status", "--org-id", org.id])
+      assert output() =~ "Key:        UNREADABLE"
+    end
+  end
+
   describe "arguments" do
     test "an unknown subcommand prints the usage" do
-      assert_raise Mix.Error, ~r/Usage: mix kiln.federation status\|enable\|disable/, fn ->
+      assert_raise Mix.Error, ~r/Usage: mix kiln.federation status\|enable\|disable\|rekey/, fn ->
         Federation.run(["sync"])
       end
     end

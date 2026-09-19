@@ -54,7 +54,19 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Rotating `SECRET_KEY_BASE` keeps stored keys now, if the steps run in
+  order.**
+  ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#rotating-secretkeybase-keeps-stored-keys-now-if-the-steps-run-in-order))
+
 ### Added
+
+- **Rotating `SECRET_KEY_BASE` no longer loses database-stored keys.**
+  ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#rotating-secretkeybase-no-longer-loses-database-stored-keys))
+
+- **A site's ActivityPub actor can be re-keyed.**
+  ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#a-sites-activitypub-actor-can-be-re-keyed))
 
 - **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#one-click-deploy-templates-for-render-railway-flyio-and-digitalocean))
@@ -64,9 +76,12 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **A delivery that fails on an unreadable signing key now says so.**
+  ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#a-delivery-that-fails-on-an-unreadable-signing-key-now-says-so))
+
 - **Buttons, links, badges and fields that rendered unstyled now look like what
   they are.**
-  ([long form](docs/changelog/unreleased.md#buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they))
+  ([#1531](https://github.com/The-Verscienta/kiln_cms/issues/1531) · [long form](docs/changelog/unreleased.md#buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they))
 
 - **A PaaS health check no longer gets a redirect, and `PHX_HOST` falls back to
   the platform's hostname.**
