@@ -19,6 +19,30 @@ carries the reasoning.
   email; `docs/data-flows.md` records the flow. Opt-in per endpoint.
   ([#334](https://github.com/The-Verscienta/kiln_cms/issues/334))
 
+<a id="on-the-fly-image-transforms-get-mediaidtops"></a>
+
+- **On-the-fly image transforms: `GET /media/:id/t/:ops`.** Any processed
+  image can now be resized, cropped and re-encoded on request —
+  `/media/<id>/t/w_1080,ar_16:9,fm_auto` — with width, height, aspect ratio,
+  `dpr`, `fit` (`cover`/`contain`), crop anchored on the item's focal point (or
+  an edge), format (`jpg`/`png`/`webp`/`avif`, or `auto` from `Accept`) and
+  quality. Output is never upscaled. Renders go through the existing libvips
+  pipeline and are cached as derivatives in blob storage, keyed on what is
+  rendered (so equivalent requests share one file and edits simply miss), and
+  served with an `ETag`; a URL carrying the `v` version pin is
+  `immutable` for a year. Abuse is bounded at every layer: unsigned URLs may
+  only use an allowlist of sizes, ratios and qualities, and HMAC-signed ones
+  (`KILN_IMAGE_TRANSFORM_KEY`) any value within a 4000px output cap; sources
+  over the upload pixel cap are refused before decoding; cache misses spend a
+  per-IP `:media_render` budget and wait on a per-node render gate; and each
+  item keeps at most 200 derivatives. The route reads the item exactly as
+  `/media/:id/download` does, so gated and quarantined media stay 404.
+  Builders ship in both SDKs (`kiln.imageUrl`/`imageSrcset`,
+  `KilnClient.image_url/2`/`image_srcset/2`) and as
+  `<KilnCMSWeb.MediaComponents.transform_img>` for public templates, all held
+  to one set of shared test vectors. One migration (`media_derivatives`). See
+  `docs/media-pipeline.md` ("On-the-fly transforms").
+
 <a id="one-click-deploy-templates-for-render-railway-flyio-and-digitalocean"></a>
 
 - **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**

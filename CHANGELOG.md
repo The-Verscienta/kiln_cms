@@ -60,6 +60,9 @@ Every summary line below that was shortened links to its own entry there.
   `membership.canceled` webhook events.**
   ([#334](https://github.com/The-Verscienta/kiln_cms/issues/334) · [long form](docs/changelog/unreleased.md#memberships-can-notify-other-systems-membershipactivated-and-membershipcanceled))
 
+- **On-the-fly image transforms: `GET /media/:id/t/:ops`.**
+  ([#1584](https://github.com/The-Verscienta/kiln_cms/pull/1584) · [long form](docs/changelog/unreleased.md#on-the-fly-image-transforms-get-mediaidtops))
+
 - **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#one-click-deploy-templates-for-render-railway-flyio-and-digitalocean))
 

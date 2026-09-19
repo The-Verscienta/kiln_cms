@@ -354,6 +354,14 @@ defmodule KilnCMS.CMS do
       define :increment_media_downloads, action: :increment_downloads
     end
 
+    # Cached on-the-fly transforms (`KilnCMS.Media.Derivatives`) — system-only,
+    # no API surface.
+    resource KilnCMS.CMS.MediaDerivative do
+      define :list_media_derivatives, action: :for_item, args: [:media_item_id]
+      define :record_media_derivative, action: :record
+      define :destroy_media_derivative, action: :destroy
+    end
+
     resource KilnCMS.CMS.WebhookEndpoint do
       define :list_webhook_endpoints, action: :read
       define :get_webhook_endpoint, action: :read, get_by: [:id]

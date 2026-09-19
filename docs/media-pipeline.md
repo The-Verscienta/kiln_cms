@@ -187,6 +187,132 @@ and fired artifacts keep serving the old URL until re-publish. The focal point
 is carried through the geometry (rotating the image rotates the point), and
 variants regenerate from the edited original.
 
+## On-the-fly transforms
+
+The fixed variants above cover Kiln's own templates. Anything else — a 16:9
+card at 1080px, a square avatar, an AVIF for a browser that takes one — is a
+**transform URL**, rendered on first request and cached:
+
+```
+GET /media/<id>/t/w_1080,ar_16:9,fm_auto,v_3f2a9c01
+```
+
+The `<ops>` segment is `key_value` pairs joined by commas:
+
+| Key | Values | Meaning |
+|---|---|---|
+| `w`, `h` | 1–4000 | Width, height in CSS px. |
+| `ar` | `a:b`, each 1–99 | Aspect ratio (width:height), instead of `h`. |
+| `dpr` | `1`, `2`, `3` | Device-pixel ratio; multiplies `w`/`h`. |
+| `fit` | `cover` (default), `contain` | Fill the box and crop, or fit inside it uncropped. |
+| `crop` | `focal` (default), `center`, `top`, `bottom`, `left`, `right` | Where a `cover` crop is anchored — by default on the [focal point](#focal-point). |
+| `fm` | `auto`, `jpg`, `png`, `webp`, `avif` | Output format; default is the source's (a GIF's is PNG). `auto` picks from `Accept` and adds `Vary: Accept`. |
+| `q` | 1–100 | Quality, lossy formats only; defaults to the variant qualities above. |
+| `v` | 8 hex digits | Version pin — see *Caching*. |
+| `s` | 22 characters | Signature — see *Bounds*. |
+
+Output is **never upscaled**: a box larger than the source (or than the
+largest crop window of the requested ratio) comes back at the largest size
+the source can supply, in the requested shape. Animated GIFs become a still of
+their first frame. Only JPEG, PNG, WebP and GIF originals transform; anything
+else is a 422.
+
+**Don't hand-build these URLs.** The builders do the snapping, versioning and
+signing: `KilnCMS.Media.ImageTransform.url/2` / `srcset/3` and the
+`<KilnCMSWeb.MediaComponents.transform_img>` component inside Kiln,
+`transformPath` / `client.imageUrl` in the JS SDK and `KilnClient.image_url/2`
+in the Elixir client. All three are held to the same checked-in test vectors
+(`clients/js/test/fixtures/image_transform_vectors.json`).
+
+### Bounds
+
+Every distinct parameter set is a decode, a resize and an encode, so an open
+transform endpoint is a CPU and storage amplifier. It is bounded at every
+layer:
+
+- **Unsigned URLs are held to an allowlist.** `w`/`h` must come from the size
+  ladder (`16 32 48 64 96 128 256 384 640 750 828 1080 1200 1920 2048 3840`),
+  `ar` from `1:1 4:3 3:4 3:2 2:3 4:5 5:4 16:9 9:16 21:9`, `q` from `50 75 90`.
+  Anything else is a 400 that names the allowed values. The SDK builders snap
+  up to the ladder, so a browser-side caller never meets it.
+- **Signed URLs may use any value within the hard limits.** `s` is
+  HMAC-SHA256 over `"<id>/<canonical ops>"`, truncated to 16 bytes and
+  base64url-encoded. The key is `KILN_IMAGE_TRANSFORM_KEY` when set (share it
+  with a *server-side* frontend so it can sign), else derived from
+  `SECRET_KEY_BASE` — which Kiln's own templates can use and nobody else can.
+  A bad signature is a 403. `KILN_IMAGE_TRANSFORM_UNSIGNED=false` turns the
+  allowlist path off, so only signed URLs serve.
+- **Hard limits apply to both.** No output side over 4000px after `dpr` (a box
+  is shrunk as a whole, keeping its ratio), and no source over the upload pixel
+  cap (`config :kiln_cms, :media, max_pixels:`, 50 MP) — refused from the
+  recorded dimensions before anything is decoded, and re-checked on the
+  decoded header.
+- **Refusals are cheap.** Parameters and signature are checked before the item
+  is read at all, so a malformed or unauthorized request costs no database or
+  storage work.
+- **Renders are metered.** Every request spends the per-IP `:media_transform`
+  bucket (1,200/min); a cache *miss* also spends `:media_render` (120/min) —
+  the actual cost bound — and waits for a slot in `KilnCMS.Media.TransformGate`,
+  which caps concurrent renders per node (half the schedulers, at least 2). A
+  request that can't get a slot within 10 s is a 503 with `Retry-After`.
+- **Storage is budgeted per item.** An item keeps at most 200 derivatives;
+  past that a transform is still rendered and served but not kept.
+
+All of it is tunable:
+
+```elixir
+config :kiln_cms, :image_transforms,
+  allow_unsigned: true,                 # KILN_IMAGE_TRANSFORM_UNSIGNED
+  signing_key: nil,                     # KILN_IMAGE_TRANSFORM_KEY
+  auto_avif: false,                     # KILN_IMAGE_TRANSFORM_AUTO_AVIF
+  sizes: [16, 32, 48, 64, 96, 128, 256, 384, 640, 750, 828, 1080, 1200, 1920, 2048, 3840],
+  aspect_ratios: ~w(1:1 4:3 3:4 3:2 2:3 4:5 5:4 16:9 9:16 21:9),
+  unsigned_qualities: [50, 75, 90],
+  max_dimension: 4000,
+  max_source_pixels: 50_000_000,        # default: the upload cap
+  max_derivatives_per_item: 200,
+  max_concurrency: 4,                   # default: half the schedulers, min 2
+  queue_timeout: 10_000,
+  max_queue: 64
+```
+
+Change `sizes` and the SDKs need the same ladder (`sizes:` option on each
+builder), or their snapped URLs will 400.
+
+### Caching
+
+A transform is cached twice, once per layer:
+
+- **Derivatives**, in blob storage next to the originals (`t-<digest>.<ext>`,
+  private storage for an item outside the `:public` audience). The key is a
+  digest of *what is rendered* — the original's storage key, the crop window,
+  the output size, format and quality — so `w_800,dpr_2` and `w_1600` share one
+  file, as does every width past the source's own. A rotate or replace (new
+  storage key) or a focal move (new crop window) simply misses, so a
+  derivative is never stale. `KilnCMS.CMS.MediaDerivative` rows record each
+  one, so the budget can be counted, derivatives the item can no longer
+  produce are deleted before they count against it, and a permanent delete
+  from the media library removes them with the original.
+- **HTTP.** The response carries a strong `ETag` (the digest; `If-None-Match`
+  is answered from the plan alone, without touching storage). `v` is a hash of
+  the item's `url` and focal point — the two things that change a transform's
+  pixels for a given URL — computed by every builder from fields the public
+  APIs already return. A URL whose `v` matches is served
+  `public, max-age=31536000, immutable`; one with no `v` or a stale one gets
+  the current image with `public, max-age=300`. An item outside the `:public`
+  audience is `private, no-store`, like its download.
+
+Put a CDN in front as for originals (below). `fm_auto` responses vary on
+`Accept`; a CDN that ignores `Vary` should be given explicit `fm_webp`/`fm_jpg`
+URLs instead.
+
+### Visibility
+
+`/media/:id/t/…` reads the item through the same policy-checked read as
+`/media/:id/download` (`MediaDownloadController.readable_item/2`), under the
+session's actor: a gated item is a 404 to anyone without its audience, and a
+quarantined upload is a 404 to everyone, editors included.
+
 ## Alt text and usage tracking
 
 `MediaItem.alt` has always existed and has always been optional, which means it

@@ -34,6 +34,7 @@ end to end.
 | **Taxonomy** (categories, tags) | JSON:API `/api/json/categories`,`/tags` **or** GraphQL `categories`,`tags` | Name, slug, description |
 | **Search** (keyword, semantic, autocomplete) | JSON:API `/<type>/search`,`/semantic-search`,`/autocomplete` **or** GraphQL `search*`/`semanticSearch*`/`autocomplete*` | Matching records (metadata; no block body). Published-only **for anonymous callers** — with a bearer token, drafts match too. Delivery sites: use the `…/published` twins (`searchPublished*` etc.), which pin `state == :published` server-side (see "Drafts") |
 | A **typed query** over published content by slug/locale | GraphQL `/gql` (`postBySlug`, `pageBySlug`, …) | Selected fields; no block body, author is the opaque `authorId` only |
+| An **image at a size, crop or format** the upload variants don't have | `GET /media/:id/t/:ops` via `kiln.imageUrl` / `KilnClient.image_url` | The image bytes, cached and immutable when version-pinned (see "Images") |
 
 ## Admin-defined (dynamic) content types
 
@@ -106,6 +107,44 @@ up, so any content at all is at least `1` and only genuinely empty content is
 CDN cache headers — `Cache-Control`/`ETag`/`Last-Modified`, see #188); use
 **JSON:API/GraphQL** for discovery, lists, filtering, taxonomy, and search; use
 **preview tokens** to share an unpublished draft.
+
+## Images: sizes, crops and formats on request
+
+A `media_item` (JSON:API `/api/json/media-items`, GraphQL `featuredImage`)
+carries `url`, `width`, `height`, `focal_x`, `focal_y` and a `variants` map of
+the fixed renditions made at upload. For anything else — a 16:9 crop at 1080px,
+a square thumbnail, AVIF — ask the transform endpoint:
+
+```ts
+import { createClient } from "@kiln-cms/client";
+
+const kiln = createClient({ baseUrl: "https://cms.example.com" });
+
+// <img src srcset sizes> for a 16:9 card, cropped around the editor's focal point
+const src = kiln.imageUrl(media, { width: 1080, aspectRatio: "16:9", format: "auto" });
+const srcset = kiln.imageSrcset(media, { aspectRatio: "16:9", format: "auto" });
+```
+
+What to know:
+
+- **The builders need the media object, not just its id.** `v` (the version
+  pin that makes a response cacheable for a year) is computed from `url` and
+  the focal point, so pass the whole `media_item`. Without `url` the URL still
+  works, with a five-minute lifetime.
+- **Unsigned URLs snap.** From a browser the builders round `width`/`height`
+  up to the server's size ladder, because the server only renders allowlisted
+  sizes for unsigned URLs. Use `aspectRatio` rather than `height` for a fixed
+  crop — snapping two sides independently changes the shape.
+- **Signed URLs don't.** A server-side frontend holding the operator's
+  `KILN_IMAGE_TRANSFORM_KEY` can sign (`kiln.signedImageUrl`,
+  `KilnClient.image_url(media, sign_key: key)`) and ask for exact sizes. The
+  key is a secret — never ship it to a browser bundle.
+- **`format: "auto"`** returns the best format the browser accepts and sends
+  `Vary: Accept`; behind a CDN that ignores `Vary`, pick explicit formats.
+- **Visibility matches downloads.** A gated item's transforms are 404 for
+  anyone who couldn't download it.
+
+Full reference: [media-pipeline.md § On-the-fly transforms](media-pipeline.md#on-the-fly-transforms).
 
 ## Author / PII
 

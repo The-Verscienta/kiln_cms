@@ -65,6 +65,8 @@ the router so preflights are answered before route matching).
 | Second factor | `GET`/`POST /sign-in/verify` | signed `:pending_2fa` token + TOTP or recovery code | `:auth`; the `POST` also per-account, tighter than sign-in (#714) |
 | Credential submits over `/live` | LiveView `"submit"` on the sign-in, register, reset-request and magic-link forms — **all four render on all three auth pages** | credentials → session / account / mail | charged on the *action*, since no plug can reach them: sign-in `:auth` (#715) + per-account (#478); registration `:register` (#724); reset and magic-link `:auth` (#724) + the per-address mail budget |
 | Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none, except the three TOTP actions on `/editor/settings`: per-account, the second factor's own bucket (#727) |
+| Media bytes | `/media/:id/download`, `/media/:id/stream` | session (a gated item needs its audience) | `:delivery` |
+| Image transforms | `/media/:id/t/:ops` | session (same read as the download); unsigned URLs allowlisted, signed ones HMAC-checked | `:media_transform` per request + `:media_render` per cache miss, plus a per-node render gate |
 | Media blobs | `/uploads/*` (`Plug.Static`) | none | none |
 | Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token + per-document read / API key + per-document read | `/live` root joins `:live_join` per address (#1183); every frame on a `/ws/collab` connection `:collab_event` per account (#1305); otherwise none (except the sign-in submit, above) |
 | Dev tools | `/dev/dashboard`, `/dev/mailbox`, `/admin`, `/gql/playground` | compile-gated off in prod | — |
@@ -317,6 +319,27 @@ build if a resource is ever registered without that authorizer.
   gated render to every anonymous visitor.
 - **Scraping / enumeration** — content is public and the sitemap is intentional.
   The `:delivery` bucket caps volume; front with a CDN to absorb load.
+
+### Image transforms (`/media/:id/t/:ops`)
+- **Resource exhaustion** — every distinct parameter set is a decode, a resize
+  and an encode, and the route is anonymous. Bounded in layers: unsigned URLs
+  may only use an allowlist of sizes, ratios and qualities (a signed URL may use
+  any value, and signing needs `KILN_IMAGE_TRANSFORM_KEY` or `SECRET_KEY_BASE`);
+  every output side is capped at 4000px and every source at the upload pixel
+  cap, the latter checked from the recorded dimensions before decoding; cache
+  misses spend a per-IP `:media_render` budget and wait on a per-node
+  concurrency gate; and an item keeps at most 200 derivatives, after which
+  renders are served but not stored. Parameters and signatures are checked
+  before the item is read, so refusals cost no I/O. *Watch:* behind a proxy
+  or CDN that isn't configured as trusted, every client shares the proxy's
+  address and so one render budget — the same caveat as every per-IP bucket.
+- **Signing-key exposure** — a leaked `KILN_IMAGE_TRANSFORM_KEY` lifts the
+  allowlist, not the hard caps or the render gate. Rotating it invalidates
+  signed URLs already in pages. It must stay server-side; the SDKs say so.
+- **Gated media** — the route reads the item with the request's actor through
+  the same policy-checked read as `/media/:id/download`, so a gated or
+  quarantined item is a 404 there too, and a gated item's derivatives live in
+  private storage and are served `private, no-store`.
 
 ### GraphQL / JSON:API / REST
 - **Authorization bypass** — prevented by Ash policies running with the request

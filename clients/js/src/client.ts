@@ -1,8 +1,8 @@
 /**
  * Typed client for the KilnCMS delivery APIs — the JSON:API read surface at
  * `/api/json/*`, per-type and hybrid search, fired artifacts at
- * `/api/content/:type/:slug` (including `?as_of=` point-in-time reads), and
- * preview tokens (see Kiln's `docs/json-api.md` and
+ * `/api/content/:type/:slug` (including `?as_of=` point-in-time reads),
+ * preview tokens, and image-transform URLs (see Kiln's `docs/json-api.md` and
  * `docs/headless-consumer-guide.md`).
  *
  * A port of the official Elixir client (`clients/elixir/kiln_client`), which
@@ -25,6 +25,15 @@
 
 import { KilnHttpError } from "./errors.js";
 import type { SchemaDocument } from "./generator.js";
+import {
+  buildSignedTransformSrcset,
+  buildTransformSrcset,
+  signedTransformPath,
+  transformPath,
+  type TransformMedia,
+  type TransformOptions,
+  type TransformSrcsetOptions,
+} from "./transform.js";
 import {
   appendArray,
   appendFilter,
@@ -78,6 +87,13 @@ export interface KilnClientOptions {
   timeoutMs?: number;
   /** Extra headers merged into every request. */
   headers?: Record<string, string>;
+  /**
+   * The server's `KILN_IMAGE_TRANSFORM_KEY`, enabling `signedImageUrl()` and
+   * `signedImageSrcset()`. **Server-side only** — anyone holding it can make
+   * the server render any size, so never configure it in a client that ships
+   * to a browser. Unsigned `imageUrl()`/`imageSrcset()` need no key.
+   */
+  imageTransformKey?: string;
 }
 
 export function createClient(options: KilnClientOptions): KilnClient {
@@ -90,6 +106,7 @@ export class KilnClient {
   private readonly fetchImpl: typeof globalThis.fetch;
   private readonly timeoutMs: number;
   private readonly headers: Record<string, string>;
+  private readonly imageTransformKey?: string;
 
   constructor(options: KilnClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
@@ -97,6 +114,7 @@ export class KilnClient {
     this.fetchImpl = options.fetch ?? globalThis.fetch;
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.headers = options.headers ?? {};
+    this.imageTransformKey = options.imageTransformKey;
   }
 
   // ── JSON:API content reads ────────────────────────────────────────────────
@@ -371,6 +389,57 @@ export class KilnClient {
       options.signal,
       "application/json",
     )) as SchemaDocument;
+  }
+
+  // ── image transforms ──────────────────────────────────────────────────────
+
+  /**
+   * Absolute URL of an on-the-fly transform of `media` (a flattened
+   * `media_item`): `GET /media/:id/t/:ops`. Unsigned, so `width`/`height`
+   * snap up to the server's size ladder — safe to call in a browser:
+   *
+   *     <img src={kiln.imageUrl(media, { width: 800, format: "auto" })} …>
+   *
+   * See `transformPath` for the options and the rules.
+   */
+  imageUrl(media: TransformMedia, options: TransformOptions = {}): string {
+    return this.baseUrl + transformPath(media, options);
+  }
+
+  /**
+   * An unsigned `srcset` of absolute transform URLs for `media`, or `null`
+   * when its dimensions are unknown. See `transformSrcset`.
+   */
+  imageSrcset(media: TransformMedia, options: TransformSrcsetOptions = {}): string | null {
+    return buildTransformSrcset(media, options, this.baseUrl);
+  }
+
+  /**
+   * `imageUrl`, signed with the `imageTransformKey` the client was created
+   * with: exact sizes, no snapping. Throws if no key was configured.
+   */
+  async signedImageUrl(media: TransformMedia, options: TransformOptions = {}): Promise<string> {
+    return this.baseUrl + (await signedTransformPath(media, options, this.transformKey()));
+  }
+
+  /**
+   * `imageSrcset`, signed with the `imageTransformKey`: widths used exactly as
+   * given. Throws if no key was configured.
+   */
+  async signedImageSrcset(
+    media: TransformMedia,
+    options: TransformSrcsetOptions = {},
+  ): Promise<string | null> {
+    return buildSignedTransformSrcset(media, options, this.transformKey(), this.baseUrl);
+  }
+
+  private transformKey(): string {
+    if (this.imageTransformKey === undefined || this.imageTransformKey === "") {
+      throw new Error(
+        "Signed image URLs need the imageTransformKey client option (the server's KILN_IMAGE_TRANSFORM_KEY).",
+      );
+    }
+    return this.imageTransformKey;
   }
 
   // ── transport ─────────────────────────────────────────────────────────────

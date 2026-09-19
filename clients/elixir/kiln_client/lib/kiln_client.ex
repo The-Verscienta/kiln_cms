@@ -316,6 +316,24 @@ defmodule KilnClient do
       Application.get_env(:kiln_client, :base_url, "")
   end
 
+  # --- image transforms ---
+
+  @doc """
+  Absolute on-the-fly transform URL for a media item — see
+  `KilnClient.Image.url/2` for the options and signing.
+
+      KilnClient.image_url(media, width: 800, aspect_ratio: "16:9", format: :auto)
+  """
+  @spec image_url(map(), keyword()) :: String.t()
+  defdelegate image_url(media, opts \\ []), to: KilnClient.Image, as: :url
+
+  @doc """
+  `srcset` of transform URLs for a media item, or `nil` without dimensions —
+  see `KilnClient.Image.srcset/2`.
+  """
+  @spec image_srcset(map(), keyword()) :: String.t() | nil
+  defdelegate image_srcset(media, opts \\ []), to: KilnClient.Image, as: :srcset
+
   # --- shapes ---
 
   @doc "Relationship refs of `item` under `name`, always as a list of `%{\"type\", \"id\"}`."
