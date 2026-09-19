@@ -133,17 +133,20 @@ defmodule KilnCMSWeb.GraphqlLimits do
   GraphQL surface. ash_graphql reads that option for the relationship fields
   that point *at* the resource.
 
-  With `limit` the list is priced at that many rows, as ash_graphql prices it.
-  Without `limit` it is priced at `#{@unlimited_list_rows}` rows, not 1. The
-  price never drops to 0: `limit: 0` still costs a row, so an empty limit cannot
-  make its subtree free.
+  With a row count — `limit`, or relay's `first`/`last` — the list is priced at
+  that many rows, as ash_graphql prices it. Without one it is priced at
+  `#{@unlimited_list_rows}` rows, not 1. The price never drops to 0: `limit: 0`
+  still costs a row, so an empty limit cannot make its subtree free (ash_graphql
+  prices that at 0, which would make the whole subtree free).
   """
   @spec list_complexity(map(), non_neg_integer(), term()) :: pos_integer()
   def list_complexity(args, child_complexity, _info) do
     rows =
       case args do
         %{limit: limit} when is_integer(limit) -> max(limit, 1)
-        _no_limit -> @unlimited_list_rows
+        %{first: first} when is_integer(first) -> max(first, 1)
+        %{last: last} when is_integer(last) -> max(last, 1)
+        _no_row_count -> @unlimited_list_rows
       end
 
     rows * max(child_complexity, 1)
