@@ -50,7 +50,7 @@ the router so preflights are answered before route matching).
 |---|---|---|---|
 | Public HTML delivery | `/`, `/:slug`, `/:type/:slug`, `/blog`, `/blog/:slug`, `/search`, `/*path` | none | `:delivery` |
 | Probes & SEO | `/up`, `/sitemap.xml`, `/robots.txt`, `/llms.txt` | none | `:probe` |
-| GraphQL | `/gql` (GET + POST), `/ws/gql` | optional JWT / API key | `:gql` |
+| GraphQL | `/gql` (GET + POST), `/ws/gql` | optional JWT / API key | `:gql` (per operation), `:gql_join` (socket connects) |
 | JSON:API | `/api/json/**` (GET/POST/PATCH/DELETE) | optional JWT / API key | `:api` |
 | Headless REST | `/api/content/**`, `/api/resolve`, `/api/locales`, `/api/search`, `/api/ask`, `/api/provenance/**`, `/api/visual-editing/:type/:slug` | optional JWT / API key | `:api` |
 | OpenAPI & explorer | `/api/json/open_api`, `/api/json/swaggerui` | none — and **not served in prod** unless `API_DOCS_ENABLED` (#567) | `:docs` |
@@ -220,8 +220,20 @@ build if a resource is ever registered without that authorizer.
 - **CORS** — Corsica, scoped to `/api` and `/gql` only, with an exact-string
   origin allowlist that **defaults to deny** in production and no
   `allow_credentials`. Browser pages stay same-origin.
-- **GraphQL abuse limits** — `analyze_complexity: true, max_complexity: 200`,
-  and introspection disabled in production.
+- **GraphQL abuse limits** — one document pipeline for `/gql` and `/ws/gql`
+  (`KilnCMSWeb.GraphqlLimits`). Every document gets complexity analysis with a
+  cap of 200, a depth limit of 15 and a token limit of 2,000. These are pinned
+  where the pipeline is built, because the socket's Absinthe options are
+  replaced after its first document and a plug can override the HTTP ones.
+  To-many relationships without a `limit` are priced at five rows each, so a
+  relationship cycle (`relatedPosts`, `featuredImage { featuredPosts }`) cannot
+  nest for free. A batched `/gql` body may carry 10 operations at most, and each
+  is charged to `:gql` (`KilnCMSWeb.Plugs.GraphqlBatchLimit`). Introspection is
+  refused in production by a pipeline phase that reads the parsed document, so
+  a batched body and a socket document are checked like a single query. Until
+  2026-09 the cap applied only to single `/gql` requests: the socket had no
+  limits, a batch was one request whatever it carried, and a batched body got
+  past the introspection block.
 - **HTTPS / HSTS** — `force_ssl` with `x_forwarded_proto` rewriting in
   `config/prod.exs`.
 - **Session cookies** — signed *and* encrypted, `SameSite=Lax`, `http_only`, and
@@ -320,7 +332,13 @@ build if a resource is ever registered without that authorizer.
   publish/unpublish (#330). Gated by resource policies *and* the API-key access
   scope, not by the router. `destroy` is a soft delete; `purge` is never routed.
 - **Mass assignment** — Ash actions accept only declared inputs (`accept`).
-- **Query complexity** — bounded at 200; introspection off in production.
+- **Query cost** — each document is capped at complexity 200, depth 15 and
+  2,000 tokens on both transports, and a batch at 10 operations. Complexity is
+  a price, not a row count: a relationship list without `limit` is priced at
+  five rows and can return more, so the cap limits how deeply lists nest rather
+  than how many rows one document returns. Documents on `/ws/gql` are not
+  counted against `:gql` (residual item 10). Introspection is off in
+  production.
 - **Error verbosity** — keep `:logger` at `:info` in prod (already set).
 
 ### MCP (`/mcp`)
@@ -984,8 +1002,11 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
 
     Still uncounted, and still this item's remaining gap: events on
     `/live` (no lifecycle hook runs before every `handle_event/3`; the sign-in
-    submit stays the one charged case, #715) and subscription documents on
-    `/ws/gql`. `/ws/collab`'s frames are the one event surface counted so far
+    submit stays the one charged case, #715) and documents on `/ws/gql`
+    (queries, mutations and subscriptions alike). Each such document is now
+    held to the same complexity, depth and token limits as `/gql`
+    (`KilnCMSWeb.GraphqlLimits`). How many a connection may send is still not
+    limited. `/ws/collab`'s frames are the one event surface counted so far
     (#1305, above); the other two remain the harder problem that issue
     described (no single choke point, no obvious per-event cost model).
 11. **Periodic CSP re-review** as the editor adds third-party assets. The

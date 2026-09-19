@@ -56,8 +56,10 @@ defmodule KilnCMSWeb.Router do
 
   pipeline :graphql do
     plug KilnCMSWeb.Plugs.RateLimit, :gql
-    # Block schema introspection in production (config-gated).
-    plug KilnCMSWeb.Plugs.DisableGraphqlIntrospection
+    # A batched body (a JSON array of operations) is refused past a size, and
+    # every operation in it after the first is charged to `:gql` as well.
+    # Introspection is refused by the document pipeline (`KilnCMSWeb.GraphqlLimits`).
+    plug KilnCMSWeb.Plugs.GraphqlBatchLimit, :gql
     plug :load_from_bearer
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
@@ -512,14 +514,15 @@ defmodule KilnCMSWeb.Router do
   # Headless GraphQL — always available; the interactive playground is dev-only
   # (see the `dev_routes` block below).
   #
-  # Cap query cost/depth so a deeply nested or wide query can't force an
-  # unbounded resolve (DoS). Tune `max_complexity` up as list queries are added.
-  # One definition shared by the forward below and `PageController.gql_get/2`
-  # (which re-dispatches GET-based queries to Absinthe).
+  # The cost limits (complexity, depth, token count, introspection) are pinned by
+  # the pipeline, not set here as options: `KilnCMSWeb.GraphqlLimits` builds the
+  # same pipeline for `/ws/gql`, and options can be overridden per request where
+  # a pipeline cannot. One definition shared by the forward below, the dev
+  # playground and `PageController.gql_get/2` (which re-dispatches GET-based
+  # queries to Absinthe).
   @graphql_opts [
     schema: Module.concat(["KilnCMSWeb.GraphqlSchema"]),
-    analyze_complexity: true,
-    max_complexity: 200
+    pipeline: {Module.concat(["KilnCMSWeb.GraphqlLimits"]), :plug_pipeline}
   ]
 
   @doc "Absinthe.Plug options for the `/gql` endpoint (see the forward below)."
@@ -535,10 +538,10 @@ defmodule KilnCMSWeb.Router do
     scope "/gql" do
       pipe_through [:graphql]
 
-      forward "/playground", Absinthe.Plug.GraphiQL,
-        schema: Module.concat(["KilnCMSWeb.GraphqlSchema"]),
-        socket: Module.concat(["KilnCMSWeb.GraphqlSocket"]),
-        interface: :simple
+      forward "/playground",
+              Absinthe.Plug.GraphiQL,
+              @graphql_opts ++
+                [socket: Module.concat(["KilnCMSWeb.GraphqlSocket"]), interface: :simple]
     end
   end
 

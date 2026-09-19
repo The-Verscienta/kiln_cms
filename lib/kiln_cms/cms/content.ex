@@ -528,6 +528,13 @@ defmodule KilnCMS.CMS.Content do
           graphql do
             type :entry
 
+            # Prices every to-many relationship that points at this type (the
+            # related-content list, a media item's featured content) at its
+            # `limit`, or at a fixed row count without one. ash_graphql priced it
+            # as a single row, so the related list could nest inside itself
+            # almost for free (`KilnCMSWeb.GraphqlLimits.list_complexity/3`).
+            complexity {KilnCMSWeb.GraphqlLimits, :list_complexity}
+
             # Real-time headless: notifies on every entry write, resolved per
             # subscriber through the policy-scoped :read — anonymous
             # subscribers only ever receive published-visible data.
@@ -652,6 +659,10 @@ defmodule KilnCMS.CMS.Content do
         quote do
           graphql do
             type unquote(type)
+
+            # See the entry tier above: to-many relationships pointing here
+            # (`relatedPosts`, `featuredPosts`) are priced per row.
+            complexity {KilnCMSWeb.GraphqlLimits, :list_complexity}
 
             # Real-time headless: notifies on create/update/destroy, resolved
             # per subscriber through the policy-scoped :read — anonymous

@@ -21,7 +21,7 @@ defmodule KilnCMSWeb.Plugs.ApiDocs do
   which actions exist, what they accept, what they return.
 
   That is the same argument that already disabled GraphQL introspection in
-  production (`KilnCMSWeb.Plugs.DisableGraphqlIntrospection`), and leaving a
+  production (`KilnCMSWeb.GraphqlLimits.NoIntrospection`), and leaving a
   full OpenAPI document next to a disabled introspection endpoint was the
   inconsistency. The explorer carries a second, smaller reason: it needs a
   relaxed CSP allowing `https://cdnjs.cloudflare.com` for its bundle, and that

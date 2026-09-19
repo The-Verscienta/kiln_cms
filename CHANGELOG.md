@@ -54,6 +54,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Breaking
+
+- **Some GraphQL queries that ran before are now refused as too costly, and a
+  refused introspection query gets a GraphQL error instead of a 403.**
+  ([long form](docs/changelog/unreleased.md#some-graphql-queries-that-ran-before-are-now-refused-as-too-costly-and-a))
+
 ### Added
 
 - **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**
@@ -71,6 +77,12 @@ Every summary line below that was shortened links to its own entry there.
 - **A PaaS health check no longer gets a redirect, and `PHX_HOST` falls back to
   the platform's hostname.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#a-paas-health-check-no-longer-gets-a-redirect-and-phxhost-falls-back-to-the))
+
+### Security
+
+- **`/ws/gql` runs under the same cost limits as `/gql`, batches are counted per
+  operation, and introspection is refused however a document arrives.**
+  ([long form](docs/changelog/unreleased.md#wsgql-runs-under-the-same-cost-limits-as-gql-batches-are-counted-per-operation))
 
 ## [0.9.0] - 2026-09-18
 

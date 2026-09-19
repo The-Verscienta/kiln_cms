@@ -5,6 +5,23 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Breaking
+
+<a id="some-graphql-queries-that-ran-before-are-now-refused-as-too-costly-and-a"></a>
+
+- **Some GraphQL queries that ran before are now refused as too costly, and a
+  refused introspection query gets a GraphQL error instead of a 403.** A
+  to-many relationship with no `limit` (`tags`, `relatedPosts`,
+  `featuredPosts`) now costs five rows, not one, under the same cap of 200. A
+  query that lists such relationships for each row of a 25-row page can go over
+  it: `publishedPosts { results { title tags { name } relatedPosts { title } } }`
+  costs 300. Ask for a smaller page or pass `limit` on the relationship.
+  Documents nested more than 15 fields deep or longer than 2,000 tokens are
+  refused, as is a batched `/gql` body of more than 10 operations. With
+  introspection off (production), `__schema` and `__type` are refused with a
+  `200` and `errors`, like any invalid document; the old plug answered `403`.
+  `docs/headless-graphql-api.md` has a new section, "Query cost".
+
 ## Added
 
 <a id="one-click-deploy-templates-for-render-railway-flyio-and-digitalocean"></a>
@@ -66,4 +83,29 @@ carries the reasoning.
   a fresh deploy's editor connects; a blank `PHX_HOST` used to become an empty
   host.
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529))
+
+## Security
+
+<a id="wsgql-runs-under-the-same-cost-limits-as-gql-batches-are-counted-per-operation"></a>
+
+- **`/ws/gql` runs under the same cost limits as `/gql`, batches are counted per
+  operation, and introspection is refused however a document arrives.** The
+  complexity cap was an `Absinthe.Plug` option on the `/gql` forward, so the
+  GraphQL socket never had one. An anonymous `/ws/gql` client could send
+  queries, mutations and subscriptions of any cost. Setting the option on the
+  socket would not have been enough: `Absinthe.Phoenix.Channel` replaces a
+  socket's options after its first document. Both transports now build their
+  document pipeline with `KilnCMSWeb.GraphqlLimits`, which pins the complexity
+  cap (200) and a token limit (2,000) over any option a caller passes, and adds
+  a depth limit (15). A JSON array body ran every element as its own operation,
+  with no maximum, for one hit on the 60-a-minute `:gql` bucket.
+  `KilnCMSWeb.Plugs.GraphqlBatchLimit` refuses a batch of more than 10
+  operations and charges the bucket once per operation. The production
+  introspection block read `params["query"]` only, so `[{"query":
+  "{__schema{…}}"}]` returned the whole schema, write mutations included, and
+  the socket was never checked at all. The block is now a pipeline phase that
+  reads the parsed document, on both transports. To-many relationships with no
+  `limit` were priced as one row, so `relatedPosts { relatedPosts { … } }`
+  cost about 2 a level while returning k^depth rows. They are now priced at
+  five rows, and at `limit` rows when one is given.
 
