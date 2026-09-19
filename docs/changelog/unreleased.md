@@ -34,6 +34,25 @@ carries the reasoning.
   write to. Ignored under S3.
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529))
 
+## Changed
+
+<a id="the-content-list-says-an-items-status-in-words-the-trigram-glyph-is-opt-in"></a>
+
+- **The content list says an item's status in words; the trigram glyph is
+  opt-in.** Each row used to carry an I-Ching trigram whose three lines meant
+  published, translated and scheduled, named in its tooltip as "li · fire" or
+  "kun · earth" — the last of the bagua theming, which the Overview had
+  already dropped, and a mark a new editor had to learn to decode. Rows now say
+  "Missing translations" when a slug group lacks a locale, and the schedule
+  line reads "Publishes Sep 22, 2026, 11:07 AM" (or "Unpublishes …") instead of
+  a bare date explained only by a hover title; the state badge already said the
+  rest. Anyone who
+  reads the glyph can turn it back on under Your settings → Content list
+  (`User.status_marks`, a new column that defaults every account, existing
+  ones included, to words). `docs/design-language.md` extends its "no internal
+  metaphors" rule to pictures.
+  ([#1323](https://github.com/The-Verscienta/kiln_cms/issues/1323))
+
 ## Fixed
 
 <a id="buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they"></a>
