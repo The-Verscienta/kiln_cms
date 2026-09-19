@@ -490,7 +490,7 @@ jobs:
   # "a new CVE landed" instead of burying the format/credo/sobelow/test results
   # for an unrelated change — the way the in-job gettext gate already does.
   deps_audit:
-    name: Dependency audit (mix_audit)
+    name: Dependency audit (mix_audit + hex.audit)
     runs-on: ubuntu-latest
 
     steps:
@@ -544,6 +544,14 @@ jobs:
 
       - name: Dependency audit
         run: mix deps.audit
+
+      # A second database, because the first one lagged: on 2026-09-18 mirego's
+      # mirror carried none of the 89 advisories (six CRITICAL, all in
+      # ash_authentication) that Hex's own advisory feed listed against the
+      # v0.9.0 lock. `mix hex.audit` reads that feed and exits non-zero on any
+      # advisory or retirement; the acknowledgement list lives in mix.exs.
+      - name: Hex advisory audit
+        run: mix hex.audit
 
   # Also its own job, for the same reason `deps_audit` is (#53). `mix docs` is
   # the only thing in CI that checks documentation cross-references — a dead

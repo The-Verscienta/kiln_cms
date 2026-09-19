@@ -110,8 +110,8 @@ mix precommit
 ```
 
 It runs: `compile --warnings-as-errors`, `deps.unlock --unused`, `format`,
-`credo --strict`, `sobelow` (security scan), `deps.audit` (dependency CVE scan,
-see below), `kiln.plugins.doctor`, and the test suite. CI
+`credo --strict`, `sobelow` (security scan), `deps.audit` and `hex.audit`
+(dependency CVE scans, see below), `kiln.plugins.doctor`, and the test suite. CI
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) additionally runs
 `mix ash.codegen --check` (migration/snapshot drift, see above),
 `mix dialyzer` (the first local run builds a PLT and is slow; it's cached
@@ -200,15 +200,19 @@ belong in it; the PR description is where a finished plan lives.
 ### Dependency audit
 
 `mix deps.audit` ([mix_audit](https://github.com/mirego/mix_audit)) checks
-`mix.lock` against the Elixir security advisory database. It runs in
-`mix precommit` and as its own CI job (`Dependency audit`).
+`mix.lock` against mirego's mirror of the Elixir security advisory database;
+`mix hex.audit` checks it against the advisories Hex itself serves. Both run in
+`mix precommit` and in the `Dependency audit` CI job, because the two databases
+drift: on 2026-09-18 the mirror carried none of the 89 advisories (six
+CRITICAL, all in `ash_authentication`) that Hex listed against the v0.9.0 lock.
 
 Because the advisory database moves independently of this repo, **this gate can
 fail on a PR that touched no dependencies** — that means a new advisory landed
 against something already locked, not that your change broke anything. It has
 its own job precisely so that failure doesn't bury the lint/test results of an
 unrelated change. Remediate by upgrading the affected dependency; if no fixed
-version exists, document the accepted risk and use mix_audit's ignore options
+version exists, document the accepted risk and acknowledge the advisory
+(mix_audit's ignore options; the `:hex` section of `mix.exs` for `hex.audit`)
 rather than dropping the check.
 
 The job fetches the advisory database explicitly before running the audit.

@@ -626,7 +626,7 @@ defmodule KilnCMS.MixProject do
       {:ash_graphql, "~> 1.0"},
       {:ash_json_api, "~> 1.0"},
       # MCP server for LLM authoring (write-scoped API keys) — see docs/mcp.md.
-      {:ash_ai, "~> 0.7"},
+      {:ash_ai, "~> 1.0"},
       # Provider-agnostic LLM client behind the optional SEO drafting generator
       # (docs/seo.md). Declared directly rather than leaned on as an `ash_ai`
       # transitive: a minor bump there could make it optional and break us.
@@ -634,7 +634,7 @@ defmodule KilnCMS.MixProject do
       {:ash_admin, "~> 1.0"},
       {:sourceror, "~> 1.8", only: [:dev, :test]},
       {:igniter, "~> 0.5", only: [:dev, :test]},
-      {:usage_rules, "~> 0.1", only: [:dev], runtime: false},
+      {:usage_rules, "~> 1.2", only: [:dev], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
@@ -877,6 +877,13 @@ defmodule KilnCMS.MixProject do
             "credo --strict",
             "sobelow --config",
             "deps.audit",
+            # Both audits, because they read different databases. mix_audit
+            # reads mirego's mirror, hex.audit reads the advisories Hex itself
+            # serves; on 2026-09-18 the mirror knew none of the 89 advisories
+            # (six CRITICAL, in ash_authentication) that hex.audit listed
+            # against v0.9.0's lock. Advisories with no fixed release are
+            # acknowledged in this file's `:hex` project config, not skipped.
+            "hex.audit",
             "kiln.plugins.doctor",
             # Cheap, and says in a second what CI's `image` job takes a full
             # dependency compile to discover: a Dockerfile pin that can't satisfy

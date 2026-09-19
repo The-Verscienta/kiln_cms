@@ -63,7 +63,7 @@ changes to compile, **minor** = new capability plus possible migrations,
 large share of the commit history is AI-pair-programmed (every such commit is
 `Co-Authored-By`-attributed). What offsets that is mechanical rather than
 social: a `mix precommit` gate and a CI suite that includes dialyzer, sobelow,
-`mix deps.audit`, a policy-coverage guard that fails the build for an Ash
+`mix deps.audit` and `mix hex.audit`, a policy-coverage guard that fails the build for an Ash
 resource with no authorizer, an overlay-drift job, and a release-image build.
 The [issue tracker](https://github.com/The-Verscienta/kiln_cms/issues) is the
 project's real backlog, including its own audit findings. If that bus factor is
