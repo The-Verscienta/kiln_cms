@@ -380,6 +380,8 @@ with real-time visual preview and collaborative locking, and headless GraphQL + 
 delivery. Remaining cleanup: replace the temporary DaisyUI auth-override scaffolding in
 `router.ex`/`auth_overrides.ex` with custom components (the plan specifies no DaisyUI).
 
-> **Note:** keep this project at a path **without spaces** (it lives at
-> `~/Github/kiln_cms`). Native deps (`bcrypt_elixir`, `libvips`) build via `make`, which
-> fails on spaced paths such as iCloud Drive's `Mobile Documents`.
+> **Note:** clone this project to a path **without spaces**. One dependency,
+> `picosat_elixir`, cannot compile under a spaced path such as iCloud Drive's
+> `Mobile Documents` (fixed upstream in
+> [bitwalker/picosat_elixir#14](https://github.com/bitwalker/picosat_elixir/pull/14),
+> not yet released). `mix setup` checks for this before it starts.

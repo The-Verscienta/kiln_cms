@@ -30,11 +30,18 @@ environment notes that bite people:
   would otherwise strip the opted-out deps out of `mix.lock`). CI's
   `Optional ML stack (semantic search)` job is the leg that compiles and tests
   that shape.
-- **The repo must live at a space-free, non-iCloud path.** Native deps
-  (`bcrypt_elixir`, libvips) build via `make`, which fails on spaced/iCloud
-  paths.
-- **Keep the `igniter` dependency** — removing it triggers an Elixir 1.20.1
-  compiler crash locally.
+- **Clone to a path without a space.** One dependency cannot compile under
+  such a path: `picosat_elixir`, Ash's policy SAT solver. Its Makefile uses
+  absolute paths as make targets, and make splits them at the space. The
+  resulting error says to install gcc and make, but they are not the cause.
+  `mix setup` stops before `deps.get` if the path has a space. The upstream fix,
+  [bitwalker/picosat_elixir#14](https://github.com/bitwalker/picosat_elixir/pull/14),
+  is not released yet. Every other native dependency builds under a spaced
+  path. iCloud Drive's folder (`~/Library/Mobile Documents/…`) fails only
+  because its name has a space.
+- **`igniter` is a real dependency.** `mix kiln.gen.content` and
+  `mix kiln.gen.plugin` are Igniter tasks. Removing it does not crash the
+  compiler; it removes those two generators.
 - **Node.js is required for assets** — the editor bundles JS deps (TipTap) that
   esbuild pulls from `assets/node_modules`. `mix setup` runs `npm install` for
   you; otherwise run `npm install` in `assets/`. `assets/node_modules` is
