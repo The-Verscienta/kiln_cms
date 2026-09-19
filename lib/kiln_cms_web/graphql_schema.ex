@@ -90,7 +90,8 @@ defmodule KilnCMSWeb.GraphqlSchema do
     @desc """
     The collection as of a date (#338): every document of `type` that was
     published at that instant, reconstructed from version history — the
-    GraphQL twin of `GET /api/content/:type?as_of=`.
+    GraphQL twin of `GET /api/content/:type?as_of=`. Lists only what an
+    anonymous reader may discover: public then and now, never passphrase-locked.
     """
     field :content_as_of, list_of(non_null(:point_in_time_entry)) do
       arg :type, non_null(:string)

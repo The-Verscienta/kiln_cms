@@ -66,11 +66,17 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Buttons, links, badges and fields that rendered unstyled now look like what
   they are.**
-  ([long form](docs/changelog/unreleased.md#buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they))
+  ([#1531](https://github.com/The-Verscienta/kiln_cms/issues/1531) · [long form](docs/changelog/unreleased.md#buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they))
 
 - **A PaaS health check no longer gets a redirect, and `PHX_HOST` falls back to
   the platform's hostname.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#a-paas-health-check-no-longer-gets-a-redirect-and-phxhost-falls-back-to-the))
+
+### Security
+
+- **Point-in-time reads (`?as_of=`) apply the passphrase lock and the audience
+  as live delivery does.**
+  ([#496](https://github.com/The-Verscienta/kiln_cms/issues/496), [#1032](https://github.com/The-Verscienta/kiln_cms/issues/1032) · [long form](docs/changelog/unreleased.md#point-in-time-reads-asof-apply-the-passphrase-lock-and-the-audience-as-live))
 
 ## [0.9.0] - 2026-09-18
 
