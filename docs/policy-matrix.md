@@ -737,7 +737,7 @@ never had ids to begin with), is documented in full at
 `KilnCMS.CMS.Changes.EnforceBlockFieldPolicy`'s moduledoc rather than
 repeated here.
 
-See residual risk 8 in [`threat-model.md`](threat-model.md) for what this does
+See residual risk 9 in [`threat-model.md`](threat-model.md) for what this does
 and does not guarantee — in particular that a wholly id-less stored tree keeps
 the re-target until stamped, and that reusing another block's id remains open.
 

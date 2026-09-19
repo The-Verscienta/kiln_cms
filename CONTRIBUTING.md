@@ -30,11 +30,18 @@ environment notes that bite people:
   would otherwise strip the opted-out deps out of `mix.lock`). CI's
   `Optional ML stack (semantic search)` job is the leg that compiles and tests
   that shape.
-- **The repo must live at a space-free, non-iCloud path.** Native deps
-  (`bcrypt_elixir`, libvips) build via `make`, which fails on spaced/iCloud
-  paths.
-- **Keep the `igniter` dependency** — removing it triggers an Elixir 1.20.1
-  compiler crash locally.
+- **Clone to a path without a space.** One dependency cannot compile under
+  such a path: `picosat_elixir`, Ash's policy SAT solver. Its Makefile uses
+  absolute paths as make targets, and make splits them at the space. The
+  resulting error says to install gcc and make, but they are not the cause.
+  `mix setup` stops before `deps.get` if the path has a space. The upstream fix,
+  [bitwalker/picosat_elixir#14](https://github.com/bitwalker/picosat_elixir/pull/14),
+  is not released yet. Every other native dependency builds under a spaced
+  path. iCloud Drive's folder (`~/Library/Mobile Documents/…`) fails only
+  because its name has a space.
+- **`igniter` is a real dependency.** `mix kiln.gen.content` and
+  `mix kiln.gen.plugin` are Igniter tasks. Removing it does not crash the
+  compiler; it removes those two generators.
 - **Node.js is required for assets** — the editor bundles JS deps (TipTap) that
   esbuild pulls from `assets/node_modules`. `mix setup` runs `npm install` for
   you; otherwise run `npm install` in `assets/`. `assets/node_modules` is
@@ -110,8 +117,8 @@ mix precommit
 ```
 
 It runs: `compile --warnings-as-errors`, `deps.unlock --unused`, `format`,
-`credo --strict`, `sobelow` (security scan), `deps.audit` (dependency CVE scan,
-see below), `kiln.plugins.doctor`, and the test suite. CI
+`credo --strict`, `sobelow` (security scan), `deps.audit` and `hex.audit`
+(dependency CVE scans, see below), `kiln.plugins.doctor`, and the test suite. CI
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) additionally runs
 `mix ash.codegen --check` (migration/snapshot drift, see above),
 `mix dialyzer` (the first local run builds a PLT and is slow; it's cached
@@ -200,15 +207,19 @@ belong in it; the PR description is where a finished plan lives.
 ### Dependency audit
 
 `mix deps.audit` ([mix_audit](https://github.com/mirego/mix_audit)) checks
-`mix.lock` against the Elixir security advisory database. It runs in
-`mix precommit` and as its own CI job (`Dependency audit`).
+`mix.lock` against mirego's mirror of the Elixir security advisory database;
+`mix hex.audit` checks it against the advisories Hex itself serves. Both run in
+`mix precommit` and in the `Dependency audit` CI job, because the two databases
+drift: on 2026-09-18 the mirror carried none of the 89 advisories (six
+CRITICAL, all in `ash_authentication`) that Hex listed against the v0.9.0 lock.
 
 Because the advisory database moves independently of this repo, **this gate can
 fail on a PR that touched no dependencies** — that means a new advisory landed
 against something already locked, not that your change broke anything. It has
 its own job precisely so that failure doesn't bury the lint/test results of an
 unrelated change. Remediate by upgrading the affected dependency; if no fixed
-version exists, document the accepted risk and use mix_audit's ignore options
+version exists, document the accepted risk and acknowledge the advisory
+(mix_audit's ignore options; the `:hex` section of `mix.exs` for `hex.audit`)
 rather than dropping the check.
 
 The job fetches the advisory database explicitly before running the audit.

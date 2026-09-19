@@ -17,7 +17,7 @@ the answer is the fastest response you can get:
   — the required secrets, boot behaviour, health endpoints, backups.
 - [Downstream projects](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md)
   — how a site layers its own content types on the core, and the
-  [overlay contract](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md#the-overlay-contract)
+  [overlay contract](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/overlay-contract.md)
   it does that against. This is how KilnCMS is meant to be consumed.
 - [Headless consumer guide](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/headless-consumer-guide.md)
   — which of JSON:API / GraphQL / MCP / RAG you want.
@@ -91,7 +91,7 @@ Honest, not discouraging:
 The two things worth reading before you commit are the
 [status and maturity](https://github.com/The-Verscienta/kiln_cms#status--maturity)
 section of the README — bus factor, what is stable, what is not — and
-[the overlay contract](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md#the-overlay-contract),
+[the overlay contract](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/overlay-contract.md),
 which is the interface your own code would be written against. Questions about
 either are welcome as issues; "would you consider X a supported surface" is a
 useful question to ask *before* you build on it, not after.
