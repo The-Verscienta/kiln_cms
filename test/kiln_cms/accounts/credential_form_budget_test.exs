@@ -114,7 +114,7 @@ defmodule KilnCMS.Accounts.CredentialFormBudgetTest do
     test "does not spend the sign-in budget" do
       # Its own bucket, deliberately: sharing `:auth` would let a burst of
       # legitimate sign-ups lock *sign-in* for everyone behind one office NAT —
-      # the shared-NAT trade residual risk 4 already records.
+      # the shared-NAT trade residual risk 5 already records.
       ip = client_ip()
 
       assert {:ok, _} = register(ip, email())
