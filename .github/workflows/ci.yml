@@ -618,7 +618,10 @@ jobs:
           }
 
       # The files the step above generated, when it failed: download and
-      # commit them if your toolchain renders them differently from CI's.
+      # commit them. The rendering depends on the OTP major (a content
+      # resource's attribute order differs between 27 and 29 — see the task's
+      # moduledoc), and this job runs the one `.tool-versions` pins, so its
+      # output is the reference whatever a developer's machine produced.
       - name: Upload the regenerated API specs
         if: ${{ failure() && hashFiles('docs/api/*') != '' }}
         uses: actions/upload-artifact@v5

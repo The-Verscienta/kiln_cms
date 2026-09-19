@@ -31,6 +31,22 @@ defmodule Mix.Tasks.Kiln.Api.Specs do
   copy; the reusable core's committed files come from a checkout without one,
   which is what CI has.
 
+  ## The pinned toolchain is the reference
+
+  The files are rendered from the compiled resources, and one thing about
+  them depends on the Erlang/OTP that compiled them: the position of the
+  state-machine `state` attribute among a content resource's attributes. It
+  differs between OTP 27 and 29, and that order is baked into strings in the
+  OpenAPI document (each sort parameter's pattern and example) as well as the
+  SDL's field order, so no sort can normalize it away. Seen on the first CI
+  run of this task: a clean OTP 29 rendering failed OTP 27's check with 131
+  lines moved and none changed.
+
+  So the reference is `.tool-versions` — what CI's check and the release
+  image run. On any other OTP major the task still writes, but says the
+  result may not be what CI expects. When `--check` then fails in CI, its job
+  uploads the files it generated as the `api-specs` artifact: commit those.
+
   The task compiles but does not start the application, so it needs no
   database.
   """
@@ -53,6 +69,7 @@ defmodule Mix.Tasks.Kiln.Api.Specs do
     end
 
     Mix.Task.run("compile")
+    warn_on_unpinned_otp()
 
     specs = [
       {KilnCMSWeb.ApiSpecs.sdl_path(), KilnCMSWeb.ApiSpecs.graphql_sdl()},
@@ -60,6 +77,25 @@ defmodule Mix.Tasks.Kiln.Api.Specs do
     ]
 
     if opts[:check], do: check(specs), else: write(specs)
+  end
+
+  # Not an error: a developer ahead of the pin (the usual case, see
+  # `.tool-versions`) should still be able to regenerate and read the diff.
+  defp warn_on_unpinned_otp do
+    with {:ok, contents} <- File.read(".tool-versions"),
+         {_elixir, "" <> erlang} <- Mix.Tasks.Kiln.Toolchain.Check.parse_tool_versions(contents),
+         pinned = erlang |> String.split(".") |> hd(),
+         running = System.otp_release(),
+         true <- pinned != running do
+      Mix.shell().info([
+        :yellow,
+        "Running on OTP #{running}; .tool-versions pins OTP #{pinned}. The specs are ",
+        "rendered from compiled resources whose attribute order can differ between ",
+        "OTP majors, so CI's check may disagree with this output. If it does, commit ",
+        "the files from the failing job's `api-specs` artifact.",
+        :reset
+      ])
+    end
   end
 
   defp write(specs) do
@@ -82,6 +118,10 @@ defmodule Mix.Tasks.Kiln.Api.Specs do
       Run `mix kiln.api.specs` and commit the result. These files are what API
       clients generate code from, so a change to either schema is a change to
       them — review the diff as you would an API change.
+
+      Rendering depends on the OTP major (see the task's moduledoc); the
+      reference is the one .tool-versions pins. In CI, the failing job uploads
+      the files it generated as the `api-specs` artifact.
       """)
     end
   end
