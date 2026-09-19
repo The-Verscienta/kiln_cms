@@ -871,6 +871,12 @@ config :sentry,
 # see docs/observability.md.
 config :kiln_cms, :otel_enabled, false
 
+# Prometheus metrics exporter (#1362). Off: nothing records
+# KilnCMSWeb.Telemetry.metrics/0 and no port is opened. The KILN_METRICS_*
+# variables override these at runtime (config/runtime/observability.exs); see
+# KilnCMSWeb.Metrics for why the listener is its own port on loopback.
+config :kiln_cms, KilnCMSWeb.Metrics, enabled: false, port: 9568, bind: :loopback, token: nil
+
 config :opentelemetry, traces_exporter: :none
 
 # Import environment specific config. This must remain at the bottom

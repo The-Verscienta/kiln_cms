@@ -2,7 +2,8 @@
 
 KilnCMS instruments the **editor hot path** with `:telemetry` so the actions that
 matter for authoring latency — save, autosave, and the publish workflow — can be
-profiled live in LiveDashboard or scraped into Prometheus/Grafana. This is the
+profiled live in LiveDashboard (development) or, with the opt-in exporter
+turned on, scraped into Prometheus/Grafana. This is the
 Phase 6 "Performance profiling and editor Telemetry" work (issue #41).
 
 ## Events
@@ -61,69 +62,123 @@ Useful Grafana panel: `sum(rate(kiln_cms_analytics_view_count[5m])) by (type)`.
 Referrer attribution, funnels and export are designed on top of this event but
 not built — see [`advanced-analytics-plan.md`](./advanced-analytics-plan.md).
 
-## LiveDashboard panel
+## Where the metrics go
 
 The matching `Telemetry.Metrics` definitions live in
-[`KilnCMSWeb.Telemetry.metrics/0`](../lib/kiln_cms_web/telemetry.ex) (a `summary`
-for duration + a `counter` per event, tagged by `kind`/`action`/`result`). They
-surface automatically on the LiveDashboard **Metrics** page under the
-`kiln_cms.editor.*` group:
+[`KilnCMSWeb.Telemetry.metrics/0`](../lib/kiln_cms_web/telemetry.ex): a
+`distribution` for each duration and a `counter` for each event, tagged by
+`kind`/`action`/`result`. They have exactly two consumers, and **a stock
+production install has neither**:
 
-- `dev`: <http://localhost:4000/dev/dashboard/metrics> (`:dev_routes` gate).
-- `prod`: mount `live_dashboard` behind admin auth (see the commented guidance in
-  `router.ex`) and read it there.
+| Consumer | Where | When |
+|---|---|---|
+| LiveDashboard **Metrics** page | <http://localhost:4000/dev/dashboard/metrics> | Development only. The route is compiled out with `dev_routes`, and a `:prod` release refuses to boot with that flag on. In-memory, only while the page is open. |
+| Prometheus exporter ([`KilnCMSWeb.Metrics`](../lib/kiln_cms_web/metrics.ex)) | `GET /metrics` on its own port, default `127.0.0.1:9568` | Any environment, **only when `KILN_METRICS_ENABLED` is on** (#1362). Off by default. |
 
-LiveDashboard keeps the series in memory only while the page is open — fine for
-spot-profiling a slow save, but not for historical trends. For that, export to
-Prometheus.
+With the exporter off, `:telemetry.execute/3` dispatches to an empty handler
+list, exactly as it always has. Adding a `counter(...)` or `distribution(...)`
+to the list documents an *intent* to measure; it only becomes a signal on a
+deployment whose operator turned the exporter on and scrapes it. This is why #678
+was withdrawn: its threat-model note claimed a refusal counter "can be alerted
+on" when it was visible nowhere.
 
-> **A `Telemetry.Metrics` entry is not instrumentation.** Until you attach a
-> reporter, `metrics/0` has **no consumer in production**: the `live_dashboard`
-> route is compiled out with `dev_routes`, the reporter child in
-> `KilnCMSWeb.Telemetry.init/1` is commented out, and no
-> `telemetry_metrics_prometheus`/`_statsd` dependency is declared — so
-> `:telemetry.execute/3` dispatches to an empty handler list. Adding a
-> `counter(...)` or `summary(...)` to that list documents an *intent* to
-> measure; on its own nothing records it and nothing can alert on it. This is
-> not hypothetical: it is why #678 was withdrawn, after its threat-model note
-> claimed a refusal counter "can be alerted on" while it was visible nowhere.
->
-> Signals that must reach an operator on a stock deployment therefore go
-> through `Logger` (stdout, and so the deployment's log viewer) or
-> `Sentry.capture_message/2` — see
-> [`KilnCMSWeb.TenantRefusalAlert`](../lib/kiln_cms_web/tenant_refusal_alert.ex)
-> and [calendar re-query coalescing](#calendar-re-query-coalescing-1336) for the
-> two shapes that does take. Note plain `Logger.warning` does **not** reach
-> Sentry.
+So **anything that must reach every operator still goes through `Logger`**
+(stdout, so the platform's log viewer) **or `Sentry.capture_message/2`**,
+whether or not the exporter is on:
 
-## Prometheus / Grafana path
+- [`KilnCMSWeb.TenantRefusalAlert`](../lib/kiln_cms_web/tenant_refusal_alert.ex)
+- [calendar re-query coalescing](#calendar-re-query-coalescing-1336)
+- `KilnCMS.Mail.RelayAlert`
 
-For persistent dashboards and alerting, attach a Prometheus reporter and point
-Grafana at it:
+A metric complements those alerts. It never replaces one. Note that plain
+`Logger.warning` does **not** reach Sentry.
 
-1. Add `{:telemetry_metrics_prometheus, "~> 1.1"}` to `mix.exs`.
-2. Start it as a child in `KilnCMSWeb.Telemetry.init/1`, reusing the existing
-   metric list so editor metrics are exported with no duplication:
+## Prometheus and Grafana
 
-   ```elixir
-   children = [
-     {TelemetryMetricsPrometheus, metrics: metrics()},
-     {:telemetry_poller, measurements: periodic_measurements(), period: 10_000}
-   ]
-   ```
+### Turning it on
 
-   This serves `/metrics` on port `9568` by default (keep it on an internal
-   interface / behind auth).
-3. Scrape it from Prometheus and graph in Grafana. Useful panels:
-   - `histogram_quantile(0.95, kiln_cms_editor_save_duration_milliseconds_bucket)`
-     — p95 save latency, broken down by `kind`.
-   - `rate(kiln_cms_editor_publish_count[5m])` split by `result` — publish
-     throughput and error rate.
-   - Compare `autosave` vs `save` duration to watch the debounced background path
-     against explicit saves.
+```bash
+KILN_METRICS_ENABLED=true   # starts the reporter and the listener
+KILN_METRICS_PORT=9568      # default
+KILN_METRICS_BIND=loopback  # default; `all` for a scraper on a private network
+KILN_METRICS_TOKEN=…        # optional; required as `Authorization: Bearer …` when set
+```
 
-The same metric definitions feed both LiveDashboard and Prometheus, so adding the
-reporter needs no change to the event-emitting code.
+The exporter is [Peep](https://hexdocs.pm/peep). It aggregates as events
+arrive: counters and gauges are kept as numbers, and distributions go into
+log-spaced histogram buckets with about 10% relative error. Its memory is set by
+the number of series, not by traffic. A node that nobody scrapes does not grow.
+
+### Exposure
+
+A scrape reveals traffic shape, editorial volume and your route table, so
+`/metrics` is **not** a route on the public endpoint. It gets its own listener:
+
+- **Nothing to hide at the proxy.** Blocking the path at a reverse proxy or CDN
+  would be one more rule to get wrong, and here there is nothing to block.
+- **The pipeline is skipped.** A scrape never passes through host-based tenant
+  resolution, sessions or rate limiting.
+- **Scrapes don't skew the numbers.** A scrape never appears in the `phoenix.*`
+  latency it is reporting.
+
+| Deployment | Setting | Why |
+|---|---|---|
+| Scraper or agent on the same host / in the same pod (Grafana Alloy, a Prometheus sidecar) | `KILN_METRICS_BIND=loopback` (default) | Nothing off-box can reach it. Scrape `127.0.0.1:9568`, not `localhost`, which may resolve to `::1`. |
+| Scraper on a private network (docker compose network, Fly 6PN, k8s pod IP) | `KILN_METRICS_BIND=all` | Do **not** publish the port. None of the one-click templates do. On Fly, `[metrics] port = 9568, path = "/metrics"` in `fly.toml` scrapes it over 6PN. |
+| Anything that can't be kept off a shared network | `KILN_METRICS_BIND=all` + `KILN_METRICS_TOKEN` | The token is compared in constant time. A missing or wrong token gets `401`. |
+
+`KILN_METRICS_BIND=all` without a token logs a warning at boot rather than
+refusing to start. Some platform scrapers (Fly's) cannot send a header, and on
+a private network the port itself is the control.
+
+A Prometheus scrape job with a token:
+
+```yaml
+scrape_configs:
+  - job_name: kiln_cms
+    authorization: { type: Bearer, credentials_file: /etc/prometheus/kiln_metrics_token }
+    static_configs:
+      - targets: ["kiln:9568"]
+```
+
+### Names, labels and cardinality
+
+A metric name is its dotted name joined with `_`. For example,
+`kiln_cms.editor.save.duration` becomes the histogram
+`kiln_cms_editor_save_duration_bucket` / `_sum` / `_count`, in **milliseconds**.
+Counters carry no `_total` suffix.
+
+Every label is bounded:
+
+- **No metric carries** an org id, a content id, a user or a slug.
+- **`route`** is the router pattern (`/api/content/:type/:slug`), never the
+  request path.
+- **`queue` and `worker`** are Oban's.
+- **`result`, `status`, `surface`, `mode`, `action` and `event`** are small
+  enumerations.
+- **The content-type label (`type`, `kind`)** keeps a compiled type's name but
+  folds every admin-defined type into `dynamic`. Admin-defined types are
+  per-org, so on a multi-tenant host they have no ceiling.
+
+`test/kiln_cms_web/metrics_test.exs` rejects an unbounded tag.
+
+### Useful panels
+
+- **Headless API latency, p95 by route:**
+  `histogram_quantile(0.95, sum by (le, route) (rate(phoenix_router_dispatch_stop_duration_bucket{route=~"/api/.*"}[5m])))`.
+  This is the series behind the SLO table in
+  [`performance.md`](performance.md#slo-targets).
+- **Editor save latency, p95 by content type:**
+  `histogram_quantile(0.95, sum by (le, kind) (rate(kiln_cms_editor_save_duration_bucket[5m])))`.
+- **Publish throughput and error rate:** `rate(kiln_cms_editor_publish_count[5m])`, split
+  by `result`.
+- **Cache hit rate:** `sum(rate(kiln_cms_cache_content_count{result="hit"}[5m])) / sum(rate(kiln_cms_cache_content_count[5m]))`.
+- **Pool pressure:** p95 of `kiln_cms_repo_query_queue_time`. When it rises,
+  `POOL_SIZE` is too small (see "Oban queues & pool sizing" in [`performance.md`](performance.md)).
+- **Oban failures:** `sum by (queue, worker) (rate(oban_job_exception_count[5m]))`.
+
+The same definitions feed LiveDashboard in development, so adding a metric needs
+no change to the exporter.
 
 ## Calendar re-query coalescing (#1336)
 
@@ -137,6 +192,11 @@ live deployment rather than about a test.
 is what makes it readable without a metrics stack: it attaches a real handler
 and logs one aggregated line per org per minute, **only when a calendar
 actually re-queried** — an idle deployment stays silent.
+
+With the [exporter](#prometheus-and-grafana) on, the same event is also the
+histogram `kiln_cms_calendar_requery_messages`. It has no labels, so it
+aggregates across orgs. The log line stays either way: it is the per-org view,
+and it is the one that reaches an operator who doesn't run Prometheus.
 
 ```
 calendar re-query coalescing, last 60s (#1336 — a high re-queries count with
@@ -231,6 +291,22 @@ A minimal Prometheus rule sketch (via a JSON exporter scraping `/ready`):
   for: 5m
   labels: { severity: warning }
 ```
+
+With the [exporter](#prometheus-and-grafana) on, two more come straight from
+`/metrics` and need no JSON exporter:
+
+```yaml
+- alert: KilnCMSObanJobsFailing
+  expr: sum by (queue) (rate(oban_job_exception_count[10m])) > 0.1
+  for: 10m
+  labels: { severity: warning }
+- alert: KilnCMSDbPoolSaturated
+  expr: histogram_quantile(0.95, sum by (le) (rate(kiln_cms_repo_query_queue_time_bucket[5m]))) > 50
+  for: 10m
+  labels: { severity: warning }
+```
+
+The thresholds are placeholders. Set them from a week of your own traffic.
 
 ## Error tracking (Sentry)
 
