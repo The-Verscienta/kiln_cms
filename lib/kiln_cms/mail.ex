@@ -22,6 +22,11 @@ defmodule KilnCMS.Mail do
   our own side (relay AUTH, TLS, the sender), raise so Oban retries with
   `backoff_seconds/1`.
 
+  Mail sent on behalf of a site carries that site's `org_id` (`enqueue!/2`,
+  `deliver_for_worker/2`), and goes out through the site's own SMTP relay when
+  it has one switched on (`KilnCMS.Mail.SiteRelay`, #1322). Mail with no site
+  — account mail — always uses the operator's.
+
   Also the Ash domain for instance-wide mail settings (`KilnCMS.Mail.Settings`
   — the DKIM key reference and direct-delivery state). `dkim_config/0`
   resolves the signing key through `KilnCMS.Keys` for the DirectMX adapter.
@@ -33,6 +38,7 @@ defmodule KilnCMS.Mail do
 
   alias KilnCMS.Mail.DeliveryWorker
   alias KilnCMS.Mail.RelayAlert
+  alias KilnCMS.Mail.SiteRelay
   alias KilnCMS.Mailer
 
   resources do
@@ -77,9 +83,14 @@ defmodule KilnCMS.Mail do
   Attachments and cc/bcc are rejected: no caller needs them today, and the
   per-recipient job split would silently change cc/bcc semantics. Lift the
   restriction deliberately when a real use case arrives.
+
+  `org_id:` names the site the mail is sent for, so it goes out through that
+  site's relay (`KilnCMS.Mail.SiteRelay`). Leave it out for account mail.
   """
-  @spec enqueue!(Swoosh.Email.t()) :: :ok
-  def enqueue!(%Swoosh.Email{} = email) do
+  @spec enqueue!(Swoosh.Email.t(), keyword()) :: :ok
+  def enqueue!(%Swoosh.Email{} = email, opts \\ []) do
+    org_id = Keyword.get(opts, :org_id)
+
     if email.attachments != [] do
       raise ArgumentError, "KilnCMS.Mail does not support attachments yet"
     end
@@ -112,6 +123,7 @@ defmodule KilnCMS.Mail do
     |> Enum.each(fn recipient ->
       email
       |> serialize(recipient)
+      |> maybe_put_org(org_id)
       |> DeliveryWorker.new()
       |> Oban.insert!()
     end)
@@ -193,29 +205,57 @@ defmodule KilnCMS.Mail do
   `KilnCMS.Mail.RelayAlert`, so the operator can fix the relay before the mail
   is lost.
 
-  `config` is merged over the mailer config (tests inject failing adapters).
+  `org_id:` names the site the mail is sent for, routing it through that site's
+  relay when it has one (`KilnCMS.Mail.SiteRelay`). A site relay that is set
+  but unusable raises `TransientDeliveryError` — the mail is held and retried,
+  never sent through the operator's relay instead. Every other key is mailer
+  config merged over the resolved one (tests inject failing adapters).
   """
   @spec deliver_for_worker(Swoosh.Email.t(), keyword()) :: :ok | {:cancel, String.t()}
-  def deliver_for_worker(%Swoosh.Email{} = email, config \\ []) do
-    case Mailer.deliver(email, config) do
-      {:ok, _receipt} ->
+  def deliver_for_worker(%Swoosh.Email{} = email, opts \\ []) do
+    {org_id, config} = Keyword.pop(opts, :org_id)
+
+    case route(email, org_id, config) do
+      {:held, reason} ->
+        raise TransientDeliveryError,
+          message: "site relay unusable, holding: #{SiteRelay.describe_error(reason)}"
+
+      {_relay, _email, {:ok, _receipt}} ->
         :ok
 
-      {:error, reason} ->
+      {relay, email, {:error, reason}} ->
         safe_reason = redact_reason(reason)
 
         case failure_class(reason) do
-          :recipient -> cancel_permanent(email, safe_reason, true)
-          :message -> cancel_permanent(email, safe_reason, false)
+          :recipient -> cancel_permanent(email, safe_reason, true, relay)
+          :message -> cancel_permanent(email, safe_reason, false, relay)
           :relay -> retry_relay_refused(email, safe_reason)
-          :transient -> retry_transient(email, reason, safe_reason)
+          :transient -> retry_transient(email, reason, safe_reason, relay)
         end
     end
   end
 
-  # A hard 5xx: log + emit a bounce event + (if it names the recipient)
-  # suppress the address, then cancel.
-  defp cancel_permanent(email, safe_reason, suppress?) do
+  # One delivery attempt through whichever relay the site resolves to: the
+  # operator's (`Mailer.deliver/2`, over the app config) or the site's
+  # (`Swoosh.Mailer.deliver/2`, over nothing — see `SiteRelay`'s moduledoc for
+  # why the operator's config must not sit underneath it).
+  defp route(email, org_id, config) do
+    case SiteRelay.route(email, org_id) do
+      {:operator, email} ->
+        {:operator, email, Mailer.deliver(email, config)}
+
+      {:site, email, site_config} ->
+        {:site, email, Swoosh.Mailer.deliver(email, Keyword.merge(site_config, config))}
+
+      {:error, reason} ->
+        {:held, reason}
+    end
+  end
+
+  # A hard 5xx: log + emit a bounce event + (when it names the recipient, and
+  # it was the operator's own relay that said so) suppress the address, then
+  # cancel.
+  defp cancel_permanent(email, safe_reason, suppress?, relay) do
     # Log so a systematic 5xx (e.g. a content filter rejecting every message) is
     # visible in server logs and Sentry, not just as `cancelled` rows in
     # `oban_jobs` — a cancel is otherwise silent (no job exception, and Sentry's
@@ -234,11 +274,21 @@ defmodule KilnCMS.Mail do
       %{recipient_domains: recipient_domains(email), reason: safe_reason}
     )
 
-    # Remember the dead address so future sends skip it (enqueue!) — only on a
-    # reject that says the address is dead. The list is instance-wide and
-    # outlives this message, so a guess here silently stops a person's password
-    # resets until an admin notices.
-    if suppress?, do: suppress_recipients(email, safe_reason)
+    # Remember the dead address so future sends skip it (enqueue!) — only when
+    # both guards agree. They answer different questions, and the list is
+    # instance-wide, so either one alone leaves a way to poison it.
+    #
+    # `suppress?` — only a reject that actually says the address is dead
+    # (`5.1.1`, `5.2.1`, ...). A refusal of our side of the conversation says
+    # nothing about the recipient, and a guess here silently stops a person's
+    # password resets until an admin notices.
+    #
+    # `relay == :operator` — only on the operator's word. A site's relay is a
+    # server that site chose, and it may answer 550 to any address it likes;
+    # believing it would let one site stop every site, account mail included,
+    # from reaching an address. A site relay's hard reject cancels this one
+    # message and nothing more.
+    if suppress? and relay == :operator, do: suppress_recipients(email, safe_reason)
 
     {:cancel, "permanent delivery failure: #{safe_reason}"}
   end
@@ -258,8 +308,13 @@ defmodule KilnCMS.Mail do
   # refused/timed-out TCP, no reachable MX) means the relay/MX itself is down —
   # not one greylisted recipient — so surface it once, aggregated, rather than
   # one alert per attempt per recipient. Greylisting (4xx) stays quiet.
-  defp retry_transient(email, reason, safe_reason) do
-    if connection_class?(reason), do: RelayAlert.notify(recipient_domain(email))
+  #
+  # Only for the operator's relay. A site's relay being down is that site's to
+  # fix, and one tenant's typo must not page the operator as an outage — it
+  # retries like any other transient failure.
+  defp retry_transient(email, reason, safe_reason, relay) do
+    if relay == :operator and connection_class?(reason),
+      do: RelayAlert.notify(recipient_domain(email))
 
     raise TransientDeliveryError, message: "transient delivery failure: #{safe_reason}"
   end
@@ -362,9 +417,17 @@ defmodule KilnCMS.Mail do
   Deliver synchronously, bypassing the queue — the admin "send test email"
   path, where the operator wants the SMTP outcome (receipt or error) now
   instead of a retrying background job.
+
+  `org_id:` sends through that site's relay, as `deliver_for_worker/2` would;
+  a site relay that is set but unusable answers `{:error, {:site_relay, reason}}`.
   """
-  @spec deliver_now(Swoosh.Email.t()) :: {:ok, term()} | {:error, term()}
-  def deliver_now(%Swoosh.Email{} = email), do: Mailer.deliver(email)
+  @spec deliver_now(Swoosh.Email.t(), keyword()) :: {:ok, term()} | {:error, term()}
+  def deliver_now(%Swoosh.Email{} = email, opts \\ []) do
+    case route(email, Keyword.get(opts, :org_id), []) do
+      {:held, reason} -> {:error, {:site_relay, reason}}
+      {_relay, _email, result} -> result
+    end
+  end
 
   @doc """
   Retry delay for mail workers: `attempt` is 1-based; attempts past the table
@@ -476,6 +539,9 @@ defmodule KilnCMS.Mail do
     |> inspect()
     |> String.replace(~r/[\w.!#$%&'*+\/=?^`{|}~-]+@[\w.-]+/, "[address redacted]")
   end
+
+  defp maybe_put_org(args, nil), do: args
+  defp maybe_put_org(args, org_id), do: Map.put(args, "org_id", org_id)
 
   defp address_args(nil), do: nil
   defp address_args({name, address}), do: [name, address]

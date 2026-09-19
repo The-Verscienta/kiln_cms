@@ -6,7 +6,7 @@ during an incident, against a *running* deployment — so every step below is
 what the code actually does, not what would be reasonable.
 
 Pairs with [`backups.md`](backups.md) (the env snapshot is part of the backup)
-and closes residual risk 12 in [`threat-model.md`](threat-model.md). The
+and closes residual risk 13 in [`threat-model.md`](threat-model.md). The
 canonical list of every variable is
 [`environment-variables.md`](environment-variables.md); this document is only
 about the ones that are *secret*, and only about replacing them.
@@ -198,7 +198,7 @@ this section is long:
 
 ### The part that is not recoverable
 
-Four things live in the database encrypted under the old `secret_key_base`, and
+Five things live in the database encrypted under the old `secret_key_base`, and
 **there is no re-encryption path in the application** — no mix task, no admin
 action, no migration. Rotate the secret and the ciphertext is permanently
 unreadable:
@@ -208,6 +208,7 @@ unreadable:
 | `dkim_private_key_encrypted` | `KilnCMS.Mail.Settings` | Outbound mail is no longer DKIM-signed (direct-delivery mode) | **Supported**: `/editor/mail` → *Rotate key*, then publish the new DNS TXT record |
 | `credential_encrypted` | `KilnCMS.Social.Account` | Scheduled social posts stop being published | `/editor/social` — re-connect each account and re-enter its credential |
 | `secret_key_encrypted`, `webhook_secret_encrypted` | `KilnCMS.Billing.Settings` | Payments and inbound payment webhooks stop | `/editor/billing` — re-paste the provider API key and the `whsec_…` from the provider dashboard |
+| `password_encrypted` | `KilnCMS.CMS.SiteMailRelay` (one per site that set its own relay) | That site's mail is **held**: the delivery jobs retry for ~16 hours and then give up. It is never sent through the operator's relay instead | `/editor/site-mail` on each such site — re-enter the relay password |
 | `private_key_encrypted` | `KilnCMS.Federation.SiteFederation` | The site can no longer sign ActivityPub deliveries | **None in-app.** See [What cannot be rotated safely today](#what-cannot-be-rotated-safely-today) |
 
 **None of these announces itself.** The decrypt helpers deliberately return
@@ -229,8 +230,13 @@ something tries to use it, and only where you would have to be looking:
 - **Federation** — signing fails, and `KilnCMS.Federation.DeliveryWorker`
   records a failed delivery per attempt rather than a signed one.
 - **Billing** — the provider call fails at the point of use.
+- **A site's own mail relay** (#1322) — the one that does announce itself:
+  `/editor/site-mail` shows *"The saved password can't be read"*, and every
+  held delivery logs `"Holding mail for site …: … its password could not be
+  decrypted"`. But only a site admin who opens that page sees the banner, so
+  on a multi-site deployment tell each site that set a relay.
 
-If you rotate this secret, go and check each of the four yourself — see the
+If you rotate this secret, go and check each of the five yourself — see the
 verification checklist below.
 
 > Using the `:env` or `:file` key providers
@@ -307,9 +313,11 @@ uses its own fixed salt.
       it for a day, then remove it.
    2. Billing settings → re-enter the API key and the webhook signing secret.
    3. Social accounts → re-connect each one.
-   4. Federation → see below.
+   4. Every site with its own relay → `/editor/site-mail` → re-enter the
+      password. On a hosted deployment that is each site's admin, not you.
+   5. Federation → see below.
 7. **Verify** with the checklist at the end of this document. Do not skip it:
-   nothing in step 6's list announces its own failure, and two of the four
+   almost nothing in step 6's list announces its own failure, and two of them
    render a healthy-looking settings page either way.
 
 ---
@@ -526,7 +534,7 @@ with a fresh identity, and tell your followers out of band that the actor was
 re-keyed.
 
 Closing this gap is a follow-up worth filing: a re-key action for the actor,
-and a vault re-encryption task that walks the four encrypted columns with the
+and a vault re-encryption task that walks the five encrypted columns with the
 old and new `SECRET_KEY_BASE` in hand. Together they would make
 `SECRET_KEY_BASE` rotation recoverable rather than destructive, and would let
 this section be deleted.
@@ -555,6 +563,8 @@ to be exercised.
       settings page offers), rather than reading the page's status.
 - [ ] ● If the site federates: confirm a delivery is **accepted** by a remote
       instance, not merely queued.
+- [ ] ● For each site with its own relay: `/editor/site-mail` shows no
+      unreadable-password banner, and *Send a test* arrives.
 - [ ] A password reset completes end to end (proves `TOKEN_SIGNING_SECRET`).
 - [ ] Oban queues are draining in the console dashboards.
 - [ ] A backup runs successfully — by hand, `./scripts/backup.sh all` — and the

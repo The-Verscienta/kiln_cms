@@ -22,7 +22,7 @@ delivery): the same immutable artifacts underpin both.
 ### Mix task
 
 ```
-mix kiln.export.static <out_dir> [--surface web,json,json_ld] [--base-url URL]
+mix kiln.export.static <out_dir> [--surface web,json,json_ld,llm] [--base-url URL]
                                  [--org-id UUID | --all-orgs]
 ```
 
@@ -49,7 +49,7 @@ destination and enqueue it from an admin action, a release task, or a cron entry
 ```elixir
 config :kiln_cms, KilnCMS.Firing.StaticExport,
   output_dir: "/var/www/edge",
-  surfaces: [:web, :json, :json_ld]
+  surfaces: [:web, :json, :json_ld, :llm]
 ```
 
 ```elixir
@@ -70,6 +70,7 @@ no-op, so it's safe to schedule a cron entry before picking a destination.
     web.html                                      # :web surface — the fired HTML body
     json.json                                     # :json surface — structured intent
     json_ld.json                                  # :json_ld surface — schema.org graph
+    llm.md                                        # :llm surface — Markdown for LLM consumers (#357)
 ```
 
 - `<type>` is the **public** content type (`page`, `post`, or a dynamic type's

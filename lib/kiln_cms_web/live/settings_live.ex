@@ -1,7 +1,8 @@
 defmodule KilnCMSWeb.SettingsLive do
   @moduledoc """
-  Per-user account settings (`/editor/settings`): display-name profile, password
-  change (#141), workflow notification preferences (#46), and a data export.
+  Per-user account settings (`/editor/settings`): the sidebar preset, the
+  content list's status marks (#1323), display-name profile, password change
+  (#141), workflow notification preferences (#46), and a data export.
   Each signed-in user manages only their own account. Editor/admin only
   (`:live_editor_required`).
   """
@@ -13,6 +14,8 @@ defmodule KilnCMSWeb.SettingsLive do
   alias KilnCMS.Accounts.Totp
   alias KilnCMS.Accounts.WebAuthn
   alias KilnCMS.Push
+
+  @status_marks %{"words" => :words, "trigrams" => :trigrams}
 
   @impl true
   def mount(_params, session, socket) do
@@ -269,6 +272,25 @@ defmodule KilnCMSWeb.SettingsLive do
     end
   end
 
+  # The content list's status marks (#1323). Only the one field is copied onto
+  # the socket's user, for the reason `KilnCMSWeb.NavPreset` gives: the update's
+  # return value need not carry what the session actor was loaded with.
+  def handle_event("set_status_marks", %{"marks" => marks}, socket)
+      when is_map_key(@status_marks, marks) do
+    %{current_user: user} = socket.assigns
+
+    case Accounts.set_status_marks(user, Map.fetch!(@status_marks, marks), actor: user) do
+      {:ok, updated} ->
+        {:noreply, assign(socket, :current_user, %{user | status_marks: updated.status_marks})}
+
+      {:error, _error} ->
+        {:noreply, put_flash(socket, :error, gettext("Your choice could not be saved."))}
+    end
+  end
+
+  # A pushed payload is client-chosen; give the guard above somewhere to fall.
+  def handle_event("set_status_marks", _params, socket), do: {:noreply, socket}
+
   def handle_event("validate_profile", %{"user" => params}, socket) when is_map(params) do
     {:noreply,
      assign(socket, :profile_form, AshPhoenix.Form.validate(socket.assigns.profile_form, params))}
@@ -514,6 +536,46 @@ defmodule KilnCMSWeb.SettingsLive do
                   "Essentials: Home, Content, Media, Calendar, Tasks and Inbox, then Configure and Your settings."
                 ),
               else: gettext("Everything: every screen you can open, grouped by section.")}
+          </p>
+        </section>
+
+        <%!-- How the content list marks each row (#1323). Words by default;
+              the trigram glyph is kept for the people who read it. --%>
+        <section id="settings-status-marks" class="card card-pad max-w-xl">
+          <h2 class="mb-1 text-lg font-medium">{gettext("Content list")}</h2>
+          <p class="mb-4 text-sm text-base-content/60">
+            {gettext(
+              "How each item in the content list shows whether it is published, translated and scheduled."
+            )}
+          </p>
+          <div class="flex flex-wrap gap-2" role="group" aria-label={gettext("Status marks")}>
+            <button
+              :for={
+                {value, label} <- [
+                  {:words, gettext("Words")},
+                  {:trigrams, gettext("Trigram glyphs")}
+                ]
+              }
+              type="button"
+              id={"settings-status-marks-#{value}"}
+              phx-click="set_status_marks"
+              phx-value-marks={value}
+              aria-pressed={to_string(status_marks(@current_user) == value)}
+              class={["btn btn-sm", status_marks(@current_user) == value && "btn-primary"]}
+            >
+              {label}
+            </button>
+          </div>
+          <p class="mt-3 text-xs text-base-content/60">
+            {if status_marks(@current_user) == :trigrams,
+              do:
+                gettext(
+                  "Trigram glyphs: three lines per item — published at the bottom, translated in the middle, scheduled on top; solid means yes. Hover one for its reading."
+                ),
+              else:
+                gettext(
+                  "Words: the state badge, the date an item publishes or unpublishes, and “Missing translations” when a language is still to do."
+                )}
           </p>
         </section>
 

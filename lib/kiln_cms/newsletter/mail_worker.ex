@@ -68,7 +68,8 @@ defmodule KilnCMS.Newsletter.MailWorker do
         # Stable Message-ID across retries (keyed on send + subscriber), so a
         # greylisted retry re-sends the same message rather than a new one.
         |> Mail.ensure_message_id("newsletter-#{send.id}-#{subscriber.id}")
-        |> Mail.deliver_for_worker()
+        # Through the site's own relay when it has one (#1322).
+        |> Mail.deliver_for_worker(org_id: send.org_id)
         |> record_outcome(send)
 
       {:error, :not_fired} ->

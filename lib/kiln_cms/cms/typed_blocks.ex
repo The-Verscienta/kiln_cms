@@ -8,8 +8,9 @@ defmodule KilnCMS.CMS.TypedBlocks do
   from whatever is stored. It is **total** — any legacy/unknown block maps to
   `KilnCMS.Blocks.Custom` so downstream serializers never crash (decision A4).
 
-  `to_legacy/1` is the reverse, kept for the eventual stored-column migration and
-  round-trip tests.
+  `to_legacy/1` is the reverse. Public delivery and the previews still call it
+  at the boundary, so the legacy `BlockComponents` renderer is unchanged;
+  moving them off it is #1537.
 
   Legacy blocks arrive either as `%KilnCMS.CMS.Block{}` structs (top-level, atom
   keys) or as plain maps with string keys (nested `children` from jsonb), so the

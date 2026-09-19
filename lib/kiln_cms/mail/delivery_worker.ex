@@ -14,9 +14,11 @@ defmodule KilnCMS.Mail.DeliveryWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
+    # `org_id` is the site the mail was queued for (`Mail.enqueue!/2`); none
+    # for account mail, which uses the operator's relay.
     args
     |> Mail.from_args()
-    |> Mail.deliver_for_worker()
+    |> Mail.deliver_for_worker(org_id: args["org_id"])
   end
 
   @impl Oban.Worker
