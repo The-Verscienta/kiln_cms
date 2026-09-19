@@ -24,6 +24,7 @@ carries the reasoning.
   version-checked, gated on an `npm`/`hex` environment, with npm provenance and
   a build-provenance attestation. Nothing is published yet: the first release
   needs the one-time registry setup described in each client's README.
+  ([#1568](https://github.com/The-Verscienta/kiln_cms/pull/1568))
 
 <a id="one-click-deploy-templates-for-render-railway-flyio-and-digitalocean"></a>
 
