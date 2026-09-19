@@ -39,13 +39,22 @@ import type {
   AsOfIndexOptions,
   AsOfIndexResult,
   AutocompleteOptions,
+  ContentRelease,
+  ContentReleaseItem,
   Filter,
   HybridSearchOptions,
   HybridSearchResult,
+  IncludedMap,
   Item,
   ListOptions,
   ListResult,
+  ReleaseListOptions,
+  ReleaseOptions,
   RequestOptions,
+  RestoreResult,
+  RevisionDetail,
+  RevisionList,
+  RevisionListOptions,
   SchemaOptions,
   SearchOptions,
 } from "./types.js";
@@ -373,6 +382,124 @@ export class KilnClient {
     )) as SchemaDocument;
   }
 
+  // ── editorial reads (editor-tier credential) ──────────────────────────────
+  //
+  // Unlike everything above, these need an editor's (or admin's) API key: an
+  // anonymous call is a 401, a viewer's key a 404. They are for tools *about*
+  // the content — never put that key in a delivery site's config.
+
+  /**
+   * A document's version history, newest first:
+   * `GET /api/content/:type/:id/revisions` (singular type name; `id` is the
+   * document's id, not its slug). Each revision names the editorial fields it
+   * changed, never their values. Page with `cursor: result.meta.next_cursor`
+   * until it is `null`.
+   */
+  async listRevisions(
+    type: string,
+    id: string,
+    options: RevisionListOptions = {},
+  ): Promise<RevisionList> {
+    const params = new URLSearchParams();
+    appendIfPresent(params, "limit", options.limit);
+    appendIfPresent(params, "cursor", options.cursor);
+    return (await this.request(
+      revisionsPath(type, id),
+      params,
+      options.signal,
+      "application/json",
+    )) as RevisionList;
+  }
+
+  /**
+   * One revision with its values: that version's own `changes` and the full
+   * `snapshot` of the document as it stood at that revision.
+   */
+  async revision(
+    type: string,
+    id: string,
+    versionId: string,
+    options: RequestOptions = {},
+  ): Promise<RevisionDetail> {
+    const path = `${revisionsPath(type, id)}/${encodeURIComponent(versionId)}`;
+    const body = await this.request(
+      path,
+      new URLSearchParams(),
+      options.signal,
+      "application/json",
+    );
+    return (body as { data: RevisionDetail }).data;
+  }
+
+  /**
+   * Revert the document's content to a revision, as the key's owner:
+   * `POST …/revisions/:version_id/restore`. Needs a `:read_write` key — a
+   * read-only key throws `KilnHttpError` 403. Workflow state is untouched; the
+   * restore is recorded as a new revision, returned as `revision`.
+   */
+  async restoreRevision(
+    type: string,
+    id: string,
+    versionId: string,
+    options: RequestOptions = {},
+  ): Promise<RestoreResult> {
+    const path = `${revisionsPath(type, id)}/${encodeURIComponent(versionId)}/restore`;
+    const body = await this.request(
+      path,
+      new URLSearchParams(),
+      options.signal,
+      "application/json",
+      "POST",
+    );
+    return (body as { data: RestoreResult }).data;
+  }
+
+  /**
+   * Content releases — bundles of publishes/unpublishes that go live together:
+   * `GET /api/json/releases`. Read-only. `include: ["items"]` side-loads each
+   * release's contents; `filter: { state: "scheduled" }` narrows the index.
+   */
+  async releases(options: ReleaseListOptions = {}): Promise<ListResult<ContentRelease>> {
+    const doc = await this.request("/api/json/releases", listParams(options), options.signal);
+    return flattenDocument<ContentRelease>(doc);
+  }
+
+  /**
+   * One release by id: `GET /api/json/releases/:id` — pass
+   * `include: ["items"]` and read the items with `resolve(release, "items",
+   * release.included)`. Throws `KilnHttpError` 404 for an unknown id (or a
+   * credential that may not read releases).
+   */
+  async release(
+    id: string,
+    options: ReleaseOptions = {},
+  ): Promise<ContentRelease & { included: IncludedMap }> {
+    const params = new URLSearchParams();
+    appendIfPresent(params, "include", options.include?.join(","));
+    appendSparseFields(params, options.fields);
+    const path = `/api/json/releases/${encodeURIComponent(id)}`;
+    const { items, included } = flattenDocument<ContentRelease>(
+      await this.request(path, params, options.signal),
+    );
+    return { ...items[0]!, included };
+  }
+
+  /**
+   * Release items (`GET /api/json/release-items`) — `filter: { release_id }`
+   * for one release's. Each names its document as `content_type` +
+   * `content_id`.
+   */
+  async releaseItems(
+    options: ReleaseListOptions = {},
+  ): Promise<ListResult<ContentReleaseItem>> {
+    const doc = await this.request(
+      "/api/json/release-items",
+      listParams(options),
+      options.signal,
+    );
+    return flattenDocument<ContentReleaseItem>(doc);
+  }
+
   // ── transport ─────────────────────────────────────────────────────────────
 
   private async request(
@@ -380,6 +507,7 @@ export class KilnClient {
     params: URLSearchParams,
     signal: AbortSignal | undefined,
     accept = "application/vnd.api+json",
+    method: "GET" | "POST" = "GET",
   ): Promise<unknown> {
     const query = params.toString();
     const url = this.baseUrl + path + (query === "" ? "" : `?${query}`);
@@ -390,6 +518,7 @@ export class KilnClient {
     }
 
     const response = await this.fetchImpl(url, {
+      method,
       headers,
       signal: signal ?? AbortSignal.timeout(this.timeoutMs),
     });
@@ -405,6 +534,10 @@ export class KilnClient {
 // alternative (opting *in* per call site) re-arms the moment someone adds one.
 function published(options: { published?: boolean }): boolean {
   return options.published !== false;
+}
+
+function revisionsPath(type: string, id: string): string {
+  return `/api/content/${encodeURIComponent(type)}/${encodeURIComponent(id)}/revisions`;
 }
 
 function asOfParam(asOf: string | Date): string {

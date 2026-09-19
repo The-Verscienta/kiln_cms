@@ -97,6 +97,27 @@ tags = KilnClient.resolve(post, "tags", included)
 Results are flattened JSON:API resources: the `attributes` map (string keys)
 plus `"id"`/`"type"`, with relationships reduced to `{type, id}` ref maps.
 
+### Editorial reads (editor-or-above key)
+
+For tools *about* the content — migrations, audit exports, launch dashboards —
+never a delivery site's key. Anonymous calls are a 401, a viewer's key a 404.
+
+```elixir
+# A document's version history, newest first (by id, not slug)
+{:ok, %{"data" => revisions, "meta" => %{"next_cursor" => cursor}}} =
+  KilnClient.list_revisions("post", post_id, limit: 50)
+
+# One revision's changes + the full document as it stood then
+{:ok, %{"snapshot" => snapshot}} = KilnClient.revision("post", post_id, version_id)
+
+# Revert the content to it (a :read_write key; a read-only key gets a 403)
+{:ok, %{"revision" => new_revision}} = KilnClient.restore_revision("post", post_id, version_id)
+
+# Content releases (read-only) and what each will publish or take down
+{:ok, %{items: releases, included: included}} =
+  KilnClient.list_releases(filter: %{state: "scheduled"}, include: ["items"])
+```
+
 ## Testing your integration
 
 Every request honors `req_options`, so [`Req.Test`](https://hexdocs.pm/req/Req.Test.html)

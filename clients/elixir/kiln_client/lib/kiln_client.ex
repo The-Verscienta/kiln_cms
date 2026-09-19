@@ -309,6 +309,129 @@ defmodule KilnClient do
     end
   end
 
+  # --- editorial reads (editor-tier credential) ---
+  #
+  # Unlike everything above, these need an editor's (or admin's) API key: an
+  # anonymous call is a 401, a viewer's key a 404. They are for tools *about*
+  # the content — never configure that key on a delivery site.
+
+  @doc """
+  A document's version history, newest first:
+  `GET /api/content/:type/:id/revisions` (singular type name; `id` is the
+  document's id, not its slug).
+
+  Each revision (`"id"`, `"action"`, `"action_type"`, `"inserted_at"`,
+  `"user_id"`, `"changed_fields"`) names the editorial fields its write
+  changed, never their values.
+
+  Options: `:limit` (1–100, server default 20), `:cursor` (the previous
+  page's `meta.next_cursor`), `:req`.
+
+  Returns `{:ok, %{"data" => [revision], "meta" => %{"limit" => n,
+  "next_cursor" => cursor | nil}}}` — page until `next_cursor` is `nil`.
+  """
+  @spec list_revisions(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def list_revisions(type, id, opts \\ []) do
+    params =
+      []
+      |> put_param(:limit, opts[:limit])
+      |> put_param(:cursor, opts[:cursor])
+
+    request(:get, revisions_path(type, id), params: params, req: opts[:req])
+  end
+
+  @doc """
+  One revision with its values: that version's own `"changes"` and the full
+  `"snapshot"` of the document as it stood at that revision (folded from
+  every version up to it), alongside the list fields. Returns
+  `{:ok, revision}`.
+  """
+  @spec revision(String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def revision(type, id, version_id, opts \\ []) do
+    path = revisions_path(type, id) <> "/" <> segment(version_id)
+
+    case request(:get, path, req: opts[:req]) do
+      {:ok, %{"data" => revision}} -> {:ok, revision}
+      other -> other
+    end
+  end
+
+  @doc """
+  Revert the document's content to a revision, as the key's owner:
+  `POST /api/content/:type/:id/revisions/:version_id/restore`.
+
+  Needs a `:read_write` key — a read-only key gets
+  `{:error, {:http_status, 403, body}}`. Workflow state is untouched; the
+  restore is itself recorded as a new revision, returned under `"revision"`
+  with `"id"`, `"type"`, `"state"` and `"restored_version_id"`.
+  """
+  @spec restore_revision(String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def restore_revision(type, id, version_id, opts \\ []) do
+    path = revisions_path(type, id) <> "/" <> segment(version_id) <> "/restore"
+
+    case request(:post, path, req: opts[:req]) do
+      {:ok, %{"data" => result}} -> {:ok, result}
+      other -> other
+    end
+  end
+
+  @doc """
+  Content releases — bundles of publishes/unpublishes that go live together:
+  `GET /api/json/releases`. Read-only.
+
+  Takes `list/2`'s JSON:API options (`:filter` — e.g. `%{state: "scheduled"}`
+  — `:sort`, `:include` — `["items"]` side-loads each release's contents —
+  `:fields`, `:limit`, `:offset`, `:count`, `:req`); there is no
+  `/published` feed here. Returns `{:ok, %{items:, included:, total:}}`.
+  """
+  @spec list_releases(keyword()) :: {:ok, list_result()} | {:error, term()}
+  def list_releases(opts \\ []), do: json_api_index("/api/json/releases", opts)
+
+  @doc """
+  One release by id: `GET /api/json/releases/:id`. `:include` (`["items"]`)
+  and `:fields` as for `list_releases/1`; the included lookup is merged into
+  the result under `"included"`, as `one/3` does.
+  """
+  @spec release(String.t(), keyword()) :: {:ok, item()} | {:error, term()}
+  def release(id, opts \\ []) do
+    params =
+      []
+      |> put_param(:include, join_list(opts[:include]))
+      |> sparse_fields(opts[:fields])
+
+    case request(:get, "/api/json/releases/" <> segment(id), params: params, req: opts[:req]) do
+      {:ok, doc} ->
+        %{items: [release | _], included: included} = flatten_doc(doc)
+        {:ok, Map.put(release, "included", included)}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Release items: `GET /api/json/release-items` — `filter: %{release_id: id}`
+  for one release's. Each names its document as `"content_type"` +
+  `"content_id"`. Same options as `list_releases/1`.
+  """
+  @spec list_release_items(keyword()) :: {:ok, list_result()} | {:error, term()}
+  def list_release_items(opts \\ []), do: json_api_index("/api/json/release-items", opts)
+
+  defp json_api_index(path, opts) do
+    case request(:get, path, params: query_params(opts), req: opts[:req]) do
+      {:ok, doc} -> {:ok, flatten_doc(doc)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp revisions_path(type, id), do: "/api/content/#{segment(type)}/#{segment(id)}/revisions"
+
+  # Path segments are caller data here (ids, type names), so they are encoded
+  # rather than interpolated raw.
+  defp segment(value), do: URI.encode(to_string(value), &URI.char_unreserved?/1)
+
   @doc "Browser-facing Kiln base URL (media `url`s are absolute, so this is rarely needed)."
   @spec public_url() :: String.t()
   def public_url do

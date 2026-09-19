@@ -62,6 +62,12 @@ Every summary line below that was shortened links to its own entry there.
 - **`KILN_MEDIA_ROOT`: a stable directory for local media.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#kilnmediaroot-a-stable-directory-for-local-media))
 
+- **Version history over the API.**
+  ([long form](docs/changelog/unreleased.md#version-history-over-the-api))
+
+- **Content releases are readable over JSON:API.**
+  ([#500](https://github.com/The-Verscienta/kiln_cms/issues/500) · [long form](docs/changelog/unreleased.md#content-releases-are-readable-over-jsonapi))
+
 ### Fixed
 
 - **Buttons, links, badges and fields that rendered unstyled now look like what

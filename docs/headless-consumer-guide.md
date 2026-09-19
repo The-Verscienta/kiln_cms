@@ -153,6 +153,28 @@ Treat "what can this credential see" as part of its blast radius: a leaked
 editor-keyed delivery config exposes drafts, and an admin-keyed one exposes
 every paying member's content as well — not just rate-limit headroom.
 
+## Editorial tooling: version history and releases
+
+Two editor-tier reads exist for tools *about* the content rather than sites
+that render it — a migration script, an audit export, a launch dashboard. Both
+need an editor's (or admin's) credential and answer nothing to an anonymous
+caller or a viewer key, so they never belong in a delivery site's config.
+
+* **Version history** — `GET /api/content/:type/:id/revisions` lists a
+  document's revisions (who, when, which fields), `…/revisions/:version_id`
+  returns one revision's changes plus the full document as it stood then, and
+  `POST …/revisions/:version_id/restore` reverts the content to it (a
+  `:read_write` key; a read-only key is refused). Keyed by document id, paged
+  with a cursor. See [api.md](api.md) → "Version history (revisions)".
+* **Content releases** — `GET /api/json/releases` (`?include=items`) shows what
+  is scheduled to go live together, when, and what each release will publish or
+  take down. Read-only: releases are shipped from the console. See
+  [json-api.md](json-api.md) → "Content releases (read-only)".
+
+To show a visitor "what this page said on a date", use the public
+point-in-time read (`GET /api/content/:type/:slug?as_of=`), not revisions: it
+serves only what was *published* at that instant, to anyone.
+
 ## Analytics: your fetches are what get counted
 
 A successful `GET /api/content/:type/:slug` records a view against that

@@ -253,3 +253,98 @@ export interface AsOfIndexOptions extends RequestOptions {
   /** Default 100, max 500. */
   limit?: number;
 }
+
+// ── editorial reads (editor-tier credential) ────────────────────────────────
+
+export interface RevisionListOptions extends RequestOptions {
+  /** Page size, 1–100 (server default 20; an out-of-range value gets the default). */
+  limit?: number;
+  /** Opaque keyset cursor — the previous page's `meta.next_cursor`. */
+  cursor?: string;
+}
+
+/**
+ * One entry of a document's version history. Carries the *names* of the
+ * editorial fields the write changed, never their values; the acting user is
+ * an id only (`null` for a system write).
+ */
+export interface Revision {
+  id: string;
+  /** The action that wrote it: `create`, `update`, `autosave`, `publish`, `restore_version`, … */
+  action: string;
+  action_type: "create" | "update" | "destroy";
+  inserted_at: string;
+  user_id: string | null;
+  changed_fields: string[];
+}
+
+/** `GET /api/content/:type/:id/revisions`, as served. */
+export interface RevisionList {
+  data: Revision[];
+  meta: {
+    limit: number;
+    /** Pass back as `cursor` for the next (older) page; `null` on the last. */
+    next_cursor: string | null;
+  };
+}
+
+/**
+ * One revision with its values: the version's own raw `changes`, and the
+ * full `snapshot` of the document at that revision (folded from every
+ * version up to it). Values are in their stored JSON shape.
+ */
+export interface RevisionDetail extends Revision {
+  changes: Record<string, unknown>;
+  snapshot: Record<string, unknown>;
+}
+
+/** The result of restoring a revision — the restore is itself a new revision. */
+export interface RestoreResult {
+  id: string;
+  type: string;
+  state: string;
+  restored_version_id: string;
+  revision: Revision;
+}
+
+/** A content release (`/api/json/releases`), flattened. */
+export interface ContentRelease extends Item {
+  name: string;
+  description: string | null;
+  state:
+    | "open"
+    | "scheduled"
+    | "publishing"
+    | "published"
+    | "failed"
+    | "rolling_back"
+    | "rolled_back"
+    | "archived";
+  scheduled_at: string | null;
+  published_at: string | null;
+  rolled_back_at: string | null;
+  failure_reason: string | null;
+  failed_item_id: string | null;
+}
+
+/** One pending change inside a release (`/api/json/release-items`), flattened. */
+export interface ContentReleaseItem extends Item {
+  release_id: string;
+  /** The document's content type name, and its id — resolve through that type's own route. */
+  content_type: string;
+  content_id: string;
+  action: "publish" | "unpublish";
+  status: "pending" | "applied" | "skipped" | "cancelled" | "rolled_back";
+  prior_state: string | null;
+  prior_version_id: string | null;
+  applied_at: string | null;
+}
+
+/** Options for the release index — the JSON:API list options, minus the `/published` switch. */
+export type ReleaseListOptions = Omit<ListOptions, "published" | "customFilter" | "customSort">;
+
+export interface ReleaseOptions extends RequestOptions {
+  /** Side-load relationships — `["items"]` for the release's contents. */
+  include?: string[];
+  fields?: Record<string, string[]>;
+}

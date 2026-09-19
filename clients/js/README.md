@@ -163,6 +163,31 @@ are addressed by type name like compiled types
 editor-or-above key, and `include: ["field_definitions"]` adds each type's
 custom-field schema.
 
+### Editorial reads (editor-or-above key)
+
+For tools _about_ the content — migrations, audit exports, launch dashboards —
+not for a delivery site. Anonymous calls are a 401 and a viewer's key a 404.
+
+| Method                                 | Endpoint                                                    | Notes                                                |
+| -------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------- |
+| `listRevisions(type, id, opts)`        | `GET /api/content/:type/:id/revisions`                      | newest first; `limit`, `cursor` (`meta.next_cursor`) |
+| `revision(type, id, versionId)`        | `GET /api/content/:type/:id/revisions/:version_id`          | the version's `changes` + full `snapshot`            |
+| `restoreRevision(type, id, versionId)` | `POST /api/content/:type/:id/revisions/:version_id/restore` | `:read_write` key; a read-only key is a 403          |
+| `releases(opts)`                       | `GET /api/json/releases`                                    | read-only; `include: ["items"]`, `filter: {state}`   |
+| `release(id, opts)`                    | `GET /api/json/releases/:id`                                | one release, `included` merged in                    |
+| `releaseItems(opts)`                   | `GET /api/json/release-items`                               | `filter: { release_id }`                             |
+
+```ts
+const editorial = createClient({ baseUrl, apiKey: process.env.KILN_EDITOR_KEY });
+
+let cursor: string | undefined;
+do {
+  const page = await editorial.listRevisions("post", postId, { cursor });
+  for (const rev of page.data) console.log(rev.inserted_at, rev.action, rev.changed_fields);
+  cursor = page.meta.next_cursor ?? undefined;
+} while (cursor);
+```
+
 ## Development
 
 ```bash
