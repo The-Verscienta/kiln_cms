@@ -94,6 +94,10 @@ Every summary line below that was shortened links to its own entry there.
   including six CRITICAL in `ash_authentication`.**
   ([long form](docs/changelog/unreleased.md#every-advisory-published-against-the-090-dependency-set-is-fixed-including-six))
 
+- **`mint` 1.10.1 closes a response-smuggling advisory in its HTTP/1 chunked
+  parser (EEF-CVE-2026-82672, MEDIUM).**
+  ([long form](docs/changelog/unreleased.md#mint-1101-closes-a-response-smuggling-advisory-in-its-http1-chunked-parser-eef))
+
 ## [0.9.0] - 2026-09-18
 
 Long form: [docs/changelog/v0.9.0.md](docs/changelog/v0.9.0.md) —
