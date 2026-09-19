@@ -22,6 +22,22 @@ defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
   `:archived`) is exactly that case (#914): a plain `only_when: :published`
   would never fire, since the resulting state is never `:published`, but the
   question that actually matters is whether delivery had anything to remove.
+
+  ## What the payload carries
+
+  Pass `payload:` to choose:
+
+    * `:full` (the default) — `ContentSerializer.to_map/1`, the document's
+      public fields including its block tree.
+    * `:tombstone` — `ContentSerializer.tombstone/1`: identity only (`id`,
+      `slug`, `locale`, `state`, `updated_at`). For `archived` and `deleted`,
+      which a mirror needs to hear about but which fire for drafts as readily
+      as for live documents — a body there would POST unpublished content to
+      every default subscriber.
+    * `:full_when_published` — the full map when the resulting record is
+      published, the tombstone otherwise. For `restored`: a document coming
+      back from the trash straight onto the delivery path is something a
+      mirror must re-ingest, and one coming back as a draft is not.
   """
   use Ash.Resource.Change
 
@@ -32,6 +48,7 @@ defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
   def change(changeset, opts, _context) do
     event = Keyword.get(opts, :event, "published")
     only_when = Keyword.get(opts, :only_when)
+    payload = Keyword.get(opts, :payload, :full)
 
     Ash.Changeset.after_transaction(changeset, fn
       changeset, {:ok, record} ->
@@ -46,18 +63,9 @@ defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
           # together; after COMMIT a crash between COMMIT and insert loses the
           # notification, which is the deliberate trade for a field on a
           # notification not being worth a lost publish.
-          record =
-            case Ash.load(record, [:effective_seo_title, :effective_seo_description],
-                   authorize?: false,
-                   tenant: record.org_id
-                 ) do
-              {:ok, loaded} -> loaded
-              _ -> record
-            end
-
           Webhooks.dispatch(
             "#{event_prefix(record)}.#{event}",
-            ContentSerializer.to_map(record),
+            payload(payload, record),
             record.org_id
           )
         end
@@ -67,6 +75,26 @@ defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
       _changeset, other ->
         other
     end)
+  end
+
+  defp payload(:tombstone, record), do: ContentSerializer.tombstone(record)
+
+  defp payload(:full_when_published, %{state: :published} = record),
+    do: payload(:full, record)
+
+  defp payload(:full_when_published, record), do: payload(:tombstone, record)
+
+  defp payload(:full, record) do
+    record =
+      case Ash.load(record, [:effective_seo_title, :effective_seo_description],
+             authorize?: false,
+             tenant: record.org_id
+           ) do
+        {:ok, loaded} -> loaded
+        _ -> record
+      end
+
+    ContentSerializer.to_map(record)
   end
 
   defp dispatch?(nil, _changeset, _record), do: true

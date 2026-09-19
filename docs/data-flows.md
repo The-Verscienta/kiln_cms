@@ -69,6 +69,11 @@ your sink feeds a public surface the filtering is yours to do, and it takes both
 fields: a document published openly and locked afterwards still reads
 `"audience": "public"`.
 
+- **Deletions reach the receiver too:** `<type>.archived`, `<type>.deleted`
+  and `<type>.restored` are on by default and carry only the document's
+  identity (`id`, `slug`, `locale`, `state`, `updated_at`), so a mirror can
+  drop what the site dropped. The opt-in `<type>.created` carries a new
+  draft's full body.
 - **Disable:** delete the webhook endpoint(s) in `/editor/webhooks` (admin only).
   No endpoints configured ⇒ nothing is sent.
 

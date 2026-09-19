@@ -327,9 +327,15 @@ defmodule KilnCMS.Portability.ExportTest do
       Ash.Seed.seed!(KilnCMS.CMS.WebhookEndpoint, %{
         org_id: target.id,
         url: "https://example.com/hooks/restore",
-        events: KilnCMS.CMS.WebhookEndpoint.events(target.id),
+        # Everything but `created`: an import does create records, and says so
+        # to a subscriber that asked. What this pins is that putting each one
+        # back in its state — review, archive — is quiet.
+        events:
+          target.id
+          |> KilnCMS.CMS.WebhookEndpoint.events()
+          |> Enum.reject(&String.ends_with?(&1, ".created")),
         active: true,
-        secret: KilnCMS.CMS.WebhookEndpoint.generate_secret()
+        secret_encrypted: KilnCMS.CMS.WebhookEndpoint.generate_encrypted_secret()
       })
 
       scope = [actor: actor, tenant: target.id]

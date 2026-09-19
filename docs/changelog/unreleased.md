@@ -5,7 +5,59 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Upgrade notes
+
+<a id="webhook-signing-secrets-move-to-an-encrypted-column"></a>
+
+- **Webhook signing secrets move to an encrypted column.** Three migrations
+  add `webhook_endpoints.secret_encrypted`, encrypt every existing secret into
+  it with `KilnCMS.Keys.Vault`, and drop the plaintext `secret` column. The
+  secrets themselves do not change, so receivers need nothing. Rolling back
+  decrypts them into the old column. Like every vault column, they are keyed
+  off `SECRET_KEY_BASE`: rotate that and each endpoint's secret becomes
+  unreadable, its deliveries are refused, and it has to be re-created
+  (`docs/secrets-rotation.md`).
+
+<a id="webhook-receivers-should-move-to-x-kilncms-webhook-signature"></a>
+
+- **Webhook receivers should move to `x-kilncms-webhook-signature`.** The
+  body-only `x-kilncms-signature` is still sent on every delivery, but it is
+  deprecated and will be removed in a later release. The new header binds a
+  timestamp into the HMAC; verify it with the recipe in `docs/webhooks.md` or
+  the client helpers. The delivery body also gains a top-level `delivery_id`,
+  which is additive. Existing endpoints keep the event list they were saved
+  with, so to hear about deletions, tick the new `archived`, `deleted` and
+  `restored` events on each one.
+
 ## Added
+
+<a id="webhooks-announce-a-documents-whole-lifecycle-created-archived-deleted-and"></a>
+
+- **Webhooks announce a document's whole lifecycle: `created`, `archived`,
+  `deleted` and `restored`.** A mirror used to hear only about publishes, so a
+  document moved to the trash stayed on the mirror forever. `archived` fires
+  from every state (alongside the existing `unpublished` when the document was
+  live), `deleted` fires on a move to the trash (`DELETE` over the API is one),
+  and `restored` fires on the way back out of the trash or out of the archive.
+  `archived` and `deleted` carry a tombstone, the document's `id`, `slug`,
+  `locale`, `state` and `updated_at` and nothing else, because they fire for
+  drafts too. `restored` carries the full body only when the document is
+  published again, and the tombstone otherwise. All three are on by default for
+  new endpoints. `created` carries a new draft's full body, so, like
+  `in_review`, it is opt-in. Dynamic types get the same four events.
+
+<a id="timestamped-webhook-signatures-and-a-stable-delivery-id"></a>
+
+- **Timestamped webhook signatures and a stable delivery id.** Every delivery
+  now carries `x-kilncms-webhook-signature: t=<unix>,v1=<hex>`, an
+  HMAC-SHA256 of `"<t>.<raw body>"`, and `delivery_id` in the signed body
+  (echoed in `x-kilncms-delivery-id`). The id is the ledger row's, so it is the
+  same across a delivery's retries. A receiver that refuses a `t` more than
+  five minutes from its clock can no longer be replayed to. That closes
+  threat-model residual risk 14 for receivers that verify the new header.
+  `KilnCMS.Webhooks.verify/4` is the reference implementation, and the JS client
+  (`verifyWebhook`) and the Elixir client (`KilnClient.Webhook.verify/4`) ship
+  the same check, pinned to one shared test vector.
 
 <a id="one-click-deploy-templates-for-render-railway-flyio-and-digitalocean"></a>
 
@@ -66,4 +118,17 @@ carries the reasoning.
   a fresh deploy's editor connects; a blank `PHX_HOST` used to become an empty
   host.
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529))
+
+## Security
+
+<a id="webhook-signing-secrets-are-encrypted-at-rest"></a>
+
+- **Webhook signing secrets are encrypted at rest.** They were a plaintext
+  column. `sensitive?` kept them out of logs, but not out of a database dump, a
+  backup or a read replica, and whoever holds a secret can sign deliveries its
+  receiver will accept as Kiln's. They are now `KilnCMS.Keys.Vault` ciphertext,
+  read through `WebhookEndpoint.secret/1`. A secret that no longer decrypts
+  refuses the delivery (`delivery failed: signing secret unreadable` on the
+  ledger) rather than sending it unsigned, and the console says so on the
+  endpoint's row.
 

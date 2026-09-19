@@ -54,7 +54,22 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Webhook signing secrets move to an encrypted column.**
+  ([long form](docs/changelog/unreleased.md#webhook-signing-secrets-move-to-an-encrypted-column))
+
+- **Webhook receivers should move to `x-kilncms-webhook-signature`.**
+  ([long form](docs/changelog/unreleased.md#webhook-receivers-should-move-to-x-kilncms-webhook-signature))
+
 ### Added
+
+- **Webhooks announce a document's whole lifecycle: `created`, `archived`,
+  `deleted` and `restored`.**
+  ([long form](docs/changelog/unreleased.md#webhooks-announce-a-documents-whole-lifecycle-created-archived-deleted-and))
+
+- **Timestamped webhook signatures and a stable delivery id.**
+  ([long form](docs/changelog/unreleased.md#timestamped-webhook-signatures-and-a-stable-delivery-id))
 
 - **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#one-click-deploy-templates-for-render-railway-flyio-and-digitalocean))
@@ -71,6 +86,11 @@ Every summary line below that was shortened links to its own entry there.
 - **A PaaS health check no longer gets a redirect, and `PHX_HOST` falls back to
   the platform's hostname.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#a-paas-health-check-no-longer-gets-a-redirect-and-phxhost-falls-back-to-the))
+
+### Security
+
+- **Webhook signing secrets are encrypted at rest.**
+  ([long form](docs/changelog/unreleased.md#webhook-signing-secrets-are-encrypted-at-rest))
 
 ## [0.9.0] - 2026-09-18
 

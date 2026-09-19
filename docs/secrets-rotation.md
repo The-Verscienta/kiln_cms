@@ -198,7 +198,7 @@ this section is long:
 
 ### The part that is not recoverable
 
-Four things live in the database encrypted under the old `secret_key_base`, and
+Five things live in the database encrypted under the old `secret_key_base`, and
 **there is no re-encryption path in the application** — no mix task, no admin
 action, no migration. Rotate the secret and the ciphertext is permanently
 unreadable:
@@ -209,6 +209,7 @@ unreadable:
 | `credential_encrypted` | `KilnCMS.Social.Account` | Scheduled social posts stop being published | `/editor/social` — re-connect each account and re-enter its credential |
 | `secret_key_encrypted`, `webhook_secret_encrypted` | `KilnCMS.Billing.Settings` | Payments and inbound payment webhooks stop | `/editor/billing` — re-paste the provider API key and the `whsec_…` from the provider dashboard |
 | `private_key_encrypted` | `KilnCMS.Federation.SiteFederation` | The site can no longer sign ActivityPub deliveries | **None in-app.** See [What cannot be rotated safely today](#what-cannot-be-rotated-safely-today) |
+| `secret_encrypted` | `KilnCMS.CMS.WebhookEndpoint` | Outbound webhook deliveries are refused (`"delivery failed: signing secret unreadable"` on the ledger) and the endpoint row says the secret is unreadable | `/editor/webhooks` — delete and re-create each endpoint, then give its receiver the new secret |
 
 **None of these announces itself.** The decrypt helpers deliberately return
 `nil` rather than raising, so that a rotated or restored deployment stops
@@ -491,7 +492,7 @@ verify the feature.
 | `KILN_GOVERNANCE_WITNESS_TOKEN` | Set and restart; rotate at the witness endpoint in the same window | Endpoint-dependent | The next checkpoint posts successfully |
 | `UNSPLASH_ACCESS_KEY` | Set and restart | None needed — read-only, no stored state | The Unsplash tab in the media library returns results |
 | `ADMIN_PASSWORD` / `EDITOR_PASSWORD` | Seed-only; change the password in the app, not the variable | — | — |
-| Webhook endpoint secrets (`KilnCMS.CMS.WebhookEndpoint`) | Per-endpoint, in the database, **not** vault-encrypted and **not** affected by any secret above. Re-create the endpoint to mint a new secret | Consumer-dependent — a consumer verifying signatures will reject deliveries until it has the new secret | A delivery succeeds; `consecutive_failures` stays at 0 |
+| Webhook endpoint secrets (`KilnCMS.CMS.WebhookEndpoint`) | Per-endpoint, in the database, vault-encrypted — so a `SECRET_KEY_BASE` rotation orphans them too ([above](#the-part-that-is-not-recoverable)). Re-create the endpoint to mint a new secret | Consumer-dependent — a consumer verifying signatures will reject deliveries until it has the new secret | A delivery succeeds; `consecutive_failures` stays at 0 |
 | API keys (`kiln_…`) | Mint a new key, hand it to the consumer, then destroy the old row | Overlap is under your control — both keys work until you delete one | The consumer's requests still succeed |
 
 ---

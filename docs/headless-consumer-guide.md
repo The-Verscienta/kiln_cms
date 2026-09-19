@@ -47,7 +47,7 @@ scoped by the type's name:
 | Artifact | `GET /api/content/<type name>/<slug>` — identical to compiled types; the `json` surface's `type` field is the dynamic type's name |
 | JSON:API | `GET /api/json/entries?filter[type_name]=<name>` (+ `/entries/search`, `/semantic-search`, `/autocomplete` with `?query=…`, each with a published-only `…/published` twin) |
 | GraphQL | `entryBySlug(slug, locale, typeDefinitionId)`, `searchEntries(query, filter: {typeName: {eq: "<name>"}})`, `entryTranslations`, `semanticSearchEntries`, `autocompleteEntries` (+ `searchPublishedEntries` / `semanticSearchPublishedEntries` / `autocompletePublishedEntries`) |
-| Webhooks | Events are named by the dynamic type — `"<name>.published"` / `.updated` / `.unpublished` — exactly like compiled types |
+| Webhooks | Events are named by the dynamic type — `"<name>.published"` / `.updated` / `.unpublished` / `.archived` / `.deleted` / `.restored` / `.created` — exactly like compiled types |
 
 Admin-defined **custom fields** are delivered in each entry's `custom_fields`
 map on every surface — including the fired artifact's `json` surface — and are

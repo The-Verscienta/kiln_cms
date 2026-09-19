@@ -2,8 +2,14 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   @moduledoc """
   A registered outbound webhook. When content is published, KilnCMS POSTs a
   signed payload to every active endpoint subscribed to that event (e.g.
-  `"page.published"`). Admin-managed; the per-endpoint `secret` signs deliveries
-  (HMAC-SHA256) so receivers can verify authenticity.
+  `"page.published"`). Admin-managed; the per-endpoint signing secret signs
+  deliveries (HMAC-SHA256) so receivers can verify authenticity.
+
+  The secret is stored encrypted (`secret_encrypted`, `KilnCMS.Keys.Vault`) and
+  read through `secret/1`. It used to be a plaintext column: `sensitive?` kept
+  it out of logs and inspected changesets, but not out of a database dump, a
+  backup or a read replica, and anyone holding it can sign deliveries a
+  receiver will accept as Kiln's.
   """
   use Ash.Resource,
     domain: KilnCMS.CMS,
@@ -13,13 +19,21 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
 
   # Lifecycle verbs a content type can emit. `<type>.<verb>` is the event name.
   # `in_review` / `returned_to_draft` are the review-workflow transitions (#375).
-  @verbs ~w(published unpublished updated in_review returned_to_draft)
+  # `created`, `archived`, `deleted` and `restored` are the record's own
+  # lifecycle, so a mirror can track a document from birth to the trash and
+  # back rather than only while it is live.
+  @verbs ~w(published unpublished updated in_review returned_to_draft
+            created archived deleted restored)
 
   # Verbs a NEW endpoint subscribes to by default. The review-transition events
-  # carry the full serialized body of a NOT-yet-published document, so they are
-  # explicit opt-in — a receiver set up for publish mirroring must never be
-  # POSTed draft/embargoed content it didn't ask for.
-  @default_verbs ~w(published unpublished updated)
+  # and `created` carry the full serialized body of a NOT-yet-published
+  # document, so they are explicit opt-in — a receiver set up for publish
+  # mirroring must never be POSTed draft/embargoed content it didn't ask for.
+  # `archived` and `deleted` carry an identity-only tombstone and `restored`
+  # carries a body only when the document is live again
+  # (`KilnCMS.CMS.Changes.NotifyWebhooks`), so they are safe defaults — and a
+  # mirror that never hears about a deletion keeps serving it.
+  @default_verbs ~w(published unpublished updated archived deleted restored)
 
   # Domain events that are NOT a content type crossed with a verb. Editorial
   # tasks (#501) and content releases (#500) dispatch through the same
@@ -58,10 +72,11 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   end
 
   @doc """
-  The default subscription for a new endpoint: the published-content lifecycle
-  plus form submissions. The review-transition events (`in_review` /
-  `returned_to_draft`, #375) carry unpublished draft bodies and are therefore
-  **opt-in only** — select them explicitly on the endpoint.
+  The default subscription for a new endpoint: the published-content lifecycle,
+  the body-less `archived` / `deleted` tombstones and `restored`, plus form
+  submissions. The review-transition events (`in_review` /
+  `returned_to_draft`, #375) and `created` carry unpublished draft bodies and
+  are therefore **opt-in only** — select them explicitly on the endpoint.
 
   Arity 0 on purpose: this is an attribute `default`, which Ash evaluates with
   no access to the changeset's tenant, so it can only resolve the default org's
@@ -76,7 +91,7 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   end
 
   # AshAdmin: keep system config out of the content groups (issue #25). The
-  # `secret` is sensitive? and stays redacted by default.
+  # encrypted secret is sensitive? and stays redacted by default.
   admin do
     resource_group :system
     table_columns [:url, :active, :inserted_at]
@@ -93,8 +108,8 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
 
     create :create do
       primary? true
-      # A receiver-shared signing secret, generated once.
-      change set_attribute(:secret, &__MODULE__.generate_secret/0)
+      # A receiver-shared signing secret, generated once and stored encrypted.
+      change set_attribute(:secret_encrypted, &__MODULE__.generate_encrypted_secret/0)
       validate KilnCMS.CMS.Validations.WebhookUrl
     end
 
@@ -179,10 +194,13 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
 
     attribute :active, :boolean, default: true, public?: true
 
-    attribute :secret, :string do
+    # The signing secret, encrypted at rest with `KilnCMS.Keys.Vault`. Read it
+    # with `secret/1`. Set once at create and never accepted as input.
+    attribute :secret_encrypted, :binary do
       allow_nil? false
       sensitive? true
       writable? false
+      public? false
     end
 
     # Health: exhausted deliveries in a row (reset by any success or edit).
@@ -206,4 +224,23 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
 
   @doc false
   def generate_secret, do: 32 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
+
+  @doc false
+  def generate_encrypted_secret, do: KilnCMS.Keys.Vault.encrypt(generate_secret())
+
+  @doc """
+  The endpoint's signing secret, decrypted — or `nil` when there is none, or
+  when it no longer opens (the `SECRET_KEY_BASE` it was encrypted under has
+  been rotated away; see `docs/secrets-rotation.md`). A delivery with no secret
+  is refused rather than sent unsigned.
+  """
+  @spec secret(struct()) :: String.t() | nil
+  def secret(%{secret_encrypted: encrypted}) when is_binary(encrypted) do
+    case KilnCMS.Keys.Vault.decrypt(encrypted) do
+      {:ok, secret} -> secret
+      {:error, :decrypt_failed} -> nil
+    end
+  end
+
+  def secret(_endpoint), do: nil
 end

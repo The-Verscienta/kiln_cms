@@ -97,6 +97,29 @@ tags = KilnClient.resolve(post, "tags", included)
 Results are flattened JSON:API resources: the `attributes` map (string keys)
 plus `"id"`/`"type"`, with relationships reduced to `{type, id}` ref maps.
 
+## Verifying webhooks
+
+`KilnClient.Webhook.verify/4` checks a delivery's `x-kilncms-webhook-signature`
+(`t=<unix>,v1=<hex>`, an HMAC-SHA256 of `"<t>.<raw body>"`) against the
+endpoint's signing secret. It refuses a `t` more than five minutes from your
+clock, so a captured request can't be replayed later. Verify the **raw** body.
+A re-encoded parse won't match.
+
+```elixir
+with [header] <- Plug.Conn.get_req_header(conn, KilnClient.Webhook.signature_header()),
+     :ok <- KilnClient.Webhook.verify(secret, conn.assigns.raw_body, header) do
+  %{"event" => event, "delivery_id" => delivery_id, "data" => data} =
+    Jason.decode!(conn.assigns.raw_body)
+
+  # delivery_id is stable across retries: remember it for the window to drop duplicates.
+else
+  _ -> send_resp(conn, 400, "bad signature")
+end
+```
+
+The error reasons are `:malformed`, `:expired` and `:mismatch`. Pass
+`tolerance: seconds` to change the window.
+
 ## Testing your integration
 
 Every request honors `req_options`, so [`Req.Test`](https://hexdocs.pm/req/Req.Test.html)

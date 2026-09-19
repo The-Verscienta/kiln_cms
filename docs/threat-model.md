@@ -27,7 +27,8 @@ document is about the network edge.
 - **Tenant isolation** — one deployment serves multiple organizations; content,
   media, branding and analytics must not cross org boundaries.
 - **Media & object storage** — uploaded files and their storage credentials.
-- **Outbound webhook secrets** — HMAC signing keys for delivery.
+- **Outbound webhook secrets** — HMAC signing keys for delivery, encrypted at
+  rest with `KilnCMS.Keys.Vault`.
 - **Payment credentials** — the provider API key and the inbound-webhook signing
   secret, both held through the `KilnCMS.Keys` provider model. The API key has
   full authority over the payment account; the signing secret is what stops
@@ -542,11 +543,19 @@ build if a resource is ever registered without that authorizer.
   webhook endpoint's blast radius is therefore *every* document that fires an
   event, not only the public ones. Treat an endpoint URL as a credential.
 - **SSRF** — mitigated by `SafeUrl` with IP pinning (see Controls).
-- **Forgery at the receiver** — deliveries are HMAC-SHA256-signed over the raw
-  body; a receiver that verifies `x-kilncms-signature` knows a delivery is
-  genuinely from Kiln with unmodified content. There is no timestamp or nonce
-  in the scheme, so this proves origin and integrity, not freshness — see
-  residual risk 14 and [webhooks.md](webhooks.md#verifying-the-signature).
+- **Forgery at the receiver** — deliveries are HMAC-SHA256-signed; a receiver
+  that verifies `x-kilncms-webhook-signature` knows a delivery is genuinely
+  from Kiln, with unmodified content, and sent within the tolerance window it
+  enforces (five minutes by default), because the timestamp is inside the MAC.
+  Inside the window a receiver dedupes on the signed `delivery_id`. The older
+  body-only `x-kilncms-signature` is still sent, deprecated: it proves origin
+  and integrity, not freshness. See residual risk 14 and
+  [webhooks.md](webhooks.md#verifying-the-signature).
+- **Secret disclosure** — each endpoint's signing secret is vault-encrypted at
+  rest, so a database dump, backup or replica does not hand out the ability to
+  sign deliveries. The trade-off is the vault's: rotating `SECRET_KEY_BASE`
+  orphans the secrets, and each endpoint must be re-created
+  ([secrets-rotation.md](secrets-rotation.md)).
 
 ### oEmbed resolution (`OEMBED_ENABLED`, #489)
 - **Content choosing the destination** — prevented by design. Kiln does **not**
@@ -1130,21 +1139,26 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     publish's own write, and the room is told afterwards so its editors stop
     typing into a document nothing will persist. The authorization re-check is
     unchanged — collaborative editing of published content remains supported.
-14. **Webhook deliveries have no anti-replay.** The signature
-    (`x-kilncms-signature`, HMAC-SHA256 over the raw body) proves a delivery's
-    origin and integrity, not its freshness — there is no timestamp or nonce
-    binding it to a point in time, so anyone who captures one signed request
-    (TLS would have to fail first) can replay it to the receiver indefinitely.
-    Accepted for now: a replay re-announces old state rather than forging new
-    access — it delivers a payload the receiver was already sent once, to a
-    receiver the operator chose. Note this is **not** because the payload is
-    always public content: a content event carries an audience-gated or
-    passphrase-locked body too, marked by `audience`/`locked` (#1014), so the
-    replay window is bounded by the receiver's own retention of that body
-    rather than by the body being harmless. A
-    receiver with exactly-once requirements should dedupe on its own terms
-    (the content payload's `id`/`updated_at`, or a delivery id tracked out of
-    band) — see [webhooks.md](webhooks.md#verifying-the-signature).
+14. ~~**Webhook deliveries have no anti-replay.**~~ **Closed for receivers
+    that verify the timestamped signature.** Every delivery now carries
+    `x-kilncms-webhook-signature: t=<unix>,v1=<hex>`, an HMAC of
+    `"<t>.<body>"`, and a `delivery_id` inside the signed body (echoed in
+    `x-kilncms-delivery-id`) that stays the same across a delivery's retries.
+    A receiver that rejects a `t` outside its window (five minutes is the
+    documented default) and remembers the delivery ids it has seen inside that
+    window cannot be replayed to. Re-stamping a captured request with a fresh
+    `t` does not verify, because `t` is inside the MAC.
+
+    **Remainder.** The original body-only `x-kilncms-signature` is still sent
+    during a deprecation period. A receiver that verifies only that header is
+    as exposed as before: anyone who captures one signed request (TLS would
+    have to fail first) can replay it indefinitely. The replay re-announces old
+    state rather than granting new access, but the replayed body may be
+    audience-gated or passphrase-locked content (`audience`/`locked`, #1014).
+    So the exposure lasts as long as the receiver keeps that body, not merely
+    as long as the body is harmless. An admin **redelivery** is a new delivery
+    with a new id and a fresh timestamp, on purpose. See
+    [webhooks.md](webhooks.md#verifying-the-signature).
 
 ## Operating the dependency audit
 

@@ -109,6 +109,17 @@ defmodule KilnCMS.CMS.ContentSerializer do
     )
   end
 
+  @tombstone_fields [:id, :slug, :locale, :state, :updated_at]
+
+  @doc """
+  Identity only — what a `archived` / `deleted` / draft `restored` webhook
+  carries. Enough for a mirror to find and drop (or re-fetch) its copy; no
+  title, excerpt or body, because these events fire for drafts too and a
+  draft's content is not something a default subscriber asked for.
+  """
+  @spec tombstone(struct()) :: map()
+  def tombstone(record), do: Map.take(record, @tombstone_fields)
+
   # Derived, so the hash never leaves — see the moduledoc.
   #
   # Fails CLOSED on anything that is not plainly "no hash": an unselected

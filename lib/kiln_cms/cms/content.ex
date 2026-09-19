@@ -1999,6 +1999,10 @@ defmodule KilnCMS.CMS.Content do
           primary? true
           require_atomic? false
           change KilnCMS.CMS.Changes.DeleteArtifacts
+          # A mirror has to hear about a deletion or it keeps serving the
+          # document. A tombstone, not the body: a trashed draft was never
+          # delivered, and its content is not a default subscriber's business.
+          change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "deleted", payload: :tombstone}
         end
 
         create :create do
@@ -2048,6 +2052,10 @@ defmodule KilnCMS.CMS.Content do
           # `:autosave`: a broadcast per debounce would wake every open grid
           # in the org every few seconds while one person types.
           change KilnCMS.CMS.Changes.BroadcastCalendar
+
+          # `<type>.created` carries the new draft's full body, so the event is
+          # opt-in on an endpoint (`WebhookEndpoint.default_events/0`).
+          change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "created"}
         end
 
         update :update do
@@ -2517,6 +2525,8 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.ClearPublishedVersion
           change KilnCMS.CMS.Changes.DeleteArtifacts
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "unpublished"}
+          # As on `:archive`: every landing on `:archived` says so.
+          change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "archived", payload: :tombstone}
           # Any open editorial calendar re-queries its window. NOT on
           # `:autosave`: a broadcast per debounce would wake every open grid
           # in the org every few seconds while one person types.
@@ -2582,6 +2592,13 @@ defmodule KilnCMS.CMS.Content do
           change {KilnCMS.CMS.Changes.NotifyWebhooks,
                   event: "unpublished", only_when: :was_published}
 
+          # …and `archived` fires from every state, as a body-less tombstone:
+          # `unpublished` answers "did this leave delivery", `archived` answers
+          # "did this leave the working set", and a mirror of drafts (fed by
+          # `created`) needs the second as much as a publish mirror needs the
+          # first.
+          change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "archived", payload: :tombstone}
+
           # Any open editorial calendar re-queries its window. NOT on
           # `:autosave`: a broadcast per debounce would wake every open grid
           # in the org every few seconds while one person types.
@@ -2610,6 +2627,10 @@ defmodule KilnCMS.CMS.Content do
           # `:autosave`: a broadcast per debounce would wake every open grid
           # in the org every few seconds while one person types.
           change KilnCMS.CMS.Changes.BroadcastCalendar
+          # The inverse of `archived`. Always lands on a draft, so this is
+          # always the tombstone — see `:restore`.
+          change {KilnCMS.CMS.Changes.NotifyWebhooks,
+                  event: "restored", payload: :full_when_published}
         end
 
         # Public delivery reads (`:public_by_slug`, `:published_translations`)
@@ -2644,11 +2665,15 @@ defmodule KilnCMS.CMS.Content do
           # `only_when: :published` because restoring a trashed *draft* has
           # nothing to rebuild — a draft never had artifacts to purge, and firing
           # one would publish an artifact for unpublished content.
-          #
-          # Deliberately no webhook: trashing emits none either (it is not an
-          # unpublish), and a `published` event for a document subscribers were
-          # never told had gone would read as a second publish.
           change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
+
+          # `restored`, the inverse of the `deleted` that trashing emits — not
+          # `published`, which would read as a second publish of a document
+          # nobody re-published. A published document is back on the delivery
+          # path, so a mirror gets the body to re-ingest; a draft gets the
+          # tombstone, for the reason `deleted` does.
+          change {KilnCMS.CMS.Changes.NotifyWebhooks,
+                  event: "restored", payload: :full_when_published}
         end
 
         # Permanent hard delete (bypasses archival). Used by "Empty trash" and the
