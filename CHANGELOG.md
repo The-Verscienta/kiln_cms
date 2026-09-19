@@ -67,7 +67,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#kilnmediaroot-a-stable-directory-for-local-media))
 
 - **Version history over the API.**
-  ([long form](docs/changelog/unreleased.md#version-history-over-the-api))
+  ([#1574](https://github.com/The-Verscienta/kiln_cms/pull/1574) · [long form](docs/changelog/unreleased.md#version-history-over-the-api))
 
 - **Content releases are readable over JSON:API.**
   ([#500](https://github.com/The-Verscienta/kiln_cms/issues/500) · [long form](docs/changelog/unreleased.md#content-releases-are-readable-over-jsonapi))

@@ -65,6 +65,7 @@ carries the reasoning.
   gain `listRevisions`/`list_revisions`, `revision` and
   `restoreRevision`/`restore_revision`. See docs/api.md → "Version history
   (revisions)".
+  ([#1574](https://github.com/The-Verscienta/kiln_cms/pull/1574))
 
 <a id="content-releases-are-readable-over-jsonapi"></a>
 
