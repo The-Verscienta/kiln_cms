@@ -17,9 +17,9 @@ what the surface exposes and how writes are authorized.
 
 | Path | Availability | Purpose |
 |------|--------------|---------|
+| `GET /api/graphql/schema.graphql` | public where introspection is on; **API key** in production | The running schema as SDL, for codegen. The stock build's copy is committed at [`docs/api/schema.graphql`](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/api/schema.graphql) — see [api.md](api.md#machine-readable-specs) |
 | `POST /gql` | always on | GraphQL query endpoint (headless consumers) |
 | `/gql/playground` | **dev only** — not served by a production build | Interactive GraphiQL playground |
-| `GET /api/graphql/schema.graphql` | public where introspection is on; **API key** in production | The running schema as SDL, for codegen. The stock build's copy is committed at [`docs/api/schema.graphql`](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/api/schema.graphql) — see [api.md](api.md#machine-readable-specs) |
 
 The endpoint is rate-limited (`KilnCMSWeb.Plugs.RateLimit, :gql`) and reads an
 optional bearer token (`load_from_bearer`). Anonymous requests are fully
