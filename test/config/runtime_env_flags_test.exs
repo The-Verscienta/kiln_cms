@@ -54,6 +54,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_UPDATE_REPO KILN_UPDATE_RELEASES_URL KILN_PIN_PATH
             MAIL_MODE SMTP_HOST SMTP_TLS SMTP_TLS_VERIFY S3_BUCKET
             KILN_PROVENANCE_ENABLED TENANT_STRICT_HOST API_DOCS_ENABLED
+            GRAPHQL_INTROSPECTION_ENABLED
             BACKUP_ENABLED OEMBED_ENABLED
             KILN_READING_TIME_WPM BACKUP_KEEP_DAYS BACKUP_STALE_AFTER_HOURS
             KILN_EXPERIMENTS_STICKY_DAYS REQUIRE_AV_METADATA_STRIP
@@ -264,6 +265,36 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
 
     test "an unrecognized value writes nothing rather than reading as on" do
       assert visual_editing("enabled") == nil
+    end
+  end
+
+  describe "GRAPHQL_INTROSPECTION_ENABLED" do
+    defp introspection(value) do
+      %{"GRAPHQL_INTROSPECTION_ENABLED" => value}
+      |> eval()
+      |> get_in([:kiln_cms, :graphql_introspection])
+    end
+
+    # `config/prod.exs` sets `false`, but that file is not what `eval/1` runs,
+    # so "writes nothing" is the observable form of "the build's setting stands".
+    test "unset writes nothing, leaving the production build's `false` in force" do
+      assert introspection(nil) == nil
+    end
+
+    test "on-spellings turn introspection back on" do
+      for value <- ["true", "True", " 1 ", "yes", "On"] do
+        assert introspection(value) == true
+      end
+    end
+
+    test "off-spellings write an explicit false" do
+      for value <- ["false", "0", "no", "OFF"] do
+        assert introspection(value) == false
+      end
+    end
+
+    test "an unrecognized value writes nothing rather than reading as on" do
+      assert introspection("enabled") == nil
     end
   end
 

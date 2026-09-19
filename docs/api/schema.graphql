@@ -1,0 +1,3832 @@
+schema {
+  subscription: RootSubscriptionType
+  mutation: RootMutationType
+  query: RootQueryType
+}
+
+type Category {
+  id: ID!
+  name: String!
+  slug: String!
+  description: String
+  pages(
+    "How to sort the records in the response"
+    sort: [PageSortInput]
+
+    "A filter to limit the results"
+    filter: PageFilterInput
+
+    customFilter: JsonString
+
+    customSort: String
+
+    "The number of records to return."
+    limit: Int
+
+    "The number of records to skip."
+    offset: Int
+  ): [Page!]!
+  posts(
+    "How to sort the records in the response"
+    sort: [PostSortInput]
+
+    "A filter to limit the results"
+    filter: PostFilterInput
+
+    customFilter: JsonString
+
+    customSort: String
+
+    "The number of records to return."
+    limit: Int
+
+    "The number of records to skip."
+    offset: Int
+  ): [Post!]!
+  pageCount: Int!
+  postCount: Int!
+}
+
+input CategoryFilterDescription {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input CategoryFilterId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID!]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input CategoryFilterInput {
+  and: [CategoryFilterInput!]
+  or: [CategoryFilterInput!]
+  not: [CategoryFilterInput!]
+  id: CategoryFilterId
+  name: CategoryFilterName
+  slug: CategoryFilterSlug
+  description: CategoryFilterDescription
+  pages: PageFilterInput
+  posts: PostFilterInput
+  pageCount: CategoryFilterPageCount
+  postCount: CategoryFilterPostCount
+}
+
+input CategoryFilterName {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input CategoryFilterPageCount {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
+}
+
+input CategoryFilterPostCount {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
+}
+
+input CategoryFilterSlug {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+enum CategorySortField {
+  ID
+  NAME
+  SLUG
+  DESCRIPTION
+  PAGE_COUNT
+  POST_COUNT
+}
+
+input CategorySortInput {
+  order: SortOrder
+  field: CategorySortField!
+}
+
+input CreateEntryInput {
+  title: String!
+  slug: String!
+  excerpt: String
+  seoTitle: String
+  seoDescription: String
+  seoKeywords: String
+  pathAlias: String
+  seoImage: String
+  canonicalUrl: String
+  locale: String
+  audience: String
+  customFields: JsonString
+  scheduledAt: DateTime
+  unpublishAt: DateTime
+  expiryAction: String
+  reviewAfterDays: Int
+  typeDefinitionId: ID!
+  categoryId: ID
+  featuredImageId: ID
+  tagIds: [ID!]
+  relatedEntryIds: [ID!]
+  blockTree: [JsonString!]
+  bodyMarkdown: String
+  accessPassword: String
+  removeAccessPassword: Boolean
+}
+
+"The result of the :create_entry mutation"
+type CreateEntryResult {
+  "The successful result of the mutation"
+  result: Entry
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+input CreatePageInput {
+  title: String!
+  slug: String!
+  seoTitle: String
+  seoDescription: String
+  seoKeywords: String
+  pathAlias: String
+  seoImage: String
+  canonicalUrl: String
+  locale: String
+  audience: String
+  customFields: JsonString
+  scheduledAt: DateTime
+  unpublishAt: DateTime
+  expiryAction: String
+  reviewAfterDays: Int
+  categoryId: ID
+  featuredImageId: ID
+  tagIds: [ID!]
+  relatedPageIds: [ID!]
+  blockTree: [JsonString!]
+  bodyMarkdown: String
+  accessPassword: String
+  removeAccessPassword: Boolean
+}
+
+"The result of the :create_page mutation"
+type CreatePageResult {
+  "The successful result of the mutation"
+  result: Page
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+input CreatePostInput {
+  title: String!
+  slug: String!
+  excerpt: String
+  seoTitle: String
+  seoDescription: String
+  seoKeywords: String
+  pathAlias: String
+  seoImage: String
+  canonicalUrl: String
+  locale: String
+  audience: String
+  customFields: JsonString
+  scheduledAt: DateTime
+  unpublishAt: DateTime
+  expiryAction: String
+  reviewAfterDays: Int
+  categoryId: ID
+  featuredImageId: ID
+  tagIds: [ID!]
+  relatedPostIds: [ID!]
+  blockTree: [JsonString!]
+  bodyMarkdown: String
+  accessPassword: String
+  removeAccessPassword: Boolean
+}
+
+"The result of the :create_post mutation"
+type CreatePostResult {
+  "The successful result of the mutation"
+  result: Post
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+"""
+The `DateTime` scalar type represents a date and time in the UTC
+timezone. The DateTime appears in a JSON response as an ISO8601 formatted
+string, including UTC timezone ("Z"). The parsed date and time string will
+be converted to UTC if there is an offset.
+"""
+scalar DateTime
+
+input DeleteEntryInput {
+  title: String!
+  slug: String!
+  excerpt: String
+  seoTitle: String
+  seoDescription: String
+  seoKeywords: String
+  pathAlias: String
+  seoImage: String
+  canonicalUrl: String
+  locale: String
+  audience: String
+  customFields: JsonString
+  scheduledAt: DateTime
+  unpublishAt: DateTime
+  expiryAction: String
+  reviewAfterDays: Int
+  typeDefinitionId: ID!
+  categoryId: ID
+  featuredImageId: ID
+}
+
+"The result of the :delete_entry mutation"
+type DeleteEntryResult {
+  "The record that was successfully deleted"
+  result: Entry
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+input DeletePageInput {
+  title: String!
+  slug: String!
+  seoTitle: String
+  seoDescription: String
+  seoKeywords: String
+  pathAlias: String
+  seoImage: String
+  canonicalUrl: String
+  locale: String
+  audience: String
+  customFields: JsonString
+  scheduledAt: DateTime
+  unpublishAt: DateTime
+  expiryAction: String
+  reviewAfterDays: Int
+  categoryId: ID
+  featuredImageId: ID
+}
+
+"The result of the :delete_page mutation"
+type DeletePageResult {
+  "The record that was successfully deleted"
+  result: Page
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+input DeletePostInput {
+  title: String!
+  slug: String!
+  excerpt: String
+  seoTitle: String
+  seoDescription: String
+  seoKeywords: String
+  pathAlias: String
+  seoImage: String
+  canonicalUrl: String
+  locale: String
+  audience: String
+  customFields: JsonString
+  scheduledAt: DateTime
+  unpublishAt: DateTime
+  expiryAction: String
+  reviewAfterDays: Int
+  categoryId: ID
+  featuredImageId: ID
+}
+
+"The result of the :delete_post mutation"
+type DeletePostResult {
+  "The record that was successfully deleted"
+  result: Post
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+type Entry {
+  id: ID!
+  title: String!
+  slug: String!
+  excerpt: String
+  seoTitle: String
+  seoDescription: String
+  seoKeywords: String
+  pathAlias: String
+  seoImage: String
+  canonicalUrl: String
+  locale: String
+  audience: String!
+  customFields: JsonString!
+  publishedAt: DateTime
+  scheduledAt: DateTime
+  unpublishAt: DateTime
+  expiryAction: String!
+  reviewAfterDays: Int
+  lastReviewedAt: DateTime
+  insertedAt: DateTime!
+  updatedAt: DateTime!
+  state: String!
+  typeDefinitionId: ID!
+  authorId: ID
+  categoryId: ID
+  featuredImageId: ID
+  category: Category
+  featuredImage: MediaItem
+  tags(
+    "How to sort the records in the response"
+    sort: [TagSortInput]
+
+    "A filter to limit the results"
+    filter: TagFilterInput
+
+    "The number of records to return."
+    limit: Int
+
+    "The number of records to skip."
+    offset: Int
+  ): [Tag!]!
+  relatedEntrys(
+    "How to sort the records in the response"
+    sort: [EntrySortInput]
+
+    "A filter to limit the results"
+    filter: EntryFilterInput
+
+    customFilter: JsonString
+
+    customSort: String
+
+    "The number of records to return."
+    limit: Int
+
+    "The number of records to skip."
+    offset: Int
+  ): [Entry!]!
+  typeName: String
+  published: Boolean
+  effectiveReviewAfterDays: Int
+  dueAt: DateTime
+  health: String
+  wordCount: Int
+  readingTimeMinutes: Int
+  path: String
+  effectiveSeoTitle: String
+  effectiveSeoDescription: String
+  relatedLinks: [JsonString!]
+  blockIds: [JsonString!]
+  highlight(locale: String!, query: String!): String
+}
+
+input EntryFilterAudience {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+}
+
+input EntryFilterAuthorId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input EntryFilterCanonicalUrl {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input EntryFilterCategoryId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input EntryFilterCustomFields {
+  isNil: Boolean
+  eq: JsonString
+  notEq: JsonString
+  in: [JsonString!]
+  lessThan: JsonString
+  greaterThan: JsonString
+  lessThanOrEqual: JsonString
+  greaterThanOrEqual: JsonString
+  isDistinctFrom: JsonString
+  isNotDistinctFrom: JsonString
+}
+
+input EntryFilterDueAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime!]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input EntryFilterEffectiveReviewAfterDays {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int!]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
+}
+
+input EntryFilterExcerpt {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input EntryFilterExpiryAction {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+}
+
+input EntryFilterFeaturedImageId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input EntryFilterHealth {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+}
+
+input EntryFilterHighlight {
+  input: EntryHighlightFieldInput
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input EntryFilterId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID!]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input EntryFilterInput {
+  and: [EntryFilterInput!]
+  or: [EntryFilterInput!]
+  not: [EntryFilterInput!]
+  id: EntryFilterId
+  title: EntryFilterTitle
+  slug: EntryFilterSlug
+  excerpt: EntryFilterExcerpt
+  seoTitle: EntryFilterSeoTitle
+  seoDescription: EntryFilterSeoDescription
+  seoKeywords: EntryFilterSeoKeywords
+  pathAlias: EntryFilterPathAlias
+  seoImage: EntryFilterSeoImage
+  canonicalUrl: EntryFilterCanonicalUrl
+  locale: EntryFilterLocale
+  audience: EntryFilterAudience
+  customFields: EntryFilterCustomFields
+  publishedAt: EntryFilterPublishedAt
+  scheduledAt: EntryFilterScheduledAt
+  unpublishAt: EntryFilterUnpublishAt
+  expiryAction: EntryFilterExpiryAction
+  reviewAfterDays: EntryFilterReviewAfterDays
+  lastReviewedAt: EntryFilterLastReviewedAt
+  insertedAt: EntryFilterInsertedAt
+  updatedAt: EntryFilterUpdatedAt
+  state: EntryFilterState
+  typeDefinitionId: EntryFilterTypeDefinitionId
+  authorId: EntryFilterAuthorId
+  categoryId: EntryFilterCategoryId
+  featuredImageId: EntryFilterFeaturedImageId
+  category: CategoryFilterInput
+  featuredImage: MediaItemFilterInput
+  tags: TagFilterInput
+  relatedEntrys: EntryFilterInput
+  typeName: EntryFilterTypeName
+  published: EntryFilterPublished
+  effectiveReviewAfterDays: EntryFilterEffectiveReviewAfterDays
+  dueAt: EntryFilterDueAt
+  health: EntryFilterHealth
+  highlight: EntryFilterHighlight
+}
+
+input EntryFilterInsertedAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime!]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input EntryFilterLastReviewedAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input EntryFilterLocale {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input EntryFilterPathAlias {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input EntryFilterPublished {
+  isNil: Boolean
+  eq: Boolean
+  notEq: Boolean
+  in: [Boolean!]
+  lessThan: Boolean
+  greaterThan: Boolean
+  lessThanOrEqual: Boolean
+  greaterThanOrEqual: Boolean
+  isDistinctFrom: Boolean
+  isNotDistinctFrom: Boolean
+}
+
+input EntryFilterPublishedAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input EntryFilterReviewAfterDays {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
+}
+
+input EntryFilterScheduledAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input EntryFilterSeoDescription {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input EntryFilterSeoImage {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input EntryFilterSeoKeywords {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input EntryFilterSeoTitle {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input EntryFilterSlug {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input EntryFilterState {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+}
+
+input EntryFilterTitle {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input EntryFilterTypeDefinitionId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID!]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input EntryFilterTypeName {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input EntryFilterUnpublishAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input EntryFilterUpdatedAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime!]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input EntryHighlightFieldInput {
+  locale: String!
+  query: String!
+}
+
+enum EntrySortField {
+  ID
+  TITLE
+  SLUG
+  EXCERPT
+  SEO_TITLE
+  SEO_DESCRIPTION
+  SEO_KEYWORDS
+  PATH_ALIAS
+  SEO_IMAGE
+  CANONICAL_URL
+  LOCALE
+  AUDIENCE
+  CUSTOM_FIELDS
+  PUBLISHED_AT
+  SCHEDULED_AT
+  UNPUBLISH_AT
+  EXPIRY_ACTION
+  REVIEW_AFTER_DAYS
+  LAST_REVIEWED_AT
+  INSERTED_AT
+  UPDATED_AT
+  STATE
+  TYPE_DEFINITION_ID
+  AUTHOR_ID
+  CATEGORY_ID
+  FEATURED_IMAGE_ID
+  TYPE_NAME
+  PUBLISHED
+  EFFECTIVE_REVIEW_AFTER_DAYS
+  DUE_AT
+  HEALTH
+  HIGHLIGHT
+}
+
+input EntrySortInput {
+  order: SortOrder
+  field: EntrySortField!
+  highlightInput: EntryHighlightFieldInput
+}
+
+"""
+The `Json` scalar type represents arbitrary json string data, represented as UTF-8
+character sequences. The Json type is most often used to represent a free-form
+human-readable json string.
+"""
+scalar Json
+
+"""
+The `Json` scalar type represents arbitrary json string data, represented as UTF-8
+character sequences. The Json type is most often used to represent a free-form
+human-readable json string.
+"""
+scalar JsonString
+
+type MediaItem {
+  id: ID!
+  filename: String!
+  contentType: String
+  byteSize: Int
+  width: Int
+  height: Int
+  durationSeconds: Float
+  variants: JsonString
+  alt: String
+  caption: String
+  decorative: Boolean!
+  url: String
+  focalX: Float
+  focalY: Float
+  audience: String!
+  downloadCount: Int!
+  uploadedById: ID
+  tags(
+    "How to sort the records in the response"
+    sort: [TagSortInput]
+
+    "A filter to limit the results"
+    filter: TagFilterInput
+
+    "The number of records to return."
+    limit: Int
+
+    "The number of records to skip."
+    offset: Int
+  ): [Tag!]!
+  featuredPages(
+    "How to sort the records in the response"
+    sort: [PageSortInput]
+
+    "A filter to limit the results"
+    filter: PageFilterInput
+
+    customFilter: JsonString
+
+    customSort: String
+
+    "The number of records to return."
+    limit: Int
+
+    "The number of records to skip."
+    offset: Int
+  ): [Page!]!
+  featuredPosts(
+    "How to sort the records in the response"
+    sort: [PostSortInput]
+
+    "A filter to limit the results"
+    filter: PostFilterInput
+
+    customFilter: JsonString
+
+    customSort: String
+
+    "The number of records to return."
+    limit: Int
+
+    "The number of records to skip."
+    offset: Int
+  ): [Post!]!
+  kind: String
+}
+
+input MediaItemFilterAlt {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input MediaItemFilterAudience {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+}
+
+input MediaItemFilterByteSize {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
+}
+
+input MediaItemFilterCaption {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input MediaItemFilterContentType {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input MediaItemFilterDecorative {
+  isNil: Boolean
+  eq: Boolean
+  notEq: Boolean
+  in: [Boolean!]
+  lessThan: Boolean
+  greaterThan: Boolean
+  lessThanOrEqual: Boolean
+  greaterThanOrEqual: Boolean
+  isDistinctFrom: Boolean
+  isNotDistinctFrom: Boolean
+}
+
+input MediaItemFilterDownloadCount {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int!]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
+}
+
+input MediaItemFilterDurationSeconds {
+  isNil: Boolean
+  eq: Float
+  notEq: Float
+  in: [Float]
+  lessThan: Float
+  greaterThan: Float
+  lessThanOrEqual: Float
+  greaterThanOrEqual: Float
+  isDistinctFrom: Float
+  isNotDistinctFrom: Float
+}
+
+input MediaItemFilterFilename {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input MediaItemFilterFocalX {
+  isNil: Boolean
+  eq: Float
+  notEq: Float
+  in: [Float]
+  lessThan: Float
+  greaterThan: Float
+  lessThanOrEqual: Float
+  greaterThanOrEqual: Float
+  isDistinctFrom: Float
+  isNotDistinctFrom: Float
+}
+
+input MediaItemFilterFocalY {
+  isNil: Boolean
+  eq: Float
+  notEq: Float
+  in: [Float]
+  lessThan: Float
+  greaterThan: Float
+  lessThanOrEqual: Float
+  greaterThanOrEqual: Float
+  isDistinctFrom: Float
+  isNotDistinctFrom: Float
+}
+
+input MediaItemFilterHeight {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
+}
+
+input MediaItemFilterId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID!]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input MediaItemFilterInput {
+  and: [MediaItemFilterInput!]
+  or: [MediaItemFilterInput!]
+  not: [MediaItemFilterInput!]
+  id: MediaItemFilterId
+  filename: MediaItemFilterFilename
+  contentType: MediaItemFilterContentType
+  byteSize: MediaItemFilterByteSize
+  width: MediaItemFilterWidth
+  height: MediaItemFilterHeight
+  durationSeconds: MediaItemFilterDurationSeconds
+  variants: MediaItemFilterVariants
+  alt: MediaItemFilterAlt
+  caption: MediaItemFilterCaption
+  decorative: MediaItemFilterDecorative
+  url: MediaItemFilterUrl
+  focalX: MediaItemFilterFocalX
+  focalY: MediaItemFilterFocalY
+  audience: MediaItemFilterAudience
+  downloadCount: MediaItemFilterDownloadCount
+  uploadedById: MediaItemFilterUploadedById
+  tags: TagFilterInput
+  featuredPages: PageFilterInput
+  featuredPosts: PostFilterInput
+  kind: MediaItemFilterKind
+}
+
+input MediaItemFilterKind {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+}
+
+input MediaItemFilterUploadedById {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input MediaItemFilterUrl {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input MediaItemFilterVariants {
+  isNil: Boolean
+  eq: JsonString
+  notEq: JsonString
+  in: [JsonString]
+  lessThan: JsonString
+  greaterThan: JsonString
+  lessThanOrEqual: JsonString
+  greaterThanOrEqual: JsonString
+  isDistinctFrom: JsonString
+  isNotDistinctFrom: JsonString
+}
+
+input MediaItemFilterWidth {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
+}
+
+enum MediaItemSortField {
+  ID
+  FILENAME
+  CONTENT_TYPE
+  BYTE_SIZE
+  WIDTH
+  HEIGHT
+  DURATION_SECONDS
+  VARIANTS
+  ALT
+  CAPTION
+  DECORATIVE
+  URL
+  FOCAL_X
+  FOCAL_Y
+  AUDIENCE
+  DOWNLOAD_COUNT
+  UPLOADED_BY_ID
+  KIND
+}
+
+input MediaItemSortInput {
+  order: SortOrder
+  field: MediaItemSortField!
+}
+
+"A resolved navigation menu (#466)."
+type Menu {
+  key: String!
+  name: String!
+  locale: String!
+  items: [MenuNode!]!
+}
+
+"""
+A resolved navigation item (#466): the label, the **live** URL its stored
+reference currently points at, and its children.
+"""
+type MenuNode {
+  id: ID!
+
+  label: String!
+
+  "nil for a heading (`link_type: NONE`) — everything else carries one."
+  url: String
+
+  linkType: String!
+
+  openInNewTab: Boolean!
+
+  children: [MenuNode!]!
+}
+
+"An error generated by a failed mutation"
+type MutationError {
+  "The human readable error message"
+  message: String
+
+  "A shorter error message, with vars not replaced"
+  shortMessage: String
+
+  "Replacements for the short message"
+  vars: Json
+
+  "An error code for the given error"
+  code: String
+
+  "The field or fields that produced the error"
+  fields: [String!]
+
+  "The path to the field that produced the error"
+  path: [String!]
+}
+
+type Page {
+  id: ID!
+  title: String!
+  slug: String!
+  seoTitle: String
+  seoDescription: String
+  seoKeywords: String
+  pathAlias: String
+  seoImage: String
+  canonicalUrl: String
+  locale: String
+  audience: String!
+  customFields: JsonString!
+  publishedAt: DateTime
+  scheduledAt: DateTime
+  unpublishAt: DateTime
+  expiryAction: String!
+  reviewAfterDays: Int
+  lastReviewedAt: DateTime
+  insertedAt: DateTime!
+  updatedAt: DateTime!
+  state: String!
+  authorId: ID
+  categoryId: ID
+  featuredImageId: ID
+  category: Category
+  featuredImage: MediaItem
+  tags(
+    "How to sort the records in the response"
+    sort: [TagSortInput]
+
+    "A filter to limit the results"
+    filter: TagFilterInput
+
+    "The number of records to return."
+    limit: Int
+
+    "The number of records to skip."
+    offset: Int
+  ): [Tag!]!
+  relatedPages(
+    "How to sort the records in the response"
+    sort: [PageSortInput]
+
+    "A filter to limit the results"
+    filter: PageFilterInput
+
+    customFilter: JsonString
+
+    customSort: String
+
+    "The number of records to return."
+    limit: Int
+
+    "The number of records to skip."
+    offset: Int
+  ): [Page!]!
+  published: Boolean
+  effectiveReviewAfterDays: Int
+  dueAt: DateTime
+  health: String
+  wordCount: Int
+  readingTimeMinutes: Int
+  path: String
+  effectiveSeoTitle: String
+  effectiveSeoDescription: String
+  relatedLinks: [JsonString!]
+  blockIds: [JsonString!]
+  highlight(locale: String!, query: String!): String
+}
+
+input PageFilterAudience {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+}
+
+input PageFilterAuthorId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input PageFilterCanonicalUrl {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PageFilterCategoryId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input PageFilterCustomFields {
+  isNil: Boolean
+  eq: JsonString
+  notEq: JsonString
+  in: [JsonString!]
+  lessThan: JsonString
+  greaterThan: JsonString
+  lessThanOrEqual: JsonString
+  greaterThanOrEqual: JsonString
+  isDistinctFrom: JsonString
+  isNotDistinctFrom: JsonString
+}
+
+input PageFilterDueAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime!]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input PageFilterEffectiveReviewAfterDays {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int!]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
+}
+
+input PageFilterExpiryAction {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+}
+
+input PageFilterFeaturedImageId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input PageFilterHealth {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+}
+
+input PageFilterHighlight {
+  input: PageHighlightFieldInput
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PageFilterId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID!]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input PageFilterInput {
+  and: [PageFilterInput!]
+  or: [PageFilterInput!]
+  not: [PageFilterInput!]
+  id: PageFilterId
+  title: PageFilterTitle
+  slug: PageFilterSlug
+  seoTitle: PageFilterSeoTitle
+  seoDescription: PageFilterSeoDescription
+  seoKeywords: PageFilterSeoKeywords
+  pathAlias: PageFilterPathAlias
+  seoImage: PageFilterSeoImage
+  canonicalUrl: PageFilterCanonicalUrl
+  locale: PageFilterLocale
+  audience: PageFilterAudience
+  customFields: PageFilterCustomFields
+  publishedAt: PageFilterPublishedAt
+  scheduledAt: PageFilterScheduledAt
+  unpublishAt: PageFilterUnpublishAt
+  expiryAction: PageFilterExpiryAction
+  reviewAfterDays: PageFilterReviewAfterDays
+  lastReviewedAt: PageFilterLastReviewedAt
+  insertedAt: PageFilterInsertedAt
+  updatedAt: PageFilterUpdatedAt
+  state: PageFilterState
+  authorId: PageFilterAuthorId
+  categoryId: PageFilterCategoryId
+  featuredImageId: PageFilterFeaturedImageId
+  category: CategoryFilterInput
+  featuredImage: MediaItemFilterInput
+  tags: TagFilterInput
+  relatedPages: PageFilterInput
+  published: PageFilterPublished
+  effectiveReviewAfterDays: PageFilterEffectiveReviewAfterDays
+  dueAt: PageFilterDueAt
+  health: PageFilterHealth
+  highlight: PageFilterHighlight
+}
+
+input PageFilterInsertedAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime!]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input PageFilterLastReviewedAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input PageFilterLocale {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PageFilterPathAlias {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PageFilterPublished {
+  isNil: Boolean
+  eq: Boolean
+  notEq: Boolean
+  in: [Boolean!]
+  lessThan: Boolean
+  greaterThan: Boolean
+  lessThanOrEqual: Boolean
+  greaterThanOrEqual: Boolean
+  isDistinctFrom: Boolean
+  isNotDistinctFrom: Boolean
+}
+
+input PageFilterPublishedAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input PageFilterReviewAfterDays {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
+}
+
+input PageFilterScheduledAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input PageFilterSeoDescription {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PageFilterSeoImage {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PageFilterSeoKeywords {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PageFilterSeoTitle {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PageFilterSlug {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PageFilterState {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+}
+
+input PageFilterTitle {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PageFilterUnpublishAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input PageFilterUpdatedAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime!]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input PageHighlightFieldInput {
+  locale: String!
+  query: String!
+}
+
+"A page of :entry"
+type PageOfEntry {
+  "Whether or not there is a next page"
+  hasNextPage: Boolean!
+
+  "Whether or not there is a previous page"
+  hasPreviousPage: Boolean!
+
+  "The number of the current page"
+  pageNumber: Int!
+
+  "The number of the last page"
+  lastPage: Int!
+
+  "The number of records per page"
+  limit: Int!
+
+  "Total count on all pages"
+  count: Int
+
+  "The records contained in the page"
+  results: [Entry!]
+}
+
+"A page of :page"
+type PageOfPage {
+  "Whether or not there is a next page"
+  hasNextPage: Boolean!
+
+  "Whether or not there is a previous page"
+  hasPreviousPage: Boolean!
+
+  "The number of the current page"
+  pageNumber: Int!
+
+  "The number of the last page"
+  lastPage: Int!
+
+  "The number of records per page"
+  limit: Int!
+
+  "Total count on all pages"
+  count: Int
+
+  "The records contained in the page"
+  results: [Page!]
+}
+
+"A page of :post"
+type PageOfPost {
+  "Whether or not there is a next page"
+  hasNextPage: Boolean!
+
+  "Whether or not there is a previous page"
+  hasPreviousPage: Boolean!
+
+  "The number of the current page"
+  pageNumber: Int!
+
+  "The number of the last page"
+  lastPage: Int!
+
+  "The number of records per page"
+  limit: Int!
+
+  "Total count on all pages"
+  count: Int
+
+  "The records contained in the page"
+  results: [Post!]
+}
+
+enum PageSortField {
+  ID
+  TITLE
+  SLUG
+  SEO_TITLE
+  SEO_DESCRIPTION
+  SEO_KEYWORDS
+  PATH_ALIAS
+  SEO_IMAGE
+  CANONICAL_URL
+  LOCALE
+  AUDIENCE
+  CUSTOM_FIELDS
+  PUBLISHED_AT
+  SCHEDULED_AT
+  UNPUBLISH_AT
+  EXPIRY_ACTION
+  REVIEW_AFTER_DAYS
+  LAST_REVIEWED_AT
+  INSERTED_AT
+  UPDATED_AT
+  STATE
+  AUTHOR_ID
+  CATEGORY_ID
+  FEATURED_IMAGE_ID
+  PUBLISHED
+  EFFECTIVE_REVIEW_AFTER_DAYS
+  DUE_AT
+  HEALTH
+  HIGHLIGHT
+}
+
+input PageSortInput {
+  order: SortOrder
+  field: PageSortField!
+  highlightInput: PageHighlightFieldInput
+}
+
+"An index entry of the historical collection view (#338)."
+type PointInTimeEntry {
+  slug: String!
+  title: String
+  publishedAt: DateTime!
+}
+
+type Post {
+  id: ID!
+  title: String!
+  slug: String!
+  excerpt: String
+  seoTitle: String
+  seoDescription: String
+  seoKeywords: String
+  pathAlias: String
+  seoImage: String
+  canonicalUrl: String
+  locale: String
+  audience: String!
+  customFields: JsonString!
+  publishedAt: DateTime
+  scheduledAt: DateTime
+  unpublishAt: DateTime
+  expiryAction: String!
+  reviewAfterDays: Int
+  lastReviewedAt: DateTime
+  insertedAt: DateTime!
+  updatedAt: DateTime!
+  state: String!
+  authorId: ID
+  categoryId: ID
+  featuredImageId: ID
+  category: Category
+  featuredImage: MediaItem
+  tags(
+    "How to sort the records in the response"
+    sort: [TagSortInput]
+
+    "A filter to limit the results"
+    filter: TagFilterInput
+
+    "The number of records to return."
+    limit: Int
+
+    "The number of records to skip."
+    offset: Int
+  ): [Tag!]!
+  relatedPosts(
+    "How to sort the records in the response"
+    sort: [PostSortInput]
+
+    "A filter to limit the results"
+    filter: PostFilterInput
+
+    customFilter: JsonString
+
+    customSort: String
+
+    "The number of records to return."
+    limit: Int
+
+    "The number of records to skip."
+    offset: Int
+  ): [Post!]!
+  published: Boolean
+  effectiveReviewAfterDays: Int
+  dueAt: DateTime
+  health: String
+  wordCount: Int
+  readingTimeMinutes: Int
+  path: String
+  effectiveSeoTitle: String
+  effectiveSeoDescription: String
+  relatedLinks: [JsonString!]
+  blockIds: [JsonString!]
+  highlight(locale: String!, query: String!): String
+}
+
+input PostFilterAudience {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+}
+
+input PostFilterAuthorId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input PostFilterCanonicalUrl {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PostFilterCategoryId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input PostFilterCustomFields {
+  isNil: Boolean
+  eq: JsonString
+  notEq: JsonString
+  in: [JsonString!]
+  lessThan: JsonString
+  greaterThan: JsonString
+  lessThanOrEqual: JsonString
+  greaterThanOrEqual: JsonString
+  isDistinctFrom: JsonString
+  isNotDistinctFrom: JsonString
+}
+
+input PostFilterDueAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime!]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input PostFilterEffectiveReviewAfterDays {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int!]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
+}
+
+input PostFilterExcerpt {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PostFilterExpiryAction {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+}
+
+input PostFilterFeaturedImageId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input PostFilterHealth {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+}
+
+input PostFilterHighlight {
+  input: PostHighlightFieldInput
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PostFilterId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID!]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input PostFilterInput {
+  and: [PostFilterInput!]
+  or: [PostFilterInput!]
+  not: [PostFilterInput!]
+  id: PostFilterId
+  title: PostFilterTitle
+  slug: PostFilterSlug
+  excerpt: PostFilterExcerpt
+  seoTitle: PostFilterSeoTitle
+  seoDescription: PostFilterSeoDescription
+  seoKeywords: PostFilterSeoKeywords
+  pathAlias: PostFilterPathAlias
+  seoImage: PostFilterSeoImage
+  canonicalUrl: PostFilterCanonicalUrl
+  locale: PostFilterLocale
+  audience: PostFilterAudience
+  customFields: PostFilterCustomFields
+  publishedAt: PostFilterPublishedAt
+  scheduledAt: PostFilterScheduledAt
+  unpublishAt: PostFilterUnpublishAt
+  expiryAction: PostFilterExpiryAction
+  reviewAfterDays: PostFilterReviewAfterDays
+  lastReviewedAt: PostFilterLastReviewedAt
+  insertedAt: PostFilterInsertedAt
+  updatedAt: PostFilterUpdatedAt
+  state: PostFilterState
+  authorId: PostFilterAuthorId
+  categoryId: PostFilterCategoryId
+  featuredImageId: PostFilterFeaturedImageId
+  category: CategoryFilterInput
+  featuredImage: MediaItemFilterInput
+  tags: TagFilterInput
+  relatedPosts: PostFilterInput
+  published: PostFilterPublished
+  effectiveReviewAfterDays: PostFilterEffectiveReviewAfterDays
+  dueAt: PostFilterDueAt
+  health: PostFilterHealth
+  highlight: PostFilterHighlight
+}
+
+input PostFilterInsertedAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime!]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input PostFilterLastReviewedAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input PostFilterLocale {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PostFilterPathAlias {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PostFilterPublished {
+  isNil: Boolean
+  eq: Boolean
+  notEq: Boolean
+  in: [Boolean!]
+  lessThan: Boolean
+  greaterThan: Boolean
+  lessThanOrEqual: Boolean
+  greaterThanOrEqual: Boolean
+  isDistinctFrom: Boolean
+  isNotDistinctFrom: Boolean
+}
+
+input PostFilterPublishedAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input PostFilterReviewAfterDays {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
+}
+
+input PostFilterScheduledAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input PostFilterSeoDescription {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PostFilterSeoImage {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PostFilterSeoKeywords {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PostFilterSeoTitle {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PostFilterSlug {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PostFilterState {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+}
+
+input PostFilterTitle {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input PostFilterUnpublishAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input PostFilterUpdatedAt {
+  isNil: Boolean
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime!]
+  lessThan: DateTime
+  greaterThan: DateTime
+  lessThanOrEqual: DateTime
+  greaterThanOrEqual: DateTime
+  isDistinctFrom: DateTime
+  isNotDistinctFrom: DateTime
+}
+
+input PostHighlightFieldInput {
+  locale: String!
+  query: String!
+}
+
+enum PostSortField {
+  ID
+  TITLE
+  SLUG
+  EXCERPT
+  SEO_TITLE
+  SEO_DESCRIPTION
+  SEO_KEYWORDS
+  PATH_ALIAS
+  SEO_IMAGE
+  CANONICAL_URL
+  LOCALE
+  AUDIENCE
+  CUSTOM_FIELDS
+  PUBLISHED_AT
+  SCHEDULED_AT
+  UNPUBLISH_AT
+  EXPIRY_ACTION
+  REVIEW_AFTER_DAYS
+  LAST_REVIEWED_AT
+  INSERTED_AT
+  UPDATED_AT
+  STATE
+  AUTHOR_ID
+  CATEGORY_ID
+  FEATURED_IMAGE_ID
+  PUBLISHED
+  EFFECTIVE_REVIEW_AFTER_DAYS
+  DUE_AT
+  HEALTH
+  HIGHLIGHT
+}
+
+input PostSortInput {
+  order: SortOrder
+  field: PostSortField!
+  highlightInput: PostHighlightFieldInput
+}
+
+"The result of the :publish_entry mutation"
+type PublishEntryResult {
+  "The successful result of the mutation"
+  result: Entry
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+"The result of the :publish_page mutation"
+type PublishPageResult {
+  "The successful result of the mutation"
+  result: Page
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+"The result of the :publish_post mutation"
+type PublishPostResult {
+  "The successful result of the mutation"
+  result: Post
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+"The result of the :return_entry_to_draft mutation"
+type ReturnEntryToDraftResult {
+  "The successful result of the mutation"
+  result: Entry
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+"The result of the :return_page_to_draft mutation"
+type ReturnPageToDraftResult {
+  "The successful result of the mutation"
+  result: Page
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+"The result of the :return_post_to_draft mutation"
+type ReturnPostToDraftResult {
+  "The successful result of the mutation"
+  result: Post
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+type RootMutationType {
+  createPage(input: CreatePageInput!): CreatePageResult!
+  updatePage(id: ID!, customFilter: JsonString, customSort: String, input: UpdatePageInput): UpdatePageResult!
+  submitPageForReview(id: ID!, customFilter: JsonString, customSort: String): SubmitPageForReviewResult!
+  returnPageToDraft(id: ID!, customFilter: JsonString, customSort: String): ReturnPageToDraftResult!
+  publishPage(id: ID!, customFilter: JsonString, customSort: String): PublishPageResult!
+  unpublishPage(id: ID!, customFilter: JsonString, customSort: String): UnpublishPageResult!
+  deletePage(id: ID!, customFilter: JsonString, customSort: String, input: DeletePageInput!): DeletePageResult!
+  createPost(input: CreatePostInput!): CreatePostResult!
+  updatePost(id: ID!, customFilter: JsonString, customSort: String, input: UpdatePostInput): UpdatePostResult!
+  submitPostForReview(id: ID!, customFilter: JsonString, customSort: String): SubmitPostForReviewResult!
+  returnPostToDraft(id: ID!, customFilter: JsonString, customSort: String): ReturnPostToDraftResult!
+  publishPost(id: ID!, customFilter: JsonString, customSort: String): PublishPostResult!
+  unpublishPost(id: ID!, customFilter: JsonString, customSort: String): UnpublishPostResult!
+  deletePost(id: ID!, customFilter: JsonString, customSort: String, input: DeletePostInput!): DeletePostResult!
+  createEntry(input: CreateEntryInput!): CreateEntryResult!
+  updateEntry(id: ID!, customFilter: JsonString, customSort: String, input: UpdateEntryInput): UpdateEntryResult!
+  submitEntryForReview(id: ID!, customFilter: JsonString, customSort: String): SubmitEntryForReviewResult!
+  returnEntryToDraft(id: ID!, customFilter: JsonString, customSort: String): ReturnEntryToDraftResult!
+  publishEntry(id: ID!, customFilter: JsonString, customSort: String): PublishEntryResult!
+  unpublishEntry(id: ID!, customFilter: JsonString, customSort: String): UnpublishEntryResult!
+  deleteEntry(id: ID!, customFilter: JsonString, customSort: String, input: DeleteEntryInput!): DeleteEntryResult!
+}
+
+type RootQueryType {
+  "Lightweight GraphQL health probe"
+  health: String
+
+  """
+  One navigation menu by its stable key, resolved (#466) — the GraphQL twin of
+  `GET /api/menus/:key`.
+
+  Every `:content` item's `url` is the target's *current* published path, and
+  items pointing at unpublished content — or hidden by an editor — are omitted
+  along with their children. The stored rows are deliberately **not** on the
+  auto GraphQL surface: they carry references rather than URLs, and they carry
+  exactly what those rules exist to withhold.
+
+  `locale` defaults to the site's default locale. A menu that has no variant
+  in the requested locale returns `null` rather than falling back — serving
+  English navigation on a French page is a worse answer than serving none.
+  """
+  menu(key: String!, locale: String): Menu
+
+  """
+  The collection as of a date (#338): every document of `type` that was
+  published at that instant, reconstructed from version history — the
+  GraphQL twin of `GET /api/content/:type?as_of=`.
+  """
+  contentAsOf(type: String!, asOf: DateTime!, limit: Int): [PointInTimeEntry!]
+
+  pageBySlug(slug: String!, locale: String!): Page
+
+  pageTranslations(
+    "How to sort the records in the response"
+    sort: [PageSortInput]
+
+    "A filter to limit the results"
+    filter: PageFilterInput
+
+    slug: String!
+  ): [Page!]!
+
+  publishedPages(
+    "How to sort the records in the response"
+    sort: [PageSortInput]
+
+    "A filter to limit the results"
+    filter: PageFilterInput
+
+    "The number of records to return. Maximum 100"
+    limit: Int
+
+    "The number of records to skip."
+    offset: Int
+
+    customFilter: JsonString
+
+    customSort: String
+  ): PageOfPage
+
+  searchPages(
+    "How to sort the records in the response"
+    sort: [PageSortInput]
+
+    "A filter to limit the results"
+    filter: PageFilterInput
+
+    query: String!
+
+    locale: String
+
+    categoryId: ID
+
+    authorId: ID
+
+    state: String
+
+    tagIds: [ID!]
+
+    customFilter: JsonString
+  ): [Page!]!
+
+  semanticSearchPages(
+    "How to sort the records in the response"
+    sort: [PageSortInput]
+
+    "A filter to limit the results"
+    filter: PageFilterInput
+
+    query: String!
+
+    locale: String
+
+    categoryId: ID
+
+    authorId: ID
+
+    state: String
+
+    tagIds: [ID!]
+
+    customFilter: JsonString
+  ): [Page!]!
+
+  autocompletePages(
+    "How to sort the records in the response"
+    sort: [PageSortInput]
+
+    "A filter to limit the results"
+    filter: PageFilterInput
+
+    prefix: String!
+
+    locale: String
+  ): [Page!]!
+
+  searchPublishedPages(
+    "How to sort the records in the response"
+    sort: [PageSortInput]
+
+    "A filter to limit the results"
+    filter: PageFilterInput
+
+    query: String!
+
+    locale: String
+
+    categoryId: ID
+
+    authorId: ID
+
+    tagIds: [ID!]
+
+    customFilter: JsonString
+  ): [Page!]!
+
+  semanticSearchPublishedPages(
+    "How to sort the records in the response"
+    sort: [PageSortInput]
+
+    "A filter to limit the results"
+    filter: PageFilterInput
+
+    query: String!
+
+    locale: String
+
+    categoryId: ID
+
+    authorId: ID
+
+    tagIds: [ID!]
+
+    customFilter: JsonString
+  ): [Page!]!
+
+  autocompletePublishedPages(
+    "How to sort the records in the response"
+    sort: [PageSortInput]
+
+    "A filter to limit the results"
+    filter: PageFilterInput
+
+    prefix: String!
+
+    locale: String
+  ): [Page!]!
+
+  postBySlug(slug: String!, locale: String!): Post
+
+  postTranslations(
+    "How to sort the records in the response"
+    sort: [PostSortInput]
+
+    "A filter to limit the results"
+    filter: PostFilterInput
+
+    slug: String!
+  ): [Post!]!
+
+  publishedPosts(
+    "How to sort the records in the response"
+    sort: [PostSortInput]
+
+    "A filter to limit the results"
+    filter: PostFilterInput
+
+    "The number of records to return. Maximum 100"
+    limit: Int
+
+    "The number of records to skip."
+    offset: Int
+
+    customFilter: JsonString
+
+    customSort: String
+  ): PageOfPost
+
+  searchPosts(
+    "How to sort the records in the response"
+    sort: [PostSortInput]
+
+    "A filter to limit the results"
+    filter: PostFilterInput
+
+    query: String!
+
+    locale: String
+
+    categoryId: ID
+
+    authorId: ID
+
+    state: String
+
+    tagIds: [ID!]
+
+    customFilter: JsonString
+  ): [Post!]!
+
+  semanticSearchPosts(
+    "How to sort the records in the response"
+    sort: [PostSortInput]
+
+    "A filter to limit the results"
+    filter: PostFilterInput
+
+    query: String!
+
+    locale: String
+
+    categoryId: ID
+
+    authorId: ID
+
+    state: String
+
+    tagIds: [ID!]
+
+    customFilter: JsonString
+  ): [Post!]!
+
+  autocompletePosts(
+    "How to sort the records in the response"
+    sort: [PostSortInput]
+
+    "A filter to limit the results"
+    filter: PostFilterInput
+
+    prefix: String!
+
+    locale: String
+  ): [Post!]!
+
+  searchPublishedPosts(
+    "How to sort the records in the response"
+    sort: [PostSortInput]
+
+    "A filter to limit the results"
+    filter: PostFilterInput
+
+    query: String!
+
+    locale: String
+
+    categoryId: ID
+
+    authorId: ID
+
+    tagIds: [ID!]
+
+    customFilter: JsonString
+  ): [Post!]!
+
+  semanticSearchPublishedPosts(
+    "How to sort the records in the response"
+    sort: [PostSortInput]
+
+    "A filter to limit the results"
+    filter: PostFilterInput
+
+    query: String!
+
+    locale: String
+
+    categoryId: ID
+
+    authorId: ID
+
+    tagIds: [ID!]
+
+    customFilter: JsonString
+  ): [Post!]!
+
+  autocompletePublishedPosts(
+    "How to sort the records in the response"
+    sort: [PostSortInput]
+
+    "A filter to limit the results"
+    filter: PostFilterInput
+
+    prefix: String!
+
+    locale: String
+  ): [Post!]!
+
+  entryBySlug(slug: String!, locale: String!, typeDefinitionId: ID!): Entry
+
+  entryTranslations(
+    "How to sort the records in the response"
+    sort: [EntrySortInput]
+
+    "A filter to limit the results"
+    filter: EntryFilterInput
+
+    slug: String!
+
+    typeDefinitionId: ID!
+  ): [Entry!]!
+
+  publishedEntries(
+    "How to sort the records in the response"
+    sort: [EntrySortInput]
+
+    "A filter to limit the results"
+    filter: EntryFilterInput
+
+    "The number of records to return. Maximum 100"
+    limit: Int
+
+    "The number of records to skip."
+    offset: Int
+
+    customFilter: JsonString
+
+    customSort: String
+  ): PageOfEntry
+
+  searchEntries(
+    "How to sort the records in the response"
+    sort: [EntrySortInput]
+
+    "A filter to limit the results"
+    filter: EntryFilterInput
+
+    query: String!
+
+    locale: String
+
+    categoryId: ID
+
+    authorId: ID
+
+    state: String
+
+    tagIds: [ID!]
+
+    customFilter: JsonString
+  ): [Entry!]!
+
+  semanticSearchEntries(
+    "How to sort the records in the response"
+    sort: [EntrySortInput]
+
+    "A filter to limit the results"
+    filter: EntryFilterInput
+
+    query: String!
+
+    locale: String
+
+    categoryId: ID
+
+    authorId: ID
+
+    state: String
+
+    tagIds: [ID!]
+
+    customFilter: JsonString
+  ): [Entry!]!
+
+  autocompleteEntries(
+    "How to sort the records in the response"
+    sort: [EntrySortInput]
+
+    "A filter to limit the results"
+    filter: EntryFilterInput
+
+    prefix: String!
+
+    locale: String
+  ): [Entry!]!
+
+  searchPublishedEntries(
+    "How to sort the records in the response"
+    sort: [EntrySortInput]
+
+    "A filter to limit the results"
+    filter: EntryFilterInput
+
+    query: String!
+
+    locale: String
+
+    categoryId: ID
+
+    authorId: ID
+
+    tagIds: [ID!]
+
+    customFilter: JsonString
+  ): [Entry!]!
+
+  semanticSearchPublishedEntries(
+    "How to sort the records in the response"
+    sort: [EntrySortInput]
+
+    "A filter to limit the results"
+    filter: EntryFilterInput
+
+    query: String!
+
+    locale: String
+
+    categoryId: ID
+
+    authorId: ID
+
+    tagIds: [ID!]
+
+    customFilter: JsonString
+  ): [Entry!]!
+
+  autocompletePublishedEntries(
+    "How to sort the records in the response"
+    sort: [EntrySortInput]
+
+    "A filter to limit the results"
+    filter: EntryFilterInput
+
+    prefix: String!
+
+    locale: String
+  ): [Entry!]!
+
+  categories(
+    "How to sort the records in the response"
+    sort: [CategorySortInput]
+
+    "A filter to limit the results"
+    filter: CategoryFilterInput
+  ): [Category!]!
+
+  categoryBySlug(slug: String!): Category
+
+  tags(
+    "How to sort the records in the response"
+    sort: [TagSortInput]
+
+    "A filter to limit the results"
+    filter: TagFilterInput
+  ): [Tag!]!
+
+  tagBySlug(slug: String!): Tag
+
+  tagGroups(
+    "How to sort the records in the response"
+    sort: [TagGroupSortInput]
+
+    "A filter to limit the results"
+    filter: TagGroupFilterInput
+  ): [TagGroup!]!
+
+  tagGroupBySlug(slug: String!): TagGroup
+}
+
+type RootSubscriptionType {
+  pageChanged(
+    "A filter to limit the results"
+    filter: PageFilterInput
+
+    customFilter: JsonString
+
+    customSort: String
+  ): page_changed_result
+  postChanged(
+    "A filter to limit the results"
+    filter: PostFilterInput
+
+    customFilter: JsonString
+
+    customSort: String
+  ): post_changed_result
+  entryChanged(
+    "A filter to limit the results"
+    filter: EntryFilterInput
+
+    customFilter: JsonString
+
+    customSort: String
+  ): entry_changed_result
+}
+
+enum SortOrder {
+  DESC
+  DESC_NULLS_FIRST
+  DESC_NULLS_LAST
+  ASC
+  ASC_NULLS_FIRST
+  ASC_NULLS_LAST
+}
+
+"The result of the :submit_entry_for_review mutation"
+type SubmitEntryForReviewResult {
+  "The successful result of the mutation"
+  result: Entry
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+"The result of the :submit_page_for_review mutation"
+type SubmitPageForReviewResult {
+  "The successful result of the mutation"
+  result: Page
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+"The result of the :submit_post_for_review mutation"
+type SubmitPostForReviewResult {
+  "The successful result of the mutation"
+  result: Post
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+type Tag {
+  id: ID!
+  name: String!
+  slug: String!
+  tagGroupId: ID
+  tagGroup: TagGroup
+  pages(
+    "How to sort the records in the response"
+    sort: [PageSortInput]
+
+    "A filter to limit the results"
+    filter: PageFilterInput
+
+    customFilter: JsonString
+
+    customSort: String
+
+    "The number of records to return."
+    limit: Int
+
+    "The number of records to skip."
+    offset: Int
+  ): [Page!]!
+  posts(
+    "How to sort the records in the response"
+    sort: [PostSortInput]
+
+    "A filter to limit the results"
+    filter: PostFilterInput
+
+    customFilter: JsonString
+
+    customSort: String
+
+    "The number of records to return."
+    limit: Int
+
+    "The number of records to skip."
+    offset: Int
+  ): [Post!]!
+  mediaItems(
+    "How to sort the records in the response"
+    sort: [MediaItemSortInput]
+
+    "A filter to limit the results"
+    filter: MediaItemFilterInput
+
+    "The number of records to return."
+    limit: Int
+
+    "The number of records to skip."
+    offset: Int
+  ): [MediaItem!]!
+  pageCount: Int!
+  postCount: Int!
+  mediaCount: Int!
+}
+
+input TagFilterId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID!]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input TagFilterInput {
+  and: [TagFilterInput!]
+  or: [TagFilterInput!]
+  not: [TagFilterInput!]
+  id: TagFilterId
+  name: TagFilterName
+  slug: TagFilterSlug
+  tagGroupId: TagFilterTagGroupId
+  tagGroup: TagGroupFilterInput
+  pages: PageFilterInput
+  posts: PostFilterInput
+  mediaItems: MediaItemFilterInput
+  pageCount: TagFilterPageCount
+  postCount: TagFilterPostCount
+  mediaCount: TagFilterMediaCount
+}
+
+input TagFilterMediaCount {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
+}
+
+input TagFilterName {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input TagFilterPageCount {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
+}
+
+input TagFilterPostCount {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
+}
+
+input TagFilterSlug {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input TagFilterTagGroupId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+type TagGroup {
+  id: ID!
+  name: String!
+  slug: String!
+  description: String
+  position: Int!
+  contentTypes: [String!]!
+  tags(
+    "How to sort the records in the response"
+    sort: [TagSortInput]
+
+    "A filter to limit the results"
+    filter: TagFilterInput
+
+    "The number of records to return."
+    limit: Int
+
+    "The number of records to skip."
+    offset: Int
+  ): [Tag!]!
+  tagCount: Int!
+}
+
+input TagGroupFilterDescription {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input TagGroupFilterId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID!]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input TagGroupFilterInput {
+  and: [TagGroupFilterInput!]
+  or: [TagGroupFilterInput!]
+  not: [TagGroupFilterInput!]
+  id: TagGroupFilterId
+  name: TagGroupFilterName
+  slug: TagGroupFilterSlug
+  description: TagGroupFilterDescription
+  position: TagGroupFilterPosition
+  tags: TagFilterInput
+  tagCount: TagGroupFilterTagCount
+}
+
+input TagGroupFilterName {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input TagGroupFilterPosition {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int!]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
+}
+
+input TagGroupFilterSlug {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String!]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
+}
+
+input TagGroupFilterTagCount {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
+}
+
+enum TagGroupSortField {
+  ID
+  NAME
+  SLUG
+  DESCRIPTION
+  POSITION
+  TAG_COUNT
+}
+
+input TagGroupSortInput {
+  order: SortOrder
+  field: TagGroupSortField!
+}
+
+enum TagSortField {
+  ID
+  NAME
+  SLUG
+  TAG_GROUP_ID
+  PAGE_COUNT
+  POST_COUNT
+  MEDIA_COUNT
+}
+
+input TagSortInput {
+  order: SortOrder
+  field: TagSortField!
+}
+
+"The result of the :unpublish_entry mutation"
+type UnpublishEntryResult {
+  "The successful result of the mutation"
+  result: Entry
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+"The result of the :unpublish_page mutation"
+type UnpublishPageResult {
+  "The successful result of the mutation"
+  result: Page
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+"The result of the :unpublish_post mutation"
+type UnpublishPostResult {
+  "The successful result of the mutation"
+  result: Post
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+input UpdateEntryInput {
+  title: String
+  slug: String
+  excerpt: String
+  seoTitle: String
+  seoDescription: String
+  seoKeywords: String
+  pathAlias: String
+  seoImage: String
+  canonicalUrl: String
+  locale: String
+  audience: String
+  customFields: JsonString
+  scheduledAt: DateTime
+  unpublishAt: DateTime
+  expiryAction: String
+  reviewAfterDays: Int
+  typeDefinitionId: ID
+  categoryId: ID
+  featuredImageId: ID
+  tagIds: [ID!]
+  addTagIds: [ID!]
+  removeTagIds: [ID!]
+  relatedEntryIds: [ID!]
+  addRelatedEntryIds: [ID!]
+  removeRelatedEntryIds: [ID!]
+  blockTree: [JsonString!]
+  bodyMarkdown: String
+  accessPassword: String
+  removeAccessPassword: Boolean
+}
+
+"The result of the :update_entry mutation"
+type UpdateEntryResult {
+  "The successful result of the mutation"
+  result: Entry
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+input UpdatePageInput {
+  title: String
+  slug: String
+  seoTitle: String
+  seoDescription: String
+  seoKeywords: String
+  pathAlias: String
+  seoImage: String
+  canonicalUrl: String
+  locale: String
+  audience: String
+  customFields: JsonString
+  scheduledAt: DateTime
+  unpublishAt: DateTime
+  expiryAction: String
+  reviewAfterDays: Int
+  categoryId: ID
+  featuredImageId: ID
+  tagIds: [ID!]
+  addTagIds: [ID!]
+  removeTagIds: [ID!]
+  relatedPageIds: [ID!]
+  addRelatedPageIds: [ID!]
+  removeRelatedPageIds: [ID!]
+  blockTree: [JsonString!]
+  bodyMarkdown: String
+  accessPassword: String
+  removeAccessPassword: Boolean
+}
+
+"The result of the :update_page mutation"
+type UpdatePageResult {
+  "The successful result of the mutation"
+  result: Page
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+input UpdatePostInput {
+  title: String
+  slug: String
+  excerpt: String
+  seoTitle: String
+  seoDescription: String
+  seoKeywords: String
+  pathAlias: String
+  seoImage: String
+  canonicalUrl: String
+  locale: String
+  audience: String
+  customFields: JsonString
+  scheduledAt: DateTime
+  unpublishAt: DateTime
+  expiryAction: String
+  reviewAfterDays: Int
+  categoryId: ID
+  featuredImageId: ID
+  tagIds: [ID!]
+  addTagIds: [ID!]
+  removeTagIds: [ID!]
+  relatedPostIds: [ID!]
+  addRelatedPostIds: [ID!]
+  removeRelatedPostIds: [ID!]
+  blockTree: [JsonString!]
+  bodyMarkdown: String
+  accessPassword: String
+  removeAccessPassword: Boolean
+}
+
+"The result of the :update_post mutation"
+type UpdatePostResult {
+  "The successful result of the mutation"
+  result: Post
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+type entry_changed_result {
+  created: Entry
+  updated: Entry
+  destroyed: ID
+}
+
+type page_changed_result {
+  created: Page
+  updated: Page
+  destroyed: ID
+}
+
+type post_changed_result {
+  created: Post
+  updated: Post
+  destroyed: ID
+}

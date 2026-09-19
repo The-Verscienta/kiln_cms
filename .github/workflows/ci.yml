@@ -599,6 +599,34 @@ jobs:
       - name: Build documentation
         run: mix docs --warnings-as-errors
 
+      # `docs/api/openapi.json` and `docs/api/schema.graphql` are what client
+      # authors run codegen against — production answers neither to a
+      # stranger (#567) — so they must describe the code they ship beside.
+      # Here because they describe the :dev build (the test build compiles a
+      # fixture plugin's block types into both), which this job already has
+      # compiled, and because `mix docs` above publishes them. No database:
+      # the task compiles but never starts the application.
+      - name: Check the committed API specs match the code
+        run: |
+          mix kiln.api.specs --check || {
+            mkdir -p "$RUNNER_TEMP/api-specs"
+            cp -R docs/api/. "$RUNNER_TEMP/api-specs/committed"
+            mix kiln.api.specs
+            cp -R docs/api/. "$RUNNER_TEMP/api-specs/generated"
+            git diff --stat -- docs/api
+            exit 1
+          }
+
+      # The files the step above generated, when it failed: download and
+      # commit them if your toolchain renders them differently from CI's.
+      - name: Upload the regenerated API specs
+        if: ${{ failure() && hashFiles('docs/api/*') != '' }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: api-specs
+          path: ${{ runner.temp }}/api-specs
+          retention-days: 7
+
       # The kilncms.dev publisher reads its catalogue out of mix.exs by
       # evaluating `extras/0` and `groups_for_extras/0` (it never compiles the
       # app). A mix.exs change those cannot be evaluated from breaks publishing

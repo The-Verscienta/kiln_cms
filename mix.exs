@@ -190,6 +190,10 @@ defmodule KilnCMS.MixProject do
         "MapSet.t/1"
       ],
       extras: extras(),
+      # The committed API specs (`mix kiln.api.specs`) ship with the docs build,
+      # at `api/openapi.json` and `api/schema.graphql` beside the HTML, so a
+      # published docs site serves the spec of the version it documents.
+      assets: %{"docs/api" => "api"},
       groups_for_extras: groups_for_extras(),
       groups_for_modules: groups_for_modules()
     ]
@@ -560,6 +564,9 @@ defmodule KilnCMS.MixProject do
         # Lives in test/support (it calls excoveralls, an `only: :test` dep),
         # so it exists only in this env — see its moduledoc.
         "kiln.coverage.merge": :test,
+        # The committed API specs describe the :dev build; the test build adds
+        # a fixture plugin's block types — see the task's moduledoc.
+        "kiln.api.specs": :dev,
         "e2e.setup": :e2e,
         "e2e.reset": :e2e
       ]
