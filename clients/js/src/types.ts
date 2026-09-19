@@ -253,3 +253,72 @@ export interface AsOfIndexOptions extends RequestOptions {
   /** Default 100, max 500. */
   limit?: number;
 }
+
+// ── sync (delta) API ────────────────────────────────────────────────────────
+
+/**
+ * A document an anonymous reader can fetch right now, with its fired artifact
+ * (the same body `artifact()` returns for that surface). Replace your copy.
+ */
+export interface SyncUpsert<A = ArtifactDocument> {
+  op: "upsert";
+  type: string;
+  id: string;
+  slug: string;
+  locale: string;
+  published_at: string | null;
+  updated_at: string;
+  artifact: A;
+}
+
+/**
+ * A document you were given earlier that is no longer publicly readable —
+ * unpublished, archived, deleted, locked or moved to a members-only audience.
+ * Remove your copy. Carries no reason, slug or body, by design.
+ */
+export interface SyncDelete {
+  op: "delete";
+  type: string;
+  id: string;
+}
+
+export type SyncItem<A = ArtifactDocument> = SyncUpsert<A> | SyncDelete;
+
+/** One page of `GET /api/sync`. */
+export interface SyncPage<A = ArtifactDocument> {
+  items: SyncItem<A>[];
+  /** Opaque; follow it now while `has_more`, store it once it is false. */
+  cursor: string;
+  has_more: boolean;
+}
+
+export interface SyncStartOptions extends RequestOptions {
+  /** Restrict the sync to one content type (singular, e.g. `"post"`). */
+  type?: string;
+  /** Artifact surface embedded in each upsert (default `json`). */
+  surface?: Surface;
+  /** Items per page (default 100, max 500). */
+  limit?: number;
+}
+
+export interface SyncOptions extends SyncStartOptions {
+  /**
+   * Resume from a stored cursor. Omit to start with a full snapshot
+   * (`initial=true`). `type`/`surface` are fixed by the cursor.
+   */
+  cursor?: string;
+  /**
+   * A page holding a just-published document can answer 503 while its
+   * artifact compiles; `sync()` waits `retryDelayMs` (default 2000) and asks
+   * again, up to `retries` times per page (default 3).
+   */
+  retries?: number;
+  retryDelayMs?: number;
+}
+
+export interface SyncResult<A = ArtifactDocument> {
+  /** Every item across every page, in order — apply them in this order. */
+  items: SyncItem<A>[];
+  /** Store this and pass it as `cursor` next time. */
+  cursor: string;
+}

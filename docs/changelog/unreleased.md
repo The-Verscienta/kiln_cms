@@ -7,6 +7,29 @@ carries the reasoning.
 
 ## Added
 
+<a id="get-apisync-a-delta-api-that-sees-deletions"></a>
+
+- **`GET /api/sync`: a delta API that sees deletions.** A headless mirror —
+  static build, search index, edge store — can now take the site's public
+  content once (`?initial=true`) and then only what changed since a signed,
+  opaque cursor: upserts carrying the fired artifact, and tombstones for any
+  document that stopped being publicly readable (unpublished, archived,
+  soft-deleted, purged, moved to a members audience, passphrase-locked).
+  `filter[updated_at][gt]` could never see a document leave, so a mirror kept
+  locked and paywalled documents indefinitely. Visibility is anonymous
+  whoever calls — the resource policies with no actor plus the same rule as an
+  explicit filter — and a tombstone is an id and a type only, never a body,
+  slug or reason. Changes come from the PaperTrail version tables; a tombstone
+  may only name a document the sync API has already served (a new
+  `sync_exposures` table), so a draft, gated or locked document that was
+  never public never appears in a delta, not even as an id. Windows trail the
+  clock by a commit lag (`config :kiln_cms, KilnCMS.Firing.Sync,
+  commit_lag_seconds:`, default 10) so an in-flight transaction is not
+  skipped; delivery is at-least-once. The migration also adds an
+  `(org_id, version_inserted_at)` index to each content version table, built
+  in the migration's transaction. Both official clients wrap the loop
+  (`kiln.sync()`, `KilnClient.sync/1`); see `docs/api.md` → "Sync".
+
 <a id="one-click-deploy-templates-for-render-railway-flyio-and-digitalocean"></a>
 
 - **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**

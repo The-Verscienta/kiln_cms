@@ -27,5 +27,12 @@ export type {
   SchemaOptions,
   SearchOptions,
   Surface,
+  SyncDelete,
+  SyncItem,
+  SyncOptions,
+  SyncPage,
+  SyncResult,
+  SyncStartOptions,
+  SyncUpsert,
   WebArtifact,
 } from "./types.js";

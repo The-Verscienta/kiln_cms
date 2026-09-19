@@ -19,7 +19,7 @@ defaults below (published-only reads, `Req.Test`-stubbable) already encoded.
 [`@kiln-cms/client`](https://github.com/The-Verscienta/kiln_cms/blob/main/clients/js/README.md)
 — the same surfaces and safe defaults as the Elixir client (published-only
 reads, injectable `fetch`), plus
-preview tokens, `?as_of=` point-in-time reads, and a bundled `kiln-types`
+preview tokens, `?as_of=` point-in-time reads, the `/api/sync` delta loop, and a bundled `kiln-types`
 generator that emits per-site TypeScript types from `GET /api/schema` (dynamic
 content types and custom fields included). `examples/astro-blog` consumes it
 end to end.
@@ -29,6 +29,7 @@ end to end.
 | You want… | Use | Returns |
 |-----------|-----|---------|
 | The **rendered body** of a published page/post (blocks, HTML, JSON-LD) | Artifact: `GET /api/content/:type/:slug?surface=json\|json_ld\|web` | Fired artifact — the immutable, pre-compiled output (Kiln v2 `_type` block model) |
+| To **mirror** the public site — a build cache, search index or edge store — and learn what was **taken down** | Sync: `GET /api/sync?initial=true`, then `?cursor=` | Upserts (with the fired artifact) and id-only deletes since your last cursor — see [api.md → Sync](api.md#sync-delta-api) |
 | To **preview a specific draft** by share link | `GET /preview/:token` | The draft's raw, editable block tree (curated public fields), behind a signed 15-minute token |
 | **Filterable lists / metadata** (slug, title, SEO, dates, relationships), incl. drafts with a bearer token | JSON:API: `GET /api/json/...` | Resource attributes + relationship linkage. **No block body** (`blocks` is `public? false`) |
 | **Taxonomy** (categories, tags) | JSON:API `/api/json/categories`,`/tags` **or** GraphQL `categories`,`tags` | Name, slug, description |
@@ -153,6 +154,31 @@ Treat "what can this credential see" as part of its blast radius: a leaked
 editor-keyed delivery config exposes drafts, and an admin-keyed one exposes
 every paying member's content as well — not just rate-limit headroom.
 
+## Mirroring: sync instead of re-reading everything
+
+A static build or search index that polls JSON:API with
+`filter[updated_at][gt]=<last run>` picks up new and edited documents, but
+never a removal: an unpublished, archived, deleted, locked or members-only
+document just stops matching. It stays in your mirror indefinitely — and for a
+document someone *locked* or moved behind a paywall, that is a leak.
+
+`GET /api/sync` is built for this ([api.md → Sync](api.md#sync-delta-api)).
+Run `?initial=true` once, follow `cursor` while `has_more`, store the final
+cursor, and poll with it; every `delete` is a document to drop. In JS:
+
+```ts
+const { items, cursor } = await kiln.sync({ cursor: await load() });
+for (const item of items) {
+  if (item.op === "upsert") await mirror.put(item.id, item.artifact);
+  else await mirror.remove(item.id);
+}
+await save(cursor);
+```
+
+What sync reports is the **anonymous** view whatever key you configure, so it
+is safe to point a delivery key at it — and a delete never says why a document
+left, or names one you were never sent.
+
 ## Analytics: your fetches are what get counted
 
 A successful `GET /api/content/:type/:slug` records a view against that
@@ -177,7 +203,8 @@ than a census**:
   — the client is actively serving that document. Excluding it would make a
   CDN-fronted site report near-zero.
 * **Point-in-time reads do not count.** `?as_of=` is a history query, not a
-  delivery.
+  delivery. Neither does `GET /api/sync`: a mirror's fetch is replication, and
+  counting it would credit every document on every snapshot.
 
 The stored counters have no surface dimension, so headless and rendered views
 sum together in the dashboard. If you export metrics, the

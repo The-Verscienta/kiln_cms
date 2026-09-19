@@ -152,6 +152,8 @@ throwing.
 | `search(q, opts)`                    | `GET /api/search`                                   | hybrid; visibility follows the credential               |
 | `artifact(type, slug, opts)`         | `GET /api/content/:type/:slug`                      | `surface`, `locale`, `asOf`; 503 retried once           |
 | `contentAsOf(type, asOf, opts)`      | `GET /api/content/:type?as_of=`                     | what was published then                                 |
+| `sync(opts)`                         | `GET /api/sync`                                     | snapshot, then upserts + deletes since `cursor`         |
+| `syncPage(cursor, opts)`             | 〃                                                  | one page, for streaming                                 |
 | `preview(token)`                     | `GET /preview/:token`                               | one draft, signed 15-minute token                       |
 | `schema(opts)`                       | `GET /api/schema`                                   | the live delivery schema; feed it to `emitTypes`        |
 
@@ -162,6 +164,22 @@ are addressed by type name like compiled types
 `kiln.list("type-definitions", { filter: { name: "product" } })` — it needs an
 editor-or-above key, and `include: ["field_definitions"]` adds each type's
 custom-field schema.
+
+To mirror the site — a build cache or search index — and learn what was taken
+down as well as what changed, loop on `sync` and store its cursor:
+
+```ts
+const { items, cursor } = await kiln.sync({ cursor: stored }); // omit cursor the first time
+for (const item of items) {
+  if (item.op === "upsert") mirror.set(item.id, item.artifact);
+  else mirror.delete(item.id); // unpublished, archived, deleted, locked or gated
+}
+stored = cursor;
+```
+
+It always reads the anonymous view, whatever `apiKey` is set, and a `delete`
+never carries a body or a reason. A `400 invalid_cursor` means start over
+without `cursor`.
 
 ## Development
 

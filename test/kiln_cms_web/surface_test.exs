@@ -38,7 +38,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /api/content/:type/:slug /api/content/:type/:slug/related /api/content/:type/:slug/unlock
     /api/forms/:slug /api/json /api/json/swaggerui /api/locales /api/menus /api/menus/:key
     /api/provenance/:type/:slug /api/provenance/:type/:slug/verify /api/provenance/public-key
-    /api/resolve /api/schema /api/search /api/visual-editing/:type/:slug /auth
+    /api/resolve /api/schema /api/search /api/sync /api/visual-editing/:type/:slug /auth
     /auth/passkey/options /auth/passkey/verify /confirm_new_user/:token /gql /locale/:locale
     /magic_link/:token /manifest.webmanifest /mcp /media/:id/download /media/:id/stream
     /offline.html /password-reset/:token /preview/:token /preview/:token/live
