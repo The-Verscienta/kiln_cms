@@ -69,8 +69,6 @@ The things an operator would hit in their first months of running Kiln.
   production consumer, and yet [`docs/performance.md`](performance.md) calls
   them scrapeable. Pick a reporter, or say plainly there is none, and make
   both docs agree. Without this, 1.0's performance targets cannot be measured.
-- **The half-done usability issue (#1323).** The Overview still ships as a
-  bagua, with a "taiji · centre" tile.
 - **Docs accuracy pass (#1532).** Fix the claims found stale while writing this page:
   - the README status section names `v0.8.0` and calls #1453 "in flight"
   - it says there are no external contributors (#1445 merged one)

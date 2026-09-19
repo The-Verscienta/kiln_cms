@@ -54,7 +54,7 @@ three starts and serves.
 |----------|---------|-----------------|
 | `DATABASE_URL` | Postgres connection string, e.g. `ecto://USER:PASS@HOST/DATABASE`. Raises if missing. | [`config/runtime/prod/database.exs:11`](../config/runtime/prod/database.exs#L11) |
 | `SECRET_KEY_BASE` | Signs/encrypts session cookies and other secrets. Generate with `mix phx.gen.secret`. Raises if missing. | [`config/runtime/prod/web.exs:16`](../config/runtime/prod/web.exs#L16) |
-| `TOKEN_SIGNING_SECRET` | Signs authentication tokens (AshAuthentication). Raises if missing. | [`config/runtime/prod/web.exs:208`](../config/runtime/prod/web.exs#L208) |
+| `TOKEN_SIGNING_SECRET` | Signs authentication tokens (AshAuthentication). Raises if missing. | [`config/runtime/prod/web.exs:227`](../config/runtime/prod/web.exs#L227) |
 
 Those three are derived from the code rather than maintained by hand: they are
 the only raises a `:prod` evaluation of the runtime config reaches with nothing
@@ -109,13 +109,14 @@ optional: unset means the feature is off or keeps the default named in its row.
 | `PRESENTATION_PREVIEW_URL` | unset | The external front end's URL template for the Presentation console (`/editor/presentation/:type/:slug`, #355) — placeholders `{path}`/`{type}`/`{slug}`/`{locale}` (a bare base URL gets `{path}` appended). Unset ⇒ the console shows a setup hint. The front-end origin is derived from this for `postMessage` validation. See [visual-editing-bridge.md](visual-editing-bridge.md#the-presentation-console-side-by-side-editing) and [`KilnCMSWeb.Presentation`](../lib/kiln_cms_web/presentation.ex). | [`config/runtime/updates.exs:16`](../config/runtime/updates.exs#L16) |
 | `POOL_SIZE` | `10` | Ecto database connection pool size. See the pool-sizing formula in [`docs/performance.md`](performance.md). | [`config/runtime/prod/database.exs:51`](../config/runtime/prod/database.exs#L51) |
 | `ECTO_IPV6` | unset | Set to an on-spelling to connect to Postgres over IPv6. | [`config/runtime/prod/database.exs:17`](../config/runtime/prod/database.exs#L17) |
+| `PREVIOUS_SECRET_KEY_BASE` | unset | Set **only while rotating `SECRET_KEY_BASE`** (#1487): the old value, next to the new `SECRET_KEY_BASE`. `KilnCMS.Keys.Vault` then still opens the key material it stored under the old secret (the DKIM key, social credentials, billing secrets and the ActivityPub actor key), and every new write uses the new one. `mix kiln.vault.reencrypt` (or `KilnCMS.Release.reencrypt_vault/1`) uses it by default to move those values across. Unset it once a dry run reports nothing left to re-encrypt. This covers the vault only: session cookies, `Phoenix.Token`s and JWTs are still a hard cutover. A blank value, or one equal to `SECRET_KEY_BASE`, is ignored. See [secrets-rotation.md](secrets-rotation.md#secret_key_base). | [`config/runtime/prod/web.exs:223`](../config/runtime/prod/web.exs#L223) |
 | `TRUSTED_PROXIES` | unset | Comma-separated reverse-proxy CIDRs (e.g. `10.0.0.0/8,172.16.0.0/12`). When set, `KilnCMSWeb.Plugs.ClientIp` rewrites `remote_ip` from `X-Forwarded-For` for rate limiting. Leave unset **only** when the app is internet-facing directly, where `X-Forwarded-For` is spoofable. **If you run behind a proxy — Coolify, Traefik, nginx, a cloud load balancer — set this.** Unset there, every request carries the proxy's address, so every rate-limit bucket becomes one shared counter for the whole internet: one noisy client exhausts `:auth` (40/min) for everybody, and the per-IP brute-force protection on `/sign-in` stops being per-IP. Nothing errors, so the app logs a warning once per node the first time a forwarded request arrives while this is unset (#564). Note the CIDRs name **which hops to skip while walking the forwarded chain**, not which peers are allowed to forward — once this is set at all, `X-Forwarded-For` is honoured whatever address the request arrives from, so set it only on a deployment that really is behind a proxy. And **every private range is skipped regardless** (`10/8`, `172.16/12`, `192.168/16`, `127/8`, `::1`, `fc00::/7`), so listing those has no effect on the chain — its only job there is flipping the honour-the-header switch. If your proxy has a **public** address (a cloud load balancer), you must list *its* CIDR or the app will key every bucket on the balancer instead of the client. The same rule serves `/live` handshakes through `ClientIp.resolve/2`, so a socket keys the bucket on the same client its HTTP request would have (#715, #934). | [`config/runtime/prod/web.exs:81`](../config/runtime/prod/web.exs#L81) |
 | `DNS_CLUSTER_QUERY` | unset | DNS query for libcluster-style node discovery. | [`config/runtime/prod/web.exs:69`](../config/runtime/prod/web.exs#L69) |
 | `KILN_READING_TIME_WPM` | `230` | Words per minute behind the `reading_time_minutes` calculation and the `reading_time()` computed-field function (#492). A non-positive or unparseable value keeps the default and warns on stderr. 230 is a mid-range figure for adult silent reading of English prose; a single rate is an English assumption, so see the caveat in [headless-consumer-guide.md](headless-consumer-guide.md#word-count-and-reading-time). | [`config/runtime/delivery.exs:16`](../config/runtime/delivery.exs#L16) |
 | `CSP_IMG_SRC` | unset | Space-separated **extra** origins allowed in the browser CSP's `img-src` **and `media-src`** (#494) — needed when media serves from a CDN or media host on a different hostname than the site (e.g. `https://media.example.com`). Without it, `default-src 'self'` blocks a cross-host `<video>` as well as a cross-host `<img>`. See [media-pipeline.md](media-pipeline.md#production-storage-and-cdn). | [`config/runtime/console.exs:11`](../config/runtime/console.exs#L11) |
 
 > **Note on ports.** The public URL is hardcoded to port `443`/`https`
-> ([`config/runtime/prod/web.exs:195`](../config/runtime/prod/web.exs#L195)); the app itself listens
+> ([`config/runtime/prod/web.exs:203`](../config/runtime/prod/web.exs#L203)); the app itself listens
 > on `PORT`. The expected topology is a TLS-terminating reverse proxy on 443
 > forwarding to the app on `PORT`.
 
@@ -129,11 +130,18 @@ policies and the API key's scope still enforce every route), but it removes the
 guesswork.
 
 Disabled, both paths answer **404** rather than 403: a 403 confirms the route
-exists and is merely closed.
+exists and is merely closed. The one exception is a request carrying an **API
+key** (`Authorization: Bearer kiln_…`): the OpenAPI document answers it, and so
+does `GET /api/graphql/schema.graphql` where introspection is off, so a client
+author can run codegen against their own production site. The explorer never
+does. The stock build's specs are also committed, at
+[`docs/api/`](https://github.com/The-Verscienta/kiln_cms/tree/main/docs/api) —
+see [api.md](api.md#machine-readable-specs).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `API_DOCS_ENABLED` | on outside prod, **off in prod** | Serve `GET /api/json/open_api` and `GET /api/json/swaggerui`. Turn it on for a deployment that publishes a public API. | [`config/runtime/prod/web.exs:112`](../config/runtime/prod/web.exs#L112) |
+| `API_DOCS_ENABLED` | on outside prod, **off in prod** | Serve `GET /api/json/open_api` and `GET /api/json/swaggerui`. Turn it on for a deployment that publishes a public API. Off, the document still answers a request carrying an API key; the explorer does not. | [`config/runtime/prod/web.exs:112`](../config/runtime/prod/web.exs#L112) |
+| `GRAPHQL_INTROSPECTION_ENABLED` | on outside prod, **off in prod** | Answer GraphQL introspection (`__schema`/`__type`) on `/gql`, and serve `GET /api/graphql/schema.graphql` to anyone. Off, that SDL route still answers a request carrying an API key. | [`config/runtime/prod/web.exs:120`](../config/runtime/prod/web.exs#L120) |
 
 ### multi-tenancy (#336)
 
@@ -230,10 +238,10 @@ KilnCMS defaults. All four are read only under `:prod`; for dev or test, set
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `SITE_NAME` | `KilnCMS` | Instance name in the admin chrome, page titles and outbound email. Also the default provenance `signer` identity when `KilnCMS.Provenance`'s `:signer` is unset. | [`config/runtime/prod/web.exs:163`](../config/runtime/prod/web.exs#L163) |
-| `BRAND_LOGO_URL` | unset | Logo shown in the admin chrome and on branded error pages. If the host differs from the site's origin it must also be in `CSP_IMG_SRC`, or the browser blocks the image. | [`config/runtime/prod/web.exs:170`](../config/runtime/prod/web.exs#L170) |
-| `BRAND_FAVICON_URL` | unset | Favicon URL. Same `CSP_IMG_SRC` caveat as the logo. | [`config/runtime/prod/web.exs:177`](../config/runtime/prod/web.exs#L177) |
-| `BRAND_PRIMARY_COLOR` | unset | Hex colour driving the emitted OKLCH theme tokens — `#1d4ed8` or the `#1d4` shorthand, stored in canonical long lowercase form. Anything else is **ignored with a warning** rather than interpreted, since the value feeds contrast computation. Validated at boot alongside every other variable here, so a bad value reaches `Logger` and Sentry and not just container stdout (#1089); before that it was checked only at render time, where a bare `Logger.warning` never reaches Sentry. | [`config/runtime/prod/web.exs:130`](../config/runtime/prod/web.exs#L130) |
+| `SITE_NAME` | `KilnCMS` | Instance name in the admin chrome, page titles and outbound email. Also the default provenance `signer` identity when `KilnCMS.Provenance`'s `:signer` is unset. | [`config/runtime/prod/web.exs:171`](../config/runtime/prod/web.exs#L171) |
+| `BRAND_LOGO_URL` | unset | Logo shown in the admin chrome and on branded error pages. If the host differs from the site's origin it must also be in `CSP_IMG_SRC`, or the browser blocks the image. | [`config/runtime/prod/web.exs:178`](../config/runtime/prod/web.exs#L178) |
+| `BRAND_FAVICON_URL` | unset | Favicon URL. Same `CSP_IMG_SRC` caveat as the logo. | [`config/runtime/prod/web.exs:185`](../config/runtime/prod/web.exs#L185) |
+| `BRAND_PRIMARY_COLOR` | unset | Hex colour driving the emitted OKLCH theme tokens — `#1d4ed8` or the `#1d4` shorthand, stored in canonical long lowercase form. Anything else is **ignored with a warning** rather than interpreted, since the value feeds contrast computation. Validated at boot alongside every other variable here, so a bad value reaches `Logger` and Sentry and not just container stdout (#1089); before that it was checked only at render time, where a bare `Logger.warning` never reaches Sentry. | [`config/runtime/prod/web.exs:138`](../config/runtime/prod/web.exs#L138) |
 
 ### Unsplash (media library)
 
@@ -332,6 +340,14 @@ implies `MAIL_MODE=smtp`). Direct mode is configured and verified from
 [`docs/direct-email-delivery.md`](direct-email-delivery.md) for the DNS
 requirements (SPF/DKIM/DMARC/PTR) and the big caveat: many cloud hosts block
 outbound port 25.
+
+These variables set the **deployment's** relay. A site admin can send their
+site's mail through their own SMTP relay and From address instead, from
+`/editor/site-mail` (#1322), with no redeploy. That covers newsletters, form
+mail, notifications and automation emails. The relay set here stays in use for
+account mail (sign-in links, password resets), and for every site that hasn't
+set its own. A site's relay host may not be a private address. An internal
+relay belongs here, where the operator sets it.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
@@ -493,9 +509,9 @@ capture is a no-op. See [`docs/observability.md`](observability.md).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `SENTRY_DSN` | unset | Sentry DSN (`https://<publickey>@o0.ingest.sentry.io/0`, or your own host when self-hosting). Enables error reporting when set. **Where to get it:** the Sentry project's Settings → Client Keys (DSN). It is not confidential in the strict sense — browser SDKs ship it publicly — but it does authorize writes to the project, so handle it like a credential anyway. | [`config/runtime/observability.exs:13`](../config/runtime/observability.exs#L13) |
-| `SENTRY_ENV` | `config_env()` | Environment name tag for Sentry events. | [`config/runtime/observability.exs:16`](../config/runtime/observability.exs#L16) |
-| `RELEASE_VSN` | unset | Release version tag (set automatically by the release runtime) to pin regressions to a deploy. | [`config/runtime/observability.exs:19`](../config/runtime/observability.exs#L19) |
+| `SENTRY_DSN` | unset | Sentry DSN (`https://<publickey>@o0.ingest.sentry.io/0`, or your own host when self-hosting). Enables error reporting when set. **Where to get it:** the Sentry project's Settings → Client Keys (DSN). It is not confidential in the strict sense — browser SDKs ship it publicly — but it does authorize writes to the project, so handle it like a credential anyway. | [`config/runtime/observability.exs:15`](../config/runtime/observability.exs#L15) |
+| `SENTRY_ENV` | `config_env()` | Environment name tag for Sentry events. | [`config/runtime/observability.exs:18`](../config/runtime/observability.exs#L18) |
+| `RELEASE_VSN` | unset | Release version tag (set automatically by the release runtime) to pin regressions to a deploy. | [`config/runtime/observability.exs:21`](../config/runtime/observability.exs#L21) |
 
 ### distributed tracing (OpenTelemetry)
 
@@ -505,10 +521,25 @@ Enabled only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, which flips the
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | OTLP collector endpoint — anything that speaks OTLP: a local `otel-collector`, Grafana Alloy, Jaeger, or a vendor's ingest URL. Enables tracing when set. Port 4318 is the conventional HTTP port, 4317 gRPC; match it to the protocol below. | [`config/runtime/observability.exs:29`](../config/runtime/observability.exs#L29) |
-| `OTEL_SERVICE_NAME` | `kiln_cms` | Service name attached to spans. Free-form — this is how the deployment is labelled in the tracing UI. | [`config/runtime/observability.exs:35`](../config/runtime/observability.exs#L35) |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http_protobuf` | OTLP protocol: `http_protobuf`, `http_json` or `grpc`. | [`config/runtime/observability.exs:39`](../config/runtime/observability.exs#L39) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | OTLP collector endpoint — anything that speaks OTLP: a local `otel-collector`, Grafana Alloy, Jaeger, or a vendor's ingest URL. Enables tracing when set. Port 4318 is the conventional HTTP port, 4317 gRPC; match it to the protocol below. | [`config/runtime/observability.exs:31`](../config/runtime/observability.exs#L31) |
+| `OTEL_SERVICE_NAME` | `kiln_cms` | Service name attached to spans. Free-form — this is how the deployment is labelled in the tracing UI. | [`config/runtime/observability.exs:37`](../config/runtime/observability.exs#L37) |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http_protobuf` | OTLP protocol: `http_protobuf`, `http_json` or `grpc`. | [`config/runtime/observability.exs:41`](../config/runtime/observability.exs#L41) |
 | `OTEL_EXPORTER_OTLP_HEADERS` | unset | Standard OTLP headers, as comma-separated `key=value` pairs (`api-key=abc123,x-tenant=acme`) — usually the ingest credential from whichever vendor `OTEL_EXPORTER_OTLP_ENDPOINT` points at. Honored by the exporter library, not by Kiln. | OpenTelemetry exporter (standard `OTEL_*`) |
+
+### metrics exporter (Prometheus, #1362)
+
+Off by default. When `KILN_METRICS_ENABLED` is on, `GET /metrics` is served in
+the Prometheus text format on a listener of its own. It is never a route on the
+public endpoint. With the exporter off, no port is opened and nothing records
+the metrics. See [`docs/observability.md`](observability.md) for the exposure
+options and a scrape config.
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `KILN_METRICS_ENABLED` | `false` | Starts the metrics reporter and its `/metrics` listener. Unrecognized values keep it off and warn. | [`config/runtime/observability.exs:51`](../config/runtime/observability.exs#L51) |
+| `KILN_METRICS_PORT` | `9568` | Port for the `/metrics` listener. Must differ from `PORT`. An unparseable value keeps the default and warns. A port above 65535 fails the boot, loudly. | [`config/runtime/observability.exs:57`](../config/runtime/observability.exs#L57) |
+| `KILN_METRICS_BIND` | `loopback` | `loopback` (127.0.0.1) suits an agent on the same host or pod. `all` binds every interface, for a scraper on a private network; don't publish the port. Other values, including an IP address, keep `loopback` and warn. | [`config/runtime/observability.exs:66`](../config/runtime/observability.exs#L66) |
+| `KILN_METRICS_TOKEN` | unset | When set, a scrape must send `Authorization: Bearer <token>`. It is compared in constant time, and anything else gets `401`. A blank value counts as unset. Recommended with `KILN_METRICS_BIND=all`; without a token, that combination logs a warning at boot. | [`config/runtime/observability.exs:72`](../config/runtime/observability.exs#L72) |
 
 ### tamper-evident history & content signing (#356, #340)
 
@@ -694,7 +725,7 @@ production.
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
 | `MIX_TEST_PARTITION` | unset | Suffix appended to the test database name for partitioned test runs — also what keeps two concurrent worktrees off the same database. | [`config/runtime.exs:211`](../config/runtime.exs#L211) |
-| `KILN_STRICT_TEST` | unset | Set to an on-spelling (`true`/`1`/`yes`/`on`) to select the strict-tenancy CI leg: `:strict_tenancy` is flipped on so tenancy scoping compiles fail-closed, and the suite runs **only** the `strict_tenancy`-tagged tests. Uses the same spellings as every other flag in this document, via the standalone [`config/strict_test_flag.exs`](../config/strict_test_flag.exs) (#646) — it can't call `KilnCMS.Config.Env` directly because it's read in `config/test.exs`, which cannot call project modules. An unrecognized value stays non-strict **and warns on stderr**, like every other flag: without that the strict leg runs zero tests and exits 0, which is indistinguishable from never having invoked it. | [`config/test.exs:351`](../config/test.exs#L351) |
+| `KILN_STRICT_TEST` | unset | Set to an on-spelling (`true`/`1`/`yes`/`on`) to select the strict-tenancy CI leg: `:strict_tenancy` is flipped on so tenancy scoping compiles fail-closed, and the suite runs **only** the `strict_tenancy`-tagged tests. Uses the same spellings as every other flag in this document, via the standalone [`config/strict_test_flag.exs`](../config/strict_test_flag.exs) (#646) — it can't call `KilnCMS.Config.Env` directly because it's read in `config/test.exs`, which cannot call project modules. An unrecognized value stays non-strict **and warns on stderr**, like every other flag: without that the strict leg runs zero tests and exits 0, which is indistinguishable from never having invoked it. | [`config/test.exs:357`](../config/test.exs#L357) |
 | `KILN_ML` | unset | Set to an on-spelling (`true`/`1`/`yes`/`on`) to put the optional ML stack — Bumblebee, Nx and EXLA — into the dependency tree (#1321). Unset, `mix deps.get` fetches 102 MB instead of 773 MB and skips a one-time 110 MB XLA archive download, because semantic search ships disabled. Read in `mix.exs` (it decides `deps/0`) and in `config/dev.exs` / `config/test.exs` (which point Nx at `EXLA.Backend` only when it is on), so like `KILN_STRICT_TEST` it goes through a standalone snippet — [`config/ml_flag.exs`](../config/ml_flag.exs) — that cannot call `KilnCMS.Config.Env`. It is a **build-time** flag: it must be set for `mix deps.get` and `mix compile`, and exporting it afterwards changes nothing on its own. `KilnCMS.Search.ML.available?/0` reports what actually compiled, and `mix kiln.ml.note` prints it. An unrecognized value stays off **and warns on stderr**. | [`config/ml_flag.exs:37`](../config/ml_flag.exs#L37) |
 | `POSTGRES_USER` | `postgres` | E2E database user. | [`config/e2e.exs:28`](../config/e2e.exs#L28) |
 | `POSTGRES_PASSWORD` | `postgres` | E2E database password. | [`config/e2e.exs:29`](../config/e2e.exs#L29) |

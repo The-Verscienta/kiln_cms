@@ -22,7 +22,121 @@ carries the reasoning.
   `200` and `errors`, like any invalid document; the old plug answered `403`.
   `docs/headless-graphql-api.md` has a new section, "Query cost".
 
+## Upgrade notes
+
+<a id="rotating-secretkeybase-keeps-stored-keys-now-if-the-steps-run-in-order"></a>
+
+**Rotating `SECRET_KEY_BASE` keeps stored keys now, if the steps run in
+order.** Nothing needs doing on upgrade (#1487). The next time you rotate
+`SECRET_KEY_BASE`:
+
+1. Set `PREVIOUS_SECRET_KEY_BASE` to the old value next to the new
+   `SECRET_KEY_BASE`, and restart.
+2. Run `mix kiln.vault.reencrypt`. In a release, run
+   `bin/kiln_cms eval 'KilnCMS.Release.reencrypt_vault()'`.
+3. Once a `--dry-run` reports nothing left, unset `PREVIOUS_SECRET_KEY_BASE`.
+
+If you retire the old value before step 2, the DKIM key, social credentials,
+billing secrets and ActivityPub actor key are orphaned, exactly as before.
+Sessions are still signed out either way. See `docs/secrets-rotation.md`.
 ## Added
+
+<a id="the-official-sdks-write-speak-graphql-and-are-ready-to-publish"></a>
+
+- **The official SDKs write, speak GraphQL, and are ready to publish.**
+  `@kiln-cms/client` 0.2.0 and `kiln_client` 0.3.0 gain the JSON:API write
+  surface (#330) — `create`, `update`, the four routed workflow transitions
+  (`submit_for_review`, `return_to_draft`, `publish`, `unpublish`) behind one
+  generic `transition`, and the reversible soft-delete — each refusing
+  client-side, before any request, when no API key is configured. Both add a
+  minimal `graphql(query, variables)` helper for `/gql`, and typed errors that
+  map 401/403, 404, 400/422 (with field pointers), 409 (with the record's
+  current state), 429 (with `Retry-After`) and 5xx to distinct classes (JS) or
+  `:reason` atoms (Elixir); the Elixir read functions keep their existing
+  `{:http_status, …}` errors. A new `release-clients.yml` workflow publishes
+  either SDK from its own tag (`client-js-vX.Y.Z`, `kiln_client-vX.Y.Z`) —
+  version-checked, gated on an `npm`/`hex` environment, with npm provenance and
+  a build-provenance attestation. Nothing is published yet: the first release
+  needs the one-time registry setup described in each client's README.
+  ([#1568](https://github.com/The-Verscienta/kiln_cms/pull/1568))
+
+<a id="rotating-secretkeybase-no-longer-loses-database-stored-keys"></a>
+
+- **Rotating `SECRET_KEY_BASE` no longer loses database-stored keys.** (#1487)
+  `KilnCMS.Keys.Vault` now has a read-only dual-key window: with
+  `PREVIOUS_SECRET_KEY_BASE` set to the old value, it opens ciphertext under
+  either secret and writes only under the current one.
+  `mix kiln.vault.reencrypt` (`KilnCMS.Release.reencrypt_vault/1` in a
+  release) then moves every vault column across. It runs one transaction per
+  table, with rows locked. A second run changes nothing. `--dry-run` reports
+  without writing. A value that opens under neither secret is reported by id
+  and never overwritten, and the task then exits non-zero. The old secret is
+  read from an environment variable named with `--old-secret-key-base-env`,
+  never from argv.
+
+  The columns are found, not listed. Each has the new
+  `KilnCMS.Keys.Vault.Ciphertext` type, which is stored as `:binary`, so there
+  is no migration. A test fails if any other binary attribute is neither that
+  type nor explicitly accounted for. The read window covers the vault only.
+  Session cookies, `Phoenix.Token`s and JWTs remain a hard cutover. The runbook
+  (`docs/secrets-rotation.md`) and threat-model residual 12 are rewritten to
+  match.
+
+<a id="a-sites-activitypub-actor-can-be-re-keyed"></a>
+
+- **A site's ActivityPub actor can be re-keyed.** (#1487) Use
+  `mix kiln.federation rekey` or *Re-key* on `/editor/federation`. Both are
+  admin-only, through `SiteFederation`'s new `:rekey` action. The action
+  replaces both halves of the keypair and keeps the origin, username, actor id
+  and `keyId`, which is the identity remote servers hold. In the same
+  transaction it queues an actor `Update` to every deliverable follower
+  (`KilnCMS.Federation.ActorUpdateWorker`), carrying the new `publicKeyPem`.
+  The job becomes visible only at commit, so the `Update` cannot leave before
+  `/actor` serves the key that signs it. The key half of `MintIdentity` is now
+  a shared `MintKeypair` change, and the fan-out `AnnounceWorker` used is
+  shared as `KilnCMS.Federation.deliver_to_followers/4`. The confirmation says
+  plainly that some servers may keep the old key until they re-fetch the actor.
+
+<a id="a-site-can-send-its-mail-through-its-own-smtp-relay-set-from-the-console"></a>
+
+- **A site can send its mail through its own SMTP relay, set from the console.**
+  `/editor/site-mail` (under Configure → Integrations) lets a site admin set
+  the relay host, port, encryption, credentials and From address that site's
+  mail goes out through. No `SMTP_*` variables and no redeploy (#1322). It
+  covers newsletters and their confirmations, form notifications and
+  autoresponders, workflow, task and comment notifications, and automation
+  emails. Account mail (sign-in links, password resets, confirmations, sign-in
+  alerts) stays on the operator's relay, because accounts belong to the
+  deployment. The `SMTP_*` / `MAIL_MODE` variables are unchanged. They are the
+  relay for every site that hasn't set its own.
+
+  This is the first integration #1322 moves out of the environment, and it
+  sets the pattern for the rest:
+
+  - **Stored per site.** The row is per site (`KilnCMS.CMS.SiteMailRelay`, on
+    `KilnCMS.CMS.OrgSettings`), and one site's row never affects another.
+  - **Password encrypted.** It is stored with `KilnCMS.Keys.Vault` and never
+    shown again. A blank save keeps it. It has no env-var or file source, so a
+    site admin can't point it at `SECRET_KEY_BASE`.
+  - **Fails closed.** If the row can't be read, or its password can't be
+    decrypted, that site's mail is *held* and retried. It never falls back to
+    the operator's relay (`KilnCMS.Mail.SiteRelay`), and the page says when the
+    password needs re-entering.
+  - **Built from the row alone.** The connection takes nothing from the
+    operator's mailer config, so the operator's relay password can't end up in
+    a connection to a host a site chose.
+  - **SSRF-checked.** The relay host is refused if it is a private, loopback,
+    link-local or metadata address, at save and again at every connection. The
+    connection goes to the pinned address with gen_smtp's MX lookup off.
+    Certificates are always verified, and there is no unencrypted option.
+  - **Can't suppress addresses.** A hard reject through a site's relay cancels
+    that message but doesn't add the address to the instance-wide suppression
+    list, which would let one site block an address, including its password
+    resets, for every site. A site relay's outage doesn't raise the operator's
+    relay-unreachable alert.
+
+  `docs/secrets-rotation.md` lists the new encrypted column: rotating
+  `SECRET_KEY_BASE` means each site with its own relay re-enters the password.
 
 <a id="memberships-can-notify-other-systems-membershipactivated-and-membershipcanceled"></a>
 
@@ -35,7 +149,6 @@ carries the reasoning.
   retries and an `event_id` to dedupe on. The payload carries the member's
   email; `docs/data-flows.md` records the flow. Opt-in per endpoint.
   ([#334](https://github.com/The-Verscienta/kiln_cms/issues/334))
-
 <a id="one-click-deploy-templates-for-render-railway-flyio-and-digitalocean"></a>
 
 - **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**
@@ -63,6 +176,62 @@ carries the reasoning.
   write to. Ignored under S3.
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529))
 
+<a id="the-graphql-schema-and-the-openapi-document-are-committed-and-a-production-site"></a>
+
+- **The GraphQL schema and the OpenAPI document are committed, and a production
+  site hands its own to an API key.** `mix kiln.api.specs` writes
+  `docs/api/schema.graphql` and `docs/api/openapi.json`; CI fails when they fall
+  behind the code, and the docs build publishes them. Production still refuses
+  introspection and the public OpenAPI document (#567), but
+  `GET /api/graphql/schema.graphql` and `GET /api/json/open_api` now answer any
+  valid API key, so codegen can target a site's own schema, overlay types
+  included. `GRAPHQL_INTROSPECTION_ENABLED` turns introspection back on at
+  runtime. The OpenAPI description now covers the write routes, entries,
+  taxonomy and API keys (an `apiKeyAuth` scheme) instead of calling the API
+  read-oriented.
+  ([#1567](https://github.com/The-Verscienta/kiln_cms/pull/1567))
+
+<a id="an-opt-in-prometheus-endpoint-for-the-apps-metrics"></a>
+
+- **An opt-in Prometheus endpoint for the app's metrics.** Before this, nothing
+  in production recorded the metrics `KilnCMSWeb.Telemetry` defines: the
+  dashboard that shows them exists only in development, and no reporter was
+  installed. Set `KILN_METRICS_ENABLED=true` and a [Peep](https://hexdocs.pm/peep)
+  reporter serves `GET /metrics` on a listener of its own, never on the public
+  endpoint:
+  - it binds `127.0.0.1:9568` by default (`KILN_METRICS_PORT`)
+  - `KILN_METRICS_BIND=all` binds every interface, for a scraper on a private
+    network
+  - `KILN_METRICS_TOKEN` optionally requires a bearer token
+
+  Durations are now histograms rather than summaries, so p95 can be computed
+  from them. Tags are bounded: content types you define in the admin are
+  reported as `dynamic`. Off by default, so a stock install records nothing
+  and opens no port. Alerts that must reach every operator still go through
+  logs and Sentry. `docs/observability.md` and `docs/performance.md` now agree
+  on all of this, and `docs/performance.md` records a first headless-API p95
+  baseline of 2.7–7.4 ms, measured on a laptop.
+  ([#1362](https://github.com/The-Verscienta/kiln_cms/issues/1362))
+
+## Changed
+
+<a id="the-content-list-says-an-items-status-in-words-the-trigram-glyph-is-opt-in"></a>
+
+- **The content list says an item's status in words; the trigram glyph is
+  opt-in.** Each row used to carry an I-Ching trigram whose three lines meant
+  published, translated and scheduled, named in its tooltip as "li · fire" or
+  "kun · earth" — the last of the bagua theming, which the Overview had
+  already dropped, and a mark a new editor had to learn to decode. Rows now say
+  "Missing translations" when a slug group lacks a locale, and the schedule
+  line reads "Publishes Sep 22, 2026, 11:07 AM" (or "Unpublishes …") instead of
+  a bare date explained only by a hover title; the state badge already said the
+  rest. Anyone who
+  reads the glyph can turn it back on under Your settings → Content list
+  (`User.status_marks`, a new column that defaults every account, existing
+  ones included, to words). `docs/design-language.md` extends its "no internal
+  metaphors" rule to pictures.
+  ([#1323](https://github.com/The-Verscienta/kiln_cms/issues/1323))
+
 ## Changed
 
 <a id="the-dependency-audit-also-reads-hexs-own-advisory-feed"></a>
@@ -87,8 +256,39 @@ carries the reasoning.
   old count was graphemes, where one grapheme can carry any number of
   combining characters; a value that only passed because of that gap is now
   rejected with the same validation error as any other over-long string.
-
 ## Fixed
+
+<a id="a-delivery-that-fails-on-an-unreadable-signing-key-now-says-so"></a>
+
+- **A delivery that fails on an unreadable signing key now says so.** (#1487)
+  It used to claim that federation was not enabled.
+  `Federation.active_settings(org_id, require_key?: true)` returns
+  `:key_unreadable` for a site that is on but whose key the vault cannot open.
+  `DeliveryWorker` settles those deliveries with *"this site's signing key is
+  unreadable — was SECRET_KEY_BASE rotated without re-encrypting?"* and logs a
+  warning. `/editor/federation` and `mix kiln.federation status` now show
+  whether the key is readable.
+
+<a id="a-relay-refusing-the-operators-password-no-longer-suppresses-every-recipient"></a>
+
+- **A relay refusing the operator's password no longer suppresses every
+  recipient.** gen_smtp reports a failed AUTH (`auth_failed`), a missing TLS
+  stack and a 5xx to MAIL FROM as permanent failures, and mail delivery treated
+  every permanent failure as a hard bounce: it cancelled the job and put the
+  recipient on the instance-wide suppression list. A rotated `SMTP_PASSWORD`
+  therefore stopped mail, password resets included, to everyone the queue
+  tried, until an admin removed each address from `/editor/mail`. Now a reject
+  suppresses the recipient only when it arrives in the mail transaction with an
+  enhanced status saying the address is dead (`5.1.1`, `5.1.2`, `5.1.3`,
+  `5.1.6`, `5.1.10`, `5.2.1`). A permanent refusal of our own side (anything
+  while opening the session: banner, EHLO, STARTTLS, AUTH; or a sender or AUTH
+  reply: `5.1.7`, `5.1.8`, `5.7.8`, `530`, `535`, SPF/DKIM/DMARC `5.7.20` to
+  `5.7.26`) retries on the usual ~16h schedule and raises one aggregated alert
+  (`Logger.error`, a Sentry message and `[:kiln_cms, :mail, :relay_refused]`
+  telemetry, at most every 15 minutes), so the mail goes out once the relay is
+  fixed. Any other 5xx (a spam filter, a full mailbox, a bare `550`) still
+  cancels the message but no longer suppresses the address. Addresses a relay
+  failure already suppressed stay on the list: clear them from `/editor/mail`.
 
 <a id="mix-setup-stops-early-with-the-real-reason-when-the-checkouts-path-has-a-space"></a>
 
@@ -101,7 +301,6 @@ carries the reasoning.
   [bitwalker/picosat_elixir#14](https://github.com/bitwalker/picosat_elixir/pull/14),
   not yet released.
   ([#1321](https://github.com/The-Verscienta/kiln_cms/issues/1321))
-
 <a id="buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they"></a>
 
 - **Buttons, links, badges and fields that rendered unstyled now look like what

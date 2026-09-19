@@ -156,6 +156,15 @@ defmodule KilnCMSWeb.Router do
     plug :put_swagger_csp
   end
 
+  # The GraphQL schema as SDL (`KilnCMSWeb.ApiSpecController`). Not `:api`:
+  # that pipeline's `accepts ["json"]` would answer a codegen tool asking for
+  # `application/graphql` with a 406. Metered on the `:docs` bucket, as the
+  # OpenAPI explorer is, and an API key is the only credential it reads.
+  pipeline :api_spec do
+    plug KilnCMSWeb.Plugs.RateLimit, :docs
+    plug KilnCMSWeb.Plugs.ApiKeyAuth
+  end
+
   # Auth pages get a tighter per-IP limit to slow credential stuffing.
   pipeline :browser_auth do
     plug :accepts, ["html"]
@@ -439,6 +448,9 @@ defmodule KilnCMSWeb.Router do
       # to take on it. Restore stays a documented ops procedure.
       live "/editor/backups", BackupLive, :index
       live "/editor/mail", MailSettingsLive, :index
+      # A site's own SMTP relay and From address (#1322). Org-scoped, unlike
+      # `/editor/mail` above: that is the operator's relay for every site.
+      live "/editor/site-mail", SiteMailLive, :index
       live "/editor/newsletter", NewsletterLive, :index
       # Paid memberships (#337 Phase 2). Instance-wide provider credentials plus
       # per-site tiers, so the page itself gates on `platform_admin?` — see the
@@ -609,6 +621,15 @@ defmodule KilnCMSWeb.Router do
       tools: @mcp_tools,
       protocol_version_statement: "2024-11-05",
       otp_app: :kiln_cms
+  end
+
+  # The running schema for GraphQL codegen: public where introspection is on,
+  # API-key-only where it is off (production). The OpenAPI document's
+  # equivalent rule lives in `KilnCMSWeb.Plugs.ApiDocs`.
+  scope "/api", KilnCMSWeb do
+    pipe_through :api_spec
+
+    get "/graphql/schema.graphql", ApiSpecController, :graphql_sdl
   end
 
   # Exchange a passphrase for a grant token (#496). Its own scope so it carries

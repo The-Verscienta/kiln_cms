@@ -65,7 +65,8 @@ defmodule KilnCMS.Newsletter.Changes.SendConfirmationEmail do
     |> to(to_string(subscriber.email))
     |> subject("Confirm your subscription to #{brand.site_name}")
     |> html_body(body(brand.site_name, url))
-    |> Mail.enqueue!()
+    # Through the site's own relay when it has one (#1322).
+    |> Mail.enqueue!(org_id: subscriber.org_id)
   end
 
   defp maybe_send(_subscriber), do: :ok

@@ -105,9 +105,11 @@ not built for bulk/marketing sending.
      source and derives the public key from it.
    - **Database** *(zero-ops default)* — click **Generate key**. The private
      key is stored AES-256-GCM-encrypted with a key derived from
-     `SECRET_KEY_BASE`, so **rotating `SECRET_KEY_BASE` orphans the key** (the
-     page tells you; regenerate and republish DNS). Env/file providers are
-     immune to this.
+     `SECRET_KEY_BASE`, so **rotating `SECRET_KEY_BASE` orphans the key**
+     unless you follow the [rotation procedure](secrets-rotation.md#secret_key_base),
+     which keeps the old value readable and re-encrypts the key under the new
+     one (`mix kiln.vault.reencrypt`). If it was orphaned anyway, regenerate it
+     and republish DNS. Env/file providers are immune to this.
 3. **Server IP** — enter your server's public IPv4 address. It drives the SPF
    suggestion and the PTR check.
 4. **DNS records** — publish the four records the page lists (copy-paste). See
@@ -213,7 +215,8 @@ arrives on a later attempt.
 **Registration/reset succeeds but the user never gets the email.**
 Delivery is queued, so the request succeeding doesn't mean mail was sent. Check
 [monitoring](#monitoring-delivery): a `cancelled` job means a hard 5xx reject
-(look at the logged reason), a `discarded` job means retries were exhausted,
+(look at the logged reason), a `discarded` job means retries were exhausted
+(a relay that kept refusing our password, TLS or sender ends up here too),
 and if you're in **local** mode (no relay/direct configured) *nothing* is
 delivered — the app logs a warning about this at boot.
 
@@ -235,6 +238,14 @@ delivered — the app logs a warning about this at boot.
 - **Telemetry** — hard bounces emit `[:kiln_cms, :mail, :bounced]` with the
   recipient domain(s) and a redacted reason; wire it into your metrics if you
   want bounce alerting.
+- **Relay alerts** — two failures mean *no* mail is going out, and each raises
+  one `Logger.error` and Sentry message (at most every 15 minutes) instead of
+  one per job: the relay or MX being unreachable
+  (`[:kiln_cms, :mail, :relay_unreachable]`), and the relay refusing our side
+  of the dialog — a failed AUTH after a password rotation, STARTTLS, or the
+  sender address (`[:kiln_cms, :mail, :relay_refused]`, with the redacted
+  reason). Either way the queued mail keeps retrying for ~16 hours, so fixing
+  the relay in that window delivers it.
 - **Retention** — finished mail jobs are pruned after **7 days** (mail job
   args contain rendered token URLs, so they aren't kept indefinitely). If you
   need a longer audit window, adjust the `Oban.Plugins.Pruner` `max_age` in
@@ -242,11 +253,23 @@ delivered — the app logs a warning about this at boot.
 
 ### Bounce suppression
 
-When a message is **permanently rejected** (a 5xx hard bounce — e.g. "user
-unknown"), KilnCMS records that address on a **suppression list** and skips it
-on future sends. This stops the system from re-mailing a known-dead address on
+When a message is **permanently rejected because of its recipient** (a 5xx hard
+bounce whose enhanced status says the address is dead — `5.1.1` "user
+unknown", `5.1.2` no such domain, `5.2.1` mailbox disabled, and the like),
+KilnCMS records that address on a **suppression list** and skips it on future
+sends. This stops the system from re-mailing a known-dead address on
 every subsequent password reset or notification, which wastes retries and
 signals spamminess to receivers.
+
+Only a reject that names the recipient suppresses it. The list is instance-wide
+and outlives the message, so a wrong entry quietly stops someone's mail:
+
+- A relay refusing **us** — AUTH failing (a rotated `SMTP_PASSWORD`), TLS, the
+  `From` address, SPF/DKIM/DMARC — retries and raises a relay alert (see
+  [monitoring](#monitoring-delivery)); nobody is suppressed.
+- Any other 5xx — a spam filter, a full mailbox, a reply with no enhanced
+  status to say whose fault it is — cancels that one message and suppresses
+  nobody.
 
 Suppressed addresses are listed on `/editor/mail` under **Delivery health**.
 If an address was suppressed in error (or the mailbox is fixed), click

@@ -322,7 +322,7 @@ defmodule KilnCMSWeb.BillingLive do
   defp provider_hint(:database),
     do:
       gettext(
-        "Zero-ops default: paste the secret here. Encrypted with a key derived from SECRET_KEY_BASE — rotating that secret orphans it."
+        "Zero-ops default: paste the secret here. Encrypted with a key derived from SECRET_KEY_BASE — rotate that secret only as the secrets rotation guide describes, or it is lost."
       )
 
   defp pointer_value(settings, key, provider) do

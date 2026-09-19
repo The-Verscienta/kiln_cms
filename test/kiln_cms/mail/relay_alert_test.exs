@@ -2,7 +2,8 @@ defmodule KilnCMS.Mail.RelayAlertTest do
   @moduledoc """
   The aggregated "relay unreachable" alert: it fires once on a connection-class
   delivery failure, stays quiet for the cooldown, and — crucially — is *not*
-  tripped by ordinary greylisting.
+  tripped by ordinary greylisting. And its "relay refused" twin, for a relay
+  that answers but refuses our AUTH, TLS or sender.
 
   `async: false`: the alert's cooldown bucket and the telemetry handler are
   process-global, so these run in isolation to keep the single-fire and
@@ -35,6 +36,14 @@ defmodule KilnCMS.Mail.RelayAlertTest do
          {:retries_exceeded, {:temporary_failure, ~c"mx.example.com", "451 4.7.1 greylisted"}}}
   end
 
+  # The rotated-password case: gen_smtp's AUTH failure is a `:permanent_failure`.
+  defmodule AuthFailedAdapter do
+    use Swoosh.Adapter
+
+    def deliver(_email, _config),
+      do: {:error, {:no_more_hosts, {:permanent_failure, ~c"relay", :auth_failed}}}
+  end
+
   setup do
     # Clear the cooldown so each test starts from a fireable state.
     RelayAlert.reset()
@@ -43,11 +52,11 @@ defmodule KilnCMS.Mail.RelayAlertTest do
     handler_id = "relay-alert-#{inspect(ref)}"
     test_pid = self()
 
-    :telemetry.attach(
+    :telemetry.attach_many(
       handler_id,
-      [:kiln_cms, :mail, :relay_unreachable],
-      fn _event, measurements, metadata, _cfg ->
-        send(test_pid, {ref, measurements, metadata})
+      [[:kiln_cms, :mail, :relay_unreachable], [:kiln_cms, :mail, :relay_refused]],
+      fn [:kiln_cms, :mail, kind], measurements, metadata, _cfg ->
+        send(test_pid, {ref, kind, measurements, metadata})
       end,
       nil
     )
@@ -70,17 +79,17 @@ defmodule KilnCMS.Mail.RelayAlertTest do
   test "notify/1 fires one alert with the recipient domain (no address)", %{ref: ref} do
     assert :ok = RelayAlert.notify("example.com")
 
-    assert_receive {^ref, %{count: 1}, %{domain: "example.com"}}
+    assert_receive {^ref, :relay_unreachable, %{count: 1}, %{domain: "example.com"}}
   end
 
   @tag :capture_log
   test "cooldown suppresses a second alert within the window", %{ref: ref} do
     assert :ok = RelayAlert.notify("example.com")
-    assert_receive {^ref, %{count: 1}, _metadata}
+    assert_receive {^ref, :relay_unreachable, %{count: 1}, _metadata}
 
     # Second call inside the window is swallowed — no second telemetry event.
     assert :ok = RelayAlert.notify("other.example")
-    refute_receive {^ref, _measurements, _metadata}
+    refute_receive {^ref, _kind, _measurements, _metadata}
   end
 
   @tag :capture_log
@@ -89,7 +98,7 @@ defmodule KilnCMS.Mail.RelayAlertTest do
       Mail.deliver_for_worker(email(), adapter: ConnectionFailureAdapter)
     end
 
-    assert_receive {^ref, %{count: 1}, %{domain: "example.com"}}
+    assert_receive {^ref, :relay_unreachable, %{count: 1}, %{domain: "example.com"}}
   end
 
   @tag :capture_log
@@ -98,6 +107,33 @@ defmodule KilnCMS.Mail.RelayAlertTest do
       Mail.deliver_for_worker(email(), adapter: GreylistAdapter)
     end
 
-    refute_receive {^ref, _measurements, _metadata}
+    refute_receive {^ref, _kind, _measurements, _metadata}
+  end
+
+  @tag :capture_log
+  test "a relay refusing our AUTH raises the refused alert, with the reason", %{ref: ref} do
+    assert_raise Mail.TransientDeliveryError, fn ->
+      Mail.deliver_for_worker(email(), adapter: AuthFailedAdapter)
+    end
+
+    assert_receive {^ref, :relay_refused, %{count: 1}, metadata}
+    assert metadata.domain == "example.com"
+    assert metadata.reason =~ "auth_failed"
+    # It is not an outage alert.
+    refute_receive {^ref, :relay_unreachable, _measurements, _metadata}
+  end
+
+  @tag :capture_log
+  test "refused and unreachable keep separate cooldowns", %{ref: ref} do
+    assert :ok = RelayAlert.notify_refused("example.com", "auth_failed")
+    assert_receive {^ref, :relay_refused, _measurements, _metadata}
+
+    # A refusal already alerted doesn't swallow an outage...
+    assert :ok = RelayAlert.notify("example.com")
+    assert_receive {^ref, :relay_unreachable, _measurements, _metadata}
+
+    # ...but a second refusal inside the window is quiet.
+    assert :ok = RelayAlert.notify_refused("other.example", "auth_failed")
+    refute_receive {^ref, _kind, _measurements, _metadata}
   end
 end

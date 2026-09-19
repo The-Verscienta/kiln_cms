@@ -203,9 +203,10 @@ defmodule KilnCMSWeb.ConsoleNavTest do
     end
 
     test "a name match beats a keyword match" do
-      # "mail" is the whole of one screen's name, and a keyword ("email") on
-      # Newsletter. The screen called Mail is the one that should lead.
-      assert found("mail", authed_user(:admin)) == [:mail, :newsletter]
+      # "mail" is the whole of one screen's name, a word in another's ("Outgoing
+      # mail", #1322), and a keyword ("email") on Newsletter. The screen called
+      # Mail leads, and both name matches beat the keyword match.
+      assert found("mail", authed_user(:admin)) == [:mail, :site_mail, :newsletter]
     end
 
     test "the words someone would actually type find the screen that owns them" do
