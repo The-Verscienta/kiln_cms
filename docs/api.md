@@ -44,7 +44,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **JSON:API**           | `/api/json`                       | Structured, filterable reads of Page/Post/MediaItem.  | [json-api.md](json-api.md) |
 | **GraphQL**            | `POST /gql`                       | Curated delivery reads + full-text/semantic search.   | [headless-graphql-api.md](headless-graphql-api.md) |
 | **Fired artifacts**    | `GET /api/content/:type/:slug`    | Pre-rendered block tree (`json`, `json_ld`, `web`).   | [`examples/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/examples/README.md) |
-| **Locales**            | `GET /api/locales`                | Discover configured content locales + the default.    | [§ Locale discovery](#locale-discovery) |
+| **Locales**            | `GET /api/locales`                | Configured content locales, the default, and each locale's fallback chain. | [§ Locale discovery](#locale-discovery) |
 | **Schema**             | `GET /api/schema`                 | JSON Schema for the fired `json` payloads — generate types, validate responses. | [§ Schema discovery](#schema-discovery-typed-clients) |
 | **Embeddable form**    | `<script src="…/embed.js">`       | Render a form in an auto-resizing iframe on any site. | [§ Embeddable forms](#embeddable-forms) |
 | **Visual editing**     | `<script src="…/bridge.js">`      | In-context edit overlay for an external front end (annotated preview + deep-link + live push). | [visual-editing-bridge.md](visual-editing-bridge.md) |
@@ -368,11 +368,71 @@ redeploy.
 
 ```bash
 curl -s http://localhost:4000/api/locales
-# {"default":"en","locales":["en","fr"]}
+# {"default":"en","locales":["en","fr","fr-CA"],
+#  "fallbacks":{"en":[],"fr":["en"],"fr-CA":["fr","en"]}}
 ```
 
 Pass the returned codes as the `locale` argument/param to the other surfaces
 (`GET /api/content/:type/:slug?locale=fr`, `postBySlug(slug:, locale:)`, etc.).
+`fallbacks` is this site's chain for each locale — see the next section.
+
+## Locale fallback
+
+Content is one document per locale, so a translation that has not been
+published is a missing document. Every delivery surface answers that the same
+way: it walks the site's **fallback chain** for the requested locale and serves
+the first published variant it finds.
+
+    fr-CA → fr → en
+
+- **The chain is a site setting**, edited at `/editor/locales` (admins), over
+  an operator default — `config :kiln_cms, :i18n, fallbacks: %{"fr-CA" => ["fr", "en"]}`.
+- **A locale with no chain falls back to the default locale** — what the
+  built-in site has always done. A chain of `[]` means *never fall back* (a
+  missing translation is a 404). A chain is taken as written: `fr-CA → fr` does
+  not quietly continue to the default.
+- **Only readable variants take part.** A variant the caller may not read —
+  gated to an audience, passphrase-locked, unpublished — is skipped like a
+  missing one. On the artifact API, if nothing on the chain is readable but a
+  locked variant exists, the answer is `401 password_required` for the first
+  locked one, and `POST …/unlock` with the same `?locale=` verifies against it.
+- **Navigation is stricter.** `/api/menus/:key` and GraphQL `menu` follow a
+  configured chain but never take the implicit hop to the default locale on
+  their own: English navigation on a French page is worse than none unless the
+  site said otherwise.
+
+### Per request
+
+| Parameter | Meaning |
+|---|---|
+| `locale=fr-CA` | Where the walk starts. Defaults to the site's default locale. |
+| `fallback=false` | Serve `locale` or nothing (`true`/`false`/`1`/`0`; anything else is `400 invalid_fallback`). |
+| `fallback_locale=fr` | Try `locale`, then this one — instead of the site's chain. |
+
+They are accepted by `GET /api/content/:type/:slug` (and `POST …/unlock`),
+`GET /api/resolve`, `GET /api/menus/:key`, the JSON:API
+`GET /api/json/<type>/by-slug/:slug` routes, and GraphQL `*BySlug` and `menu`
+(as the `locale`, `fallback` and `fallbackLocale` arguments).
+
+### Which locale was served
+
+- **HTTP surfaces** set `x-kiln-locale` and `Content-Language` to the served
+  locale. `/api/resolve` and `/api/menus` also carry it as `locale` in the body;
+  the artifact `json` surface carries it in the document, and the JSON:API
+  resource in `attributes.locale`.
+- **GraphQL** cannot set a header per field: select `locale` on the result.
+- **ETags** name the served locale, and every cache key in front of Kiln is
+  the URL — which carries the *requested* locale and the fallback parameters —
+  so a shared cache never mixes two answers. A settings change drops the site's
+  cached delivery lookups at once rather than waiting out a TTL.
+
+### An unsupported locale is a `400`
+
+`?locale=de` on a site that does not run German answers
+`400 unsupported_locale` (naming `GET /api/locales`) on every surface above,
+instead of silently serving the default locale: a typo like `fr_CA` answered in
+English is indistinguishable from a missing translation. The same goes for
+`fallback_locale`. GraphQL returns an error on the field.
 
 ## Schema discovery (typed clients)
 

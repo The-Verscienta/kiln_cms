@@ -49,7 +49,7 @@ from its singular type name. For `post`:
 
 | Query | Action | Arguments | Returns |
 |-------|--------|-----------|---------|
-| `postBySlug` | `:public_by_slug` | `slug: String!`, `locale: String!` | one published post (or `null`) |
+| `postBySlug` | `:public_by_slug` | `slug: String!`, `locale: String!`, `fallback`, `fallbackLocale` | one published post (or `null`), through the site's locale fallback chain |
 | `postTranslations` | `:published_translations` | `slug: String!` | every published locale variant of a slug |
 | `publishedPosts` | `:published` | `limit`, `offset`, `customFilter`, `customSort` | published posts, newest first, **offset-paginated** (`PageOfPost`) |
 | `searchPosts` | `:search` | `query: String!`, `locale`, `categoryId`, `authorId`, `state`, `tagIds`, `customFilter` | full-text matches, relevance-ranked |
@@ -76,6 +76,14 @@ consumers never need the plain, credential-widened list.
 > `*BySlug` queries require both `slug` and `locale` because content is modelled
 > per-locale (unique `[slug, locale]`). Use `postTranslations` to discover which
 > locales exist for a slug.
+>
+> A missing translation is answered along the **site's fallback chain**
+> (`fr-CA → fr → en`, set at `/editor/locales`): select `locale` on the result
+> to see which variant you got. `fallback: false` returns the requested locale
+> or `null`; `fallbackLocale: "fr"` tries that one instead of the chain. A
+> locale the site does not run is an error on the field, not the default
+> locale. The top-level `menu(key:, locale:, fallback:, fallbackLocale:)` query
+> follows only a *configured* chain. See [api.md → Locale fallback](api.md#locale-fallback).
 
 > `customFilter` (JSON) and `customSort` (String) query **admin-defined custom
 > fields**: `customFilter: {price: {gt: 10}}, customSort: "-price"`. The same

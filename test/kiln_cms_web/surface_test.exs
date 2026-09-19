@@ -25,7 +25,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor/funnels /editor/funnels/:id /editor/governance /editor/governance/:type/:id
     /editor/governance/:type/:id/export.csv /editor/governance/:type/:id/export.json
     /editor/governance/health.csv /editor/inbox
-    /editor/links /editor/mail /editor/menus /editor/menus/:id /editor/newsletter
+    /editor/links /editor/locales /editor/mail /editor/menus /editor/menus/:id /editor/newsletter
     /editor/overview /editor/pages/:id /editor/posts/:id /editor/presentation/:type/:slug
     /editor/preview/:kind/:id /editor/redirects /editor/releases /editor/releases/:id
     /editor/search /editor/settings /editor/site/:type/:slug /editor/slugs /editor/social

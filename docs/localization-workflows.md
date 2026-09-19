@@ -12,6 +12,40 @@ On top of that model, the **workflow layer** (`KilnCMS.CMS.Translations`)
 answers the editorial questions it raises. Everything below works identically
 for compiled content types and admin-defined dynamic types (D17).
 
+## Fallback chains — what a missing translation serves
+
+Because a translation is a separate record, a locale nobody has translated yet
+is a *missing document*. Each site decides what readers get instead, at
+**`/editor/locales`** (admins): per locale, one of
+
+- **the default locale** — no chain configured; what the built-in site has
+  always done;
+- **these locales, in order** — e.g. `fr-CA → fr → en`, tried as written, with
+  no silent last hop to the default;
+- **never** — a missing translation is a 404.
+
+The operator default sits underneath, for sites that have not saved their own:
+
+```elixir
+config :kiln_cms, :i18n,
+  default_locale: "en",
+  locales: ["en", "fr", "fr-CA"],
+  fallbacks: %{"fr-CA" => ["fr", "en"]}
+```
+
+The same chain applies on the built-in site (`/fr-CA/about` served in French
+says `lang="fr"` and `Content-Language: fr`), the artifact API, `/api/resolve`,
+JSON:API `by-slug`, GraphQL `*BySlug`, and — for configured chains only —
+navigation menus. Headless callers can narrow it per request
+(`?fallback=false`, `?fallback_locale=`) and always get told which locale was
+served; the API side is documented in [api.md → Locale fallback](api.md#locale-fallback).
+
+A variant a reader may not open (audience-gated, passphrase-locked) is skipped
+along the chain like a missing one. The chain is resolved per *locale*, not
+per document, so the per-field localization tracked in
+[#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) will resolve
+each localized field along the same chain.
+
 ## Coverage & staleness
 
 `Translations.coverage(kind, record, actor: user)` reports, per configured

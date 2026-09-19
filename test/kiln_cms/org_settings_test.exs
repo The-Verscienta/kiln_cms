@@ -141,6 +141,7 @@ defmodule KilnCMS.OrgSettingsTest do
       KilnCMS.CMS.SiteEditorialSettings,
       KilnCMS.CMS.SiteEmbedSettings,
       KilnCMS.CMS.SiteLinkCheck,
+      KilnCMS.CMS.SiteLocaleSettings,
       KilnCMS.Federation.SiteFederation
     ]
 

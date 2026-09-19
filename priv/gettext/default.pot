@@ -26,6 +26,11 @@ msgstr ""
 msgid "\"In feeds\" also covers the fediverse."
 msgstr ""
 
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "\"fr, en\" tries French, then English, then stops. Navigation menus follow a chain you write here, but never fall back to the default locale on their own. A headless request can narrow the chain with ?fallback=false or ?fallback_locale=, and every response says which locale it served."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/content_html.ex
 #, elixir-autogen, elixir-format
 msgid "%B %-d, %Y"
@@ -897,6 +902,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
 msgid "A campaign for this publish revision was already sent."
+msgstr ""
+
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "A chain is taken as written."
 msgstr ""
 
 #: lib/kiln_cms_web/live/menu_live.ex
@@ -4251,6 +4261,7 @@ msgid "Deployment"
 msgstr ""
 
 #: lib/kiln_cms_web/live/feed_settings_live.ex
+#: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Deployment defaults"
 msgstr ""
@@ -5283,6 +5294,21 @@ msgstr ""
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Failures"
+msgstr ""
+
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Fall back to"
+msgstr ""
+
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Fallback for %{locale}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Fallbacks only matter once there is a second language to fall back from. The operator adds locales in configuration."
 msgstr ""
 
 #: lib/kiln_cms_web/live/branding_live.ex
@@ -6721,11 +6747,38 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/locale_settings_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #: lib/kiln_cms_web/live/preview_live.ex
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Locale"
+msgstr ""
+
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Locale fallbacks could not be saved."
+msgstr ""
+
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Locale fallbacks reset to the operator defaults."
+msgstr ""
+
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Locale fallbacks saved."
+msgstr ""
+
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Locales"
+msgstr ""
+
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Locales %{locale} falls back to"
 msgstr ""
 
 #: lib/kiln_cms_web/live/branding_live.ex
@@ -7190,6 +7243,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Network"
+msgstr ""
+
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Never — show nothing"
 msgstr ""
 
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -7886,6 +7944,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing has been delivered yet."
+msgstr ""
+
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing has been set for this site yet, so it follows whatever the operator configured for the whole deployment. Saving below gives this site its own chains."
 msgstr ""
 
 #: lib/kiln_cms_web/live/compliance_live.ex
@@ -9500,6 +9563,11 @@ msgstr ""
 msgid "Remove this site's feed settings and follow the deployment defaults again?"
 msgstr ""
 
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove this site's locale fallbacks and follow the deployment defaults again?"
+msgstr ""
+
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove this step from the funnel?"
@@ -10015,6 +10083,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
+#: lib/kiln_cms_web/live/locale_settings_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
@@ -10136,6 +10205,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
+#: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saving…"
 msgstr ""
@@ -10488,6 +10558,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set TENANT_STRICT_HOST=true to reject unrecognized hosts instead, then restart. Leave it off only if an unmatched host reaching the default organization is what you want."
+msgstr ""
+
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Set by the operator in configuration, and used by any site that has not saved its own chains above."
 msgstr ""
 
 #: lib/kiln_cms_web/live/feed_settings_live.ex
@@ -12112,6 +12187,11 @@ msgstr ""
 msgid "This content was saved elsewhere while you were offline. A text block reloaded the saved version; the edits you made to it since were not applied."
 msgstr ""
 
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "This deployment runs one locale."
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor/markdown_import.ex
 #, elixir-autogen, elixir-format
 msgid "This document already has %{count} block."
@@ -12277,6 +12357,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
+#: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site is using the deployment defaults."
 msgstr ""
@@ -12475,9 +12556,19 @@ msgstr ""
 msgid "Trend range"
 msgstr ""
 
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Tries"
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/offline_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Try again"
+msgstr ""
+
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Try these locales, in order"
 msgstr ""
 
 #: lib/kiln_cms_web/live/calendar_live.ex
@@ -12885,6 +12976,11 @@ msgstr ""
 msgid "Use system theme"
 msgstr ""
 
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Use the default locale (%{locale})"
+msgstr ""
+
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Use the deployment default"
@@ -12892,6 +12988,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
+#: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Use the operator defaults"
 msgstr ""
@@ -13181,6 +13278,16 @@ msgstr ""
 msgid "What a match on these phrases means"
 msgstr ""
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "What a missing translation falls back to."
+msgstr ""
+
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "What a reader gets when the translation they asked for has not been published — on this site's pages, its API and its menus."
+msgstr ""
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "What other servers show for this actor. Peers refetch it on their own schedule."
@@ -13213,6 +13320,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "When"
+msgstr ""
+
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "When a translation is missing"
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
@@ -13441,6 +13553,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's form settings."
+msgstr ""
+
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's locale settings."
 msgstr ""
 
 #: lib/kiln_cms_web/components/core_components.ex
@@ -13903,6 +14020,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "e.g. /about/team"
+msgstr ""
+
+#: lib/kiln_cms_web/live/locale_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "e.g. fr, en"
 msgstr ""
 
 #: lib/kiln_cms_web/live/api_key_live.ex

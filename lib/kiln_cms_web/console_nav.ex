@@ -459,6 +459,16 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("How URLs are built, and bulk regeneration."),
             keywords: ["url", "path", "permalink", "pathauto"]
           },
+          # Delivery, not Content model: a chain decides what a reader is
+          # *served*, on the site, the API and the menus alike.
+          %{
+            key: :locales,
+            label: gettext("Locales"),
+            path: ~p"/editor/locales",
+            icon: "hero-language",
+            description: gettext("What a missing translation falls back to."),
+            keywords: ["locale", "language", "fallback", "translation", "i18n"]
+          },
           %{
             key: :social,
             label: gettext("Social"),
