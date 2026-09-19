@@ -62,6 +62,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Memberships can notify other systems: `membership.activated` and
+  `membership.canceled` webhook events.**
+  ([#334](https://github.com/The-Verscienta/kiln_cms/issues/334) · [long form](docs/changelog/unreleased.md#memberships-can-notify-other-systems-membershipactivated-and-membershipcanceled))
+
 - **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#one-click-deploy-templates-for-render-railway-flyio-and-digitalocean))
 
@@ -78,9 +82,13 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **`mix setup` stops early, with the real reason, when the checkout's path has
+  a space.**
+  ([#1321](https://github.com/The-Verscienta/kiln_cms/issues/1321) · [long form](docs/changelog/unreleased.md#mix-setup-stops-early-with-the-real-reason-when-the-checkouts-path-has-a-space))
+
 - **Buttons, links, badges and fields that rendered unstyled now look like what
   they are.**
-  ([long form](docs/changelog/unreleased.md#buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they))
+  ([#1531](https://github.com/The-Verscienta/kiln_cms/issues/1531) · [long form](docs/changelog/unreleased.md#buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they))
 
 - **A PaaS health check no longer gets a redirect, and `PHX_HOST` falls back to
   the platform's hostname.**
@@ -91,6 +99,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Every advisory published against the 0.9.0 dependency set is fixed,
   including six CRITICAL in `ash_authentication`.**
   ([long form](docs/changelog/unreleased.md#every-advisory-published-against-the-090-dependency-set-is-fixed-including-six))
+
+- **`mint` is bumped to 1.10.1, closing an HTTP/1 response-smuggling advisory
+  published hours after the sweep above landed.**
+  ([EEF-CVE-2026-82672](https://osv.dev/vulnerability/EEF-CVE-2026-82672))
 
 - **`/ws/gql` runs under the same cost limits as `/gql`, batches are counted per
   operation, and introspection is refused however a document arrives.**
