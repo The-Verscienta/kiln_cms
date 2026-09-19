@@ -630,15 +630,17 @@ defmodule KilnCMS.MixProject do
       {:ash_graphql, "~> 1.0"},
       {:ash_json_api, "~> 1.0"},
       # MCP server for LLM authoring (write-scoped API keys) — see docs/mcp.md.
-      {:ash_ai, "~> 0.7"},
+      {:ash_ai, "~> 1.0"},
       # Provider-agnostic LLM client behind the optional SEO drafting generator
       # (docs/seo.md). Declared directly rather than leaned on as an `ash_ai`
       # transitive: a minor bump there could make it optional and break us.
       {:req_llm, "~> 1.17"},
       {:ash_admin, "~> 1.0"},
       {:sourceror, "~> 1.8", only: [:dev, :test]},
+      # `mix kiln.gen.content` and `mix kiln.gen.plugin` are Igniter tasks, and
+      # their tests use `Igniter.Test`. Without this dep both generators vanish.
       {:igniter, "~> 0.5", only: [:dev, :test]},
-      {:usage_rules, "~> 0.1", only: [:dev], runtime: false},
+      {:usage_rules, "~> 1.2", only: [:dev], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
@@ -749,6 +751,14 @@ defmodule KilnCMS.MixProject do
       {:tz, "~> 0.28"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
+      # The production consumer for `KilnCMSWeb.Telemetry.metrics/0` (#1362).
+      # Started only when KILN_METRICS_ENABLED is on, and served on its own
+      # listener rather than the public endpoint — see KilnCMSWeb.Metrics.
+      # Peep rather than telemetry_metrics_prometheus_core: it aggregates into
+      # fixed-size histograms as events arrive, where the core reporter keeps
+      # every distribution sample in ETS until a scrape drains it, so an
+      # enabled-but-unscraped node would grow without bound.
+      {:peep, "~> 5.0"},
       # Error tracking. No-op unless SENTRY_DSN is set (config/runtime.exs), so
       # dev/test/precommit stay offline. Uses Req (not hackney) for transport to
       # keep the project on a single HTTP client — see KilnCMS.SentryReqClient.
@@ -840,6 +850,7 @@ defmodule KilnCMS.MixProject do
       # that the VM is torn down when the *chain* ends, which a `phx.server`
       # needs to outlive. A task that prints a line and returns does not.
       setup: [
+        &refuse_a_spaced_checkout/1,
         "deps.get",
         "ash.setup",
         "assets.setup",
@@ -881,6 +892,13 @@ defmodule KilnCMS.MixProject do
             "credo --strict",
             "sobelow --config",
             "deps.audit",
+            # Both audits, because they read different databases. mix_audit
+            # reads mirego's mirror, hex.audit reads the advisories Hex itself
+            # serves; on 2026-09-18 the mirror knew none of the 89 advisories
+            # (six CRITICAL, in ash_authentication) that hex.audit listed
+            # against v0.9.0's lock. Advisories with no fixed release are
+            # acknowledged in this file's `:hex` project config, not skipped.
+            "hex.audit",
             "kiln.plugins.doctor",
             # Cheap, and says in a second what CI's `image` job takes a full
             # dependency compile to discover: a Dockerfile pin that can't satisfy
@@ -917,5 +935,36 @@ defmodule KilnCMS.MixProject do
   # tokenizers, unpickler, unzip and xla.
   defp unlock_unused_step do
     if ml?(), do: ["deps.unlock --unused"], else: []
+  end
+
+  # `mix setup`'s first step (#1321). One dependency cannot build under a path
+  # that contains a space: picosat_elixir, Ash's policy SAT solver. Its Makefile
+  # (0.2.3, the latest release) uses absolute paths as make targets, and make
+  # splits a target at the space. The failure then comes hundreds of lines into
+  # the dependency compile, as elixir_make's "You need to have gcc and make
+  # installed", which is wrong. Every other native dep builds there:
+  # bcrypt_elixir keeps absolute paths out of its targets and quotes them in its
+  # recipes, and vix and y_ex download precompiled NIFs.
+  #
+  # The fix is bitwalker/picosat_elixir#14, which is not released yet. Once a
+  # release carries it, bump the dep and delete this step.
+  defp refuse_a_spaced_checkout(_args) do
+    spaced =
+      Enum.filter([Mix.Project.deps_path(), Mix.Project.build_path()], &String.contains?(&1, " "))
+
+    if spaced != [] do
+      Mix.raise("""
+      This checkout is under a path that contains a space:
+
+          #{Enum.join(spaced, "\n    ")}
+
+      picosat_elixir (Ash's policy SAT solver) cannot compile there. Its Makefile \
+      uses absolute paths as make targets, and make splits them at the space. The \
+      compile would fail later with a message about gcc and make, which is not the \
+      cause. Clone the repo to a path without a space, then run `mix setup` again.
+
+      Upstream fix, not yet released: https://github.com/bitwalker/picosat_elixir/pull/14
+      """)
+    end
   end
 end

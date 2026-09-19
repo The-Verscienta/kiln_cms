@@ -136,7 +136,9 @@ macro over the Ash/Spark DSL) from which it derives, automatically:
 
 - the database schema and typed content model,
 - the editor UI,
-- renderers for every surface (web HTML, email, JSON-LD, JSON, GraphQL),
+- renderers for every fired surface — web HTML, JSON, JSON-LD and an LLM
+  Markdown projection (`KilnCMS.Firing.Surfaces`) — with GraphQL and JSON:API
+  derived from the same definition rather than rendered,
 - search projections (full-text + embeddings), and
 - **pre-computed immutable "fired" artifacts per surface**, with a reference
   graph that re-fires dependents precisely when referenced content changes.

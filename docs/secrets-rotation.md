@@ -6,7 +6,7 @@ during an incident, against a *running* deployment — so every step below is
 what the code actually does, not what would be reasonable.
 
 Pairs with [`backups.md`](backups.md) (the env snapshot is part of the backup)
-and closes residual risk 12 in [`threat-model.md`](threat-model.md). The
+and closes residual risk 13 in [`threat-model.md`](threat-model.md). The
 canonical list of every variable is
 [`environment-variables.md`](environment-variables.md); this document is only
 about the ones that are *secret*, and only about replacing them.
@@ -211,6 +211,7 @@ is neither that type nor explained, so the list cannot fall behind the code.
 | `dkim_private_key_encrypted` | `KilnCMS.Mail.Settings` | Outbound mail is no longer DKIM-signed (direct-delivery mode) | `/editor/mail` → *Rotate key*, then publish the new DNS TXT record |
 | `credential_encrypted` | `KilnCMS.Social.Account` | Scheduled social posts stop being published | `/editor/social`: reconnect each account and enter its credential again |
 | `secret_key_encrypted`, `webhook_secret_encrypted` | `KilnCMS.Billing.Settings` | Payments and inbound payment webhooks stop | `/editor/billing`: paste the provider API key and the `whsec_…` from the provider dashboard again |
+| `password_encrypted` | `KilnCMS.CMS.SiteMailRelay` (one per site that set its own relay) | That site's mail is **held**: the delivery jobs retry for ~16 hours and then give up. It is never sent through the operator's relay instead | `/editor/site-mail` on each such site: enter the relay password again |
 | `private_key_encrypted` | `KilnCMS.Federation.SiteFederation` | The site can no longer sign ActivityPub deliveries | `/editor/federation` → *Re-key*, or `mix kiln.federation rekey`. See [Re-keying the ActivityPub actor](#re-keying-the-activitypub-actor) |
 
 **You should never need the last column.** Two pieces make the rotation
@@ -258,6 +259,12 @@ fails at boot and nothing sends an alert:
   *"this site's signing key is unreadable"*. Before #1487 it failed with
   *"federation is not enabled"*.
 - **Billing**: the provider call fails at the point of use.
+- **A site's own mail relay** (#1322): the one that does announce itself.
+  `/editor/site-mail` shows *"The saved password can't be read"*, and every
+  held delivery logs `"Holding mail for site …: … its password could not be
+  decrypted"`. The mail is held, not sent through the operator's relay — but
+  only a site admin who opens that page sees the banner, so on a multi-site
+  deployment tell each site that set a relay.
 
 `mix kiln.vault.reencrypt --dry-run` with no old secret is the one check that
 covers all of them at once. It should report `0 unreadable` for every column.
