@@ -54,24 +54,30 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+## [0.9.1] - 2026-09-19
+
+Long form: [docs/changelog/v0.9.1.md](docs/changelog/v0.9.1.md) —
+the 0.9.1 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
 ### Upgrade notes
 
 - **Upgrading to 0.9.1: rebuild, and re-run your overlay's tests.**
-  ([long form](docs/changelog/unreleased.md#upgrading-to-091-rebuild-and-re-run-overlay-tests))
+  ([long form](docs/changelog/v0.9.1.md#upgrading-to-091-rebuild-and-re-run-overlay-tests))
 
 ### Changed
 
 - **The dependency audit also reads Hex's own advisory feed.**
-  ([#1553](https://github.com/The-Verscienta/kiln_cms/issues/1553) · [long form](docs/changelog/unreleased.md#the-dependency-audit-also-reads-hexs-own-advisory-feed))
+  ([#1553](https://github.com/The-Verscienta/kiln_cms/issues/1553) · [long form](docs/changelog/v0.9.1.md#the-dependency-audit-also-reads-hexs-own-advisory-feed))
 
 - **String lengths are counted in codepoints, as Postgres counts them.**
-  ([#1553](https://github.com/The-Verscienta/kiln_cms/issues/1553) · [long form](docs/changelog/unreleased.md#string-lengths-are-counted-in-codepoints-as-postgres-counts-them))
+  ([#1553](https://github.com/The-Verscienta/kiln_cms/issues/1553) · [long form](docs/changelog/v0.9.1.md#string-lengths-are-counted-in-codepoints-as-postgres-counts-them))
 
 ### Security
 
 - **Every advisory published against the 0.9.0 dependency set is fixed,
   including six CRITICAL in `ash_authentication`.**
-  ([#1553](https://github.com/The-Verscienta/kiln_cms/issues/1553) · [long form](docs/changelog/unreleased.md#every-advisory-published-against-the-090-dependency-set-is-fixed-including-six))
+  ([#1553](https://github.com/The-Verscienta/kiln_cms/issues/1553) · [long form](docs/changelog/v0.9.1.md#every-advisory-published-against-the-090-dependency-set-is-fixed-including-six))
 
 ## [0.9.0] - 2026-09-18
 
@@ -1321,7 +1327,8 @@ that `mix kiln.update` compares against.
   one that can't be described by a changelog diff.
   ([long form](docs/changelog/v0.1.0.md#if-your-project-pins-a-sha-from-before-this-tag-your-first-update-is-the-only))
 
-[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/The-Verscienta/kiln_cms/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.6.0...v0.7.0
