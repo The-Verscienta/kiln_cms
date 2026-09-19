@@ -3117,6 +3117,11 @@ msgstr "La inteligencia de contenido no está disponible para llamadas no superv
 msgid "Content item"
 msgstr "Elemento de contenido"
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Content list"
+msgstr "Lista de contenido"
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "Content model"
@@ -6081,6 +6086,11 @@ msgstr "Cómo se construyen las URL, y regeneración masiva."
 msgid "How do you publish?"
 msgstr "¿Cómo publicas?"
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "How each item in the content list shows whether it is published, translated and scheduled."
+msgstr "Cómo indica cada elemento de la lista de contenido si está publicado, traducido y programado."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "How often an event repeats, such as every Tuesday. Use it alongside a date & time range, which says when it starts."
@@ -6988,6 +6998,11 @@ msgstr "Genere una clave arriba para conceder acceso headless o MCP."
 #, elixir-autogen, elixir-format
 msgid "Missing alt text"
 msgstr "Falta el texto alternativo"
+
+#: lib/kiln_cms_web/components/core_components.ex
+#, elixir-autogen, elixir-format
+msgid "Missing translations"
+msgstr "Faltan traducciones"
 
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
@@ -9036,6 +9051,7 @@ msgid "Published — content I authored went live"
 msgstr "Publicado — contenido de mi autoría se puso en línea"
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Publishes"
 msgstr "Se publica el"
@@ -11113,6 +11129,11 @@ msgstr "Estado:"
 msgid "Status"
 msgstr "Estado"
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Status marks"
+msgstr "Marcas de estado"
+
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "Stays open when its content publishes"
@@ -12637,6 +12658,16 @@ msgstr "La papelera está vacía."
 msgid "Trend range"
 msgstr "Rango de tendencia"
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Trigram glyphs"
+msgstr "Trigramas"
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Trigram glyphs: three lines per item — published at the bottom, translated in the middle, scheduled on top; solid means yes. Hover one for its reading."
+msgstr "Trigramas: tres líneas por elemento — publicado abajo, traducido en medio, programado arriba; una línea continua significa sí. Pasa el cursor sobre uno para ver su lectura."
+
 #: lib/kiln_cms_web/controllers/offline_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Try again"
@@ -12848,6 +12879,7 @@ msgid "Unpublish on go-live"
 msgstr "Despublicar al lanzarse"
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Unpublishes"
 msgstr "Se despublica el"
@@ -13483,6 +13515,16 @@ msgstr "Con ella activada, el editor muestra un panel Cumplimiento que cita las 
 msgid "Witnessed by checkpoint #%{sequence} at anchor position %{position}"
 msgstr "Atestiguado por el punto de control n.º %{sequence} en la posición de anclaje %{position}"
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Words"
+msgstr "Palabras"
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Words: the state badge, the date an item publishes or unpublishes, and “Missing translations” when a language is still to do."
+msgstr "Palabras: la etiqueta de estado, la fecha en que un elemento se publica o se despublica, y «Faltan traducciones» cuando queda un idioma por hacer."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Worked out from a formula on every save, so editors can't type into it. For a reading time or a code built from the title."
@@ -13773,6 +13815,7 @@ msgid "Your browser will prompt you to confirm with this device's screen lock."
 msgstr "Su navegador le pedirá que confirme con el bloqueo de pantalla de este dispositivo."
 
 #: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Your choice could not be saved."
 msgstr "No se pudo guardar tu elección."

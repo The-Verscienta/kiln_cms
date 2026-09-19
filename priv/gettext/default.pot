@@ -3117,6 +3117,11 @@ msgstr ""
 msgid "Content item"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Content list"
+msgstr ""
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "Content model"
@@ -6081,6 +6086,11 @@ msgstr ""
 msgid "How do you publish?"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "How each item in the content list shows whether it is published, translated and scheduled."
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "How often an event repeats, such as every Tuesday. Use it alongside a date & time range, which says when it starts."
@@ -6987,6 +6997,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Missing alt text"
+msgstr ""
+
+#: lib/kiln_cms_web/components/core_components.ex
+#, elixir-autogen, elixir-format
+msgid "Missing translations"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
@@ -9036,6 +9051,7 @@ msgid "Published — content I authored went live"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Publishes"
 msgstr ""
@@ -11113,6 +11129,11 @@ msgstr ""
 msgid "Status"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Status marks"
+msgstr ""
+
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "Stays open when its content publishes"
@@ -12637,6 +12658,16 @@ msgstr ""
 msgid "Trend range"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Trigram glyphs"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Trigram glyphs: three lines per item — published at the bottom, translated in the middle, scheduled on top; solid means yes. Hover one for its reading."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/offline_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Try again"
@@ -12848,6 +12879,7 @@ msgid "Unpublish on go-live"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Unpublishes"
 msgstr ""
@@ -13483,6 +13515,16 @@ msgstr ""
 msgid "Witnessed by checkpoint #%{sequence} at anchor position %{position}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Words"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Words: the state badge, the date an item publishes or unpublishes, and “Missing translations” when a language is still to do."
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Worked out from a formula on every save, so editors can't type into it. For a reading time or a code built from the title."
@@ -13773,6 +13815,7 @@ msgid "Your browser will prompt you to confirm with this device's screen lock."
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Your choice could not be saved."
 msgstr ""
