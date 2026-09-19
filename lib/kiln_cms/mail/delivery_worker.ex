@@ -4,8 +4,9 @@ defmodule KilnCMS.Mail.DeliveryWorker do
 
   Enqueued by `KilnCMS.Mail.enqueue!/1` (one job per recipient). Rebuilds the
   Swoosh email from the serialised args and delivers it via
-  `KilnCMS.Mail.deliver_for_worker/2`: permanent (5xx) failures cancel the
-  job, transient failures raise and retry on the greylist-aware backoff.
+  `KilnCMS.Mail.deliver_for_worker/2`: a permanent (5xx) reject of the message
+  cancels the job; transient failures, and the relay refusing our AUTH, TLS or
+  sender, raise and retry on the greylist-aware backoff.
   """
   use Oban.Worker, queue: :mail, max_attempts: 8
 
@@ -13,9 +14,11 @@ defmodule KilnCMS.Mail.DeliveryWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
+    # `org_id` is the site the mail was queued for (`Mail.enqueue!/2`); none
+    # for account mail, which uses the operator's relay.
     args
     |> Mail.from_args()
-    |> Mail.deliver_for_worker()
+    |> Mail.deliver_for_worker(org_id: args["org_id"])
   end
 
   @impl Oban.Worker

@@ -147,6 +147,11 @@ written as a function component or a raw `class="…"` in a template.
   is the operator/integrator — "fired artifact" is the name the API reference,
   `docs/static-export.md` and the System → Delivery cache panel all use for
   the same thing, and renaming it only there would break the trail.
+- The same goes for pictures. A mark an editor has to learn to decode is not a
+  status mark: the content list says "Missing translations" and "Publishes
+  <date>" in words, beside the state badge. The I-Ching trigram glyph it used
+  to show is kept as an opt-in (Your settings → Content list), never the
+  default, and even there its accessible label spells each bit out.
 
 ## UX patterns
 

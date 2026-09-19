@@ -3098,16 +3098,79 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
-  describe "status trigram glyphs" do
-    # The list's composite status glyph is a trigram: published (bottom line),
-    # a variant in every configured locale (middle), a pending scheduled
-    # transition (top). The trigram's name is in the accessible label.
-    test "a bare draft renders as kun (all yin)", %{conn: conn} do
-      draft_page(%{title: "Bare draft"})
+  describe "status marks in words (the default)" do
+    # #1323: the list says in words what the state badge does not — a slug
+    # group missing a locale, and the date a pending publish or unpublish
+    # happens, with the verb on screen rather than only in a tooltip. No
+    # trigram and no pinyin name by default.
+    test "a bare draft is marked as missing translations, with no glyph", %{conn: conn} do
+      page = draft_page(%{title: "Bare draft"})
 
-      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      assert has_element?(
+               lv,
+               ~s(#page-#{page.id} [data-status-mark="untranslated"]),
+               "Missing translations"
+             )
+
+      refute has_element?(lv, "#page-#{page.id} svg[role=img]")
+      refute html =~ "kun · earth"
+    end
+
+    test "a scheduled draft says when it publishes", %{conn: conn} do
+      page = draft_page(%{scheduled_at: DateTime.add(DateTime.utc_now(), 3, :day)})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      assert has_element?(
+               lv,
+               "#page-#{page.id} span:has(> #scheduled-page-#{page.id})",
+               "Publishes"
+             )
+    end
+
+    test "a fully translated page due to unpublish says so, and nothing is missing",
+         %{conn: conn} do
+      slug = "wd-#{System.unique_integer([:positive])}"
+      horizon = DateTime.add(DateTime.utc_now(), 3, :day)
+
+      [page | _] =
+        for locale <- ["en", "fr", "es"] do
+          draft_page(%{slug: slug, locale: locale, state: :published, unpublish_at: horizon})
+        end
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      assert has_element?(
+               lv,
+               "#page-#{page.id} span:has(> #unpublish-page-#{page.id})",
+               "Unpublishes"
+             )
+
+      refute has_element?(lv, "#page-#{page.id} [data-status-mark]")
+    end
+  end
+
+  describe "status trigram glyphs (opt-in)" do
+    # The opt-in composite status glyph (`User.status_marks == :trigrams`) is a
+    # trigram: published (bottom line), a variant in every configured locale
+    # (middle), a pending scheduled transition (top). The trigram's name is in
+    # the accessible label, followed by each bit in words.
+    defp trigram_user do
+      user = authed_user(:editor)
+      {:ok, _} = KilnCMS.Accounts.set_status_marks(user, :trigrams, actor: user)
+      user
+    end
+
+    test "a bare draft renders as kun (all yin)", %{conn: conn} do
+      page = draft_page(%{title: "Bare draft"})
+
+      {:ok, lv, html} = conn |> log_in(trigram_user()) |> live(~p"/editor")
 
       assert html =~ "kun · earth · not published · translation gaps · no schedule"
+      # One or the other, never both.
+      refute has_element?(lv, "#page-#{page.id} [data-status-mark]")
     end
 
     test "published, fully translated and scheduled renders as qian (all yang)", %{conn: conn} do
@@ -3118,7 +3181,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
         draft_page(%{slug: slug, locale: locale, state: :published, unpublish_at: horizon})
       end
 
-      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      {:ok, _lv, html} = conn |> log_in(trigram_user()) |> live(~p"/editor")
 
       assert html =~ "qian · heaven · published · translated · scheduled"
     end
@@ -3126,7 +3189,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
     test "published but untranslated and unscheduled renders as zhen", %{conn: conn} do
       draft_page(%{title: "Solo published", state: :published})
 
-      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      {:ok, _lv, html} = conn |> log_in(trigram_user()) |> live(~p"/editor")
 
       assert html =~ "zhen · thunder · published · translation gaps · no schedule"
     end

@@ -254,6 +254,12 @@ config :kiln_cms, KilnCMSWeb.Endpoint,
 # In test we don't send emails
 config :kiln_cms, KilnCMS.Mailer, adapter: Swoosh.Adapters.Test
 
+# A site's own relay (#1322) is not merged over the mailer config above, so it
+# needs its own stand-in: one that records the connection config it was handed,
+# which is what a site-relay test asserts on. The SSRF check stays ON — tests
+# use public-looking host names, which `SafeUrl`'s `resolve_dns: false` passes.
+config :kiln_cms, KilnCMS.Mail.SiteRelay, adapter: KilnCMS.SiteRelayTestAdapter
+
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
 

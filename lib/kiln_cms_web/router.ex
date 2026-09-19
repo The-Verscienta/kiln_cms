@@ -59,9 +59,16 @@ defmodule KilnCMSWeb.Router do
     # Anonymous GET queries become CDN-cacheable with an ETag; anything carrying
     # a credential is `private, no-store`. Mutations are never cached: Absinthe
     # refuses them over GET, and only a 200 without `errors` qualifies.
+    # First in the pipeline so its `before_send` is registered even for a
+    # request a later plug refuses — a batch rejected below still leaves with
+    # an explicit `private, no-store` rather than no directive for a CDN to
+    # interpret.
     plug KilnCMSWeb.Plugs.PublicCache, graphql: true
-    # Block schema introspection in production (config-gated).
-    plug KilnCMSWeb.Plugs.DisableGraphqlIntrospection
+    # A batched body (a JSON array of operations) is refused past a size, and
+    # every operation in it after the first is charged to `:gql` as well.
+    # Introspection is refused by the document pipeline (`KilnCMSWeb.GraphqlLimits`),
+    # which replaced the `DisableGraphqlIntrospection` plug that stood here.
+    plug KilnCMSWeb.Plugs.GraphqlBatchLimit, :gql
     plug :load_from_bearer
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
@@ -164,6 +171,15 @@ defmodule KilnCMSWeb.Router do
     plug :protect_from_forgery
     plug :put_secure_browser_headers, @swagger_csp_headers
     plug :put_swagger_csp
+  end
+
+  # The GraphQL schema as SDL (`KilnCMSWeb.ApiSpecController`). Not `:api`:
+  # that pipeline's `accepts ["json"]` would answer a codegen tool asking for
+  # `application/graphql` with a 406. Metered on the `:docs` bucket, as the
+  # OpenAPI explorer is, and an API key is the only credential it reads.
+  pipeline :api_spec do
+    plug KilnCMSWeb.Plugs.RateLimit, :docs
+    plug KilnCMSWeb.Plugs.ApiKeyAuth
   end
 
   # Auth pages get a tighter per-IP limit to slow credential stuffing.
@@ -449,6 +465,9 @@ defmodule KilnCMSWeb.Router do
       # to take on it. Restore stays a documented ops procedure.
       live "/editor/backups", BackupLive, :index
       live "/editor/mail", MailSettingsLive, :index
+      # A site's own SMTP relay and From address (#1322). Org-scoped, unlike
+      # `/editor/mail` above: that is the operator's relay for every site.
+      live "/editor/site-mail", SiteMailLive, :index
       live "/editor/newsletter", NewsletterLive, :index
       # Paid memberships (#337 Phase 2). Instance-wide provider credentials plus
       # per-site tiers, so the page itself gates on `platform_admin?` — see the
@@ -524,14 +543,15 @@ defmodule KilnCMSWeb.Router do
   # Headless GraphQL — always available; the interactive playground is dev-only
   # (see the `dev_routes` block below).
   #
-  # Cap query cost/depth so a deeply nested or wide query can't force an
-  # unbounded resolve (DoS). Tune `max_complexity` up as list queries are added.
-  # One definition shared by the forward below and `PageController.gql_get/2`
-  # (which re-dispatches GET-based queries to Absinthe).
+  # The cost limits (complexity, depth, token count, introspection) are pinned by
+  # the pipeline, not set here as options: `KilnCMSWeb.GraphqlLimits` builds the
+  # same pipeline for `/ws/gql`, and options can be overridden per request where
+  # a pipeline cannot. One definition shared by the forward below, the dev
+  # playground and `PageController.gql_get/2` (which re-dispatches GET-based
+  # queries to Absinthe).
   @graphql_opts [
     schema: Module.concat(["KilnCMSWeb.GraphqlSchema"]),
-    analyze_complexity: true,
-    max_complexity: 200
+    pipeline: {Module.concat(["KilnCMSWeb.GraphqlLimits"]), :plug_pipeline}
   ]
 
   @doc "Absinthe.Plug options for the `/gql` endpoint (see the forward below)."
@@ -547,10 +567,10 @@ defmodule KilnCMSWeb.Router do
     scope "/gql" do
       pipe_through [:graphql]
 
-      forward "/playground", Absinthe.Plug.GraphiQL,
-        schema: Module.concat(["KilnCMSWeb.GraphqlSchema"]),
-        socket: Module.concat(["KilnCMSWeb.GraphqlSocket"]),
-        interface: :simple
+      forward "/playground",
+              Absinthe.Plug.GraphiQL,
+              @graphql_opts ++
+                [socket: Module.concat(["KilnCMSWeb.GraphqlSocket"]), interface: :simple]
     end
   end
 
@@ -618,6 +638,15 @@ defmodule KilnCMSWeb.Router do
       tools: @mcp_tools,
       protocol_version_statement: "2024-11-05",
       otp_app: :kiln_cms
+  end
+
+  # The running schema for GraphQL codegen: public where introspection is on,
+  # API-key-only where it is off (production). The OpenAPI document's
+  # equivalent rule lives in `KilnCMSWeb.Plugs.ApiDocs`.
+  scope "/api", KilnCMSWeb do
+    pipe_through :api_spec
+
+    get "/graphql/schema.graphql", ApiSpecController, :graphql_sdl
   end
 
   # Exchange a passphrase for a grant token (#496). Its own scope so it carries

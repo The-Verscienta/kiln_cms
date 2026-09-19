@@ -35,8 +35,15 @@ defmodule KilnCMS.Federation.SiteFederation do
   models it. Provenance can retire a key and still verify old signatures because
   it controls both sides. Here the other side is thousands of remote servers
   that cached `publicKeyPem` from the actor document at follow time, on their own
-  schedule; there is no retired-key set that helps. Rotating means re-signing
-  under a new key and letting peers re-fetch, which is a phase-2 concern.
+  schedule; there is no retired-key set that helps.
+
+  So re-keying (`:rekey`, #1487) replaces the keypair in place — same actor id,
+  same `keyId`, a new PEM behind them — and then tells followers: an actor
+  `Update` carrying the new `publicKeyPem` is queued in the same transaction
+  (`KilnCMS.Federation.ActorUpdateWorker`), so it can only go out once the new
+  key is what `/actor` serves. A peer that does not process actor updates
+  still recovers the way Mastodon does: the next delivery fails verification
+  under its cached key, and it re-fetches the actor.
   """
   # The shared one-row-per-org shape comes from `KilnCMS.CMS.OrgSettings`
   # (#1080). Editors read it: the federation panel shows whether the site is
@@ -75,6 +82,33 @@ defmodule KilnCMS.Federation.SiteFederation do
 
       change set_attribute(:enabled, true)
       change KilnCMS.Federation.Changes.MintIdentity
+    end
+
+    # Replace the signing keypair, keeping the identity (#1487). `origin` and
+    # `username` are untouched — the actor id is the identity, and a new one
+    # would orphan every follower — and so is the `keyId` derived from them.
+    # Admin-only through the shared write policy. The actor `Update` is queued
+    # inside this transaction, so the job cannot run before the new key is
+    # committed and served: an `Update` signed with a key peers cannot yet
+    # fetch would not verify.
+    update :rekey do
+      description "Replace the site actor's signing keypair and tell its followers."
+      require_atomic? false
+      accept []
+
+      validate present(:origin),
+        message: "federation has never been enabled for this site, so it has no key to replace"
+
+      change KilnCMS.Federation.Changes.MintKeypair
+
+      change after_action(fn _changeset, settings, _context ->
+               case Oban.insert(
+                      KilnCMS.Federation.ActorUpdateWorker.new(%{"org_id" => settings.org_id})
+                    ) do
+                 {:ok, _job} -> {:ok, settings}
+                 {:error, error} -> {:error, error}
+               end
+             end)
     end
 
     update :disable do
@@ -128,7 +162,7 @@ defmodule KilnCMS.Federation.SiteFederation do
 
     # AES-256-GCM via `KilnCMS.Keys.Vault`. Never public: it signs every
     # outbound delivery, and anyone holding it can speak as this site.
-    attribute :private_key_encrypted, :binary do
+    attribute :private_key_encrypted, KilnCMS.Keys.Vault.Ciphertext do
       writable? false
       public? false
       sensitive? true
@@ -143,10 +177,12 @@ defmodule KilnCMS.Federation.SiteFederation do
   @doc """
   The decrypted RSA private key PEM for a settings row, or `nil`.
 
-  `nil` rather than an error when the vault cannot open it: `secret_key_base`
-  rotation orphans database-stored keys (see `KilnCMS.Keys.Vault`), and the
-  honest response to "this site can no longer sign" is that it stops
-  delivering, not that every caller crashes.
+  `nil` rather than an error when the vault cannot open it — a
+  `secret_key_base` rotated without `PREVIOUS_SECRET_KEY_BASE` or the
+  re-encryption task (see `KilnCMS.Keys.Vault`) — because the honest response
+  to "this site can no longer sign" is that it stops delivering, not that
+  every caller crashes. `KilnCMS.Federation.active_settings/2` tells that case
+  apart from federation being off, so the delivery ledger says which it was.
   """
   @spec private_key_pem(t()) :: String.t() | nil
   def private_key_pem(%{private_key_encrypted: nil}), do: nil
