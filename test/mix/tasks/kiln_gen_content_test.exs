@@ -48,6 +48,19 @@ defmodule Mix.Tasks.Kiln.Gen.ContentTest do
 
   describe "the generator codemod" do
     setup do
+      # `Ash.Domain.Igniter.list_domains/1` takes a fast path when the app env
+      # answers: `Application.get_env(app, :ash_domains)` plus a scan of the
+      # *changed* sources only, and a `test_project/1` fixture counts as
+      # neither. Up to igniter 0.8.3 evaluating the fixture's `config.exs`
+      # left `config :test, ash_domains:` in the real app env, so the fast
+      # path found the domain by accident; 0.8.4 restores the env after
+      # evaluating project config (igniter #400), the fast path returns `[]`,
+      # and the codemod took the "plain module, upgrade it to a domain" branch
+      # — a second `use Ash.Domain` and a second `resources do` block. Give the
+      # fast path what production has: the compiled `:ash_domains` config.
+      Application.put_env(:test, :ash_domains, [KilnCMS.CMS])
+      on_exit(fn -> Application.delete_env(:test, :ash_domains) end)
+
       igniter =
         test_project(
           files: %{
