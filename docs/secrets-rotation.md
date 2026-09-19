@@ -1,7 +1,7 @@
 # Secrets rotation runbook
 
-How to replace each secret a KilnCMS deployment depends on, what breaks while
-you do it, and what cannot be rotated gracefully today. Written to be followed
+How to replace each secret a KilnCMS deployment depends on, and what breaks
+while you do it. Written to be followed
 during an incident, against a *running* deployment — so every step below is
 what the code actually does, not what would be reasonable.
 
@@ -23,10 +23,12 @@ ends in a restart, and on the reference deployment (a single Coolify app on one
 VPS — see [`deploy.md`](deploy.md)) a restart is a brief full outage, not a
 rolling one. Plan the window.
 
-**2. Nothing here supports two keys at once.** Not the session cookie, not the
-auth tokens, not the object store. Where a graceful transition exists it is
-because the *provider* (Postgres, S3) can hold two credentials, never because
-Kiln can. Sections that say "hard cutover" mean it.
+**2. Almost nothing here supports two keys at once.** Not the session cookie,
+not the auth tokens, not the object store. Where a graceful transition exists,
+it is usually because the *provider* (Postgres, S3) can hold two credentials,
+not because Kiln can. The one exception is data at rest: `KilnCMS.Keys.Vault`
+reads under `PREVIOUS_SECRET_KEY_BASE` too while a `SECRET_KEY_BASE` rotation
+is in progress (#1487). Sections that say "hard cutover" mean it.
 
 **3. Two secrets are not interchangeable, even though both sign things.**
 
@@ -34,11 +36,12 @@ Kiln can. Sections that say "hard cutover" mean it.
 |---|---|---|
 | Signs/encrypts | the session cookie, every `Phoenix.Token` (preview links, content-password grants, the collab socket token, the 2FA pending blob) | the AshAuthentication JWTs (session token, bearer tokens, remember-me, magic links, password resets, email confirmations) |
 | Also **encrypts data at rest** | **yes** — `KilnCMS.Keys.Vault` | no |
-| Rotation is reversible | **no** (see below) | yes |
-| Blast radius | everyone signed out **plus** silent, permanent loss of database-stored key material | everyone signed out |
+| Rotation loses data | **only if done out of order**: the old value must stay readable until the re-encryption task has run (see below) | no |
+| Blast radius | everyone signed out, **plus** silent loss of database-stored key material if the old value is retired too early | everyone signed out |
 
-Rotating `SECRET_KEY_BASE` is the single most destructive operation in this
-document. Read its section in full before you run it.
+Rotating `SECRET_KEY_BASE` is the one operation in this document where the
+*order* of the steps decides whether data survives. Read its section in full
+before you run it.
 
 ## Preconditions for any rotation
 
@@ -194,71 +197,97 @@ this section is long:
    The LiveView session is signed with it too.
 3. **Data at rest.** `KilnCMS.Keys.Vault` derives an AES-256-GCM key from
    `secret_key_base` and encrypts database-stored key material with it. This is
-   the irreversible part.
+   the part that can lose data if the steps below are done out of order.
 
-### The part that is not recoverable
+### Data at rest: re-encrypt before you retire the old value
 
-Four things live in the database encrypted under the old `secret_key_base`, and
-**there is no re-encryption path in the application** — no mix task, no admin
-action, no migration. Rotate the secret and the ciphertext is permanently
-unreadable:
+These columns hold ciphertext under the current `secret_key_base`. Every one
+has type `KilnCMS.Keys.Vault.Ciphertext`, and that type is how the
+re-encryption task finds them. A test fails the build if a new binary column
+is neither that type nor explained, so the list cannot fall behind the code.
 
-| Encrypted column | Resource | What stops working | Recovery |
+| Encrypted column | Resource | What stops working if it cannot be opened | In-app recovery if the old secret is gone |
 |---|---|---|---|
-| `dkim_private_key_encrypted` | `KilnCMS.Mail.Settings` | Outbound mail is no longer DKIM-signed (direct-delivery mode) | **Supported**: `/editor/mail` → *Rotate key*, then publish the new DNS TXT record |
-| `credential_encrypted` | `KilnCMS.Social.Account` | Scheduled social posts stop being published | `/editor/social` — re-connect each account and re-enter its credential |
-| `secret_key_encrypted`, `webhook_secret_encrypted` | `KilnCMS.Billing.Settings` | Payments and inbound payment webhooks stop | `/editor/billing` — re-paste the provider API key and the `whsec_…` from the provider dashboard |
-| `private_key_encrypted` | `KilnCMS.Federation.SiteFederation` | The site can no longer sign ActivityPub deliveries | **None in-app.** See [What cannot be rotated safely today](#what-cannot-be-rotated-safely-today) |
+| `dkim_private_key_encrypted` | `KilnCMS.Mail.Settings` | Outbound mail is no longer DKIM-signed (direct-delivery mode) | `/editor/mail` → *Rotate key*, then publish the new DNS TXT record |
+| `credential_encrypted` | `KilnCMS.Social.Account` | Scheduled social posts stop being published | `/editor/social`: reconnect each account and enter its credential again |
+| `secret_key_encrypted`, `webhook_secret_encrypted` | `KilnCMS.Billing.Settings` | Payments and inbound payment webhooks stop | `/editor/billing`: paste the provider API key and the `whsec_…` from the provider dashboard again |
+| `private_key_encrypted` | `KilnCMS.Federation.SiteFederation` | The site can no longer sign ActivityPub deliveries | `/editor/federation` → *Re-key*, or `mix kiln.federation rekey`. See [Re-keying the ActivityPub actor](#re-keying-the-activitypub-actor) |
 
-**None of these announces itself.** The decrypt helpers deliberately return
-`nil` rather than raising, so that a rotated or restored deployment stops
+**You should never need the last column.** Two pieces make the rotation
+lossless:
+
+- **A read window.** Set `PREVIOUS_SECRET_KEY_BASE` to the *old* value next to
+  the new `SECRET_KEY_BASE`. `KilnCMS.Keys.Vault.decrypt/1` tries the current
+  secret and then the previous one. `encrypt/1` writes only under the current
+  secret. While both are set, everything above keeps working, and anything
+  written during the window is already under the new key.
+- **A re-encryption task.** `mix kiln.vault.reencrypt` (in a release:
+  `bin/kiln_cms eval 'KilnCMS.Release.reencrypt_vault()'`) walks every column
+  above in one transaction per table, with rows locked. It decrypts each value
+  with the old secret and writes it back under the current one. It sorts each
+  value into one of three groups:
+  - *already current*: skipped, so a second run is a no-op.
+  - *re-encrypted*: moved from the old secret to the current one.
+  - *unreadable*: opens under neither secret. It is reported by table, column
+    and id, and **never overwritten**.
+
+  If anything is unreadable, it exits non-zero. By default the old secret is
+  `PREVIOUS_SECRET_KEY_BASE`. To name a different variable, pass
+  `--old-secret-key-base-env VAR`. The secret itself is never an argument, so
+  it stays out of shell history and `ps`. `--dry-run` reports without writing.
+  With no old secret at all, the task still runs, as a check that everything
+  opens under the current secret.
+
+**If it goes wrong, the failure is quiet.** The decrypt helpers deliberately
+return `nil` instead of raising, so that a rotated or restored deployment stops
 *doing* the thing instead of crashing every request that touches it. Nothing
-fails at boot and nothing alerts; each one surfaces only at the moment
-something tries to use it, and only where you would have to be looking:
+fails at boot and nothing sends an alert:
 
-- **DKIM** — `KilnCMS.Mail.dkim_config/0` logs
+- **DKIM**: `KilnCMS.Mail.dkim_config/0` logs
   `"DKIM key configured but unresolvable, sending unsigned"` at `warning` and
   **sends the mail anyway**, on the explicit reasoning that losing a signature
   hurts deliverability while losing the mail loses a password reset. So mail
-  keeps flowing, unsigned, and deliverability decays. Worse for your
-  purposes: `/editor/mail` still renders the selector, the public key and the
-  DNS record, because `dkim_public_key` is a **plaintext** column — the page
-  looks completely healthy. **The log line is the only signal.**
-- **Social** — the provider adapter turns the `nil` into a recorded post
-  failure, `"no usable access token stored"`, per attempt.
-- **Federation** — signing fails, and `KilnCMS.Federation.DeliveryWorker`
-  records a failed delivery per attempt rather than a signed one.
-- **Billing** — the provider call fails at the point of use.
+  keeps flowing, unsigned, and deliverability decays. `/editor/mail` still
+  renders the selector, the public key and the DNS record, because
+  `dkim_public_key` is a **plaintext** column. The page looks completely
+  healthy. **The log line is the only signal.**
+- **Social**: the provider adapter turns the `nil` into a recorded post
+  failure, `"no usable access token stored"`, on every attempt.
+- **Federation**: `/editor/federation` and `mix kiln.federation status` show
+  the signing key as **unreadable**, and each delivery in the ledger fails with
+  *"this site's signing key is unreadable"*. Before #1487 it failed with
+  *"federation is not enabled"*.
+- **Billing**: the provider call fails at the point of use.
 
-If you rotate this secret, go and check each of the four yourself — see the
-verification checklist below.
+`mix kiln.vault.reencrypt --dry-run` with no old secret is the one check that
+covers all of them at once. It should report `0 unreadable` for every column.
 
 > Using the `:env` or `:file` key providers
 > (`KilnCMS.Keys.Providers.Env`, `KilnCMS.Keys.Providers.File`) instead of the
 > `:database` one takes the DKIM and billing keys out of the vault entirely and
-> makes them immune to this. If your deployment rotates `SECRET_KEY_BASE` on a
-> schedule, move them off the database provider *first*, permanently. The
-> federation actor key has no such option — it is vault-only.
+> makes them immune to this. The federation actor key has no such option: it
+> is vault-only.
 
-### Dual-key transition: not possible
+### Dual-key transition: the vault only
 
-`Plug.Session`'s cookie store derives its keys from the single
-`conn.secret_key_base` and has no notion of an old key. `Phoenix.Token` reads
-one `secret_key_base` from the endpoint's config. `KilnCMS.Keys.Vault` derives
-one AES key. There is nowhere to put a second value.
+`KilnCMS.Keys.Vault` has the read window described above. **Nothing else in
+this section does.** `Plug.Session`'s cookie store derives its keys from the
+single `conn.secret_key_base` and has no notion of an old key. `Phoenix.Token`
+reads one `secret_key_base` from the endpoint's config.
+`PREVIOUS_SECRET_KEY_BASE` is read by the vault and by nothing else. For
+everyone signed in, the rotation is still a hard cutover.
 
-PR #1445 (open at the time of writing) makes the session cookie's two salts
-configurable (`:session_signing_salt` / `:session_encryption_salt`) rather than
-literals in `KilnCMSWeb.SessionCookie`. **It does not change this answer.**
-The salts are `Application.compile_env/3` reads — compile-time, because the
-endpoint's `@session_options` is a module attribute — so they are set in a
-downstream `config/prod.exs` and take a **rebuild**, not an env change, and
-they still derive a single key from a single `secret_key_base`. What that PR
-gives you is a deployment-specific salt instead of one shared by every clone of
-this open-source tree; what it does not give you is a grace period. Changing a
-salt has exactly the session-invalidating effect that changing
-`secret_key_base` has — with none of the vault consequences, since the vault
-uses its own fixed salt.
+PR #1445 made the session cookie's two salts configurable
+(`:session_signing_salt` / `:session_encryption_salt`) instead of literals in
+`KilnCMSWeb.SessionCookie`. **It does not change this answer.** The salts are
+`Application.compile_env/3` reads, compile-time because the endpoint's
+`@session_options` is a module attribute. So they are set in a downstream
+`config/prod.exs` and take a **rebuild**, not an env change, and they still
+derive a single key from a single `secret_key_base`. What that PR gives you is
+a deployment-specific salt instead of one shared by every clone of this
+open-source tree. It does not give you a grace period. Changing a salt
+invalidates sessions exactly as changing `secret_key_base` does, without the
+vault consequences, because the vault uses its own fixed salt.
 
 ### What breaks
 
@@ -270,47 +299,74 @@ uses its own fixed salt.
 | Remember-me cookies | Unaffected by this secret; still valid, so a "remembered" browser signs straight back in |
 | Shared preview links, release-preview links | Dead. Re-issue from the editor |
 | Content-password grants | Dead; visitors re-enter the password |
-| Two-factor sign-ins in flight | The pending blob is undecryptable — the user restarts sign-in |
+| Two-factor sign-ins in flight | The pending blob is undecryptable, so the user restarts sign-in |
 | Editor content locks | Unreadable locks are treated as absent, which is the intended fallback |
-| DKIM / social / billing / federation key material | **Permanently lost** — see above |
+| DKIM / social / billing / federation key material | **Kept**, if you follow the procedure: readable through the window, then re-encrypted. Lost only if the old value is retired first |
 
 ### Procedure
 
 1. **Decide whether you actually need this.** If the goal is "sign everyone
    out", use the SQL above instead. If the goal is "the session cookie's key
-   leaked", you need this. If the goal is "a backup was exfiltrated", note
-   that the vault ciphertext in that backup is readable only with the *old*
-   `SECRET_KEY_BASE` — so rotation here protects the data in a stolen dump,
-   at the cost of the live copy.
+   leaked", you need this. If the goal is "a backup was exfiltrated", read
+   [If the old value leaked](#if-the-old-value-leaked) first: re-encrypting
+   does not protect a copy that has already been taken.
 2. **Take a fresh, verified backup** and record the **old** `SECRET_KEY_BASE`
-   alongside it, labelled. Without it that dump is only a partial backup
+   alongside it, labelled. Without it, that dump is only a partial backup
    ([`backups.md`](backups.md#what-must-be-backed-up)).
-3. **Harvest what you are about to lose**, while the old secret is still live:
-   - `/editor/mail` — note the current DKIM selector and TXT record.
-   - `/editor/social` — note which accounts are connected. The page will keep
-     showing them afterwards; the credential behind each is what is lost.
-   - `/editor/billing` — have the provider API key and webhook secret to hand
-     from the provider's dashboard; you will re-paste both.
-   - If the site federates, read [What cannot be rotated safely
-     today](#what-cannot-be-rotated-safely-today) **before continuing**.
-4. **Generate and set the new value:**
+3. **Check the starting point.** Everything should open under the current
+   secret before you change anything:
+   ```bash
+   mix kiln.vault.reencrypt --dry-run
+   # in a release:
+   bin/kiln_cms rpc 'KilnCMS.Release.reencrypt_vault(dry_run: true)'
+   ```
+   Every column should say `0 unreadable`. If one does not, that value is
+   already lost to the current secret. Recover it in the app (the last column
+   of the table above) before you rotate, so you are not fixing two things at
+   once.
+4. **Generate the new value:**
    ```bash
    mix phx.gen.secret
    ```
-   Set `SECRET_KEY_BASE`, record it in the password manager, and update the
-   env snapshot that backups depend on.
-5. **Restart.** Boot `raise`s on an *unset* variable — but not on a blank
-   one; see the note under `TOKEN_SIGNING_SECRET` step 4.
-6. **Re-establish each vault-backed secret**, in this order:
-   1. `/editor/mail` → *Rotate key* → publish the new DNS TXT record. The UI
-      says the old record can stay up while signed mail is in transit; leave
-      it for a day, then remove it.
-   2. Billing settings → re-enter the API key and the webhook signing secret.
-   3. Social accounts → re-connect each one.
-   4. Federation → see below.
-7. **Verify** with the checklist at the end of this document. Do not skip it:
-   nothing in step 6's list announces its own failure, and two of the four
-   render a healthy-looking settings page either way.
+5. **Set both variables:** `SECRET_KEY_BASE` to the **new** value, and
+   `PREVIOUS_SECRET_KEY_BASE` to the **old** one. Record both in the password
+   manager, and update the env snapshot that backups depend on.
+6. **Restart.** Boot `raise`s on an *unset* `SECRET_KEY_BASE`, but not on a
+   blank one; see the note under `TOKEN_SIGNING_SECRET` step 4. Everyone is
+   signed out (see [What breaks](#what-breaks)). Mail, social, billing and
+   federation keep working, because the vault reads through the window.
+7. **Re-encrypt:**
+   ```bash
+   mix kiln.vault.reencrypt --dry-run   # expect "N would re-encrypt, 0 unreadable"
+   mix kiln.vault.reencrypt
+   # in a release:
+   bin/kiln_cms eval 'KilnCMS.Release.reencrypt_vault()'
+   ```
+   It is safe to run against the live deployment and safe to run twice. A
+   non-zero exit means some value opened under neither secret. Those values
+   are listed by id and left untouched. Stop and find out why before going on.
+8. **Confirm nothing is left:** run the dry run once more. Every column should
+   report `0 would re-encrypt, 0 unreadable`.
+9. **Close the window.** Remove `PREVIOUS_SECRET_KEY_BASE` and restart. From
+   now on the old value opens nothing the application stores. Keep it with the
+   backups taken before step 7, which still need it.
+10. **Verify** with the checklist at the end of this document.
+
+### If the old value leaked
+
+Re-encryption protects the data you keep. **It does not un-leak anything.**
+Anyone holding the old `SECRET_KEY_BASE` and a copy of the database from before
+step 7 (a backup, a staging clone, a stolen dump) can still decrypt every value
+in the table above. So after the procedure, rotate the secrets themselves, not
+just their encryption:
+
+1. `/editor/mail` → *Rotate key*, then publish the new DNS TXT record.
+2. Roll the billing provider's API key and webhook secret in the provider
+   dashboard, then paste the new ones into `/editor/billing`.
+3. Revoke and reissue each social credential at the provider, then reconnect
+   it in `/editor/social`.
+4. Re-key the ActivityPub actor, as described in
+   [Re-keying the ActivityPub actor](#re-keying-the-activitypub-actor).
 
 ---
 
@@ -496,40 +552,47 @@ verify the feature.
 
 ---
 
-## What cannot be rotated safely today
+## Re-keying the ActivityPub actor
 
-**The ActivityPub actor key, when federation is enabled.**
+**The federation actor key** is the RSA keypair
+`KilnCMS.Federation.SiteFederation` mints on `:enable`. The private half is
+vault-encrypted. You do **not** need to re-key for a `SECRET_KEY_BASE`
+rotation: the procedure above carries the key across unchanged, and followers
+never notice. Re-key when the key itself is compromised, or when it was lost
+(a rotation done without the window, or a restore without the old secret).
 
-`KilnCMS.Federation.SiteFederation` mints the site's RSA keypair exactly once,
-in the `:enable` action, and stores the private half vault-encrypted. The
-action is an upsert whose `upsert_fields` list is `[:enabled]` and nothing
-else, *deliberately* — re-enabling a site that was switched off must keep the
-actor its remote followers already cached. The consequence is that there is no
-action, no admin UI and no mix task that can give a site a new keypair.
+```bash
+mix kiln.federation rekey [--org-id UUID]
+```
 
-So if `SECRET_KEY_BASE` is rotated on a federating deployment:
+In the app, use `/editor/federation` → *Re-key*. Both are admin-only.
 
-- `private_key_pem/1` returns `nil`, the site stops signing, and every outbound
-  delivery is refused. It shows up as a run of failed deliveries in
-  `KilnCMS.Federation.DeliveryWorker`, not as anything that announces a cause.
-- The only way back is a manual database intervention — delete the
-  `site_federation` row and re-run `:enable` — which mints a **new** public key
-  under the same actor id.
-- Remote servers cache an actor's public key. Whether they refetch on a
-  signature failure is entirely up to each remote implementation; the source
-  comment on `MintIdentity` is explicit that "there is no mechanism for a
-  remote server to learn it happened". Expect some followers never to recover.
+**What stays and what changes.** The handle, the actor id and the `keyId`
+(`<origin>/actor#main-key`) stay the same. Only the PEM behind them changes.
+Remote servers store the actor id and deduplicate on it, so keeping it is what
+keeps your followers.
 
-**Treat federation as a reason not to rotate `SECRET_KEY_BASE`** unless the
-leak makes it unavoidable. If you must: disable federation, rotate, re-enable
-with a fresh identity, and tell your followers out of band that the actor was
-re-keyed.
+**How followers find out.** Re-keying queues an actor `Update` to every
+deliverable follower (`KilnCMS.Federation.ActorUpdateWorker`). The update
+carries the whole actor document with the new `publicKeyPem`. It is queued
+inside the re-key transaction, so it cannot go out before `/actor` serves the
+new key. It is signed with the new key, like every delivery after it.
 
-Closing this gap is a follow-up worth filing: a re-key action for the actor,
-and a vault re-encryption task that walks the four encrypted columns with the
-old and new `SECRET_KEY_BASE` in hand. Together they would make
-`SECRET_KEY_BASE` rotation recoverable rather than destructive, and would let
-this section be deleted.
+**What followers actually do with it depends on their software:**
+
+- A server that processes actor `Update`s replaces the key straight away.
+- A server that behaves like Mastodon first fails to verify the `Update`
+  against its cached key. It then re-fetches the actor document, finds the new
+  key, and accepts the update. Mastodon rate-limits that re-fetch, so expect a
+  short run of failed deliveries in the ledger, which clears on retry.
+- A server that does neither keeps the old key. Deliveries to it keep failing
+  until it re-fetches the actor for some other reason, and some never will.
+  The confirmation on the button says so.
+
+**If the key leaked**, re-key immediately, but do not assume it is contained.
+Until each peer has the new key, the old one still signs traffic those peers
+accept as yours. Treat it as the incident it is, and tell your followers out of
+band if what the old key could sign matters.
 
 ---
 
@@ -544,6 +607,12 @@ to be exercised.
 - [ ] Sign in with email + password in a fresh private window.
 - [ ] A published page serves publicly, and an image on it renders.
 - [ ] Upload a new image in the media library (proves S3 write credentials).
+- [ ] ● `mix kiln.vault.reencrypt --dry-run` (in a release,
+      `bin/kiln_cms rpc 'KilnCMS.Release.reencrypt_vault(dry_run: true)'`)
+      reports `0 unreadable` for every column, and, once a `SECRET_KEY_BASE`
+      rotation is finished, `0 would re-encrypt`. This one check covers every
+      item below at the storage level. The items below prove that each feature
+      actually uses what is stored.
 - [ ] ● Send a test mail and check the application log for
       `"DKIM key configured but unresolvable"`. Its **absence** is the pass —
       the mail is delivered either way, so receiving it proves nothing.
@@ -553,8 +622,9 @@ to be exercised.
       `/editor/social` is not evidence; a successful post is.
 - [ ] ● Exercise billing against the provider (a test call, or whatever the
       settings page offers), rather than reading the page's status.
-- [ ] ● If the site federates: confirm a delivery is **accepted** by a remote
-      instance, not merely queued.
+- [ ] ● If the site federates: `/editor/federation` shows the signing key as
+      readable, and a delivery is **accepted** by a remote instance, not
+      merely queued.
 - [ ] A password reset completes end to end (proves `TOKEN_SIGNING_SECRET`).
 - [ ] Oban queues are draining in the console dashboards.
 - [ ] A backup runs successfully — by hand, `./scripts/backup.sh all` — and the
