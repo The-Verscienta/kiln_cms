@@ -41,6 +41,7 @@ default-locale menu — and an error on GraphQL `*BySlug` and `menu`.
   `GET /api/locales` publishes each locale's chain. A variant the reader may
   not open is skipped like a missing one. Resolution is per locale, not per
   document, so field-level localization (#1327) can reuse the same chains.
+  ([#1579](https://github.com/The-Verscienta/kiln_cms/pull/1579))
 
 <a id="one-click-deploy-templates-for-render-railway-flyio-and-digitalocean"></a>
 

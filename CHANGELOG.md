@@ -58,13 +58,13 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Headless slug lookups now answer a missing translation from the site's
   fallback chain, and an unsupported locale is a `400`.**
-  ([long form](docs/changelog/unreleased.md#headless-slug-lookups-now-answer-a-missing-translation-from-the-sites-fallback))
+  ([#1579](https://github.com/The-Verscienta/kiln_cms/pull/1579) · [long form](docs/changelog/unreleased.md#headless-slug-lookups-now-answer-a-missing-translation-from-the-sites-fallback))
 
 ### Added
 
 - **Locale fallback chains (`fr-CA → fr → en`), per site, on every delivery
   surface.**
-  ([long form](docs/changelog/unreleased.md#locale-fallback-chains-fr-ca-fr-en-per-site-on-every-delivery-surface))
+  ([#1579](https://github.com/The-Verscienta/kiln_cms/pull/1579) · [long form](docs/changelog/unreleased.md#locale-fallback-chains-fr-ca-fr-en-per-site-on-every-delivery-surface))
 
 - **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#one-click-deploy-templates-for-render-railway-flyio-and-digitalocean))
