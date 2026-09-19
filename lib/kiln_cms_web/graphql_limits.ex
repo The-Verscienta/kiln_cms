@@ -30,6 +30,12 @@ defmodule KilnCMSWeb.GraphqlLimits do
       replaced only read `params["query"]`, and a batched body (`_json`) or a
       socket document got past it.
 
+  How many documents a client may send is the rate limit's job, not a cost cap.
+  Over HTTP the `:gql` bucket is charged per request by `KilnCMSWeb.Plugs.RateLimit`.
+  On the socket, where the connection is charged once and the documents arrive
+  as frames on it, `KilnCMSWeb.GraphqlLimits.SocketDocumentBudget` charges the
+  same bucket once per document, as the socket pipeline's first phase.
+
   HTTP batching (a JSON array body, one document per element) is limited
   separately by `KilnCMSWeb.Plugs.GraphqlBatchLimit`. Each document in a batch
   goes through this pipeline on its own, so no phase here can see the size of
@@ -37,6 +43,7 @@ defmodule KilnCMSWeb.GraphqlLimits do
   """
 
   alias Absinthe.Phase
+  alias KilnCMSWeb.GraphqlLimits.SocketDocumentBudget
 
   # The cost cap the `/gql` forward has always had. Only the documents it covers
   # have changed (the socket, now).
@@ -101,10 +108,15 @@ defmodule KilnCMSWeb.GraphqlLimits do
   @doc "`Absinthe.Phoenix.Socket`'s `:pipeline` callback for `/ws/gql` (see `KilnCMSWeb.GraphqlSocket`)."
   @spec socket_pipeline(Absinthe.Schema.t(), keyword()) :: Absinthe.Pipeline.t()
   def socket_pipeline(schema, pipeline_opts) do
-    # The same pipeline `Absinthe.Phoenix.Channel.default_pipeline/2` builds.
+    # The same pipeline `Absinthe.Phoenix.Channel.default_pipeline/2` builds,
+    # charged to the rate limit first. The budget goes before `Phase.Init` so a
+    # subscription's pushes, which re-run the phases Init recorded, never pay it.
+    budget = {SocketDocumentBudget, context: Keyword.get(pipeline_opts, :context, %{})}
+
     schema
     |> Absinthe.Pipeline.for_document(pin(pipeline_opts))
     |> add_phases()
+    |> Absinthe.Pipeline.insert_before(Phase.Init, budget)
   end
 
   defp pin(pipeline_opts), do: Keyword.merge(pipeline_opts, options())

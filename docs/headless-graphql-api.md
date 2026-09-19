@@ -21,8 +21,9 @@ what the surface exposes and how writes are authorized.
 | `/gql/playground` | **dev only** — not served by a production build | Interactive GraphiQL playground |
 | `/ws/gql` | always on | Absinthe websocket: subscriptions, and queries and mutations too |
 
-The endpoint is rate-limited (`KilnCMSWeb.Plugs.RateLimit, :gql`) and reads an
-optional bearer token (`load_from_bearer`). Anonymous requests are fully
+The endpoint is rate-limited to 60 documents a minute per client address, over
+`/gql` and `/ws/gql` together (the `:gql` bucket; see [Query cost](#query-cost)),
+and reads an optional bearer token (`load_from_bearer`). Anonymous requests are fully
 supported — they simply run through the resource read policies, which already
 make **published content world-readable and everything else editor-only**. So an
 unauthenticated query can only ever see published content and world-readable
@@ -287,9 +288,17 @@ A list costs its row count times the cost of one row:
 If a listing page goes over, ask for a smaller page, pass `limit` on its
 relationships, or fetch the per-item detail separately.
 
+**Rate limit.** Each document counts once against a budget of 60 a minute per
+client address. The budget is shared by `/gql` and `/ws/gql`: a document sent
+over the socket costs the same as a request. Over it, `/gql` answers `429` with
+a `retry-after` header, and the socket answers that document with an error
+whose `extensions` are `{"code": "too_many_requests", "retry_after": <seconds>}`.
+The socket stays open. A subscription counts once, when you subscribe; the
+updates it pushes to you are free.
+
 **Batches.** A JSON array body runs each element as its own operation. Each one
-is counted against the `/gql` rate limit, so ten operations in one request
-cost the same as ten requests.
+is counted against the rate limit, so ten operations in one request cost the
+same as ten requests.
 
 **Introspection** (`__schema`, `__type`) is refused in production, however the
 document arrives. The playground needs it, which is why the playground is

@@ -96,7 +96,7 @@ The things an operator would hit in their first months of running Kiln.
   still accepted at 1.0. The ones most worth deciding explicitly:
   - `TENANT_STRICT_HOST` ships off. Decided: it turns on automatically
     once a second organization exists (#1547, in this milestone)
-  - `/live` events and `/ws/gql` subscription documents are not rate-limited
+  - `/live` events are not rate-limited
   - webhooks have no replay protection
   - `/api/ask` lets an anonymous caller drive LLM cost
 - **External review of the authentication surface (#1536).** This is the one

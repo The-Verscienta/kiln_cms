@@ -109,3 +109,30 @@ carries the reasoning.
   cost about 2 a level while returning k^depth rows. They are now priced at
   five rows, and at `limit` rows when one is given.
 
+<a id="each-document-sent-over-wsgql-now-counts-against-the-gql-rate-limit-and-a"></a>
+
+- **Each document sent over `/ws/gql` now counts against the `:gql` rate limit,
+  and a malformed document no longer strips a GraphQL socket of its tenant and
+  actor.** Only the connect was counted (`:gql_join`), so an anonymous client
+  could connect once and send any number of documents, each allowed the full
+  complexity cap. `KilnCMSWeb.GraphqlLimits.SocketDocumentBudget`, the first
+  phase of the socket's document pipeline, now charges every document the
+  client sends to `:gql`, the 60-a-minute bucket `/gql` requests use, under the
+  address the connect was charged under. A client has one GraphQL budget
+  whichever transport it uses. The key is the address, not the account as for
+  `/ws/collab` frames (decision record 0002): documents are not a per-keystroke
+  stream, and an anonymous socket has no account. A subscription's pushes are
+  not charged. They re-run only the phases `Absinthe.Phase.Init` recorded, and
+  the budget runs before Init. Over budget, the document is answered before it
+  is parsed with a GraphQL error whose `extensions` are
+  `{code: "too_many_requests", retry_after: <seconds>}`, and the socket and its
+  subscriptions stay up. A second defect turned up on the way:
+  `Absinthe.Phoenix.Channel` keeps the context a document ends with as the
+  socket's context, and a document refused before Absinthe copied the context
+  onto it (a syntax error, the token limit) ended with none. One malformed
+  document left the socket with no tenant, no actor and no pubsub until it
+  reconnected, so its next query ran with no tenant and its next subscription
+  crashed the channel. The budget phase now puts the context on the document
+  before any other phase runs. This closes the `/ws/gql` part of threat-model
+  residual item 10; `/live` events are still uncounted.
+
