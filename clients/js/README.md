@@ -49,7 +49,9 @@ const then = await kiln.artifact("post", "hello-world", { asOf: "2026-03-01" });
 // Search (each also has semanticSearch / autocomplete twins).
 const hits = await kiln.textSearch("posts", "firing schedules");
 
-// Share-link previews: one draft, behind a signed 15-minute token.
+// Share-link previews: one draft, behind a signed 15-minute token. Mint on the
+// server (an editor's `:read` key), redeem in the browser (no key needed).
+const { token } = await kiln.mintPreview("post", draftId);
 const draft = await kiln.preview(token);
 ```
 
@@ -152,6 +154,7 @@ throwing.
 | `search(q, opts)`                    | `GET /api/search`                                   | hybrid; visibility follows the credential               |
 | `artifact(type, slug, opts)`         | `GET /api/content/:type/:slug`                      | `surface`, `locale`, `asOf`; 503 retried once           |
 | `contentAsOf(type, asOf, opts)`      | `GET /api/content/:type?as_of=`                     | what was published then                                 |
+| `mintPreview(type, id)`              | `POST /api/content/:type/:id/preview-token`         | server side; `{token, url, expires_at, …}`              |
 | `preview(token)`                     | `GET /preview/:token`                               | one draft, signed 15-minute token                       |
 | `schema(opts)`                       | `GET /api/schema`                                   | the live delivery schema; feed it to `emitTypes`        |
 

@@ -66,6 +66,9 @@ Every summary line below that was shortened links to its own entry there.
 - **`KILN_MEDIA_ROOT`: a stable directory for local media.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#kilnmediaroot-a-stable-directory-for-local-media))
 
+- **Share a draft: *Copy preview link* in the editor, and a preview-token API.**
+  ([long form](docs/changelog/unreleased.md#share-a-draft-copy-preview-link-in-the-editor-and-a-preview-token-api))
+
 ### Changed
 
 - **The dependency audit also reads Hex's own advisory feed.**
@@ -79,6 +82,10 @@ Every summary line below that was shortened links to its own entry there.
 - **`mix setup` stops early, with the real reason, when the checkout's path has
   a space.**
   ([#1321](https://github.com/The-Verscienta/kiln_cms/issues/1321) · [long form](docs/changelog/unreleased.md#mix-setup-stops-early-with-the-real-reason-when-the-checkouts-path-has-a-space))
+
+- **A preview link shows a live document's unpublished edits, and works for
+  admin-defined types.**
+  ([long form](docs/changelog/unreleased.md#a-preview-link-shows-the-working-copy-and-works-for-admin-defined-types))
 
 - **Buttons, links, badges and fields that rendered unstyled now look like what
   they are.**

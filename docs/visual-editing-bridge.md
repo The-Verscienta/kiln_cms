@@ -60,14 +60,23 @@ users. A typical gate: a `?kilnPreview=1` query param or a preview cookie.
 <script
   src="https://cms.example.com/bridge.js"
   data-kiln-host="https://cms.example.com"
-  data-kiln-api-key="kiln_…"    <!-- an editor/admin :read_write key -->
+  data-kiln-api-key="kiln_…"    <!-- an editor/admin :read key -->
   data-kiln-auto>              <!-- enable edit mode on load -->
 </script>
 ```
 
 `data-kiln-api-key` is optional and only used for the live-preview socket and
-`fetchPreview`. It is an editor credential — inject it **only** into the
-edit-mode build, never the public site.
+`fetchPreview` — both reads, so a **`:read`**-scoped key on an editor's account
+is all it needs; never put a `:read_write` key here. It is still an editor
+credential that sees every draft until it is revoked — inject it **only** into
+the edit-mode build, never the public site.
+
+For showing one draft to someone (a reviewer, a front end's draft mode) rather
+than running the overlay, don't use a key at all: mint a short-lived,
+read-only, per-document **preview token** server-side
+(`POST /api/content/:type/:id/preview-token`, see
+[api.md → Preview tokens](api.md#preview-tokens)) and hand the browser that.
+The bridge itself does not accept a preview token yet.
 
 ### 2. Render the annotated preview in edit mode
 
@@ -161,8 +170,9 @@ elements, where there's no text to encode), annotate elements yourself from the
 ## Security
 
 - **Writes and drafts require an API key.** The annotated read and the write API
-  (#330) share the `:read_write` API-key model and the resource policies — a
-  read-only key or anonymous caller sees only published content and cannot write.
+  (#330) share the API-key model and the resource policies. What a key *reads*
+  follows its owner's role — an editor's `:read` key sees drafts — and only a
+  `:read_write` key can write. An anonymous caller sees only published content.
 - **Cross-origin is off by default.** The annotated read, the write API, and the
   live-preview socket are all gated by the shared **`CORS_ORIGINS`** allowlist
   (the socket via `check_origin`). Set it to your front end's origin(s).

@@ -249,6 +249,23 @@ export interface AsOfIndexResult {
   entries: AsOfIndexEntry[];
 }
 
+/**
+ * A freshly minted draft preview link (`POST /api/content/:type/:id/preview-token`).
+ * Hand `token` (or `url`) to the browser — never the API key that minted it.
+ */
+export interface MintedPreview {
+  /** Signed, read-only, this document only. Redeem with `preview(token)`. */
+  token: string;
+  /** The shareable link, on the host of the site that owns the document. */
+  url: string;
+  type: string;
+  id: string;
+  /** ISO 8601. */
+  expires_at: string;
+  /** Seconds (900). */
+  expires_in: number;
+}
+
 export interface AsOfIndexOptions extends RequestOptions {
   /** Default 100, max 500. */
   limit?: number;
