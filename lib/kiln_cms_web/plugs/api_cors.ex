@@ -27,10 +27,13 @@ defmodule KilnCMSWeb.Plugs.ApiCORS do
   # `res.headers.get('retry-after')` is `null` for exactly the allow-listed
   # front ends `CORS_ORIGINS` exists to serve — a documented header that the
   # audience it was documented for cannot read.
+  # `x-kiln-preview-token` is how `bridge.js` presents a preview token to
+  # `GET /api/visual-editing/...`; a custom request header is refused at the
+  # preflight unless it is listed here.
   @corsica Corsica.init(
              origins: {KilnCMSWeb.CORS, :allowed_origin?, []},
              allow_methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-             allow_headers: ["authorization", "content-type", "x-api-key"],
+             allow_headers: ["authorization", "content-type", "x-api-key", "x-kiln-preview-token"],
              expose_headers: ["retry-after"],
              max_age: 600
            )

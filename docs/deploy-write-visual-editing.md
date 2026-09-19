@@ -116,10 +116,13 @@ of them until you allow its origin.
       setup hint. The front-end origin is derived from this for `postMessage`
       validation.
 - [ ] On the **front end** (its responsibility, not Kiln's): load
-      `https://<kiln-host>/bridge.js` in an **edit-mode build only**, and inject
-      the editor's `kiln_…` API key there — **never** in the public build. The
-      key grants draft reads + writes; treat it like any editor credential. See
-      `docs/visual-editing-bridge.md`.
+      `https://<kiln-host>/bridge.js` in an **edit-mode build only**, and give
+      it a **preview token** minted server-side per render
+      (`POST /api/content/:type/:id/preview-token` with an editor's `:read`
+      key that stays on the front-end server) — not the key itself. A token is
+      read-only, one document, 15 minutes; a key in the browser sees every
+      draft until it is revoked. See `docs/visual-editing-bridge.md` →
+      *Preview tokens and long edit sessions*.
 - [ ] Verify end to end: from the front end's edit-mode build, hover a rendered
       value → it outlines → click → you land in the Kiln editor (or the
       Presentation console's side pane) on that field; save; the frame refreshes.

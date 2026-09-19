@@ -60,23 +60,86 @@ users. A typical gate: a `?kilnPreview=1` query param or a preview cookie.
 <script
   src="https://cms.example.com/bridge.js"
   data-kiln-host="https://cms.example.com"
-  data-kiln-api-key="kiln_…"    <!-- an editor/admin :read key -->
-  data-kiln-auto>              <!-- enable edit mode on load -->
+  data-kiln-preview-token="SFMyNTY…"  <!-- minted server-side for this document -->
+  data-kiln-auto>                    <!-- enable edit mode on load -->
 </script>
 ```
 
-`data-kiln-api-key` is optional and only used for the live-preview socket and
-`fetchPreview` — both reads, so a **`:read`**-scoped key on an editor's account
-is all it needs; never put a `:read_write` key here. It is still an editor
-credential that sees every draft until it is revoked — inject it **only** into
-the edit-mode build, never the public site.
+The bridge needs a credential only to see a **draft**: the live-preview socket
+and `fetchPreview` both read, and without one they see published content only.
+Give it a **preview token**. Don't give it an API key.
 
-For showing one draft to someone (a reviewer, a front end's draft mode) rather
-than running the overlay, don't use a key at all: mint a short-lived,
-read-only, per-document **preview token** server-side
-(`POST /api/content/:type/:id/preview-token`, see
-[api.md → Preview tokens](api.md#preview-tokens)) and hand the browser that.
-The bridge itself does not accept a preview token yet.
+- **A preview token (recommended).** Your front-end *server* mints one for the
+  document it is rendering with `POST /api/content/:type/:id/preview-token`
+  (see [api.md → Preview tokens](api.md#preview-tokens)), using an editor's
+  **`:read`** key that never leaves the server, and writes the token into the
+  page. The browser then holds a credential that is **read-only**, opens **one
+  document**, and expires in **15 minutes**. If it leaks, it exposes that one
+  draft briefly and nothing else.
+- **An API key (`data-kiln-api-key`), still accepted.** A `:read` key on an
+  editor's account works (never a `:read_write` key: the bridge only reads).
+  But it is a standing credential that sees **every** draft until someone
+  revokes it, and in the browser anyone can read it from the page source. Use
+  it only where no server can mint tokens, such as a static edit-mode build,
+  and never in the public site.
+
+When both are configured, the bridge sends only the token.
+
+### Preview tokens and long edit sessions
+
+A token lasts 15 minutes, and an editing session can last an afternoon.
+Neither side extends the token: `PreviewToken` tokens are stateless and cannot
+be renewed. The front end **re-mints** instead and hands the bridge the new
+token. Both surfaces enforce the lifetime:
+
+- the annotated read answers `404 invalid_preview` to an expired token, never
+  a fall-back to the published page, so a lapsed token is noticed;
+- the live socket re-verifies its token every 30 seconds (the #775 re-check)
+  and **closes once the token has expired**. `bridge.js` reconnects on close
+  with whatever token it holds by then. A leaked token therefore streams for
+  at most 15 minutes plus one check interval, not for as long as a tab stays
+  open.
+
+Two refresh patterns, and most front ends use both:
+
+1. **Re-mint per render.** Every server render of an edit-mode page mints a
+   fresh token and writes it into `data-kiln-preview-token`. A front end that
+   re-renders on each `onUpdate` (e.g. `router.refresh()` in Next.js) gets a
+   new token each time an editor saves, which needs no extra code:
+
+   ```js
+   // app/[...slug]/page.tsx (server): runs on every draft-mode render
+   // `kiln` is a @kiln-cms/client instance holding an editor's :read key, server-only
+   const { token } = await kiln.mintPreview(doc.type, doc.id)
+   // …render <script src=…/bridge.js data-kiln-preview-token={token} data-kiln-auto>
+   ```
+
+   Then hand the new token to the bridge after each refresh. Call
+   `KilnBridge.setPreviewToken(t)` with the value from the new render, since
+   the script tag is not re-executed.
+
+2. **Re-mint on an interval.** An editor can leave a tab open without saving
+   anything. For that case, have the page ask a small endpoint on your own
+   server for a new token well inside the 15 minutes:
+
+   ```js
+   // Client side. /api/kiln-preview-token is YOUR route: it mints with the
+   // server-held key and returns only {token}.
+   setInterval(async () => {
+     const r = await fetch(`/api/kiln-preview-token?type=post&id=${doc.id}`)
+     if (r.ok) KilnBridge.setPreviewToken((await r.json()).token)
+   }, 10 * 60 * 1000)   // 10 min, inside the 15-minute lifetime
+   ```
+
+   Gate that route on your own edit-mode session. It mints a draft credential
+   for whoever calls it.
+
+`setPreviewToken` does not interrupt an open socket. The socket keeps its old
+token until the server closes it at that token's expiry, then reconnects with
+the new one. A socket that is already down (refused, or backing off after
+refusals) reconnects immediately. If refusals continue for about two and a
+half minutes, the bridge stops retrying until it is given a new token or
+`connect` is called again, so an abandoned tab does not retry forever.
 
 ### 2. Render the annotated preview in edit mode
 
@@ -85,7 +148,8 @@ artifact, so the stega addresses are present and drafts are visible:
 
 ```
 GET /api/visual-editing/<type>/<slug>
-Authorization: Bearer kiln_…        # editor key → draft; anonymous → published
+x-kiln-preview-token: SFMyNTY…     # token for this document → its draft
+Authorization: Bearer kiln_…        # (or) editor key → draft; neither → published
 ```
 
 Render its strings as-is (the stega is invisible). That's all — hovering now
@@ -124,11 +188,13 @@ elements, where there's no text to encode), annotate elements yourself from the
 
 | Method | What it does |
 |--------|--------------|
-| `configure({host, apiKey})` | Override script-tag config. |
+| `configure({host, previewToken, apiKey})` | Override script-tag config. |
+| `setPreviewToken(token)` | Swap in a freshly minted token. The live socket reconnects with it (see [long edit sessions](#preview-tokens-and-long-edit-sessions)). |
 | `enable()` / `disable()` | Turn the click-to-edit overlay on/off. |
 | `onUpdate(cb)` | Register a callback fired on a live `update` push. |
-| `connect(type, id)` | Open the live-preview socket for a document. |
-| `fetchPreview(type, slug)` | Fetch the annotated preview JSON (uses the key). |
+| `connect(type, id)` | Open the live-preview socket for a document. The socket reconnects after the server closes it. |
+| `disconnect()` | Close the live-preview socket and stop reconnecting. |
+| `fetchPreview(type, slug, locale?)` | Fetch the annotated preview JSON with the token, or else the key. |
 | `decode(text)` / `clean(text)` | Stega decode / strip (mirrors the server). |
 
 ## The protocol (for other clients)
@@ -143,11 +209,19 @@ elements, where there's no text to encode), annotate elements yourself from the
   stega-encoded. Plain-string custom-field values are encoded block-less
   (`{type, id, slug, field}`); values consumers parse — JSON-encoded structures,
   URLs — and non-strings are left untouched. `no-store`; draft visibility
-  follows the caller's actor. (The public fired artifact still omits
-  `custom_fields`.)
-- **Live push:** `WS /ws/bridge?type=&id=&api_key=` → JSON frames
-  `{event: "update", type, id, title, excerpt}`. Connect refuses if the actor
-  can't read the document.
+  follows the caller's credential. A preview token (the `x-kiln-preview-token`
+  header, or `?preview_token=` for a client that cannot set headers) reads its
+  own document's working copy. The route's type and slug must be that
+  document's, the host must be the token's site, and `?locale=`, if given,
+  must be the document's. Any mismatch, and an expired or tampered token, gets
+  `404` with code `invalid_preview`. A presented token is the only credential
+  consulted. (The public fired artifact still omits `custom_fields`.)
+- **Live push:** `WS /ws/bridge?type=&id=&preview_token=` (or `&api_key=`) →
+  JSON frames `{event: "update", type, id, title, excerpt}`. Connect is refused
+  when a token does not name this `type`/`id` on this host's site, or has
+  expired, and when a key's actor (or an anonymous caller) can't read the
+  document. The server closes the connection when its periodic re-check
+  refuses, including when a token expires.
 - **Deep-link:** `/editor/site/:type/:slug?focus=<block_id>` (in-context editor,
   block-level). Locale variants share a slug, so the bridge also passes
   `locale=` from the stega payload (#1104); absent locale falls back to the
@@ -169,17 +243,18 @@ elements, where there's no text to encode), annotate elements yourself from the
 
 ## Security
 
-- **Writes and drafts require an API key.** The annotated read and the write API
-  (#330) share the API-key model and the resource policies. What a key *reads*
-  follows its owner's role — an editor's `:read` key sees drafts — and only a
-  `:read_write` key can write. An anonymous caller sees only published content.
+- **Drafts require a preview token or an API key; writes require a key.** A
+  preview token reads one document's draft for 15 minutes. What a key *reads*
+  follows its owner's role (an editor's `:read` key sees drafts), and only a
+  `:read_write` key can write, through the write API (#330). An anonymous
+  caller sees only published content.
 - **Cross-origin is off by default.** The annotated read, the write API, and the
   live-preview socket are all gated by the shared **`CORS_ORIGINS`** allowlist
   (the socket via `check_origin`). Set it to your front end's origin(s).
 - **Feature flag.** `VISUAL_EDITING_ENABLED=false` turns the whole surface off
   (`/api/visual-editing/...` 404s; the socket refuses).
-- **Never ship the editor key to the public site.** Load `bridge.js` and the key
-  only in the edit-mode build.
+- **Keep the editor key on a server.** Mint preview tokens with it there and
+  give the browser the token. Load `bridge.js` only in the edit-mode build.
 
 > **Deploying this?** See [deploy-write-visual-editing.md](deploy-write-visual-editing.md)
 > — the operator checklist (audit `:read_write` keys; set `CORS_ORIGINS` +

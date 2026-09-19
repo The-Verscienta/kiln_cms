@@ -69,6 +69,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Share a draft: *Copy preview link* in the editor, and a preview-token API.**
   ([long form](docs/changelog/unreleased.md#share-a-draft-copy-preview-link-in-the-editor-and-a-preview-token-api))
 
+- **The visual-editing bridge takes a preview token instead of an API key.**
+  ([long form](docs/changelog/unreleased.md#the-visual-editing-bridge-takes-a-preview-token-instead-of-an-api-key))
+
 ### Changed
 
 - **The dependency audit also reads Hex's own advisory feed.**

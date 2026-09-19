@@ -51,6 +51,23 @@ defmodule KilnCMSWeb.Plugs.ApiCORSTest do
       assert allow_methods =~ "PATCH"
       assert allow_methods =~ "DELETE"
     end
+
+    test "the bridge's preview-token header passes the preflight", %{conn: conn} do
+      # `bridge.js` sends `x-kiln-preview-token` to the annotated read. A custom
+      # header not on the allowlist fails the preflight, and the browser never
+      # sends the real request.
+      conn =
+        conn
+        |> put_req_header("origin", @allowed)
+        |> put_req_header("access-control-request-method", "GET")
+        |> put_req_header("access-control-request-headers", "x-kiln-preview-token")
+        |> options(~p"/api/visual-editing/post/some-slug")
+
+      assert get_resp_header(conn, "access-control-allow-origin") == [@allowed]
+
+      assert conn |> get_resp_header("access-control-allow-headers") |> Enum.join(",") =~
+               "x-kiln-preview-token"
+    end
   end
 
   describe "actual cross-origin request" do
