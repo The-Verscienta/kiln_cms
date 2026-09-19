@@ -68,6 +68,14 @@ Every summary line below that was shortened links to its own entry there.
 - **`KILN_MEDIA_ROOT`: a stable directory for local media.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#kilnmediaroot-a-stable-directory-for-local-media))
 
+### Changed
+
+- **The dependency audit also reads Hex's own advisory feed.**
+  ([long form](docs/changelog/unreleased.md#the-dependency-audit-also-reads-hexs-own-advisory-feed))
+
+- **String lengths are counted in codepoints, as Postgres counts them.**
+  ([long form](docs/changelog/unreleased.md#string-lengths-are-counted-in-codepoints-as-postgres-counts-them))
+
 ### Fixed
 
 - **Buttons, links, badges and fields that rendered unstyled now look like what
@@ -79,6 +87,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#a-paas-health-check-no-longer-gets-a-redirect-and-phxhost-falls-back-to-the))
 
 ### Security
+
+- **Every advisory published against the 0.9.0 dependency set is fixed,
+  including six CRITICAL in `ash_authentication`.**
+  ([long form](docs/changelog/unreleased.md#every-advisory-published-against-the-090-dependency-set-is-fixed-including-six))
 
 - **`/ws/gql` runs under the same cost limits as `/gql`, batches are counted per
   operation, and introspection is refused however a document arrives.**
