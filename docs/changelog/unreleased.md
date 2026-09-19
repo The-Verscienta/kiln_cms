@@ -36,6 +36,18 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="mix-setup-stops-early-with-the-real-reason-when-the-checkouts-path-has-a-space"></a>
+
+- **`mix setup` stops early, with the real reason, when the checkout's path has
+  a space.** Only one dependency cannot compile under such a path:
+  `picosat_elixir`, whose Makefile uses absolute paths as make targets. It used
+  to fail late, with an error telling you to install gcc and make. The docs said
+  every native dependency failed there, and that removing `igniter` crashed the
+  compiler. Neither is true, and the docs now say what is. The upstream fix is
+  [bitwalker/picosat_elixir#14](https://github.com/bitwalker/picosat_elixir/pull/14),
+  not yet released.
+  ([#1321](https://github.com/The-Verscienta/kiln_cms/issues/1321))
+
 <a id="buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they"></a>
 
 - **Buttons, links, badges and fields that rendered unstyled now look like what
