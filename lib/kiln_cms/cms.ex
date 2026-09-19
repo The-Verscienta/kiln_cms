@@ -431,6 +431,15 @@ defmodule KilnCMS.CMS do
       define :reset_site_code_injection, action: :destroy
     end
 
+    # A site's own SMTP relay (#1322). Read through `KilnCMS.Mail.SiteRelay`,
+    # which owns the precedence rule and the fail direction — never directly.
+    resource KilnCMS.CMS.SiteMailRelay do
+      define :list_site_mail_relay, action: :read
+      define :save_site_mail_relay, action: :save
+      define :update_site_mail_relay, action: :update
+      define :reset_site_mail_relay, action: :destroy
+    end
+
     # The version twin: "who added that script, and when". Registered because
     # AshPaperTrail generates it into this domain.
     resource KilnCMS.CMS.SiteCodeInjection.Version do
