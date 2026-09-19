@@ -29,7 +29,7 @@ end to end.
 | You want… | Use | Returns |
 |-----------|-----|---------|
 | The **rendered body** of a published page/post (blocks, HTML, JSON-LD) | Artifact: `GET /api/content/:type/:slug?surface=json\|json_ld\|web` | Fired artifact — the immutable, pre-compiled output (Kiln v2 `_type` block model) |
-| To **preview a specific draft** by share link | `GET /preview/:token` | The draft's raw, editable block tree (curated public fields), behind a signed 15-minute token |
+| To **preview a specific draft** by share link (draft mode) | Mint: `POST /api/content/:type/:id/preview-token` (editor key, server side) — or an editor's **Copy preview link**. Redeem: `GET /preview/:token` | The draft's raw, editable block tree (curated public fields) — the working copy for a live document — behind a signed, read-only 15-minute token for that one document |
 | **Filterable lists / metadata** (slug, title, SEO, dates, relationships), incl. drafts with a bearer token | JSON:API: `GET /api/json/...` | Resource attributes + relationship linkage. **No block body** (`blocks` is `public? false`) |
 | **Taxonomy** (categories, tags) | JSON:API `/api/json/categories`,`/tags` **or** GraphQL `categories`,`tags` | Name, slug, description |
 | **Search** (keyword, semantic, autocomplete) | JSON:API `/<type>/search`,`/semantic-search`,`/autocomplete` **or** GraphQL `search*`/`semanticSearch*`/`autocomplete*` | Matching records (metadata; no block body). Published-only **for anonymous callers** — with a bearer token, drafts match too. Delivery sites: use the `…/published` twins (`searchPublished*` etc.), which pin `state == :published` server-side (see "Drafts") |
@@ -106,6 +106,21 @@ up, so any content at all is at least `1` and only genuinely empty content is
 CDN cache headers — `Cache-Control`/`ETag`/`Last-Modified`, see #188); use
 **JSON:API/GraphQL** for discovery, lists, filtering, taxonomy, and search; use
 **preview tokens** to share an unpublished draft.
+
+### Draft mode with a preview token
+
+A front end's draft/preview mode needs one draft in a browser, and the browser
+must not hold your API key. Mint on the server, redeem in the page:
+
+1. Your server (holding an editor's `:read` key) calls
+   `POST /api/content/:type/:id/preview-token` — or the editor pastes a link
+   from **Copy preview link**, whose last path segment is the token.
+2. Pass the returned `token` to the page (a cookie, a query param).
+3. The page reads `GET /preview/:token` — no credential — until it expires 15
+   minutes later; mint again on the next render.
+
+See [api.md → Preview tokens](api.md#preview-tokens) for the response shape and
+who may mint.
 
 ## Author / PII
 

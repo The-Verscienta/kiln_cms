@@ -321,7 +321,38 @@ describe("preview", () => {
     const draft = await client(stub).preview<{ title: string }>("tok/en+1");
 
     expect(stub.calls[0]!.url.pathname).toBe("/preview/tok%2Fen%2B1");
+    expect(stub.calls[0]!.method).toBe("GET");
     expect(draft.title).toBe("Draft");
+  });
+});
+
+describe("mintPreview", () => {
+  it("POSTs to the document's preview-token route with the key", async () => {
+    const minted = {
+      token: "tok",
+      url: "https://cms.example.com/preview/tok",
+      type: "post",
+      id: "p 1",
+      expires_at: "2026-09-19T14:15:00Z",
+      expires_in: 900,
+    };
+    const stub = stubFetch({ status: 201, body: minted });
+
+    const result = await client(stub, "kiln_key").mintPreview("post", "p 1");
+
+    const call = stub.calls[0]!;
+    expect(call.method).toBe("POST");
+    expect(call.url.pathname).toBe("/api/content/post/p%201/preview-token");
+    expect(call.headers.authorization).toBe("Bearer kiln_key");
+    expect(result).toEqual(minted);
+  });
+
+  it("throws KilnHttpError on a refusal", async () => {
+    const stub = stubFetch({ status: 403, body: { errors: [{ code: "forbidden" }] } });
+
+    await expect(client(stub, "kiln_key").mintPreview("post", "p1")).rejects.toMatchObject({
+      status: 403,
+    });
   });
 });
 

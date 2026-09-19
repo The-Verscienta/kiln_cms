@@ -6,6 +6,7 @@
 
 export interface RecordedCall {
   url: URL;
+  method: string;
   headers: Record<string, string>;
 }
 
@@ -28,7 +29,11 @@ export function stubFetch(...responses: StubResponse[]): FetchStub {
 
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
-    calls.push({ url, headers: { ...((init?.headers ?? {}) as Record<string, string>) } });
+    calls.push({
+      url,
+      method: init?.method ?? "GET",
+      headers: { ...((init?.headers ?? {}) as Record<string, string>) },
+    });
 
     const response = responses[Math.min(index, responses.length - 1)] ?? {};
     index += 1;
