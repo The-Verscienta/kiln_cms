@@ -16,7 +16,7 @@ one production incident at a time.
 ```elixir
 def deps do
   [
-    {:kiln_client, "~> 0.1"}
+    {:kiln_client, "~> 0.3"}
     # or, until it's published to Hex:
     # {:kiln_client, github: "The-Verscienta/kiln_cms", sparse: "clients/elixir/kiln_client"}
   ]
@@ -96,6 +96,30 @@ tags = KilnClient.resolve(post, "tags", included)
 
 Results are flattened JSON:API resources: the `attributes` map (string keys)
 plus `"id"`/`"type"`, with relationships reduced to `{type, id}` ref maps.
+
+## Media uploads
+
+The one write surface the client covers — it needs a **read + write** API key
+on an editor (or admin) account; a read-only key gets `{:error, {:http_status, 403, _}}`.
+
+```elixir
+# Multipart, streamed from disk; metadata optional.
+{:ok, item} = KilnClient.upload_media("priv/kiln.jpg", alt: "The kiln at dusk", focal_x: 0.3)
+item["processing"]  # true while a video's metadata strip is pending — its url isn't live yet
+
+# Server-side fetch of a public URL (SSRF-guarded, ≤ 25 MB).
+{:ok, item} = KilnClient.import_media("https://example.com/cat.png", tag_ids: [tag_id])
+
+# Metadata edits: alt/caption/decorative/focal point/tags (add_tag_ids / remove_tag_ids merge).
+{:ok, item} = KilnClient.update_media(item["id"], caption: "Firing day", add_tag_ids: [tag_id])
+
+# Large files straight to object storage (server on S3 with a private bucket; else a 501).
+{:ok, item} = KilnClient.upload_media_direct("footage.mp4", alt: "Loading the kiln")
+```
+
+The server byte-sniffs every file and runs it through the media library's own
+pipeline — metadata stripping, size caps, variants. See Kiln's `docs/api.md` →
+"Uploading media".
 
 ## Testing your integration
 

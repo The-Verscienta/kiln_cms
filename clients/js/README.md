@@ -155,6 +155,34 @@ throwing.
 | `preview(token)`                     | `GET /preview/:token`                               | one draft, signed 15-minute token                       |
 | `schema(opts)`                       | `GET /api/schema`                                   | the live delivery schema; feed it to `emitTypes`        |
 
+### Media uploads
+
+The one write surface the client covers. It needs a **read + write** key on an
+editor (or admin) account — a read-only key gets a `403`.
+
+| Method                                       | Endpoint                                         | Notes                                                |
+| -------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------- |
+| `uploadMedia(file, opts)`                    | `POST /api/media`                                | multipart; `alt`, `caption`, `focalX`/`Y`, `tagIds`… |
+| `importMediaFromUrl(url, opts)`              | `POST /api/media/import-url`                     | fetched server-side, public URLs only, ≤ 25 MB       |
+| `updateMedia(id, changes)`                   | `PATCH /api/json/media-items/:id`                | metadata only; `addTagIds`/`removeTagIds` merge      |
+| `uploadMediaDirect(file, opts)`              | `POST /api/media/uploads` → `PUT` → `…/complete` | straight to object storage, for large files          |
+| `beginDirectUpload` / `completeDirectUpload` | the two legs of the above                        | when you do the `PUT` yourself                       |
+
+```ts
+const kiln = createClient({ baseUrl, apiKey: process.env.KILN_WRITE_KEY });
+
+const item = await kiln.uploadMedia(file, { alt: "The kiln at dusk", focalX: 0.3 });
+// item.processing === true → a video's metadata strip is still pending;
+// item.url isn't live yet.
+```
+
+The server byte-sniffs every file — the name and `type` you send are not
+trusted — and runs it through the same pipeline as the editor's media library
+(metadata stripping, size caps, variants). `uploadMediaDirect` needs the server
+on S3 storage with a private bucket; otherwise it throws `KilnHttpError` 501 and
+`uploadMedia` is the route. Upload calls use `uploadTimeoutMs` (default five
+minutes) rather than `timeoutMs` when no `signal` is passed.
+
 Dynamic (admin-created) types go through the shared `entries` surface:
 `kiln.list("entries", { filter: { type_name: "product" } })`; their artifacts
 are addressed by type name like compiled types

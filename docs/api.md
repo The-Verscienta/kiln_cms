@@ -50,6 +50,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Visual editing**     | `<script src="…/bridge.js">`      | In-context edit overlay for an external front end (annotated preview + deep-link + live push). | [visual-editing-bridge.md](visual-editing-bridge.md) |
 | **Sitemap**            | `GET /sitemap.xml`                | Enumerate published content for crawling/SSG.         | — |
 | **Feeds**              | `GET /feed.xml`, `GET /feed.json` | Atom 1.0 / JSON Feed 1.1 of newly published content.  | [§ Feeds](#feeds) |
+| **Media upload**       | `POST /api/media`                 | Upload a file (or import one by URL) into the media library. `:read_write` key. | [§ Uploading media](#uploading-media) |
 | **Outbound webhooks**  | (you host the receiver)           | HMAC-signed push on publish/unpublish/update.         | [webhooks.md](webhooks.md) |
 | **Signed preview**     | `GET /preview/:token`             | One unpublished document via a short-lived token.     | [§ Preview tokens](#preview-tokens) |
 
@@ -261,7 +262,7 @@ A quick map:
 |-----------|-----------------------------|---------------------------------|-----------------------------------------------|
 | Page      | `GET /api/json/pages`       | `GET /api/json/pages/:id`       | `/pages/search`, `/pages/semantic-search`, `/pages/autocomplete` |
 | Post      | `GET /api/json/posts`       | `GET /api/json/posts/:id`       | `/posts/published`, `/posts/search`, `/posts/semantic-search`, `/posts/autocomplete` |
-| MediaItem | `GET /api/json/media-items` | `GET /api/json/media-items/:id` | `/media-items/search`                         |
+| MediaItem | `GET /api/json/media-items` | `GET /api/json/media-items/:id` | `/media-items/search`, `/media-items/library` — uploads: [§ Uploading media](#uploading-media) |
 | Category  | `GET /api/json/categories`  | `GET /api/json/categories/:id`  | `/categories/by-slug/:slug`                   |
 | Tag       | `GET /api/json/tags`        | `GET /api/json/tags/:id`        | `/tags/by-slug/:slug`                         |
 | TagGroup  | `GET /api/json/tag-groups`  | `GET /api/json/tag-groups/:id`  | `/tag-groups/by-slug/:slug`                   |
@@ -291,6 +292,165 @@ curl -s 'http://localhost:4000/api/json/posts?filter[state]=draft' \
   -H 'accept: application/vnd.api+json' \
   -H 'authorization: Bearer <token>'
 ```
+
+## Uploading media
+
+Files enter the media library over REST. Every route below runs the **same
+pipeline as a file dropped on `/editor/media`** (`KilnCMS.Media.Ingest`): the
+file is **byte-sniffed** (the name and `Content-Type` you send are ignored),
+size-capped per kind, **metadata-stripped** (EXIF/GPS from images, author data
+from PDFs, container metadata from video/audio — see
+[media-pipeline.md](media-pipeline.md)), stored, recorded as a `MediaItem`
+attributed to the credential's user, and its variants/poster are derived in the
+background.
+
+| Route | Body | Use it for |
+|-------|------|------------|
+| `POST /api/media` | multipart: `file` + metadata fields | Most uploads, up to the per-kind caps below |
+| `POST /api/media/import-url` | JSON: `url` + metadata | A file already on the public web |
+| `POST /api/media/uploads` → `PUT` → `POST /api/media/uploads/complete` | JSON | Large files, sent straight to object storage ([below](#direct-uploads-for-large-files)) |
+| `PATCH /api/json/media-items/:id` | JSON:API | Editing metadata afterwards ([json-api.md](json-api.md#editing-media-metadata)); GraphQL `updateMediaItem` is the same write |
+
+**Who may upload:** a **read + write** API key (or a JWT) on an **editor or
+admin** account — the same gate as content writes. A read-only key is `403`
+whatever its owner's role; so is a `:viewer`; no credential is `401`. On
+`POST /api/media` that answer comes **before the body is read**: the endpoint
+leaves this one route's body unparsed until the caller is authenticated and
+allowed to create media, so an unauthorized client cannot make the server
+spool a large upload to disk first. Deleting media is not routed for any key.
+
+**Metadata** — optional on every upload route, as form fields or JSON keys:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `alt` | string | Alt text. |
+| `caption` | string | |
+| `decorative` | boolean | A decorative image correctly has no alt text. |
+| `focal_x`, `focal_y` | number, 0.0–1.0 | Focal point the smart crops centre on (default 0.5). |
+| `tag_ids` | array of tag ids | `tag_ids[]=…` repeated in a multipart form. Every id must be a tag on this site. |
+| `filename` | string | `import-url` only: the name to record instead of the URL's. |
+
+Anything else in the request — `url`, `storage_key`, `content_type`,
+dimensions — is ignored: those come from the bytes. There are no folders; tags
+are the library's organising axis. Metadata is validated **before** the file is
+processed, so a bad focal point is a `422` with nothing stored.
+
+```bash
+curl -s http://localhost:4000/api/media \
+  -H "authorization: Bearer $KILN_API_KEY" \
+  -F file=@kiln-at-dusk.jpg \
+  -F alt='The kiln at dusk' -F focal_x=0.3 \
+  -F 'tag_ids[]=<tag uuid>'
+```
+
+```bash
+curl -s http://localhost:4000/api/media/import-url \
+  -H "authorization: Bearer $KILN_API_KEY" \
+  -H 'content-type: application/json' \
+  -d '{"url": "https://example.com/cat.png", "alt": "A cat"}'
+```
+
+A successful upload answers **`201`** with a `Location` header and the item as
+a JSON:API resource object — the same `type`, attributes and `tags`
+relationship `GET /api/json/media-items/:id` returns, plus:
+
+```jsonc
+{
+  "data": {
+    "type": "media_item",
+    "id": "…",
+    "attributes": { "filename": "kiln-at-dusk.jpg", "content_type": "image/jpeg",
+                    "kind": "image", "url": "https://…", "alt": "The kiln at dusk",
+                    "focal_x": 0.3, "uploaded_by_id": "…", /* … */ },
+    "relationships": { "tags": { "data": [{ "type": "tag", "id": "…" }] } },
+    "links": { "self": "/api/json/media-items/…" },
+    "meta": { "processing": false }
+  }
+}
+```
+
+`meta.processing: true` means an audio/video file's metadata strip is still
+running in the background (`KILN_AV_STRIP_MODE=deferred`): the item exists and
+is editor-visible, but its `url` serves nothing until the strip finishes.
+`variants` fill in shortly after any image upload.
+
+**Size limits.** The per-kind caps are the library's: images 10 MB, documents
+25 MB, captions 2 MB, audio 100 MB, video 500 MB — applied to the bytes
+actually received, after sniffing. `POST /api/media` accepts a body up to the
+largest cap (the rest of the API keeps the 8 MB request cap). `import-url`
+downloads at most **25 MB** (the body is buffered in memory) and follows up to
+three redirects, each re-validated.
+
+**URL imports are SSRF-guarded.** The server fetches through
+`KilnCMS.SafeFetch`: only public `http(s)` addresses, resolved once and
+connected to by address, so a hostname cannot be re-pointed at an internal
+service between the check and the connection. A refused URL is
+`422 unsafe_url`, and the response never says what a name resolved to.
+
+### Direct uploads for large files
+
+A reverse proxy or CDN in front of Kiln often caps request bodies below the
+video limit (Cloudflare's is 100 MB on most plans). Direct uploads send the
+bytes **straight to object storage** and only the small JSON requests to Kiln:
+
+```bash
+# 1. Ask for an upload URL (byte_size is the exact file size).
+curl -s http://localhost:4000/api/media/uploads \
+  -H "authorization: Bearer $KILN_API_KEY" -H 'content-type: application/json' \
+  -d '{"filename": "firing.mp4", "byte_size": 412345678}'
+# → 201 {"data": {"token": "…", "upload_url": "https://…", "method": "PUT",
+#                 "headers": {"content-length": "412345678"}, "expires_at": "…", "max_bytes": 500000000}}
+
+# 2. PUT the bytes to upload_url with exactly those headers (no Kiln credentials).
+curl -s -X PUT "$UPLOAD_URL" -H 'content-length: 412345678' --data-binary @firing.mp4
+
+# 3. Complete — metadata goes here.
+curl -s http://localhost:4000/api/media/uploads/complete \
+  -H "authorization: Bearer $KILN_API_KEY" -H 'content-type: application/json' \
+  -d '{"token": "…", "alt": "Loading the kiln"}'
+# → 201, the same media item body as POST /api/media
+```
+
+- The upload URL is a presigned `PUT` into the **private** bucket, valid 15
+  minutes, with the declared size **signed in** — the store refuses any other
+  length. The token may be completed within an hour, only by the same user on
+  the same site.
+- Completion copies the staged object down and runs it through the same
+  pipeline as `POST /api/media` — sniffed, stripped, stored under its own key —
+  then deletes the staged copy **whatever the outcome**. A token completes
+  once; a staged upload never completed is deleted when its token expires.
+- Needs the **S3 storage adapter with a private bucket** (`S3_PRIVATE_BUCKET`),
+  and a CORS rule on that bucket if browsers upload to it — see
+  [media-pipeline.md](media-pipeline.md#direct-uploads). Without one,
+  `POST /api/media/uploads` answers `501 direct_uploads_unavailable`; use
+  `POST /api/media`.
+
+### Upload errors
+
+Refusals use the [error envelope](#error-responses); branch on `code`:
+
+| Status | `code` | Meaning |
+|--------|--------|---------|
+| 401 | `unauthorized` | No credential. |
+| 403 | `forbidden` | Read-only key, or an account that can't create media. |
+| 413 | `too_large` | Over the cap for the file's kind (or the import download cap). A body over the route's limit is `413` too. |
+| 415 | `unsupported_media_type` | Not a kind the library accepts. |
+| 422 | `missing_file` | No multipart `file` field. |
+| 422 | `invalid_parameter` | A metadata field failed validation; `detail` names it. |
+| 422 | `create_failed` | The item couldn't be saved — usually a `tag_ids` entry that isn't a tag on this site. Nothing is stored. |
+| 422 | `encrypted` | A password-protected PDF — its metadata can't be removed. |
+| 422 | `strip_unavailable` / `strip_failed` | Metadata couldn't be removed, so the file was refused rather than stored with it. |
+| 422 | `unsafe_url` / `fetch_failed` | `import-url`: the URL isn't a public address, or didn't answer 2xx. |
+| 422 | `invalid_upload_token` / `not_uploaded` / `size_mismatch` | Direct uploads: a bad or someone else's token; nothing staged (or already completed); the staged size isn't the declared one. |
+| 429 | `too_many_requests` | The `media_upload` bucket ([§ Rate limits](#rate-limits)). |
+| 501 | `direct_uploads_unavailable` | This deployment can't presign (no S3 private bucket). |
+| 502 | `storage_failed` | The object store refused the write; retry. |
+| 503 | `insufficient_storage` | Out of temp disk to strip a video; retry after `retry-after`. |
+
+**Not over MCP.** `/mcp` has no upload tool on purpose: media has no draft
+state — an upload is live at its public URL the moment it lands — and `/mcp`'s
+promise is that an LLM's work stays a draft until a human approves it. See
+[mcp.md](mcp.md).
 
 ## Password-protected content
 
@@ -706,6 +866,7 @@ Over the limit returns **429** with a `retry-after` header.
 | `auth` | sign-in / auth  | 40 requests / minute  |
 | `docs` | `/api/json/swaggerui` | 60 requests / minute |
 | `unlock` | `POST /api/content/:type/:slug/unlock` (and the built-in site's lock form) | 10 requests / minute |
+| `media_upload` | `/api/media/*` (uploads, URL imports, direct-upload begin/complete) — charged **on top of** `api` | 60 requests / minute |
 
 ## Error responses
 
@@ -723,8 +884,8 @@ string (`"422"`, never `"unprocessable_entity"`) — safe to `parseInt` — and
 
 You get it from the headless sign-in, fired-artifact (`not_found` /
 `artifact_compiling`), related-content, provenance, form-schema and
-form-submission, visual-editing and preview-token (`invalid_preview`)
-endpoints — **and from the 429 when you exceed a rate-limit bucket**
+form-submission, visual-editing, media-upload ([§ Upload errors](#upload-errors))
+and preview-token (`invalid_preview`) endpoints — **and from the 429 when you exceed a rate-limit bucket**
 (`too_many_requests`, alongside `retry-after`). All of them render through one
 implementation, `KilnCMSWeb.ApiError.send/4`, and a test fails the build if a
 new endpoint writes its own (#190, #744).

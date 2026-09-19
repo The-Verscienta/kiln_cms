@@ -154,11 +154,20 @@ defmodule KilnCMSWeb.Endpoint do
   # ActivityPub inbox (#491) — so that route reaches the body reader below with
   # no parser change.
   plug Plug.Parsers,
-    parsers: [:urlencoded, :multipart, :json, AshJsonApi.Plug.Parser, Absinthe.Plug.Parser],
+    # `MultipartParser` is `:multipart` with one exception: it leaves the media
+    # upload API's body (`POST /api/media`) unread, for its controller to parse
+    # under a larger limit AFTER authenticating — see that module.
+    parsers: [
+      :urlencoded,
+      KilnCMSWeb.Plugs.MultipartParser,
+      :json,
+      AshJsonApi.Plug.Parser,
+      Absinthe.Plug.Parser
+    ],
     pass: ["*/*"],
     # Explicit request-body cap (Plug's default is 8MB). Bounds the memory a
-    # single request can force us to buffer; raise per-endpoint if large uploads
-    # are ever needed.
+    # single request can force us to buffer. The one route that needs more
+    # (`POST /api/media`) is exempted above and applies its own.
     length: 8_000_000,
     # Preserves the raw bytes for the inbound payment-webhook and ActivityPub
     # inbox paths only, so their signatures can be verified over exactly what

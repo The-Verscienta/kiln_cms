@@ -111,6 +111,12 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.AshJsonApiParams
   end
 
+  # The media upload API's own, much tighter, per-address budget — on top of
+  # `:api`'s (see the `/api/media` scope below).
+  pipeline :media_upload do
+    plug KilnCMSWeb.Plugs.RateLimit, :media_upload
+  end
+
   # Headless sign-in — exchanges credentials for a bearer token (issue #37).
   # Tight per-IP `:auth` limit to slow credential stuffing; no bearer/actor
   # plugs (this is the endpoint that *issues* the token).
@@ -616,6 +622,21 @@ defmodule KilnCMSWeb.Router do
     pipe_through [:api, :content_unlock]
 
     post "/content/:type/:slug/unlock", ArtifactController, :unlock
+  end
+
+  # Media upload API. Its own scope for its own bucket: every request here is a
+  # sniff + strip + store (+ a download, for an import), far costlier than a
+  # read, so it gets a far smaller budget than `:api`'s. `POST /api/media`'s
+  # body is left unread by the endpoint and parsed by the controller only
+  # after the caller is authenticated and authorized — see
+  # `KilnCMSWeb.Plugs.MultipartParser` and the controller's moduledoc.
+  scope "/api/media", KilnCMSWeb do
+    pipe_through [:api, :media_upload]
+
+    post "/", MediaUploadController, :create
+    post "/import-url", MediaUploadController, :import_url
+    post "/uploads", MediaUploadController, :begin_direct
+    post "/uploads/complete", MediaUploadController, :complete_direct
   end
 
   # Headless delivery of fired artifacts (Kiln v2 — D9). The v2 content API serves

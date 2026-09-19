@@ -1,7 +1,7 @@
 defmodule KilnClient.MixProject do
   use Mix.Project
 
-  @version "0.2.2"
+  @version "0.3.0"
   @source_url "https://github.com/The-Verscienta/kiln_cms"
 
   def project do
@@ -13,7 +13,7 @@ defmodule KilnClient.MixProject do
       deps: deps(),
       description:
         "Official Elixir client for the KilnCMS delivery APIs — " <>
-          "published-by-default JSON:API reads, search, and fired artifacts.",
+          "published-by-default JSON:API reads, search, fired artifacts, and media uploads.",
       package: package(),
       docs: docs(),
       name: "KilnClient",

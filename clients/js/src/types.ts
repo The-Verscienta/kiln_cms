@@ -253,3 +253,77 @@ export interface AsOfIndexOptions extends RequestOptions {
   /** Default 100, max 500. */
   limit?: number;
 }
+
+// ── media uploads ───────────────────────────────────────────────────────────
+
+/**
+ * A media library item, flattened like any other resource. The attributes
+ * below are the ones every item carries; `kind` and `processing` come back on
+ * upload responses only (see `KilnClient.uploadMedia`).
+ */
+export interface MediaItem extends Item {
+  filename: string;
+  content_type: string | null;
+  byte_size: number | null;
+  width: number | null;
+  height: number | null;
+  duration_seconds: number | null;
+  url: string | null;
+  alt: string | null;
+  caption: string | null;
+  decorative: boolean;
+  focal_x: number;
+  focal_y: number;
+  variants: Record<string, unknown>;
+  uploaded_by_id: string | null;
+  /** Upload responses only: what the server's byte-sniffing decided. */
+  kind?: "image" | "video" | "audio" | "captions" | "document";
+  /**
+   * Upload responses only: `true` while an A/V upload's metadata strip is
+   * still pending — the item exists, but its `url` serves nothing yet.
+   */
+  processing?: boolean;
+}
+
+/** Metadata settable on upload (and afterwards via `updateMedia`). */
+export interface MediaMetadata {
+  alt?: string;
+  caption?: string;
+  /** A decorative image correctly has no alt text (`alt=""`). */
+  decorative?: boolean;
+  /** Focal point for smart crops, 0.0–1.0 from the left. */
+  focalX?: number;
+  /** Focal point for smart crops, 0.0–1.0 from the top. */
+  focalY?: number;
+  /** Complete tag set (ids of tags on this site). */
+  tagIds?: string[];
+}
+
+export interface UploadMediaOptions extends MediaMetadata, RequestOptions {
+  /** Name to record. Default: the `File`'s own name, else `"upload"`. */
+  filename?: string;
+}
+
+export interface ImportMediaOptions extends MediaMetadata, RequestOptions {
+  /** Name to record instead of the one the URL's path implies. */
+  filename?: string;
+}
+
+/** `updateMedia` changes. Tags follow content's replace / merge verbs. */
+export interface MediaMetadataUpdate extends Omit<MediaMetadata, "tagIds"> {
+  /** Replaces the whole tag set. Don't combine with add/remove. */
+  tagIds?: string[];
+  addTagIds?: string[];
+  removeTagIds?: string[];
+}
+
+/** An issued direct upload: PUT the bytes to `uploadUrl`, then complete. */
+export interface DirectUpload {
+  token: string;
+  uploadUrl: string;
+  method: "PUT";
+  /** Signed headers — send them exactly as given (`content-length` among them). */
+  headers: Record<string, string>;
+  expiresAt: string;
+  maxBytes: number;
+}
