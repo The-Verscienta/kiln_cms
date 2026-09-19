@@ -673,6 +673,12 @@ config :ash_json_api,
   authorize_update_destroy_with_error?: true
 
 config :ash,
+  # Ash 3.33 refuses to compile until this is chosen. `:codepoints` is what
+  # the SQL data layer counts, so a `max_length` validated in Elixir and one
+  # enforced atomically in Postgres agree, and a value's stored size is
+  # bounded (a grapheme can carry unbounded combining characters; `:mixed`
+  # keeps the old grapheme count and that gap).
+  default_string_length_count: :codepoints,
   allow_forbidden_field_for_relationships_by_default?: true,
   include_embedded_source_by_default?: false,
   show_keysets_for_all_actions?: false,
@@ -870,6 +876,12 @@ config :sentry,
 # noise. Instrumentation is wired up in KilnCMS.Application.setup_observability/0;
 # see docs/observability.md.
 config :kiln_cms, :otel_enabled, false
+
+# Prometheus metrics exporter (#1362). Off: nothing records
+# KilnCMSWeb.Telemetry.metrics/0 and no port is opened. The KILN_METRICS_*
+# variables override these at runtime (config/runtime/observability.exs); see
+# KilnCMSWeb.Metrics for why the listener is its own port on loopback.
+config :kiln_cms, KilnCMSWeb.Metrics, enabled: false, port: 9568, bind: :loopback, token: nil
 
 config :opentelemetry, traces_exporter: :none
 

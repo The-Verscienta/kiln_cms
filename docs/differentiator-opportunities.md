@@ -237,12 +237,15 @@ are cheap here and hard for live-render CMSs.
 
 ---
 
-**Sequencing take (updated):** most of this list has shipped; what remains is
-the tail. Paid memberships (#337 Phase 2, specced in the issue) is the
-strategic priority — it completes the Ghost play, the one differentiator with a
-direct revenue story. #356 (tamper-evident audit + consent linking) is next for
-the health/regulated positioning, building on the shipped governance dashboard
-(#352) and provenance signing (#340). The RAG Phase 2 items (#339:
-related-content, auto-tagging, gap analysis) and later point-in-time phases
-(#338) are cheap incremental wins on already-shipped foundations, in no
-particular hurry.
+**Sequencing take (updated 2026-09):** all twelve have shipped, and each section's
+issue is closed. That includes the two this section used to call
+next: paid memberships (#337 Phase 2) and tamper-evident audit with consent
+linking (#356). The RAG Phase 2 items (#339) are also done. What remains is
+refinement on shipped foundations, in no particular hurry:
+
+- id-addressable single-document history for point-in-time (#338, see
+  [point-in-time.md](point-in-time.md), "Scope & later phases")
+- semantic search in production (the EXLA build-host constraint) and the
+  multilingual model swap, per the note above
+
+What 1.0 needs is tracked in [roadmap-1.0.md](roadmap-1.0.md), not here.

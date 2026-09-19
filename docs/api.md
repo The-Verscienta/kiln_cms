@@ -1,57 +1,105 @@
 # KilnCMS API documentation
 
-KilnCMS ships a **published, machine-readable OpenAPI 3 spec** for its headless
-JSON:API surface, plus an interactive **Swagger UI** explorer.
+KilnCMS describes its two schema-bearing APIs in machine-readable form: an
+**OpenAPI 3** document for the JSON:API surface (with an interactive **Swagger
+UI** explorer over it), and the **GraphQL schema** as SDL. Both come in two
+forms — committed to the repository for the stock build, and served by a
+running site for its own build.
 
-Both are served in development and test, and **off in production by default**
-since #567. Set `API_DOCS_ENABLED=true` to publish them from a production
-deployment. When they are off, both paths answer **404** — not 403, which would
-confirm the route exists and is merely closed.
+## Machine-readable specs
 
-The reason is the same one that already disables GraphQL introspection in
-production: since #330 the described surface includes the **write** routes, so
-the document is a complete machine-readable map of the mutation API. It grants
-nothing — every route it describes is still enforced by the Ash policies and
-the API key's access scope — but it removes the guesswork, and shipping it
-beside a disabled introspection endpoint was an inconsistency rather than a
-decision.
+### Committed: the stock build
 
-| Resource              | URL                            | Notes                                   |
-|-----------------------|--------------------------------|-----------------------------------------|
-| **OpenAPI 3 spec**    | `GET /api/json/open_api`       | JSON, machine-readable. Import into any OpenAPI tool. |
-| **Swagger UI**        | `GET /api/json/swaggerui`      | Interactive explorer over the spec.     |
-| **GraphQL playground**| `GET /gql/playground`          | **Dev-only** convenience UI.            |
+| File | What it describes |
+|------|-------------------|
+| [`docs/api/openapi.json`](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/api/openapi.json) | The JSON:API surface (`/api/json`), sign-in, fired artifacts and preview links, as OpenAPI 3.0. |
+| [`docs/api/schema.graphql`](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/api/schema.graphql) | The GraphQL schema behind `/gql` and `/ws/gql`, as SDL. |
 
-The first two follow `API_DOCS_ENABLED`; the playground is compile-gated to
-`dev_routes` and is never built into a production release.
+Point codegen at these without running anything:
+
+```bash
+npx openapi-typescript docs/api/openapi.json -o kiln-api.d.ts
+npx graphql-codegen --config codegen.ts   # schema: "docs/api/schema.graphql"
+```
+
+They are regenerated with `mix kiln.api.specs`, and CI fails when they fall
+behind the code (`mix kiln.api.specs --check`), so the copy on `main` matches
+the code on `main` — and the copy at a release tag matches that release. The
+OpenAPI document's server is a placeholder (`{origin}`, default
+`http://localhost:4000`); set your site's origin in your tool.
+
+They describe the **stock** build. A project that adds its own content domains
+(`config :kiln_cms, :content_domains`) grows both schemas; generate against
+that project's running site instead.
+
+### Served: a running site
+
+| Resource | URL | Who gets it |
+|----------|-----|-------------|
+| **OpenAPI 3 document** | `GET /api/json/open_api` | Anyone where `API_DOCS_ENABLED` is on; otherwise a request with an **API key**. |
+| **Swagger UI** | `GET /api/json/swaggerui` | Anyone where `API_DOCS_ENABLED` is on; otherwise no one. |
+| **GraphQL SDL** | `GET /api/graphql/schema.graphql` | Anyone where GraphQL introspection is on; otherwise a request with an **API key**. |
+| **GraphQL introspection** | `POST /gql` (`__schema`) | Anyone where `GRAPHQL_INTROSPECTION_ENABLED` is on; otherwise no one. |
+| **GraphQL playground** | `GET /gql/playground` | **Dev-only**; compile-gated to `dev_routes`, never built into a release. |
+
+The docs and introspection are on in development and test and **off in a
+production build** (#567). Closed, each path answers **404** — not 403, which
+would confirm the route exists and is merely closed.
+
+The reason is disclosure, not access: since #330 the described surface
+includes the **write** routes, so the documents are a complete map of the
+mutation API. They grant nothing — every route is still enforced by the Ash
+policies and the API key's access scope — but an anonymous stranger has no need
+of the map. An API key is different: only an admin can mint one, so its holder
+is an integration the site chose, and generating a client against the site's
+own schema is exactly what it needs. Any key works, `read` or `read_write`. A
+user JWT does not — open registration hands those to anyone.
+
+```bash
+# A production site's own schemas, with any API key
+curl -H "authorization: Bearer $KILN_API_KEY" https://cms.example.com/api/json/open_api
+curl -H "authorization: Bearer $KILN_API_KEY" https://cms.example.com/api/graphql/schema.graphql
+```
+
+`graphql-codegen` reads a schema URL ending in `.graphql` as SDL and sends the
+headers you configure, so the second URL works as its `schema` directly.
 
 Locally: <http://localhost:4000/api/json/swaggerui>.
 
-The spec is generated by [AshJsonApi](https://hexdocs.pm/ash_json_api) from the
-`KilnCMS.CMS` resources and enriched by `KilnCMSWeb.OpenApi` (title, version,
-auth/usage description, servers). It covers the core content types — **Page**,
-**Post**, **MediaItem** — including every collection, single-record, search and
-autocomplete route, their filter/sort/page parameters, and the bearer auth
-scheme.
+The OpenAPI document is generated by [AshJsonApi](https://hexdocs.pm/ash_json_api)
+from the content domains' resources and enriched by `KilnCMSWeb.OpenApi` (title,
+version, auth/usage description, servers, the API-key scheme, and the routes
+that live outside the JSON:API router). It covers **Page**, **Post**, admin-defined
+types through **Entry**, **MediaItem**, the taxonomy (**Tag**, **TagGroup**,
+**Category**), **Redirect** and **TypeDefinition** — every collection,
+single-record, search and autocomplete route, the write and workflow routes,
+their filter/sort/page parameters, and both auth schemes.
 
 ## Headless surfaces at a glance
 
 The JSON:API is one of several headless surfaces. Pick the one that fits:
 
-| Surface                | Endpoint                          | Use case                                              | Reference |
-|------------------------|-----------------------------------|-------------------------------------------------------|-----------|
-| **Sign-in**            | `POST /api/auth/sign_in`          | Exchange credentials for a bearer token (JWT).        | [§ Authentication](#authentication) |
-| **JSON:API**           | `/api/json`                       | Structured, filterable reads of Page/Post/MediaItem.  | [json-api.md](json-api.md) |
-| **GraphQL**            | `POST /gql`                       | Curated delivery reads + full-text/semantic search.   | [headless-graphql-api.md](headless-graphql-api.md) |
-| **Fired artifacts**    | `GET /api/content/:type/:slug`    | Pre-rendered block tree (`json`, `json_ld`, `web`).   | [`examples/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/examples/README.md) |
-| **Locales**            | `GET /api/locales`                | Discover configured content locales + the default.    | [§ Locale discovery](#locale-discovery) |
-| **Schema**             | `GET /api/schema`                 | JSON Schema for the fired `json` payloads — generate types, validate responses. | [§ Schema discovery](#schema-discovery-typed-clients) |
-| **Embeddable form**    | `<script src="…/embed.js">`       | Render a form in an auto-resizing iframe on any site. | [§ Embeddable forms](#embeddable-forms) |
-| **Visual editing**     | `<script src="…/bridge.js">`      | In-context edit overlay for an external front end (annotated preview + deep-link + live push). | [visual-editing-bridge.md](visual-editing-bridge.md) |
-| **Sitemap**            | `GET /sitemap.xml`                | Enumerate published content for crawling/SSG.         | — |
-| **Feeds**              | `GET /feed.xml`, `GET /feed.json` | Atom 1.0 / JSON Feed 1.1 of newly published content.  | [§ Feeds](#feeds) |
-| **Outbound webhooks**  | (you host the receiver)           | HMAC-signed push on publish/unpublish/update.         | [webhooks.md](webhooks.md) |
-| **Signed preview**     | `GET /preview/:token`             | One unpublished document via a short-lived token.     | [§ Preview tokens](#preview-tokens) |
+| Surface | Endpoint | Use case | Reference |
+|---------|----------|----------|-----------|
+| **Sign-in** | `POST /api/auth/sign_in` | Exchange credentials for a bearer token (JWT). Server-to-server clients use an [API key](#api-keys-third-party-access) instead. | [§ Authentication](#authentication) |
+| **JSON:API** | `/api/json` | Filterable reads of Page, Post and admin-defined types (Entry), media, taxonomy and redirects; per-type search and autocomplete; **writes** — create, update, workflow transitions, soft-delete — with a `read_write` API key. | [json-api.md](json-api.md) |
+| **GraphQL** | `POST /gql`, `/ws/gql` | Delivery reads, search, menus and point-in-time (`contentAsOf`); the same **writes** as mutations; subscriptions over the WebSocket. | [headless-graphql-api.md](headless-graphql-api.md) |
+| **Fired artifacts** | `GET /api/content/:type/:slug` | Pre-rendered output per surface: `json` (default), `json_ld`, `web`, and `llm` (raw `text/markdown`). `?as_of=` reads a document as it stood on a date; `GET /api/content/:type?as_of=` lists what was published then. | [`examples/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/examples/README.md), [point-in-time.md](point-in-time.md) |
+| **Hybrid search** | `GET /api/search?q=` | Keyword + semantic + title search across every type, fused and ranked; answers as an anonymous visitor whatever the credential. | [search-roadmap.md](search-roadmap.md) |
+| **Path resolution** | `GET /api/resolve?path=` | "What lives at this URL?" — content, a redirect to follow, or nothing — for a front end's catch-all route. | [json-api.md](json-api.md) (URLs, pathauto & redirects) |
+| **Menus** | `GET /api/menus`, `GET /api/menus/:key` | Resolved navigation trees with live URLs. | [navigation-menus.md](navigation-menus.md) |
+| **Related content** | `GET /api/content/:type/:slug/related` | Published documents semantically closest to this one (empty when semantic search is off). | [rag.md](rag.md) |
+| **Ask your content** | `GET /api/ask?q=` | Cited published passages, plus a generated answer when a generator is configured. | [rag.md](rag.md) |
+| **Provenance** | `GET /api/provenance/:type/:slug`, `…/verify`, `GET /api/provenance/public-key` | Signed manifests proving an artifact is unaltered (404 unless provenance is on). | [provenance.md](provenance.md) |
+| **Locales** | `GET /api/locales` | Discover configured content locales + the default. | [§ Locale discovery](#locale-discovery) |
+| **Schema** | `GET /api/schema` | JSON Schema for the fired `json` payloads — generate types, validate responses. | [§ Schema discovery](#schema-discovery-typed-clients) |
+| **MCP** | `/mcp` | Model Context Protocol server for LLM authoring clients; **API key required**. | [mcp.md](mcp.md) |
+| **Forms** | `GET /api/forms/:slug`, `POST /api/forms/:slug`, `<script src="…/embed.js">` | A form's schema and JSON submission, or an auto-resizing iframe on any site. | [§ Embeddable forms](#embeddable-forms) |
+| **Visual editing** | `<script src="…/bridge.js">` | In-context edit overlay for an external front end (annotated preview + deep-link + live push). | [visual-editing-bridge.md](visual-editing-bridge.md) |
+| **Sitemap** | `GET /sitemap.xml` | Enumerate published content for crawling/SSG. | — |
+| **Feeds** | `GET /feed.xml`, `GET /feed.json` | Atom 1.0 / JSON Feed 1.1 of newly published content. | [§ Feeds](#feeds) |
+| **Outbound webhooks** | (you host the receiver) | HMAC-signed push on publish/unpublish/update. | [webhooks.md](webhooks.md) |
+| **Signed preview** | `GET /preview/:token` | One unpublished document via a short-lived token. | [§ Preview tokens](#preview-tokens) |
 
 ## Authentication
 
