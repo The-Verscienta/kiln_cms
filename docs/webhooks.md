@@ -43,10 +43,17 @@ their payload is the full serialized body of a document that has **never been
 published** — a receiver built for publish-mirroring must not be sent
 draft/embargoed content it didn't ask for.
 
-Two more event names exist outside the `<type>.<verb>` pattern:
+More event names exist outside the `<type>.<verb>` pattern:
 
 - **`form.submitted`** — a public form submission ([Forms](forms.md)); every
   endpoint is subscribed by default.
+- **`membership.activated`** / **`membership.canceled`** — a paid membership
+  started or stopped granting access ([Paid memberships](memberships.md#webhook-events));
+  opt in.
+- **`task.assigned`** / **`task.overdue`**, **`release.published`** /
+  **`release.rolled_back`** / **`release.failed`**, and
+  **`experiment.concluded`** — editorial tasks, content releases and A/B
+  experiments; opt in.
 - **`ping`** — a manual test delivery (see [Ping](#ping-and-redeliver) below);
   never subscribed to, and delivered on demand regardless of an endpoint's
   active state or event list.
@@ -61,6 +68,10 @@ depends on the event:
   trimmed to `type`, `content`, `data`, `order`, `children`. Internal-only
   fields (e.g. search text) are never included.
 - **`form.submitted`** — `{"form": "<slug>", "data": {...submitted fields...}}`.
+- **`membership.activated`** / **`membership.canceled`** — the member (`user_id`,
+  `email`), the tier (`id`, `slug`, `name`, `audience`), the transition
+  (`status`, `previous_status`, `occurred_at`) and `event_id` to dedupe on; see
+  [Paid memberships](memberships.md#webhook-events).
 - **`ping`** — `{"message": "KilnCMS webhook test", "endpoint_url": "...", "sent_at": "<ISO 8601>"}`.
 
 ```jsonc

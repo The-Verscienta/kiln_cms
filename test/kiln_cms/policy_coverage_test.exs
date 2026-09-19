@@ -118,6 +118,27 @@ defmodule KilnCMS.PolicyCoverageTest do
     end
   end
 
+  # A content type a downstream project builds on `KilnCMS.CMS.Content`
+  # (projects/README.md) inherits the base's system-actor grant, which the
+  # matrix's `(content)` row already documents — and it cannot be listed there by
+  # name, since `@domains` is the compile-time `:ash_domains` and a project's
+  # `config/project.exs` appends its own domain to it. Such a resource counts as
+  # covered, but only while it admits the system actor in no more policies than
+  # `CMS.Page` does: a type that layers a grant of its own on top of the base is
+  # still an undocumented admission and still fails.
+  defp inherits_documented_content_grant?(resource, section) do
+    content? =
+      function_exported?(resource, :__kiln_content_type__, 0) or
+        function_exported?(resource, :__kiln_dynamic_entry__, 0)
+
+    content? and String.contains?(section, "(content)") and
+      system_actor_policy_count(resource) <= system_actor_policy_count(KilnCMS.CMS.Page)
+  end
+
+  defp system_actor_policy_count(resource) do
+    Enum.count(system_actor_policies(), fn {r, _policy} -> r == resource end)
+  end
+
   test "no resource admits the system actor through a `bypass`" do
     offenders =
       for {resource, policy} <- system_actor_policies(),
@@ -163,7 +184,7 @@ defmodule KilnCMS.PolicyCoverageTest do
         String.contains?(
           section,
           "`" <> String.replace_prefix(inspect(resource), "KilnCMS.", "") <> "`"
-        )
+        ) or inherits_documented_content_grant?(resource, section)
       end)
       |> Enum.map(&inspect/1)
 

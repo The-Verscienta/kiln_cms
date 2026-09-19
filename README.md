@@ -9,7 +9,7 @@ the resolved architectural decisions (D1–D8).
 
 ## Status & maturity
 
-**Pre-1.0 (`v0.8.0`), single maintainer, and consumed as a source overlay
+**Pre-1.0 (`v0.9.0`), single maintainer, and consumed as a source overlay
 rather than a package.** If you are evaluating KilnCMS for a team, read this
 section before the feature list.
 
@@ -21,13 +21,11 @@ pins this repository as a **git submodule**, adds its own content types under
 layers onto the core; you do not fork it and you do not `mix deps.get` it. The
 interface that layering is written against — which surfaces are promised, and
 what a minor release may still do to you — is the **overlay contract**
-([`projects/README.md`][contract]; a fuller written policy is in flight as
-[#1453](https://github.com/The-Verscienta/kiln_cms/pull/1453)).
+([`docs/overlay-contract.md`](docs/overlay-contract.md)).
 
 [overlay]: https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md
-[contract]: https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md#the-overlay-contract
 
-<!-- Those two are absolute URLs for a different reason than the `.github/`
+<!-- That one is an absolute URL for a different reason than the `.github/`
      links further down. `README.md` is the basename of four registered ExDoc
      extras (this one, `examples/`, `projects/`, `clients/elixir/kiln_client/`),
      and ExDoc resolves a relative `README.md` link to the last of them
@@ -57,13 +55,14 @@ changes to compile, **minor** = new capability plus possible migrations,
 |---|---|
 | **Stable** — changes follow a deprecation path | The overlay contract surfaces (the `KilnCMS.CMS.Content` options, workflow action names, `Kiln.Plugin` callbacks, the block DSL, the extension behaviours and registries, config keys, the `PROJECT` build arg, the `public-*` CSS hooks); the published-content read contract on the HTTP APIs (*Versioning & stability* in [`docs/api.md`](docs/api.md)) |
 | **Moves without notice** | Everything inside `KilnCMSWeb.*` bar the plugin and JSON:API routers, core internals, the console's `side-*` classes, core Oban queue names, and search *ranking* |
-| **Experimental / off by default** | Semantic + hybrid search and the Meilisearch backend (both feature-flagged off); the CRDT collaborative-editing prototype (`:collab_prototype`, dev/test only) |
+| **Experimental / off by default** | Semantic + hybrid search and the Meilisearch backend (both feature-flagged off); the Bumblebee cross-encoder reranker (`rerank: false`; its model path is not exercised in CI); the CRDT collaborative-editing prototype (`:collab_prototype`, dev/test only); GraphQL subscriptions (on, but built on `ash_graphql`'s subscription DSL, which is still beta) |
 
-**Bus factor is one.** One maintainer, no external contributors yet, and a
+**Bus factor is one.** One maintainer, one merged external contribution
+([#1445](https://github.com/The-Verscienta/kiln_cms/pull/1445)), and a
 large share of the commit history is AI-pair-programmed (every such commit is
 `Co-Authored-By`-attributed). What offsets that is mechanical rather than
 social: a `mix precommit` gate and a CI suite that includes dialyzer, sobelow,
-`mix deps.audit`, a policy-coverage guard that fails the build for an Ash
+`mix deps.audit` and `mix hex.audit`, a policy-coverage guard that fails the build for an Ash
 resource with no authorizer, an overlay-drift job, and a release-image build.
 The [issue tracker](https://github.com/The-Verscienta/kiln_cms/issues) is the
 project's real backlog, including its own audit findings. If that bus factor is
@@ -381,6 +380,8 @@ with real-time visual preview and collaborative locking, and headless GraphQL + 
 delivery. Remaining cleanup: replace the temporary DaisyUI auth-override scaffolding in
 `router.ex`/`auth_overrides.ex` with custom components (the plan specifies no DaisyUI).
 
-> **Note:** keep this project at a path **without spaces** (it lives at
-> `~/Github/kiln_cms`). Native deps (`bcrypt_elixir`, `libvips`) build via `make`, which
-> fails on spaced paths such as iCloud Drive's `Mobile Documents`.
+> **Note:** clone this project to a path **without spaces**. One dependency,
+> `picosat_elixir`, cannot compile under a spaced path such as iCloud Drive's
+> `Mobile Documents` (fixed upstream in
+> [bitwalker/picosat_elixir#14](https://github.com/bitwalker/picosat_elixir/pull/14),
+> not yet released). `mix setup` checks for this before it starts.
