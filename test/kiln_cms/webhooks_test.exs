@@ -419,6 +419,49 @@ defmodule KilnCMS.WebhooksTest do
       assert data["state"] == "draft"
     end
 
+    # `TrashLive` lists trashed rows with a narrow select — no `blocks`, the
+    # heavy column it does not show — and restores from that record. Building
+    # the payload by loading calculations onto it raised inside Ash
+    # (`{:array, BlockUnion}` on an `%Ash.NotLoaded{}`), taking the restore
+    # down with it. The dispatch re-reads the record instead.
+    test "restoring from a narrow projection still sends the whole document" do
+      stub_capture()
+      admin = admin()
+      CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Narrow",
+            slug: slug(),
+            block_tree: [%{"type" => "heading", "content" => "Body"}]
+          },
+          actor: admin
+        )
+
+      page = CMS.publish_page!(page, %{}, actor: admin)
+
+      CMS.destroy_page!(page, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+      _ = events_received()
+
+      [trashed] =
+        CMS.list_trashed_pages!(
+          actor: admin,
+          query: [
+            filter: [id: page.id],
+            select: [:id, :org_id, :title, :slug, :locale, :state, :archived_at, :updated_at]
+          ]
+        )
+
+      CMS.restore_page!(trashed, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      assert [{"page.restored", %{"data" => data}}] = events_received()
+      assert data["title"] == "Narrow"
+      assert [%{"type" => "heading"}] = data["blocks"]
+    end
+
     test "unarchiving says restored, as a tombstone" do
       stub_capture()
       admin = admin()

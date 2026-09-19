@@ -102,7 +102,6 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
     "lib/kiln_cms/cms/changes/fold_working_copy.ex" => 1,
     "lib/kiln_cms/cms/changes/hash_inline_scripts.ex" => 1,
     "lib/kiln_cms/cms/changes/notify_comment.ex" => 1,
-    "lib/kiln_cms/cms/changes/notify_webhooks.ex" => 1,
     "lib/kiln_cms/cms/changes/record_published_version.ex" => 2,
     "lib/kiln_cms/cms/changes/record_slug_redirect.ex" => 1,
     "lib/kiln_cms/cms/changes/restore_version.ex" => 3,

@@ -84,17 +84,32 @@ defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
 
   defp payload(:full_when_published, record), do: payload(:tombstone, record)
 
-  defp payload(:full, record) do
-    record =
-      case Ash.load(record, [:effective_seo_title, :effective_seo_description],
-             authorize?: false,
-             tenant: record.org_id
-           ) do
-        {:ok, loaded} -> loaded
-        _ -> record
-      end
+  defp payload(:full, record), do: record |> reload() |> ContentSerializer.to_map()
 
-    ContentSerializer.to_map(record)
+  # Re-read the record rather than `Ash.load/3`-ing the two calculations onto
+  # the one the action returned, because that one carries only what its caller
+  # selected. `TrashLive` lists trashed rows with a narrow select that leaves
+  # out `blocks` — deliberately, it is the heavy column — and `Ash.load/3` on a
+  # record whose union array is `%Ash.NotLoaded{}` raises inside Ash's
+  # field-auth cleanup, which would take the restore down with it. A full
+  # re-read is also what makes the payload the whole document rather than the
+  # caller's projection of it.
+  #
+  # Runs after COMMIT (see `change/3`), so this is a plain read: a failure
+  # costs the loaded fields, never the write. `ContentSerializer` drops
+  # whatever is still unloaded.
+  defp reload(record) do
+    # authorize?: false — a system notification of a write that has already
+    # happened, re-reading the record the actor just wrote, under its own org.
+    # The payload goes to the operator's own endpoints, not to the actor.
+    case Ash.get(record.__struct__, record.id,
+           authorize?: false,
+           tenant: record.org_id,
+           load: [:effective_seo_title, :effective_seo_description]
+         ) do
+      {:ok, loaded} -> loaded
+      _ -> record
+    end
   end
 
   defp dispatch?(nil, _changeset, _record), do: true
