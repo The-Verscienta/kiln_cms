@@ -637,6 +637,8 @@ defmodule KilnCMS.MixProject do
       {:req_llm, "~> 1.17"},
       {:ash_admin, "~> 1.0"},
       {:sourceror, "~> 1.8", only: [:dev, :test]},
+      # `mix kiln.gen.content` and `mix kiln.gen.plugin` are Igniter tasks, and
+      # their tests use `Igniter.Test`. Without this dep both generators vanish.
       {:igniter, "~> 0.5", only: [:dev, :test]},
       {:usage_rules, "~> 0.1", only: [:dev], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
@@ -840,6 +842,7 @@ defmodule KilnCMS.MixProject do
       # that the VM is torn down when the *chain* ends, which a `phx.server`
       # needs to outlive. A task that prints a line and returns does not.
       setup: [
+        &refuse_a_spaced_checkout/1,
         "deps.get",
         "ash.setup",
         "assets.setup",
@@ -917,5 +920,36 @@ defmodule KilnCMS.MixProject do
   # tokenizers, unpickler, unzip and xla.
   defp unlock_unused_step do
     if ml?(), do: ["deps.unlock --unused"], else: []
+  end
+
+  # `mix setup`'s first step (#1321). One dependency cannot build under a path
+  # that contains a space: picosat_elixir, Ash's policy SAT solver. Its Makefile
+  # (0.2.3, the latest release) uses absolute paths as make targets, and make
+  # splits a target at the space. The failure then comes hundreds of lines into
+  # the dependency compile, as elixir_make's "You need to have gcc and make
+  # installed", which is wrong. Every other native dep builds there:
+  # bcrypt_elixir keeps absolute paths out of its targets and quotes them in its
+  # recipes, and vix and y_ex download precompiled NIFs.
+  #
+  # The fix is bitwalker/picosat_elixir#14, which is not released yet. Once a
+  # release carries it, bump the dep and delete this step.
+  defp refuse_a_spaced_checkout(_args) do
+    spaced =
+      Enum.filter([Mix.Project.deps_path(), Mix.Project.build_path()], &String.contains?(&1, " "))
+
+    if spaced != [] do
+      Mix.raise("""
+      This checkout is under a path that contains a space:
+
+          #{Enum.join(spaced, "\n    ")}
+
+      picosat_elixir (Ash's policy SAT solver) cannot compile there. Its Makefile \
+      uses absolute paths as make targets, and make splits them at the space. The \
+      compile would fail later with a message about gcc and make, which is not the \
+      cause. Clone the repo to a path without a space, then run `mix setup` again.
+
+      Upstream fix, not yet released: https://github.com/bitwalker/picosat_elixir/pull/14
+      """)
+    end
   end
 end
