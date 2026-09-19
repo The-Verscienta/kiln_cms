@@ -96,7 +96,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`mint` 1.10.1 closes a response-smuggling advisory in its HTTP/1 chunked
   parser (EEF-CVE-2026-82672, MEDIUM).**
-  ([long form](docs/changelog/unreleased.md#mint-1101-closes-a-response-smuggling-advisory-in-its-http1-chunked-parser-eef))
+  ([#1587](https://github.com/The-Verscienta/kiln_cms/issues/1587) · [long form](docs/changelog/unreleased.md#mint-1101-closes-a-response-smuggling-advisory-in-its-http1-chunked-parser-eef))
 
 ## [0.9.0] - 2026-09-18
 
