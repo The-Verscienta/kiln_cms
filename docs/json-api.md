@@ -586,6 +586,68 @@ admin-set nested value (a field behind `editable_by`), a non-admin write that
 drops the ids is **refused** (#954), with the error naming this surface. The
 fired `:json` artifact carries the same `_id`s for published content.
 
+### Concurrency: `ETag` and `If-Match`
+
+Without a precondition, a `PATCH` is last-write-wins: the server reads the
+record and applies your attributes in the same request, so a client editing
+from a copy it fetched earlier overwrites anything an editor saved in between,
+without an error. To make a write conditional on the version you read:
+
+1. Every single-record response carries an `ETag`: `GET /:id`, and the
+   responses to `PATCH /:id` and the workflow routes. It looks like `"4-draft"`
+   and is built from the record's `lock_version` (bumped by every content edit)
+   and its `state` (moved by every workflow transition). Treat it as opaque and
+   echo it back unchanged.
+2. Send it as `If-Match` on `PATCH /:id`, on `PATCH /:id/publish`,
+   `/unpublish`, `/submit-for-review`, `/return-to-draft`, or on `DELETE /:id`.
+   The write happens only if the record still carries that tag. Otherwise you
+   get **`412 Precondition Failed`** and nothing changes:
+
+```jsonc
+{
+  "errors": [{
+    "status": "412",
+    "code": "precondition_failed",
+    "detail": "this content was changed since you read it — it is now version 5 (draft); re-read it and retry",
+    "meta": { "etag": "\"5-draft\"", "lock_version": 5, "state": "draft" }
+  }]
+}
+```
+
+```bash
+# Read, keeping the ETag…
+curl -si http://localhost:4000/api/json/posts/<uuid> \
+  -H 'accept: application/vnd.api+json' -H "authorization: Bearer $KEY" | grep -i etag
+# etag: "4-draft"
+
+# …and write only if nobody has changed it since.
+curl -s -X PATCH http://localhost:4000/api/json/posts/<uuid> \
+  -H 'accept: application/vnd.api+json' -H 'content-type: application/vnd.api+json' \
+  -H "authorization: Bearer $KEY" -H 'if-match: "4-draft"' \
+  -d '{ "data": { "type": "post", "id": "<uuid>", "attributes": { "title": "New" } } }'
+```
+
+- **`If-Match: *`** passes whenever the record exists. Several tags,
+  comma-separated, pass if any one matches.
+- **A tag the server could not have issued fails with 412.** That covers a weak
+  `W/"…"` tag (`If-Match` uses strong comparison), a mistyped tag, or one
+  without quotes. It is not ignored: ignoring it would turn a typo into an
+  unguarded write.
+- **Publishing moves the tag even though it doesn't edit content.** A client
+  that read a draft and PATCHes after someone published it gets a 412 rather
+  than silently editing live content. `If-Match` on `/publish` likewise means
+  "publish the version I reviewed": an edit made after your read refuses it.
+- The check runs inside the write's transaction, against the row locked for
+  update, so a save that lands between your request arriving and the write
+  cannot slip past it.
+- No `If-Match`, no check: existing clients behave exactly as before.
+
+`lock_version` is also a read-only attribute on every content type, if you'd
+rather track versions yourself. The write routes accept it as an optional
+`expected_lock_version` attribute, which compares `lock_version` alone, like
+the GraphQL argument. Browsers can read `ETag` and send `If-Match` cross-origin:
+both are allowed in the CORS headers.
+
 ### Re-fire semantics
 
 Firing (immutable per-surface artifact regeneration) is bound to `:publish`, so

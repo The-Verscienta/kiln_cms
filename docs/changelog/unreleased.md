@@ -7,6 +7,24 @@ carries the reasoning.
 
 ## Added
 
+<a id="conditional-writes-on-the-headless-api-etag-if-match-and-expectedlockversion"></a>
+
+- **Conditional writes on the headless API: `ETag`, `If-Match` and
+  `expectedLockVersion`.** An API `PATCH` used to be last-write-wins: the
+  server read the record and applied the patch in one request, so a client
+  writing from a copy it fetched earlier silently overwrote whatever an editor
+  had saved since. Single-record JSON:API responses now carry an `ETag`
+  (`"<lock_version>-<state>"`), and `If-Match` on `PATCH`, the workflow routes
+  and `DELETE` refuses a write from any other version with `412
+  precondition_failed`, the current tag in `meta`. The tag includes `state`
+  because a publish changes the document without bumping `lock_version`, and a
+  client that read a draft must not PATCH what has since gone live. GraphQL
+  mutations take the same check as an optional `expectedLockVersion` input,
+  and `lock_version` is now a readable (never writable) attribute on every
+  content type. The comparison runs inside the write's transaction against the
+  row locked for update. Without either, nothing changes. `If-Match` and `ETag`
+  are allowed through CORS.
+
 <a id="one-click-deploy-templates-for-render-railway-flyio-and-digitalocean"></a>
 
 - **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**

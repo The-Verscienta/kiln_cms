@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Conditional writes on the headless API: `ETag`, `If-Match` and
+  `expectedLockVersion`.**
+  ([long form](docs/changelog/unreleased.md#conditional-writes-on-the-headless-api-etag-if-match-and-expectedlockversion))
+
 - **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#one-click-deploy-templates-for-render-railway-flyio-and-digitalocean))
 
