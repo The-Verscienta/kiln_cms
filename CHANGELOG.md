@@ -58,16 +58,16 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A CDN in front of the headless API now caches anonymous JSON:API, GraphQL
   `GET` and `/api/search` responses for up to 60 seconds.**
-  ([long form](docs/changelog/unreleased.md#a-cdn-in-front-of-the-headless-api-now-caches-anonymous-jsonapi-graphql-get-and))
+  ([#1571](https://github.com/The-Verscienta/kiln_cms/issues/1571) · [long form](docs/changelog/unreleased.md#a-cdn-in-front-of-the-headless-api-now-caches-anonymous-jsonapi-graphql-get-and))
 
 ### Added
 
 - **Anonymous JSON:API, GraphQL and search reads are CDN-cacheable, with a body
   ETag and 304s.**
-  ([long form](docs/changelog/unreleased.md#anonymous-jsonapi-graphql-and-search-reads-are-cdn-cacheable-with-a-body-etag))
+  ([#1571](https://github.com/The-Verscienta/kiln_cms/issues/1571) · [long form](docs/changelog/unreleased.md#anonymous-jsonapi-graphql-and-search-reads-are-cdn-cacheable-with-a-body-etag))
 
 - **Optional CDN purge on publish (`KILN_CDN_PURGE_URL`).**
-  ([long form](docs/changelog/unreleased.md#optional-cdn-purge-on-publish-kilncdnpurgeurl))
+  ([#1571](https://github.com/The-Verscienta/kiln_cms/issues/1571) · [long form](docs/changelog/unreleased.md#optional-cdn-purge-on-publish-kilncdnpurgeurl))
 
 - **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#one-click-deploy-templates-for-render-railway-flyio-and-digitalocean))
