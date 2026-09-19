@@ -62,11 +62,17 @@ Every summary line below that was shortened links to its own entry there.
 - **`KILN_MEDIA_ROOT`: a stable directory for local media.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#kilnmediaroot-a-stable-directory-for-local-media))
 
+### Changed
+
+- **The content list says an item's status in words; the trigram glyph is
+  opt-in.**
+  ([#1323](https://github.com/The-Verscienta/kiln_cms/issues/1323) · [long form](docs/changelog/unreleased.md#the-content-list-says-an-items-status-in-words-the-trigram-glyph-is-opt-in))
+
 ### Fixed
 
 - **Buttons, links, badges and fields that rendered unstyled now look like what
   they are.**
-  ([long form](docs/changelog/unreleased.md#buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they))
+  ([#1531](https://github.com/The-Verscienta/kiln_cms/issues/1531) · [long form](docs/changelog/unreleased.md#buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they))
 
 - **A PaaS health check no longer gets a redirect, and `PHX_HOST` falls back to
   the platform's hostname.**

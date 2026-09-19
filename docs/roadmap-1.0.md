@@ -69,10 +69,11 @@ The things an operator would hit in their first months of running Kiln.
   production consumer, and yet [`docs/performance.md`](performance.md) calls
   them scrapeable. Pick a reporter, or say plainly there is none, and make
   both docs agree. Without this, 1.0's performance targets cannot be measured.
-- **The two half-done usability issues.** #1323: the Overview still ships as
-  a bagua, with a "taiji · centre" tile. #1321: the "space-free, non-iCloud
+- **The half-done usability issue.** #1321: the "space-free, non-iCloud
   path" warnings in `CONTRIBUTING.md` and `AGENTS.md` still need verifying,
-  then either fixing or reporting upstream.
+  then either fixing or reporting upstream. (#1323, the other one, is done:
+  the Overview lost its bagua in #1390, and the content list's trigram status
+  glyph is now an opt-in on Your settings, with words by default.)
 - **Docs accuracy pass (#1532).** Fix the claims found stale while writing this page:
   - the README status section names `v0.8.0` and calls #1453 "in flight"
   - it says there are no external contributors (#1445 merged one)
