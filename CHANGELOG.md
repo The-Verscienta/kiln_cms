@@ -66,11 +66,15 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Buttons, links, badges and fields that rendered unstyled now look like what
   they are.**
-  ([long form](docs/changelog/unreleased.md#buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they))
+  ([#1531](https://github.com/The-Verscienta/kiln_cms/issues/1531) · [long form](docs/changelog/unreleased.md#buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they))
 
 - **A PaaS health check no longer gets a redirect, and `PHX_HOST` falls back to
   the platform's hostname.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#a-paas-health-check-no-longer-gets-a-redirect-and-phxhost-falls-back-to-the))
+
+- **A request on a host that names no site no longer reads the database for the
+  default site every time.**
+  ([long form](docs/changelog/unreleased.md#a-request-on-a-host-that-names-no-site-no-longer-reads-the-database-for-the))
 
 ## [0.9.0] - 2026-09-18
 

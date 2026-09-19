@@ -151,8 +151,18 @@ defmodule KilnCMSWeb.TenantOutageTest do
       # `default_org/0`'s own read fails too during an outage. The synthetic
       # struct keeps `current_org_id/1` — and therefore every cache key the
       # delivery path builds — working.
-      assert {:ok, %Accounts.Organization{id: id}} = Tenant.fetch_org(unknown_host())
+      #
+      # The fallback reads through the canonical host's `Cache.Hosts` entry, so
+      # that entry has to be cold for the read to be attempted at all — a warm
+      # one answers with the real row and this would say nothing.
+      base = cold_base_host!()
+
+      assert {:ok, %Accounts.Organization{id: id, slug: nil}} = Tenant.fetch_org(unknown_host())
       assert id == Accounts.default_org_id()
+
+      # And the failed read is not remembered: once Postgres is back, the next
+      # request must get the real row, not this stand-in for the positive TTL.
+      assert {:ok, nil} = Cachex.get(KilnCMS.Cache.Hosts.cache_name(), base)
     end
 
     test "a socket connect info with no host resolves the same way" do
