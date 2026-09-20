@@ -5,6 +5,11 @@ defmodule KilnCMSWeb.RateLimit do
   use Hammer, backend: :ets
 
   @default_limits %{
+    # GraphQL documents per client address, over both transports: each `/gql`
+    # request, each operation of a batched body
+    # (`KilnCMSWeb.Plugs.GraphqlBatchLimit`), and each document sent over an
+    # open `/ws/gql` connection (`KilnCMSWeb.GraphqlLimits.SocketDocumentBudget`).
+    # A subscription's pushes are not charged.
     gql: {60, :timer.minutes(1)},
     api: {120, :timer.minutes(1)},
     # Doubled from the original 20/min (#747). A two-factor sign-in is *two*

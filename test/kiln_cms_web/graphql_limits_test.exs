@@ -17,8 +17,13 @@ defmodule KilnCMSWeb.GraphqlLimitsTest do
 
   use Absinthe.Phoenix.SubscriptionTest, schema: KilnCMSWeb.GraphqlSchema
 
+  import KilnCMS.RateLimitHelpers, only: [put_limit: 2, restore_limits_on_exit: 0, spent: 2]
+
+  alias KilnCMS.Accounts.User
+  alias KilnCMS.CMS
   alias KilnCMSWeb.GraphqlLimits
   alias KilnCMSWeb.GraphqlSocket
+  alias KilnCMSWeb.RateLimit
 
   defp gql(conn, body) do
     conn
@@ -153,6 +158,151 @@ defmodule KilnCMSWeb.GraphqlLimitsTest do
              Absinthe.Pipeline.run(related_chain(4), pipeline)
 
     assert message =~ "is too complex"
+  end
+
+  describe "the socket's document budget" do
+    setup %{conn: conn} do
+      restore_limits_on_exit()
+
+      # The socket connects from the address the injected conn already has, so
+      # a test can charge `/gql` and the socket as one client.
+      connect_info = %{
+        peer_data: %{address: conn.remote_ip, port: 111, ssl_cert: nil},
+        x_headers: []
+      }
+
+      %{connect_info: connect_info, client: RateLimit.client_key(conn.remote_ip)}
+    end
+
+    defp socket!(connect_info) do
+      {:ok, socket} =
+        Phoenix.ChannelTest.connect(GraphqlSocket, %{}, connect_info: connect_info)
+
+      {:ok, socket} = join_absinthe(socket)
+      socket
+    end
+
+    defp context(socket), do: :sys.get_state(socket.channel_pid).assigns.absinthe.opts[:context]
+
+    test "charges every document to :gql, under the address /gql charges", %{
+      conn: conn,
+      connect_info: connect_info,
+      client: client
+    } do
+      assert %{"data" => %{"health" => "ok"}} = gql(conn, %{query: "{ health }"})
+      assert spent(:gql, client) == 1
+
+      socket = socket!(connect_info)
+
+      for _ <- 1..3 do
+        ref = push_doc(socket, "{ health }")
+        assert_reply(ref, :ok, %{data: %{"health" => "ok"}})
+      end
+
+      assert spent(:gql, client) == 4
+    end
+
+    test "refuses a document over the budget without closing the socket", %{
+      connect_info: connect_info,
+      client: client
+    } do
+      put_limit(:gql, 2)
+      socket = socket!(connect_info)
+
+      for _ <- 1..2 do
+        ref = push_doc(socket, "{ health }")
+        assert_reply(ref, :ok, %{data: %{"health" => "ok"}})
+      end
+
+      ref = push_doc(socket, "{ health }")
+
+      assert_reply(ref, :error, %{
+        errors: [
+          %{
+            message: "Too many requests.",
+            extensions: %{code: "too_many_requests", retry_after: retry_after}
+          }
+        ]
+      })
+
+      assert retry_after in 0..60
+
+      # The refusal left the socket as it was: same context, and once the
+      # budget allows it the next document runs and is charged to the same key.
+      assert %{tenant: tenant, pubsub: KilnCMSWeb.Endpoint, rate_limit_key: ^client} =
+               context(socket)
+
+      assert is_binary(tenant)
+
+      put_limit(:gql, 100)
+      ref = push_doc(socket, "{ health }")
+      assert_reply(ref, :ok, %{data: %{"health" => "ok"}})
+      assert spent(:gql, client) == 4
+    end
+
+    # A document refused before Absinthe copies the context onto it used to
+    # end with an empty context, which the channel then kept for the socket:
+    # no tenant, no actor, no pubsub, and no budget key.
+    test "a malformed document is charged, and the socket keeps its context", %{
+      connect_info: connect_info,
+      client: client
+    } do
+      socket = socket!(connect_info)
+      before = context(socket)
+
+      ref = push_doc(socket, "{ health ")
+      assert_reply(ref, :error, %{errors: [%{message: "syntax error" <> _}]})
+
+      assert context(socket) == before
+      assert spent(:gql, client) == 1
+
+      # Without the pubsub in the context, subscribing crashed the channel.
+      ref = push_doc(socket, "subscription { pageChanged { destroyed } }")
+      assert_reply(ref, :ok, %{subscriptionId: _})
+      assert spent(:gql, client) == 2
+    end
+
+    # A push re-runs the subscription document through the phases recorded when
+    # it was first run. The budget phase runs before they are recorded, so the
+    # subscriber pays once, when it subscribes. The Batcher is off in test, so a
+    # push would be charged in this process if it were charged at all.
+    test "a subscription's pushes are not charged", %{
+      connect_info: connect_info,
+      client: client
+    } do
+      socket = socket!(connect_info)
+
+      ref =
+        push_doc(socket, """
+        subscription { pageChanged { created { id title } updated { id title } destroyed } }
+        """)
+
+      assert_reply(ref, :ok, %{subscriptionId: _})
+      assert spent(:gql, client) == 1
+
+      actor =
+        Ash.Seed.seed!(User, %{
+          email: "budget-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+          confirmed_at: DateTime.utc_now(),
+          role: :admin
+        })
+
+      org = KilnCMS.Accounts.default_org_id()
+      slug = "budget-#{System.unique_integer([:positive])}"
+
+      page = CMS.create_page!(%{title: "Budget", slug: slug}, actor: actor, tenant: org)
+      page = CMS.publish_page!(page, %{}, actor: actor, tenant: org)
+      CMS.update_page!(page, %{title: "Budget v2"}, actor: actor, tenant: org)
+
+      assert_push(
+        "subscription:data",
+        %{result: %{data: %{"pageChanged" => %{"updated" => %{"title" => "Budget v2"}}}}},
+        2_000
+      )
+
+      assert spent(:gql, client) == 1
+    end
   end
 
   describe "relationship lists" do

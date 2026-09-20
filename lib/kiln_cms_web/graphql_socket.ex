@@ -5,12 +5,15 @@ defmodule KilnCMSWeb.GraphqlSocket do
   # count and the production introspection block (`KilnCMSWeb.GraphqlLimits`).
   # Options set with `put_options/2` in `do_connect/3` would not hold them:
   # `Absinthe.Phoenix.Channel` replaces a socket's options with `[context: …]`
-  # after its first document.
+  # after its first document. It also charges each document the client sends to
+  # the `:gql` bucket, keyed on the address the context carries
+  # (`KilnCMSWeb.GraphqlLimits.SocketDocumentBudget`).
   use Absinthe.Phoenix.Socket,
     schema: KilnCMSWeb.GraphqlSchema,
     pipeline: {KilnCMSWeb.GraphqlLimits, :socket_pipeline}
 
   alias KilnCMSWeb.BearerAuth
+  alias KilnCMSWeb.GraphqlLimits.SocketDocumentBudget
 
   @impl true
   def connect(params, socket, connect_info) do
@@ -37,7 +40,17 @@ defmodule KilnCMSWeb.GraphqlSocket do
     # (#563).
     case KilnCMSWeb.Tenant.fetch_org_from_connect_info(connect_info) do
       {:ok, org} ->
-        context = params |> actor_context() |> Map.put(:tenant, org.id)
+        context =
+          params
+          |> actor_context()
+          |> Map.put(:tenant, org.id)
+          # The context is the only socket state the document pipeline sees,
+          # and it outlives every document, so the key each document is charged
+          # under lives here.
+          |> Map.put(
+            SocketDocumentBudget.context_key(),
+            KilnCMSWeb.SocketJoinBudget.client_key(connect_info)
+          )
 
         socket =
           socket

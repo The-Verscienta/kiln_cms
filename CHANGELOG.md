@@ -202,6 +202,10 @@ Every summary line below that was shortened links to its own entry there.
 - **`/ws/gql` runs under the same cost limits as `/gql`, batches are counted per
   operation, and introspection is refused however a document arrives.**
   ([long form](docs/changelog/unreleased.md#wsgql-runs-under-the-same-cost-limits-as-gql-batches-are-counted-per-operation))
+- **Each document sent over `/ws/gql` now counts against the `:gql` rate limit,
+  and a malformed document no longer strips a GraphQL socket of its tenant and
+  actor.**
+  ([long form](docs/changelog/unreleased.md#each-document-sent-over-wsgql-now-counts-against-the-gql-rate-limit-and-a))
 ## [0.9.0] - 2026-09-18
 
 Long form: [docs/changelog/v0.9.0.md](docs/changelog/v0.9.0.md) —
