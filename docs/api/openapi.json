@@ -10347,6 +10347,1265 @@
         },
         "type": "object"
       },
+      "release": {
+        "additionalProperties": false,
+        "description": "A \"Resource object\" representing a release",
+        "properties": {
+          "attributes": {
+            "additionalProperties": false,
+            "description": "An attributes object for a release",
+            "properties": {
+              "description": {
+                "anyOf": [
+                  {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
+              "failed_item_id": {
+                "anyOf": [
+                  {
+                    "format": "uuid",
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
+              "failure_reason": {
+                "anyOf": [
+                  {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
+              "name": {
+                "description": "Field included by default.",
+                "type": "string"
+              },
+              "published_at": {
+                "anyOf": [
+                  {},
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
+              "rolled_back_at": {
+                "anyOf": [
+                  {},
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
+              "scheduled_at": {
+                "anyOf": [
+                  {},
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
+              "state": {
+                "description": "Field included by default.",
+                "enum": [
+                  "open",
+                  "scheduled",
+                  "publishing",
+                  "published",
+                  "failed",
+                  "rolling_back",
+                  "rolled_back",
+                  "archived"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "state"
+            ],
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "relationships": {
+            "additionalProperties": false,
+            "description": "A relationships object for a release",
+            "properties": {
+              "items": {
+                "properties": {
+                  "data": {
+                    "description": "Relationship data for items",
+                    "items": {
+                      "additionalProperties": false,
+                      "description": "Resource identifiers for items",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "meta": {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "id"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array",
+                    "uniqueItems": true
+                  }
+                }
+              }
+            },
+            "type": "object"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ],
+        "type": "object"
+      },
+      "release-filter": {
+        "additionalProperties": false,
+        "description": "Filters the query to results matching the given filter object",
+        "example": "",
+        "properties": {
+          "and": {
+            "items": {
+              "$ref": "#/components/schemas/release-filter"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "description": {
+            "$ref": "#/components/schemas/release-filter-description"
+          },
+          "failed_item_id": {
+            "$ref": "#/components/schemas/release-filter-failed_item_id"
+          },
+          "failure_reason": {
+            "$ref": "#/components/schemas/release-filter-failure_reason"
+          },
+          "id": {
+            "$ref": "#/components/schemas/release-filter-id"
+          },
+          "items": {
+            "$ref": "#/components/schemas/release_item-filter"
+          },
+          "name": {
+            "$ref": "#/components/schemas/release-filter-name"
+          },
+          "not": {
+            "$ref": "#/components/schemas/release-filter"
+          },
+          "or": {
+            "items": {
+              "$ref": "#/components/schemas/release-filter"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "published_at": {
+            "$ref": "#/components/schemas/release-filter-published_at"
+          },
+          "rolled_back_at": {
+            "$ref": "#/components/schemas/release-filter-rolled_back_at"
+          },
+          "scheduled_at": {
+            "$ref": "#/components/schemas/release-filter-scheduled_at"
+          },
+          "state": {
+            "$ref": "#/components/schemas/release-filter-state"
+          }
+        },
+        "type": "deepObject"
+      },
+      "release-filter-description": {
+        "additionalProperties": false,
+        "properties": {
+          "contains": {
+            "type": "string"
+          },
+          "eq": {
+            "type": "string"
+          },
+          "greater_than": {
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "type": "string"
+          },
+          "ilike": {
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "string"
+          },
+          "less_than": {
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "type": "string"
+          },
+          "like": {
+            "type": "string"
+          },
+          "not_eq": {
+            "type": "string"
+          },
+          "string_ends_with": {
+            "type": "string"
+          },
+          "string_starts_with": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "release-filter-failed_item_id": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "greater_than": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "less_than": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "not_eq": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "release-filter-failure_reason": {
+        "additionalProperties": false,
+        "properties": {
+          "contains": {
+            "type": "string"
+          },
+          "eq": {
+            "type": "string"
+          },
+          "greater_than": {
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "type": "string"
+          },
+          "ilike": {
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "string"
+          },
+          "less_than": {
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "type": "string"
+          },
+          "like": {
+            "type": "string"
+          },
+          "not_eq": {
+            "type": "string"
+          },
+          "string_ends_with": {
+            "type": "string"
+          },
+          "string_starts_with": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "release-filter-id": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "greater_than": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "less_than": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "not_eq": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "release-filter-name": {
+        "additionalProperties": false,
+        "properties": {
+          "contains": {
+            "type": "string"
+          },
+          "eq": {
+            "type": "string"
+          },
+          "greater_than": {
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "type": "string"
+          },
+          "ilike": {
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "string"
+          },
+          "less_than": {
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "type": "string"
+          },
+          "like": {
+            "type": "string"
+          },
+          "not_eq": {
+            "type": "string"
+          },
+          "string_ends_with": {
+            "type": "string"
+          },
+          "string_starts_with": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "release-filter-published_at": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {},
+          "greater_than": {},
+          "greater_than_or_equal": {},
+          "in": {
+            "items": {},
+            "type": "array"
+          },
+          "is_distinct_from": {},
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {},
+          "less_than": {},
+          "less_than_or_equal": {},
+          "not_eq": {}
+        },
+        "type": "object"
+      },
+      "release-filter-rolled_back_at": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {},
+          "greater_than": {},
+          "greater_than_or_equal": {},
+          "in": {
+            "items": {},
+            "type": "array"
+          },
+          "is_distinct_from": {},
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {},
+          "less_than": {},
+          "less_than_or_equal": {},
+          "not_eq": {}
+        },
+        "type": "object"
+      },
+      "release-filter-scheduled_at": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {},
+          "greater_than": {},
+          "greater_than_or_equal": {},
+          "in": {
+            "items": {},
+            "type": "array"
+          },
+          "is_distinct_from": {},
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {},
+          "less_than": {},
+          "less_than_or_equal": {},
+          "not_eq": {}
+        },
+        "type": "object"
+      },
+      "release-filter-state": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "enum": [
+              "open",
+              "scheduled",
+              "publishing",
+              "published",
+              "failed",
+              "rolling_back",
+              "rolled_back",
+              "archived"
+            ],
+            "type": "string"
+          },
+          "greater_than": {
+            "enum": [
+              "open",
+              "scheduled",
+              "publishing",
+              "published",
+              "failed",
+              "rolling_back",
+              "rolled_back",
+              "archived"
+            ],
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "enum": [
+              "open",
+              "scheduled",
+              "publishing",
+              "published",
+              "failed",
+              "rolling_back",
+              "rolled_back",
+              "archived"
+            ],
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "string"
+          },
+          "less_than": {
+            "enum": [
+              "open",
+              "scheduled",
+              "publishing",
+              "published",
+              "failed",
+              "rolling_back",
+              "rolled_back",
+              "archived"
+            ],
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "enum": [
+              "open",
+              "scheduled",
+              "publishing",
+              "published",
+              "failed",
+              "rolling_back",
+              "rolled_back",
+              "archived"
+            ],
+            "type": "string"
+          },
+          "not_eq": {
+            "enum": [
+              "open",
+              "scheduled",
+              "publishing",
+              "published",
+              "failed",
+              "rolling_back",
+              "rolled_back",
+              "archived"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "release_item": {
+        "additionalProperties": false,
+        "description": "A \"Resource object\" representing a release_item",
+        "properties": {
+          "attributes": {
+            "additionalProperties": false,
+            "description": "An attributes object for a release_item",
+            "properties": {
+              "action": {
+                "description": "What the release does to this record when it goes live. Field included by default.",
+                "enum": [
+                  "publish",
+                  "unpublish"
+                ],
+                "type": "string"
+              },
+              "applied_at": {
+                "anyOf": [
+                  {},
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
+              "content_id": {
+                "description": "Field included by default.",
+                "format": "uuid",
+                "type": "string"
+              },
+              "content_type": {
+                "description": "Field included by default.",
+                "type": "string"
+              },
+              "prior_state": {
+                "anyOf": [
+                  {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
+              "prior_version_id": {
+                "anyOf": [
+                  {
+                    "format": "uuid",
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
+              "release_id": {
+                "description": "Field included by default.",
+                "format": "uuid",
+                "type": "string"
+              },
+              "status": {
+                "description": "Field included by default.",
+                "enum": [
+                  "pending",
+                  "applied",
+                  "skipped",
+                  "cancelled",
+                  "rolled_back"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "content_type",
+              "content_id",
+              "action",
+              "status",
+              "release_id"
+            ],
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "relationships": {
+            "additionalProperties": false,
+            "description": "A relationships object for a release_item",
+            "properties": {
+              "release": {
+                "properties": {
+                  "data": {
+                    "additionalProperties": false,
+                    "description": "An identifier for release",
+                    "nullable": true,
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "meta": {
+                        "additionalProperties": true,
+                        "type": "object"
+                      },
+                      "type": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "type": "object"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ],
+        "type": "object"
+      },
+      "release_item-filter": {
+        "additionalProperties": false,
+        "description": "Filters the query to results matching the given filter object",
+        "example": "",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/release_item-filter-action"
+          },
+          "and": {
+            "items": {
+              "$ref": "#/components/schemas/release_item-filter"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "applied_at": {
+            "$ref": "#/components/schemas/release_item-filter-applied_at"
+          },
+          "content_id": {
+            "$ref": "#/components/schemas/release_item-filter-content_id"
+          },
+          "content_type": {
+            "$ref": "#/components/schemas/release_item-filter-content_type"
+          },
+          "id": {
+            "$ref": "#/components/schemas/release_item-filter-id"
+          },
+          "not": {
+            "$ref": "#/components/schemas/release_item-filter"
+          },
+          "or": {
+            "items": {
+              "$ref": "#/components/schemas/release_item-filter"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "prior_state": {
+            "$ref": "#/components/schemas/release_item-filter-prior_state"
+          },
+          "prior_version_id": {
+            "$ref": "#/components/schemas/release_item-filter-prior_version_id"
+          },
+          "release": {
+            "$ref": "#/components/schemas/release-filter"
+          },
+          "release_id": {
+            "$ref": "#/components/schemas/release_item-filter-release_id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/release_item-filter-status"
+          }
+        },
+        "type": "deepObject"
+      },
+      "release_item-filter-action": {
+        "additionalProperties": false,
+        "description": "What the release does to this record when it goes live.",
+        "properties": {
+          "eq": {
+            "enum": [
+              "publish",
+              "unpublish"
+            ],
+            "type": "string"
+          },
+          "greater_than": {
+            "enum": [
+              "publish",
+              "unpublish"
+            ],
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "enum": [
+              "publish",
+              "unpublish"
+            ],
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "string"
+          },
+          "less_than": {
+            "enum": [
+              "publish",
+              "unpublish"
+            ],
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "enum": [
+              "publish",
+              "unpublish"
+            ],
+            "type": "string"
+          },
+          "not_eq": {
+            "enum": [
+              "publish",
+              "unpublish"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "release_item-filter-applied_at": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {},
+          "greater_than": {},
+          "greater_than_or_equal": {},
+          "in": {
+            "items": {},
+            "type": "array"
+          },
+          "is_distinct_from": {},
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {},
+          "less_than": {},
+          "less_than_or_equal": {},
+          "not_eq": {}
+        },
+        "type": "object"
+      },
+      "release_item-filter-content_id": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "greater_than": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "less_than": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "not_eq": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "release_item-filter-content_type": {
+        "additionalProperties": false,
+        "properties": {
+          "contains": {
+            "type": "string"
+          },
+          "eq": {
+            "type": "string"
+          },
+          "greater_than": {
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "type": "string"
+          },
+          "ilike": {
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "string"
+          },
+          "less_than": {
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "type": "string"
+          },
+          "like": {
+            "type": "string"
+          },
+          "not_eq": {
+            "type": "string"
+          },
+          "string_ends_with": {
+            "type": "string"
+          },
+          "string_starts_with": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "release_item-filter-id": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "greater_than": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "less_than": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "not_eq": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "release_item-filter-prior_state": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "type": "string"
+          },
+          "greater_than": {
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "string"
+          },
+          "less_than": {
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "type": "string"
+          },
+          "not_eq": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "release_item-filter-prior_version_id": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "greater_than": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "less_than": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "not_eq": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "release_item-filter-release_id": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "greater_than": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "less_than": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "not_eq": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "release_item-filter-status": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "enum": [
+              "pending",
+              "applied",
+              "skipped",
+              "cancelled",
+              "rolled_back"
+            ],
+            "type": "string"
+          },
+          "greater_than": {
+            "enum": [
+              "pending",
+              "applied",
+              "skipped",
+              "cancelled",
+              "rolled_back"
+            ],
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "enum": [
+              "pending",
+              "applied",
+              "skipped",
+              "cancelled",
+              "rolled_back"
+            ],
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "string"
+          },
+          "less_than": {
+            "enum": [
+              "pending",
+              "applied",
+              "skipped",
+              "cancelled",
+              "rolled_back"
+            ],
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "enum": [
+              "pending",
+              "applied",
+              "skipped",
+              "cancelled",
+              "rolled_back"
+            ],
+            "type": "string"
+          },
+          "not_eq": {
+            "enum": [
+              "pending",
+              "applied",
+              "skipped",
+              "cancelled",
+              "rolled_back"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "tag": {
         "additionalProperties": false,
         "description": "A \"Resource object\" representing a tag",
@@ -12615,6 +13874,57 @@
         "summary": "Complete a two-factor sign-in",
         "tags": [
           "Authentication"
+        ]
+      }
+    },
+    "/api/content/{type}/{id}/preview-token": {
+      "post": {
+        "callbacks": {},
+        "deprecated": false,
+        "description": "Returns a signed, read-only token for this one document (redeem it at `GET /preview/{token}`), its shareable `url` on the owning site's host, and when it expires (15 minutes). Requires a caller who sees this document's drafts as an editor; a `:read` API key is enough.",
+        "operationId": "createPreviewToken",
+        "parameters": [
+          {
+            "description": "Content type name, e.g. `post`",
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The document's id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "`{token, url, type, id, expires_at, expires_in}`"
+          },
+          "401": {
+            "description": "No (valid) credential"
+          },
+          "403": {
+            "description": "Readable, but not as an editor (e.g. a viewer on a published page)"
+          },
+          "404": {
+            "description": "Unknown type or document"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mint a short-lived preview link for one draft",
+        "tags": [
+          "Delivery"
         ]
       }
     },
@@ -23073,6 +24383,466 @@
         ]
       }
     },
+    "/api/json/release-items": {
+      "get": {
+        "callbacks": {},
+        "deprecated": false,
+        "description": "/release-items operation on release_item resource",
+        "parameters": [
+          {
+            "description": "Filters the query to results with attributes matching the given filter object",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/release_item-filter"
+            },
+            "style": "deepObject"
+          },
+          {
+            "description": "Sort order to apply to the results",
+            "explode": false,
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "pattern": "^(id|-id|\\+\\+id|--id|content_type|-content_type|\\+\\+content_type|--content_type|content_id|-content_id|\\+\\+content_id|--content_id|action|-action|\\+\\+action|--action|status|-status|\\+\\+status|--status|prior_state|-prior_state|\\+\\+prior_state|--prior_state|prior_version_id|-prior_version_id|\\+\\+prior_version_id|--prior_version_id|applied_at|-applied_at|\\+\\+applied_at|--applied_at|release_id|-release_id|\\+\\+release_id|--release_id)(,(id|-id|\\+\\+id|--id|content_type|-content_type|\\+\\+content_type|--content_type|content_id|-content_id|\\+\\+content_id|--content_id|action|-action|\\+\\+action|--action|status|-status|\\+\\+status|--status|prior_state|-prior_state|\\+\\+prior_state|--prior_state|prior_version_id|-prior_version_id|\\+\\+prior_version_id|--prior_version_id|applied_at|-applied_at|\\+\\+applied_at|--applied_at|release_id|-release_id|\\+\\+release_id|--release_id))*$",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Paginates the response with the limit and offset or keyset pagination.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "example": {
+                "limit": 25
+              },
+              "properties": {
+                "after": {
+                  "type": "string"
+                },
+                "before": {
+                  "type": "string"
+                },
+                "count": {
+                  "default": false,
+                  "type": "boolean"
+                },
+                "limit": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "offset": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "style": "deepObject"
+          },
+          {
+            "description": "Relationship paths to include in the response",
+            "explode": false,
+            "in": "query",
+            "name": "include",
+            "required": false,
+            "schema": {
+              "pattern": "^(release)(,(release))*$",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Limits the response fields to only those listed for each type",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "additionalProperties": true,
+              "example": {
+                "release_item": "id,content_type,content_id,action,status,prior_state,prior_version_id,applied_at,release_id"
+              },
+              "properties": {
+                "release_item": {
+                  "description": "Comma separated field names for release_item",
+                  "example": "id,content_type,content_id,action,status,prior_state,prior_version_id,applied_at,release_id",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "style": "deepObject"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/vnd.api+json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "description": "An array of resource objects representing a release_item",
+                      "items": {
+                        "$ref": "#/components/schemas/release_item"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "included": {
+                      "items": {
+                        "oneOf": [
+                          {
+                            "$ref": "#/components/schemas/release"
+                          }
+                        ]
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "meta": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "$ref": "#/components/responses/errors"
+          }
+        },
+        "tags": [
+          "release_item"
+        ]
+      }
+    },
+    "/api/json/release-items/{id}": {
+      "get": {
+        "callbacks": {},
+        "deprecated": false,
+        "description": "/release-items/:id operation on release_item resource",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Relationship paths to include in the response",
+            "explode": false,
+            "in": "query",
+            "name": "include",
+            "required": false,
+            "schema": {
+              "pattern": "^(release)(,(release))*$",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Limits the response fields to only those listed for each type",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "additionalProperties": true,
+              "example": {
+                "release_item": "id,content_type,content_id,action,status,prior_state,prior_version_id,applied_at,release_id"
+              },
+              "properties": {
+                "release_item": {
+                  "description": "Comma separated field names for release_item",
+                  "example": "id,content_type,content_id,action,status,prior_state,prior_version_id,applied_at,release_id",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "style": "deepObject"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/vnd.api+json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/release_item"
+                    },
+                    "included": {
+                      "items": {
+                        "oneOf": [
+                          {
+                            "$ref": "#/components/schemas/release"
+                          }
+                        ]
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "meta": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "$ref": "#/components/responses/errors"
+          }
+        },
+        "tags": [
+          "release_item"
+        ]
+      }
+    },
+    "/api/json/releases": {
+      "get": {
+        "callbacks": {},
+        "deprecated": false,
+        "description": "/releases operation on release resource",
+        "parameters": [
+          {
+            "description": "Filters the query to results with attributes matching the given filter object",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/release-filter"
+            },
+            "style": "deepObject"
+          },
+          {
+            "description": "Sort order to apply to the results",
+            "explode": false,
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "pattern": "^(id|-id|\\+\\+id|--id|name|-name|\\+\\+name|--name|description|-description|\\+\\+description|--description|scheduled_at|-scheduled_at|\\+\\+scheduled_at|--scheduled_at|published_at|-published_at|\\+\\+published_at|--published_at|rolled_back_at|-rolled_back_at|\\+\\+rolled_back_at|--rolled_back_at|failure_reason|-failure_reason|\\+\\+failure_reason|--failure_reason|failed_item_id|-failed_item_id|\\+\\+failed_item_id|--failed_item_id|state|-state|\\+\\+state|--state)(,(id|-id|\\+\\+id|--id|name|-name|\\+\\+name|--name|description|-description|\\+\\+description|--description|scheduled_at|-scheduled_at|\\+\\+scheduled_at|--scheduled_at|published_at|-published_at|\\+\\+published_at|--published_at|rolled_back_at|-rolled_back_at|\\+\\+rolled_back_at|--rolled_back_at|failure_reason|-failure_reason|\\+\\+failure_reason|--failure_reason|failed_item_id|-failed_item_id|\\+\\+failed_item_id|--failed_item_id|state|-state|\\+\\+state|--state))*$",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Paginates the response with the limit and offset or keyset pagination.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "example": {
+                "limit": 25
+              },
+              "properties": {
+                "after": {
+                  "type": "string"
+                },
+                "before": {
+                  "type": "string"
+                },
+                "count": {
+                  "default": false,
+                  "type": "boolean"
+                },
+                "limit": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "offset": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "style": "deepObject"
+          },
+          {
+            "description": "Relationship paths to include in the response",
+            "explode": false,
+            "in": "query",
+            "name": "include",
+            "required": false,
+            "schema": {
+              "pattern": "^(items)(,(items))*$",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Limits the response fields to only those listed for each type",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "additionalProperties": true,
+              "example": {
+                "release": "id,name,description,scheduled_at,published_at,rolled_back_at,failure_reason,failed_item_id,state"
+              },
+              "properties": {
+                "release": {
+                  "description": "Comma separated field names for release",
+                  "example": "id,name,description,scheduled_at,published_at,rolled_back_at,failure_reason,failed_item_id,state",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "style": "deepObject"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/vnd.api+json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "description": "An array of resource objects representing a release",
+                      "items": {
+                        "$ref": "#/components/schemas/release"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "included": {
+                      "items": {
+                        "oneOf": [
+                          {
+                            "$ref": "#/components/schemas/release_item"
+                          }
+                        ]
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "meta": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "$ref": "#/components/responses/errors"
+          }
+        },
+        "tags": [
+          "release"
+        ]
+      }
+    },
+    "/api/json/releases/{id}": {
+      "get": {
+        "callbacks": {},
+        "deprecated": false,
+        "description": "/releases/:id operation on release resource",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Relationship paths to include in the response",
+            "explode": false,
+            "in": "query",
+            "name": "include",
+            "required": false,
+            "schema": {
+              "pattern": "^(items)(,(items))*$",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Limits the response fields to only those listed for each type",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "additionalProperties": true,
+              "example": {
+                "release": "id,name,description,scheduled_at,published_at,rolled_back_at,failure_reason,failed_item_id,state"
+              },
+              "properties": {
+                "release": {
+                  "description": "Comma separated field names for release",
+                  "example": "id,name,description,scheduled_at,published_at,rolled_back_at,failure_reason,failed_item_id,state",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "style": "deepObject"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/vnd.api+json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/release"
+                    },
+                    "included": {
+                      "items": {
+                        "oneOf": [
+                          {
+                            "$ref": "#/components/schemas/release_item"
+                          }
+                        ]
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "meta": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "$ref": "#/components/responses/errors"
+          }
+        },
+        "tags": [
+          "release"
+        ]
+      }
+    },
     "/api/json/tag-groups": {
       "get": {
         "callbacks": {},
@@ -24001,7 +25771,7 @@
       "get": {
         "callbacks": {},
         "deprecated": false,
-        "description": "Returns a single referenced draft Page/Post (curated public fields) for a short-lived signed token. No account needed; the token is the credential.",
+        "description": "Returns a single referenced draft of any content type (curated public fields; a live document's unpublished working copy) for a short-lived signed token. No account needed; the token is the credential.",
         "operationId": "getPreview",
         "parameters": [
           {
