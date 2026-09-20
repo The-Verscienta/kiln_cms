@@ -9,10 +9,11 @@ defmodule KilnCMSWeb.GraphqlSchema do
   use AshGraphql,
     domains: Application.compile_env(:kiln_cms, :content_domains, [KilnCMS.CMS])
 
-  # Query cost is bounded at the transport: the `/gql` Absinthe.Plug forward sets
-  # `analyze_complexity: true` + `max_complexity:` (see the router) so a deeply
-  # nested or wide query can't force an unbounded resolve. Introspection is
-  # disabled in production by KilnCMSWeb.Plugs.DisableGraphqlIntrospection.
+  # Query cost is bounded by the document pipeline both transports build
+  # (`KilnCMSWeb.GraphqlLimits`: complexity, depth, token count), which also
+  # refuses introspection in production. Relationship lists are priced by
+  # `KilnCMSWeb.GraphqlLimits.list_complexity/3` (set on each resource's `graphql`
+  # block).
 
   import_types Absinthe.Plug.Types
 

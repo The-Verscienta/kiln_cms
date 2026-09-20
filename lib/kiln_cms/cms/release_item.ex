@@ -47,13 +47,32 @@ defmodule KilnCMS.CMS.ReleaseItem do
     domain: KilnCMS.CMS,
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer],
-    extensions: [AshAdmin.Resource]
+    extensions: [AshAdmin.Resource, AshJsonApi.Resource]
 
   @statuses [:pending, :applied, :skipped, :cancelled, :rolled_back]
 
   @doc "Every lifecycle status a release item can hold."
   @spec statuses() :: [atom()]
   def statuses, do: @statuses
+
+  # Read-only over JSON:API beside `KilnCMS.CMS.ContentRelease` (see its
+  # `json_api` block for why there are no write routes). Reachable as
+  # `/api/json/releases/:id?include=items` or directly, filtered by release:
+  # `/api/json/release-items?filter[release_id]=…`. The item names its content
+  # the way everything cross-type in Kiln does — `content_type` + `content_id` —
+  # so a client resolves the document through the type's own route, under that
+  # route's own read policy. `added_by_id` (a User id) is not `public?`.
+  json_api do
+    type "release_item"
+
+    includes [:release]
+
+    routes do
+      base "/release-items"
+      index :read
+      get :read
+    end
+  end
 
   admin do
     resource_group :content

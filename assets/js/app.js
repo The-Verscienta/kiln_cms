@@ -349,6 +349,22 @@ const Hooks = {
       })
     },
   },
+  // Copy preview link (content editor): the link is minted on click, so there
+  // is nothing to copy until the server replies. A refused write (the reply
+  // arrived after the click's user activation lapsed) is not an error — the
+  // editor renders the link on screen with its own Copy button.
+  CopyPreviewLink: {
+    mounted() {
+      this.el.addEventListener("click", () => {
+        this.pushEvent("share_preview", {}, (reply) => {
+          if (!reply || !reply.url || !navigator.clipboard) return
+          navigator.clipboard
+            .writeText(reply.url)
+            .then(() => this.pushEvent("copied", {}), () => {})
+        })
+      })
+    },
+  },
   // TipTap (and ProseMirror underneath) is admin-editor-only and heavy, so the
   // implementation is loaded on demand the first time a rich_text block mounts
   // — public pages never download it (audit P-M6). The dynamic import is what

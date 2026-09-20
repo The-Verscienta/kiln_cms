@@ -26,6 +26,9 @@ config :kiln_cms, :async_analytics, false
 config :kiln_cms, KilnCMS.CMS.ContentTypes, cache_registry?: false
 # Route outbound webhook HTTP through a Req.Test stub in tests.
 config :kiln_cms, KilnCMS.Webhooks, req_options: [plug: {Req.Test, KilnCMS.Webhooks}]
+# The optional CDN purge (`KILN_CDN_PURGE_URL`) is unset here, like a default
+# deployment; its tests set a URL and stub the receiver.
+config :kiln_cms, KilnCMS.CDN, req_options: [plug: {Req.Test, KilnCMS.CDN}]
 
 # oEmbed (#489) is OFF by default everywhere, including here — the tests that
 # need it turn it on themselves, so nothing accidentally makes an outbound
@@ -250,6 +253,12 @@ config :kiln_cms, KilnCMSWeb.Endpoint,
 
 # In test we don't send emails
 config :kiln_cms, KilnCMS.Mailer, adapter: Swoosh.Adapters.Test
+
+# A site's own relay (#1322) is not merged over the mailer config above, so it
+# needs its own stand-in: one that records the connection config it was handed,
+# which is what a site-relay test asserts on. The SSRF check stays ON — tests
+# use public-looking host names, which `SafeUrl`'s `resolve_dns: false` passes.
+config :kiln_cms, KilnCMS.Mail.SiteRelay, adapter: KilnCMS.SiteRelayTestAdapter
 
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
