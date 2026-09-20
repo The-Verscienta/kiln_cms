@@ -22,11 +22,18 @@ defmodule KilnCMSWeb.FederationLive do
   the org slug), and says so before it happens: the handle cannot be renamed
   once followers know it. Disabling keeps the identity, as the resource's
   moduledoc explains, so re-enabling restores the same handle and key.
+
+  **Re-keying** (#1487) replaces the signing keypair under the same handle and
+  sends followers an actor `Update`; the confirmation says plainly that some
+  servers may keep the old key. The status block shows whether the key is
+  readable at all — a key the vault cannot open (a rotated `SECRET_KEY_BASE`)
+  otherwise shows up nowhere but the delivery ledger.
   """
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Federation
   alias KilnCMS.Federation.Actor
+  alias KilnCMS.Federation.SiteFederation
 
   @deliveries_shown 50
 
@@ -72,6 +79,30 @@ defmodule KilnCMSWeb.FederationLive do
                :info,
                gettext(
                  "Federation disabled. The identity is kept, so re-enabling restores the same handle."
+               )
+             )
+             |> load()}
+
+          {:error, error} ->
+            {:noreply, put_flash(socket, :error, error_message(error))}
+        end
+    end
+  end
+
+  def handle_event("rekey", _params, socket) do
+    case socket.assigns.settings do
+      nil ->
+        {:noreply, socket}
+
+      settings ->
+        case Federation.rekey_site_federation(settings, actor_opts(socket)) do
+          {:ok, _} ->
+            {:noreply,
+             socket
+             |> put_flash(
+               :info,
+               gettext(
+                 "Re-keyed. Followers are being sent the new key; some servers may keep the old one until they re-fetch this actor."
                )
              )
              |> load()}
@@ -168,6 +199,7 @@ defmodule KilnCMSWeb.FederationLive do
     |> assign(:deployment_enabled?, Federation.enabled?())
     |> assign(:settings, settings)
     |> assign(:identity, identity(settings))
+    |> assign(:key_readable?, key_readable?(settings))
     |> assign(:followers, followers)
     |> assign(:deliverable_count, deliverable)
     |> assign(:deliveries, deliveries)
@@ -186,6 +218,11 @@ defmodule KilnCMSWeb.FederationLive do
        do: Actor.identity(settings)
 
   defp identity(_settings), do: nil
+
+  defp key_readable?(%{private_key_encrypted: encrypted} = settings) when is_binary(encrypted),
+    do: is_binary(SiteFederation.private_key_pem(settings))
+
+  defp key_readable?(_settings), do: nil
 
   defp actor_opts(socket),
     do: [actor: socket.assigns.current_user, tenant: socket.assigns.current_org]
@@ -272,6 +309,20 @@ defmodule KilnCMSWeb.FederationLive do
             <dd :if={@identity} id="handle" class="font-mono">{@identity.handle}</dd>
             <dt :if={@identity} class="text-base-content/70">{gettext("Actor")}</dt>
             <dd :if={@identity} class="break-all font-mono text-xs">{@identity.actor_id}</dd>
+            <dt :if={is_boolean(@key_readable?)} class="text-base-content/70">
+              {gettext("Signing key")}
+            </dt>
+            <dd :if={is_boolean(@key_readable?)} id="signing-key">
+              <%= if @key_readable? do %>
+                {gettext("readable")}
+              <% else %>
+                <span class="text-warning-ink">
+                  {gettext(
+                    "unreadable — deliveries fail. SECRET_KEY_BASE was probably rotated without re-encrypting; see the secrets rotation guide, or re-key."
+                  )}
+                </span>
+              <% end %>
+            </dd>
             <dt :if={@settings && @settings.last_delivered_at} class="text-base-content/70">
               {gettext("Last delivered")}
             </dt>
@@ -312,6 +363,21 @@ defmodule KilnCMSWeb.FederationLive do
                 else: gettext("Re-enable federation")}
             </.button>
           </form>
+
+          <button
+            :if={@identity}
+            type="button"
+            id="rekey"
+            phx-click="rekey"
+            data-confirm={
+              gettext(
+                "Re-key this actor? The handle stays the same, but its signing key is replaced. Followers are sent the new key, and some remote servers may keep the old one until they re-fetch the actor. Deliveries to those servers fail until they do."
+              )
+            }
+            class="btn btn-ghost btn-sm"
+          >
+            {gettext("Re-key")}
+          </button>
 
           <button
             :if={@settings && @settings.enabled}

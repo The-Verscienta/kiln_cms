@@ -1,8 +1,16 @@
 {
   "name": "@kiln-cms/client",
   "version": "0.2.0",
-  "description": "Official JS/TS client for the KilnCMS delivery APIs — typed JSON:API reads, search, fired artifacts, preview tokens, point-in-time reads, media uploads, and the kiln-types generator.",
+  "description": "Official JS/TS client for the KilnCMS APIs — typed JSON:API reads and writes, workflow transitions, GraphQL, search, fired artifacts, preview tokens, point-in-time reads, media uploads, and the kiln-types generator.",
   "license": "MIT",
+  "author": {
+    "name": "The-Verscienta",
+    "url": "https://github.com/The-Verscienta"
+  },
+  "homepage": "https://github.com/The-Verscienta/kiln_cms/tree/main/clients/js#readme",
+  "bugs": {
+    "url": "https://github.com/The-Verscienta/kiln_cms/issues"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,12 +20,14 @@
       "import": "./dist/index.js"
     }
   },
+  "sideEffects": false,
   "bin": {
     "kiln-types": "./dist/bin/kiln-types.js"
   },
   "files": [
     "dist",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "engines": {
@@ -28,12 +38,17 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "npm run lint && npm run build && npm test"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/The-Verscienta/kiln_cms.git",
     "directory": "clients/js"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "keywords": [
     "kiln",

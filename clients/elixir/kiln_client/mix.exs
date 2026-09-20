@@ -12,8 +12,9 @@ defmodule KilnClient.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       description:
-        "Official Elixir client for the KilnCMS delivery APIs — " <>
-          "published-by-default JSON:API reads, search, fired artifacts, and media uploads.",
+        "Official Elixir client for the KilnCMS APIs — published-by-default " <>
+          "JSON:API reads, writes and workflow transitions, search, fired " <>
+          "artifacts, media uploads, and GraphQL.",
       package: package(),
       docs: docs(),
       name: "KilnClient",
@@ -37,12 +38,25 @@ defmodule KilnClient.MixProject do
   defp package do
     [
       licenses: ["MIT"],
-      links: %{"GitHub" => @source_url},
-      files: ~w(lib mix.exs README.md LICENSE)
+      links: %{
+        "GitHub" => "#{@source_url}/tree/main/clients/elixir/kiln_client",
+        "Changelog" => "#{@source_url}/blob/main/clients/elixir/kiln_client/CHANGELOG.md",
+        "KilnCMS" => @source_url
+      },
+      files: ~w(lib mix.exs README.md CHANGELOG.md LICENSE)
     ]
   end
 
   defp docs do
-    [main: "KilnClient", extras: ["README.md"]]
+    [
+      main: "KilnClient",
+      extras: ["README.md", "CHANGELOG.md"],
+      # The client lives in a subdirectory of the Kiln monorepo and is tagged
+      # `kiln_client-vX.Y.Z` (see `.github/workflows/release-clients.yml`), so
+      # "view source" links must point at that tag *and* that subdirectory.
+      source_ref: "kiln_client-v#{@version}",
+      source_url_pattern:
+        "#{@source_url}/blob/kiln_client-v#{@version}/clients/elixir/kiln_client/%{path}#L%{line}"
+    ]
   end
 end

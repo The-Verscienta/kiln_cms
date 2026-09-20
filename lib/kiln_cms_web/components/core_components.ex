@@ -301,9 +301,49 @@ defmodule KilnCMSWeb.CoreComponents do
   end
 
   @doc """
+  The content list's per-row status mark, in words — the default (#1323).
+
+  Says the one thing the rest of the row does not: that the item's slug group
+  is still missing a variant in some configured locale. The workflow state is
+  the `<.state_badge>`, and a pending publish or unpublish is its own dated
+  line, so the only bit of `content_trigram/1` left to spell out is this one.
+  Renders nothing for a fully translated item (and on a single-locale site,
+  where every item is), so the mark is read rather than scanned past.
+
+  The opt-in alternative is `content_trigram/1`; which one a user sees is
+  `status_marks/1` of their account.
+
+  ## Examples
+
+      <.content_status_marks translated={false} />
+  """
+  attr :translated, :boolean, required: true
+
+  def content_status_marks(assigns) do
+    ~H"""
+    <span
+      :if={!@translated}
+      data-status-mark="untranslated"
+      class="inline-flex items-center gap-1 text-xs text-base-content/70"
+    >
+      <.icon name="hero-language" class="size-3.5 shrink-0" />
+      {gettext("Missing translations")}
+    </span>
+    """
+  end
+
+  @doc """
+  Which status marks a user has chosen for the content list (`User.status_marks`):
+  `:trigrams` only when they opted in. Anything else — no user, a struct from
+  before the column, a field policy's `%Ash.ForbiddenField{}` — gets `:words`.
+  """
+  def status_marks(%{status_marks: :trigrams}), do: :trigrams
+  def status_marks(_user), do: :words
+
+  @doc """
   Renders a bagua trigram: three stacked lines, each solid (yang) or broken
-  (yin), given bottom line first. Used for the per-item status glyph derived
-  from workflow bits (see `content_trigram/1`).
+  (yin), given bottom line first. Used for the opt-in per-item status glyph
+  derived from workflow bits (see `content_trigram/1`).
 
   ## Examples
 
@@ -337,6 +377,11 @@ defmodule KilnCMSWeb.CoreComponents do
   locale (middle), a pending scheduled transition (top); solid = yes. The
   `<.state_badge>` next to it spells the workflow state out; this is the
   at-a-glance composite, named in the tooltip.
+
+  Opt-in (`User.status_marks == :trigrams`, #1323): a glyph from the I-Ching is
+  a theme for people who already read it, so the default content list uses
+  `content_status_marks/1` instead. The accessible label still spells all three
+  bits out after the trigram's name.
 
   ## Examples
 

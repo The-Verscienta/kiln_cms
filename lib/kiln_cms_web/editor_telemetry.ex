@@ -2,7 +2,8 @@ defmodule KilnCMSWeb.EditorTelemetry do
   @moduledoc """
   `:telemetry` instrumentation for content-editor actions so the editor hot path
   (save / autosave / publish + the other workflow transitions) can be profiled
-  via LiveDashboard's Metrics page or scraped into Prometheus/Grafana.
+  via LiveDashboard's Metrics page in development, or scraped into
+  Prometheus/Grafana when the opt-in exporter is on (`KilnCMSWeb.Metrics`).
 
   All events share the `[:kiln_cms, :editor, …]` prefix:
 

@@ -103,7 +103,7 @@ describe("importMediaFromUrl", () => {
     expect(call.method).toBe("POST");
     expect(call.url.pathname).toBe("/api/media/import-url");
     expect(call.headers["content-type"]).toBe("application/json");
-    expect(JSON.parse(call.body as string)).toEqual({
+    expect(call.body).toEqual({
       url: "https://example.com/cat.png",
       filename: "cat.png",
       caption: "Imported",
@@ -127,7 +127,7 @@ describe("updateMedia", () => {
     expect(call.method).toBe("PATCH");
     expect(call.url.pathname).toBe("/api/json/media-items/m1");
     expect(call.headers["content-type"]).toBe("application/vnd.api+json");
-    expect(JSON.parse(call.body as string)).toEqual({
+    expect(call.body).toEqual({
       data: {
         type: "media_item",
         id: "m1",
@@ -165,7 +165,7 @@ describe("direct uploads", () => {
     const [begin, put, complete] = stub.calls;
 
     expect(begin!.url.pathname).toBe("/api/media/uploads");
-    expect(JSON.parse(begin!.body as string)).toEqual({ filename: "big.mp4", byte_size: 3 });
+    expect(begin!.body).toEqual({ filename: "big.mp4", byte_size: 3 });
 
     expect(put!.method).toBe("PUT");
     expect(put!.url.host).toBe("bucket.example.com");
@@ -173,7 +173,7 @@ describe("direct uploads", () => {
     expect(put!.body).toBe(file);
 
     expect(complete!.url.pathname).toBe("/api/media/uploads/complete");
-    expect(JSON.parse(complete!.body as string)).toEqual({ token: "tok", alt: "Big" });
+    expect(complete!.body).toEqual({ token: "tok", alt: "Big" });
 
     expect(item.alt).toBe("Big");
   });

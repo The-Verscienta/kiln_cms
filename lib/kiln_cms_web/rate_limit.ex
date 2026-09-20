@@ -165,11 +165,16 @@ defmodule KilnCMSWeb.RateLimit do
   `KilnCMSWeb.SocketEventBudget.key/1` for the socket event buckets (#1305).
   Whichever it is, one function spells it, so two charges for the same client
   land on the same key.
+
+  `cost` is how many of the bucket's requests this one counts as. It is 1 except
+  for a batched GraphQL body (`KilnCMSWeb.Plugs.GraphqlBatchLimit`), which pays
+  for each operation it carries.
   """
-  def check(bucket, key) when is_atom(bucket) and is_binary(key) do
+  def check(bucket, key, cost \\ 1)
+      when is_atom(bucket) and is_binary(key) and is_integer(cost) and cost > 0 do
     {limit, scale} = Map.fetch!(limits(), bucket)
 
-    case hit(bucket_key(bucket, key), scale, limit) do
+    case hit(bucket_key(bucket, key), scale, limit, cost) do
       {:allow, _count} -> :allow
       {:deny, retry_after} -> {:deny, retry_after}
     end

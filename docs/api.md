@@ -1,40 +1,82 @@
 # KilnCMS API documentation
 
-KilnCMS ships a **published, machine-readable OpenAPI 3 spec** for its headless
-JSON:API surface, plus an interactive **Swagger UI** explorer.
+KilnCMS describes its two schema-bearing APIs in machine-readable form: an
+**OpenAPI 3** document for the JSON:API surface (with an interactive **Swagger
+UI** explorer over it), and the **GraphQL schema** as SDL. Both come in two
+forms — committed to the repository for the stock build, and served by a
+running site for its own build.
 
-Both are served in development and test, and **off in production by default**
-since #567. Set `API_DOCS_ENABLED=true` to publish them from a production
-deployment. When they are off, both paths answer **404** — not 403, which would
-confirm the route exists and is merely closed.
+## Machine-readable specs
 
-The reason is the same one that already disables GraphQL introspection in
-production: since #330 the described surface includes the **write** routes, so
-the document is a complete machine-readable map of the mutation API. It grants
-nothing — every route it describes is still enforced by the Ash policies and
-the API key's access scope — but it removes the guesswork, and shipping it
-beside a disabled introspection endpoint was an inconsistency rather than a
-decision.
+### Committed: the stock build
 
-| Resource              | URL                            | Notes                                   |
-|-----------------------|--------------------------------|-----------------------------------------|
-| **OpenAPI 3 spec**    | `GET /api/json/open_api`       | JSON, machine-readable. Import into any OpenAPI tool. |
-| **Swagger UI**        | `GET /api/json/swaggerui`      | Interactive explorer over the spec.     |
-| **GraphQL playground**| `GET /gql/playground`          | **Dev-only** convenience UI.            |
+| File | What it describes |
+|------|-------------------|
+| [`docs/api/openapi.json`](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/api/openapi.json) | The JSON:API surface (`/api/json`), sign-in, fired artifacts and preview links, as OpenAPI 3.0. |
+| [`docs/api/schema.graphql`](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/api/schema.graphql) | The GraphQL schema behind `/gql` and `/ws/gql`, as SDL. |
 
-The first two follow `API_DOCS_ENABLED`; the playground is compile-gated to
-`dev_routes` and is never built into a production release.
+Point codegen at these without running anything:
+
+```bash
+npx openapi-typescript docs/api/openapi.json -o kiln-api.d.ts
+npx graphql-codegen --config codegen.ts   # schema: "docs/api/schema.graphql"
+```
+
+They are regenerated with `mix kiln.api.specs`, and CI fails when they fall
+behind the code (`mix kiln.api.specs --check`), so the copy on `main` matches
+the code on `main` — and the copy at a release tag matches that release. The
+OpenAPI document's server is a placeholder (`{origin}`, default
+`http://localhost:4000`); set your site's origin in your tool.
+
+They describe the **stock** build. A project that adds its own content domains
+(`config :kiln_cms, :content_domains`) grows both schemas; generate against
+that project's running site instead.
+
+### Served: a running site
+
+| Resource | URL | Who gets it |
+|----------|-----|-------------|
+| **OpenAPI 3 document** | `GET /api/json/open_api` | Anyone where `API_DOCS_ENABLED` is on; otherwise a request with an **API key**. |
+| **Swagger UI** | `GET /api/json/swaggerui` | Anyone where `API_DOCS_ENABLED` is on; otherwise no one. |
+| **GraphQL SDL** | `GET /api/graphql/schema.graphql` | Anyone where GraphQL introspection is on; otherwise a request with an **API key**. |
+| **GraphQL introspection** | `POST /gql` (`__schema`) | Anyone where `GRAPHQL_INTROSPECTION_ENABLED` is on; otherwise no one. |
+| **GraphQL playground** | `GET /gql/playground` | **Dev-only**; compile-gated to `dev_routes`, never built into a release. |
+
+The docs and introspection are on in development and test and **off in a
+production build** (#567). Closed, each path answers **404** — not 403, which
+would confirm the route exists and is merely closed.
+
+The reason is disclosure, not access: since #330 the described surface
+includes the **write** routes, so the documents are a complete map of the
+mutation API. They grant nothing — every route is still enforced by the Ash
+policies and the API key's access scope — but an anonymous stranger has no need
+of the map. An API key is different: only an admin can mint one, so its holder
+is an integration the site chose, and generating a client against the site's
+own schema is exactly what it needs. Any key works, `read` or `read_write`. A
+user JWT does not — open registration hands those to anyone.
+
+```bash
+# A production site's own schemas, with any API key
+curl -H "authorization: Bearer $KILN_API_KEY" https://cms.example.com/api/json/open_api
+curl -H "authorization: Bearer $KILN_API_KEY" https://cms.example.com/api/graphql/schema.graphql
+```
+
+`graphql-codegen` reads a schema URL ending in `.graphql` as SDL and sends the
+headers you configure, so the second URL works as its `schema` directly.
 
 Locally: <http://localhost:4000/api/json/swaggerui>.
 
-The spec is generated by [AshJsonApi](https://hexdocs.pm/ash_json_api) from the
-`KilnCMS.CMS` resources and enriched by `KilnCMSWeb.OpenApi` (title, version,
-auth/usage description, servers). It covers the core content types — **Page**,
-**Post**, **MediaItem** — including every collection, single-record, search and
-autocomplete route, their filter/sort/page parameters, and the bearer auth
-scheme. The hand-written routes AshJsonApi cannot derive are described there
-too: headless sign-in, the fired-artifact and preview reads, and the media
-upload API ([below](#uploading-media)).
+The OpenAPI document is generated by [AshJsonApi](https://hexdocs.pm/ash_json_api)
+from the content domains' resources and enriched by `KilnCMSWeb.OpenApi` (title,
+version, auth/usage description, servers, the API-key scheme, and the routes
+that live outside the JSON:API router). It covers **Page**, **Post**, admin-defined
+types through **Entry**, **MediaItem**, the taxonomy (**Tag**, **TagGroup**,
+**Category**), **Redirect** and **TypeDefinition** — every collection,
+single-record, search and autocomplete route, the write and workflow routes,
+their filter/sort/page parameters, and both auth schemes. The hand-written
+routes AshJsonApi cannot derive are described there too: headless sign-in, the
+fired-artifact and preview reads, and the media upload API
+([below](#uploading-media)).
 
 ## Headless surfaces at a glance
 
@@ -46,6 +88,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **JSON:API** | `/api/json` | Filterable reads of Page, Post and admin-defined types (Entry), media, taxonomy and redirects; per-type search and autocomplete; **writes** — create, update, workflow transitions, soft-delete — with a `read_write` API key. | [json-api.md](json-api.md) |
 | **GraphQL** | `POST /gql`, `/ws/gql` | Delivery reads, search, menus and point-in-time (`contentAsOf`); the same **writes** as mutations; subscriptions over the WebSocket. | [headless-graphql-api.md](headless-graphql-api.md) |
 | **Fired artifacts** | `GET /api/content/:type/:slug` | Pre-rendered output per surface: `json` (default), `json_ld`, `web`, and `llm` (raw `text/markdown`). `?as_of=` reads a document as it stood on a date; `GET /api/content/:type?as_of=` lists what was published then. | [`examples/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/examples/README.md), [point-in-time.md](point-in-time.md) |
+| **Version history** | `GET /api/content/:type/:id/revisions` | A document's revisions, one revision's snapshot, and restore. Editor-tier credential required. | [§ Version history](#version-history-revisions) |
 | **Hybrid search** | `GET /api/search?q=` | Keyword + semantic + title search across every type, fused and ranked; answers as an anonymous visitor whatever the credential. | [search-roadmap.md](search-roadmap.md) |
 | **Path resolution** | `GET /api/resolve?path=` | "What lives at this URL?" — content, a redirect to follow, or nothing — for a front end's catch-all route. | [json-api.md](json-api.md) (URLs, pathauto & redirects) |
 | **Menus** | `GET /api/menus`, `GET /api/menus/:key` | Resolved navigation trees with live URLs. | [navigation-menus.md](navigation-menus.md) |
@@ -276,6 +319,8 @@ A quick map:
 | Tag       | `GET /api/json/tags`        | `GET /api/json/tags/:id`        | `/tags/by-slug/:slug`                         |
 | TagGroup  | `GET /api/json/tag-groups`  | `GET /api/json/tag-groups/:id`  | `/tag-groups/by-slug/:slug`                   |
 | TypeDefinition | `GET /api/json/type-definitions` | `GET /api/json/type-definitions/:id` | `/type-definitions/by-name/:name` (editor+ key; read-only) |
+| ContentRelease | `GET /api/json/releases` | `GET /api/json/releases/:id` | `?include=items` (editor+ key; read-only) |
+| ReleaseItem | `GET /api/json/release-items` | `GET /api/json/release-items/:id` | `?filter[release_id]=` (editor+ key; read-only) |
 
 Taxonomy (Category/Tag/TagGroup) is world-readable and now mirrors the GraphQL
 taxonomy surface over JSON:API (#185) — list, fetch by id, or fetch by slug. A
@@ -460,6 +505,83 @@ Refusals use the [error envelope](#error-responses); branch on `code`:
 state — an upload is live at its public URL the moment it lands — and `/mcp`'s
 promise is that an LLM's work stays a draft until a human approves it. See
 [mcp.md](mcp.md).
+
+## Version history (revisions)
+
+A document's version history — the same history the editor's version panel
+shows — is readable, and restorable, over three hand-written routes. It is an
+**authenticated, editor-tier** surface: history carries every draft a document
+ever held, so there is no anonymous access at all.
+
+| Route | Answers |
+|-------|---------|
+| `GET /api/content/:type/:id/revisions` | The document's revisions, newest first — ids, actions, timestamps and the *names* of the fields each write changed |
+| `GET /api/content/:type/:id/revisions/:version_id` | One revision: its own `changes`, plus the full `snapshot` of the document at that revision |
+| `POST /api/content/:type/:id/revisions/:version_id/restore` | Revert the document's content to that revision, as the caller |
+
+`:type` is any content type's name — `page`, `post`, a project type, or an
+admin-defined (dynamic) type's machine name. `:id` is the document's **id**, not
+its slug: a slug is per-locale and can change; a document's history cannot.
+
+```bash
+curl -s "http://localhost:4000/api/content/post/$POST_ID/revisions?limit=10" \
+  -H "authorization: Bearer $KILN_API_KEY"
+```
+
+```jsonc
+{
+  "data": [
+    {
+      "id": "8c1f…",                 // the version id
+      "action": "update",            // the action that wrote it (update, autosave, publish, restore_version, …)
+      "action_type": "update",       // create | update | destroy
+      "inserted_at": "2026-09-19T09:14:03.118220Z",
+      "user_id": "5b2e…",            // the acting user's id — null for a system write
+      "changed_fields": ["seo_title", "title"]
+    }
+  ],
+  "meta": { "limit": 10, "next_cursor": "MjAyNi0wOS0xOVQwOTox…" }
+}
+```
+
+- **Values only on the single-revision read.** The list names the editorial
+  fields each write touched (bookkeeping such as the derived `search_text`
+  column is left out); `GET …/revisions/:version_id` adds the version's own raw
+  `changes` and the `snapshot` — every tracked field at that revision. History
+  is stored as *changes only*, so the snapshot is folded from every version up
+  to that one: the same fold a restore writes back and the editor's compare view
+  diffs. Values are in their stored JSON shape (the block tree as typed blocks).
+- **The acting user is an id.** User records are not exposed over the API (PII,
+  #183); `user_id` is `null` when the write had no actor.
+- **Pagination** is newest first: `?limit=` (1–100, default 20) and an opaque
+  `?cursor=` — pass back the previous page's `meta.next_cursor`, which is `null`
+  on the last page. The cursor is a keyset, so autosave coalescing pruning rows
+  between two reads never shifts or repeats a page.
+- **Restore** runs the type's own `:restore_version` action as the caller. It
+  moves content fields only, never workflow state — restoring a published
+  document's old text does not unpublish it — and is itself recorded as a new
+  revision, which the response carries:
+  `{"data": {"id", "type", "state", "restored_version_id", "revision": {…}}}`.
+  A restore that cannot land (a category or media item deleted since that
+  version) answers `422` `restore_failed`, naming the field.
+
+**Who gets what.** Authorization is the version resources' own policies, with
+your credential as the actor and the request host's org as the tenant:
+
+| Caller | List / read | Restore |
+|--------|-------------|---------|
+| No credential | `401` | `401` |
+| Admin; editor whose read scope covers the type | ✅ | ✅ with a JWT or a **`:read_write`** key |
+| Same, with a **read-only** key | ✅ | `403` — refused by the content policies |
+| Viewer; editor whose `readable_types` leave the type out | `404` | `404` |
+
+Anything the caller may not read history for is a `404`, never a `403`, whether
+or not the document exists — a document in another org, a document of a
+different type than `:type` names (dynamic types included), a version of a
+different document, a trashed document. A `403` is reserved for a caller who
+*can* read the history but may not write the document. Malformed ids and
+cursors are `400`. Every response, refusals included, is `Cache-Control:
+private, no-store`.
 
 ## Password-protected content
 
@@ -767,12 +889,58 @@ verification, and the SSRF/egress protections applied to endpoint URLs.
 
 ## Preview tokens
 
-`GET /preview/:token` returns a single referenced **draft** Page/Post as JSON
-(curated public fields only). The token is a stateless `Phoenix.Token` with a
-**15-minute** expiry — share a draft without granting a standing credential. It
-binds one record *and its site*: the read it authorizes is scoped to the org
-the token was minted under, and a token presented on another site's host is
-refused, so a draft is only ever served by the site that owns it.
+`GET /preview/:token` returns a single referenced **draft** of any content type
+(pages, posts, project types and admin-defined types alike) as JSON (curated
+public fields only). For a live document with unpublished edits it is the
+**working copy** — what the editor sees — not the published row. A browser
+opening the same URL is redirected to `/preview/:token/live`, a shared view
+anyone holding the link can watch without signing in.
+
+The token is a stateless `Phoenix.Token` with a **15-minute** expiry — share a
+draft without granting a standing credential. It is **read-only** and
+**per-document**: it binds one record *and its site*. The read it authorizes is
+scoped to the org the token was minted under, and a token presented on another
+site's host is refused, so a draft is only ever served by the site that owns it.
+
+### Minting one
+
+Editors mint from the content editor's **Copy preview link** button. A headless
+front end (a framework's *draft mode*, a preview deployment) mints over the API:
+
+```
+POST /api/content/:type/:id/preview-token
+Authorization: Bearer kiln_…            # an editor's API key, or a bearer JWT
+```
+
+```json
+201 Created
+{
+  "token": "SFMyNTY…",
+  "url": "https://acme.example.com/preview/SFMyNTY…",
+  "type": "post",
+  "id": "0b6c…",
+  "expires_at": "2026-09-19T14:15:00Z",
+  "expires_in": 900
+}
+```
+
+`url` is on the host of the site the document belongs to (the only host that
+will honour it). Keep your API key on the server and hand the browser the
+**token** — redeem it with `GET /preview/:token` — so a leaked value exposes one
+draft for a few minutes rather than every draft indefinitely. Mint a fresh one
+per preview render rather than caching it.
+
+Who may mint: anyone who sees this document's **drafts** as an editor — an
+admin, or an editor whose read scope covers the type (`readable_types`, see
+[granular-rbac.md](granular-rbac.md)). A `:read`-scoped API key is enough: the
+token grants a read, never a write. The responses:
+
+| Status | When |
+|--------|------|
+| `201` | Minted. `Cache-Control: private, no-store`. |
+| `401` | No credential (or an invalid one). |
+| `403` | The caller can read the document, but not as an editor — e.g. a viewer on a published page, whose pending edits they may not see. |
+| `404` | Unknown type, no such record, or one the caller cannot read at all. |
 
 ## Cross-origin (CORS)
 
@@ -863,6 +1031,116 @@ submission is deliberately CSRF-free. See [forms.md](forms.md#embedding-on-anoth
 Inactive or unknown slugs render a framable "Form not found" page (HTTP 404)
 rather than a blank iframe.
 
+## Caching and CDNs
+
+Every headless read surface tells a shared cache what it may keep, so a CDN in
+front of Kiln can answer delivery traffic instead of the app.
+
+| Surface | Anonymous `200` | With a credential |
+|---------|-----------------|-------------------|
+| `GET /api/content/:type/:slug` (fired artifacts) | `public, max-age=300`, `ETag`, `Last-Modified` | same (the artifact is published-only); a passphrase-unlocked document is `private, no-store` |
+| `GET /api/json/*` (JSON:API) | `public, max-age=60, stale-while-revalidate=60`, `ETag` | `private, no-store` |
+| `GET /gql?query=…` (GraphQL queries over `GET`) | `public, max-age=60, stale-while-revalidate=60`, `ETag` | `private, no-store` |
+| `GET /api/search` | `public, max-age=60, stale-while-revalidate=60`, `ETag` | `private, no-store` |
+| `POST /gql`, any JSON:API write | never cached | never cached |
+
+**Anonymous means no credential at all**: no `Authorization` header (a JWT or
+`kiln_…` API key — even an invalid one), no `x-api-key`, no unlock grant
+(`x-kiln-unlock` or `?unlock=`) and no `Cookie`. Anything else gets
+`private, no-store`, because a bearer token with editor rights sees **drafts on
+the same URLs** — its response must never be stored where the next anonymous
+caller could be handed it.
+
+What the cached responses carry:
+
+- **An `ETag` that is a digest of the body** (and its content type). It
+  changes whenever anything that shapes the response changes — there is no list
+  of inputs to keep in sync with the body. Send it back as `If-None-Match` and a
+  still-current response is a bodyless **`304 Not Modified`**. It is a *weak*
+  validator (`W/"…"`) so the server can still gzip the response; conditional
+  `GET`s compare weakly anyway. A credentialed request never gets a `304` from
+  this: it has no `ETag` to match.
+- **`Vary: Accept, Authorization, Origin`** on every response of these
+  surfaces, cached or not. `Origin` because the CORS `Access-Control-Allow-Origin`
+  header is only sent to a request with an allowed `Origin` — a copy cached from
+  a server-side fetch must not be handed to a browser. The locale is always part
+  of the URL (`?locale=`, a GraphQL argument, a JSON:API filter or a `/fr/`
+  prefix), so there is no `Accept-Language` or `Cookie` variation to key on.
+- **`Surrogate-Key: kiln kiln-org-<site id>`** and the same keys as
+  **`Cache-Tag`** (comma-separated), also on public fired-artifact responses —
+  see [Purging on publish](#purging-on-publish).
+
+Only a `200` is cached, and only for a `GET` with no request body. A GraphQL
+`GET` is cached only when the document is in the URL (`?query=`), and not when
+it answers `200` with an `errors` member (a failed resolver, a validation
+error), so a transient failure is not pinned for a minute. Mutations are never
+cached: Absinthe refuses a mutation over `GET` (`405`), and a `POST` is never
+public.
+
+Other `/api` routes — menus, `/resolve`, `/locales`, `/schema`, related
+content, `/ask` — keep their own headers, set per controller.
+
+### Configuring your CDN
+
+- **Bypass the cache when the request has an `Authorization` header** (and
+  ideally `x-kiln-unlock`), unless your CDN honours `Vary: Authorization`.
+  Fastly, Varnish and most standards-following caches do; some CDNs ignore
+  `Vary` apart from `Accept-Encoding` and would otherwise hand the anonymous
+  response to an editor's token or, worse, store nothing but key on the URL.
+  RFC 9111 forbids a shared cache from *storing* a response to an
+  `Authorization` request that is not marked `public`, which Kiln never does for
+  those.
+- **Key on the full URL including the query string.** Every input to these
+  bodies that is not a credential is in it.
+- **Don't cache `POST /gql`.** Use `GET` for queries you want cached; the query
+  string carries the document and variables.
+- **Search analytics count only what reaches Kiln.** `/api/search` records the
+  query for the search report at `/editor/analytics` when it runs, so a CDN hit is not
+  counted.
+
+`KILN_API_CACHE=false` keeps anonymous responses at the `private` default;
+`KILN_API_CACHE_MAX_AGE` and `KILN_API_CACHE_SWR` tune the two lifetimes. See
+[environment-variables.md](environment-variables.md#api-caching-and-cdn-purge).
+
+### Purging on publish
+
+Without a purge, a publish reaches readers when the cached copy expires —
+within `KILN_API_CACHE_MAX_AGE` (60 s by default) for JSON:API, GraphQL and
+search, 300 s for fired artifacts. Set **`KILN_CDN_PURGE_URL`** and every
+`<type>.published`, `<type>.unpublished`, `<type>.updated` and
+`release.published` in a site sends one purge of that site's key. Those are the
+content webhook events; a change that emits none — renaming a category or tag,
+editing a type definition or custom field — is not purged and ages out on the
+`max-age`:
+
+```http
+POST <KILN_CDN_PURGE_URL>
+content-type: application/json
+surrogate-key: kiln-org-<site id>
+authorization: Bearer <KILN_CDN_PURGE_TOKEN>
+
+{"tags": ["kiln-org-<site id>"]}
+```
+
+The body is Cloudflare's purge-by-tag request and the header is Fastly's
+purge-by-key request, so either can be the URL directly:
+
+- **Cloudflare:** `KILN_CDN_PURGE_URL=https://api.cloudflare.com/client/v4/zones/<zone>/purge_cache`,
+  `KILN_CDN_PURGE_TOKEN=<API token with Cache Purge>`.
+- **Fastly:** `KILN_CDN_PURGE_URL=https://api.fastly.com/service/<service>/purge`,
+  `KILN_CDN_PURGE_TOKEN=<API token>`, `KILN_CDN_PURGE_TOKEN_HEADER=fastly-key`.
+- **Anything else:** point it at a small relay that translates the request.
+
+The purge covers the whole site rather than the one document: a list or query
+response can contain any number of documents and nothing records which, so the
+site key is the one invalidation that is right for every cached response.
+Purges are coalesced (a release publishing fifty documents sends one, after it
+commits), retried
+with backoff on failure, and sent through `KilnCMS.SafeFetch`, so in production
+the URL must be `https://` and resolve to a public address. A purge that never
+lands leaves the cached copies to expire on their own. The `kiln` key on every
+response exists for a deployment-wide purge by hand.
+
 ## Rate limits
 
 API and auth endpoints are rate-limited per client IP (Hammer fixed window).
@@ -893,8 +1171,10 @@ string (`"422"`, never `"unprocessable_entity"`) — safe to `parseInt` — and
 
 You get it from the headless sign-in, fired-artifact (`not_found` /
 `artifact_compiling`), related-content, provenance, form-schema and
-form-submission, visual-editing, media-upload ([§ Upload errors](#upload-errors))
-and preview-token (`invalid_preview`) endpoints — **and from the 429 when you exceed a rate-limit bucket**
+form-submission, visual-editing, media-upload ([§ Upload errors](#upload-errors)),
+version-history (`unauthenticated`, `invalid_id`, `invalid_cursor`,
+`forbidden`, `restore_failed`) and preview-token (`invalid_preview`)
+endpoints — **and from the 429 when you exceed a rate-limit bucket**
 (`too_many_requests`, alongside `retry-after`). All of them render through one
 implementation, `KilnCMSWeb.ApiError.send/4`, and a test fails the build if a
 new endpoint writes its own (#190, #744).
