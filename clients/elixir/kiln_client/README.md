@@ -104,6 +104,27 @@ tags = KilnClient.resolve(post, "tags", included)
 Results are flattened JSON:API resources: the `attributes` map (string keys)
 plus `"id"`/`"type"`, with relationships reduced to `{type, id}` ref maps.
 
+### Editorial reads (editor-or-above key)
+
+For tools *about* the content — migrations, audit exports, launch dashboards —
+never a delivery site's key. Anonymous calls are a 401, a viewer's key a 404.
+
+```elixir
+# A document's version history, newest first (by id, not slug)
+{:ok, %{"data" => revisions, "meta" => %{"next_cursor" => cursor}}} =
+  KilnClient.list_revisions("post", post_id, limit: 50)
+
+# One revision's changes + the full document as it stood then
+{:ok, %{"snapshot" => snapshot}} = KilnClient.revision("post", post_id, version_id)
+
+# Revert the content to it (a :read_write key; a read-only key gets a 403)
+{:ok, %{"revision" => new_revision}} = KilnClient.restore_revision("post", post_id, version_id)
+
+# Content releases (read-only) and what each will publish or take down
+{:ok, %{items: releases, included: included}} =
+  KilnClient.list_releases(filter: %{state: "scheduled"}, include: ["items"])
+```
+
 ## Writing content
 
 `create/3`, `update/4`, `transition/4` (with `submit_for_review/3`,
@@ -199,7 +220,6 @@ Every error also carries `:status`, `:code` (the first error's) and `:errors`
 `{:error, {:http_status, status, body}}` (or a transport exception), exactly as
 before. `KilnClient.Error.normalize/1` converts one into the struct when you
 want a single error handler for both.
-
 ## Testing your integration
 
 Every request honors `req_options`, so [`Req.Test`](https://hexdocs.pm/req/Req.Test.html)

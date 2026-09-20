@@ -101,6 +101,12 @@ Every summary line below that was shortened links to its own entry there.
 - **`KILN_MEDIA_ROOT`: a stable directory for local media.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#kilnmediaroot-a-stable-directory-for-local-media))
 
+- **Version history over the API.**
+  ([#1574](https://github.com/The-Verscienta/kiln_cms/pull/1574) · [long form](docs/changelog/unreleased.md#version-history-over-the-api))
+
+- **Content releases are readable over JSON:API.**
+  ([#500](https://github.com/The-Verscienta/kiln_cms/issues/500) · [long form](docs/changelog/unreleased.md#content-releases-are-readable-over-jsonapi))
+
 - **Share a draft: *Copy preview link* in the editor, and a preview-token API.**
   ([long form](docs/changelog/unreleased.md#share-a-draft-copy-preview-link-in-the-editor-and-a-preview-token-api))
 
@@ -116,7 +122,6 @@ Every summary line below that was shortened links to its own entry there.
 - **The content list says an item's status in words; the trigram glyph is
   opt-in.**
   ([#1323](https://github.com/The-Verscienta/kiln_cms/issues/1323) · [long form](docs/changelog/unreleased.md#the-content-list-says-an-items-status-in-words-the-trigram-glyph-is-opt-in))
-
 ### Changed
 
 - **The dependency audit also reads Hex's own advisory feed.**

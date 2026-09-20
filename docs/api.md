@@ -85,6 +85,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **JSON:API** | `/api/json` | Filterable reads of Page, Post and admin-defined types (Entry), media, taxonomy and redirects; per-type search and autocomplete; **writes** — create, update, workflow transitions, soft-delete — with a `read_write` API key. | [json-api.md](json-api.md) |
 | **GraphQL** | `POST /gql`, `/ws/gql` | Delivery reads, search, menus and point-in-time (`contentAsOf`); the same **writes** as mutations; subscriptions over the WebSocket. | [headless-graphql-api.md](headless-graphql-api.md) |
 | **Fired artifacts** | `GET /api/content/:type/:slug` | Pre-rendered output per surface: `json` (default), `json_ld`, `web`, and `llm` (raw `text/markdown`). `?as_of=` reads a document as it stood on a date; `GET /api/content/:type?as_of=` lists what was published then. | [`examples/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/examples/README.md), [point-in-time.md](point-in-time.md) |
+| **Version history** | `GET /api/content/:type/:id/revisions` | A document's revisions, one revision's snapshot, and restore. Editor-tier credential required. | [§ Version history](#version-history-revisions) |
 | **Hybrid search** | `GET /api/search?q=` | Keyword + semantic + title search across every type, fused and ranked; answers as an anonymous visitor whatever the credential. | [search-roadmap.md](search-roadmap.md) |
 | **Path resolution** | `GET /api/resolve?path=` | "What lives at this URL?" — content, a redirect to follow, or nothing — for a front end's catch-all route. | [json-api.md](json-api.md) (URLs, pathauto & redirects) |
 | **Menus** | `GET /api/menus`, `GET /api/menus/:key` | Resolved navigation trees with live URLs. | [navigation-menus.md](navigation-menus.md) |
@@ -314,6 +315,8 @@ A quick map:
 | Tag       | `GET /api/json/tags`        | `GET /api/json/tags/:id`        | `/tags/by-slug/:slug`                         |
 | TagGroup  | `GET /api/json/tag-groups`  | `GET /api/json/tag-groups/:id`  | `/tag-groups/by-slug/:slug`                   |
 | TypeDefinition | `GET /api/json/type-definitions` | `GET /api/json/type-definitions/:id` | `/type-definitions/by-name/:name` (editor+ key; read-only) |
+| ContentRelease | `GET /api/json/releases` | `GET /api/json/releases/:id` | `?include=items` (editor+ key; read-only) |
+| ReleaseItem | `GET /api/json/release-items` | `GET /api/json/release-items/:id` | `?filter[release_id]=` (editor+ key; read-only) |
 
 Taxonomy (Category/Tag/TagGroup) is world-readable and now mirrors the GraphQL
 taxonomy surface over JSON:API (#185) — list, fetch by id, or fetch by slug. A
@@ -339,6 +342,83 @@ curl -s 'http://localhost:4000/api/json/posts?filter[state]=draft' \
   -H 'accept: application/vnd.api+json' \
   -H 'authorization: Bearer <token>'
 ```
+
+## Version history (revisions)
+
+A document's version history — the same history the editor's version panel
+shows — is readable, and restorable, over three hand-written routes. It is an
+**authenticated, editor-tier** surface: history carries every draft a document
+ever held, so there is no anonymous access at all.
+
+| Route | Answers |
+|-------|---------|
+| `GET /api/content/:type/:id/revisions` | The document's revisions, newest first — ids, actions, timestamps and the *names* of the fields each write changed |
+| `GET /api/content/:type/:id/revisions/:version_id` | One revision: its own `changes`, plus the full `snapshot` of the document at that revision |
+| `POST /api/content/:type/:id/revisions/:version_id/restore` | Revert the document's content to that revision, as the caller |
+
+`:type` is any content type's name — `page`, `post`, a project type, or an
+admin-defined (dynamic) type's machine name. `:id` is the document's **id**, not
+its slug: a slug is per-locale and can change; a document's history cannot.
+
+```bash
+curl -s "http://localhost:4000/api/content/post/$POST_ID/revisions?limit=10" \
+  -H "authorization: Bearer $KILN_API_KEY"
+```
+
+```jsonc
+{
+  "data": [
+    {
+      "id": "8c1f…",                 // the version id
+      "action": "update",            // the action that wrote it (update, autosave, publish, restore_version, …)
+      "action_type": "update",       // create | update | destroy
+      "inserted_at": "2026-09-19T09:14:03.118220Z",
+      "user_id": "5b2e…",            // the acting user's id — null for a system write
+      "changed_fields": ["seo_title", "title"]
+    }
+  ],
+  "meta": { "limit": 10, "next_cursor": "MjAyNi0wOS0xOVQwOTox…" }
+}
+```
+
+- **Values only on the single-revision read.** The list names the editorial
+  fields each write touched (bookkeeping such as the derived `search_text`
+  column is left out); `GET …/revisions/:version_id` adds the version's own raw
+  `changes` and the `snapshot` — every tracked field at that revision. History
+  is stored as *changes only*, so the snapshot is folded from every version up
+  to that one: the same fold a restore writes back and the editor's compare view
+  diffs. Values are in their stored JSON shape (the block tree as typed blocks).
+- **The acting user is an id.** User records are not exposed over the API (PII,
+  #183); `user_id` is `null` when the write had no actor.
+- **Pagination** is newest first: `?limit=` (1–100, default 20) and an opaque
+  `?cursor=` — pass back the previous page's `meta.next_cursor`, which is `null`
+  on the last page. The cursor is a keyset, so autosave coalescing pruning rows
+  between two reads never shifts or repeats a page.
+- **Restore** runs the type's own `:restore_version` action as the caller. It
+  moves content fields only, never workflow state — restoring a published
+  document's old text does not unpublish it — and is itself recorded as a new
+  revision, which the response carries:
+  `{"data": {"id", "type", "state", "restored_version_id", "revision": {…}}}`.
+  A restore that cannot land (a category or media item deleted since that
+  version) answers `422` `restore_failed`, naming the field.
+
+**Who gets what.** Authorization is the version resources' own policies, with
+your credential as the actor and the request host's org as the tenant:
+
+| Caller | List / read | Restore |
+|--------|-------------|---------|
+| No credential | `401` | `401` |
+| Admin; editor whose read scope covers the type | ✅ | ✅ with a JWT or a **`:read_write`** key |
+| Same, with a **read-only** key | ✅ | `403` — refused by the content policies |
+| Viewer; editor whose `readable_types` leave the type out | `404` | `404` |
+
+Anything the caller may not read history for is a `404`, never a `403`, whether
+or not the document exists — a document in another org, a document of a
+different type than `:type` names (dynamic types included), a version of a
+different document, a trashed document. A `403` is reserved for a caller who
+*can* read the history but may not write the document. Malformed ids and
+cursors are `400`. Every response, refusals included, is `Cache-Control:
+private, no-store`.
 
 ## Password-protected content
 
@@ -927,8 +1007,9 @@ string (`"422"`, never `"unprocessable_entity"`) — safe to `parseInt` — and
 
 You get it from the headless sign-in, fired-artifact (`not_found` /
 `artifact_compiling`), related-content, provenance, form-schema and
-form-submission, visual-editing and preview-token (`invalid_preview`)
-endpoints — **and from the 429 when you exceed a rate-limit bucket**
+form-submission, visual-editing, version-history (`unauthenticated`,
+`invalid_id`, `invalid_cursor`, `forbidden`, `restore_failed`) and
+preview-token (`invalid_preview`) endpoints — **and from the 429 when you exceed a rate-limit bucket**
 (`too_many_requests`, alongside `retry-after`). All of them render through one
 implementation, `KilnCMSWeb.ApiError.send/4`, and a test fails the build if a
 new endpoint writes its own (#190, #744).

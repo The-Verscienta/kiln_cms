@@ -230,6 +230,40 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
   write to. Ignored under S3.
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529))
 
+<a id="version-history-over-the-api"></a>
+
+- **Version history over the API.** `GET /api/content/:type/:id/revisions`
+  lists a document's revisions newest first (version id, action, timestamp,
+  the acting user's id, and the *names* of the editorial fields each write
+  changed), keyset-paginated with `?limit=` and an opaque `?cursor=`.
+  `GET …/revisions/:version_id` adds that version's raw `changes` and the full
+  `snapshot` of the document at it — folded by `KilnCMS.CMS.VersionSnapshot`,
+  the same fold restore and the compare view use. `POST
+  …/revisions/:version_id/restore` runs the type's `:restore_version` as the
+  caller. An authenticated, editor-tier surface: authorized by the version
+  resources' own policies with the real actor and the host's org — no
+  credential is a `401`; a viewer, an out-of-scope restricted editor, another
+  org's document or version, or another dynamic type's document is a `404`; a
+  read-only API key's restore is refused `403` by the content policies. Every
+  response is `Cache-Control: private, no-store`. The JS and Elixir clients
+  gain `listRevisions`/`list_revisions`, `revision` and
+  `restoreRevision`/`restore_revision`. See docs/api.md → "Version history
+  (revisions)".
+  ([#1574](https://github.com/The-Verscienta/kiln_cms/pull/1574))
+
+<a id="content-releases-are-readable-over-jsonapi"></a>
+
+- **Content releases are readable over JSON:API.** `GET /api/json/releases`
+  (`?include=items`, `filter[state]=`) and `GET /api/json/release-items`
+  (`filter[release_id]=`) expose releases (#500) read-only to an editor-tier
+  credential of the request's org — the console's own `:read` and policy, so a
+  viewer or anonymous caller gets an empty list. There are no write routes:
+  shipping a release publishes as its triggering admin, and that stays in the
+  console. Creator/trigger user ids are not exposed. The JS and Elixir clients
+  gain `releases`/`list_releases`, `release` and
+  `releaseItems`/`list_release_items`. See docs/json-api.md → "Content
+  releases (read-only)".
+
 <a id="share-a-draft-copy-preview-link-in-the-editor-and-a-preview-token-api"></a>
 
 - **Share a draft: *Copy preview link* in the editor, and a preview-token API.**
@@ -305,7 +339,6 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
   ones included, to words). `docs/design-language.md` extends its "no internal
   metaphors" rule to pictures.
   ([#1323](https://github.com/The-Verscienta/kiln_cms/issues/1323))
-
 ## Changed
 
 <a id="the-dependency-audit-also-reads-hexs-own-advisory-feed"></a>
