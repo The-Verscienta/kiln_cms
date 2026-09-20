@@ -1030,7 +1030,7 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     actor as `/ws/collab` frames are: documents are not a per-keystroke
     stream, the per-address size `/gql` already has fits them, and an
     anonymous socket, where the gap was, has no actor. A subscription's pushes
-    are not charged. They re-run the phases `Absinthe.Phase.Init` recorded when
+    are not charged. They re-run the phases Absinthe.Phase.Init recorded when
     the client subscribed, and the budget runs before Init. Over budget, the
     document is answered with a GraphQL error (`too_many_requests`, with
     `retry_after` in seconds) before it is parsed, and the connection and its
