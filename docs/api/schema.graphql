@@ -2885,11 +2885,16 @@ type RootQueryType {
   auto GraphQL surface: they carry references rather than URLs, and they carry
   exactly what those rules exist to withhold.
 
-  `locale` defaults to the site's default locale. A menu that has no variant
-  in the requested locale returns `null` rather than falling back — serving
-  English navigation on a French page is a worse answer than serving none.
+  `locale` defaults to the site's default locale; a locale the site does not
+  run is an error, not the default menu. A menu with no variant in the
+  requested locale follows the site's *configured* fallback chain only — never
+  the implicit hop to the default locale, because English navigation on a
+  French page is a worse answer than none unless the site said otherwise — and
+  otherwise returns `null`. `fallback: false` and `fallbackLocale` narrow the
+  chain as on every delivery surface. The result's `locale` is the variant
+  served.
   """
-  menu(key: String!, locale: String): Menu
+  menu(key: String!, locale: String, fallback: Boolean, fallbackLocale: String): Menu
 
   """
   The collection as of a date (#338): every document of `type` that was
@@ -2899,7 +2904,7 @@ type RootQueryType {
   """
   contentAsOf(type: String!, asOf: DateTime!, limit: Int): [PointInTimeEntry!]
 
-  pageBySlug(slug: String!, locale: String!): Page
+  pageBySlug(slug: String!, locale: String!, fallback: Boolean, fallbackLocale: String): Page
 
   pageTranslations(
     "How to sort the records in the response"
@@ -3037,7 +3042,7 @@ type RootQueryType {
     locale: String
   ): [Page!]!
 
-  postBySlug(slug: String!, locale: String!): Post
+  postBySlug(slug: String!, locale: String!, fallback: Boolean, fallbackLocale: String): Post
 
   postTranslations(
     "How to sort the records in the response"
@@ -3175,7 +3180,7 @@ type RootQueryType {
     locale: String
   ): [Post!]!
 
-  entryBySlug(slug: String!, locale: String!, typeDefinitionId: ID!): Entry
+  entryBySlug(slug: String!, locale: String!, typeDefinitionId: ID!, fallback: Boolean, fallbackLocale: String): Entry
 
   entryTranslations(
     "How to sort the records in the response"
