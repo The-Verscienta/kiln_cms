@@ -562,6 +562,28 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
   ledger) rather than sending it unsigned, and the console says so on the
   endpoint's row.
 
+<a id="mint-1101-closes-a-response-smuggling-advisory-in-its-http1-chunked-parser-eef"></a>
+
+- **`mint` 1.10.1 closes a response-smuggling advisory in its HTTP/1 chunked
+  parser (EEF-CVE-2026-82672, MEDIUM).** Mint's HTTP/1 chunked-transfer decoder
+  treated everything after the chunk-size digits as a chunk extension without
+  validating it, so a chunk-size line of `5ZZZZZ` or `5 9` was accepted as a
+  5-byte chunk where RFC 9112 permits only an optional `;`-introduced
+  extension. A malicious HTTP/1 origin can use that difference to desynchronize
+  Mint from a stricter intermediary on a pooled connection and poison the
+  response queue for later requests that share it. Kiln reaches Mint through
+  Req and Finch, which carry every outbound HTTP path in the app — webhook
+  delivery, ActivityPub federation, media URL import, external link checking,
+  S3, Meilisearch, Stripe, Sentry, and Swoosh's `ApiClient.Req` in prod — and
+  webhooks, federation and URL import all aim at hosts an operator or an editor
+  supplies, so the hostile-origin half of the precondition is reachable rather
+  than theoretical. `mint` 1.10.1, published the same day as the advisory, is
+  the fix OSV names for it. `mint` is a transitive dependency, so this is a lockfile bump alone: every constraint on
+  it in the tree (`~> 1.0`, `~> 1.6`, `~> 1.8`) already admits 1.10.1, and no
+  Kiln code, configuration or API changed. It is the second advisory against
+  this package in two days — the 0.9.0 sweep had moved `mint` *to* 1.10.0 to
+  clear a connection-pinning and memory-exhaustion DoS.
+
 <a id="every-advisory-published-against-the-090-dependency-set-is-fixed-including-six"></a>
 
 - **Every advisory published against the 0.9.0 dependency set is fixed, including six CRITICAL in `ash_authentication`.** The lock behind v0.9.0 carried
