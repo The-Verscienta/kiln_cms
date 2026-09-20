@@ -185,9 +185,9 @@ Every summary line below that was shortened links to its own entry there.
   including six CRITICAL in `ash_authentication`.**
   ([long form](docs/changelog/unreleased.md#every-advisory-published-against-the-090-dependency-set-is-fixed-including-six))
 
-- **`mint` is bumped to 1.10.1, closing an HTTP/1 response-smuggling advisory
-  published hours after the sweep above landed.**
-  ([EEF-CVE-2026-82672](https://osv.dev/vulnerability/EEF-CVE-2026-82672))
+- **`mint` 1.10.1 closes a response-smuggling advisory in its HTTP/1 chunked
+  parser (EEF-CVE-2026-82672, MEDIUM).**
+  ([#1586](https://github.com/The-Verscienta/kiln_cms/pull/1586) · [long form](docs/changelog/unreleased.md#mint-1101-closes-a-response-smuggling-advisory-in-its-http1-chunked-parser-eef))
 
 - **`/ws/gql` runs under the same cost limits as `/gql`, batches are counted per
   operation, and introspection is refused however a document arrives.**
