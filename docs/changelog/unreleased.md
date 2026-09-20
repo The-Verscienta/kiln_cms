@@ -549,6 +549,27 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
   host.
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529))
 
+## Security
+
+<a id="point-in-time-reads-asof-apply-the-passphrase-lock-and-the-audience-as-live"></a>
+
+- **Point-in-time reads (`?as_of=`) apply the passphrase lock and the audience
+  as live delivery does.** Three gaps on an unauthenticated, CDN-cacheable
+  surface. A historical snapshot of a passphrase-locked document (#496), read
+  with a grant, was served `cache-control: public, max-age=300` — and the grant
+  usually rides in the `x-kiln-unlock` header, which no shared cache keys on, so
+  a CDN would hand the unlocked body to the next caller at that URL. It is now
+  `private, no-store`, as live delivery already was. The historical collection
+  (`GET /api/content/:type?as_of=`, GraphQL `contentAsOf`) listed the slug and
+  title of every document published at `as_of`, locked and members-only ones
+  included — the leak #1032 closed on `/published`. It now lists only documents
+  public to an anonymous reader both now and at `as_of`. And the snapshot
+  checked only today's audience, so a document that was members-only at
+  `as_of` and is public now served its old gated body; it now answers
+  `404 not_public` for dates it was not public. The lock has no history (its
+  hash is kept out of version rows), so its current state applies to every
+  date. See `docs/point-in-time.md`.
+
 <a id="a-request-on-a-host-that-names-no-site-no-longer-reads-the-database-for-the"></a>
 
 - **A request on a host that names no site no longer reads the database for the

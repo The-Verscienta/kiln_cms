@@ -623,14 +623,16 @@ Notes that matter in practice:
   different fingerprints, so a token for one will not read the other.
 - **Unlocked responses are `private, no-store` and carry no `ETag`.** The body
   is a function of your grant rather than of the URL, so it must not be
-  shared-cached. Budget for that: a locked document is not a CDN-friendly one.
+  shared-cached. That includes a point-in-time snapshot (`?as_of=`) read with
+  a grant. Budget for that: a locked document is not a CDN-friendly one.
 - **A wrong passphrase and an unlocked document answer identically** (`401`
   `invalid_passphrase` from the unlock endpoint), so it cannot be used to
   enumerate which documents are locked.
 - **Locked documents are absent from every discovery surface** — the sitemap,
   feeds, `llms.txt`, the blog index, the `/published` collection routes,
-  keyword and semantic search, related content, and any configured Meilisearch
-  index. If a document is locked, the only way to reach it is to know its URL
+  the historical collection (`GET /api/content/:type?as_of=` and GraphQL
+  `contentAsOf`), keyword and semantic search, related content, and any
+  configured Meilisearch index. If a document is locked, the only way to reach it is to know its URL
   *and* its passphrase.
 
   The `:published` read carries that as a **filter**, not a policy clause, so

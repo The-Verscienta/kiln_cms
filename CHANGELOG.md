@@ -176,6 +176,12 @@ Every summary line below that was shortened links to its own entry there.
   the platform's hostname.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#a-paas-health-check-no-longer-gets-a-redirect-and-phxhost-falls-back-to-the))
 
+### Security
+
+- **Point-in-time reads (`?as_of=`) apply the passphrase lock and the audience
+  as live delivery does.**
+  ([#496](https://github.com/The-Verscienta/kiln_cms/issues/496), [#1032](https://github.com/The-Verscienta/kiln_cms/issues/1032) · [long form](docs/changelog/unreleased.md#point-in-time-reads-asof-apply-the-passphrase-lock-and-the-audience-as-live))
+
 - **A request on a host that names no site no longer reads the database for the
   default site every time.**
   ([#1580](https://github.com/The-Verscienta/kiln_cms/pull/1580) · [long form](docs/changelog/unreleased.md#a-request-on-a-host-that-names-no-site-no-longer-reads-the-database-for-the))
