@@ -9118,6 +9118,21 @@ msgstr "Vuelva a derivar los slugs con las reglas actuales (patrones, palabras c
 msgid "Re-enable federation"
 msgstr "Reactivar la federación"
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-key"
+msgstr "Cambiar la clave"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-key this actor? The handle stays the same, but its signing key is replaced. Followers are sent the new key, and some remote servers may keep the old one until they re-fetch the actor. Deliveries to those servers fail until they do."
+msgstr "¿Cambiar la clave de este actor? El identificador no cambia, pero su clave de firma se reemplaza. Se envía la nueva clave a los seguidores, y algunos servidores remotos pueden conservar la anterior hasta que vuelvan a obtener el actor. Los envíos a esos servidores fallan hasta entonces."
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-keyed. Followers are being sent the new key; some servers may keep the old one until they re-fetch this actor."
+msgstr "Clave cambiada. Se está enviando la nueva clave a los seguidores; algunos servidores pueden conservar la anterior hasta que vuelvan a obtener este actor."
+
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reaches a page"
@@ -10813,6 +10828,11 @@ msgstr "Sesión iniciada con una clave de acceso."
 #, elixir-autogen, elixir-format
 msgid "Signed out of every session."
 msgstr "Sesión cerrada en todas partes."
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Signing key"
+msgstr "Clave de firma"
 
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
@@ -13910,13 +13930,13 @@ msgstr "Solo suyos: nadie más del equipo los ve ni los hereda."
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
-msgid "Zero-ops default: generate a key right here. Encrypted with a key derived from SECRET_KEY_BASE — rotating that secret orphans the key."
-msgstr "Opción predeterminada sin operaciones: genere una clave aquí mismo. Se cifra con una clave derivada de SECRET_KEY_BASE — rotar ese secreto deja la clave huérfana."
+msgid "Zero-ops default: generate a key right here. Encrypted with a key derived from SECRET_KEY_BASE — rotate that secret only as the secrets rotation guide describes, or the key is lost."
+msgstr "Opción predeterminada sin mantenimiento: genere una clave aquí mismo. Cifrada con una clave derivada de SECRET_KEY_BASE: rote ese secreto solo como describe la guía de rotación de secretos, o la clave se pierde."
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
-msgid "Zero-ops default: paste the secret here. Encrypted with a key derived from SECRET_KEY_BASE — rotating that secret orphans it."
-msgstr "Opción predeterminada sin configuración: pegue el secreto aquí. Cifrado con una clave derivada de SECRET_KEY_BASE; rotar ese secreto lo inutiliza."
+msgid "Zero-ops default: paste the secret here. Encrypted with a key derived from SECRET_KEY_BASE — rotate that secret only as the secrets rotation guide describes, or it is lost."
+msgstr "Opción predeterminada sin configuración: pegue el secreto aquí. Cifrado con una clave derivada de SECRET_KEY_BASE: rote ese secreto solo como describe la guía de rotación de secretos, o se pierde."
 
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
@@ -14495,6 +14515,11 @@ msgstr "se publica"
 msgid "read"
 msgstr "lectura"
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "readable"
+msgstr "legible"
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "recorded content views"
@@ -14780,6 +14805,11 @@ msgstr "se despublica"
 #, elixir-autogen, elixir-format
 msgid "unreadable"
 msgstr "ilegible"
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "unreadable — deliveries fail. SECRET_KEY_BASE was probably rotated without re-encrypting; see the secrets rotation guide, or re-key."
+msgstr "ilegible: los envíos fallan. Probablemente se rotó SECRET_KEY_BASE sin volver a cifrar; consulte la guía de rotación de secretos, o cambie la clave."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex

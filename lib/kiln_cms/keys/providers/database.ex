@@ -4,7 +4,9 @@ defmodule KilnCMS.Keys.Providers.Database do
   (`KilnCMS.Keys.Vault`). The zero-ops default — a key generated in the admin
   UI just works — but the least-preferred production tier: its encryption key
   derives from `secret_key_base`, so rotating that secret orphans the stored
-  key (env/file providers are immune).
+  key unless the rotation keeps the old value readable and re-encrypts
+  (`PREVIOUS_SECRET_KEY_BASE`, `mix kiln.vault.reencrypt` — #1487; see
+  `docs/secrets-rotation.md`). Env/file providers are immune.
 
   `config` is assembled in-memory by `KilnCMS.Keys` from the settings row
   (`%{"encrypted" => <binary>}`); nothing secret is persisted in the

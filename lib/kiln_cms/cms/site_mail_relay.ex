@@ -110,7 +110,10 @@ defmodule KilnCMS.CMS.SiteMailRelay do
       constraints: [max_length: 255]
 
     # Set only by `Changes.StoreRelayPassword`, from the `:password` argument.
-    attribute :password_encrypted, :binary do
+    # `Vault.Ciphertext`, not plain `:binary`, so `mix kiln.vault.reencrypt`
+    # walks it across a `SECRET_KEY_BASE` rotation (#1487). Same storage, so
+    # there is no migration — the type exists to make the column findable.
+    attribute :password_encrypted, KilnCMS.Keys.Vault.Ciphertext do
       sensitive? true
       writable? false
     end

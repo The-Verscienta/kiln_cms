@@ -184,7 +184,7 @@ defmodule KilnCMS.Billing.Settings do
     # material. Empty for the database provider.
     attribute :secret_key_provider_config, :map, allow_nil?: false, default: %{}, public?: true
 
-    attribute :secret_key_encrypted, :binary do
+    attribute :secret_key_encrypted, KilnCMS.Keys.Vault.Ciphertext do
       sensitive? true
       writable? false
     end
@@ -201,7 +201,7 @@ defmodule KilnCMS.Billing.Settings do
       default: %{},
       public?: true
 
-    attribute :webhook_secret_encrypted, :binary do
+    attribute :webhook_secret_encrypted, KilnCMS.Keys.Vault.Ciphertext do
       sensitive? true
       writable? false
     end

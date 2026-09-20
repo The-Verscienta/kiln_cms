@@ -148,7 +148,38 @@ defmodule KilnCMS.Federation.DeliveryWorkerTest do
 
       # Nothing about waiting makes an absent signing key appear.
       assert :ok = run(delivery, ctx.org_id)
-      assert reload(delivery, ctx.org_id).state == :failed
+      settled = reload(delivery, ctx.org_id)
+      assert settled.state == :failed
+      assert settled.last_error == "federation is not enabled for this site"
+    end
+
+    # #1487: a site that is ON but whose key the vault cannot open (a rotated
+    # SECRET_KEY_BASE) used to be reported as "not enabled", which sent the
+    # operator to the wrong switch.
+    test "an unreadable key is named as the cause, not federation being off", ctx do
+      [settings] =
+        Ash.read!(KilnCMS.Federation.SiteFederation, authorize?: false, tenant: ctx.org_id)
+
+      under_another_secret =
+        KilnCMS.Keys.Vault.encrypt("pem", "some-other-secret-" <> String.duplicate("z", 64))
+
+      KilnCMS.Repo.query!(
+        "UPDATE site_federation SET private_key_encrypted = $1 WHERE id = $2",
+        [under_another_secret, Ecto.UUID.dump!(settings.id)]
+      )
+
+      delivery = queue_delivery(ctx.org_id, ctx.follower)
+
+      {result, log} =
+        ExUnit.CaptureLog.with_log(fn -> run(delivery, ctx.org_id) end)
+
+      assert result == :ok
+      assert log =~ "signing key is unreadable"
+
+      settled = reload(delivery, ctx.org_id)
+      assert settled.state == :failed
+      assert settled.last_error =~ "signing key is unreadable"
+      assert settled.last_error =~ "SECRET_KEY_BASE"
     end
   end
 

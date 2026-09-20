@@ -203,6 +203,17 @@ config :kiln_cms, KilnCMSWeb.Endpoint,
   ],
   secret_key_base: secret_key_base
 
+# The read half of a `SECRET_KEY_BASE` rotation (#1487): set this to the OLD
+# value, next to the new `SECRET_KEY_BASE`, and `KilnCMS.Keys.Vault` still opens
+# what was stored under it while every write uses the new one. Run the
+# re-encryption task, then unset it. Vault only — sessions and tokens are still
+# a hard cutover. Read raw rather than through `KilnCMS.Config.Env`, which is
+# for flags and counts and echoes what it reads. Kept byte-for-byte, as
+# `SECRET_KEY_BASE` is: the Vault drops a blank entry, or a copy of the current
+# secret, itself.
+config :kiln_cms, KilnCMS.Keys.Vault,
+  previous_secret_key_bases: List.wrap(System.get_env("PREVIOUS_SECRET_KEY_BASE"))
+
 config :kiln_cms,
   token_signing_secret:
     System.get_env("TOKEN_SIGNING_SECRET") ||

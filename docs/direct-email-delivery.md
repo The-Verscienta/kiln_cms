@@ -105,9 +105,11 @@ not built for bulk/marketing sending.
      source and derives the public key from it.
    - **Database** *(zero-ops default)* — click **Generate key**. The private
      key is stored AES-256-GCM-encrypted with a key derived from
-     `SECRET_KEY_BASE`, so **rotating `SECRET_KEY_BASE` orphans the key** (the
-     page tells you; regenerate and republish DNS). Env/file providers are
-     immune to this.
+     `SECRET_KEY_BASE`, so **rotating `SECRET_KEY_BASE` orphans the key**
+     unless you follow the [rotation procedure](secrets-rotation.md#secret_key_base),
+     which keeps the old value readable and re-encrypts the key under the new
+     one (`mix kiln.vault.reencrypt`). If it was orphaned anyway, regenerate it
+     and republish DNS. Env/file providers are immune to this.
 3. **Server IP** — enter your server's public IPv4 address. It drives the SPF
    suggestion and the PTR check.
 4. **DNS records** — publish the four records the page lists (copy-paste). See

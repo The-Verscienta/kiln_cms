@@ -5,7 +5,62 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Upgrade notes
+
+<a id="rotating-secretkeybase-keeps-stored-keys-now-if-the-steps-run-in-order"></a>
+
+**Rotating `SECRET_KEY_BASE` keeps stored keys now, if the steps run in
+order.** Nothing needs doing on upgrade (#1487). The next time you rotate
+`SECRET_KEY_BASE`:
+
+1. Set `PREVIOUS_SECRET_KEY_BASE` to the old value next to the new
+   `SECRET_KEY_BASE`, and restart.
+2. Run `mix kiln.vault.reencrypt`. In a release, run
+   `bin/kiln_cms eval 'KilnCMS.Release.reencrypt_vault()'`.
+3. Once a `--dry-run` reports nothing left, unset `PREVIOUS_SECRET_KEY_BASE`.
+
+If you retire the old value before step 2, the DKIM key, social credentials,
+billing secrets and ActivityPub actor key are orphaned, exactly as before.
+Sessions are still signed out either way. See `docs/secrets-rotation.md`.
+
 ## Added
+
+<a id="rotating-secretkeybase-no-longer-loses-database-stored-keys"></a>
+
+- **Rotating `SECRET_KEY_BASE` no longer loses database-stored keys.** (#1487)
+  `KilnCMS.Keys.Vault` now has a read-only dual-key window: with
+  `PREVIOUS_SECRET_KEY_BASE` set to the old value, it opens ciphertext under
+  either secret and writes only under the current one.
+  `mix kiln.vault.reencrypt` (`KilnCMS.Release.reencrypt_vault/1` in a
+  release) then moves every vault column across. It runs one transaction per
+  table, with rows locked. A second run changes nothing. `--dry-run` reports
+  without writing. A value that opens under neither secret is reported by id
+  and never overwritten, and the task then exits non-zero. The old secret is
+  read from an environment variable named with `--old-secret-key-base-env`,
+  never from argv.
+
+  The columns are found, not listed. Each has the new
+  `KilnCMS.Keys.Vault.Ciphertext` type, which is stored as `:binary`, so there
+  is no migration. A test fails if any other binary attribute is neither that
+  type nor explicitly accounted for. The read window covers the vault only.
+  Session cookies, `Phoenix.Token`s and JWTs remain a hard cutover. The runbook
+  (`docs/secrets-rotation.md`) and threat-model residual 12 are rewritten to
+  match.
+
+<a id="a-sites-activitypub-actor-can-be-re-keyed"></a>
+
+- **A site's ActivityPub actor can be re-keyed.** (#1487) Use
+  `mix kiln.federation rekey` or *Re-key* on `/editor/federation`. Both are
+  admin-only, through `SiteFederation`'s new `:rekey` action. The action
+  replaces both halves of the keypair and keeps the origin, username, actor id
+  and `keyId`, which is the identity remote servers hold. In the same
+  transaction it queues an actor `Update` to every deliverable follower
+  (`KilnCMS.Federation.ActorUpdateWorker`), carrying the new `publicKeyPem`.
+  The job becomes visible only at commit, so the `Update` cannot leave before
+  `/actor` serves the key that signs it. The key half of `MintIdentity` is now
+  a shared `MintKeypair` change, and the fan-out `AnnounceWorker` used is
+  shared as `KilnCMS.Federation.deliver_to_followers/4`. The confirmation says
+  plainly that some servers may keep the old key until they re-fetch the actor.
 
 <a id="a-site-can-send-its-mail-through-its-own-smtp-relay-set-from-the-console"></a>
 
@@ -152,6 +207,17 @@ carries the reasoning.
   combining characters; a value that only passed because of that gap is now
   rejected with the same validation error as any other over-long string.
 ## Fixed
+
+<a id="a-delivery-that-fails-on-an-unreadable-signing-key-now-says-so"></a>
+
+- **A delivery that fails on an unreadable signing key now says so.** (#1487)
+  It used to claim that federation was not enabled.
+  `Federation.active_settings(org_id, require_key?: true)` returns
+  `:key_unreadable` for a site that is on but whose key the vault cannot open.
+  `DeliveryWorker` settles those deliveries with *"this site's signing key is
+  unreadable — was SECRET_KEY_BASE rotated without re-encrypting?"* and logs a
+  warning. `/editor/federation` and `mix kiln.federation status` now show
+  whether the key is readable.
 
 <a id="a-relay-refusing-the-operators-password-no-longer-suppresses-every-recipient"></a>
 

@@ -1001,17 +1001,35 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     `TOKEN_SIGNING_SECRET`, S3 keys) is not written down.~~ **Closed by
     #1304:** [`secrets-rotation.md`](secrets-rotation.md) is the per-secret
     procedure, verified against what the code does rather than what would be
-    reasonable. *Residual, and the reason to read it before an incident rather
-    than during one:* nothing in this application supports a dual-key
-    transition. `TOKEN_SIGNING_SECRET` and `SECRET_KEY_BASE` are hard
-    cutovers that sign every user out, and `SECRET_KEY_BASE` additionally
-    keys `KilnCMS.Keys.Vault`, so rotating it **permanently orphans**
-    database-stored key material — the DKIM key, social credentials, payment
-    secrets and the ActivityPub actor key — with no re-encryption path. Three
-    of those four have a documented way back; the federation actor key has
-    none, which the runbook flags as the one rotation that cannot be done
-    safely today. Pairs with [`backups.md`](backups.md), where the same
-    `SECRET_KEY_BASE` is part of the backup.
+    reasonable. ~~Rotating `SECRET_KEY_BASE` permanently orphans the
+    vault-encrypted columns, and the ActivityPub actor key cannot be
+    re-keyed.~~ **Closed by #1487:** `KilnCMS.Keys.Vault` reads under
+    `PREVIOUS_SECRET_KEY_BASE` as well while a rotation is under way, and
+    `mix kiln.vault.reencrypt` (`KilnCMS.Release.reencrypt_vault/1` in a
+    release) moves every vault column to the new secret. It finds those columns
+    by type, never overwrites a value it cannot open, and is safe to run twice.
+    `SiteFederation`'s admin-only `:rekey` replaces the actor's keypair under
+    the same actor id and sends followers a signed actor `Update`.
+    *Residual, and the reason to read the runbook before an incident rather
+    than during one:*
+    - **Sessions and tokens are still hard cutovers.** `TOKEN_SIGNING_SECRET`
+      and `SECRET_KEY_BASE` each sign every user out. The read window covers
+      the vault only: `Plug.Session` and `AshAuthentication.Jwt` each derive
+      one key from one secret.
+    - **The order of steps decides whether data survives.** If the old value is
+      retired before the task has run, the vault columns are orphaned exactly as
+      before. The only signal is the task's `unreadable` count, a warning in the
+      log and the federation panel.
+    - **Re-encryption is not revocation.** Backups taken before the task, and
+      any other copy of the database, still open with the old secret. After a
+      *leak*, the underlying secrets have to be rotated as well: the DKIM key,
+      billing and social credentials, and the actor key.
+    - **A re-keyed actor depends on its peers.** Servers that ignore actor
+      `Update`s keep the old key until they re-fetch the actor, and until then
+      the old key still signs traffic they accept.
+
+    Pairs with [`backups.md`](backups.md), where the same `SECRET_KEY_BASE` is
+    part of the backup.
 14. ~~**The collaborative-editing socket is scoped by topic, not by
     tenancy.**~~ **Closed by #655.** The socket token still names only a user,
     so it establishes *who* and nothing more; `CollabChannel.join/3` now

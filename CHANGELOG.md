@@ -54,7 +54,19 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Rotating `SECRET_KEY_BASE` keeps stored keys now, if the steps run in
+  order.**
+  ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#rotating-secretkeybase-keeps-stored-keys-now-if-the-steps-run-in-order))
+
 ### Added
+
+- **Rotating `SECRET_KEY_BASE` no longer loses database-stored keys.**
+  ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#rotating-secretkeybase-no-longer-loses-database-stored-keys))
+
+- **A site's ActivityPub actor can be re-keyed.**
+  ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#a-sites-activitypub-actor-can-be-re-keyed))
 
 - **A site can send its mail through its own SMTP relay, set from the console.**
   ([#1322](https://github.com/The-Verscienta/kiln_cms/issues/1322) · [long form](docs/changelog/unreleased.md#a-site-can-send-its-mail-through-its-own-smtp-relay-set-from-the-console))
@@ -85,6 +97,9 @@ Every summary line below that was shortened links to its own entry there.
 - **String lengths are counted in codepoints, as Postgres counts them.**
   ([long form](docs/changelog/unreleased.md#string-lengths-are-counted-in-codepoints-as-postgres-counts-them))
 ### Fixed
+
+- **A delivery that fails on an unreadable signing key now says so.**
+  ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#a-delivery-that-fails-on-an-unreadable-signing-key-now-says-so))
 
 - **A relay refusing the operator's password no longer suppresses every
   recipient.**
