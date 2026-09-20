@@ -304,6 +304,7 @@ input DeleteEntryInput {
   typeDefinitionId: ID!
   categoryId: ID
   featuredImageId: ID
+  expectedLockVersion: Int
 }
 
 "The result of the :delete_entry mutation"
@@ -333,6 +334,7 @@ input DeletePageInput {
   reviewAfterDays: Int
   categoryId: ID
   featuredImageId: ID
+  expectedLockVersion: Int
 }
 
 "The result of the :delete_page mutation"
@@ -363,6 +365,7 @@ input DeletePostInput {
   reviewAfterDays: Int
   categoryId: ID
   featuredImageId: ID
+  expectedLockVersion: Int
 }
 
 "The result of the :delete_post mutation"
@@ -394,6 +397,7 @@ type Entry {
   expiryAction: String!
   reviewAfterDays: Int
   lastReviewedAt: DateTime
+  lockVersion: Int!
   insertedAt: DateTime!
   updatedAt: DateTime!
   typeDefinitionId: ID!
@@ -656,6 +660,7 @@ input EntryFilterInput {
   expiryAction: EntryFilterExpiryAction
   reviewAfterDays: EntryFilterReviewAfterDays
   lastReviewedAt: EntryFilterLastReviewedAt
+  lockVersion: EntryFilterLockVersion
   insertedAt: EntryFilterInsertedAt
   updatedAt: EntryFilterUpdatedAt
   typeDefinitionId: EntryFilterTypeDefinitionId
@@ -717,6 +722,19 @@ input EntryFilterLocale {
   stringStartsWith: String
   like: String
   ilike: String
+}
+
+input EntryFilterLockVersion {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int!]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
 }
 
 input EntryFilterPathAlias {
@@ -992,6 +1010,7 @@ enum EntrySortField {
   EXPIRY_ACTION
   REVIEW_AFTER_DAYS
   LAST_REVIEWED_AT
+  LOCK_VERSION
   INSERTED_AT
   UPDATED_AT
   TYPE_DEFINITION_ID
@@ -1474,6 +1493,7 @@ type Page {
   expiryAction: String!
   reviewAfterDays: Int
   lastReviewedAt: DateTime
+  lockVersion: Int!
   insertedAt: DateTime!
   updatedAt: DateTime!
   authorId: ID
@@ -1715,6 +1735,7 @@ input PageFilterInput {
   expiryAction: PageFilterExpiryAction
   reviewAfterDays: PageFilterReviewAfterDays
   lastReviewedAt: PageFilterLastReviewedAt
+  lockVersion: PageFilterLockVersion
   insertedAt: PageFilterInsertedAt
   updatedAt: PageFilterUpdatedAt
   authorId: PageFilterAuthorId
@@ -1774,6 +1795,19 @@ input PageFilterLocale {
   stringStartsWith: String
   like: String
   ilike: String
+}
+
+input PageFilterLockVersion {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int!]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
 }
 
 input PageFilterPathAlias {
@@ -2089,6 +2123,7 @@ enum PageSortField {
   EXPIRY_ACTION
   REVIEW_AFTER_DAYS
   LAST_REVIEWED_AT
+  LOCK_VERSION
   INSERTED_AT
   UPDATED_AT
   AUTHOR_ID
@@ -2135,6 +2170,7 @@ type Post {
   expiryAction: String!
   reviewAfterDays: Int
   lastReviewedAt: DateTime
+  lockVersion: Int!
   insertedAt: DateTime!
   updatedAt: DateTime!
   authorId: ID
@@ -2395,6 +2431,7 @@ input PostFilterInput {
   expiryAction: PostFilterExpiryAction
   reviewAfterDays: PostFilterReviewAfterDays
   lastReviewedAt: PostFilterLastReviewedAt
+  lockVersion: PostFilterLockVersion
   insertedAt: PostFilterInsertedAt
   updatedAt: PostFilterUpdatedAt
   authorId: PostFilterAuthorId
@@ -2454,6 +2491,19 @@ input PostFilterLocale {
   stringStartsWith: String
   like: String
   ilike: String
+}
+
+input PostFilterLockVersion {
+  isNil: Boolean
+  eq: Int
+  notEq: Int
+  in: [Int!]
+  lessThan: Int
+  greaterThan: Int
+  lessThanOrEqual: Int
+  greaterThanOrEqual: Int
+  isDistinctFrom: Int
+  isNotDistinctFrom: Int
 }
 
 input PostFilterPathAlias {
@@ -2698,6 +2748,7 @@ enum PostSortField {
   EXPIRY_ACTION
   REVIEW_AFTER_DAYS
   LAST_REVIEWED_AT
+  LOCK_VERSION
   INSERTED_AT
   UPDATED_AT
   AUTHOR_ID
@@ -2717,6 +2768,10 @@ input PostSortInput {
   highlightInput: PostHighlightFieldInput
 }
 
+input PublishEntryInput {
+  expectedLockVersion: Int
+}
+
 "The result of the :publish_entry mutation"
 type PublishEntryResult {
   "The successful result of the mutation"
@@ -2724,6 +2779,10 @@ type PublishEntryResult {
 
   "Any errors generated, if the mutation failed"
   errors: [MutationError!]!
+}
+
+input PublishPageInput {
+  expectedLockVersion: Int
 }
 
 "The result of the :publish_page mutation"
@@ -2735,6 +2794,10 @@ type PublishPageResult {
   errors: [MutationError!]!
 }
 
+input PublishPostInput {
+  expectedLockVersion: Int
+}
+
 "The result of the :publish_post mutation"
 type PublishPostResult {
   "The successful result of the mutation"
@@ -2742,6 +2805,10 @@ type PublishPostResult {
 
   "Any errors generated, if the mutation failed"
   errors: [MutationError!]!
+}
+
+input ReturnEntryToDraftInput {
+  expectedLockVersion: Int
 }
 
 "The result of the :return_entry_to_draft mutation"
@@ -2753,6 +2820,10 @@ type ReturnEntryToDraftResult {
   errors: [MutationError!]!
 }
 
+input ReturnPageToDraftInput {
+  expectedLockVersion: Int
+}
+
 "The result of the :return_page_to_draft mutation"
 type ReturnPageToDraftResult {
   "The successful result of the mutation"
@@ -2760,6 +2831,10 @@ type ReturnPageToDraftResult {
 
   "Any errors generated, if the mutation failed"
   errors: [MutationError!]!
+}
+
+input ReturnPostToDraftInput {
+  expectedLockVersion: Int
 }
 
 "The result of the :return_post_to_draft mutation"
@@ -2774,25 +2849,26 @@ type ReturnPostToDraftResult {
 type RootMutationType {
   createPage(input: CreatePageInput!): CreatePageResult!
   updatePage(id: ID!, customFilter: JsonString, customSort: String, input: UpdatePageInput): UpdatePageResult!
-  submitPageForReview(id: ID!, customFilter: JsonString, customSort: String): SubmitPageForReviewResult!
-  returnPageToDraft(id: ID!, customFilter: JsonString, customSort: String): ReturnPageToDraftResult!
-  publishPage(id: ID!, customFilter: JsonString, customSort: String): PublishPageResult!
-  unpublishPage(id: ID!, customFilter: JsonString, customSort: String): UnpublishPageResult!
+  submitPageForReview(id: ID!, customFilter: JsonString, customSort: String, input: SubmitPageForReviewInput): SubmitPageForReviewResult!
+  returnPageToDraft(id: ID!, customFilter: JsonString, customSort: String, input: ReturnPageToDraftInput): ReturnPageToDraftResult!
+  publishPage(id: ID!, customFilter: JsonString, customSort: String, input: PublishPageInput): PublishPageResult!
+  unpublishPage(id: ID!, customFilter: JsonString, customSort: String, input: UnpublishPageInput): UnpublishPageResult!
   deletePage(id: ID!, customFilter: JsonString, customSort: String, input: DeletePageInput!): DeletePageResult!
   createPost(input: CreatePostInput!): CreatePostResult!
   updatePost(id: ID!, customFilter: JsonString, customSort: String, input: UpdatePostInput): UpdatePostResult!
-  submitPostForReview(id: ID!, customFilter: JsonString, customSort: String): SubmitPostForReviewResult!
-  returnPostToDraft(id: ID!, customFilter: JsonString, customSort: String): ReturnPostToDraftResult!
-  publishPost(id: ID!, customFilter: JsonString, customSort: String): PublishPostResult!
-  unpublishPost(id: ID!, customFilter: JsonString, customSort: String): UnpublishPostResult!
+  submitPostForReview(id: ID!, customFilter: JsonString, customSort: String, input: SubmitPostForReviewInput): SubmitPostForReviewResult!
+  returnPostToDraft(id: ID!, customFilter: JsonString, customSort: String, input: ReturnPostToDraftInput): ReturnPostToDraftResult!
+  publishPost(id: ID!, customFilter: JsonString, customSort: String, input: PublishPostInput): PublishPostResult!
+  unpublishPost(id: ID!, customFilter: JsonString, customSort: String, input: UnpublishPostInput): UnpublishPostResult!
   deletePost(id: ID!, customFilter: JsonString, customSort: String, input: DeletePostInput!): DeletePostResult!
   createEntry(input: CreateEntryInput!): CreateEntryResult!
   updateEntry(id: ID!, customFilter: JsonString, customSort: String, input: UpdateEntryInput): UpdateEntryResult!
-  submitEntryForReview(id: ID!, customFilter: JsonString, customSort: String): SubmitEntryForReviewResult!
-  returnEntryToDraft(id: ID!, customFilter: JsonString, customSort: String): ReturnEntryToDraftResult!
-  publishEntry(id: ID!, customFilter: JsonString, customSort: String): PublishEntryResult!
-  unpublishEntry(id: ID!, customFilter: JsonString, customSort: String): UnpublishEntryResult!
+  submitEntryForReview(id: ID!, customFilter: JsonString, customSort: String, input: SubmitEntryForReviewInput): SubmitEntryForReviewResult!
+  returnEntryToDraft(id: ID!, customFilter: JsonString, customSort: String, input: ReturnEntryToDraftInput): ReturnEntryToDraftResult!
+  publishEntry(id: ID!, customFilter: JsonString, customSort: String, input: PublishEntryInput): PublishEntryResult!
+  unpublishEntry(id: ID!, customFilter: JsonString, customSort: String, input: UnpublishEntryInput): UnpublishEntryResult!
   deleteEntry(id: ID!, customFilter: JsonString, customSort: String, input: DeleteEntryInput!): DeleteEntryResult!
+  updateMediaItem(id: ID!, input: UpdateMediaItemInput): UpdateMediaItemResult!
 }
 
 type RootQueryType {
@@ -3305,6 +3381,10 @@ enum SortOrder {
   ASC_NULLS_LAST
 }
 
+input SubmitEntryForReviewInput {
+  expectedLockVersion: Int
+}
+
 "The result of the :submit_entry_for_review mutation"
 type SubmitEntryForReviewResult {
   "The successful result of the mutation"
@@ -3314,6 +3394,10 @@ type SubmitEntryForReviewResult {
   errors: [MutationError!]!
 }
 
+input SubmitPageForReviewInput {
+  expectedLockVersion: Int
+}
+
 "The result of the :submit_page_for_review mutation"
 type SubmitPageForReviewResult {
   "The successful result of the mutation"
@@ -3321,6 +3405,10 @@ type SubmitPageForReviewResult {
 
   "Any errors generated, if the mutation failed"
   errors: [MutationError!]!
+}
+
+input SubmitPostForReviewInput {
+  expectedLockVersion: Int
 }
 
 "The result of the :submit_post_for_review mutation"
@@ -3666,6 +3754,10 @@ input TagSortInput {
   field: TagSortField!
 }
 
+input UnpublishEntryInput {
+  expectedLockVersion: Int
+}
+
 "The result of the :unpublish_entry mutation"
 type UnpublishEntryResult {
   "The successful result of the mutation"
@@ -3675,6 +3767,10 @@ type UnpublishEntryResult {
   errors: [MutationError!]!
 }
 
+input UnpublishPageInput {
+  expectedLockVersion: Int
+}
+
 "The result of the :unpublish_page mutation"
 type UnpublishPageResult {
   "The successful result of the mutation"
@@ -3682,6 +3778,10 @@ type UnpublishPageResult {
 
   "Any errors generated, if the mutation failed"
   errors: [MutationError!]!
+}
+
+input UnpublishPostInput {
+  expectedLockVersion: Int
 }
 
 "The result of the :unpublish_post mutation"
@@ -3713,6 +3813,7 @@ input UpdateEntryInput {
   typeDefinitionId: ID
   categoryId: ID
   featuredImageId: ID
+  expectedLockVersion: Int
   tagIds: [ID!]
   addTagIds: [ID!]
   removeTagIds: [ID!]
@@ -3729,6 +3830,26 @@ input UpdateEntryInput {
 type UpdateEntryResult {
   "The successful result of the mutation"
   result: Entry
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+input UpdateMediaItemInput {
+  alt: String
+  caption: String
+  decorative: Boolean
+  focalX: Float
+  focalY: Float
+  tagIds: [ID!]
+  addTagIds: [ID!]
+  removeTagIds: [ID!]
+}
+
+"The result of the :update_media_item mutation"
+type UpdateMediaItemResult {
+  "The successful result of the mutation"
+  result: MediaItem
 
   "Any errors generated, if the mutation failed"
   errors: [MutationError!]!
@@ -3752,6 +3873,7 @@ input UpdatePageInput {
   reviewAfterDays: Int
   categoryId: ID
   featuredImageId: ID
+  expectedLockVersion: Int
   tagIds: [ID!]
   addTagIds: [ID!]
   removeTagIds: [ID!]
@@ -3792,6 +3914,7 @@ input UpdatePostInput {
   reviewAfterDays: Int
   categoryId: ID
   featuredImageId: ID
+  expectedLockVersion: Int
   tagIds: [ID!]
   addTagIds: [ID!]
   removeTagIds: [ID!]
