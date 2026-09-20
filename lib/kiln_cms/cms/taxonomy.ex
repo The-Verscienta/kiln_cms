@@ -165,6 +165,10 @@ defmodule KilnCMS.CMS.Taxonomy do
       graphql do
         type unquote(type)
 
+        # A content item's `tags` is priced per row, not as one
+        # (`KilnCMSWeb.GraphqlLimits.list_complexity/3`).
+        complexity {KilnCMSWeb.GraphqlLimits, :list_complexity}
+
         # Taxonomy is world-readable (D7) — list them all and fetch one by slug,
         # so a headless frontend can build the same navigation, tag clouds and
         # filtered listings the console does.

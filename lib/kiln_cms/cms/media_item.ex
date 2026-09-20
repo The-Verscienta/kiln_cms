@@ -32,6 +32,10 @@ defmodule KilnCMS.CMS.MediaItem do
   graphql do
     type :media_item
 
+    # Nothing lists media items as a to-many relationship today; this prices one
+    # per row if something does (`KilnCMSWeb.GraphqlLimits.list_complexity/3`).
+    complexity {KilnCMSWeb.GraphqlLimits, :list_complexity}
+
     # No top-level queries (D7 — deliberate). Media is resolved only as a nested
     # `featuredImage` on content; the library itself isn't a public listing
     # endpoint (that's an admin concern via AshAdmin / the JSON:API).

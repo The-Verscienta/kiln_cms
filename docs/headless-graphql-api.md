@@ -20,6 +20,7 @@ what the surface exposes and how writes are authorized.
 | `GET /api/graphql/schema.graphql` | public where introspection is on; **API key** in production | The running schema as SDL, for codegen. The stock build's copy is committed at [`docs/api/schema.graphql`](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/api/schema.graphql) — see [api.md](api.md#machine-readable-specs) |
 | `POST /gql` | always on | GraphQL query endpoint (headless consumers) |
 | `/gql/playground` | **dev only** — not served by a production build | Interactive GraphiQL playground |
+| `/ws/gql` | always on | Absinthe websocket: subscriptions, and queries and mutations too |
 
 The endpoint is rate-limited (`KilnCMSWeb.Plugs.RateLimit, :gql`) and reads an
 optional bearer token (`load_from_bearer`). Anonymous requests are fully
@@ -293,6 +294,49 @@ already-published content with `updatePost` **also** re-fires (the `:update`
 action carries a `published`-guarded re-fire, #330) — so a write-through to live
 content never leaves a stale artifact. Draft edits do not fire.
 
+## Query cost
+
+Every document is checked before any of it runs, over `POST`/`GET /gql` and
+over `/ws/gql` alike. A document over a limit is answered with `errors` and no
+`data`:
+
+| Limit | Value |
+|-------|-------|
+| Complexity | 200 |
+| Depth | 15 nested fields |
+| Size | 2,000 tokens |
+| Batch | 10 operations in one JSON-array body |
+
+**Complexity.** A field costs 1 plus the cost of the fields selected inside it.
+A list costs its row count times the cost of one row:
+
+- **A paginated query** (`publishedPosts`) counts `limit` rows. With no `limit`
+  it counts its default page, 25.
+- **A to-many relationship** (`tags`, `relatedPosts`, a media item's
+  `featuredPosts`) counts `limit` rows if you pass one. Without `limit` it
+  counts five, however many it returns. That makes a list nested inside itself
+  (`relatedPosts { relatedPosts { … } }`) expensive quickly.
+
+| Query | Cost |
+|-------|------|
+| [`postBySlug`](#fetch-a-published-post-by-slug) below | 32 |
+| [`publishedPosts(limit: 10)`](#list-the-published-blog-index) below | 100 |
+| `publishedPosts { results { title tags { name } } }` | 25 × 7 = 175 |
+| `publishedPosts { results { title tags { name } relatedPosts { title } } }` | 25 × 12 = 300, **refused** |
+| the same with `limit: 15` | 15 × 12 = 180 |
+| the same with `tags(limit: 3)` and `relatedPosts(limit: 3)` | 25 × 8 = 200 |
+
+If a listing page goes over, ask for a smaller page, pass `limit` on its
+relationships, or fetch the per-item detail separately.
+
+**Batches.** A JSON array body runs each element as its own operation. Each one
+is counted against the `/gql` rate limit, so ten operations in one request
+cost the same as ten requests.
+
+**Introspection** (`__schema`, `__type`) is refused in production, however the
+document arrives. The playground needs it, which is why the playground is
+served in development only. `__typename` always works.
+
 ## Deliberately *not* exposed
 
 - **Hard delete.** `deletePost` is a reversible soft-delete; the permanent
@@ -355,11 +399,12 @@ Variables:
 `publishedPosts` is **offset-paginated** (parity with the JSON:API `/published`
 feed) — it returns a `PageOfPost` with `results`, `count`, and `hasNextPage`.
 `limit` is capped server-side (max 100, default 25), so use `limit`/`offset` to
-page.
+page. A page's [cost](#query-cost) is its size times the fields of one row, so
+this selection fits a page of 10; at 25 it would cost 250 and be refused.
 
 ```graphql
 {
-  publishedPosts(limit: 25, offset: 0) {
+  publishedPosts(limit: 10, offset: 0) {
     count
     hasNextPage
     results {
