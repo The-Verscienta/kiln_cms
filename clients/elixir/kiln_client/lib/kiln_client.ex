@@ -91,6 +91,9 @@ defmodule KilnClient do
   alias KilnClient.Error
 
   @json_api "application/vnd.api+json"
+  # The media upload API is plain JSON, not JSON:API — it is not an
+  # AshJsonApi route (see `KilnCMSWeb.MediaUploadController`).
+  @json "application/json"
 
   @typedoc "A flattened JSON:API resource: attributes + id/type/relationships."
   @type item :: %{optional(String.t()) => term()}
@@ -432,11 +435,16 @@ defmodule KilnClient do
   with `"processing" => true` while an A/V file's metadata strip is pending
   (its `"url"` isn't live until then).
 
+  An upload is a **write**: it needs a `:read_write` API key — per call
+  (`api_key:`) or configured — and returns
+  `{:error, %KilnClient.Error{reason: :no_api_key}}` without sending anything
+  when there is none, like `create/3` and friends.
+
   Options: `:filename` (default: the path's basename), the metadata `:alt`,
   `:caption`, `:decorative`, `:focal_x`, `:focal_y` (0.0–1.0) and `:tag_ids`,
-  and `:req` (per-call `Req` overrides).
+  plus `:api_key` and `:req`.
   """
-  @spec upload_media(Path.t(), keyword()) :: {:ok, item()} | {:error, term()}
+  @spec upload_media(Path.t(), keyword()) :: {:ok, item()} | {:error, Error.t()}
   def upload_media(path, opts \\ []) do
     filename = opts[:filename] || Path.basename(path)
 
@@ -450,10 +458,11 @@ defmodule KilnClient do
       end) ++ [file: {File.stream!(path, 65_536), filename: filename}]
 
     :post
-    |> request("/api/media",
+    |> write_request("/api/media", nil,
       form_multipart: fields,
-      headers: [{"accept", "application/json"}],
+      accept: @json,
       receive_timeout: @upload_timeout,
+      api_key: opts[:api_key],
       req: opts[:req]
     )
     |> media_item()
@@ -465,7 +474,7 @@ defmodule KilnClient do
   25 MB) and ingests it like an upload. Same options as `upload_media/2`,
   `:filename` overriding the name the URL implies.
   """
-  @spec import_media(String.t(), keyword()) :: {:ok, item()} | {:error, term()}
+  @spec import_media(String.t(), keyword()) :: {:ok, item()} | {:error, Error.t()}
   def import_media(url, opts \\ []) do
     body =
       opts
@@ -475,10 +484,11 @@ defmodule KilnClient do
       |> put_present(:filename, opts[:filename])
 
     :post
-    |> request("/api/media/import-url",
-      json: body,
-      headers: [{"accept", "application/json"}],
+    |> write_request("/api/media/import-url", body,
+      accept: @json,
+      content_type: @json,
       receive_timeout: @upload_timeout,
+      api_key: opts[:api_key],
       req: opts[:req]
     )
     |> media_item()
@@ -497,16 +507,10 @@ defmodule KilnClient do
       Map.new(changes, fn {key, value} -> {key, value} end)
       |> Map.take(@metadata_opts ++ [:add_tag_ids, :remove_tag_ids])
 
-    :patch
-    |> request("/api/json/media-items/#{id}",
-      json: %{data: %{type: "media_item", id: id, attributes: attributes}},
-      headers: [
-        {"accept", "application/vnd.api+json"},
-        {"content-type", "application/vnd.api+json"}
-      ],
-      req: opts[:req]
-    )
-    |> media_item()
+    # The JSON:API write route, so it goes through `update/4` — the type is
+    # passed explicitly because `"media-items"` does not singularize to
+    # `"media_item"`.
+    update("media-items", id, attributes, Keyword.put(opts, :type, "media_item"))
   end
 
   @doc """
@@ -519,14 +523,22 @@ defmodule KilnClient do
   @spec begin_direct_upload(String.t(), pos_integer(), keyword()) ::
           {:ok, map()} | {:error, term()}
   def begin_direct_upload(filename, byte_size, opts \\ []) do
-    case request(:post, "/api/media/uploads",
-           json: %{filename: filename, byte_size: byte_size},
-           headers: [{"accept", "application/json"}],
-           req: opts[:req]
-         ) do
-      {:ok, %{"data" => upload}} -> {:ok, upload}
-      {:ok, other} -> {:error, {:unexpected_body, other}}
-      {:error, reason} -> {:error, reason}
+    :post
+    |> write_request("/api/media/uploads", %{filename: filename, byte_size: byte_size},
+      accept: @json,
+      content_type: @json,
+      api_key: opts[:api_key],
+      req: opts[:req]
+    )
+    |> case do
+      {:ok, %{"data" => upload}} ->
+        {:ok, upload}
+
+      {:ok, other} ->
+        {:error, %Error{reason: :unexpected_body, body: other, path: "/api/media/uploads"}}
+
+      {:error, _reason} = error ->
+        error
     end
   end
 
@@ -535,12 +547,15 @@ defmodule KilnClient do
   runs the staged bytes through the normal pipeline and deletes the staged
   copy; a token completes once. Takes the metadata options of `upload_media/2`.
   """
-  @spec complete_direct_upload(String.t(), keyword()) :: {:ok, item()} | {:error, term()}
+  @spec complete_direct_upload(String.t(), keyword()) :: {:ok, item()} | {:error, Error.t()}
   def complete_direct_upload(token, opts \\ []) do
     :post
-    |> request("/api/media/uploads/complete",
-      json: opts |> metadata() |> Map.new() |> Map.put(:token, token),
-      headers: [{"accept", "application/json"}],
+    |> write_request(
+      "/api/media/uploads/complete",
+      opts |> metadata() |> Map.new() |> Map.put(:token, token),
+      accept: @json,
+      content_type: @json,
+      api_key: opts[:api_key],
       receive_timeout: @upload_timeout,
       req: opts[:req]
     )
@@ -552,7 +567,7 @@ defmodule KilnClient do
   `path`: the bytes go straight to object storage, streamed from disk, for a
   file too large to send through the app. Same options as `upload_media/2`.
   """
-  @spec upload_media_direct(Path.t(), keyword()) :: {:ok, item()} | {:error, term()}
+  @spec upload_media_direct(Path.t(), keyword()) :: {:ok, item()} | {:error, Error.t()}
   def upload_media_direct(path, opts \\ []) do
     filename = opts[:filename] || Path.basename(path)
 
@@ -581,11 +596,14 @@ defmodule KilnClient do
       {:ok, %Req.Response{status: status}} when status in 200..299 ->
         :ok
 
+      # The store's own refusal (a 403 `SignatureDoesNotMatch` on a stale URL),
+      # not Kiln's envelope — so it carries the raw body rather than a `code`.
       {:ok, %Req.Response{status: status, body: body}} ->
-        {:error, {:http_status, status, body}}
+        {:error,
+         %Error{reason: :storage_refused, status: status, body: body, method: :put, path: url}}
 
       {:error, exception} ->
-        {:error, exception}
+        {:error, %Error{reason: :transport, exception: exception, method: :put, path: url}}
     end
   end
 
@@ -1117,22 +1135,38 @@ defmodule KilnClient do
   # Writes fail fast without a key: an anonymous write can only be refused,
   # and finding that out client-side costs no round trip and no rate-limit
   # budget. The error names the option, never a value.
+  #
+  # `opts` carries the media upload API's departures from JSON:API — it speaks
+  # plain JSON, takes a `:form_multipart` body on `POST /api/media` (whose
+  # content type Req must write itself, boundary and all), and is bounded by
+  # the upload timeout rather than the read one. The defaults reproduce the
+  # JSON:API behaviour exactly, so the content writes are unchanged.
   defp write_request(method, path, body, opts) do
     case api_key(opts) do
       nil ->
         {:error, %Error{reason: :no_api_key, method: method, path: path}}
 
       key ->
+        accept = opts[:accept] || @json_api
+
         # Req's `:json` encodes the body but only *defaults* the content
-        # type, so the JSON:API media type set here is the one sent.
+        # type, so the media type set here is the one sent.
         req_opts =
-          if body == nil,
-            do: [headers: [{"accept", @json_api}], req: opts[:req]],
-            else: [
-              headers: [{"accept", @json_api}, {"content-type", @json_api}],
-              json: body,
-              req: opts[:req]
-            ]
+          cond do
+            opts[:form_multipart] ->
+              [headers: [{"accept", accept}], form_multipart: opts[:form_multipart]]
+
+            body == nil ->
+              [headers: [{"accept", accept}]]
+
+            true ->
+              [
+                headers: [{"accept", accept}, {"content-type", opts[:content_type] || @json_api}],
+                json: body
+              ]
+          end
+          |> Keyword.put(:req, opts[:req])
+          |> put_present_opt(:receive_timeout, opts[:receive_timeout])
 
         case do_request(method, path, req_opts, key) do
           # A soft-delete may answer 200 with the record or an empty 204.
@@ -1155,6 +1189,9 @@ defmodule KilnClient do
     Logger.error("Kiln #{method} #{path} failed: #{inspect(exception)}")
     {:error, %Error{reason: :transport, exception: exception, method: method, path: path}}
   end
+
+  defp put_present_opt(opts, _key, nil), do: opts
+  defp put_present_opt(opts, key, value), do: Keyword.put(opts, key, value)
 
   defp api_key(opts) do
     case Keyword.get(opts, :api_key) || Application.get_env(:kiln_client, :api_key) do
