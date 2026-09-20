@@ -719,6 +719,13 @@ jobs:
       - name: Lint (eslint + prettier)
         run: npm run lint
 
+      # Covers `test/` as well as `src/`, which the build below does not: it
+      # compiles `tsconfig.build.json`, scoped to `src/`. Without this step a
+      # type error in a test file only ever surfaced as a vitest failure, and
+      # then only if the bad line actually ran.
+      - name: Typecheck (tsc, src + test)
+        run: npm run typecheck
+
       - name: Build (tsc, strict)
         run: npm run build
 
