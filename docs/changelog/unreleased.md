@@ -5,6 +5,21 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Upgrade notes
+
+<a id="a-cdn-in-front-of-the-headless-api-now-caches-anonymous-jsonapi-graphql-get-and"></a>
+
+- **A CDN in front of the headless API now caches anonymous JSON:API, GraphQL
+  `GET` and `/api/search` responses for up to 60 seconds.** They used to go out
+  as Plug's `private, max-age=0`; they are now `public, max-age=60,
+  stale-while-revalidate=60` with an `ETag`. A credentialed request is
+  `private, no-store` and every response says `Vary: Accept, Authorization,
+  Origin`, so
+  a cache that honours `Vary` needs nothing. One that ignores it must be told to
+  bypass the cache on an `Authorization` header, or an editor's token is handed
+  the published answer instead of its drafts. `KILN_API_CACHE=false` restores
+  the old headers; `KILN_CDN_PURGE_URL` makes a publish visible at once.
+
 ## Breaking
 
 <a id="some-graphql-queries-that-ran-before-are-now-refused-as-too-costly-and-a"></a>
@@ -40,6 +55,45 @@ If you retire the old value before step 2, the DKIM key, social credentials,
 billing secrets and ActivityPub actor key are orphaned, exactly as before.
 Sessions are still signed out either way. See `docs/secrets-rotation.md`.
 ## Added
+
+<a id="anonymous-jsonapi-graphql-and-search-reads-are-cdn-cacheable-with-a-body-etag"></a>
+
+- **Anonymous JSON:API, GraphQL and search reads are CDN-cacheable, with a body
+  ETag and 304s.** Only the fired-artifact API sent cache headers before, so
+  every other delivery read reached the app — where Contentful, Sanity and
+  Storyblok serve those from a CDN. `KilnCMSWeb.Plugs.PublicCache` runs on
+  `/api/json`, `/gql` and `/api/search`: a `GET` with no `Authorization`,
+  `x-api-key`, unlock grant or cookie that answers `200` gets `public,
+  max-age=60, stale-while-revalidate=60` (`KILN_API_CACHE_MAX_AGE`,
+  `KILN_API_CACHE_SWR`), an `ETag` and a `304` for a matching
+  `If-None-Match`. The ETag is a digest of the body and its content type
+  rather than of chosen fields, so it cannot miss an input the way #1079's
+  did; it is weak (`W/"…"`) because Bandit will not gzip a response with a
+  strong one. Anything carrying a credential is `private, no-store`, since an
+  editor's token sees drafts on the same URLs. GraphQL is cached only for a
+  `GET` whose document is in the URL and that completed without `errors`;
+  Absinthe refuses mutations over `GET`, and a `POST` is never public. A
+  handler that sets its own `cache-control` is never overridden. `Vary:
+  Accept, Authorization, Origin` is merged into any existing `Vary` rather than
+  replacing it — `Origin` always, since a copy cached without one lacks the
+  CORS header a browser needs; the locale is always a URL input, so there is
+  no `Accept-Language` to vary on. See `docs/api.md` → "Caching and
+  CDNs".
+
+<a id="optional-cdn-purge-on-publish-kilncdnpurgeurl"></a>
+
+- **Optional CDN purge on publish (`KILN_CDN_PURGE_URL`).** Cacheable API
+  responses, and public fired-artifact ones, carry the site's surrogate key as
+  `Surrogate-Key` and `Cache-Tag`. With a purge URL set, every
+  `<type>.published`, `.unpublished`, `.updated` and `release.published`
+  enqueues one purge of that key — `{"tags": [...]}` plus a `Surrogate-Key`
+  header, so the Cloudflare and Fastly purge APIs work directly
+  (`KILN_CDN_PURGE_TOKEN`, `KILN_CDN_PURGE_TOKEN_HEADER`). It hangs off the
+  webhook funnel beside automation and federation, is coalesced per site among
+  *scheduled* jobs only (a running purge may predate the publish) and per
+  transaction (so a release's purge runs after it commits), retried with
+  backoff, and sent through `KilnCMS.SafeFetch`. The whole site is purged
+  because a list or query response records no document ids.
 
 <a id="the-official-sdks-write-speak-graphql-and-are-ready-to-publish"></a>
 

@@ -742,6 +742,116 @@ submission is deliberately CSRF-free. See [forms.md](forms.md#embedding-on-anoth
 Inactive or unknown slugs render a framable "Form not found" page (HTTP 404)
 rather than a blank iframe.
 
+## Caching and CDNs
+
+Every headless read surface tells a shared cache what it may keep, so a CDN in
+front of Kiln can answer delivery traffic instead of the app.
+
+| Surface | Anonymous `200` | With a credential |
+|---------|-----------------|-------------------|
+| `GET /api/content/:type/:slug` (fired artifacts) | `public, max-age=300`, `ETag`, `Last-Modified` | same (the artifact is published-only); a passphrase-unlocked document is `private, no-store` |
+| `GET /api/json/*` (JSON:API) | `public, max-age=60, stale-while-revalidate=60`, `ETag` | `private, no-store` |
+| `GET /gql?query=…` (GraphQL queries over `GET`) | `public, max-age=60, stale-while-revalidate=60`, `ETag` | `private, no-store` |
+| `GET /api/search` | `public, max-age=60, stale-while-revalidate=60`, `ETag` | `private, no-store` |
+| `POST /gql`, any JSON:API write | never cached | never cached |
+
+**Anonymous means no credential at all**: no `Authorization` header (a JWT or
+`kiln_…` API key — even an invalid one), no `x-api-key`, no unlock grant
+(`x-kiln-unlock` or `?unlock=`) and no `Cookie`. Anything else gets
+`private, no-store`, because a bearer token with editor rights sees **drafts on
+the same URLs** — its response must never be stored where the next anonymous
+caller could be handed it.
+
+What the cached responses carry:
+
+- **An `ETag` that is a digest of the body** (and its content type). It
+  changes whenever anything that shapes the response changes — there is no list
+  of inputs to keep in sync with the body. Send it back as `If-None-Match` and a
+  still-current response is a bodyless **`304 Not Modified`**. It is a *weak*
+  validator (`W/"…"`) so the server can still gzip the response; conditional
+  `GET`s compare weakly anyway. A credentialed request never gets a `304` from
+  this: it has no `ETag` to match.
+- **`Vary: Accept, Authorization, Origin`** on every response of these
+  surfaces, cached or not. `Origin` because the CORS `Access-Control-Allow-Origin`
+  header is only sent to a request with an allowed `Origin` — a copy cached from
+  a server-side fetch must not be handed to a browser. The locale is always part
+  of the URL (`?locale=`, a GraphQL argument, a JSON:API filter or a `/fr/`
+  prefix), so there is no `Accept-Language` or `Cookie` variation to key on.
+- **`Surrogate-Key: kiln kiln-org-<site id>`** and the same keys as
+  **`Cache-Tag`** (comma-separated), also on public fired-artifact responses —
+  see [Purging on publish](#purging-on-publish).
+
+Only a `200` is cached, and only for a `GET` with no request body. A GraphQL
+`GET` is cached only when the document is in the URL (`?query=`), and not when
+it answers `200` with an `errors` member (a failed resolver, a validation
+error), so a transient failure is not pinned for a minute. Mutations are never
+cached: Absinthe refuses a mutation over `GET` (`405`), and a `POST` is never
+public.
+
+Other `/api` routes — menus, `/resolve`, `/locales`, `/schema`, related
+content, `/ask` — keep their own headers, set per controller.
+
+### Configuring your CDN
+
+- **Bypass the cache when the request has an `Authorization` header** (and
+  ideally `x-kiln-unlock`), unless your CDN honours `Vary: Authorization`.
+  Fastly, Varnish and most standards-following caches do; some CDNs ignore
+  `Vary` apart from `Accept-Encoding` and would otherwise hand the anonymous
+  response to an editor's token or, worse, store nothing but key on the URL.
+  RFC 9111 forbids a shared cache from *storing* a response to an
+  `Authorization` request that is not marked `public`, which Kiln never does for
+  those.
+- **Key on the full URL including the query string.** Every input to these
+  bodies that is not a credential is in it.
+- **Don't cache `POST /gql`.** Use `GET` for queries you want cached; the query
+  string carries the document and variables.
+- **Search analytics count only what reaches Kiln.** `/api/search` records the
+  query for the search report at `/editor/analytics` when it runs, so a CDN hit is not
+  counted.
+
+`KILN_API_CACHE=false` keeps anonymous responses at the `private` default;
+`KILN_API_CACHE_MAX_AGE` and `KILN_API_CACHE_SWR` tune the two lifetimes. See
+[environment-variables.md](environment-variables.md#api-caching-and-cdn-purge).
+
+### Purging on publish
+
+Without a purge, a publish reaches readers when the cached copy expires —
+within `KILN_API_CACHE_MAX_AGE` (60 s by default) for JSON:API, GraphQL and
+search, 300 s for fired artifacts. Set **`KILN_CDN_PURGE_URL`** and every
+`<type>.published`, `<type>.unpublished`, `<type>.updated` and
+`release.published` in a site sends one purge of that site's key. Those are the
+content webhook events; a change that emits none — renaming a category or tag,
+editing a type definition or custom field — is not purged and ages out on the
+`max-age`:
+
+```http
+POST <KILN_CDN_PURGE_URL>
+content-type: application/json
+surrogate-key: kiln-org-<site id>
+authorization: Bearer <KILN_CDN_PURGE_TOKEN>
+
+{"tags": ["kiln-org-<site id>"]}
+```
+
+The body is Cloudflare's purge-by-tag request and the header is Fastly's
+purge-by-key request, so either can be the URL directly:
+
+- **Cloudflare:** `KILN_CDN_PURGE_URL=https://api.cloudflare.com/client/v4/zones/<zone>/purge_cache`,
+  `KILN_CDN_PURGE_TOKEN=<API token with Cache Purge>`.
+- **Fastly:** `KILN_CDN_PURGE_URL=https://api.fastly.com/service/<service>/purge`,
+  `KILN_CDN_PURGE_TOKEN=<API token>`, `KILN_CDN_PURGE_TOKEN_HEADER=fastly-key`.
+- **Anything else:** point it at a small relay that translates the request.
+
+The purge covers the whole site rather than the one document: a list or query
+response can contain any number of documents and nothing records which, so the
+site key is the one invalidation that is right for every cached response.
+Purges are coalesced (a release publishing fifty documents sends one, after it
+commits), retried
+with backoff on failure, and sent through `KilnCMS.SafeFetch`, so in production
+the URL must be `https://` and resolve to a public address. A purge that never
+lands leaves the cached copies to expire on their own. The `kiln` key on every
+response exists for a deployment-wide purge by hand.
+
 ## Rate limits
 
 API and auth endpoints are rate-limited per client IP (Hammer fixed window).

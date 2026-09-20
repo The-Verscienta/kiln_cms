@@ -56,9 +56,18 @@ defmodule KilnCMSWeb.Router do
 
   pipeline :graphql do
     plug KilnCMSWeb.Plugs.RateLimit, :gql
+    # Anonymous GET queries become CDN-cacheable with an ETag; anything carrying
+    # a credential is `private, no-store`. Mutations are never cached: Absinthe
+    # refuses them over GET, and only a 200 without `errors` qualifies.
+    # First in the pipeline so its `before_send` is registered even for a
+    # request a later plug refuses — a batch rejected below still leaves with
+    # an explicit `private, no-store` rather than no directive for a CDN to
+    # interpret.
+    plug KilnCMSWeb.Plugs.PublicCache, graphql: true
     # A batched body (a JSON array of operations) is refused past a size, and
     # every operation in it after the first is charged to `:gql` as well.
-    # Introspection is refused by the document pipeline (`KilnCMSWeb.GraphqlLimits`).
+    # Introspection is refused by the document pipeline (`KilnCMSWeb.GraphqlLimits`),
+    # which replaced the `DisableGraphqlIntrospection` plug that stood here.
     plug KilnCMSWeb.Plugs.GraphqlBatchLimit, :gql
     plug :load_from_bearer
     plug :set_actor, :user
@@ -111,6 +120,14 @@ defmodule KilnCMSWeb.Router do
   # already go through `KilnCMSWeb.Params` (#751).
   pipeline :ash_json_api do
     plug KilnCMSWeb.Plugs.AshJsonApiParams
+  end
+
+  # Shared-cache headers for anonymous reads of a headless read surface —
+  # `public` + a body ETag + 304s for a request with no credential, `private,
+  # no-store` for one with. See `KilnCMSWeb.Plugs.PublicCache` for exactly what
+  # counts as anonymous and why a surface must be audited before joining.
+  pipeline :public_cache do
+    plug KilnCMSWeb.Plugs.PublicCache
   end
 
   # Headless sign-in — exchanges credentials for a bearer token (issue #37).
@@ -586,7 +603,7 @@ defmodule KilnCMSWeb.Router do
   # `/api/json/open_api` follows the same `:api_docs` flag as the explorer
   # above (#567); the content routes are unaffected.
   scope "/api/json" do
-    pipe_through [:api, :ash_json_api]
+    pipe_through [:api, :ash_json_api, :public_cache]
 
     forward "/", KilnCMSWeb.AshJsonApiRouter
   end
@@ -642,6 +659,17 @@ defmodule KilnCMSWeb.Router do
     post "/content/:type/:slug/unlock", ArtifactController, :unlock
   end
 
+  # Hybrid search (keyword + semantic RRF, reranked when enabled) — not
+  # expressible as one Ash action, so it gets a thin controller (roadmap #4).
+  # Its own scope for `:public_cache`: actorless (#1013), so its anonymous
+  # answer is the same for everyone at this URL. Declared before the scope
+  # below; the paths do not overlap.
+  scope "/api", KilnCMSWeb do
+    pipe_through [:api, :public_cache]
+
+    get "/search", SearchApiController, :index
+  end
+
   # Headless delivery of fired artifacts (Kiln v2 — D9). The v2 content API serves
   # immutable per-surface artifacts, not the raw editable block tree.
   scope "/api", KilnCMSWeb do
@@ -685,10 +713,6 @@ defmodule KilnCMSWeb.Router do
     # Admin-defined form schemas, for headless frontends hydrating
     # `data-kiln-form` placeholders (submissions POST via :public_form below).
     get "/forms/:slug", FormController, :schema
-
-    # Hybrid search (keyword + semantic RRF, reranked when enabled) — not
-    # expressible as one Ash action, so it gets a thin controller (roadmap #4).
-    get "/search", SearchApiController, :index
 
     # RAG "ask your content" (#339): retrieval over published content + cited
     # sources, with an optional (config-gated) generated answer.

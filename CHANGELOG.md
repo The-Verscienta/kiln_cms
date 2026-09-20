@@ -54,6 +54,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **A CDN in front of the headless API now caches anonymous JSON:API, GraphQL
+  `GET` and `/api/search` responses for up to 60 seconds.**
+  ([#1571](https://github.com/The-Verscienta/kiln_cms/issues/1571) · [long form](docs/changelog/unreleased.md#a-cdn-in-front-of-the-headless-api-now-caches-anonymous-jsonapi-graphql-get-and))
+
 ### Breaking
 
 - **Some GraphQL queries that ran before are now refused as too costly, and a
@@ -66,6 +72,13 @@ Every summary line below that was shortened links to its own entry there.
   order.**
   ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#rotating-secretkeybase-keeps-stored-keys-now-if-the-steps-run-in-order))
 ### Added
+
+- **Anonymous JSON:API, GraphQL and search reads are CDN-cacheable, with a body
+  ETag and 304s.**
+  ([#1571](https://github.com/The-Verscienta/kiln_cms/issues/1571) · [long form](docs/changelog/unreleased.md#anonymous-jsonapi-graphql-and-search-reads-are-cdn-cacheable-with-a-body-etag))
+
+- **Optional CDN purge on publish (`KILN_CDN_PURGE_URL`).**
+  ([#1571](https://github.com/The-Verscienta/kiln_cms/issues/1571) · [long form](docs/changelog/unreleased.md#optional-cdn-purge-on-publish-kilncdnpurgeurl))
 
 - **The official SDKs write, speak GraphQL, and are ready to publish.**
   ([#330](https://github.com/The-Verscienta/kiln_cms/issues/330) · [long form](docs/changelog/unreleased.md#the-official-sdks-write-speak-graphql-and-are-ready-to-publish))

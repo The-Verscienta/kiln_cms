@@ -26,6 +26,9 @@ config :kiln_cms, :async_analytics, false
 config :kiln_cms, KilnCMS.CMS.ContentTypes, cache_registry?: false
 # Route outbound webhook HTTP through a Req.Test stub in tests.
 config :kiln_cms, KilnCMS.Webhooks, req_options: [plug: {Req.Test, KilnCMS.Webhooks}]
+# The optional CDN purge (`KILN_CDN_PURGE_URL`) is unset here, like a default
+# deployment; its tests set a URL and stub the receiver.
+config :kiln_cms, KilnCMS.CDN, req_options: [plug: {Req.Test, KilnCMS.CDN}]
 
 # oEmbed (#489) is OFF by default everywhere, including here — the tests that
 # need it turn it on themselves, so nothing accidentally makes an outbound
