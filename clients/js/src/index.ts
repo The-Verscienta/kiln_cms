@@ -37,6 +37,7 @@ export type {
   Item,
   ListOptions,
   ListResult,
+  MintedPreview,
   PortableTextBlock,
   PortableTextMarkDef,
   PortableTextSpan,

@@ -230,6 +230,26 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
   write to. Ignored under S3.
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529))
 
+<a id="share-a-draft-copy-preview-link-in-the-editor-and-a-preview-token-api"></a>
+
+- **Share a draft: *Copy preview link* in the editor, and a preview-token API.**
+  `GET /preview/:token` and its shared view `/preview/:token/live` have existed
+  since #379, but nothing outside the tests ever minted a token, so neither
+  could be used. The content editor now has a **Copy preview link** button: it
+  mints a read-only link to that one document, valid for 15 minutes, copies it
+  and shows it with what it grants. A headless front end's draft mode mints
+  server-side with `POST /api/content/:type/:id/preview-token` (an editor's
+  `:read` key is enough) and hands the browser the token instead of its key.
+  The response is `{token, url, type, id, expires_at, expires_in}`, where `url` is on
+  the owning site's host, the only one that honours it. The JS client gains
+  `mintPreview(type, id)`. Minting is gated on **editorial read visibility**
+  (`Checks.ReadableContentType`, the grant that shows an editor drafts), not on
+  reading the row. Otherwise a viewer or a type-scoped editor could mint a link
+  to a published page and read its pending working copy. `docs/api.md` →
+  Preview tokens has the refusals (401/403/404). `docs/visual-editing-bridge.md`
+  now asks for a `:read` key rather than `:read_write`, since the bridge only
+  reads. The bridge itself still takes a key, not a preview token.
+
 <a id="the-graphql-schema-and-the-openapi-document-are-committed-and-a-production-site"></a>
 
 - **The GraphQL schema and the OpenAPI document are committed, and a production
@@ -311,6 +331,18 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
   combining characters; a value that only passed because of that gap is now
   rejected with the same validation error as any other over-long string.
 ## Fixed
+
+<a id="a-preview-link-shows-the-working-copy-and-works-for-admin-defined-types"></a>
+
+- **A preview link shows a live document's unpublished edits, and works for
+  admin-defined types.** Both preview surfaces rendered the record's row. For a
+  published document with pending edits, that is the text readers already
+  have, not the working copy being reviewed; both now render
+  `WorkingCopy.view/1`, as the editor and a release preview do. A token also
+  named its type by resource module, so every admin-defined type signed itself
+  as `entry` and could not be resolved. Tokens now carry the public type name
+  and are resolved under the token's org. A token in the old shape is refused
+  as invalid. None were ever minted outside tests.
 
 <a id="a-delivery-that-fails-on-an-unreadable-signing-key-now-says-so"></a>
 

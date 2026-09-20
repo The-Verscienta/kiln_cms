@@ -12618,6 +12618,57 @@
         ]
       }
     },
+    "/api/content/{type}/{id}/preview-token": {
+      "post": {
+        "callbacks": {},
+        "deprecated": false,
+        "description": "Returns a signed, read-only token for this one document (redeem it at `GET /preview/{token}`), its shareable `url` on the owning site's host, and when it expires (15 minutes). Requires a caller who sees this document's drafts as an editor; a `:read` API key is enough.",
+        "operationId": "createPreviewToken",
+        "parameters": [
+          {
+            "description": "Content type name, e.g. `post`",
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The document's id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "`{token, url, type, id, expires_at, expires_in}`"
+          },
+          "401": {
+            "description": "No (valid) credential"
+          },
+          "403": {
+            "description": "Readable, but not as an editor (e.g. a viewer on a published page)"
+          },
+          "404": {
+            "description": "Unknown type or document"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mint a short-lived preview link for one draft",
+        "tags": [
+          "Delivery"
+        ]
+      }
+    },
     "/api/content/{type}/{slug}": {
       "get": {
         "callbacks": {},
@@ -24001,7 +24052,7 @@
       "get": {
         "callbacks": {},
         "deprecated": false,
-        "description": "Returns a single referenced draft Page/Post (curated public fields) for a short-lived signed token. No account needed; the token is the credential.",
+        "description": "Returns a single referenced draft of any content type (curated public fields; a live document's unpublished working copy) for a short-lived signed token. No account needed; the token is the credential.",
         "operationId": "getPreview",
         "parameters": [
           {

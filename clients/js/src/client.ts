@@ -2,9 +2,9 @@
  * Typed client for the KilnCMS APIs — the JSON:API read surface at
  * `/api/json/*`, per-type and hybrid search, fired artifacts at
  * `/api/content/:type/:slug` (including `?as_of=` point-in-time reads),
- * preview tokens, the JSON:API write surface (create, update, workflow
- * transitions, soft-delete) and a minimal `/gql` helper (see Kiln's
- * `docs/json-api.md` and `docs/headless-consumer-guide.md`).
+ * preview tokens — minting and redeeming them — the JSON:API write surface
+ * (create, update, workflow transitions, soft-delete) and a minimal `/gql`
+ * helper (see Kiln's `docs/json-api.md` and `docs/headless-consumer-guide.md`).
  *
  * A port of the official Elixir client (`clients/elixir/kiln_client`), which
  * encodes the safe defaults so consumers don't rediscover the traps one
@@ -69,6 +69,7 @@ import type {
   Item,
   ListOptions,
   ListResult,
+  MintedPreview,
   RequestOptions,
   SchemaOptions,
   SearchOptions,
@@ -386,6 +387,30 @@ export class KilnClient {
   }
 
   /**
+   * Mint a draft preview link: `POST /api/content/:type/:id/preview-token`.
+   * The server half of a front end's draft mode — call it where the API key
+   * lives, then pass the returned `token` to the browser, which redeems it with
+   * `preview(token)` and holds no credential of its own. Needs a key (or
+   * bearer token) whose owner sees this document's drafts as an editor; a
+   * `:read` key is enough. Refusals throw `KilnHttpError` (401 no credential,
+   * 403 not an editor of it, 404 unknown document).
+   */
+  async mintPreview(
+    type: string,
+    id: string,
+    options: RequestOptions = {},
+  ): Promise<MintedPreview> {
+    const path = `/api/content/${encodeURIComponent(type)}/${encodeURIComponent(id)}/preview-token`;
+    return (await this.request(
+      path,
+      new URLSearchParams(),
+      options.signal,
+      "application/json",
+      "POST",
+    )) as MintedPreview;
+  }
+
+  /**
    * The site's live delivery schema: `GET /api/schema` — a JSON Schema of the
    * `:json` fired-artifact shape, dynamic content types and custom fields
    * included. Feed it to `emitTypes` (or the `kiln-types` CLI) for per-site
@@ -592,8 +617,9 @@ export class KilnClient {
     params: URLSearchParams,
     signal: AbortSignal | undefined,
     accept = JSON_API,
+    method: "GET" | "POST" = "GET",
   ): Promise<unknown> {
-    return this.send("GET", path, { params, signal, accept });
+    return this.send(method, path, { params, signal, accept });
   }
 
   // Writes fail fast without a key: an anonymous write can only be refused,

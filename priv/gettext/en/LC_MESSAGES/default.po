@@ -1919,6 +1919,11 @@ msgstr ""
 msgid "Anyone with editor access can publish. Submitting for review stays available."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Anyone with this link can view this draft, without signing in, for 15 minutes. It follows your edits live."
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Anyone with this passphrase can read the published page. Weak protection, meant for convenience — use Audience for real access control."
@@ -3210,6 +3215,7 @@ msgid "Copied to clipboard."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -3224,6 +3230,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Copy link to %{title}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Copy preview link"
 msgstr ""
 
 #: lib/kiln_cms_web/live/api_key_live.ex
@@ -8841,6 +8852,11 @@ msgstr ""
 msgid "Preview URL matches this console's origin, so the frame is sandboxed without cookies. Signed-in or member-only pages render as anonymous here. Point PRESENTATION_PREVIEW_URL at a separate front-end origin to keep preview authentication."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Preview link"
+msgstr ""
+
 #: lib/kiln_cms_web/live/token_preview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Preview links are short-lived. Ask the editor who shared it for a fresh one."
@@ -13620,6 +13636,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "You can't create this content."
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "You can't share a preview of this document."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/billing_controller.ex

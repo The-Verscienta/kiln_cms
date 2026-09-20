@@ -646,12 +646,58 @@ verification, and the SSRF/egress protections applied to endpoint URLs.
 
 ## Preview tokens
 
-`GET /preview/:token` returns a single referenced **draft** Page/Post as JSON
-(curated public fields only). The token is a stateless `Phoenix.Token` with a
-**15-minute** expiry — share a draft without granting a standing credential. It
-binds one record *and its site*: the read it authorizes is scoped to the org
-the token was minted under, and a token presented on another site's host is
-refused, so a draft is only ever served by the site that owns it.
+`GET /preview/:token` returns a single referenced **draft** of any content type
+(pages, posts, project types and admin-defined types alike) as JSON (curated
+public fields only). For a live document with unpublished edits it is the
+**working copy** — what the editor sees — not the published row. A browser
+opening the same URL is redirected to `/preview/:token/live`, a shared view
+anyone holding the link can watch without signing in.
+
+The token is a stateless `Phoenix.Token` with a **15-minute** expiry — share a
+draft without granting a standing credential. It is **read-only** and
+**per-document**: it binds one record *and its site*. The read it authorizes is
+scoped to the org the token was minted under, and a token presented on another
+site's host is refused, so a draft is only ever served by the site that owns it.
+
+### Minting one
+
+Editors mint from the content editor's **Copy preview link** button. A headless
+front end (a framework's *draft mode*, a preview deployment) mints over the API:
+
+```
+POST /api/content/:type/:id/preview-token
+Authorization: Bearer kiln_…            # an editor's API key, or a bearer JWT
+```
+
+```json
+201 Created
+{
+  "token": "SFMyNTY…",
+  "url": "https://acme.example.com/preview/SFMyNTY…",
+  "type": "post",
+  "id": "0b6c…",
+  "expires_at": "2026-09-19T14:15:00Z",
+  "expires_in": 900
+}
+```
+
+`url` is on the host of the site the document belongs to (the only host that
+will honour it). Keep your API key on the server and hand the browser the
+**token** — redeem it with `GET /preview/:token` — so a leaked value exposes one
+draft for a few minutes rather than every draft indefinitely. Mint a fresh one
+per preview render rather than caching it.
+
+Who may mint: anyone who sees this document's **drafts** as an editor — an
+admin, or an editor whose read scope covers the type (`readable_types`, see
+[granular-rbac.md](granular-rbac.md)). A `:read`-scoped API key is enough: the
+token grants a read, never a write. The responses:
+
+| Status | When |
+|--------|------|
+| `201` | Minted. `Cache-Control: private, no-store`. |
+| `401` | No credential (or an invalid one). |
+| `403` | The caller can read the document, but not as an editor — e.g. a viewer on a published page, whose pending edits they may not see. |
+| `404` | Unknown type, no such record, or one the caller cannot read at all. |
 
 ## Cross-origin (CORS)
 

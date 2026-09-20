@@ -7,6 +7,7 @@
 export interface RecordedCall {
   method: string;
   url: URL;
+  method: string;
   headers: Record<string, string>;
   /** The request body, JSON-parsed; `undefined` when none was sent. */
   body: unknown;

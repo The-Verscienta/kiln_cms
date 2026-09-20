@@ -101,6 +101,9 @@ Every summary line below that was shortened links to its own entry there.
 - **`KILN_MEDIA_ROOT`: a stable directory for local media.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#kilnmediaroot-a-stable-directory-for-local-media))
 
+- **Share a draft: *Copy preview link* in the editor, and a preview-token API.**
+  ([long form](docs/changelog/unreleased.md#share-a-draft-copy-preview-link-in-the-editor-and-a-preview-token-api))
+
 - **The GraphQL schema and the OpenAPI document are committed, and a production
   site hands its own to an API key.**
   ([#567](https://github.com/The-Verscienta/kiln_cms/issues/567), [#1567](https://github.com/The-Verscienta/kiln_cms/issues/1567) · [long form](docs/changelog/unreleased.md#the-graphql-schema-and-the-openapi-document-are-committed-and-a-production-site))
@@ -122,6 +125,10 @@ Every summary line below that was shortened links to its own entry there.
 - **String lengths are counted in codepoints, as Postgres counts them.**
   ([long form](docs/changelog/unreleased.md#string-lengths-are-counted-in-codepoints-as-postgres-counts-them))
 ### Fixed
+
+- **A preview link shows a live document's unpublished edits, and works for
+  admin-defined types.**
+  ([long form](docs/changelog/unreleased.md#a-preview-link-shows-the-working-copy-and-works-for-admin-defined-types))
 
 - **A delivery that fails on an unreadable signing key now says so.**
   ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#a-delivery-that-fails-on-an-unreadable-signing-key-now-says-so))

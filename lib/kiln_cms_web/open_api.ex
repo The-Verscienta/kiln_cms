@@ -372,7 +372,8 @@ defmodule KilnCMSWeb.OpenApi do
           operationId: "getPreview",
           summary: "Fetch an unpublished document via a signed preview token",
           description:
-            "Returns a single referenced draft Page/Post (curated public fields) " <>
+            "Returns a single referenced draft of any content type (curated public fields; " <>
+              "a live document's unpublished working copy) " <>
               "for a short-lived signed token. No account needed; the token is the " <>
               "credential.",
           security: [],
@@ -380,6 +381,33 @@ defmodule KilnCMSWeb.OpenApi do
           responses: %{
             200 => %OpenApiSpex.Response{description: "The draft document"},
             404 => %OpenApiSpex.Response{description: "Invalid or expired preview link"}
+          }
+        }
+      },
+      "/api/content/{type}/{id}/preview-token" => %OpenApiSpex.PathItem{
+        post: %OpenApiSpex.Operation{
+          tags: ["Delivery"],
+          operationId: "createPreviewToken",
+          summary: "Mint a short-lived preview link for one draft",
+          description:
+            "Returns a signed, read-only token for this one document (redeem it at " <>
+              "`GET /preview/{token}`), its shareable `url` on the owning site's host, " <>
+              "and when it expires (15 minutes). Requires a caller who sees this " <>
+              "document's drafts as an editor; a `:read` API key is enough.",
+          security: [%{"bearerAuth" => []}],
+          parameters: [
+            path_param(:type, "Content type name, e.g. `post`"),
+            path_param(:id, "The document's id")
+          ],
+          responses: %{
+            201 => %OpenApiSpex.Response{
+              description: "`{token, url, type, id, expires_at, expires_in}`"
+            },
+            401 => %OpenApiSpex.Response{description: "No (valid) credential"},
+            403 => %OpenApiSpex.Response{
+              description: "Readable, but not as an editor (e.g. a viewer on a published page)"
+            },
+            404 => %OpenApiSpex.Response{description: "Unknown type or document"}
           }
         }
       }

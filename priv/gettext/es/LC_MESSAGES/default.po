@@ -1919,6 +1919,11 @@ msgstr "Subido por cualquiera"
 msgid "Anyone with editor access can publish. Submitting for review stays available."
 msgstr "Cualquiera con acceso de editor puede publicar. Enviar a revisión sigue disponible."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Anyone with this link can view this draft, without signing in, for 15 minutes. It follows your edits live."
+msgstr "Cualquiera con este enlace puede ver este borrador, sin iniciar sesión, durante 15 minutos. Sigue tus cambios en directo."
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Anyone with this passphrase can read the published page. Weak protection, meant for convenience — use Audience for real access control."
@@ -3210,6 +3215,7 @@ msgid "Copied to clipboard."
 msgstr "Copiado al portapapeles."
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -3225,6 +3231,11 @@ msgstr "Copiar en un borrador nuevo"
 #, elixir-autogen, elixir-format
 msgid "Copy link to %{title}"
 msgstr "Copiar el enlace a %{title}"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Copy preview link"
+msgstr "Copiar enlace de vista previa"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
@@ -8841,6 +8852,11 @@ msgstr "Vista previa"
 msgid "Preview URL matches this console's origin, so the frame is sandboxed without cookies. Signed-in or member-only pages render as anonymous here. Point PRESENTATION_PREVIEW_URL at a separate front-end origin to keep preview authentication."
 msgstr "La URL de vista previa coincide con el origen de esta consola, así que el marco queda aislado (sandbox) sin cookies. Las páginas con sesión iniciada o solo para miembros se muestran aquí como anónimas. Configura PRESENTATION_PREVIEW_URL con un origen de front-end independiente para conservar la autenticación en la vista previa."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Preview link"
+msgstr "Enlace de vista previa"
+
 #: lib/kiln_cms_web/live/token_preview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Preview links are short-lived. Ask the editor who shared it for a fresh one."
@@ -13621,6 +13637,11 @@ msgstr "No puedes crear contenido de tipo %{type}."
 #, elixir-autogen, elixir-format
 msgid "You can't create this content."
 msgstr "No puedes crear este contenido."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "You can't share a preview of this document."
+msgstr "No puedes compartir una vista previa de este documento."
 
 #: lib/kiln_cms_web/controllers/billing_controller.ex
 #, elixir-autogen, elixir-format

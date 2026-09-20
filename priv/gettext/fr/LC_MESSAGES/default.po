@@ -1919,6 +1919,11 @@ msgstr "Téléversé par n'importe qui"
 msgid "Anyone with editor access can publish. Submitting for review stays available."
 msgstr "Toute personne ayant un accès éditeur peut publier. L'envoi en relecture reste disponible."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Anyone with this link can view this draft, without signing in, for 15 minutes. It follows your edits live."
+msgstr "Toute personne disposant de ce lien peut voir ce brouillon, sans se connecter, pendant 15 minutes. Il suit vos modifications en direct."
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Anyone with this passphrase can read the published page. Weak protection, meant for convenience — use Audience for real access control."
@@ -3210,6 +3215,7 @@ msgid "Copied to clipboard."
 msgstr "Copié dans le presse-papiers."
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -3225,6 +3231,11 @@ msgstr "Copier dans un nouveau brouillon"
 #, elixir-autogen, elixir-format
 msgid "Copy link to %{title}"
 msgstr "Copier le lien vers %{title}"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Copy preview link"
+msgstr "Copier le lien d’aperçu"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
@@ -8841,6 +8852,11 @@ msgstr "Aperçu"
 msgid "Preview URL matches this console's origin, so the frame is sandboxed without cookies. Signed-in or member-only pages render as anonymous here. Point PRESENTATION_PREVIEW_URL at a separate front-end origin to keep preview authentication."
 msgstr "L'URL de prévisualisation correspond à l'origine de cette console, donc le cadre est isolé (sandbox) sans cookies. Les pages connectées ou réservées aux membres s'affichent ici comme anonymes. Configurez PRESENTATION_PREVIEW_URL avec une origine front-end distincte pour conserver l'authentification en prévisualisation."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Preview link"
+msgstr "Lien d’aperçu"
+
 #: lib/kiln_cms_web/live/token_preview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Preview links are short-lived. Ask the editor who shared it for a fresh one."
@@ -13621,6 +13637,11 @@ msgstr "Vous ne pouvez pas créer de contenu %{type}."
 #, elixir-autogen, elixir-format
 msgid "You can't create this content."
 msgstr "Vous ne pouvez pas créer ce contenu."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "You can't share a preview of this document."
+msgstr "Vous ne pouvez pas partager un aperçu de ce document."
 
 #: lib/kiln_cms_web/controllers/billing_controller.ex
 #, elixir-autogen, elixir-format
