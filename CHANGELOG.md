@@ -62,6 +62,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **The official SDKs write, speak GraphQL, and are ready to publish.**
+  ([#330](https://github.com/The-Verscienta/kiln_cms/issues/330) · [long form](docs/changelog/unreleased.md#the-official-sdks-write-speak-graphql-and-are-ready-to-publish))
+
 - **Rotating `SECRET_KEY_BASE` no longer loses database-stored keys.**
   ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#rotating-secretkeybase-no-longer-loses-database-stored-keys))
 
