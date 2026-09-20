@@ -181,8 +181,6 @@ Every summary line below that was shortened links to its own entry there.
 - **Webhook signing secrets are encrypted at rest.**
   ([long form](docs/changelog/unreleased.md#webhook-signing-secrets-are-encrypted-at-rest))
 
-### Security
-
 - **Every advisory published against the 0.9.0 dependency set is fixed,
   including six CRITICAL in `ash_authentication`.**
   ([long form](docs/changelog/unreleased.md#every-advisory-published-against-the-090-dependency-set-is-fixed-including-six))

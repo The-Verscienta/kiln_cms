@@ -562,8 +562,6 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
   ledger) rather than sending it unsigned, and the console says so on the
   endpoint's row.
 
-## Security
-
 <a id="every-advisory-published-against-the-090-dependency-set-is-fixed-including-six"></a>
 
 - **Every advisory published against the 0.9.0 dependency set is fixed, including six CRITICAL in `ash_authentication`.** The lock behind v0.9.0 carried
