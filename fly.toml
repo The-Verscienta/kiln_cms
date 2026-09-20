@@ -18,7 +18,7 @@ app = "kiln"
 primary_region = "iad"
 
 [build]
-  image = "ghcr.io/the-verscienta/kiln_cms:0.9.0"
+  image = "ghcr.io/the-verscienta/kiln_cms:0.10.0"
 
 [env]
   PORT = "4000"

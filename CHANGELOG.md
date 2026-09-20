@@ -54,177 +54,183 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
-### Breaking
+## [0.10.0] - 2026-09-19
 
-- **Headless slug lookups now answer a missing translation from the site's
-  fallback chain, and an unsupported locale is a `400`.**
-  ([#1579](https://github.com/The-Verscienta/kiln_cms/pull/1579) · [long form](docs/changelog/unreleased.md#headless-slug-lookups-now-answer-a-missing-translation-from-the-sites-fallback))
+Long form: [docs/changelog/v0.10.0.md](docs/changelog/v0.10.0.md) —
+the 0.10.0 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
 - **Webhook signing secrets move to an encrypted column.**
-  ([long form](docs/changelog/unreleased.md#webhook-signing-secrets-move-to-an-encrypted-column))
+  ([long form](docs/changelog/v0.10.0.md#webhook-signing-secrets-move-to-an-encrypted-column))
 
 - **Webhook receivers should move to `x-kilncms-webhook-signature`.**
-  ([long form](docs/changelog/unreleased.md#webhook-receivers-should-move-to-x-kilncms-webhook-signature))
-
-### Upgrade notes
+  ([long form](docs/changelog/v0.10.0.md#webhook-receivers-should-move-to-x-kilncms-webhook-signature))
 
 - **A CDN in front of the headless API now caches anonymous JSON:API, GraphQL
   `GET` and `/api/search` responses for up to 60 seconds.**
-  ([#1571](https://github.com/The-Verscienta/kiln_cms/issues/1571) · [long form](docs/changelog/unreleased.md#a-cdn-in-front-of-the-headless-api-now-caches-anonymous-jsonapi-graphql-get-and))
-
-### Breaking
-
-- **Some GraphQL queries that ran before are now refused as too costly, and a
-  refused introspection query gets a GraphQL error instead of a 403.**
-  ([long form](docs/changelog/unreleased.md#some-graphql-queries-that-ran-before-are-now-refused-as-too-costly-and-a))
-
-### Upgrade notes
+  ([#1571](https://github.com/The-Verscienta/kiln_cms/issues/1571) · [long form](docs/changelog/v0.10.0.md#a-cdn-in-front-of-the-headless-api-now-caches-anonymous-jsonapi-graphql-get-and))
 
 - **Rotating `SECRET_KEY_BASE` keeps stored keys now, if the steps run in
   order.**
-  ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#rotating-secretkeybase-keeps-stored-keys-now-if-the-steps-run-in-order))
+  ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/v0.10.0.md#rotating-secretkeybase-keeps-stored-keys-now-if-the-steps-run-in-order))
+
+### Breaking
+
+- **Headless slug lookups now answer a missing translation from the site's
+  fallback chain, and an unsupported locale is a `400`.**
+  ([#1579](https://github.com/The-Verscienta/kiln_cms/pull/1579) · [long form](docs/changelog/v0.10.0.md#headless-slug-lookups-now-answer-a-missing-translation-from-the-sites-fallback))
+
+- **Some GraphQL queries that ran before are now refused as too costly, and a
+  refused introspection query gets a GraphQL error instead of a 403.**
+  ([long form](docs/changelog/v0.10.0.md#some-graphql-queries-that-ran-before-are-now-refused-as-too-costly-and-a))
+
 ### Added
 
 - **`GET /api/sync`: a delta API that sees deletions.**
-  ([#1581](https://github.com/The-Verscienta/kiln_cms/pull/1581) · [long form](docs/changelog/unreleased.md#get-apisync-a-delta-api-that-sees-deletions))
+  ([#1581](https://github.com/The-Verscienta/kiln_cms/pull/1581) · [long form](docs/changelog/v0.10.0.md#get-apisync-a-delta-api-that-sees-deletions))
 
 - **Locale fallback chains (`fr-CA → fr → en`), per site, on every delivery
   surface.**
-  ([#1579](https://github.com/The-Verscienta/kiln_cms/pull/1579) · [long form](docs/changelog/unreleased.md#locale-fallback-chains-fr-ca-fr-en-per-site-on-every-delivery-surface))
+  ([#1579](https://github.com/The-Verscienta/kiln_cms/pull/1579) · [long form](docs/changelog/v0.10.0.md#locale-fallback-chains-fr-ca-fr-en-per-site-on-every-delivery-surface))
 
 - **Webhooks announce a document's whole lifecycle: `created`, `archived`,
   `deleted` and `restored`.**
-  ([long form](docs/changelog/unreleased.md#webhooks-announce-a-documents-whole-lifecycle-created-archived-deleted-and))
+  ([long form](docs/changelog/v0.10.0.md#webhooks-announce-a-documents-whole-lifecycle-created-archived-deleted-and))
 
 - **Timestamped webhook signatures and a stable delivery id.**
-  ([long form](docs/changelog/unreleased.md#timestamped-webhook-signatures-and-a-stable-delivery-id))
+  ([long form](docs/changelog/v0.10.0.md#timestamped-webhook-signatures-and-a-stable-delivery-id))
 
 - **Conditional writes on the headless API: `ETag`, `If-Match` and
   `expectedLockVersion`.**
-  ([long form](docs/changelog/unreleased.md#conditional-writes-on-the-headless-api-etag-if-match-and-expectedlockversion))
+  ([long form](docs/changelog/v0.10.0.md#conditional-writes-on-the-headless-api-etag-if-match-and-expectedlockversion))
 
 - **Anonymous JSON:API, GraphQL and search reads are CDN-cacheable, with a body
   ETag and 304s.**
-  ([#1571](https://github.com/The-Verscienta/kiln_cms/issues/1571) · [long form](docs/changelog/unreleased.md#anonymous-jsonapi-graphql-and-search-reads-are-cdn-cacheable-with-a-body-etag))
+  ([#1571](https://github.com/The-Verscienta/kiln_cms/issues/1571) · [long form](docs/changelog/v0.10.0.md#anonymous-jsonapi-graphql-and-search-reads-are-cdn-cacheable-with-a-body-etag))
 
 - **Optional CDN purge on publish (`KILN_CDN_PURGE_URL`).**
-  ([#1571](https://github.com/The-Verscienta/kiln_cms/issues/1571) · [long form](docs/changelog/unreleased.md#optional-cdn-purge-on-publish-kilncdnpurgeurl))
+  ([#1571](https://github.com/The-Verscienta/kiln_cms/issues/1571) · [long form](docs/changelog/v0.10.0.md#optional-cdn-purge-on-publish-kilncdnpurgeurl))
 
 - **The official SDKs write, speak GraphQL, and are ready to publish.**
-  ([#330](https://github.com/The-Verscienta/kiln_cms/issues/330) · [long form](docs/changelog/unreleased.md#the-official-sdks-write-speak-graphql-and-are-ready-to-publish))
+  ([#330](https://github.com/The-Verscienta/kiln_cms/issues/330) · [long form](docs/changelog/v0.10.0.md#the-official-sdks-write-speak-graphql-and-are-ready-to-publish))
 
 - **Rotating `SECRET_KEY_BASE` no longer loses database-stored keys.**
-  ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#rotating-secretkeybase-no-longer-loses-database-stored-keys))
+  ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/v0.10.0.md#rotating-secretkeybase-no-longer-loses-database-stored-keys))
 
 - **A site's ActivityPub actor can be re-keyed.**
-  ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#a-sites-activitypub-actor-can-be-re-keyed))
+  ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/v0.10.0.md#a-sites-activitypub-actor-can-be-re-keyed))
 
 - **A site can send its mail through its own SMTP relay, set from the console.**
-  ([#1322](https://github.com/The-Verscienta/kiln_cms/issues/1322) · [long form](docs/changelog/unreleased.md#a-site-can-send-its-mail-through-its-own-smtp-relay-set-from-the-console))
+  ([#1322](https://github.com/The-Verscienta/kiln_cms/issues/1322) · [long form](docs/changelog/v0.10.0.md#a-site-can-send-its-mail-through-its-own-smtp-relay-set-from-the-console))
+
 - **`Idempotency-Key` on the headless writes.**
-  ([long form](docs/changelog/unreleased.md#idempotency-key-on-the-headless-writes))
+  ([long form](docs/changelog/v0.10.0.md#idempotency-key-on-the-headless-writes))
+
 - **Memberships can notify other systems: `membership.activated` and
   `membership.canceled` webhook events.**
-  ([#334](https://github.com/The-Verscienta/kiln_cms/issues/334) · [long form](docs/changelog/unreleased.md#memberships-can-notify-other-systems-membershipactivated-and-membershipcanceled))
+  ([#334](https://github.com/The-Verscienta/kiln_cms/issues/334) · [long form](docs/changelog/v0.10.0.md#memberships-can-notify-other-systems-membershipactivated-and-membershipcanceled))
+
 - **On-the-fly image transforms: `GET /media/:id/t/:ops`.**
-  ([#1584](https://github.com/The-Verscienta/kiln_cms/pull/1584) · [long form](docs/changelog/unreleased.md#on-the-fly-image-transforms-get-mediaidtops))
+  ([#1584](https://github.com/The-Verscienta/kiln_cms/pull/1584) · [long form](docs/changelog/v0.10.0.md#on-the-fly-image-transforms-get-mediaidtops))
+
 - **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**
-  ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#one-click-deploy-templates-for-render-railway-flyio-and-digitalocean))
+  ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/v0.10.0.md#one-click-deploy-templates-for-render-railway-flyio-and-digitalocean))
 
 - **`KILN_MEDIA_ROOT`: a stable directory for local media.**
-  ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#kilnmediaroot-a-stable-directory-for-local-media))
+  ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/v0.10.0.md#kilnmediaroot-a-stable-directory-for-local-media))
 
 - **Share a draft: *Copy preview link* in the editor, and a preview-token API.**
-  ([long form](docs/changelog/unreleased.md#share-a-draft-copy-preview-link-in-the-editor-and-a-preview-token-api))
+  ([long form](docs/changelog/v0.10.0.md#share-a-draft-copy-preview-link-in-the-editor-and-a-preview-token-api))
 
 - **The visual-editing bridge takes a preview token instead of an API key.**
-  ([long form](docs/changelog/unreleased.md#the-visual-editing-bridge-takes-a-preview-token-instead-of-an-api-key))
+  ([long form](docs/changelog/v0.10.0.md#the-visual-editing-bridge-takes-a-preview-token-instead-of-an-api-key))
 
 - **Upload media over the API: `POST /api/media`, URL imports, presigned direct
   uploads, metadata `PATCH`, and SDK support.**
-  ([#1576](https://github.com/The-Verscienta/kiln_cms/pull/1576) · [long form](docs/changelog/unreleased.md#upload-media-over-the-api))
+  ([#1576](https://github.com/The-Verscienta/kiln_cms/pull/1576) · [long form](docs/changelog/v0.10.0.md#upload-media-over-the-api))
 
 - **Version history over the API.**
-  ([#1574](https://github.com/The-Verscienta/kiln_cms/pull/1574) · [long form](docs/changelog/unreleased.md#version-history-over-the-api))
+  ([#1574](https://github.com/The-Verscienta/kiln_cms/pull/1574) · [long form](docs/changelog/v0.10.0.md#version-history-over-the-api))
 
 - **Content releases are readable over JSON:API.**
-  ([#500](https://github.com/The-Verscienta/kiln_cms/issues/500) · [long form](docs/changelog/unreleased.md#content-releases-are-readable-over-jsonapi))
+  ([#500](https://github.com/The-Verscienta/kiln_cms/issues/500) · [long form](docs/changelog/v0.10.0.md#content-releases-are-readable-over-jsonapi))
 
 - **The GraphQL schema and the OpenAPI document are committed, and a production
   site hands its own to an API key.**
-  ([#567](https://github.com/The-Verscienta/kiln_cms/issues/567), [#1567](https://github.com/The-Verscienta/kiln_cms/issues/1567) · [long form](docs/changelog/unreleased.md#the-graphql-schema-and-the-openapi-document-are-committed-and-a-production-site))
+  ([#567](https://github.com/The-Verscienta/kiln_cms/issues/567), [#1567](https://github.com/The-Verscienta/kiln_cms/issues/1567) · [long form](docs/changelog/v0.10.0.md#the-graphql-schema-and-the-openapi-document-are-committed-and-a-production-site))
 
 - **An opt-in Prometheus endpoint for the app's metrics.**
-  ([#1362](https://github.com/The-Verscienta/kiln_cms/issues/1362) · [long form](docs/changelog/unreleased.md#an-opt-in-prometheus-endpoint-for-the-apps-metrics))
+  ([#1362](https://github.com/The-Verscienta/kiln_cms/issues/1362) · [long form](docs/changelog/v0.10.0.md#an-opt-in-prometheus-endpoint-for-the-apps-metrics))
 
 ### Changed
 
 - **The content list says an item's status in words; the trigram glyph is
   opt-in.**
-  ([#1323](https://github.com/The-Verscienta/kiln_cms/issues/1323) · [long form](docs/changelog/unreleased.md#the-content-list-says-an-items-status-in-words-the-trigram-glyph-is-opt-in))
-### Changed
+  ([#1323](https://github.com/The-Verscienta/kiln_cms/issues/1323) · [long form](docs/changelog/v0.10.0.md#the-content-list-says-an-items-status-in-words-the-trigram-glyph-is-opt-in))
 
 - **The dependency audit also reads Hex's own advisory feed.**
-  ([long form](docs/changelog/unreleased.md#the-dependency-audit-also-reads-hexs-own-advisory-feed))
+  ([#1553](https://github.com/The-Verscienta/kiln_cms/issues/1553) · [long form](docs/changelog/v0.10.0.md#the-dependency-audit-also-reads-hexs-own-advisory-feed))
 
 - **String lengths are counted in codepoints, as Postgres counts them.**
-  ([long form](docs/changelog/unreleased.md#string-lengths-are-counted-in-codepoints-as-postgres-counts-them))
+  ([#1553](https://github.com/The-Verscienta/kiln_cms/issues/1553) · [long form](docs/changelog/v0.10.0.md#string-lengths-are-counted-in-codepoints-as-postgres-counts-them))
+
 ### Fixed
 
 - **A preview link shows a live document's unpublished edits, and works for
   admin-defined types.**
-  ([long form](docs/changelog/unreleased.md#a-preview-link-shows-the-working-copy-and-works-for-admin-defined-types))
+  ([long form](docs/changelog/v0.10.0.md#a-preview-link-shows-the-working-copy-and-works-for-admin-defined-types))
 
 - **A delivery that fails on an unreadable signing key now says so.**
-  ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#a-delivery-that-fails-on-an-unreadable-signing-key-now-says-so))
+  ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/v0.10.0.md#a-delivery-that-fails-on-an-unreadable-signing-key-now-says-so))
 
 - **A relay refusing the operator's password no longer suppresses every
   recipient.**
-  ([long form](docs/changelog/unreleased.md#a-relay-refusing-the-operators-password-no-longer-suppresses-every-recipient))
+  ([long form](docs/changelog/v0.10.0.md#a-relay-refusing-the-operators-password-no-longer-suppresses-every-recipient))
 
 - **`mix setup` stops early, with the real reason, when the checkout's path has
   a space.**
-  ([#1321](https://github.com/The-Verscienta/kiln_cms/issues/1321) · [long form](docs/changelog/unreleased.md#mix-setup-stops-early-with-the-real-reason-when-the-checkouts-path-has-a-space))
+  ([#1321](https://github.com/The-Verscienta/kiln_cms/issues/1321) · [long form](docs/changelog/v0.10.0.md#mix-setup-stops-early-with-the-real-reason-when-the-checkouts-path-has-a-space))
+
 - **Buttons, links, badges and fields that rendered unstyled now look like what
   they are.**
-  ([#1531](https://github.com/The-Verscienta/kiln_cms/issues/1531) · [long form](docs/changelog/unreleased.md#buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they))
+  ([#1531](https://github.com/The-Verscienta/kiln_cms/issues/1531) · [long form](docs/changelog/v0.10.0.md#buttons-links-badges-and-fields-that-rendered-unstyled-now-look-like-what-they))
 
 - **A PaaS health check no longer gets a redirect, and `PHX_HOST` falls back to
   the platform's hostname.**
-  ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#a-paas-health-check-no-longer-gets-a-redirect-and-phxhost-falls-back-to-the))
+  ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/v0.10.0.md#a-paas-health-check-no-longer-gets-a-redirect-and-phxhost-falls-back-to-the))
 
 ### Security
 
 - **Point-in-time reads (`?as_of=`) apply the passphrase lock and the audience
   as live delivery does.**
-  ([#496](https://github.com/The-Verscienta/kiln_cms/issues/496), [#1032](https://github.com/The-Verscienta/kiln_cms/issues/1032) · [long form](docs/changelog/unreleased.md#point-in-time-reads-asof-apply-the-passphrase-lock-and-the-audience-as-live))
+  ([#496](https://github.com/The-Verscienta/kiln_cms/issues/496), [#1032](https://github.com/The-Verscienta/kiln_cms/issues/1032) · [long form](docs/changelog/v0.10.0.md#point-in-time-reads-asof-apply-the-passphrase-lock-and-the-audience-as-live))
 
 - **A request on a host that names no site no longer reads the database for the
   default site every time.**
-  ([#1580](https://github.com/The-Verscienta/kiln_cms/pull/1580) · [long form](docs/changelog/unreleased.md#a-request-on-a-host-that-names-no-site-no-longer-reads-the-database-for-the))
-
-### Security
+  ([#1580](https://github.com/The-Verscienta/kiln_cms/pull/1580) · [long form](docs/changelog/v0.10.0.md#a-request-on-a-host-that-names-no-site-no-longer-reads-the-database-for-the))
 
 - **Webhook signing secrets are encrypted at rest.**
-  ([long form](docs/changelog/unreleased.md#webhook-signing-secrets-are-encrypted-at-rest))
+  ([long form](docs/changelog/v0.10.0.md#webhook-signing-secrets-are-encrypted-at-rest))
 
 - **Every advisory published against the 0.9.0 dependency set is fixed,
   including six CRITICAL in `ash_authentication`.**
-  ([long form](docs/changelog/unreleased.md#every-advisory-published-against-the-090-dependency-set-is-fixed-including-six))
+  ([#1553](https://github.com/The-Verscienta/kiln_cms/issues/1553) · [long form](docs/changelog/v0.10.0.md#every-advisory-published-against-the-090-dependency-set-is-fixed-including-six))
 
 - **`mint` 1.10.1 closes a response-smuggling advisory in its HTTP/1 chunked
   parser (EEF-CVE-2026-82672, MEDIUM).**
-  ([#1586](https://github.com/The-Verscienta/kiln_cms/pull/1586) · [long form](docs/changelog/unreleased.md#mint-1101-closes-a-response-smuggling-advisory-in-its-http1-chunked-parser-eef))
+  ([#1586](https://github.com/The-Verscienta/kiln_cms/pull/1586) · [long form](docs/changelog/v0.10.0.md#mint-1101-closes-a-response-smuggling-advisory-in-its-http1-chunked-parser-eef))
 
 - **`/ws/gql` runs under the same cost limits as `/gql`, batches are counted per
   operation, and introspection is refused however a document arrives.**
-  ([long form](docs/changelog/unreleased.md#wsgql-runs-under-the-same-cost-limits-as-gql-batches-are-counted-per-operation))
+  ([long form](docs/changelog/v0.10.0.md#wsgql-runs-under-the-same-cost-limits-as-gql-batches-are-counted-per-operation))
+
 - **Each document sent over `/ws/gql` now counts against the `:gql` rate limit,
   and a malformed document no longer strips a GraphQL socket of its tenant and
   actor.**
-  ([long form](docs/changelog/unreleased.md#each-document-sent-over-wsgql-now-counts-against-the-gql-rate-limit-and-a))
+  ([long form](docs/changelog/v0.10.0.md#each-document-sent-over-wsgql-now-counts-against-the-gql-rate-limit-and-a))
+
 ## [0.9.0] - 2026-09-18
 
 Long form: [docs/changelog/v0.9.0.md](docs/changelog/v0.9.0.md) —
@@ -1473,7 +1479,8 @@ that `mix kiln.update` compares against.
   one that can't be described by a changelog diff.
   ([long form](docs/changelog/v0.1.0.md#if-your-project-pins-a-sha-from-before-this-tag-your-first-update-is-the-only))
 
-[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.6.0...v0.7.0

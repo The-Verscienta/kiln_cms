@@ -23,7 +23,7 @@ services:
     name: kiln
     runtime: image
     image:
-      url: ghcr.io/the-verscienta/kiln_cms:0.9.0
+      url: ghcr.io/the-verscienta/kiln_cms:0.10.0
     # 512 MB. The disk below needs a paid plan; the free plan also sleeps.
     plan: 0.5c-512mb
     # /up is 200 only once the database answers — the right signal for routing.

@@ -9,7 +9,7 @@ the resolved architectural decisions (D1–D8).
 
 ## Status & maturity
 
-**Pre-1.0 (`v0.9.0`), single maintainer, and consumed as a source overlay
+**Pre-1.0 (`v0.10.0`), single maintainer, and consumed as a source overlay
 rather than a package.** If you are evaluating KilnCMS for a team, read this
 section before the feature list.
 

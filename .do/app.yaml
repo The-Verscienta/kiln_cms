@@ -30,7 +30,7 @@ services:
       registry_type: GHCR
       registry: the-verscienta
       repository: kiln_cms
-      tag: "0.9.0"
+      tag: "0.10.0"
     http_port: 4000
     instance_count: 1
     # 1 GB. The 512 MB size works for a small site; see the guide.
