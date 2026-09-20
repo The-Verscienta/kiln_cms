@@ -2793,6 +2793,7 @@ type RootMutationType {
   publishEntry(id: ID!, customFilter: JsonString, customSort: String): PublishEntryResult!
   unpublishEntry(id: ID!, customFilter: JsonString, customSort: String): UnpublishEntryResult!
   deleteEntry(id: ID!, customFilter: JsonString, customSort: String, input: DeleteEntryInput!): DeleteEntryResult!
+  updateMediaItem(id: ID!, input: UpdateMediaItemInput): UpdateMediaItemResult!
 }
 
 type RootQueryType {
@@ -3729,6 +3730,26 @@ input UpdateEntryInput {
 type UpdateEntryResult {
   "The successful result of the mutation"
   result: Entry
+
+  "Any errors generated, if the mutation failed"
+  errors: [MutationError!]!
+}
+
+input UpdateMediaItemInput {
+  alt: String
+  caption: String
+  decorative: Boolean
+  focalX: Float
+  focalY: Float
+  tagIds: [ID!]
+  addTagIds: [ID!]
+  removeTagIds: [ID!]
+}
+
+"The result of the :update_media_item mutation"
+type UpdateMediaItemResult {
+  "The successful result of the mutation"
+  result: MediaItem
 
   "Any errors generated, if the mutation failed"
   errors: [MutationError!]!
