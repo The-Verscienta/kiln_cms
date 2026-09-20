@@ -176,6 +176,10 @@ Every summary line below that was shortened links to its own entry there.
   the platform's hostname.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#a-paas-health-check-no-longer-gets-a-redirect-and-phxhost-falls-back-to-the))
 
+- **A request on a host that names no site no longer reads the database for the
+  default site every time.**
+  ([#1580](https://github.com/The-Verscienta/kiln_cms/pull/1580) · [long form](docs/changelog/unreleased.md#a-request-on-a-host-that-names-no-site-no-longer-reads-the-database-for-the))
+
 ### Security
 
 - **Webhook signing secrets are encrypted at rest.**

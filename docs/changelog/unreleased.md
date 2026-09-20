@@ -549,6 +549,23 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
   host.
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529))
 
+<a id="a-request-on-a-host-that-names-no-site-no-longer-reads-the-database-for-the"></a>
+
+- **A request on a host that names no site no longer reads the database for the
+  default site every time.** With `TENANT_STRICT_HOST` off, a `Host` that
+  resolves to no organization — a health check by IP, the platform's own
+  hostname (`*.onrender.com`, `*.fly.dev`) when `PHX_HOST` is a custom domain,
+  any unrecognised header — is served the default site. That host's miss was
+  cached, but the default site behind it was one `organizations` read per
+  request, made in the endpoint above every rate limiter. Under delivery load
+  it queued on the connection pool behind view-tracking writes: measured while
+  baselining the metrics exporter, the endpoint's p95 was 11–19 ms on such a host against
+  about 3 ms on `PHX_HOST`, with the router under 1 ms on both. The fallback now
+  shares the canonical host's host-cache entry, so it is refreshed on the same
+  five-minute schedule as every other host (an edit to the default site no
+  longer shows up instantly on a stray host and late on `PHX_HOST`), and a
+  failed read is still never cached.
+
 ## Security
 
 <a id="webhook-signing-secrets-are-encrypted-at-rest"></a>
