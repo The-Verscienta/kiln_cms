@@ -347,6 +347,8 @@ defmodule KilnCMS.CMS do
       define :get_media_item, action: :read, get_by: [:id]
       define :create_media_item, action: :create
       define :update_media_item, action: :update
+      # The API's metadata-only write (alt/caption/decorative/focal/tags).
+      define :update_media_item_metadata, action: :update_metadata
       define :destroy_media_item, action: :destroy
       define :list_trashed_media_items, action: :trashed
       define :restore_media_item, action: :restore
@@ -429,6 +431,15 @@ defmodule KilnCMS.CMS do
       define :list_site_code_injection, action: :read
       define :save_site_code_injection, action: :save
       define :reset_site_code_injection, action: :destroy
+    end
+
+    # A site's own SMTP relay (#1322). Read through `KilnCMS.Mail.SiteRelay`,
+    # which owns the precedence rule and the fail direction — never directly.
+    resource KilnCMS.CMS.SiteMailRelay do
+      define :list_site_mail_relay, action: :read
+      define :save_site_mail_relay, action: :save
+      define :update_site_mail_relay, action: :update
+      define :reset_site_mail_relay, action: :destroy
     end
 
     # The version twin: "who added that script, and when". Registered because

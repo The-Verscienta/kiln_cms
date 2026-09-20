@@ -78,6 +78,11 @@ defmodule KilnCMSWeb.ApiExplorerRoutesTest do
              "getArtifact"
 
     assert get_in(spec, ["paths", "/preview/{token}", "get", "operationId"]) == "getPreview"
+
+    # Minting is authenticated — the one delivery operation that requires it.
+    mint = get_in(spec, ["paths", "/api/content/{type}/{id}/preview-token", "post"])
+    assert mint["operationId"] == "createPreviewToken"
+    assert mint["security"] == [%{"bearerAuth" => []}]
   end
 
   # #319: a browser GET on the bare endpoint gets the developer docs instead of

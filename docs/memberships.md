@@ -78,8 +78,10 @@ the same one the DKIM key uses:
   mounted secrets. Trailing newlines are trimmed.
 - **Database (encrypted)** — the zero-ops default: paste the secret and it is
   stored AES-256-GCM encrypted. The encryption key is derived from
-  `SECRET_KEY_BASE`, so **rotating that secret orphans the stored value** and you
-  will need to paste it again.
+  `SECRET_KEY_BASE`, so **rotating that secret orphans the stored value** unless
+  you follow the [rotation procedure](secrets-rotation.md#secret_key_base),
+  which re-encrypts it under the new secret (`mix kiln.vault.reencrypt`).
+  Otherwise you will need to paste it again.
 
 "Test connection" performs a live credential check and records which account the
 keys belong to, so a mistyped key fails at setup rather than at a member's first

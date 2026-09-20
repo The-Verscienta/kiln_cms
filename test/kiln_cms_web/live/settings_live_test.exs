@@ -92,6 +92,50 @@ defmodule KilnCMSWeb.SettingsLiveTest do
     end
   end
 
+  describe "the content list's status marks" do
+    test "words are the default", %{conn: conn} do
+      user = authed_user(:editor)
+      assert user.status_marks == :words
+
+      {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor/settings")
+
+      assert has_element?(lv, ~s(#settings-status-marks-words[aria-pressed="true"]))
+      assert has_element?(lv, ~s(#settings-status-marks-trigrams[aria-pressed="false"]))
+    end
+
+    test "opting into trigram glyphs saves it, and words switch it back", %{conn: conn} do
+      user = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor/settings")
+
+      lv |> element("#settings-status-marks-trigrams") |> render_click()
+
+      assert reload(user).status_marks == :trigrams
+      assert has_element?(lv, ~s(#settings-status-marks-trigrams[aria-pressed="true"]))
+
+      lv |> element("#settings-status-marks-words") |> render_click()
+
+      assert reload(user).status_marks == :words
+      assert has_element?(lv, ~s(#settings-status-marks-words[aria-pressed="true"]))
+    end
+
+    test "an unknown value is ignored", %{conn: conn} do
+      user = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor/settings")
+
+      render_click(lv, "set_status_marks", %{"marks" => "bagua"})
+
+      assert reload(user).status_marks == :words
+    end
+
+    test "one account cannot set another's", %{conn: _conn} do
+      user = authed_user(:editor)
+      other = authed_user(:editor)
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               KilnCMS.Accounts.set_status_marks(user, :trigrams, actor: other)
+    end
+  end
+
   describe "saving preferences" do
     test "muting an event persists to the user", %{conn: conn} do
       user = authed_user(:editor)

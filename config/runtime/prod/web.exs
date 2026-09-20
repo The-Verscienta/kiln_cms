@@ -113,6 +113,14 @@ with {:ok, api_docs?} <- Env.fetch("API_DOCS_ENABLED") do
   config :kiln_cms, :api_docs, api_docs?
 end
 
+# GraphQL schema introspection — off in a production build (config/prod.exs),
+# for the reason the API docs are. An operator publishing a public GraphQL API
+# turns it back on here. Without it, a caller with an API key can still fetch
+# the schema as SDL from `GET /api/graphql/schema.graphql`. `fetch/1`, as above.
+with {:ok, introspection?} <- Env.fetch("GRAPHQL_INTROSPECTION_ENABLED") do
+  config :kiln_cms, :graphql_introspection, introspection?
+end
+
 # White-label branding (#48, see `KilnCMS.Branding`) — the instance-wide layer
 # beneath each site's own editor-managed row. Unset vars fall through to the
 # stock KilnCMS defaults. Off-origin BRAND_LOGO_URL hosts must also be in
@@ -202,6 +210,17 @@ config :kiln_cms, KilnCMSWeb.Endpoint,
     ip: {0, 0, 0, 0, 0, 0, 0, 0}
   ],
   secret_key_base: secret_key_base
+
+# The read half of a `SECRET_KEY_BASE` rotation (#1487): set this to the OLD
+# value, next to the new `SECRET_KEY_BASE`, and `KilnCMS.Keys.Vault` still opens
+# what was stored under it while every write uses the new one. Run the
+# re-encryption task, then unset it. Vault only — sessions and tokens are still
+# a hard cutover. Read raw rather than through `KilnCMS.Config.Env`, which is
+# for flags and counts and echoes what it reads. Kept byte-for-byte, as
+# `SECRET_KEY_BASE` is: the Vault drops a blank entry, or a copy of the current
+# secret, itself.
+config :kiln_cms, KilnCMS.Keys.Vault,
+  previous_secret_key_bases: List.wrap(System.get_env("PREVIOUS_SECRET_KEY_BASE"))
 
 config :kiln_cms,
   token_signing_secret:

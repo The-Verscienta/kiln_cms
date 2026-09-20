@@ -218,6 +218,11 @@ defmodule KilnCMSWeb.ArtifactController do
          {resource, definition_id} when not is_nil(resource) <- storage(ct) do
       limit = index_limit(params)
 
+      # One shared slot per `{org, type, as_of, limit}`, with no caller in the
+      # key — which is only sound because `PointInTime.index/4` takes no caller
+      # input: it lists what an ANONYMOUS reader may discover (public now and
+      # then, never locked), for everyone. Anything caller-dependent added to
+      # that read must key this slot on the caller, or skip it.
       entries =
         KilnCMS.Cache.fetch(
           {:pit_index, org_id, type, DateTime.to_iso8601(as_of), limit},
@@ -319,7 +324,7 @@ defmodule KilnCMSWeb.ArtifactController do
            PointInTime.read(org_id, record.__struct__, record.id, surface, as_of) do
       conn
       |> DeliveryLocale.put_served(record.locale)
-      |> serve_point_in_time(as_of, published_at, params["surface"] || "json", body)
+      |> serve_point_in_time(record, as_of, published_at, params["surface"] || "json", body)
     else
       :error ->
         ApiError.send(
@@ -341,6 +346,17 @@ defmodule KilnCMSWeb.ArtifactController do
           :not_found,
           "withdrawn",
           "This content had been withdrawn as of that date."
+        )
+
+      # Readable now, but it was gated then (`PointInTime.read/5`). Saying so
+      # discloses only that a document the caller can already read was once
+      # members-only — never the body it had.
+      {:error, :not_public} ->
+        ApiError.send(
+          conn,
+          :not_found,
+          "not_public",
+          "This content was not publicly available as of that date."
         )
 
       _ ->
@@ -373,15 +389,29 @@ defmodule KilnCMSWeb.ArtifactController do
 
   # Historical snapshots are immutable for a given (content, as_of), so they're
   # cacheable; the headers name the requested moment and the effective publish.
-  defp serve_point_in_time(conn, as_of, published_at, surface, body) do
+  #
+  # Except a locked one (#496). It resolved above only because the caller
+  # presented a grant — often in the `x-kiln-unlock` HEADER, which no shared
+  # cache keys on — so its body is a function of the request, not the URL, and
+  # a `public` answer would hand the unlocked body to the next caller who
+  # presented nothing. The rule live delivery's `put_cache_headers/4` applies.
+  defp serve_point_in_time(conn, record, as_of, published_at, surface, body) do
+    locked? = not is_nil(Map.get(record, :access_password_hash))
+
     conn
-    |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
+    |> put_point_in_time_cache_headers(locked?)
     |> put_resp_header("x-kiln-as-of", DateTime.to_iso8601(as_of))
     |> put_resp_header("x-kiln-published-at", DateTime.to_iso8601(published_at))
     # Same per-surface envelope as live delivery — :llm is raw text/markdown
     # with or without as_of.
     |> respond(surface, body)
   end
+
+  defp put_point_in_time_cache_headers(conn, true),
+    do: put_resp_header(conn, "cache-control", "private, no-store")
+
+  defp put_point_in_time_cache_headers(conn, false),
+    do: put_resp_header(conn, "cache-control", "public, max-age=#{@max_age_seconds}")
 
   # Serve a fired artifact with CDN/static-build cache headers (#188). Honour a
   # matching `If-None-Match` with a 304 so revalidation skips the body.
@@ -417,6 +447,9 @@ defmodule KilnCMSWeb.ArtifactController do
     |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
     |> put_resp_header("etag", etag)
     |> put_resp_header("last-modified", http_date(record.updated_at))
+    # The site's surrogate key, so the publish purge `KilnCMS.CDN` sends reaches
+    # this response as well as the JSON:API/GraphQL/search ones.
+    |> KilnCMSWeb.Plugs.PublicCache.put_surrogate_keys()
   end
 
   # The :llm surface is raw Markdown (#357) — LLM crawlers fetch it directly,

@@ -282,7 +282,7 @@ defmodule KilnCMS.Keys do
 
   def describe_error(:decrypt_failed),
     do:
-      "stored key cannot be decrypted (was SECRET_KEY_BASE rotated?) — regenerate or switch provider"
+      "stored key cannot be decrypted (was SECRET_KEY_BASE rotated without mix kiln.vault.reencrypt?) — regenerate or switch provider"
 
   # Deliberately neutral: this registry now serves mail, provenance and billing
   # secrets, so naming one of them here would print a mail message on the

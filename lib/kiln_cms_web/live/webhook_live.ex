@@ -326,7 +326,16 @@ defmodule KilnCMSWeb.WebhookLive do
                     </span>
                   </div>
                   <p class="text-xs text-base-content/70">
-                    {gettext("Signing secret")}: <code>{endpoint.secret}</code>
+                    {gettext("Signing secret")}:
+                    <%= if secret = WebhookEndpoint.secret(endpoint) do %>
+                      <code>{secret}</code>
+                    <% else %>
+                      <span class="text-error">
+                        {gettext(
+                          "unreadable — it was encrypted under a SECRET_KEY_BASE this server no longer has. Delete and re-create the endpoint."
+                        )}
+                      </span>
+                    <% end %>
                   </p>
                 </div>
                 <div class="flex shrink-0 items-center gap-1">

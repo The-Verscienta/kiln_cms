@@ -512,6 +512,17 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("This site as an ActivityPub actor, and its followers."),
             keywords: ["activitypub", "fediverse", "mastodon", "followers", "actor"]
           },
+          # A site's own SMTP relay (#1322). Not beside Mail below: that is the
+          # operator's transport for the whole deployment, platform-gated; this
+          # is one site's provider and From address, and a site admin's to set.
+          %{
+            key: :site_mail,
+            label: gettext("Outgoing mail"),
+            path: ~p"/editor/site-mail",
+            icon: "hero-paper-airplane",
+            description: gettext("The mail provider and From address this site sends from."),
+            keywords: ["smtp", "email", "relay", "sender", "from address", "postmark", "ses"]
+          },
           %{
             key: :automation,
             label: gettext("Automation"),

@@ -1779,6 +1779,11 @@ msgstr ""
 msgid "Alt text — leave blank only if decorative"
 msgstr ""
 
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "Always encrypted, and the server's certificate is always checked."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "An OpenAPI spec and a browsable API explorer"
@@ -1922,6 +1927,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Anyone with editor access can publish. Submitting for review stays available."
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Anyone with this link can view this draft, without signing in, for 15 minutes. It follows your edits live."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
@@ -3122,6 +3132,11 @@ msgstr ""
 msgid "Content item"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Content list"
+msgstr ""
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "Content model"
@@ -3210,6 +3225,7 @@ msgid "Copied to clipboard."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -3224,6 +3240,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Copy link to %{title}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Copy preview link"
 msgstr ""
 
 #: lib/kiln_cms_web/live/api_key_live.ex
@@ -4922,6 +4943,11 @@ msgstr ""
 msgid "Enabling mints this site's permanent actor identity. The handle cannot be renamed once other servers know it — pick the username with care."
 msgstr ""
 
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "Encryption"
+msgstr ""
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
@@ -5685,8 +5711,14 @@ msgid "From"
 msgstr ""
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
+#: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "From address"
+msgstr ""
+
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "From name"
 msgstr ""
 
 #: lib/kiln_cms_web/live/redirect_live.ex
@@ -6089,6 +6121,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "How do you publish?"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "How each item in the content list shows whether it is published, translated and scheduled."
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -6611,6 +6648,11 @@ msgstr ""
 msgid "Leave blank to use the duration above."
 msgstr ""
 
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "Leave blank to use the site's name."
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Leave blank to use the slug URL above. Set a nested address such as /about/team and the slug URL redirects (301) to it; changing it later leaves a redirect behind on published content."
@@ -7021,6 +7063,11 @@ msgstr ""
 msgid "Missing alt text"
 msgstr ""
 
+#: lib/kiln_cms_web/components/core_components.ex
+#, elixir-autogen, elixir-format
+msgid "Missing translations"
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
 msgid "Model content once. Publish everywhere."
@@ -7152,6 +7199,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Moved “%{title}” to %{date}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "Must be an address your provider will send for."
 msgstr ""
 
 #: lib/kiln_cms_web/live/task_live.ex
@@ -8446,6 +8498,22 @@ msgstr ""
 msgid "Outdent"
 msgstr ""
 
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "Outgoing mail"
+msgstr ""
+
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "Outgoing mail could not be saved."
+msgstr ""
+
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "Outgoing mail saved."
+msgstr ""
+
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
@@ -8556,6 +8624,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
+#: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "Password"
 msgstr ""
@@ -8779,6 +8848,11 @@ msgstr ""
 msgid "Poor"
 msgstr ""
 
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "Port"
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Portable Text rich content"
@@ -8839,6 +8913,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Preview URL matches this console's origin, so the frame is sandboxed without cookies. Signed-in or member-only pages render as anonymous here. Point PRESENTATION_PREVIEW_URL at a separate front-end origin to keep preview authentication."
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Preview link"
 msgstr ""
 
 #: lib/kiln_cms_web/live/token_preview_live.ex
@@ -9051,6 +9130,7 @@ msgid "Published — content I authored went live"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Publishes"
 msgstr ""
@@ -9115,6 +9195,21 @@ msgstr ""
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Re-enable federation"
+msgstr ""
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-key"
+msgstr ""
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-key this actor? The handle stays the same, but its signing key is replaced. Followers are sent the new key, and some remote servers may keep the old one until they re-fetch the actor. Deliveries to those servers fail until they do."
+msgstr ""
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-keyed. Followers are being sent the new key; some servers may keep the old one until they re-fetch this actor."
 msgstr ""
 
 #: lib/kiln_cms_web/live/experiments_live.ex
@@ -9440,6 +9535,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/site_mail_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -9568,6 +9664,11 @@ msgstr ""
 msgid "Remove this site's locale fallbacks and follow the deployment defaults again?"
 msgstr ""
 
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove this site's relay? Its mail will use the deployment's relay again."
+msgstr ""
+
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove this step from the funnel?"
@@ -9606,6 +9707,11 @@ msgid "Removed the tag from %{count} item."
 msgid_plural "Removed the tag from %{count} items."
 msgstr[0] ""
 msgstr[1] ""
+
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "Removed. This site's mail uses the deployment's relay again."
+msgstr ""
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -10053,9 +10159,19 @@ msgstr ""
 msgid "SEO title is short — %{length} of the %{min}–%{max} characters search results show."
 msgstr ""
 
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "SMTP host"
+msgstr ""
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "SMTP relay"
+msgstr ""
+
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "STARTTLS (usually port 587)"
 msgstr ""
 
 #: lib/kiln_cms_web/live/menu_live.ex
@@ -10086,6 +10202,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
+#: lib/kiln_cms_web/live/site_mail_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
@@ -10199,6 +10316,11 @@ msgstr ""
 msgid "Saved."
 msgstr ""
 
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "Saved. Leave blank to keep it."
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #: lib/kiln_cms_web/live/compliance_live.ex
@@ -10206,6 +10328,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/locale_settings_live.ex
+#: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saving…"
 msgstr ""
@@ -10495,6 +10618,11 @@ msgstr ""
 msgid "Send a test email to"
 msgstr ""
 
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "Send a test to %{email}"
+msgstr ""
+
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Send content out as XLIFF 2.0 and apply the file that comes back. Tick rows below, pick the target locale, then export."
@@ -10515,7 +10643,13 @@ msgstr ""
 msgid "Send test"
 msgstr ""
 
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "Send this site's mail through this relay"
+msgstr ""
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
+#: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "Sending…"
 msgstr ""
@@ -10533,6 +10667,11 @@ msgstr ""
 #: lib/kiln_cms_web/workflow_messages.ex
 #, elixir-autogen, elixir-format
 msgid "Sent for review — an admin will publish when ready."
+msgstr ""
+
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sent to %{email}. Check that inbox."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/content_html.ex
@@ -10779,6 +10918,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Signed out of every session."
+msgstr ""
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Signing key"
 msgstr ""
 
 #: lib/kiln_cms_web/live/webhook_live.ex
@@ -11096,6 +11240,11 @@ msgstr ""
 msgid "Status"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Status marks"
+msgstr ""
+
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "Stays open when its content publishes"
@@ -11150,6 +11299,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Stop sending notifications to this device?"
+msgstr ""
+
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "Stored encrypted and never shown again. Clearing the username removes it."
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -11313,6 +11467,11 @@ msgstr ""
 msgid "System"
 msgstr ""
 
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "TLS (usually port 465)"
+msgstr ""
+
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
 msgid "Tag"
@@ -11461,6 +11620,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Test connection"
+msgstr ""
+
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "Test email"
 msgstr ""
 
 #: lib/kiln_cms_web/live/webhook_live.ex
@@ -11825,6 +11989,11 @@ msgstr ""
 msgid "The demo is being reset. Sign in again in a moment."
 msgstr ""
 
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "The deployment's secret key has changed since it was saved. Until you enter it again, this site's mail is held and retried, not sent."
+msgstr ""
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "The description is about %{pixels}px wide — over the %{max}px Google shows, so it may be cut off."
@@ -11937,6 +12106,16 @@ msgstr ""
 msgid "The light and dark variants, and the text colour on buttons, are derived from this so they always meet WCAG AA."
 msgstr ""
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "The mail provider and From address this site sends from."
+msgstr ""
+
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "The mail provider and From address this site's email is sent from."
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "The model returned nothing usable. Try again, or rephrase your instruction."
@@ -12003,6 +12182,11 @@ msgstr ""
 msgid "The same list is available on the server as %{list}, and %{doctor} verifies an install."
 msgstr ""
 
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "The saved password can't be read. Re-enter it."
+msgstr ""
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "The shipped pack deliberately leaves out bare marketing words — \"best\", \"free\", \"proven\" — because they have too many legitimate uses to flag without knowing a publication's subject. That is what the phrase list above is for."
@@ -12047,6 +12231,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "The target's blocks are inlined where this block sits. Editing the target updates every page that embeds it; an unpublished or restricted target renders nothing."
+msgstr ""
+
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "The test didn't send: %{reason}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "The test send stopped unexpectedly."
 msgstr ""
 
 #: lib/kiln_cms_web/components/seo_components.ex
@@ -12187,6 +12381,11 @@ msgstr ""
 msgid "This content was saved elsewhere while you were offline. A text block reloaded the saved version; the edits you made to it since were not applied."
 msgstr ""
 
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "This covers newsletters, form notifications and autoresponders, workflow, task and comment notifications, and automation emails. Sign-in links, password resets and other account mail always use the deployment's relay, because accounts belong to the deployment, not to one site."
+msgstr ""
+
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "This deployment runs one locale."
@@ -12252,6 +12451,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "This is a test email from your KilnCMS instance."
+msgstr ""
+
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "This is a test email from your site's outgoing mail settings."
 msgstr ""
 
 #: lib/kiln_cms_web/live/system_live.ex
@@ -12376,6 +12580,21 @@ msgstr ""
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site's Content-Security-Policy blocks scripts, connections and images from hosts it doesn't know. List the origins your snippet needs — one per line, e.g. https://plausible.io — or the browser will silently refuse them. Inline <script> blocks are allowed automatically once you save."
+msgstr ""
+
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's mail goes out through %{host}, from %{from}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's mail goes out through the deployment's relay, from %{from}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's mail goes out through the deployment's relay."
 msgstr ""
 
 #: lib/kiln_cms_web/live/compliance_live.ex
@@ -12559,6 +12778,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Tries"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Trigram glyphs"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Trigram glyphs: three lines per item — published at the bottom, translated in the middle, scheduled on top; solid means yes. Hover one for its reading."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/offline_controller.ex
@@ -12777,6 +13006,7 @@ msgid "Unpublish on go-live"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Unpublishes"
 msgstr ""
@@ -13024,6 +13254,7 @@ msgid "User"
 msgstr ""
 
 #: lib/kiln_cms_web/live/federation_live.ex
+#: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "Username"
 msgstr ""
@@ -13432,6 +13663,16 @@ msgstr ""
 msgid "Witnessed by checkpoint #%{sequence} at anchor position %{position}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Words"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Words: the state badge, the date an item publishes or unpublishes, and “Missing translations” when a language is still to do."
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Worked out from a formula on every save, so editors can't type into it. For a reading time or a code built from the title."
@@ -13509,6 +13750,11 @@ msgstr ""
 msgid "You can't create this content."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "You can't share a preview of this document."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/billing_controller.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have a membership to manage yet."
@@ -13558,6 +13804,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's locale settings."
+msgstr ""
+
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's outgoing mail."
 msgstr ""
 
 #: lib/kiln_cms_web/components/core_components.ex
@@ -13722,6 +13973,7 @@ msgid "Your browser will prompt you to confirm with this device's screen lock."
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Your choice could not be saved."
 msgstr ""
@@ -13816,12 +14068,12 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
-msgid "Zero-ops default: generate a key right here. Encrypted with a key derived from SECRET_KEY_BASE — rotating that secret orphans the key."
+msgid "Zero-ops default: generate a key right here. Encrypted with a key derived from SECRET_KEY_BASE — rotate that secret only as the secrets rotation guide describes, or the key is lost."
 msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
-msgid "Zero-ops default: paste the secret here. Encrypted with a key derived from SECRET_KEY_BASE — rotating that secret orphans it."
+msgid "Zero-ops default: paste the secret here. Encrypted with a key derived from SECRET_KEY_BASE — rotate that secret only as the secrets rotation guide describes, or it is lost."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/shared.ex
@@ -14406,6 +14658,11 @@ msgstr ""
 msgid "read"
 msgstr ""
 
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "readable"
+msgstr ""
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "recorded content views"
@@ -14690,6 +14947,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "unreadable"
+msgstr ""
+
+#: lib/kiln_cms_web/live/federation_live.ex
+#, elixir-autogen, elixir-format
+msgid "unreadable — deliveries fail. SECRET_KEY_BASE was probably rotated without re-encrypting; see the secrets rotation guide, or re-key."
+msgstr ""
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "unreadable — it was encrypted under a SECRET_KEY_BASE this server no longer has. Delete and re-create the endpoint."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex

@@ -468,4 +468,34 @@ defmodule KilnCMS.Storage.S3Test do
       assert path =~ "kiln-private"
     end
   end
+
+  describe "presign_private_put/3 (direct uploads)" do
+    test "is refused without a private bucket — never presigned into the public one" do
+      assert {:error, :private_storage_not_configured} = S3.presign_private_put("k", 10, 60)
+    end
+
+    test "presigns a PUT into the private bucket with the length signed in" do
+      original = Application.get_env(:kiln_cms, KilnCMS.Storage.S3)
+      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Storage.S3, original) end)
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Storage.S3,
+        [private_bucket: "kiln-private"] ++ original
+      )
+
+      assert {:ok, %{url: url, headers: headers}} =
+               S3.presign_private_put("direct-uploads/abc", 1234, 900)
+
+      uri = URI.parse(url)
+      query = URI.decode_query(uri.query)
+
+      assert uri.path == "/kiln-private/direct-uploads/abc"
+      assert headers == %{"content-length" => "1234"}
+      # The length is part of the signature, so the store refuses any other.
+      assert query["X-Amz-SignedHeaders"] == "content-length;host"
+      assert query["X-Amz-Expires"] == "900"
+      assert query["X-Amz-Signature"] =~ ~r/^[0-9a-f]{64}$/
+    end
+  end
 end

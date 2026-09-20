@@ -124,7 +124,7 @@ defmodule KilnCMS.Mail.Settings do
     # key material. Empty for the database provider.
     attribute :dkim_key_provider_config, :map, allow_nil?: false, default: %{}, public?: true
 
-    attribute :dkim_private_key_encrypted, :binary do
+    attribute :dkim_private_key_encrypted, KilnCMS.Keys.Vault.Ciphertext do
       sensitive? true
       writable? false
     end

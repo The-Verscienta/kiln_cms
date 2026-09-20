@@ -9,10 +9,11 @@ defmodule KilnCMSWeb.GraphqlSchema do
   use AshGraphql,
     domains: Application.compile_env(:kiln_cms, :content_domains, [KilnCMS.CMS])
 
-  # Query cost is bounded at the transport: the `/gql` Absinthe.Plug forward sets
-  # `analyze_complexity: true` + `max_complexity:` (see the router) so a deeply
-  # nested or wide query can't force an unbounded resolve. Introspection is
-  # disabled in production by KilnCMSWeb.Plugs.DisableGraphqlIntrospection.
+  # Query cost is bounded by the document pipeline both transports build
+  # (`KilnCMSWeb.GraphqlLimits`: complexity, depth, token count), which also
+  # refuses introspection in production. Relationship lists are priced by
+  # `KilnCMSWeb.GraphqlLimits.list_complexity/3` (set on each resource's `graphql`
+  # block).
 
   import_types Absinthe.Plug.Types
 
@@ -100,7 +101,8 @@ defmodule KilnCMSWeb.GraphqlSchema do
     @desc """
     The collection as of a date (#338): every document of `type` that was
     published at that instant, reconstructed from version history — the
-    GraphQL twin of `GET /api/content/:type?as_of=`.
+    GraphQL twin of `GET /api/content/:type?as_of=`. Lists only what an
+    anonymous reader may discover: public then and now, never passphrase-locked.
     """
     field :content_as_of, list_of(non_null(:point_in_time_entry)) do
       arg :type, non_null(:string)
