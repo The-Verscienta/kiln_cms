@@ -321,6 +321,22 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
 
   `docs/secrets-rotation.md` lists the new encrypted column: rotating
   `SECRET_KEY_BASE` means each site with its own relay re-enters the password.
+<a id="idempotency-key-on-the-headless-writes"></a>
+
+- **`Idempotency-Key` on the headless writes.** A write that times out left a
+  client unable to retry: a repeated `POST` created a second document, and a
+  repeated `/publish` answered 409 because the first attempt had already
+  landed. Send an `Idempotency-Key` on any authenticated `POST` or `PATCH`
+  under `/api/json`, or on `POST /gql`, and a retry replays the first
+  attempt's status, body and `content-type`/`etag`/`location`, marked
+  `idempotency-replayed: true`, without running anything again. The same key
+  with a different request is `422 idempotency_key_reused`; while the first
+  request is still in flight it is `409 idempotency_request_in_progress` with
+  `retry-after`. Keys are scoped to the acting user, matched on method, path,
+  query and the *parsed* body (so a re-serialized retry still matches), and
+  kept for 24 hours by an hourly-pruned `idempotent_requests` table. 2xx and
+  request-level 4xx are stored; 401/403, 409, 429, 5xx and bodies over 1 MB
+  are not, so those retry for real. Without the header nothing changes.
 <a id="memberships-can-notify-other-systems-membershipactivated-and-membershipcanceled"></a>
 
 - **Memberships can notify other systems: `membership.activated` and

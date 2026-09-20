@@ -347,6 +347,12 @@ content), so `expectedLockVersion: 4` on `publishPost` means "publish the
 content I reviewed", not "the record is still a draft". The JSON:API `ETag`
 covers both halves ([json-api.md](json-api.md), *Concurrency*).
 
+### Retrying a mutation safely
+
+`POST /gql` honours `Idempotency-Key` like the JSON:API writes: a retry with the
+same key and the same request body replays the first response. See
+[api.md](api.md) → *Idempotent writes*.
+
 ### Re-fire semantics
 
 Firing (the immutable per-surface artifact regeneration) is bound to the

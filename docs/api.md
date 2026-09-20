@@ -1353,6 +1353,47 @@ Over the limit returns **429** with a `retry-after` header.
 | `media_render` | `GET /media/:id/t/:ops` that misses the derivative cache (each is a render) | 120 renders / minute |
 | `media_upload` | `/api/media/*` (uploads, URL imports, direct-upload begin/complete) — charged **on top of** `api` | 60 requests / minute |
 
+## Idempotent writes
+
+A write that times out leaves the client unsure whether it landed. Retrying a
+`POST` blindly can create a second document, and retrying a `/publish` gets a
+409 because the first attempt already published. To make a retry safe, send an
+**`Idempotency-Key`** header with a value you generate once per logical
+operation (a UUID is ideal) and reuse on every retry of it:
+
+```bash
+curl -s -X POST http://localhost:4000/api/json/posts \
+  -H 'accept: application/vnd.api+json' -H 'content-type: application/vnd.api+json' \
+  -H "authorization: Bearer $KEY" \
+  -H 'idempotency-key: 6f1c1e8e-5d0b-4e61-9f0e-2a4b1c7d9e10' \
+  -d '{ "data": { "type": "post", "attributes": { "title": "Launch" } } }'
+```
+
+It works on every authenticated `POST` and `PATCH` on `/api/json/*`, the
+workflow routes included, and on `POST /gql`.
+
+| What you send | What you get |
+| --- | --- |
+| A key not seen before | The request runs; its response is stored |
+| The same key and the same request, after the first finished | The stored response, byte for byte, with `idempotency-replayed: true`. Nothing runs again |
+| The same key with a different request | `422 idempotency_key_reused` |
+| The same key while the first request is still running | `409 idempotency_request_in_progress`, with `retry-after: 1` |
+| A key that is empty, longer than 255 characters, or not printable ASCII | `400 idempotency_key_invalid` |
+
+- **"The same request"** means the same method, path, query string and body.
+  The body is compared after parsing, so a retry that re-serializes the JSON
+  with different key order or whitespace still matches.
+- **Keys are scoped to the authenticated user.** Two callers can't replay, or
+  collide with, each other's keys. Anonymous requests ignore the header.
+- **Kept for 24 hours**, then pruned. A key reused after that runs as new.
+- **What is stored:** every 2xx, and the 4xx that describe the request itself
+  (validation errors, 404, 412). A 401 or 403 is not stored, so fixing a
+  credential and retrying with the same key works; neither are 409, 429, any
+  5xx, or a response body over 1 MB. For those, retrying with the same key runs
+  the request again.
+- A request that crashes before it answers leaves its key in progress; after
+  60 seconds a retry takes it over and runs.
+
 ## Error responses
 
 The headless surfaces return errors as a JSON object with an **`errors`

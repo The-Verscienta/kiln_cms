@@ -73,6 +73,8 @@ defmodule KilnCMSWeb.Router do
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
     plug KilnCMSWeb.Plugs.ApiKeyAuth
+    # A mutation is a `POST` like any other — see the JSON:API pipeline.
+    plug KilnCMSWeb.Plugs.Idempotency
     plug AshGraphql.Plug
   end
 
@@ -122,6 +124,9 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.AshJsonApiParams
     # `If-Match` on a single-record write → the action's version check (412).
     plug KilnCMSWeb.Plugs.IfMatch
+    # `Idempotency-Key` on a write: claim it, or replay what the first attempt
+    # answered. Runs after the auth plugs above — the key is scoped to the actor.
+    plug KilnCMSWeb.Plugs.Idempotency
   end
 
   # The media upload API's own, much tighter, per-address budget — on top of

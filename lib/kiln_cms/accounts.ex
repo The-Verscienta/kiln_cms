@@ -114,6 +114,18 @@ defmodule KilnCMS.Accounts do
       define :revoke_api_key, action: :revoke
     end
 
+    # The `Idempotency-Key` ledger (`KilnCMSWeb.Plugs.Idempotency`). Every
+    # caller is that plug, as a system component — the resource forbids
+    # everything else — but the interfaces exist because every domain action
+    # gets one.
+    resource KilnCMS.Accounts.IdempotentRequest do
+      define :claim_idempotent_request, action: :claim
+      define :lookup_idempotent_request, action: :lookup, args: [:scope, :key]
+      define :reclaim_idempotent_request, action: :reclaim
+      define :complete_idempotent_request, action: :complete
+      define :destroy_idempotent_request, action: :destroy
+    end
+
     resource KilnCMS.Accounts.User do
       define :list_users, action: :read
       define :get_user, action: :read, get_by: [:id]

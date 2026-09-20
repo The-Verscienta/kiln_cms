@@ -41,9 +41,13 @@ defmodule KilnCMSWeb.Plugs.ApiCORS do
                "content-type",
                "x-api-key",
                "if-match",
-               "x-kiln-preview-token"
+               "x-kiln-preview-token",
+               # A browser front end that cannot send `Idempotency-Key`, or read
+               # back whether a response was a replay, cannot retry a write
+               # safely at all.
+               "idempotency-key"
              ],
-             expose_headers: ["retry-after", "etag"],
+             expose_headers: ["retry-after", "etag", "idempotency-replayed"],
              max_age: 600
            )
 

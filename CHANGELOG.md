@@ -123,6 +123,8 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A site can send its mail through its own SMTP relay, set from the console.**
   ([#1322](https://github.com/The-Verscienta/kiln_cms/issues/1322) · [long form](docs/changelog/unreleased.md#a-site-can-send-its-mail-through-its-own-smtp-relay-set-from-the-console))
+- **`Idempotency-Key` on the headless writes.**
+  ([long form](docs/changelog/unreleased.md#idempotency-key-on-the-headless-writes))
 - **Memberships can notify other systems: `membership.activated` and
   `membership.canceled` webhook events.**
   ([#334](https://github.com/The-Verscienta/kiln_cms/issues/334) · [long form](docs/changelog/unreleased.md#memberships-can-notify-other-systems-membershipactivated-and-membershipcanceled))

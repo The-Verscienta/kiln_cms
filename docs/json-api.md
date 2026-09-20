@@ -705,6 +705,13 @@ rather track versions yourself. The write routes accept it as an optional
 the GraphQL argument. Browsers can read `ETag` and send `If-Match` cross-origin:
 both are allowed in the CORS headers.
 
+### Retrying a write safely
+
+Send an `Idempotency-Key` header and a retry of the same `POST` or `PATCH`
+replays the first attempt's response instead of creating a second document or
+running a second transition. See
+[api.md](api.md) → *Idempotent writes*.
+
 ### Re-fire semantics
 
 Firing (immutable per-surface artifact regeneration) is bound to `:publish`, so
