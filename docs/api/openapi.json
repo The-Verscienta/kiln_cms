@@ -13818,7 +13818,7 @@
       "url": "https://github.com/The-Verscienta/kiln_cms/blob/main/LICENSE"
     },
     "title": "KilnCMS Headless API",
-    "version": "0.9.0"
+    "version": "0.10.0"
   },
   "openapi": "3.0.0",
   "paths": {
