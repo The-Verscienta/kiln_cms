@@ -148,7 +148,7 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
     "lib/kiln_cms/experiments/results.ex" => 1,
     "lib/kiln_cms/experiments/validations/goal_configured.ex" => 4,
     "lib/kiln_cms/federation.ex" => 5,
-    "lib/kiln_cms/federation/announce_worker.ex" => 3,
+    "lib/kiln_cms/federation/announce_worker.ex" => 1,
     "lib/kiln_cms/federation/delivery_worker.ex" => 7,
     "lib/kiln_cms/federation/http_signature.ex" => 1,
     "lib/kiln_cms/federation/inbox.ex" => 5,

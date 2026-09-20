@@ -114,6 +114,18 @@ Authoring (require a write key + editor role): `create_page` / `update_page` /
 > related posts, bodies included, into every write response, since `load` cannot
 > project.
 
+> **No media upload tool, on purpose.** Every other authoring tool produces
+> a draft that a human approves before anyone sees it. Media has no draft
+> state: an uploaded file is live at its public URL the moment it lands, and
+> the upload pipeline has no review step to route it through. An
+> `upload_media` tool would therefore be the one tool whose output an LLM —
+> or a prompt injected into what it is reading — could publish on your
+> domain by itself. Agents that need an image can reference one by URL in a
+> draft for the reviewer to import, or an integration can call the REST
+> upload API (`POST /api/media`, [api.md](api.md#uploading-media)) with its
+> own key, where the file is the integration's deliberate act rather than a
+> model's.
+
 The tool set lives in the `tools` block on `KilnCMS.CMS` and the
 `config :kiln_cms, :mcp_tools` list in `config/config.exs` (read at compile
 time by the `/mcp` forward in `KilnCMSWeb.Router`) — add a tool in both places.

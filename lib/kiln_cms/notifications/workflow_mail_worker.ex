@@ -4,9 +4,10 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
 
   Enqueued by `KilnCMS.Notifications` (one job per recipient). Builds the
   Swoosh email for the event and delivers it via
-  `KilnCMS.Mail.deliver_for_worker/2`: permanent (5xx) failures cancel the
-  job, transient failures raise and Oban retries on the same greylist-aware
-  backoff as `KilnCMS.Mail.DeliveryWorker`.
+  `KilnCMS.Mail.deliver_for_worker/2`: a permanent (5xx) reject of the message
+  cancels the job; transient failures, and the relay refusing our AUTH, TLS or
+  sender, raise and Oban retries on the same greylist-aware backoff as
+  `KilnCMS.Mail.DeliveryWorker`.
 
   Subject/body are `Kiln.Tokens` patterns (#468) rather than hand-interpolated
   strings — `@templates` below is still the one place that owns the actual
@@ -95,7 +96,10 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
     # retries of this job carry the *same* ID rather than a fresh one each
     # attempt (and so gen_smtp doesn't fill in one from the container hostname).
     |> Mail.ensure_message_id("workflow-#{id}")
-    |> Mail.deliver_for_worker()
+    # Through the site's own relay when it has one (#1322). Jobs queued before
+    # `org_id` was in the args carry none and use the operator's relay, as
+    # they would have.
+    |> Mail.deliver_for_worker(org_id: args["org_id"])
   end
 
   @impl Oban.Worker

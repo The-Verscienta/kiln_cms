@@ -169,6 +169,11 @@ defmodule KilnCMS.Webhooks do
     # like the automation call above.
     KilnCMS.Federation.handle_event(event, payload, org)
 
+    # The optional CDN purge (`KILN_CDN_PURGE_URL`) is the fourth: a publish
+    # changes what the site's cached API responses should say. Enqueue-only
+    # and non-raising, like the two above.
+    KilnCMS.CDN.handle_event(event, payload, org)
+
     :ok
   end
 

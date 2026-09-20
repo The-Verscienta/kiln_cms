@@ -528,6 +528,13 @@ defmodule KilnCMS.CMS.Content do
           graphql do
             type :entry
 
+            # Prices every to-many relationship that points at this type (the
+            # related-content list, a media item's featured content) at its
+            # `limit`, or at a fixed row count without one. ash_graphql priced it
+            # as a single row, so the related list could nest inside itself
+            # almost for free (`KilnCMSWeb.GraphqlLimits.list_complexity/3`).
+            complexity {KilnCMSWeb.GraphqlLimits, :list_complexity}
+
             # Real-time headless: notifies on every entry write, resolved per
             # subscriber through the policy-scoped :read — anonymous
             # subscribers only ever receive published-visible data.
@@ -628,7 +635,7 @@ defmodule KilnCMS.CMS.Content do
               index :search_semantic_published, route: "/semantic-search/published"
               index :autocomplete_published, route: "/autocomplete/published"
               unquote(published_route)
-              get :read
+              get :read, modify_conn: &KilnCMSWeb.ContentETag.put_etag/4
 
               # Write surface (#330) — the shared entry tier, same policy stack
               # as the compiled types. `create` requires `type_definition_id`
@@ -636,14 +643,27 @@ defmodule KilnCMS.CMS.Content do
               # — `KilnCMS.CMS.TypeDefinition`'s read-only routes — or MCP's
               # `read_type_definitions`). See docs/json-api.md → "Writing".
               post :create
-              patch :update
-              patch :submit_for_review, route: "/:id/submit-for-review"
+              patch :update, modify_conn: &KilnCMSWeb.ContentETag.put_etag/4
+
+              patch :submit_for_review,
+                route: "/:id/submit-for-review",
+                modify_conn: &KilnCMSWeb.ContentETag.put_etag/4
+
               # The return half of the approve/return pair (#626): without it a
               # headless reviewer can approve but has to switch to the web editor
               # to send anything back. Admin-only, like `publish` below.
-              patch :return_to_draft, route: "/:id/return-to-draft"
-              patch :publish, route: "/:id/publish"
-              patch :unpublish, route: "/:id/unpublish"
+              patch :return_to_draft,
+                route: "/:id/return-to-draft",
+                modify_conn: &KilnCMSWeb.ContentETag.put_etag/4
+
+              patch :publish,
+                route: "/:id/publish",
+                modify_conn: &KilnCMSWeb.ContentETag.put_etag/4
+
+              patch :unpublish,
+                route: "/:id/unpublish",
+                modify_conn: &KilnCMSWeb.ContentETag.put_etag/4
+
               delete :destroy
             end
           end
@@ -652,6 +672,10 @@ defmodule KilnCMS.CMS.Content do
         quote do
           graphql do
             type unquote(type)
+
+            # See the entry tier above: to-many relationships pointing here
+            # (`relatedPosts`, `featuredPosts`) are priced per row.
+            complexity {KilnCMSWeb.GraphqlLimits, :list_complexity}
 
             # Real-time headless: notifies on create/update/destroy, resolved
             # per subscriber through the policy-scoped :read — anonymous
@@ -665,11 +689,11 @@ defmodule KilnCMS.CMS.Content do
               end
             end
 
-            # Curated, read-only public surface (D7 — deliberate exposure). The
-            # GraphQL endpoint is a *delivery* API: it exposes published-content
-            # reads only. Authoring/workflow actions (create/update/publish/…) are
-            # intentionally NOT surfaced here — they run through the admin editor
-            # (and the bearer-authenticated JSON:API), behind the role policies.
+            # Curated public queries (D7 — deliberate exposure): published-content
+            # delivery and search, nothing that lists drafts by default. The
+            # authoring/workflow actions are exposed too, as the `mutations`
+            # block below (#330 reversed D7's read-only stance), behind the same
+            # role policies and API-key scope as the JSON:API write routes.
             queries do
               # Published-content delivery: one record by slug+locale, and every
               # published locale variant of a slug (hreflang alternates). Both reads
@@ -782,8 +806,10 @@ defmodule KilnCMS.CMS.Content do
               index :search_semantic_published, route: "/semantic-search/published"
               index :autocomplete_published, route: "/autocomplete/published"
               unquote(published_route)
-              # `/:id` last so it can't shadow the static sub-paths above.
-              get :read
+              # `/:id` last so it can't shadow the static sub-paths above. Every
+              # single-record response — this read and the writes below —
+              # carries an `ETag` for `If-Match` (`KilnCMSWeb.ContentETag`).
+              get :read, modify_conn: &KilnCMSWeb.ContentETag.put_etag/4
 
               # Write surface (#330 — reverses D7 for authenticated writers).
               # Same policy stack as `/mcp`: a read-only API key is forbidden
@@ -793,14 +819,27 @@ defmodule KilnCMS.CMS.Content do
               # content is written via the public `block_tree` argument (the raw
               # `blocks` union isn't exposed). See docs/json-api.md → "Writing".
               post :create
-              patch :update
-              patch :submit_for_review, route: "/:id/submit-for-review"
+              patch :update, modify_conn: &KilnCMSWeb.ContentETag.put_etag/4
+
+              patch :submit_for_review,
+                route: "/:id/submit-for-review",
+                modify_conn: &KilnCMSWeb.ContentETag.put_etag/4
+
               # The return half of the approve/return pair (#626): without it a
               # headless reviewer can approve but has to switch to the web editor
               # to send anything back. Admin-only, like `publish` below.
-              patch :return_to_draft, route: "/:id/return-to-draft"
-              patch :publish, route: "/:id/publish"
-              patch :unpublish, route: "/:id/unpublish"
+              patch :return_to_draft,
+                route: "/:id/return-to-draft",
+                modify_conn: &KilnCMSWeb.ContentETag.put_etag/4
+
+              patch :publish,
+                route: "/:id/publish",
+                modify_conn: &KilnCMSWeb.ContentETag.put_etag/4
+
+              patch :unpublish,
+                route: "/:id/unpublish",
+                modify_conn: &KilnCMSWeb.ContentETag.put_etag/4
+
               # DELETE is a reversible soft-delete (AshArchival); hard `:purge`
               # is deliberately never routed and is API-key-banned.
               delete :destroy
@@ -1998,6 +2037,11 @@ defmodule KilnCMS.CMS.Content do
         destroy :destroy do
           primary? true
           require_atomic? false
+          # `If-Match` / `expected_lock_version` (docs/json-api.md, "Concurrency"):
+          # refused with a 412 unless the row is still the version the client
+          # read. A no-op without either.
+          argument :expected_lock_version, :integer
+          change KilnCMS.CMS.Changes.CheckExpectedVersion
           change KilnCMS.CMS.Changes.DeleteArtifacts
           # A mirror has to hear about a deletion or it keeps serving the
           # document. A tombstone, not the body: a trashed draft was never
@@ -2061,6 +2105,11 @@ defmodule KilnCMS.CMS.Content do
         update :update do
           primary? true
           require_atomic? false
+          # `If-Match` / `expected_lock_version` (docs/json-api.md, "Concurrency"):
+          # refused with a 412 unless the row is still the version the client
+          # read. A no-op without either.
+          argument :expected_lock_version, :integer
+          change KilnCMS.CMS.Changes.CheckExpectedVersion
           # Optimistic concurrency: only apply if the in-memory `lock_version`
           # still matches the row, incrementing it on success. Two editors saving
           # the same draft no longer silently clobber each other — the loser gets
@@ -2308,6 +2357,11 @@ defmodule KilnCMS.CMS.Content do
 
         update :submit_for_review do
           require_atomic? false
+          # `If-Match` / `expected_lock_version` (docs/json-api.md, "Concurrency"):
+          # refused with a 412 unless the row is still the version the client
+          # read. A no-op without either.
+          argument :expected_lock_version, :integer
+          change KilnCMS.CMS.Changes.CheckExpectedVersion
           # A workflow transition takes no content input, and its UPDATE is a
           # compare-and-swap on the current state — see `:return_to_draft` for the
           # full rationale (#873); this closes the same two gaps on the other three
@@ -2321,6 +2375,11 @@ defmodule KilnCMS.CMS.Content do
 
         update :return_to_draft do
           require_atomic? false
+          # `If-Match` / `expected_lock_version` (docs/json-api.md, "Concurrency"):
+          # refused with a 412 unless the row is still the version the client
+          # read. A no-op without either.
+          argument :expected_lock_version, :integer
+          change KilnCMS.CMS.Changes.CheckExpectedVersion
           # A workflow transition takes no content input. Without this the action
           # inherits `default_accept` (17 attributes), so `PATCH
           # /:id/return-to-draft` with a populated `attributes` object would write
@@ -2351,6 +2410,11 @@ defmodule KilnCMS.CMS.Content do
           # with the DocServer (#1061), and the gates must judge what actually
           # publishes. No-op when nobody is editing.
           change KilnCMS.CMS.Changes.CheckpointCollabRoom
+          # `If-Match` / `expected_lock_version` (docs/json-api.md, "Concurrency"):
+          # refused with a 412 unless the row is still the version the client
+          # read. A no-op without either.
+          argument :expected_lock_version, :integer
+          change KilnCMS.CMS.Changes.CheckExpectedVersion
           # No content input, and a compare-and-swap on state (#879) — see
           # `:return_to_draft`. Without the filter a publish landing after a
           # concurrent transition would stamp `published_at` + artifacts onto a
@@ -2456,6 +2520,11 @@ defmodule KilnCMS.CMS.Content do
 
         update :unpublish do
           require_atomic? false
+          # `If-Match` / `expected_lock_version` (docs/json-api.md, "Concurrency"):
+          # refused with a 412 unless the row is still the version the client
+          # read. A no-op without either.
+          argument :expected_lock_version, :integer
+          change KilnCMS.CMS.Changes.CheckExpectedVersion
           # No content input, and a compare-and-swap on state (#879) — see
           # `:return_to_draft`.
           accept []
@@ -3312,8 +3381,13 @@ defmodule KilnCMS.CMS.Content do
         attribute :embedded_at, :utc_datetime_usec
 
         # Optimistic-concurrency version, bumped on every `:update` (see the
-        # action's `optimistic_lock`). Internal.
-        attribute :lock_version, :integer, allow_nil?: false, default: 1, public?: false
+        # action's `optimistic_lock`). Public and read-only, so a headless
+        # client can say which version it is writing from — the `ETag` a
+        # single-resource read carries is built from it and `state`, and
+        # `expected_lock_version` / `If-Match` refuse a write from any other
+        # (`Changes.CheckExpectedVersion`). Never accepted as input: the
+        # editor's own lock reads it off the record it loaded.
+        attribute :lock_version, :integer, allow_nil?: false, default: 1, public?: true
 
         # Public so headless consumers can serialize and sort on them (Ash 3
         # defaults attributes to public?: false, and AshJsonApi rejects a
