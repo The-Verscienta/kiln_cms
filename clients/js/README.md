@@ -175,8 +175,11 @@ cold-cache 503 once before throwing; everything else that fails throws — see
 
 ### Media uploads
 
-The one write surface the client covers. It needs a **read + write** key on an
-editor (or admin) account — a read-only key gets a `403`.
+Files enter the library over REST, not JSON:API — but they are **writes** like
+any other: they need a `:read_write` key on an editor (or admin) account, throw
+`KilnConfigError` before sending anything when the client has none (so an
+upload never transfers the file just to be refused), and surface failures as
+the same typed errors — a read-only key is a `KilnAuthError`.
 
 | Method                                       | Endpoint                                         | Notes                                                |
 | -------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------- |

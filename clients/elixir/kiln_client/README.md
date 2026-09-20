@@ -169,8 +169,11 @@ The error reasons are `:malformed`, `:expired` and `:mismatch`. Pass
 
 ## Media uploads
 
-The one write surface the client covers — it needs a **read + write** API key
-on an editor (or admin) account; a read-only key gets `{:error, {:http_status, 403, _}}`.
+Files enter the library over REST, not JSON:API — but they are **writes** like
+any other: they take a `:read_write` API key per call (`api_key:`) or from
+config, refuse with `{:error, %KilnClient.Error{reason: :no_api_key}}` before
+sending anything when there is none, and report failures as the same error
+struct (a read-only key is `reason: :forbidden`).
 
 ```elixir
 # Multipart, streamed from disk; metadata optional.
