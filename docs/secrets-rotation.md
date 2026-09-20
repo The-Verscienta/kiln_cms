@@ -555,7 +555,7 @@ verify the feature.
 | `KILN_GOVERNANCE_WITNESS_TOKEN` | Set and restart; rotate at the witness endpoint in the same window | Endpoint-dependent | The next checkpoint posts successfully |
 | `UNSPLASH_ACCESS_KEY` | Set and restart | None needed — read-only, no stored state | The Unsplash tab in the media library returns results |
 | `ADMIN_PASSWORD` / `EDITOR_PASSWORD` | Seed-only; change the password in the app, not the variable | — | — |
-| Webhook endpoint secrets (`KilnCMS.CMS.WebhookEndpoint`) | Per-endpoint, in the database, vault-encrypted — so a `SECRET_KEY_BASE` rotation orphans them too ([above](#the-part-that-is-not-recoverable)). Re-create the endpoint to mint a new secret | Consumer-dependent — a consumer verifying signatures will reject deliveries until it has the new secret | A delivery succeeds; `consecutive_failures` stays at 0 |
+| Webhook endpoint secrets (`KilnCMS.CMS.WebhookEndpoint`) | Per-endpoint, in the database, vault-encrypted — so they move with the rest of the vault when you re-encrypt (*Data at rest*, under `SECRET_KEY_BASE` above). Re-create the endpoint only to mint a *new* secret | Consumer-dependent — a consumer verifying signatures will reject deliveries until it has the new secret | A delivery succeeds; `consecutive_failures` stays at 0 |
 | API keys (`kiln_…`) | Mint a new key, hand it to the consumer, then destroy the old row | Overlap is under your control — both keys work until you delete one | The consumer's requests still succeed |
 
 ---
