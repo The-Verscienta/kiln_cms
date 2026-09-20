@@ -754,12 +754,12 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
   whichever transport it uses. The key is the address, not the account as for
   `/ws/collab` frames (decision record 0002): documents are not a per-keystroke
   stream, and an anonymous socket has no account. A subscription's pushes are
-  not charged. They re-run only the phases `Absinthe.Phase.Init` recorded, and
+  not charged. They re-run only the phases Absinthe.Phase.Init recorded, and
   the budget runs before Init. Over budget, the document is answered before it
   is parsed with a GraphQL error whose `extensions` are
   `{code: "too_many_requests", retry_after: <seconds>}`, and the socket and its
   subscriptions stay up. A second defect turned up on the way:
-  `Absinthe.Phoenix.Channel` keeps the context a document ends with as the
+  Absinthe.Phoenix.Channel keeps the context a document ends with as the
   socket's context, and a document refused before Absinthe copied the context
   onto it (a syntax error, the token limit) ended with none. One malformed
   document left the socket with no tenant, no actor and no pubsub until it

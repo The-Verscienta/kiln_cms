@@ -7,11 +7,11 @@
 export interface RecordedCall {
   method: string;
   url: URL;
-  method: string;
   headers: Record<string, string>;
-  /** The request body as sent — a string, a `FormData`, a `Blob`, or undefined. */
-  body: unknown;
-  /** The request body, JSON-parsed; `undefined` when none was sent. */
+  /**
+   * The request body: JSON-parsed when it was sent as a string, and otherwise
+   * as sent — a `FormData`, a `Blob`, or `undefined` when none was sent.
+   */
   body: unknown;
 }
 

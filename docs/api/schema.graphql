@@ -2894,7 +2894,8 @@ type RootQueryType {
   """
   The collection as of a date (#338): every document of `type` that was
   published at that instant, reconstructed from version history — the
-  GraphQL twin of `GET /api/content/:type?as_of=`.
+  GraphQL twin of `GET /api/content/:type?as_of=`. Lists only what an
+  anonymous reader may discover: public then and now, never passphrase-locked.
   """
   contentAsOf(type: String!, asOf: DateTime!, limit: Int): [PointInTimeEntry!]
 

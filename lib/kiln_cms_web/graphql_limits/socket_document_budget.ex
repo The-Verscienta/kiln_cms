@@ -33,15 +33,15 @@ defmodule KilnCMSWeb.GraphqlLimits.SocketDocumentBudget do
   ## Only what the client sends is charged
 
   A subscription's push re-runs its document every time a subscribed record
-  changes. It runs the phases `Absinthe.Phase.Init` recorded when the document
-  was first run (`Absinthe.Subscription.Local.pipeline/2`), and Init records the
+  changes. It runs the phases Absinthe.Phase.Init recorded when the document
+  was first run (Absinthe.Subscription.Local.pipeline/2), and Init records the
   pipeline from itself onward. This phase runs before Init, so pushes skip it.
   A push is caused by a write, not by the subscriber, and the subscriber paid
   for it once, when it subscribed.
 
   ## The context survives a refused document
 
-  `Absinthe.Phoenix.Channel` stores the context a document ends with as the
+  Absinthe.Phoenix.Channel stores the context a document ends with as the
   socket's context for the next one. Absinthe copies the socket's context onto
   the blueprint in `Absinthe.Phase.Document.Context`, which runs after parsing.
   A document refused before that point (a syntax error, the token limit, or this
