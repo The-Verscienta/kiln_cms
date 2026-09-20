@@ -1,10 +1,11 @@
 defmodule KilnCMS.Mail.SuppressedRecipient do
   @moduledoc """
-  An email address that hard-bounced (a permanent 5xx reject) and should not
-  be mailed again until an admin clears it.
+  An email address that hard-bounced (a permanent 5xx reject naming the
+  recipient) and should not be mailed again until an admin clears it.
 
-  Written by the delivery pipeline on a permanent failure
-  (`KilnCMS.Mail.deliver_for_worker/2`) and consulted by
+  Written by the delivery pipeline on a permanent reject whose enhanced status
+  says the address is dead — never on the relay refusing our own AUTH, TLS or
+  sender (`KilnCMS.Mail.deliver_for_worker/2`) — and consulted by
   `KilnCMS.Mail.enqueue!/1`, which drops suppressed recipients before queuing
   — so a dead address isn't re-attempted on every future send, which wastes
   retries and signals spamminess to receivers. Admin-managed (viewable and

@@ -33,10 +33,15 @@ defmodule KilnCMS.Mail.SiteRelayTest do
   defmodule PermanentFailureAdapter do
     use Swoosh.Adapter
 
+    # A RCPT TO reject arrives under `:send` (the mail transaction), never
+    # `:no_more_hosts` (the session, which ends before any address is sent) —
+    # so this is what a relay refusing *the recipient* actually looks like.
+    # The distinction is load-bearing since #1575: a session failure is the
+    # relay refusing us, and retries rather than cancelling.
     def deliver(_email, _config),
       do:
         {:error,
-         {:no_more_hosts,
+         {:send,
           {:permanent_failure, ~c"smtp.example.com", "550 5.1.1 Recipient address rejected"}}}
   end
 
@@ -276,8 +281,10 @@ defmodule KilnCMS.Mail.SiteRelayTest do
                  adapter: PermanentFailureAdapter
                )
 
-      # The suppression list is instance-wide; a relay the site chose must not
-      # be able to write to it.
+      # The reject names the recipient, so on the operator's relay this would
+      # suppress the address (#1575). The suppression list is instance-wide,
+      # and a relay the site chose must not be able to write to it — so the
+      # site's word cancels this message and nothing more.
       refute Mail.suppressed?("reader@example.com")
     end
 

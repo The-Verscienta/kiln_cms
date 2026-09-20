@@ -15,9 +15,12 @@ defmodule KilnCMS.Mail do
 
   `deliver_for_worker/2` is the shared delivery step for mail workers
   (`DeliveryWorker`, `KilnCMS.Notifications.WorkflowMailWorker`): it maps SMTP
-  outcomes onto Oban semantics — permanent (5xx) failures cancel the job and
-  emit a `[:kiln_cms, :mail, :bounced]` telemetry event, transient failures
-  (4xx, connection/DNS errors) raise so Oban retries with `backoff_seconds/1`.
+  outcomes onto Oban semantics — a permanent (5xx) reject of the message
+  cancels the job and emits a `[:kiln_cms, :mail, :bounced]` telemetry event,
+  and suppresses the address only when the reject is about the recipient;
+  transient failures (4xx, connection/DNS errors), and permanent refusals of
+  our own side (relay AUTH, TLS, the sender), raise so Oban retries with
+  `backoff_seconds/1`.
 
   Mail sent on behalf of a site carries that site's `org_id` (`enqueue!/2`,
   `deliver_for_worker/2`), and goes out through the site's own SMTP relay when
@@ -64,7 +67,8 @@ defmodule KilnCMS.Mail do
   defmodule TransientDeliveryError do
     @moduledoc """
     Raised inside mail workers for retryable delivery failures (4xx SMTP
-    replies, connection resets, DNS errors) so Oban re-attempts the job.
+    replies, connection resets, DNS errors, the relay refusing our AUTH, TLS or
+    sender) so Oban re-attempts the job.
     """
     defexception [:message]
   end
@@ -190,7 +194,16 @@ defmodule KilnCMS.Mail do
   @doc """
   Deliver an email from inside an Oban worker, translating the outcome into
   Oban return values: `:ok` on success, `{:cancel, reason}` on a permanent
-  (5xx) failure, raises `TransientDeliveryError` otherwise so the job retries.
+  (5xx) reject of the message, raises `TransientDeliveryError` otherwise so the
+  job retries.
+
+  A permanent reject suppresses the recipient only when it is about the
+  recipient — a 5xx to `RCPT`/`DATA` whose enhanced status names a dead mailbox
+  or domain (`5.1.1`, `5.2.1`, ...). A permanent refusal of our side — the relay
+  rejecting AUTH (a rotated `SMTP_PASSWORD`) or STARTTLS, or the sender — says
+  nothing about the recipient: it retries, raising one aggregated
+  `KilnCMS.Mail.RelayAlert`, so the operator can fix the relay before the mail
+  is lost.
 
   `org_id:` names the site the mail is sent for, routing it through that site's
   relay when it has one (`KilnCMS.Mail.SiteRelay`). A site relay that is set
@@ -213,10 +226,11 @@ defmodule KilnCMS.Mail do
       {relay, email, {:error, reason}} ->
         safe_reason = redact_reason(reason)
 
-        if permanent_failure?(reason) do
-          cancel_permanent(email, safe_reason, relay)
-        else
-          retry_transient(email, reason, safe_reason, relay)
+        case failure_class(reason) do
+          :recipient -> cancel_permanent(email, safe_reason, true, relay)
+          :message -> cancel_permanent(email, safe_reason, false, relay)
+          :relay -> retry_relay_refused(email, safe_reason)
+          :transient -> retry_transient(email, reason, safe_reason, relay)
         end
     end
   end
@@ -238,15 +252,17 @@ defmodule KilnCMS.Mail do
     end
   end
 
-  # A hard 5xx: log + emit a bounce event + suppress the address, then cancel.
-  defp cancel_permanent(email, safe_reason, relay) do
-    # Log so a systematic 5xx (e.g. a rotated relay password) is visible in
-    # server logs and Sentry, not just as `cancelled` rows in `oban_jobs` — a
-    # cancel is otherwise silent (no job exception, and Sentry's Oban
-    # integration ignores `{:cancel, _}`).
+  # A hard 5xx: log + emit a bounce event + (when it names the recipient, and
+  # it was the operator's own relay that said so) suppress the address, then
+  # cancel.
+  defp cancel_permanent(email, safe_reason, suppress?, relay) do
+    # Log so a systematic 5xx (e.g. a content filter rejecting every message) is
+    # visible in server logs and Sentry, not just as `cancelled` rows in
+    # `oban_jobs` — a cancel is otherwise silent (no job exception, and Sentry's
+    # Oban integration ignores `{:cancel, _}`).
     Logger.warning(
       "Mail permanently rejected for #{Enum.join(recipient_domains(email), ", ")}, " <>
-        "cancelling: #{safe_reason}"
+        "cancelling#{if suppress?, do: " and suppressing the recipient"}: #{safe_reason}"
     )
 
     :telemetry.execute(
@@ -258,15 +274,34 @@ defmodule KilnCMS.Mail do
       %{recipient_domains: recipient_domains(email), reason: safe_reason}
     )
 
-    # Remember the dead address so future sends skip it (enqueue!) — but only
-    # on the operator's word. The suppression list is instance-wide, and a
-    # site's relay is a server the site chose: it can answer 550 to any address
-    # it likes. Believing it would let one site stop every site, and account
-    # mail, from reaching an address — a password reset included. A site
-    # relay's hard reject cancels this one message and nothing more.
-    if relay == :operator, do: suppress_recipients(email, safe_reason)
+    # Remember the dead address so future sends skip it (enqueue!) — only when
+    # both guards agree. They answer different questions, and the list is
+    # instance-wide, so either one alone leaves a way to poison it.
+    #
+    # `suppress?` — only a reject that actually says the address is dead
+    # (`5.1.1`, `5.2.1`, ...). A refusal of our side of the conversation says
+    # nothing about the recipient, and a guess here silently stops a person's
+    # password resets until an admin notices.
+    #
+    # `relay == :operator` — only on the operator's word. A site's relay is a
+    # server that site chose, and it may answer 550 to any address it likes;
+    # believing it would let one site stop every site, account mail included,
+    # from reaching an address. A site relay's hard reject cancels this one
+    # message and nothing more.
+    if suppress? and relay == :operator, do: suppress_recipients(email, safe_reason)
 
     {:cancel, "permanent delivery failure: #{safe_reason}"}
+  end
+
+  # The relay refused *us* — AUTH, STARTTLS, the sender — permanently, as gen_smtp
+  # sees it. Nothing is wrong with the recipient, and every other queued job is
+  # about to hit the same wall, so raise one aggregated alert and retry: the
+  # operator fixing the password or sender within the ~16h retry window gets
+  # the mail out, where cancelling would lose it.
+  defp retry_relay_refused(email, safe_reason) do
+    RelayAlert.notify_refused(recipient_domain(email), safe_reason)
+
+    raise TransientDeliveryError, message: "relay refused delivery, retrying: #{safe_reason}"
   end
 
   # A retryable failure: raise so Oban retries. A connection-class failure (DNS,
@@ -534,21 +569,90 @@ defmodule KilnCMS.Mail do
   defp recipient_domain(email), do: email |> recipient_domains() |> Enum.join(", ")
 
   # gen_smtp reports hard rejects as a `:permanent_failure` marker nested at
-  # varying depths (`{:no_more_hosts, {:permanent_failure, host, msg}}`,
-  # `{:send, {:permanent_failure, ...}}`, ...) depending on where in the
-  # dialog the 5xx arrived, so walk the term rather than enumerate shapes.
-  # Anything else — 4xx, network errors, unexpected shapes — is treated as
-  # transient: retrying a hard bounce a few times is wasteful but harmless,
-  # while cancelling a greylisted send loses the email.
-  defp permanent_failure?(:permanent_failure), do: true
+  # varying depths depending on where in the dialog the 5xx arrived, so walk
+  # the term rather than enumerate shapes. Opening the session — banner, EHLO,
+  # STARTTLS, AUTH, all before any address is sent — fails as
+  # `{:no_more_hosts, {:permanent_failure, host, why}}`; the mail transaction
+  # (MAIL FROM, RCPT TO, DATA) as `{:send, {:permanent_failure, host, why}}`.
+  # `why` is the reply text, or an atom for a failed AUTH (`:auth_failed`) and
+  # a TLS stack that isn't running (`:ssl_not_started`).
+  @session_markers ~w(no_more_hosts auth_failed ssl_not_started)a
 
-  defp permanent_failure?(term) when is_tuple(term),
-    do: term |> Tuple.to_list() |> Enum.any?(&permanent_failure?/1)
+  # What a delivery failure is about, which decides what the worker does:
+  #
+  #   * `:recipient` — the receiving server refused this address: a 5xx to the
+  #     mail transaction whose enhanced status names a dead mailbox or domain.
+  #     Cancel and suppress.
+  #   * `:relay` — the relay refused our side: the session (banner, EHLO,
+  #     STARTTLS, AUTH) or the sender (MAIL FROM, SPF/DKIM/DMARC). Retry and
+  #     alert; the recipient is fine.
+  #   * `:message` — any other 5xx: content policy, size, a bare `550` with no
+  #     enhanced status to say whose fault it is. Retrying won't change the
+  #     answer, so cancel — but don't suppress on a guess.
+  #   * `:transient` — no permanent marker at all (4xx, network). Retry.
+  #
+  # Anything unrecognised falls to the side that doesn't suppress: a missed
+  # suppression costs one more doomed send later, a wrong one costs a person
+  # all their mail.
+  defp failure_class(reason) do
+    cond do
+      not has_marker?(reason, [:permanent_failure]) -> :transient
+      has_marker?(reason, @session_markers) -> :relay
+      true -> reply_class(permanent_reply(reason))
+    end
+  end
 
-  defp permanent_failure?(term) when is_list(term),
-    do: Enum.any?(term, &permanent_failure?/1)
+  # The reply text of a permanent failure, wherever gen_smtp nested it.
+  defp permanent_reply({:permanent_failure, _host, reply}) when is_binary(reply), do: reply
+  defp permanent_reply({:permanent_failure, reply}) when is_binary(reply), do: reply
 
-  defp permanent_failure?(_term), do: false
+  defp permanent_reply(term) when is_tuple(term),
+    do: term |> Tuple.to_list() |> permanent_reply()
+
+  defp permanent_reply(term) when is_list(term), do: Enum.find_value(term, &permanent_reply/1)
+  defp permanent_reply(_term), do: nil
+
+  # A transaction reject can't say which command it answered, so read the
+  # RFC 3463 enhanced status code, which RFC 2034 puts straight after the reply
+  # code ("550 5.1.1 ..." or, multiline, "550-5.1.1 ...").
+  @enhanced_status ~r/\A5\d\d[ -]5\.(\d{1,3})\.(\d{1,3})(?![\d.])/
+
+  # The address is dead: bad mailbox (5.1.1), bad or null-MX domain (5.1.2,
+  # 5.1.10), unusable syntax (5.1.3), moved (5.1.6), disabled (5.2.1). Not
+  # 5.2.2 (mailbox full) — that one clears on its own.
+  @recipient_statuses [{1, 1}, {1, 2}, {1, 3}, {1, 6}, {1, 10}, {2, 1}]
+
+  # Our side: a bad sender address (5.1.7, 5.1.8), AUTH trouble (5.7.8
+  # credentials invalid, 5.7.9 mechanism too weak, 5.7.11 encryption required,
+  # 5.7.13 account disabled, 5.7.14 trust required), and SPF/DKIM/DMARC failing
+  # the sender (5.7.20–5.7.26, RFC 7372).
+  @relay_statuses [{1, 7}, {1, 8}, {7, 8}, {7, 9}, {7, 11}, {7, 13}, {7, 14}] ++
+                    for(detail <- 20..26, do: {7, detail})
+
+  # 530 authentication required, 535 credentials invalid, 538 encryption
+  # required for AUTH (RFC 4954) — for relays that send no enhanced status —
+  # and the reply texts relays use to refuse a sender or an unauthenticated
+  # relay attempt at MAIL FROM / RCPT TO.
+  @relay_reply ~r/\A53[058][ -]|\bsender\b|\brelay(ing)? (access )?(denied|not permitted)/i
+
+  defp reply_class(reply) when is_binary(reply) do
+    status = enhanced_status(reply)
+
+    cond do
+      status in @recipient_statuses -> :recipient
+      status in @relay_statuses or Regex.match?(@relay_reply, reply) -> :relay
+      true -> :message
+    end
+  end
+
+  defp reply_class(_no_reply_text), do: :message
+
+  defp enhanced_status(reply) do
+    case Regex.run(@enhanced_status, reply, capture: :all_but_first) do
+      [subject, detail] -> {String.to_integer(subject), String.to_integer(detail)}
+      nil -> nil
+    end
+  end
 
   # A transient failure is "connection-class" when delivery never reached an
   # SMTP dialog — DNS resolution, TCP connect, or the connection dropping —
@@ -556,21 +660,24 @@ defmodule KilnCMS.Mail do
   # `:temporary_failure`). gen_smtp nests `:network_failure` and the underlying
   # posix atom at varying depths (`{:retries_exceeded, {:network_failure, host,
   # {:error, :nxdomain}}}`, `{:network_failure, {:error, :econnrefused}}`, ...),
-  # so walk the term like `permanent_failure?/1`. Keyed on `:network_failure`
-  # (present for every socket/DNS error, absent from a `:temporary_failure`
-  # greylist) plus the posix atoms as defence in depth.
+  # so walk the term. Keyed on `:network_failure` (present for every socket/DNS
+  # error, absent from a `:temporary_failure` greylist) plus the posix atoms as
+  # defence in depth.
   @connection_class_markers ~w(
     network_failure
     nxdomain econnrefused econnreset ehostunreach enetunreach etimedout ehostdown
   )a
 
-  defp connection_class?(marker) when is_atom(marker), do: marker in @connection_class_markers
+  defp connection_class?(reason), do: has_marker?(reason, @connection_class_markers)
 
-  defp connection_class?(term) when is_tuple(term),
-    do: term |> Tuple.to_list() |> Enum.any?(&connection_class?/1)
+  # Whether any of `markers` appears anywhere in a (nested) gen_smtp error term.
+  defp has_marker?(marker, markers) when is_atom(marker), do: marker in markers
 
-  defp connection_class?(term) when is_list(term),
-    do: Enum.any?(term, &connection_class?/1)
+  defp has_marker?(term, markers) when is_tuple(term),
+    do: term |> Tuple.to_list() |> has_marker?(markers)
 
-  defp connection_class?(_term), do: false
+  defp has_marker?(term, markers) when is_list(term),
+    do: Enum.any?(term, &has_marker?(&1, markers))
+
+  defp has_marker?(_term, _markers), do: false
 end
