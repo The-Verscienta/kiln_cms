@@ -751,6 +751,14 @@ defmodule KilnCMS.MixProject do
       {:tz, "~> 0.28"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
+      # The production consumer for `KilnCMSWeb.Telemetry.metrics/0` (#1362).
+      # Started only when KILN_METRICS_ENABLED is on, and served on its own
+      # listener rather than the public endpoint — see KilnCMSWeb.Metrics.
+      # Peep rather than telemetry_metrics_prometheus_core: it aggregates into
+      # fixed-size histograms as events arrive, where the core reporter keeps
+      # every distribution sample in ETS until a scrape drains it, so an
+      # enabled-but-unscraped node would grow without bound.
+      {:peep, "~> 5.0"},
       # Error tracking. No-op unless SENTRY_DSN is set (config/runtime.exs), so
       # dev/test/precommit stay offline. Uses Req (not hackney) for transport to
       # keep the project on a single HTTP client — see KilnCMS.SentryReqClient.

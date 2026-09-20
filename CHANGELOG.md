@@ -66,6 +66,9 @@ Every summary line below that was shortened links to its own entry there.
 - **`KILN_MEDIA_ROOT`: a stable directory for local media.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#kilnmediaroot-a-stable-directory-for-local-media))
 
+- **An opt-in Prometheus endpoint for the app's metrics.**
+  ([#1362](https://github.com/The-Verscienta/kiln_cms/issues/1362) · [long form](docs/changelog/unreleased.md#an-opt-in-prometheus-endpoint-for-the-apps-metrics))
+
 ### Changed
 
 - **The content list says an item's status in words; the trigram glyph is

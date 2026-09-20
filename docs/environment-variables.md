@@ -493,9 +493,9 @@ capture is a no-op. See [`docs/observability.md`](observability.md).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `SENTRY_DSN` | unset | Sentry DSN (`https://<publickey>@o0.ingest.sentry.io/0`, or your own host when self-hosting). Enables error reporting when set. **Where to get it:** the Sentry project's Settings → Client Keys (DSN). It is not confidential in the strict sense — browser SDKs ship it publicly — but it does authorize writes to the project, so handle it like a credential anyway. | [`config/runtime/observability.exs:13`](../config/runtime/observability.exs#L13) |
-| `SENTRY_ENV` | `config_env()` | Environment name tag for Sentry events. | [`config/runtime/observability.exs:16`](../config/runtime/observability.exs#L16) |
-| `RELEASE_VSN` | unset | Release version tag (set automatically by the release runtime) to pin regressions to a deploy. | [`config/runtime/observability.exs:19`](../config/runtime/observability.exs#L19) |
+| `SENTRY_DSN` | unset | Sentry DSN (`https://<publickey>@o0.ingest.sentry.io/0`, or your own host when self-hosting). Enables error reporting when set. **Where to get it:** the Sentry project's Settings → Client Keys (DSN). It is not confidential in the strict sense — browser SDKs ship it publicly — but it does authorize writes to the project, so handle it like a credential anyway. | [`config/runtime/observability.exs:15`](../config/runtime/observability.exs#L15) |
+| `SENTRY_ENV` | `config_env()` | Environment name tag for Sentry events. | [`config/runtime/observability.exs:18`](../config/runtime/observability.exs#L18) |
+| `RELEASE_VSN` | unset | Release version tag (set automatically by the release runtime) to pin regressions to a deploy. | [`config/runtime/observability.exs:21`](../config/runtime/observability.exs#L21) |
 
 ### distributed tracing (OpenTelemetry)
 
@@ -505,10 +505,25 @@ Enabled only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, which flips the
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | OTLP collector endpoint — anything that speaks OTLP: a local `otel-collector`, Grafana Alloy, Jaeger, or a vendor's ingest URL. Enables tracing when set. Port 4318 is the conventional HTTP port, 4317 gRPC; match it to the protocol below. | [`config/runtime/observability.exs:29`](../config/runtime/observability.exs#L29) |
-| `OTEL_SERVICE_NAME` | `kiln_cms` | Service name attached to spans. Free-form — this is how the deployment is labelled in the tracing UI. | [`config/runtime/observability.exs:35`](../config/runtime/observability.exs#L35) |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http_protobuf` | OTLP protocol: `http_protobuf`, `http_json` or `grpc`. | [`config/runtime/observability.exs:39`](../config/runtime/observability.exs#L39) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | OTLP collector endpoint — anything that speaks OTLP: a local `otel-collector`, Grafana Alloy, Jaeger, or a vendor's ingest URL. Enables tracing when set. Port 4318 is the conventional HTTP port, 4317 gRPC; match it to the protocol below. | [`config/runtime/observability.exs:31`](../config/runtime/observability.exs#L31) |
+| `OTEL_SERVICE_NAME` | `kiln_cms` | Service name attached to spans. Free-form — this is how the deployment is labelled in the tracing UI. | [`config/runtime/observability.exs:37`](../config/runtime/observability.exs#L37) |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http_protobuf` | OTLP protocol: `http_protobuf`, `http_json` or `grpc`. | [`config/runtime/observability.exs:41`](../config/runtime/observability.exs#L41) |
 | `OTEL_EXPORTER_OTLP_HEADERS` | unset | Standard OTLP headers, as comma-separated `key=value` pairs (`api-key=abc123,x-tenant=acme`) — usually the ingest credential from whichever vendor `OTEL_EXPORTER_OTLP_ENDPOINT` points at. Honored by the exporter library, not by Kiln. | OpenTelemetry exporter (standard `OTEL_*`) |
+
+### metrics exporter (Prometheus, #1362)
+
+Off by default. When `KILN_METRICS_ENABLED` is on, `GET /metrics` is served in
+the Prometheus text format on a listener of its own. It is never a route on the
+public endpoint. With the exporter off, no port is opened and nothing records
+the metrics. See [`docs/observability.md`](observability.md) for the exposure
+options and a scrape config.
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `KILN_METRICS_ENABLED` | `false` | Starts the metrics reporter and its `/metrics` listener. Unrecognized values keep it off and warn. | [`config/runtime/observability.exs:51`](../config/runtime/observability.exs#L51) |
+| `KILN_METRICS_PORT` | `9568` | Port for the `/metrics` listener. Must differ from `PORT`. An unparseable value keeps the default and warns. A port above 65535 fails the boot, loudly. | [`config/runtime/observability.exs:57`](../config/runtime/observability.exs#L57) |
+| `KILN_METRICS_BIND` | `loopback` | `loopback` (127.0.0.1) suits an agent on the same host or pod. `all` binds every interface, for a scraper on a private network; don't publish the port. Other values, including an IP address, keep `loopback` and warn. | [`config/runtime/observability.exs:66`](../config/runtime/observability.exs#L66) |
+| `KILN_METRICS_TOKEN` | unset | When set, a scrape must send `Authorization: Bearer <token>`. It is compared in constant time, and anything else gets `401`. A blank value counts as unset. Recommended with `KILN_METRICS_BIND=all`; without a token, that combination logs a warning at boot. | [`config/runtime/observability.exs:72`](../config/runtime/observability.exs#L72) |
 
 ### tamper-evident history & content signing (#356, #340)
 

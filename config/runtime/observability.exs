@@ -1,5 +1,7 @@
 import Config
 
+alias KilnCMS.Config.Env
+
 # A fragment of config/runtime.exs, evaluated by it at the position this
 # block always occupied. Evaluation ORDER matters here — see the header of
 # config/runtime.exs before moving anything.
@@ -38,4 +40,37 @@ if otlp_endpoint = System.get_env("OTEL_EXPORTER_OTLP_ENDPOINT") do
     otlp_protocol:
       "OTEL_EXPORTER_OTLP_PROTOCOL" |> System.get_env("http_protobuf") |> String.to_atom(),
     otlp_endpoint: otlp_endpoint
+end
+
+# ## Metrics exporter (Prometheus, #1362)
+#
+# Off by default. KilnCMSWeb.Metrics starts a Peep reporter and a /metrics
+# listener on its own port only when this is on. Each variable writes config
+# only when the operator set a recognized value, so the compiled defaults in
+# config/config.exs (off, 9568, loopback, no token) stand otherwise.
+with {:ok, enabled?} <- Env.fetch("KILN_METRICS_ENABLED") do
+  config :kiln_cms, KilnCMSWeb.Metrics, enabled: enabled?
+end
+
+# No upper-bound check beyond the shared reader's: a port above 65535 fails the
+# listener at boot, loudly, which is the right outcome for an opt-in feature.
+with {:ok, port} <- Env.positive_integer("KILN_METRICS_PORT") do
+  config :kiln_cms, KilnCMSWeb.Metrics, port: port
+end
+
+# `loopback` for a sidecar agent; `all` for a scraper on a private network.
+# A named choice rather than an address, so an unreadable value keeps loopback
+# and warns instead of being guessed at. Mapped by hand, not with
+# `String.to_existing_atom/1`: in a release this runs before the module that
+# mentions `:loopback` is loaded.
+with {:ok, bind} <- Env.one_of("KILN_METRICS_BIND", ~w(loopback all)) do
+  config :kiln_cms, KilnCMSWeb.Metrics, bind: if(bind == "all", do: :all, else: :loopback)
+end
+
+# Blank is unset: `KILN_METRICS_TOKEN=` in a compose file must not turn into a
+# required empty bearer token.
+with token when is_binary(token) <- System.get_env("KILN_METRICS_TOKEN"),
+     token = String.trim(token),
+     true <- token != "" do
+  config :kiln_cms, KilnCMSWeb.Metrics, token: token
 end

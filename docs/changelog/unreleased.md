@@ -46,6 +46,28 @@ carries the reasoning.
   write to. Ignored under S3.
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529))
 
+<a id="an-opt-in-prometheus-endpoint-for-the-apps-metrics"></a>
+
+- **An opt-in Prometheus endpoint for the app's metrics.** Before this, nothing
+  in production recorded the metrics `KilnCMSWeb.Telemetry` defines: the
+  dashboard that shows them exists only in development, and no reporter was
+  installed. Set `KILN_METRICS_ENABLED=true` and a [Peep](https://hexdocs.pm/peep)
+  reporter serves `GET /metrics` on a listener of its own, never on the public
+  endpoint:
+  - it binds `127.0.0.1:9568` by default (`KILN_METRICS_PORT`)
+  - `KILN_METRICS_BIND=all` binds every interface, for a scraper on a private
+    network
+  - `KILN_METRICS_TOKEN` optionally requires a bearer token
+
+  Durations are now histograms rather than summaries, so p95 can be computed
+  from them. Tags are bounded: content types you define in the admin are
+  reported as `dynamic`. Off by default, so a stock install records nothing
+  and opens no port. Alerts that must reach every operator still go through
+  logs and Sentry. `docs/observability.md` and `docs/performance.md` now agree
+  on all of this, and `docs/performance.md` records a first headless-API p95
+  baseline of 2.7–7.4 ms, measured on a laptop.
+  ([#1362](https://github.com/The-Verscienta/kiln_cms/issues/1362))
+
 ## Changed
 
 <a id="the-content-list-says-an-items-status-in-words-the-trigram-glyph-is-opt-in"></a>
