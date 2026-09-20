@@ -39,6 +39,15 @@ defmodule KilnCMS.CMS.MediaItem do
     # No top-level queries (D7 — deliberate). Media is resolved only as a nested
     # `featuredImage` on content; the library itself isn't a public listing
     # endpoint (that's an admin concern via AshAdmin / the JSON:API).
+
+    # The metadata write, mirroring the JSON:API `PATCH` below (#330 reversed
+    # D7 for writes). Uploads themselves are not GraphQL: they are REST
+    # (`POST /api/media`), where the body limit, the per-upload rate limit and
+    # "authorize before reading the body" can be scoped to one route — see
+    # `KilnCMSWeb.MediaUploadController`.
+    mutations do
+      update :update_media_item, :update_metadata
+    end
   end
 
   json_api do
@@ -64,6 +73,14 @@ defmodule KilnCMS.CMS.MediaItem do
       index :library, route: "/library"
       # `/:id` last so it can't shadow the static `/search`/`/library` sub-paths.
       get :read
+
+      # Metadata edits for API clients: alt text, caption, decorative flag,
+      # focal point and tags. `:update_metadata`, never `:update`, which also
+      # accepts `storage_key`/`url`/`variants` for the pipeline's own writes —
+      # a client able to set `storage_key` could point its row at another
+      # item's private blob. Creating media is `POST /api/media`
+      # (`KilnCMSWeb.MediaUploadController`): JSON:API has no file upload.
+      patch :update_metadata
     end
   end
 
@@ -244,6 +261,43 @@ defmodule KilnCMS.CMS.MediaItem do
                on_no_match: :ignore,
                on_missing: :ignore
              )
+    end
+
+    # What an API client may change about an item after upload: the fields an
+    # editor edits in the media library's drawer, and nothing the pipeline
+    # owns. Deliberately narrower than `:update` (see the JSON:API route).
+    # Same tag trio and rules as `:update`. `audience` is left out: gating a
+    # document relocates its blob between stores, and it stays an editor-UI
+    # act until an API caller needs it.
+    update :update_metadata do
+      require_atomic? false
+      accept [:alt, :caption, :decorative, :focal_x, :focal_y]
+
+      argument :tag_ids, {:array, :uuid}
+      argument :add_tag_ids, {:array, :uuid}
+      argument :remove_tag_ids, {:array, :uuid}
+
+      validate {KilnCMS.CMS.Validations.MergeArguments,
+                complete: :tag_ids, add: :add_tag_ids, remove: :remove_tag_ids}
+
+      change {KilnCMS.CMS.Changes.NormalizeManagedArguments,
+              arguments: [:tag_ids, :add_tag_ids, :remove_tag_ids]}
+
+      change manage_relationship(:tag_ids, :tags, type: :append_and_remove)
+      change manage_relationship(:add_tag_ids, :tags, type: :append)
+
+      change manage_relationship(:remove_tag_ids, :tags,
+               on_lookup: :ignore,
+               on_match: :unrelate,
+               on_no_match: :ignore,
+               on_missing: :ignore
+             )
+
+      # A moved focal point is only half-applied until the focal-aware crops
+      # are re-derived around it — what `Media.Transform.set_focal_point/4`
+      # does for the library's click-to-set. In the transaction, so a refused
+      # write queues nothing.
+      change KilnCMS.CMS.Changes.RederiveOnFocalChange
     end
 
     # Soft-deleted ("trashed") media — the only read that bypasses AshArchival's
@@ -637,9 +691,18 @@ defmodule KilnCMS.CMS.MediaItem do
       public? false
     end
 
-    # Focal point (0.0–1.0) for smart cropping.
-    attribute :focal_x, :float, default: 0.5, public?: true
-    attribute :focal_y, :float, default: 0.5, public?: true
+    # Focal point (0.0–1.0) for smart cropping. Constrained since the upload
+    # API made it client-writable; the library's own writes already clamp
+    # (`Media.Transform`).
+    attribute :focal_x, :float,
+      default: 0.5,
+      public?: true,
+      constraints: [min: 0.0, max: 1.0]
+
+    attribute :focal_y, :float,
+      default: 0.5,
+      public?: true,
+      constraints: [min: 0.0, max: 1.0]
 
     # Consumer-facing access tier (#481, `KilnCMS.CMS.Audiences`) — the same
     # gate published content uses, applied to a document instead. `:public`

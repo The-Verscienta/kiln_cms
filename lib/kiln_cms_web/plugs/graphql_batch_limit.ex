@@ -19,7 +19,7 @@ defmodule KilnCMSWeb.Plugs.GraphqlBatchLimit do
       batches pays the same as one that sends each operation separately. Over
       budget, it gets the rate-limit plug's 429.
 
-  To count operations it reads the request the way `Absinthe.Plug.Request`
+  To count operations it reads the request the way Absinthe.Plug.Request
   does. That includes a multipart `operations` field and a `_json` that arrives
   as a JSON string. A request Absinthe would not run as a batch counts as one
   operation.

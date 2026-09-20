@@ -160,6 +160,31 @@ defmodule KilnCMS.Storage.S3 do
   @impl true
   def private_available?, do: match?({:ok, _bucket}, private_bucket())
 
+  # The direct-upload API's first leg. A presigned PUT rather than a presigned
+  # POST policy: POST Object is an AWS-and-MinIO feature that R2 and B2 do not
+  # implement, and the one thing a POST policy adds — `content-length-range` —
+  # a signed `content-length` header does too, more strictly: the store
+  # refuses any body whose length differs from the one signed. Path-style, like
+  # every other request this adapter makes. Private bucket only (see
+  # `KilnCMS.Storage.presign_private_put/3` for why).
+  @impl true
+  def presign_private_put(key, byte_size, expires_in) do
+    with {:ok, bucket} <- private_bucket() do
+      headers = %{"content-length" => Integer.to_string(byte_size)}
+
+      :s3
+      |> ExAws.Config.new()
+      |> ExAws.S3.presigned_url(:put, bucket, key,
+        expires_in: expires_in,
+        headers: Map.to_list(headers)
+      )
+      |> case do
+        {:ok, url} -> {:ok, %{url: url, headers: headers}}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
   @impl true
   def fetch_range(key, first, last), do: get_range(bucket(), key, first, last)
 

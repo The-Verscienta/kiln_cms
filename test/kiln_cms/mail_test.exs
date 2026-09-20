@@ -3,7 +3,8 @@ defmodule KilnCMS.MailTest do
   Coverage for the outbound-mail pipeline (`KilnCMS.Mail`): per-recipient
   queueing, serialisation round-trip through Oban args, and the SMTP failure
   classification that decides whether a delivery job cancels (hard bounce) or
-  retries (greylisting, network trouble).
+  retries (greylisting, network trouble, the relay refusing us), and whether a
+  hard bounce suppresses the recipient.
   """
   use KilnCMS.DataCase, async: true
   # `except: from/2` — DataCase already imports Ecto.Query.from/2.
@@ -19,13 +20,22 @@ defmodule KilnCMS.MailTest do
     use Swoosh.Adapter
 
     # The 5xx text echoes the recipient address, as real MTAs routinely do —
-    # so the redaction path is exercised.
+    # so the redaction path is exercised. A RCPT TO reject arrives under
+    # `:send` (the mail transaction), never `:no_more_hosts` (the session).
     def deliver(_email, _config),
       do:
         {:error,
-         {:no_more_hosts,
+         {:send,
           {:permanent_failure, ~c"mx.example.com",
            "550 5.1.1 <one@example.com>: Recipient address rejected"}}}
+  end
+
+  # Answers whatever gen_smtp error term the test passes as `error:`, for the
+  # classification tables below.
+  defmodule ErrorAdapter do
+    use Swoosh.Adapter
+
+    def deliver(_email, config), do: {:error, Keyword.fetch!(config, :error)}
   end
 
   defmodule TransientFailureAdapter do
@@ -225,6 +235,113 @@ defmodule KilnCMS.MailTest do
     end
   end
 
+  describe "deliver_for_worker/2 on a permanent failure of our own side" do
+    # The relay refused the session or the sender, not the recipient. gen_smtp
+    # still calls these `:permanent_failure`, so each used to suppress every
+    # address it was sending to — a rotated SMTP_PASSWORD would have silently
+    # stopped everyone's mail, password resets included, until an admin removed
+    # each address by hand.
+    @relay_refusals [
+      # AUTH rejected — the rotated-password case (gen_smtp_client.erl, try_AUTH).
+      {:no_more_hosts, {:permanent_failure, ~c"relay", :auth_failed}},
+      # STARTTLS with no TLS stack running.
+      {:no_more_hosts, {:permanent_failure, ~c"relay", :ssl_not_started}},
+      # A 5xx banner or EHLO, before any address is sent — even one whose
+      # status would name a recipient, since none has been given yet.
+      {:no_more_hosts,
+       {:permanent_failure, ~c"relay", "554 5.7.1 Client host [203.0.113.9] blocked"}},
+      {:no_more_hosts, {:permanent_failure, ~c"relay", "550 5.1.1 unexpected"}},
+      # MAIL FROM refused: the sender isn't ours to use, or its domain is bad.
+      {:send,
+       {:permanent_failure, ~c"relay",
+        "553 5.7.1 <cms@example.com>: Sender address rejected: not owned by user"}},
+      {:send, {:permanent_failure, ~c"relay", "550 5.1.8 <cms@example.com>: domain not found"}},
+      # A relay wanting AUTH, with and without an enhanced status.
+      {:send, {:permanent_failure, ~c"relay", "530 5.7.0 Authentication required"}},
+      {:send, {:permanent_failure, ~c"relay", "535 Authentication credentials invalid"}},
+      # Unauthenticated relaying to the recipient's domain.
+      {:send,
+       {:permanent_failure, ~c"relay", "554 5.7.1 <one@example.com>: Relay access denied"}},
+      # The receiver failing our DKIM/SPF/DMARC.
+      {:send,
+       {:permanent_failure, ~c"mx.example.com",
+        "550-5.7.26 Unauthenticated email is not accepted due to domain's DMARC policy"}}
+    ]
+
+    @tag :capture_log
+    test "retries, and suppresses nobody" do
+      for {reason, n} <- Enum.with_index(@relay_refusals) do
+        address = "refused-#{n}@example.com"
+
+        assert_raise Mail.TransientDeliveryError,
+                     ~r/relay refused delivery/,
+                     fn -> deliver_failing(address, reason) end
+
+        refute Mail.suppressed?(address), "#{inspect(reason)} suppressed the recipient"
+      end
+    end
+
+    @tag :capture_log
+    test "a rotated relay password leaves the address mailable once it is fixed" do
+      auth_failed = {:no_more_hosts, {:permanent_failure, ~c"relay", :auth_failed}}
+
+      assert_raise Mail.TransientDeliveryError, fn ->
+        deliver_failing("reset-me@example.com", auth_failed)
+      end
+
+      :ok = email() |> put_to([{"", "reset-me@example.com"}]) |> Mail.enqueue!()
+      drain_oban()
+      assert_email_sent(fn sent -> sent.to == [{"", "reset-me@example.com"}] end)
+    end
+  end
+
+  describe "deliver_for_worker/2 on a permanent reject of the message" do
+    @recipient_rejects [
+      "550 5.1.1 <one@example.com>: Recipient address rejected: User unknown",
+      # Gmail's multiline form.
+      "550-5.1.1 The email account that you tried to reach does not exist.\r\n" <>
+        "550 5.1.1 https://support.google.com/mail/?p=NoSuchUser",
+      "550 5.1.2 Host unknown",
+      "550 5.1.10 Recipient address has null MX",
+      "550 5.2.1 Mailbox disabled"
+    ]
+
+    # 5xx that says nothing about whose fault it is.
+    @unattributed_rejects [
+      "554 5.7.1 Message rejected as spam",
+      "552 5.3.4 Message size exceeds fixed limit",
+      # Mailbox full clears on its own; it is no reason to stop mailing someone.
+      "552 5.2.2 Mailbox full",
+      # No enhanced status at all.
+      "550 Requested action not taken",
+      # A status-shaped token further into the text is not the status: RFC
+      # 2034 puts it straight after the reply code or nowhere.
+      "550 Blocked, see https://blocklist.example/5.1.1 for why"
+    ]
+
+    @tag :capture_log
+    test "a reject naming the recipient cancels and suppresses it" do
+      for {reply, n} <- Enum.with_index(@recipient_rejects) do
+        address = "dead-#{n}@example.com"
+        reason = {:send, {:permanent_failure, ~c"mx.example.com", reply}}
+
+        assert {:cancel, "permanent delivery failure: " <> _} = deliver_failing(address, reason)
+        assert Mail.suppressed?(address), "#{inspect(reply)} did not suppress the recipient"
+      end
+    end
+
+    @tag :capture_log
+    test "a reject that doesn't name the recipient cancels without suppressing it" do
+      for {reply, n} <- Enum.with_index(@unattributed_rejects) do
+        address = "unsure-#{n}@example.com"
+        reason = {:send, {:permanent_failure, ~c"mx.example.com", reply}}
+
+        assert {:cancel, "permanent delivery failure: " <> _} = deliver_failing(address, reason)
+        refute Mail.suppressed?(address), "#{inspect(reply)} suppressed the recipient"
+      end
+    end
+  end
+
   describe "suppression list" do
     test "suppress is idempotent (upsert) and refreshes the reason" do
       admin = admin_user()
@@ -297,6 +414,12 @@ defmodule KilnCMS.MailTest do
 
     assert KilnCMS.Notifications.WorkflowMailWorker.timeout(%Oban.Job{}) ==
              Mail.attempt_timeout()
+  end
+
+  defp deliver_failing(address, reason) do
+    email()
+    |> put_to([{"", address}])
+    |> Mail.deliver_for_worker(adapter: ErrorAdapter, error: reason)
   end
 
   defp admin_user, do: user(:admin)

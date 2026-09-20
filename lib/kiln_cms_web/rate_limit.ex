@@ -42,6 +42,14 @@ defmodule KilnCMSWeb.RateLimit do
     # for convenience, so it is short and guessable far more often than a
     # password is, and there is no account to lock out instead.
     unlock: {10, :timer.minutes(1)},
+    # The media upload API (`/api/media/*`), charged on top of `:api`. Every
+    # request is a byte-sniff, a metadata strip (an ffmpeg remux, for A/V),
+    # a store and a queued derivation — or a server-side download, for an
+    # import — so this bounds the work one address can queue, not just the
+    # request count. One a second sustained is a brisk migration script; an
+    # editor dragging files into the library goes through the LiveView, not
+    # here.
+    media_upload: {60, :timer.minutes(1)},
     # Public form submissions — tight per IP; a human fills a handful of
     # forms a minute, a spammer fills hundreds.
     form: {20, :timer.minutes(1)},

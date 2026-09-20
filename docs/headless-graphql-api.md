@@ -17,6 +17,7 @@ what the surface exposes and how writes are authorized.
 
 | Path | Availability | Purpose |
 |------|--------------|---------|
+| `GET /api/graphql/schema.graphql` | public where introspection is on; **API key** in production | The running schema as SDL, for codegen. The stock build's copy is committed at [`docs/api/schema.graphql`](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/api/schema.graphql) — see [api.md](api.md#machine-readable-specs) |
 | `POST /gql` | always on | GraphQL query endpoint (headless consumers) |
 | `/gql/playground` | **dev only** — not served by a production build | Interactive GraphiQL playground |
 | `/ws/gql` | always on | Absinthe websocket: subscriptions, and queries and mutations too |
@@ -108,6 +109,47 @@ list of content-type name strings (`["post"]`) scoping where the group applies,
 and **an empty list means every content type**; filter on it client-side to
 mirror the editor's sectioning.
 
+### Navigation menus
+
+`menu(key: String!, locale: String): Menu` — one navigation menu, resolved: the
+GraphQL twin of `GET /api/menus/:key` (see [navigation-menus.md](navigation-menus.md)).
+Each item's `url` is its target's *current* published path; items pointing at
+unpublished content, or hidden by an editor, are left out with their children.
+`locale` defaults to the site's default, and a menu with no variant in the
+requested locale is `null` rather than a fallback.
+
+```graphql
+query {
+  menu(key: "main", locale: "en") {
+    name
+    items { label url linkType openInNewTab children { label url } }
+  }
+}
+```
+
+### Point in time — `contentAsOf`
+
+`contentAsOf(type: String!, asOf: DateTime!, limit: Int): [PointInTimeEntry!]`
+— "what was published on this site at `asOf`?", reconstructed from version
+history: the GraphQL twin of `GET /api/content/:type?as_of=`. Each entry is
+`slug`, `title` and `publishedAt`, as they stood at that instant (a later
+rename does not leak in, and since-unpublished content is left out). `limit`
+defaults to 100 and is capped at 500. Compiled types only (`page`, `post`, an
+overlay's types); a dynamic type is an error. See
+[point-in-time.md](point-in-time.md) ("The collection view") for how
+the index is built, and `GET /api/content/:type/:slug?as_of=` for one
+document's body at that date.
+
+```graphql
+query {
+  contentAsOf(type: "post", asOf: "2026-03-01T00:00:00Z", limit: 20) {
+    slug
+    title
+    publishedAt
+  }
+}
+```
+
 ### Health
 
 `health: String` — a lightweight probe that returns `"ok"`.
@@ -172,6 +214,30 @@ create/update/submit; **return-to-draft, publish, unpublish and delete require a
 `:admin`** account — an editor submits for review, and deciding the outcome
 (approve or return) is the admin's half. The hard delete (`:purge`) is **never** exposed as a mutation and is
 API-key-banned regardless of scope.
+
+### Media metadata — `updateMediaItem`
+
+`updateMediaItem(id:, input:)` edits what a media item says about itself —
+`alt`, `caption`, `decorative`, `focalX`/`focalY` (0.0–1.0; moving the point
+re-derives the focal-aware crops) and tags (`tagIds` / `addTagIds` /
+`removeTagIds`, same rules as content). Same gate as the content writes: a
+`:read_write` key (or JWT) on an editor or admin account.
+
+```graphql
+mutation ($id: ID!) {
+  updateMediaItem(id: $id, input: { alt: "The kiln at dusk", focalX: 0.3 }) {
+    result { id alt focalX focalY }
+    errors { message }
+  }
+}
+```
+
+**Uploads are not GraphQL.** Files are created over REST —
+`POST /api/media` (multipart), `POST /api/media/import-url`, or the presigned
+direct-upload pair; see [api.md → Uploading media](api.md#uploading-media).
+The upload route needs its own body limit, its own rate-limit bucket, and to
+refuse an unauthorized caller *before* reading a large body; `/gql` can offer
+none of those per operation.
 
 ### Writing tags — replace vs merge
 
@@ -245,6 +311,34 @@ curl -s http://localhost:4000/gql \
   -d '{"query":"mutation($id:ID!){ publishPost(id:$id){ result{ id state } errors{ message } } }","variables":{"id":"<uuid>"}}'
 ```
 
+### Concurrency: `expectedLockVersion`
+
+A mutation is last-write-wins by default: `updatePost` reads the record and
+applies your input in the same request, so writing from a copy you fetched
+earlier overwrites anything saved since. To make it conditional, read
+`lockVersion` (a read-only field on every content type, bumped by every content
+edit) and pass it back as `expectedLockVersion` in the input of `update*`,
+`submit*ForReview`, `return*ToDraft`, `publish*`, `unpublish*` or `delete*`:
+
+```graphql
+mutation ($id: ID!) {
+  updatePost(id: $id, input: { title: "New", expectedLockVersion: 4 }) {
+    result { id lockVersion }
+    errors { code message vars }
+  }
+}
+```
+
+If the record has moved on, nothing is written and the mutation returns an
+error with `code: "precondition_failed"`, with the current `lock_version`,
+`state` and `etag` in `vars`. The check runs inside the write's transaction
+against the locked row. Omit the argument and nothing changes.
+
+`lockVersion` does not move on a workflow transition (publishing doesn't edit
+content), so `expectedLockVersion: 4` on `publishPost` means "publish the
+content I reviewed", not "the record is still a draft". The JSON:API `ETag`
+covers both halves ([json-api.md](json-api.md), *Concurrency*).
+
 ### Re-fire semantics
 
 Firing (the immutable per-surface artifact regeneration) is bound to the
@@ -312,13 +406,15 @@ served in development only. `__typename` always works.
   authored through the admin editor (or `/mcp`'s `create_tag`/`create_category`).
 - **The media library as a list.** `MediaItem` has a GraphQL *type* (so it
   resolves as the nested `featuredImage` on content) but **no top-level query** —
-  there is no public "list all media" endpoint.
+  there is no public "list all media" endpoint. Its one mutation is the
+  metadata edit above; uploads are REST.
 - **The raw `blocks` tree.** Blocks are a typed union not rendered over the auto
   API; the v2 content API surface is the *fired artifacts* (`/api/...`), not the
   editable tree. Render content from the fired artifacts or your own block
   renderer.
 - **Internal fields** — `search_text`, `embedding`, `published_version_id`,
-  `lock_version`, etc. are not `public?` and never serialized.
+  etc. are not `public?` and never serialized. (`lockVersion` is readable, but
+  never writable; see *Concurrency* above.)
 - **Author PII** — content exposes only the opaque `authorId` foreign key. `User`
   has no GraphQL type (and no JSON:API resource), so there is **no nested `author`
   object** through which `email` or `role` could be selected. Even if the author

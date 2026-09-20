@@ -23,14 +23,15 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
     args
     |> build_assigned_email()
     |> Mail.ensure_message_id("task-#{id}")
-    |> Mail.deliver_for_worker()
+    # Through the site's own relay when it has one (#1322).
+    |> Mail.deliver_for_worker(org_id: args["org_id"])
   end
 
   def perform(%Oban.Job{id: id, args: %{"kind" => "digest"} = args}) do
     args
     |> build_digest_email()
     |> Mail.ensure_message_id("task-digest-#{id}")
-    |> Mail.deliver_for_worker()
+    |> Mail.deliver_for_worker(org_id: args["org_id"])
   end
 
   @impl Oban.Worker

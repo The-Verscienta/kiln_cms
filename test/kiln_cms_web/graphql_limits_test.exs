@@ -319,11 +319,18 @@ defmodule KilnCMSWeb.GraphqlLimitsTest do
                gql(conn, %{query: related_chain(8, "(limit: 1)")})
     end
 
-    test "list_complexity/3 prices a limit at its rows, no limit at five, and never at zero" do
+    test "list_complexity/3 prices a row count at its rows, none at five, and never at zero" do
       assert GraphqlLimits.list_complexity(%{limit: 3}, 4, nil) == 12
       assert GraphqlLimits.list_complexity(%{}, 4, nil) == 20
-      assert GraphqlLimits.list_complexity(%{limit: 0}, 4, nil) == 4
       assert GraphqlLimits.list_complexity(%{}, 0, nil) == 5
+
+      # Relay pages count their rows too (ash_graphql reads `first`/`last` as of
+      # 1.12); a zero row count still costs one row, where ash_graphql's own
+      # pricing would make the subtree free.
+      assert GraphqlLimits.list_complexity(%{first: 3}, 4, nil) == 12
+      assert GraphqlLimits.list_complexity(%{last: 3}, 4, nil) == 12
+      assert GraphqlLimits.list_complexity(%{limit: 0}, 4, nil) == 4
+      assert GraphqlLimits.list_complexity(%{first: 0}, 4, nil) == 4
     end
   end
 

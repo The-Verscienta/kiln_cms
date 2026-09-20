@@ -27,7 +27,8 @@ document is about the network edge.
 - **Tenant isolation** — one deployment serves multiple organizations; content,
   media, branding and analytics must not cross org boundaries.
 - **Media & object storage** — uploaded files and their storage credentials.
-- **Outbound webhook secrets** — HMAC signing keys for delivery.
+- **Outbound webhook secrets** — HMAC signing keys for delivery, encrypted at
+  rest with `KilnCMS.Keys.Vault`.
 - **Payment credentials** — the provider API key and the inbound-webhook signing
   secret, both held through the `KilnCMS.Keys` provider model. The API key has
   full authority over the payment account; the signing secret is what stops
@@ -53,9 +54,11 @@ the router so preflights are answered before route matching).
 | GraphQL | `/gql` (GET + POST), `/ws/gql` | optional JWT / API key | `:gql` (per operation, on both transports), `:gql_join` (socket connects) |
 | JSON:API | `/api/json/**` (GET/POST/PATCH/DELETE) | optional JWT / API key | `:api` |
 | Headless REST | `/api/content/**`, `/api/resolve`, `/api/locales`, `/api/search`, `/api/ask`, `/api/provenance/**`, `/api/visual-editing/:type/:slug` | optional JWT / API key | `:api` |
-| OpenAPI & explorer | `/api/json/open_api`, `/api/json/swaggerui` | none — and **not served in prod** unless `API_DOCS_ENABLED` (#567) | `:docs` |
+| OpenAPI & explorer | `/api/json/open_api`, `/api/json/swaggerui` | none — and **not served in prod** unless `API_DOCS_ENABLED` (#567); the document (never the explorer) also answers any valid API key | `:docs` |
+| GraphQL SDL | `GET /api/graphql/schema.graphql` | none where introspection is on; **API key required** in prod unless `GRAPHQL_INTROSPECTION_ENABLED` | `:docs` |
 | Headless sign-in | `POST /api/auth/sign_in` | credentials → JWT, or a pending token for a 2FA account | `:auth` + per-account (#478) |
 | Headless second factor | `POST /api/auth/sign_in/verify` | encrypted pending token + TOTP or recovery code | `:auth`; the same per-account second-factor budget as the browser prompt (#714, #726) |
+| Media upload | `POST /api/media`, `/api/media/import-url`, `/api/media/uploads[/complete]` | JWT / API key; `:read_write` + editor, checked **before** `POST /api/media`'s body is parsed (the endpoint leaves it unread) | `:api` + `:media_upload` |
 | MCP (LLM authoring) | `/mcp` | **API key required** | `:api` |
 | Public forms | `GET /api/forms/:slug`, `POST /forms/:slug`, `POST /api/forms/:slug` | none (no CSRF by design) | `:form` |
 | Form embed | `GET /forms/:slug/embed` | none | `:delivery` |
@@ -103,7 +106,7 @@ build if a resource is ever registered without that authorizer.
   tenant for the whole request, so tenant scoping applies to GraphQL and
   JSON:API without resolver changes. A host matching neither falls back to the
   default org unless `TENANT_STRICT_HOST=true`, which 404s it instead — see
-  residual risk 2.
+  residual risk 3.
 - **Rate limiting** — `Plugs.RateLimit` (Hammer/ETS, per-IP) across nine
   buckets; limits in `lib/kiln_cms_web/rate_limit.ex`. **The credential forms
   submit where no plug can reach them:** each is an AshAuthentication
@@ -132,7 +135,7 @@ build if a resource is ever registered without that authorizer.
   `:auth` (#724): it was the unbounded one, at a bcrypt hash and a confirmation
   mail per socket event, but sharing would let a burst of legitimate sign-ups
   lock *sign-in* for everyone behind one office NAT — the shared-NAT trade
-  residual risk 4 records. It carries no per-*account* budget, because there is
+  residual risk 5 records. It carries no per-*account* budget, because there is
   no account yet and the address being registered is attacker-chosen: keying on
   it would let anyone deny a specific address its first registration. Password sign-in is limited on a second axis by
   `KilnCMS.Accounts.AccountThrottle` (#478): a flat per-**account** budget,
@@ -274,9 +277,13 @@ build if a resource is ever registered without that authorizer.
   signed in there, and sent on.
 
   *Residual:* signing out revokes only the token in the browser doing it, so a
-  cookie copied elsewhere keeps working until it expires. There is no
-  "sign out other devices" affordance, and #734 records that a password change
-  does not currently revoke stored tokens either.
+  cookie copied elsewhere keeps working until it expires — or until something
+  revokes every stored token for the account. Two things do: a password change
+  (`log_out_everywhere` with `apply_on_password_change? true` on
+  `KilnCMS.Accounts.User`, since #734), and an administrator's *Sign out
+  everywhere* on the account's page under `/editor/accounts`. An account holder
+  has no self-service "sign out other devices" affordance short of changing
+  their password.
 
   **Remember-me and the second factor.** The cookie is a completed sign-in in a
   cookie — the read plug hands it to `store_in_session/2` directly, so it never
@@ -307,9 +314,10 @@ build if a resource is ever registered without that authorizer.
 - **Upload handling** — uploads validated from bytes rather than declared type,
   EXIF stripped, and blobs served with `Content-Disposition: attachment` and
   `X-Content-Type-Options: nosniff`.
-- **Static analysis & dependencies** — Credo, Sobelow, Dialyzer, and
-  `mix deps.audit` (mix_audit) in CI and `mix precommit`, failing the build on a
-  known-vulnerable locked dependency.
+- **Static analysis & dependencies** — Credo, Sobelow, Dialyzer, and two
+  dependency audits (`mix deps.audit` against mirego's advisory mirror,
+  `mix hex.audit` against Hex's own feed) in CI and `mix precommit`, failing
+  the build on a known-vulnerable locked dependency.
 
 ## Per-surface risks & mitigations
 
@@ -426,13 +434,13 @@ build if a resource is ever registered without that authorizer.
     TOTP code, so the two only had to arrive together.
 
     `WebAuthn.take_challenge/1` and `AccountThrottle` still make the node-local
-    trade for their own state; residual risk #9 below covers the throttle.
+    trade for their own state; residual risk #10 below covers the throttle.
   - Codes are charged `AccountThrottle.consume_second_factor/1` on the **same
     per-account bucket** the browser prompt charges. Per-surface budgets would
     let an attacker double their guesses by alternating endpoints, and the
     five-minute pending lifetime bounds nothing on its own — re-running the
     password step mints a fresh token. Since #742 each of those costs a unit of
-    the sign-in budget, so the renewal is bounded rather than free. That bucket is per node too (residual risk #9 below), so the real
+    the sign-in budget, so the renewal is bounded rather than free. That bucket is per node too (residual risk #10 below), so the real
     ceiling is 5 × nodes per window.
     *Residual:* reaching that bucket used to require a browser session and a
     CSRF token. It now takes five `curl` calls from anyone holding the password,
@@ -500,7 +508,7 @@ build if a resource is ever registered without that authorizer.
   minutes, the **same** bucket `/sign-in/verify` uses, so they cannot be spent
   independently. The charge lives on the Ash action rather than in the
   `handle_event` clauses, so a future caller inherits it.
-  *Watch:* the bound is per node (residual risk 9), and it bounds *guessing*
+  *Watch:* the bound is per node (residual risk 10), and it bounds *guessing*
   only. It hands a stolen session a small denial-of-service it did not have:
   five wrong codes here deny the real owner `/sign-in/verify` for the rest of
   the window. That is strictly less than what the session already grants, so
@@ -543,7 +551,7 @@ build if a resource is ever registered without that authorizer.
   loads the record with `authorize?: false`, so token possession is full read
   access to that record in whatever state it is in. Tokens are the sharing
   mechanism for unpublished work; treat a leaked preview URL as a content leak.
-  See residual risk 5.
+  See residual risk 6.
 
 ### Media (`/uploads/*`)
 - **Unauthenticated access** — local blobs are served by `Plug.Static` with no
@@ -563,11 +571,19 @@ build if a resource is ever registered without that authorizer.
   webhook endpoint's blast radius is therefore *every* document that fires an
   event, not only the public ones. Treat an endpoint URL as a credential.
 - **SSRF** — mitigated by `SafeUrl` with IP pinning (see Controls).
-- **Forgery at the receiver** — deliveries are HMAC-SHA256-signed over the raw
-  body; a receiver that verifies `x-kilncms-signature` knows a delivery is
-  genuinely from Kiln with unmodified content. There is no timestamp or nonce
-  in the scheme, so this proves origin and integrity, not freshness — see
-  residual risk 14 and [webhooks.md](webhooks.md#verifying-the-signature).
+- **Forgery at the receiver** — deliveries are HMAC-SHA256-signed; a receiver
+  that verifies `x-kilncms-webhook-signature` knows a delivery is genuinely
+  from Kiln, with unmodified content, and sent within the tolerance window it
+  enforces (five minutes by default), because the timestamp is inside the MAC.
+  Inside the window a receiver dedupes on the signed `delivery_id`. The older
+  body-only `x-kilncms-signature` is still sent, deprecated: it proves origin
+  and integrity, not freshness. See residual risk 15 and
+  [webhooks.md](webhooks.md#verifying-the-signature).
+- **Secret disclosure** — each endpoint's signing secret is vault-encrypted at
+  rest, so a database dump, backup or replica does not hand out the ability to
+  sign deliveries. The trade-off is the vault's: rotating `SECRET_KEY_BASE`
+  orphans the secrets, and each endpoint must be re-created
+  ([secrets-rotation.md](secrets-rotation.md)).
 
 ### oEmbed resolution (`OEMBED_ENABLED`, #489)
 - **Content choosing the destination** — prevented by design. Kiln does **not**
@@ -755,7 +771,8 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    **raises** when the `:current_org` assign is missing rather than reading the
    default org, so a forgotten `SetTenant` plug or `:assign_current_org`
    on_mount fails loudly in test instead of serving the wrong tenant in
-   production.3. **The OpenAPI spec and Swagger explorer describe the write surface** —
+   production.
+4. **The OpenAPI spec and Swagger explorer describe the write surface** —
    *closed (#567).* Both were unauthenticated in every environment, production
    included, while GraphQL introspection was already disabled there for the
    same reconnaissance reason. They now follow `config :kiln_cms, :api_docs`:
@@ -768,7 +785,7 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    hang a pipeline on — so a future rename of either path has to be made in
    `KilnCMSWeb.Plugs.ApiDocs` too. A test pins that the content routes it sits
    in front of are unaffected.
-4. **Rate limiting keys on `remote_ip`.** Behind a proxy with `TRUSTED_PROXIES`
+5. **Rate limiting keys on `remote_ip`.** Behind a proxy with `TRUSTED_PROXIES`
    unset, every request shares one bucket — which throttles all clients together
    and makes per-IP limits meaningless. Set `TRUSTED_PROXIES`. **No longer
    silent (#564):** the app logs a warning, once per node, the first time a
@@ -791,12 +808,12 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    is generous enough never to inconvenience a shared egress is not a limit.
    `TRUSTED_PROXIES` is what makes the buckets per-*client* and is the real
    remedy on any deployment behind a proxy.
-5. **Preview tokens bypass authorization and tenancy.** `PreviewController`
+6. **Preview tokens bypass authorization and tenancy.** `PreviewController`
    loads with `authorize?: false` and no tenant. Token validity and expiry are
    the whole control. (`live_session :token_preview` does now carry
    `:assign_current_org`, added in #563, so the preview LiveView resolves the
    host it is served from — but the token lookup itself is still tenant-less.)
-6. ~~**Four resources are world-readable by policy.**~~ **Closed in #565.**
+7. ~~**Four resources are world-readable by policy.**~~ **Closed in #565.**
    `Firing.PublishedArtifact`, `Firing.ReferenceEdge`, `CMS.FormField` and
    `Search.BlockEmbedding` no longer declare `authorize_if always()` on reads:
 
@@ -818,10 +835,10 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    Delivery, the re-fire wave, the indexer and form rendering were unaffected
    because they read as the system (`authorize?: false`). See
    [`policy-matrix.md`](policy-matrix.md) for the resulting grants.
-7. **Unauthenticated GraphQL runs with `actor: nil` *and* `tenant: nil`.**
+8. **Unauthenticated GraphQL runs with `actor: nil` *and* `tenant: nil`.**
    Policies still run, so the audience and published filters hold, but the
    tenant boundary does not for that request.
-8. **A block field policy could be cleared by omission** — *closed for the
+9. **A block field policy could be cleared by omission** — *closed for the
    reported case (#566).* `EnforceBlockFieldPolicy` stopped an editor *setting*
    an admin-only block field, but a headless client that submitted a block tree
    without ids and omitted the field got the declared default, silently
@@ -910,7 +927,7 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    true of nested children: ids there are client-supplied, so relabelling which
    child an id names is believed, and only the two-children-one-id case is
    decidable without an ownership check.
-9. **Per-account throttling is per node, in memory, and keyed on
+10. **Per-account throttling is per node, in memory, and keyed on
    attacker-chosen strings.** `AccountThrottle` (#478) holds its budgets in ETS,
    so a restart forgives every accumulated attempt and a second node would carry
    its own counters — the same trade `KilnCMSWeb.RateLimit` makes, and deliberate:
@@ -922,7 +939,7 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    mail budget delays that victim's own reset mail until the window rolls — the
    suppression is logged for exactly that reason. Revisit if Kiln is ever
    deployed multi-node.
-10. **The `:browser` pipeline is not rate-limited**, so `/`, `/developers`, all
+11. **The `:browser` pipeline is not rate-limited**, so `/`, `/developers`, all
     `/editor/**` LiveView mounts, and the account/governance export endpoints
     are unthrottled. They are session-gated (except the first two), so this is
     an availability rather than a confidentiality concern.
@@ -1027,25 +1044,43 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     document. `/ws/collab` frames and `/ws/gql` documents are the event
     surfaces counted so far (above); `/live` events remain the harder problem
     #1305 described (no single choke point, no obvious per-event cost model).
-11. **Periodic CSP re-review** as the editor adds third-party assets. The
+12. **Periodic CSP re-review** as the editor adds third-party assets. The
     runtime `img-src` is widened by `CSP_IMG_SRC` and by the Unsplash
     integration — the only externally-influenced part of the policy.
-12. ~~**Secrets rotation runbook** (DB URL, `SECRET_KEY_BASE`,
+13. ~~**Secrets rotation runbook** (DB URL, `SECRET_KEY_BASE`,
     `TOKEN_SIGNING_SECRET`, S3 keys) is not written down.~~ **Closed by
     #1304:** [`secrets-rotation.md`](secrets-rotation.md) is the per-secret
     procedure, verified against what the code does rather than what would be
-    reasonable. *Residual, and the reason to read it before an incident rather
-    than during one:* nothing in this application supports a dual-key
-    transition. `TOKEN_SIGNING_SECRET` and `SECRET_KEY_BASE` are hard
-    cutovers that sign every user out, and `SECRET_KEY_BASE` additionally
-    keys `KilnCMS.Keys.Vault`, so rotating it **permanently orphans**
-    database-stored key material — the DKIM key, social credentials, payment
-    secrets and the ActivityPub actor key — with no re-encryption path. Three
-    of those four have a documented way back; the federation actor key has
-    none, which the runbook flags as the one rotation that cannot be done
-    safely today. Pairs with [`backups.md`](backups.md), where the same
-    `SECRET_KEY_BASE` is part of the backup.
-13. ~~**The collaborative-editing socket is scoped by topic, not by
+    reasonable. ~~Rotating `SECRET_KEY_BASE` permanently orphans the
+    vault-encrypted columns, and the ActivityPub actor key cannot be
+    re-keyed.~~ **Closed by #1487:** `KilnCMS.Keys.Vault` reads under
+    `PREVIOUS_SECRET_KEY_BASE` as well while a rotation is under way, and
+    `mix kiln.vault.reencrypt` (`KilnCMS.Release.reencrypt_vault/1` in a
+    release) moves every vault column to the new secret. It finds those columns
+    by type, never overwrites a value it cannot open, and is safe to run twice.
+    `SiteFederation`'s admin-only `:rekey` replaces the actor's keypair under
+    the same actor id and sends followers a signed actor `Update`.
+    *Residual, and the reason to read the runbook before an incident rather
+    than during one:*
+    - **Sessions and tokens are still hard cutovers.** `TOKEN_SIGNING_SECRET`
+      and `SECRET_KEY_BASE` each sign every user out. The read window covers
+      the vault only: `Plug.Session` and `AshAuthentication.Jwt` each derive
+      one key from one secret.
+    - **The order of steps decides whether data survives.** If the old value is
+      retired before the task has run, the vault columns are orphaned exactly as
+      before. The only signal is the task's `unreadable` count, a warning in the
+      log and the federation panel.
+    - **Re-encryption is not revocation.** Backups taken before the task, and
+      any other copy of the database, still open with the old secret. After a
+      *leak*, the underlying secrets have to be rotated as well: the DKIM key,
+      billing and social credentials, and the actor key.
+    - **A re-keyed actor depends on its peers.** Servers that ignore actor
+      `Update`s keep the old key until they re-fetch the actor, and until then
+      the old key still signs traffic they accept.
+
+    Pairs with [`backups.md`](backups.md), where the same `SECRET_KEY_BASE` is
+    part of the backup.
+14. ~~**The collaborative-editing socket is scoped by topic, not by
     tenancy.**~~ **Closed by #655.** The socket token still names only a user,
     so it establishes *who* and nothing more; `CollabChannel.join/3` now
     resolves the topic to a real document, loads it as that user under the
@@ -1169,26 +1204,35 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     publish's own write, and the room is told afterwards so its editors stop
     typing into a document nothing will persist. The authorization re-check is
     unchanged — collaborative editing of published content remains supported.
-14. **Webhook deliveries have no anti-replay.** The signature
-    (`x-kilncms-signature`, HMAC-SHA256 over the raw body) proves a delivery's
-    origin and integrity, not its freshness — there is no timestamp or nonce
-    binding it to a point in time, so anyone who captures one signed request
-    (TLS would have to fail first) can replay it to the receiver indefinitely.
-    Accepted for now: a replay re-announces old state rather than forging new
-    access — it delivers a payload the receiver was already sent once, to a
-    receiver the operator chose. Note this is **not** because the payload is
-    always public content: a content event carries an audience-gated or
-    passphrase-locked body too, marked by `audience`/`locked` (#1014), so the
-    replay window is bounded by the receiver's own retention of that body
-    rather than by the body being harmless. A
-    receiver with exactly-once requirements should dedupe on its own terms
-    (the content payload's `id`/`updated_at`, or a delivery id tracked out of
-    band) — see [webhooks.md](webhooks.md#verifying-the-signature).
+15. ~~**Webhook deliveries have no anti-replay.**~~ **Closed for receivers
+    that verify the timestamped signature.** Every delivery now carries
+    `x-kilncms-webhook-signature: t=<unix>,v1=<hex>`, an HMAC of
+    `"<t>.<body>"`, and a `delivery_id` inside the signed body (echoed in
+    `x-kilncms-delivery-id`) that stays the same across a delivery's retries.
+    A receiver that rejects a `t` outside its window (five minutes is the
+    documented default) and remembers the delivery ids it has seen inside that
+    window cannot be replayed to. Re-stamping a captured request with a fresh
+    `t` does not verify, because `t` is inside the MAC.
+
+    **Remainder.** The original body-only `x-kilncms-signature` is still sent
+    during a deprecation period. A receiver that verifies only that header is
+    as exposed as before: anyone who captures one signed request (TLS would
+    have to fail first) can replay it indefinitely. The replay re-announces old
+    state rather than granting new access, but the replayed body may be
+    audience-gated or passphrase-locked content (`audience`/`locked`, #1014).
+    So the exposure lasts as long as the receiver keeps that body, not merely
+    as long as the body is harmless. An admin **redelivery** is a new delivery
+    with a new id and a fresh timestamp, on purpose. See
+    [webhooks.md](webhooks.md#verifying-the-signature).
 
 ## Operating the dependency audit
 
 `mix deps.audit` ([mix_audit](https://github.com/mirego/mix_audit)) checks
-`mix.lock` against the Elixir security advisory database. It runs:
+`mix.lock` against mirego's mirror of the Elixir security advisory database,
+and `mix hex.audit` checks it against the advisories Hex itself serves. Both
+run, because the two databases are not the same: on 2026-09-18 the mirror
+knew none of the 89 advisories — six CRITICAL, all in `ash_authentication` —
+that Hex listed against the v0.9.0 lock. They run:
 
 - in CI, as its own **Dependency audit** job in
   [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), and
@@ -1198,8 +1242,9 @@ A new advisory affecting a locked dependency fails the build — including on a 
 that changed no dependencies, since the advisory database moves independently of
 this repo. It is a separate job so that failure does not bury the lint and test
 results of an unrelated change. Remediate by upgrading the dependency; if no
-fixed version exists, document the accepted risk and use mix_audit's ignore
-options rather than dropping the check.
+fixed version exists, document the accepted risk and acknowledge the advisory
+(mix_audit's ignore options; the `:hex` section of `mix.exs` for `hex.audit`)
+rather than dropping the check.
 
 The CI job fetches the advisory database explicitly before auditing. mix_audit
 clones it at run time and discards the exit status of its own git commands, so a

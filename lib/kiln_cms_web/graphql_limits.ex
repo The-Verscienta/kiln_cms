@@ -9,7 +9,7 @@ defmodule KilnCMSWeb.GraphqlLimits do
   document it liked. The limits are enforced where the document pipeline is built,
   not passed in as options, because both transports can lose the options:
 
-    * `Absinthe.Phoenix.Channel` replaces a socket's options with `[context: …]`
+    * Absinthe.Phoenix.Channel replaces a socket's options with `[context: …]`
       after it runs the first document. A cap set with `put_options/2` at connect
       would stop applying from the second document on.
     * A plug that calls `Absinthe.Plug.put_options/2` can override the
@@ -76,7 +76,7 @@ defmodule KilnCMSWeb.GraphqlLimits do
   # a smaller page or pass `limit` on the lists.
   @unlimited_list_rows 5
 
-  @doc "The complexity cap (`Absinthe.Phase.Document.Complexity.Result`)."
+  @doc "The complexity cap, enforced by Absinthe's complexity result phase."
   @spec max_complexity() :: pos_integer()
   def max_complexity, do: @max_complexity
 
@@ -84,7 +84,7 @@ defmodule KilnCMSWeb.GraphqlLimits do
   @spec max_depth() :: pos_integer()
   def max_depth, do: @max_depth
 
-  @doc "The parser's token limit (`Absinthe.Phase.Parse`)."
+  @doc "The token limit Absinthe's parse phase applies."
   @spec token_limit() :: pos_integer()
   def token_limit, do: @token_limit
 
@@ -145,17 +145,20 @@ defmodule KilnCMSWeb.GraphqlLimits do
   GraphQL surface. ash_graphql reads that option for the relationship fields
   that point *at* the resource.
 
-  With `limit` the list is priced at that many rows, as ash_graphql prices it.
-  Without `limit` it is priced at `#{@unlimited_list_rows}` rows, not 1. The
-  price never drops to 0: `limit: 0` still costs a row, so an empty limit cannot
-  make its subtree free.
+  With a row count — `limit`, or relay's `first`/`last` — the list is priced at
+  that many rows, as ash_graphql prices it. Without one it is priced at
+  `#{@unlimited_list_rows}` rows, not 1. The price never drops to 0: `limit: 0`
+  still costs a row, so an empty limit cannot make its subtree free (ash_graphql
+  prices that at 0, which would make the whole subtree free).
   """
   @spec list_complexity(map(), non_neg_integer(), term()) :: pos_integer()
   def list_complexity(args, child_complexity, _info) do
     rows =
       case args do
         %{limit: limit} when is_integer(limit) -> max(limit, 1)
-        _no_limit -> @unlimited_list_rows
+        %{first: first} when is_integer(first) -> max(first, 1)
+        %{last: last} when is_integer(last) -> max(last, 1)
+        _no_row_count -> @unlimited_list_rows
       end
 
     rows * max(child_complexity, 1)

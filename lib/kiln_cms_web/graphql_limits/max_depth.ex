@@ -9,8 +9,8 @@ defmodule KilnCMSWeb.GraphqlLimits.MaxDepth do
   A document that spreads one fragment many times is therefore checked in time
   linear in its size, not its expanded size.
 
-  A fragment cycle is reported by `Absinthe.Phase.Document.Validation.NoFragmentCycles`,
-  which ends the pipeline before this phase runs. The walk still ends on one:
+  A fragment cycle is reported by Absinthe's own NoFragmentCycles phase, which
+  ends the pipeline before this phase runs. The walk still ends on one:
   a fragment spread inside itself counts as depth 0, so the phase is safe on any
   blueprint.
   """
