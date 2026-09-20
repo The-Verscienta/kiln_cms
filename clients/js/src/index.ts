@@ -65,3 +65,12 @@ export type {
   WorkflowVerb,
   WriteOptions,
 } from "./types.js";
+export {
+  verifyWebhook,
+  WEBHOOK_DELIVERY_ID_HEADER,
+  WEBHOOK_SIGNATURE_HEADER,
+  WEBHOOK_TOLERANCE_SECONDS,
+  type VerifyWebhookOptions,
+  type WebhookDelivery,
+  type WebhookVerification,
+} from "./webhooks.js";

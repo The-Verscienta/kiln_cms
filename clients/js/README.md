@@ -207,6 +207,39 @@ are addressed by type name like compiled types
 editor-or-above key, and `include: ["field_definitions"]` adds each type's
 custom-field schema.
 
+## Verifying webhooks
+
+`verifyWebhook` checks a delivery's `x-kilncms-webhook-signature`
+(`t=<unix>,v1=<hex>`, an HMAC-SHA256 of `"<t>.<raw body>"`) against the
+endpoint's signing secret. It refuses a `t` more than five minutes from your
+clock, so a captured request can't be replayed later. It uses Web Crypto, so it
+runs in Node 20+, Deno, Bun, Workers and browsers.
+
+```ts
+import {
+  verifyWebhook,
+  WEBHOOK_SIGNATURE_HEADER,
+  type WebhookDelivery,
+} from "@kiln-cms/client";
+
+export async function POST(request: Request) {
+  const raw = await request.text(); // the raw bytes, not a re-serialized parse
+  const result = await verifyWebhook(
+    process.env.KILN_WEBHOOK_SECRET!,
+    raw,
+    request.headers.get(WEBHOOK_SIGNATURE_HEADER),
+  );
+  if (!result.ok) return new Response(result.reason, { status: 400 });
+
+  const { event, delivery_id, data } = JSON.parse(raw) as WebhookDelivery;
+  // delivery_id is stable across retries: remember it for the window to drop duplicates.
+  return new Response(null, { status: 204 });
+}
+```
+
+`result.reason` is `"malformed"`, `"expired"` or `"mismatch"`. Pass
+`{ toleranceSeconds }` to widen or narrow the window.
+
 ### Editorial reads (editor-or-above key)
 
 For tools _about_ the content — migrations, audit exports, launch dashboards —

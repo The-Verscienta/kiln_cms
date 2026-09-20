@@ -56,6 +56,14 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Webhook signing secrets move to an encrypted column.**
+  ([long form](docs/changelog/unreleased.md#webhook-signing-secrets-move-to-an-encrypted-column))
+
+- **Webhook receivers should move to `x-kilncms-webhook-signature`.**
+  ([long form](docs/changelog/unreleased.md#webhook-receivers-should-move-to-x-kilncms-webhook-signature))
+
+### Upgrade notes
+
 - **A CDN in front of the headless API now caches anonymous JSON:API, GraphQL
   `GET` and `/api/search` responses for up to 60 seconds.**
   ([#1571](https://github.com/The-Verscienta/kiln_cms/issues/1571) · [long form](docs/changelog/unreleased.md#a-cdn-in-front-of-the-headless-api-now-caches-anonymous-jsonapi-graphql-get-and))
@@ -72,6 +80,13 @@ Every summary line below that was shortened links to its own entry there.
   order.**
   ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#rotating-secretkeybase-keeps-stored-keys-now-if-the-steps-run-in-order))
 ### Added
+
+- **Webhooks announce a document's whole lifecycle: `created`, `archived`,
+  `deleted` and `restored`.**
+  ([long form](docs/changelog/unreleased.md#webhooks-announce-a-documents-whole-lifecycle-created-archived-deleted-and))
+
+- **Timestamped webhook signatures and a stable delivery id.**
+  ([long form](docs/changelog/unreleased.md#timestamped-webhook-signatures-and-a-stable-delivery-id))
 
 - **Conditional writes on the headless API: `ETag`, `If-Match` and
   `expectedLockVersion`.**
@@ -163,6 +178,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Security
 
+- **Webhook signing secrets are encrypted at rest.**
+  ([long form](docs/changelog/unreleased.md#webhook-signing-secrets-are-encrypted-at-rest))
+
 - **Every advisory published against the 0.9.0 dependency set is fixed,
   including six CRITICAL in `ash_authentication`.**
   ([long form](docs/changelog/unreleased.md#every-advisory-published-against-the-090-dependency-set-is-fixed-including-six))
@@ -174,7 +192,6 @@ Every summary line below that was shortened links to its own entry there.
 - **`/ws/gql` runs under the same cost limits as `/gql`, batches are counted per
   operation, and introspection is refused however a document arrives.**
   ([long form](docs/changelog/unreleased.md#wsgql-runs-under-the-same-cost-limits-as-gql-batches-are-counted-per-operation))
-
 ## [0.9.0] - 2026-09-18
 
 Long form: [docs/changelog/v0.9.0.md](docs/changelog/v0.9.0.md) —

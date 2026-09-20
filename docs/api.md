@@ -103,7 +103,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Visual editing** | `<script src="…/bridge.js">` | In-context edit overlay for an external front end (annotated preview + deep-link + live push). | [visual-editing-bridge.md](visual-editing-bridge.md) |
 | **Sitemap** | `GET /sitemap.xml` | Enumerate published content for crawling/SSG. | — |
 | **Feeds** | `GET /feed.xml`, `GET /feed.json` | Atom 1.0 / JSON Feed 1.1 of newly published content. | [§ Feeds](#feeds) |
-| **Outbound webhooks** | (you host the receiver) | HMAC-signed push on publish/unpublish/update. | [webhooks.md](webhooks.md) |
+| **Outbound webhooks** | (you host the receiver) | Timestamped HMAC-signed push on the content lifecycle. | [webhooks.md](webhooks.md) |
 | **Signed preview** | `GET /preview/:token` | One unpublished document via a short-lived token. | [§ Preview tokens](#preview-tokens) |
 
 ## Authentication
@@ -866,12 +866,17 @@ post is in the feed on the next fetch rather than after the TTL.
 ## Webhooks
 
 Admins register receivers in the editor UI (`/editor/webhooks`); each endpoint
-has its own signing secret. On publish/unpublish/update KilnCMS dispatches
-`<type>.published`, `<type>.unpublished` and `<type>.updated` events, delivered
-by an Oban worker with retry/backoff. Every request carries an
-**HMAC-SHA256** signature header computed over the raw body with the endpoint
-secret — verify it before trusting the payload. Selectable events are derived at
-runtime from every registered content type × verb.
+has its own signing secret, stored encrypted. On publish/unpublish/update KilnCMS
+dispatches `<type>.published`, `<type>.unpublished` and `<type>.updated` events;
+`<type>.archived`, `<type>.deleted` (trashed) and `<type>.restored` tell a mirror
+when a document leaves or comes back, and opt-in `<type>.created` announces new
+drafts. Deliveries go out through an Oban worker with retry/backoff. Every request
+carries `x-kilncms-webhook-signature: t=<unix>,v1=<hex>`, an **HMAC-SHA256** of
+`"<t>.<raw body>"` keyed by the endpoint secret, plus an `x-kilncms-delivery-id`
+that stays the same across retries. Verify the signature and reject a `t` more than
+five minutes from your clock before trusting the payload. The JS and Elixir
+clients ship a `verifyWebhook` / `KilnClient.Webhook.verify/4` helper. Selectable
+events are derived at runtime from every registered content type × verb.
 
 **Reliability.** Every delivery is recorded on a ledger shown at
 `/editor/webhooks`: per-attempt status, last HTTP code, and last error. A
