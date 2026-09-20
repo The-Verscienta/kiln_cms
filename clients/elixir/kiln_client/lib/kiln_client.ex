@@ -3,8 +3,10 @@ defmodule KilnClient do
   Official Elixir client for the KilnCMS APIs — the JSON:API read surface at
   `/api/json/*`, per-type and hybrid search, fired artifacts at
   `/api/content/:type/:slug`, the JSON:API write surface (create, update,
-  workflow transitions, soft-delete) and a minimal `/gql` helper (see Kiln's
-  `docs/json-api.md` and `docs/headless-consumer-guide.md`).
+  workflow transitions, soft-delete), the media upload API (`upload_media/2`
+  and friends) and a minimal `/gql` helper (see Kiln's `docs/json-api.md` and
+  `docs/headless-consumer-guide.md`). The writes and the uploads need a read +
+  write key on an editor account; the reads need no key at all.
 
   Extracted from the client Verscienta's production site hand-rolled and
   hardened against a live Kiln (kiln_cms#300); it encodes the safe defaults so
@@ -339,6 +341,204 @@ defmodule KilnClient do
         other
     end
   end
+
+  # --- media uploads ---
+  #
+  # The one write surface this client covers. Every call needs a read + write
+  # API key on an editor (or admin) account; a read-only key is a 403. See
+  # Kiln's docs/api.md → "Uploading media".
+
+  # Uploads are bounded by the file and the link, not by server read latency.
+  @upload_timeout 300_000
+
+  @metadata_opts [:alt, :caption, :decorative, :focal_x, :focal_y, :tag_ids]
+
+  @doc """
+  Upload the file at `path` to the media library: `POST /api/media`
+  (multipart, streamed from disk).
+
+  The server byte-sniffs the file (its name is not trusted), strips its
+  metadata, stores it and queues its variants — the pipeline the editor's
+  library runs. Returns the created item, flattened like any other resource,
+  with `"processing" => true` while an A/V file's metadata strip is pending
+  (its `"url"` isn't live until then).
+
+  Options: `:filename` (default: the path's basename), the metadata `:alt`,
+  `:caption`, `:decorative`, `:focal_x`, `:focal_y` (0.0–1.0) and `:tag_ids`,
+  and `:req` (per-call `Req` overrides).
+  """
+  @spec upload_media(Path.t(), keyword()) :: {:ok, item()} | {:error, term()}
+  def upload_media(path, opts \\ []) do
+    filename = opts[:filename] || Path.basename(path)
+
+    # Req names multipart fields with atoms. `:"tag_ids[]"` is the one list
+    # (multipart repeats a `name[]` field per value); every key here comes
+    # from `@metadata_opts`, so no atom is minted from input.
+    fields =
+      Enum.flat_map(metadata(opts), fn
+        {:tag_ids, values} -> Enum.map(List.wrap(values), &{:"tag_ids[]", to_string(&1)})
+        {key, value} -> [{key, to_string(value)}]
+      end) ++ [file: {File.stream!(path, 65_536), filename: filename}]
+
+    :post
+    |> request("/api/media",
+      form_multipart: fields,
+      headers: [{"accept", "application/json"}],
+      receive_timeout: @upload_timeout,
+      req: opts[:req]
+    )
+    |> media_item()
+  end
+
+  @doc """
+  Import a file from a public URL: `POST /api/media/import-url`. The server
+  fetches it (public http(s) addresses only, a few re-validated redirects,
+  25 MB) and ingests it like an upload. Same options as `upload_media/2`,
+  `:filename` overriding the name the URL implies.
+  """
+  @spec import_media(String.t(), keyword()) :: {:ok, item()} | {:error, term()}
+  def import_media(url, opts \\ []) do
+    body =
+      opts
+      |> metadata()
+      |> Map.new()
+      |> Map.put(:url, url)
+      |> put_present(:filename, opts[:filename])
+
+    :post
+    |> request("/api/media/import-url",
+      json: body,
+      headers: [{"accept", "application/json"}],
+      receive_timeout: @upload_timeout,
+      req: opts[:req]
+    )
+    |> media_item()
+  end
+
+  @doc """
+  Edit an item's metadata: `PATCH /api/json/media-items/:id`. `changes` takes
+  `:alt`, `:caption`, `:decorative`, `:focal_x`/`:focal_y` (moving the point
+  re-derives the crops) and tags with content's verbs — `:tag_ids` replaces
+  the set, `:add_tag_ids`/`:remove_tag_ids` merge (don't combine the two).
+  """
+  @spec update_media(String.t(), keyword() | map(), keyword()) ::
+          {:ok, item()} | {:error, term()}
+  def update_media(id, changes, opts \\ []) do
+    attributes =
+      Map.new(changes, fn {key, value} -> {key, value} end)
+      |> Map.take(@metadata_opts ++ [:add_tag_ids, :remove_tag_ids])
+
+    :patch
+    |> request("/api/json/media-items/#{id}",
+      json: %{data: %{type: "media_item", id: id, attributes: attributes}},
+      headers: [
+        {"accept", "application/vnd.api+json"},
+        {"content-type", "application/vnd.api+json"}
+      ],
+      req: opts[:req]
+    )
+    |> media_item()
+  end
+
+  @doc """
+  First leg of a direct upload: `POST /api/media/uploads`. Returns
+  `{:ok, %{"token", "upload_url", "method", "headers", "expires_at", "max_bytes"}}`
+  — `PUT` exactly `byte_size` bytes to `"upload_url"` with `"headers"` as given,
+  then `complete_direct_upload/2`. A 501 means the server's storage can't
+  presign (it needs S3 with a private bucket); use `upload_media/2` instead.
+  """
+  @spec begin_direct_upload(String.t(), pos_integer(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def begin_direct_upload(filename, byte_size, opts \\ []) do
+    case request(:post, "/api/media/uploads",
+           json: %{filename: filename, byte_size: byte_size},
+           headers: [{"accept", "application/json"}],
+           req: opts[:req]
+         ) do
+      {:ok, %{"data" => upload}} -> {:ok, upload}
+      {:ok, other} -> {:error, {:unexpected_body, other}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Last leg of a direct upload: `POST /api/media/uploads/complete`. The server
+  runs the staged bytes through the normal pipeline and deletes the staged
+  copy; a token completes once. Takes the metadata options of `upload_media/2`.
+  """
+  @spec complete_direct_upload(String.t(), keyword()) :: {:ok, item()} | {:error, term()}
+  def complete_direct_upload(token, opts \\ []) do
+    :post
+    |> request("/api/media/uploads/complete",
+      json: opts |> metadata() |> Map.new() |> Map.put(:token, token),
+      headers: [{"accept", "application/json"}],
+      receive_timeout: @upload_timeout,
+      req: opts[:req]
+    )
+    |> media_item()
+  end
+
+  @doc """
+  `begin_direct_upload/3` → `PUT` → `complete_direct_upload/2` for the file at
+  `path`: the bytes go straight to object storage, streamed from disk, for a
+  file too large to send through the app. Same options as `upload_media/2`.
+  """
+  @spec upload_media_direct(Path.t(), keyword()) :: {:ok, item()} | {:error, term()}
+  def upload_media_direct(path, opts \\ []) do
+    filename = opts[:filename] || Path.basename(path)
+
+    with {:ok, %File.Stat{size: size}} <- File.stat(path),
+         {:ok, upload} <- begin_direct_upload(filename, size, opts),
+         :ok <- put_staged(upload, path) do
+      complete_direct_upload(upload["token"], opts)
+    end
+  end
+
+  # Straight to the bucket: no Kiln base URL and no Kiln credentials — the
+  # presigned URL is the authorization, and the signed `content-length` in
+  # `"headers"` is what the store checks the streamed body against.
+  defp put_staged(%{"upload_url" => url, "headers" => headers}, path) do
+    [
+      method: :put,
+      url: url,
+      headers: Map.to_list(headers),
+      body: File.stream!(path, 65_536),
+      receive_timeout: @upload_timeout,
+      retry: false
+    ]
+    |> Keyword.merge(Application.get_env(:kiln_client, :req_options, []))
+    |> Req.request()
+    |> case do
+      {:ok, %Req.Response{status: status}} when status in 200..299 ->
+        :ok
+
+      {:ok, %Req.Response{status: status, body: body}} ->
+        {:error, {:http_status, status, body}}
+
+      {:error, exception} ->
+        {:error, exception}
+    end
+  end
+
+  defp metadata(opts),
+    do: opts |> Keyword.take(@metadata_opts) |> Enum.reject(&is_nil(elem(&1, 1)))
+
+  defp put_present(map, _key, nil), do: map
+  defp put_present(map, key, value), do: Map.put(map, key, value)
+
+  # A created/updated media item: the resource flattened like a list item, plus
+  # the upload response's `meta.processing` when it carries one.
+  defp media_item({:ok, %{"data" => %{} = resource}}) do
+    item = flatten_resource(resource)
+
+    case resource do
+      %{"meta" => %{"processing" => processing}} -> {:ok, Map.put(item, "processing", processing)}
+      _ -> {:ok, item}
+    end
+  end
+
+  defp media_item({:ok, other}), do: {:error, {:unexpected_body, other}}
+  defp media_item({:error, reason}), do: {:error, reason}
 
   # --- editorial reads (editor-tier credential) ---
   #

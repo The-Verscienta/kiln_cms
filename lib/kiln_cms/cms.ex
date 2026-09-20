@@ -347,6 +347,8 @@ defmodule KilnCMS.CMS do
       define :get_media_item, action: :read, get_by: [:id]
       define :create_media_item, action: :create
       define :update_media_item, action: :update
+      # The API's metadata-only write (alt/caption/decorative/focal/tags).
+      define :update_media_item_metadata, action: :update_metadata
       define :destroy_media_item, action: :destroy
       define :list_trashed_media_items, action: :trashed
       define :restore_media_item, action: :restore

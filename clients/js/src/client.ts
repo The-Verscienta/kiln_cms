@@ -3,8 +3,11 @@
  * `/api/json/*`, per-type and hybrid search, fired artifacts at
  * `/api/content/:type/:slug` (including `?as_of=` point-in-time reads),
  * preview tokens — minting and redeeming them — the JSON:API write surface
- * (create, update, workflow transitions, soft-delete) and a minimal `/gql`
- * helper (see Kiln's `docs/json-api.md` and `docs/headless-consumer-guide.md`).
+ * (create, update, workflow transitions, soft-delete), the media upload API
+ * (`uploadMedia` and friends; Kiln's `docs/api.md` → "Uploading media") and a
+ * minimal `/gql` helper (see Kiln's `docs/json-api.md` and
+ * `docs/headless-consumer-guide.md`). The writes and the uploads need a read +
+ * write key on an editor account.
  *
  * A port of the official Elixir client (`clients/elixir/kiln_client`), which
  * encodes the safe defaults so consumers don't rediscover the traps one
@@ -61,6 +64,7 @@ import type {
   AsOfIndexOptions,
   AsOfIndexResult,
   AutocompleteOptions,
+  DirectUpload,
   ContentRelease,
   ContentReleaseItem,
   Filter,
@@ -68,10 +72,14 @@ import type {
   GraphQLResponse,
   HybridSearchOptions,
   HybridSearchResult,
+  ImportMediaOptions,
   IncludedMap,
   Item,
   ListOptions,
   ListResult,
+  MediaItem,
+  MediaMetadata,
+  MediaMetadataUpdate,
   ReleaseListOptions,
   ReleaseOptions,
   MintedPreview,
@@ -82,6 +90,7 @@ import type {
   RevisionListOptions,
   SchemaOptions,
   SearchOptions,
+  UploadMediaOptions,
   WorkflowVerb,
   WriteOptions,
 } from "./types.js";
@@ -119,6 +128,14 @@ export interface KilnClientOptions {
   timeoutMs?: number;
   /** Extra headers merged into every request. */
   headers?: Record<string, string>;
+  /**
+   * Timeout in milliseconds for the media upload calls (default 300000),
+   * applied when a call passes no `signal`. Separate from `timeoutMs` because
+   * an upload is bounded by the file's size and the network, not by the
+   * server's read latency — and the server sniffs and strips it before
+   * answering.
+   */
+  uploadTimeoutMs?: number;
 }
 
 export function createClient(options: KilnClientOptions): KilnClient {
@@ -130,6 +147,7 @@ export class KilnClient {
   private readonly apiKey?: string;
   private readonly fetchImpl: typeof globalThis.fetch;
   private readonly timeoutMs: number;
+  private readonly uploadTimeoutMs: number;
   private readonly headers: Record<string, string>;
 
   constructor(options: KilnClientOptions) {
@@ -137,6 +155,7 @@ export class KilnClient {
     this.apiKey = options.apiKey;
     this.fetchImpl = options.fetch ?? globalThis.fetch;
     this.timeoutMs = options.timeoutMs ?? 15_000;
+    this.uploadTimeoutMs = options.uploadTimeoutMs ?? 300_000;
     this.headers = options.headers ?? {};
   }
 
@@ -436,6 +455,148 @@ export class KilnClient {
       options.signal,
       "application/json",
     )) as SchemaDocument;
+  }
+
+  // ── media uploads ─────────────────────────────────────────────────────────
+
+  /**
+   * Upload a file to the media library: `POST /api/media` (multipart). The
+   * server byte-sniffs it (the name and `type` are not trusted), strips its
+   * metadata, stores it and queues its variants — the same pipeline as the
+   * editor's library. Returns the created item; `processing: true` means an
+   * A/V file's metadata strip is still pending and its `url` isn't live yet.
+   *
+   *     const item = await kiln.uploadMedia(file, { alt: "A cat", tagIds: [tag] });
+   *
+   * Needs a read + write key (or JWT) on an editor/admin account. For files
+   * too large to send through the app, see `uploadMediaDirect`.
+   */
+  async uploadMedia(file: Blob, options: UploadMediaOptions = {}): Promise<MediaItem> {
+    const form = new FormData();
+    appendMetadata(form, options);
+    form.append("file", file, options.filename ?? fileName(file));
+    return this.mediaItem(
+      await this.sendBody("POST", "/api/media", form, options.signal, true),
+    );
+  }
+
+  /**
+   * Import a file from a public URL: `POST /api/media/import-url`. The server
+   * fetches it (SSRF-guarded: public http(s) addresses only, up to a few
+   * re-validated redirects, 25 MB) and ingests it like an upload.
+   */
+  async importMediaFromUrl(url: string, options: ImportMediaOptions = {}): Promise<MediaItem> {
+    const body = { url, ...metadataParams(options) } as Record<string, unknown>;
+    if (options.filename !== undefined) body.filename = options.filename;
+    return this.mediaItem(
+      await this.sendBody("POST", "/api/media/import-url", body, options.signal, true),
+    );
+  }
+
+  /**
+   * Edit an item's metadata: `PATCH /api/json/media-items/:id` — alt text,
+   * caption, the decorative flag, the focal point (moving it re-derives the
+   * crops) and tags, with content's replace / merge tag verbs.
+   */
+  async updateMedia(
+    id: string,
+    changes: MediaMetadataUpdate,
+    options: RequestOptions = {},
+  ): Promise<MediaItem> {
+    const attributes: Record<string, unknown> = metadataParams(changes);
+    if (changes.addTagIds !== undefined) attributes.add_tag_ids = changes.addTagIds;
+    if (changes.removeTagIds !== undefined) attributes.remove_tag_ids = changes.removeTagIds;
+
+    const doc = await this.sendBody(
+      "PATCH",
+      `/api/json/media-items/${encodeURIComponent(id)}`,
+      { data: { type: "media_item", id, attributes } },
+      options.signal,
+    );
+    return this.mediaItem(doc);
+  }
+
+  /**
+   * First leg of a direct upload: `POST /api/media/uploads`. Returns a
+   * presigned URL to `PUT` exactly `byteSize` bytes to (send `headers` as
+   * given), and a token for `completeDirectUpload`. Throws `KilnHttpError`
+   * 501 when the server's storage can't presign (it needs S3 with a private
+   * bucket) — fall back to `uploadMedia`.
+   */
+  async beginDirectUpload(
+    filename: string,
+    byteSize: number,
+    options: RequestOptions = {},
+  ): Promise<DirectUpload> {
+    const body = (await this.sendBody(
+      "POST",
+      "/api/media/uploads",
+      { filename, byte_size: byteSize },
+      options.signal,
+    )) as { data: Record<string, unknown> };
+
+    const data = body.data;
+    return {
+      token: data.token as string,
+      uploadUrl: data.upload_url as string,
+      method: "PUT",
+      headers: data.headers as Record<string, string>,
+      expiresAt: data.expires_at as string,
+      maxBytes: data.max_bytes as number,
+    };
+  }
+
+  /**
+   * Last leg of a direct upload: `POST /api/media/uploads/complete`. The
+   * server pulls the staged bytes through the normal ingest pipeline, deletes
+   * the staged copy, and returns the created item. A token completes once.
+   */
+  async completeDirectUpload(
+    token: string,
+    options: MediaMetadata & RequestOptions = {},
+  ): Promise<MediaItem> {
+    return this.mediaItem(
+      await this.sendBody(
+        "POST",
+        "/api/media/uploads/complete",
+        { token, ...metadataParams(options) },
+        options.signal,
+        true,
+      ),
+    );
+  }
+
+  /**
+   * `beginDirectUpload` → `PUT` → `completeDirectUpload` in one call, for a
+   * file too large to send through the app (a proxy's request-size cap, a
+   * slow link). The bytes go straight to object storage; the server still
+   * sniffs, strips and derives them on completion.
+   */
+  async uploadMediaDirect(file: Blob, options: UploadMediaOptions = {}): Promise<MediaItem> {
+    const signal = options.signal ?? AbortSignal.timeout(this.uploadTimeoutMs);
+    const upload = await this.beginDirectUpload(options.filename ?? fileName(file), file.size, {
+      signal,
+    });
+
+    // Straight to the bucket: no Kiln credentials on this request.
+    const response = await this.fetchImpl(upload.uploadUrl, {
+      method: "PUT",
+      headers: upload.headers,
+      body: file,
+      signal,
+    });
+    if (!response.ok) {
+      throw new KilnHttpError(response.status, upload.uploadUrl, await errorBody(response));
+    }
+
+    return this.completeDirectUpload(upload.token, { ...options, signal });
+  }
+
+  private mediaItem(doc: unknown): MediaItem {
+    const [item] = flattenDocument<MediaItem>(doc).items;
+    if (item === undefined) throw new Error("Kiln returned no media item");
+    const meta = (doc as { data?: { meta?: { processing?: boolean } } }).data?.meta;
+    return meta?.processing === undefined ? item : { ...item, processing: meta.processing };
   }
 
   // ── editorial reads (editor-tier credential) ──────────────────────────────
@@ -739,6 +900,26 @@ export class KilnClient {
 
   // ── transport ─────────────────────────────────────────────────────────────
 
+  // Writes with a body: JSON:API's mime on the `/api/json/*` routes, plain
+  // JSON on the upload API, or a `FormData` whose multipart boundary `fetch`
+  // sets itself. `upload` selects the longer default timeout.
+  private sendBody(
+    method: "POST" | "PATCH",
+    path: string,
+    body: FormData | Record<string, unknown>,
+    signal: AbortSignal | undefined,
+    upload = false,
+  ): Promise<unknown> {
+    const mime = path.startsWith("/api/json/") ? JSON_API : "application/json";
+    return this.send(method, path, {
+      signal,
+      accept: mime,
+      contentType: body instanceof FormData ? undefined : mime,
+      body,
+      upload,
+    });
+  }
+
   private request(
     path: string,
     params: URLSearchParams,
@@ -787,21 +968,31 @@ export class KilnClient {
       accept: string;
       contentType?: string;
       body?: unknown;
+      /** Use the longer upload timeout rather than the request timeout. */
+      upload?: boolean;
     },
   ): Promise<unknown> {
+    // A `FormData` goes to `fetch` untouched: it must not be stringified, and
+    // its `content-type` carries a multipart boundary only `fetch` can write.
+    const form = typeof FormData !== "undefined" && request.body instanceof FormData;
     const query = request.params?.toString() ?? "";
     const url = this.baseUrl + path + (query === "" ? "" : `?${query}`);
 
     const headers: Record<string, string> = { accept: request.accept, ...this.headers };
-    if (request.contentType !== undefined) headers["content-type"] = request.contentType;
+    if (request.contentType !== undefined && !form)
+      headers["content-type"] = request.contentType;
     if (this.hasApiKey()) headers.authorization = `Bearer ${this.apiKey}`;
 
     const init: RequestInit = {
       method,
       headers,
-      signal: request.signal ?? AbortSignal.timeout(this.timeoutMs),
+      signal:
+        request.signal ??
+        AbortSignal.timeout(request.upload ? this.uploadTimeoutMs : this.timeoutMs),
     };
-    if (request.body !== undefined) init.body = JSON.stringify(request.body);
+    if (request.body !== undefined) {
+      init.body = form ? (request.body as FormData) : JSON.stringify(request.body);
+    }
 
     let response: Response;
     try {
@@ -868,6 +1059,36 @@ function isAbort(error: unknown): boolean {
 // alternative (opting *in* per call site) re-arms the moment someone adds one.
 function published(options: { published?: boolean }): boolean {
   return options.published !== false;
+}
+
+// The wire names of the upload metadata, which `uploadMedia`,
+// `importMediaFromUrl`, `completeDirectUpload` and `updateMedia` share.
+function metadataParams(metadata: MediaMetadata): Record<string, unknown> {
+  const params: Record<string, unknown> = {};
+  if (metadata.alt !== undefined) params.alt = metadata.alt;
+  if (metadata.caption !== undefined) params.caption = metadata.caption;
+  if (metadata.decorative !== undefined) params.decorative = metadata.decorative;
+  if (metadata.focalX !== undefined) params.focal_x = metadata.focalX;
+  if (metadata.focalY !== undefined) params.focal_y = metadata.focalY;
+  if (metadata.tagIds !== undefined) params.tag_ids = metadata.tagIds;
+  return params;
+}
+
+// Multipart spells a list as repeated `name[]` fields.
+function appendMetadata(form: FormData, metadata: MediaMetadata): void {
+  for (const [key, value] of Object.entries(metadataParams(metadata))) {
+    if (Array.isArray(value)) {
+      for (const entry of value) form.append(`${key}[]`, String(entry));
+    } else {
+      form.append(key, String(value));
+    }
+  }
+}
+
+function fileName(file: Blob): string {
+  return typeof File !== "undefined" && file instanceof File && file.name !== ""
+    ? file.name
+    : "upload";
 }
 
 function revisionsPath(type: string, id: string): string {

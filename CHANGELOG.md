@@ -101,6 +101,10 @@ Every summary line below that was shortened links to its own entry there.
 - **`KILN_MEDIA_ROOT`: a stable directory for local media.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#kilnmediaroot-a-stable-directory-for-local-media))
 
+- **Upload media over the API: `POST /api/media`, URL imports, presigned direct
+  uploads, metadata `PATCH`, and SDK support.**
+  ([#1576](https://github.com/The-Verscienta/kiln_cms/pull/1576) · [long form](docs/changelog/unreleased.md#upload-media-over-the-api))
+
 - **Version history over the API.**
   ([#1574](https://github.com/The-Verscienta/kiln_cms/pull/1574) · [long form](docs/changelog/unreleased.md#version-history-over-the-api))
 

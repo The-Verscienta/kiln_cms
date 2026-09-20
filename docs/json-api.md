@@ -36,7 +36,7 @@ Authorization: Bearer <token>
 |-----------|-----------------------------|-----------------------------|-------------|
 | Page      | `GET /api/json/pages`       | `GET /api/json/pages/:id`   | `/pages/search`, `/pages/semantic-search`, `/pages/autocomplete`, `/pages/published` |
 | Post      | `GET /api/json/posts`       | `GET /api/json/posts/:id`   | `/posts/search`, `/posts/semantic-search`, `/posts/autocomplete`, `/posts/published` |
-| MediaItem | `GET /api/json/media-items` | `GET /api/json/media-items/:id` | `/media-items/search`, `/media-items/library` |
+| MediaItem | `GET /api/json/media-items` | `GET /api/json/media-items/:id` | `/media-items/search`, `/media-items/library`; `PATCH /media-items/:id` edits metadata ([below](#editing-media-metadata)) |
 | Category  | `GET /api/json/categories`  | `GET /api/json/categories/:id` | `/categories/by-slug/:slug` |
 | Tag       | `GET /api/json/tags`        | `GET /api/json/tags/:id`    | `/tags/by-slug/:slug` |
 | TagGroup  | `GET /api/json/tag-groups`  | `GET /api/json/tag-groups/:id` | `/tag-groups/by-slug/:slug` |
@@ -639,6 +639,37 @@ the publish route re-fires automatically. Editing already-published content with
 `PATCH /:id` **also** re-fires (a `published`-guarded re-fire on `:update`,
 #330), so a write-through to live content never leaves a stale artifact. Draft
 edits do not fire.
+
+### Editing media metadata
+
+Files are **created** through the upload API (`POST /api/media` — JSON:API has
+no file upload; see [api.md → Uploading media](api.md#uploading-media)). What
+an item says about itself is edited here:
+
+| Route | Action | Who | Effect |
+|-------|--------|-----|--------|
+| `PATCH /api/json/media-items/:id` | `:update_metadata` | `:read_write` key (or JWT), editor+ | Edits `alt`, `caption`, `decorative`, `focal_x`, `focal_y` and tags |
+
+```bash
+curl -s -X PATCH http://localhost:4000/api/json/media-items/<uuid> \
+  -H 'accept: application/vnd.api+json' \
+  -H 'content-type: application/vnd.api+json' \
+  -H "authorization: Bearer $KILN_API_KEY" \
+  -d '{ "data": { "type": "media_item", "id": "<uuid>",
+        "attributes": { "alt": "The kiln at dusk", "focal_x": 0.3, "add_tag_ids": ["<tag uuid>"] } } }'
+```
+
+- The focal point is `0.0`–`1.0` on each axis; moving it **re-derives** the
+  focal-aware crops in the background, as clicking the point in the media
+  library does.
+- Tags take the same three arguments as content — `tag_ids` replaces the set,
+  `add_tag_ids` / `remove_tag_ids` merge — with the same rules (see "Writing
+  tags — replace vs merge" above).
+- Nothing the pipeline owns is writable: `url`, `storage_key`, `variants`,
+  `content_type`, dimensions and sizes come from the bytes. Sending one is a
+  `400`, not a silent write. `audience` (gating a document) stays an editor-UI
+  action for now, because it moves the file between storage buckets.
+- Deleting media is not routed for any key.
 
 ### Workflow routes take an empty resource object
 

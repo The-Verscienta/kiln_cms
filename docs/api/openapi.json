@@ -13671,7 +13671,7 @@
       "name": "KilnCMS",
       "url": "https://github.com/The-Verscienta/kiln_cms"
     },
-    "description": "The [JSON:API](https://jsonapi.org/)-compliant headless surface of\n**KilnCMS**: reads, search and — since #330 — writes, for the core content\ntypes **Page** and **Post**, admin-defined types through **Entry**\n(`/api/json/entries`, described by `/api/json/type-definitions`), the\n**MediaItem** library, and the taxonomy (**Tag**, **TagGroup**, **Category**)\nplus **Redirect**.\n\n## Authentication\n\nRequests are **anonymous by default** and resolved through each resource's read\npolicy, so an unauthenticated caller only ever sees **published** content — no\ncredentials are required for the public delivery use case.\n\nA credential widens that, as far as its account's role allows. Both kinds go\nin the same header:\n\n```\nAuthorization: Bearer <credential>\n```\n\n  * **API key** (`kiln_…`, the `apiKeyAuth` scheme) — minted at\n    `/editor/api-keys`, acting as the account that minted it and bounded by\n    the key's `access` scope. A `read` key reads what its account may read;\n    a `read_write` key may also **write**: create and update drafts, submit\n    for review, and — on an admin account — publish, unpublish, return to\n    draft and soft-delete. The key for server-to-server use.\n  * **User JWT** (the `bearerAuth` scheme) — an AshAuthentication token from\n    **`POST /api/auth/sign_in`** (documented below), with that user's role.\n\nEither credential also authenticates the GraphQL endpoint (`POST /gql`) and\nits WebSocket. See `docs/api.md` and, for the write routes, `docs/json-api.md`\n→ \"Writing\".\n\n## Content negotiation\n\nEvery request and response uses the JSON:API media type:\n\n```\nAccept: application/vnd.api+json\nContent-Type: application/vnd.api+json\n```\n\n## Filtering, sorting & pagination\n\nCollection routes accept `filter[<field>]=`, `sort=<field>` (prefix `-` for\ndescending) and the `page[...]` family (`page[limit]` defaults to 25, capped\nat 100; `page[offset]`, `page[after]`/`page[before]` keyset cursors,\n`page[count]=true`). Full reference: `docs/json-api.md`.\n\n## Beyond JSON:API\n\nThe JSON:API router is one of several headless surfaces. Those with an\noperation below are marked; the rest are in `docs/api.md`.\n\n  * **GraphQL** delivery, search and authoring at `POST /gql`\n    (`docs/headless-graphql-api.md`); its schema as SDL at\n    `GET /api/graphql/schema.graphql` (operation below).\n  * **Fired artifacts** — the rendered block tree — at\n    `GET /api/content/:type/:slug` (operation below).\n  * **Search, resolve, menus, locales, forms, related, ask, provenance** under\n    `/api/*`.\n  * **MCP** for LLM authoring clients at `/mcp` (`docs/mcp.md`).\n  * **Outbound webhooks** (HMAC-signed) on publish/unpublish/update.\n  * **Signed preview URLs** for unpublished content at `GET /preview/:token`\n    (operation below).\n\n## This document\n\nA production build serves it only to a caller holding an API key, unless the\noperator turns the public documentation on (`API_DOCS_ENABLED`). The copy\ncommitted at `docs/api/openapi.json` describes the stock build.\n",
+    "description": "The [JSON:API](https://jsonapi.org/)-compliant headless surface of\n**KilnCMS**: reads, search and — since #330 — writes, for the core content\ntypes **Page** and **Post**, admin-defined types through **Entry**\n(`/api/json/entries`, described by `/api/json/type-definitions`), the\n**MediaItem** library, and the taxonomy (**Tag**, **TagGroup**, **Category**)\nplus **Redirect**.\n\n## Authentication\n\nRequests are **anonymous by default** and resolved through each resource's read\npolicy, so an unauthenticated caller only ever sees **published** content — no\ncredentials are required for the public delivery use case.\n\nA credential widens that, as far as its account's role allows. Both kinds go\nin the same header:\n\n```\nAuthorization: Bearer <credential>\n```\n\n  * **API key** (`kiln_…`, the `apiKeyAuth` scheme) — minted at\n    `/editor/api-keys`, acting as the account that minted it and bounded by\n    the key's `access` scope. A `read` key reads what its account may read;\n    a `read_write` key may also **write**: create and update drafts, submit\n    for review, and — on an admin account — publish, unpublish, return to\n    draft and soft-delete. The key for server-to-server use.\n  * **User JWT** (the `bearerAuth` scheme) — an AshAuthentication token from\n    **`POST /api/auth/sign_in`** (documented below), with that user's role.\n\nEither credential also authenticates the GraphQL endpoint (`POST /gql`) and\nits WebSocket. See `docs/api.md` and, for the write routes, `docs/json-api.md`\n→ \"Writing\".\n\n## Content negotiation\n\nEvery request and response uses the JSON:API media type:\n\n```\nAccept: application/vnd.api+json\nContent-Type: application/vnd.api+json\n```\n\n## Filtering, sorting & pagination\n\nCollection routes accept `filter[<field>]=`, `sort=<field>` (prefix `-` for\ndescending) and the `page[...]` family (`page[limit]` defaults to 25, capped\nat 100; `page[offset]`, `page[after]`/`page[before]` keyset cursors,\n`page[count]=true`). Full reference: `docs/json-api.md`.\n\n## Beyond JSON:API\n\nThe JSON:API router is one of several headless surfaces. Those with an\noperation below are marked; the rest are in `docs/api.md`.\n\n  * **GraphQL** delivery, search and authoring at `POST /gql`\n    (`docs/headless-graphql-api.md`); its schema as SDL at\n    `GET /api/graphql/schema.graphql` (operation below).\n  * **Fired artifacts** — the rendered block tree — at\n    `GET /api/content/:type/:slug` (operation below).\n  * **Media upload** at `POST /api/media` (multipart), `POST /api/media/import-url`\n    and the presigned direct-upload pair under `/api/media/uploads`\n    (`docs/api.md` → \"Uploading media\"). Metadata edits are the JSON:API\n    `PATCH /api/json/media-items/{id}` below.\n  * **Search, resolve, menus, locales, forms, related, ask, provenance** under\n    `/api/*`.\n  * **MCP** for LLM authoring clients at `/mcp` (`docs/mcp.md`).\n  * **Outbound webhooks** (HMAC-signed) on publish/unpublish/update.\n  * **Signed preview URLs** for unpublished content at `GET /preview/:token`\n    (operation below).\n\n## This document\n\nA production build serves it only to a caller holding an API key, unless the\noperator turns the public documentation on (`API_DOCS_ENABLED`). The copy\ncommitted at `docs/api/openapi.json` describes the stock build.\n",
     "license": {
       "name": "MIT",
       "url": "https://github.com/The-Verscienta/kiln_cms/blob/main/LICENSE"
@@ -18010,6 +18010,232 @@
             "style": "deepObject"
           }
         ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/vnd.api+json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/media_item"
+                    },
+                    "included": {
+                      "items": {
+                        "oneOf": [
+                          {
+                            "$ref": "#/components/schemas/tag"
+                          }
+                        ]
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "meta": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "$ref": "#/components/responses/errors"
+          }
+        },
+        "tags": [
+          "media_item"
+        ]
+      },
+      "patch": {
+        "callbacks": {},
+        "deprecated": false,
+        "description": "/media-items/:id operation on media_item resource",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Relationship paths to include in the response",
+            "explode": false,
+            "in": "query",
+            "name": "include",
+            "required": false,
+            "schema": {
+              "pattern": "^(tags)(,(tags))*$",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Limits the response fields to only those listed for each type",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "additionalProperties": true,
+              "example": {
+                "media_item": "id,filename,content_type,byte_size,width,height,duration_seconds,variants,alt,caption,decorative,url,focal_x,focal_y,audience,download_count,uploaded_by_id"
+              },
+              "properties": {
+                "media_item": {
+                  "description": "Comma separated field names for media_item",
+                  "example": "id,filename,content_type,byte_size,width,height,duration_seconds,variants,alt,caption,decorative,url,focal_x,focal_y,audience,download_count,uploaded_by_id",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "style": "deepObject"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/vnd.api+json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "data": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "attributes": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "add_tag_ids": {
+                            "anyOf": [
+                              {
+                                "items": {
+                                  "format": "uuid",
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "alt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "caption": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "decorative": {
+                            "anyOf": [
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "focal_x": {
+                            "anyOf": [
+                              {
+                                "format": "float",
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "focal_y": {
+                            "anyOf": [
+                              {
+                                "format": "float",
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "remove_tag_ids": {
+                            "anyOf": [
+                              {
+                                "items": {
+                                  "format": "uuid",
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "tag_ids": {
+                            "anyOf": [
+                              {
+                                "items": {
+                                  "format": "uuid",
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "relationships": {
+                        "additionalProperties": false,
+                        "properties": {},
+                        "type": "object"
+                      },
+                      "type": {
+                        "enum": [
+                          "media_item"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "data"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "description": "Request body for the /media-items/:id operation on media_item resource",
+          "required": false
+        },
         "responses": {
           "200": {
             "content": {
@@ -25764,6 +25990,1514 @@
         },
         "tags": [
           "type_definition"
+        ]
+      }
+    },
+    "/api/media": {
+      "post": {
+        "callbacks": {},
+        "deprecated": false,
+        "description": "Multipart upload of one `file`, with optional metadata. The file is byte-sniffed (its name and `Content-Type` are ignored), size-capped per kind (images 10 MB, documents 25 MB, captions 2 MB, audio 100 MB, video 500 MB), metadata-stripped, stored and recorded as the credential's user — the media library's own pipeline. The caller is authorized **before** the body is read. Rate limited by the `media_upload` bucket on top of `api`.",
+        "operationId": "uploadMedia",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "alt": {
+                    "type": "string"
+                  },
+                  "caption": {
+                    "type": "string"
+                  },
+                  "decorative": {
+                    "description": "A decorative image correctly has no alt text",
+                    "type": "boolean"
+                  },
+                  "file": {
+                    "format": "binary",
+                    "type": "string"
+                  },
+                  "focal_x": {
+                    "default": 0.5,
+                    "maximum": 1,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "focal_y": {
+                    "default": 0.5,
+                    "maximum": 1,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "tag_ids[]": {
+                    "description": "Tag ids, one repeated field per id",
+                    "items": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "attributes": {
+                          "properties": {
+                            "alt": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "audience": {
+                              "type": "string"
+                            },
+                            "byte_size": {
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "caption": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "content_type": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "decorative": {
+                              "type": "boolean"
+                            },
+                            "download_count": {
+                              "type": "integer"
+                            },
+                            "duration_seconds": {
+                              "nullable": true,
+                              "type": "number"
+                            },
+                            "filename": {
+                              "type": "string"
+                            },
+                            "focal_x": {
+                              "type": "number"
+                            },
+                            "focal_y": {
+                              "type": "number"
+                            },
+                            "height": {
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "kind": {
+                              "enum": [
+                                "image",
+                                "video",
+                                "audio",
+                                "captions",
+                                "document"
+                              ],
+                              "type": "string"
+                            },
+                            "uploaded_by_id": {
+                              "format": "uuid",
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "url": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "variants": {
+                              "type": "object"
+                            },
+                            "width": {
+                              "nullable": true,
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "id": {
+                          "format": "uuid",
+                          "type": "string"
+                        },
+                        "links": {
+                          "type": "object"
+                        },
+                        "meta": {
+                          "properties": {
+                            "processing": {
+                              "description": "`true` while an A/V file's metadata strip is pending — `url` serves nothing until it finishes",
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "relationships": {
+                          "type": "object"
+                        },
+                        "type": {
+                          "enum": [
+                            "media_item"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Created. `Location` names the item's JSON:API route; the body is the same resource object `GET /api/json/media-items/{id}` serves, plus `kind` and `meta.processing`.",
+            "headers": {
+              "location": {
+                "description": "`/api/json/media-items/{id}`",
+                "schema": {
+                  "type": "string"
+                },
+                "style": "simple"
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "No credential (`unauthorized`)"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "A read-only key, or an account that can't create media (`forbidden`)"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Over the cap for the file's kind (`too_large`)"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not a kind the library accepts (`unsupported_media_type`)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "`missing_file`, `invalid_parameter`, `create_failed`, `encrypted`, `strip_unavailable` or `strip_failed`"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "`media_upload` or `api` bucket spent — see `Retry-After`"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The object store refused the write (`storage_failed`)"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Out of temp disk to strip a video (`insufficient_storage`) — see `Retry-After`"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Upload a file to the media library",
+        "tags": [
+          "Media"
+        ]
+      }
+    },
+    "/api/media/import-url": {
+      "post": {
+        "callbacks": {},
+        "deprecated": false,
+        "description": "The server fetches `url` through its SSRF-guarded fetcher — public http(s) addresses only, resolved once and connected to by address, up to three redirects each re-validated, at most 25 MB — and ingests it exactly like an upload.",
+        "operationId": "importMediaFromUrl",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "alt": {
+                    "type": "string"
+                  },
+                  "caption": {
+                    "type": "string"
+                  },
+                  "decorative": {
+                    "description": "A decorative image correctly has no alt text",
+                    "type": "boolean"
+                  },
+                  "filename": {
+                    "description": "Name to record instead of the one the URL's path implies",
+                    "type": "string"
+                  },
+                  "focal_x": {
+                    "default": 0.5,
+                    "maximum": 1,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "focal_y": {
+                    "default": 0.5,
+                    "maximum": 1,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "tag_ids": {
+                    "description": "Tags on this site to attach",
+                    "items": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "url": {
+                    "format": "uri",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "attributes": {
+                          "properties": {
+                            "alt": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "audience": {
+                              "type": "string"
+                            },
+                            "byte_size": {
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "caption": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "content_type": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "decorative": {
+                              "type": "boolean"
+                            },
+                            "download_count": {
+                              "type": "integer"
+                            },
+                            "duration_seconds": {
+                              "nullable": true,
+                              "type": "number"
+                            },
+                            "filename": {
+                              "type": "string"
+                            },
+                            "focal_x": {
+                              "type": "number"
+                            },
+                            "focal_y": {
+                              "type": "number"
+                            },
+                            "height": {
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "kind": {
+                              "enum": [
+                                "image",
+                                "video",
+                                "audio",
+                                "captions",
+                                "document"
+                              ],
+                              "type": "string"
+                            },
+                            "uploaded_by_id": {
+                              "format": "uuid",
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "url": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "variants": {
+                              "type": "object"
+                            },
+                            "width": {
+                              "nullable": true,
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "id": {
+                          "format": "uuid",
+                          "type": "string"
+                        },
+                        "links": {
+                          "type": "object"
+                        },
+                        "meta": {
+                          "properties": {
+                            "processing": {
+                              "description": "`true` while an A/V file's metadata strip is pending — `url` serves nothing until it finishes",
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "relationships": {
+                          "type": "object"
+                        },
+                        "type": {
+                          "enum": [
+                            "media_item"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Created. `Location` names the item's JSON:API route; the body is the same resource object `GET /api/json/media-items/{id}` serves, plus `kind` and `meta.processing`.",
+            "headers": {
+              "location": {
+                "description": "`/api/json/media-items/{id}`",
+                "schema": {
+                  "type": "string"
+                },
+                "style": "simple"
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "No credential (`unauthorized`)"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "A read-only key, or an account that can't create media (`forbidden`)"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Over the kind's cap, or the 25 MB import cap (`too_large`)"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not a kind the library accepts (`unsupported_media_type`)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "`unsafe_url` (not a public address), `fetch_failed` (no 2xx), `invalid_parameter`, `create_failed`, or a strip refusal"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "`media_upload` or `api` bucket spent — see `Retry-After`"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Import a file from a public URL",
+        "tags": [
+          "Media"
+        ]
+      }
+    },
+    "/api/media/uploads": {
+      "post": {
+        "callbacks": {},
+        "deprecated": false,
+        "description": "For files too large to send through the app. Returns a URL to `PUT` exactly `byte_size` bytes to (in the deployment's private bucket, valid 15 minutes, the length signed in — send `headers` as given) and a `token` for `POST /api/media/uploads/complete`, valid one hour for the same user on the same site. Needs S3 storage with a private bucket; otherwise 501.",
+        "operationId": "beginDirectUpload",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "byte_size": {
+                    "description": "The file's exact size in bytes",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "filename": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "filename",
+                  "byte_size"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "expires_at": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "headers": {
+                          "additionalProperties": {
+                            "type": "string"
+                          },
+                          "description": "Signed headers — send exactly these with the PUT",
+                          "type": "object"
+                        },
+                        "max_bytes": {
+                          "type": "integer"
+                        },
+                        "method": {
+                          "enum": [
+                            "PUT"
+                          ],
+                          "type": "string"
+                        },
+                        "token": {
+                          "type": "string"
+                        },
+                        "upload_url": {
+                          "format": "uri",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Upload issued"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "No credential (`unauthorized`)"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "A read-only key, or an account that can't create media (`forbidden`)"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "`byte_size` is over the largest upload cap (`too_large`)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Missing or invalid `filename`/`byte_size` (`invalid_parameter`)"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "`media_upload` or `api` bucket spent — see `Retry-After`"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "This deployment can't presign — no S3 private bucket (`direct_uploads_unavailable`)"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Start a direct upload: get a presigned PUT URL",
+        "tags": [
+          "Media"
+        ]
+      }
+    },
+    "/api/media/uploads/complete": {
+      "post": {
+        "callbacks": {},
+        "deprecated": false,
+        "description": "Runs the staged object through the same pipeline as `POST /api/media`, then deletes the staged copy whatever the outcome. A token completes once. Metadata is set here.",
+        "operationId": "completeDirectUpload",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "alt": {
+                    "type": "string"
+                  },
+                  "caption": {
+                    "type": "string"
+                  },
+                  "decorative": {
+                    "description": "A decorative image correctly has no alt text",
+                    "type": "boolean"
+                  },
+                  "focal_x": {
+                    "default": 0.5,
+                    "maximum": 1,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "focal_y": {
+                    "default": 0.5,
+                    "maximum": 1,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "tag_ids": {
+                    "description": "Tags on this site to attach",
+                    "items": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "token": {
+                    "description": "The `token` from `POST /api/media/uploads`",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "token"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "attributes": {
+                          "properties": {
+                            "alt": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "audience": {
+                              "type": "string"
+                            },
+                            "byte_size": {
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "caption": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "content_type": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "decorative": {
+                              "type": "boolean"
+                            },
+                            "download_count": {
+                              "type": "integer"
+                            },
+                            "duration_seconds": {
+                              "nullable": true,
+                              "type": "number"
+                            },
+                            "filename": {
+                              "type": "string"
+                            },
+                            "focal_x": {
+                              "type": "number"
+                            },
+                            "focal_y": {
+                              "type": "number"
+                            },
+                            "height": {
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "kind": {
+                              "enum": [
+                                "image",
+                                "video",
+                                "audio",
+                                "captions",
+                                "document"
+                              ],
+                              "type": "string"
+                            },
+                            "uploaded_by_id": {
+                              "format": "uuid",
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "url": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "variants": {
+                              "type": "object"
+                            },
+                            "width": {
+                              "nullable": true,
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "id": {
+                          "format": "uuid",
+                          "type": "string"
+                        },
+                        "links": {
+                          "type": "object"
+                        },
+                        "meta": {
+                          "properties": {
+                            "processing": {
+                              "description": "`true` while an A/V file's metadata strip is pending — `url` serves nothing until it finishes",
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "relationships": {
+                          "type": "object"
+                        },
+                        "type": {
+                          "enum": [
+                            "media_item"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Created. `Location` names the item's JSON:API route; the body is the same resource object `GET /api/json/media-items/{id}` serves, plus `kind` and `meta.processing`.",
+            "headers": {
+              "location": {
+                "description": "`/api/json/media-items/{id}`",
+                "schema": {
+                  "type": "string"
+                },
+                "style": "simple"
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "No credential (`unauthorized`)"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "A read-only key, or an account that can't create media (`forbidden`)"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Over the cap for the file's kind (`too_large`)"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not a kind the library accepts (`unsupported_media_type`)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "`invalid_upload_token`, `not_uploaded` (nothing staged, or already completed), `size_mismatch`, `invalid_parameter`, `create_failed`, or a strip refusal"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "`media_upload` or `api` bucket spent — see `Retry-After`"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "No S3 private bucket (`direct_uploads_unavailable`)"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Finish a direct upload",
+        "tags": [
+          "Media"
         ]
       }
     },

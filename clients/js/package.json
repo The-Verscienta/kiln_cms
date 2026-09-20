@@ -1,7 +1,7 @@
 {
   "name": "@kiln-cms/client",
   "version": "0.2.0",
-  "description": "Official JS/TS client for the KilnCMS APIs — typed JSON:API reads and writes, workflow transitions, GraphQL, search, fired artifacts, preview tokens, point-in-time reads, and the kiln-types generator.",
+  "description": "Official JS/TS client for the KilnCMS APIs — typed JSON:API reads and writes, workflow transitions, GraphQL, search, fired artifacts, preview tokens, point-in-time reads, media uploads, and the kiln-types generator.",
   "license": "MIT",
   "author": {
     "name": "The-Verscienta",

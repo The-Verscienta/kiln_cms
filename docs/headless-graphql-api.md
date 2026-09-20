@@ -214,6 +214,30 @@ create/update/submit; **return-to-draft, publish, unpublish and delete require a
 (approve or return) is the admin's half. The hard delete (`:purge`) is **never** exposed as a mutation and is
 API-key-banned regardless of scope.
 
+### Media metadata — `updateMediaItem`
+
+`updateMediaItem(id:, input:)` edits what a media item says about itself —
+`alt`, `caption`, `decorative`, `focalX`/`focalY` (0.0–1.0; moving the point
+re-derives the focal-aware crops) and tags (`tagIds` / `addTagIds` /
+`removeTagIds`, same rules as content). Same gate as the content writes: a
+`:read_write` key (or JWT) on an editor or admin account.
+
+```graphql
+mutation ($id: ID!) {
+  updateMediaItem(id: $id, input: { alt: "The kiln at dusk", focalX: 0.3 }) {
+    result { id alt focalX focalY }
+    errors { message }
+  }
+}
+```
+
+**Uploads are not GraphQL.** Files are created over REST —
+`POST /api/media` (multipart), `POST /api/media/import-url`, or the presigned
+direct-upload pair; see [api.md → Uploading media](api.md#uploading-media).
+The upload route needs its own body limit, its own rate-limit bucket, and to
+refuse an unauthorized caller *before* reading a large body; `/gql` can offer
+none of those per operation.
+
 ### Writing tags — replace vs merge
 
 `updatePost` accepts three tag inputs (#521). `tagIds` is the **complete** set,
@@ -345,7 +369,8 @@ served in development only. `__typename` always works.
   authored through the admin editor (or `/mcp`'s `create_tag`/`create_category`).
 - **The media library as a list.** `MediaItem` has a GraphQL *type* (so it
   resolves as the nested `featuredImage` on content) but **no top-level query** —
-  there is no public "list all media" endpoint.
+  there is no public "list all media" endpoint. Its one mutation is the
+  metadata edit above; uploads are REST.
 - **The raw `blocks` tree.** Blocks are a typed union not rendered over the auto
   API; the v2 content API surface is the *fired artifacts* (`/api/...`), not the
   editable tree. Render content from the fired artifacts or your own block

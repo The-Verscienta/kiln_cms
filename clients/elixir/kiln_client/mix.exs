@@ -14,7 +14,7 @@ defmodule KilnClient.MixProject do
       description:
         "Official Elixir client for the KilnCMS APIs — published-by-default " <>
           "JSON:API reads, writes and workflow transitions, search, fired " <>
-          "artifacts, and GraphQL.",
+          "artifacts, media uploads, and GraphQL.",
       package: package(),
       docs: docs(),
       name: "KilnClient",

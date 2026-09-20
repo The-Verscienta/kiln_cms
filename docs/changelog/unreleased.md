@@ -230,6 +230,34 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
   write to. Ignored under S3.
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529))
 
+<a id="upload-media-over-the-api"></a>
+
+- **Upload media over the API.** Until now no headless surface could create a
+  media item — the write API (#330) covered content but not the library, so an
+  integration had to hand files to a human. `POST /api/media` takes a
+  multipart `file`, `POST /api/media/import-url` fetches a public URL through
+  `SafeFetch`, and `POST /api/media/uploads` + `/uploads/complete` presign a
+  `PUT` into the private bucket for files too large to send through the app.
+  All three run the library's own pipeline (`Media.Ingest`): byte-sniffing,
+  per-kind caps, the EXIF/PDF/A-V strips and the #1122 quarantine, variants,
+  and the `MediaItem` create under the caller's actor, which stamps the
+  uploader. Alt text, caption, decorative flag, focal point and tags can be set
+  on upload, and afterwards through `PATCH /api/json/media-items/:id` or
+  GraphQL `updateMediaItem` — a new `:update_metadata` action, since `:update`
+  also accepts `storage_key`/`url`. Moving the focal point re-derives the
+  crops. A `:read_write` key (or JWT) on an editor account is required; a
+  read-only key or a viewer is refused **before** `POST /api/media`'s body is
+  read — the endpoint's multipart parser now leaves that one route's body for
+  its controller to parse after authorizing, under a limit the size of the
+  largest upload cap rather than the endpoint-wide 8 MB. The routes charge a
+  new `media_upload` rate-limit bucket (60/min per address) on top of `:api`.
+  `focal_x`/`focal_y` are now constrained to 0.0–1.0. No MCP upload tool:
+  media has no draft state, so it would be the one tool whose output an LLM
+  could publish unreviewed (docs/mcp.md). The JS client (0.2.0) and Elixir
+  client (0.3.0) gain `uploadMedia`/`upload_media`, URL import, metadata
+  updates and the direct-upload flow. Docs: `docs/api.md` → "Uploading media".
+  ([#1576](https://github.com/The-Verscienta/kiln_cms/pull/1576))
+
 <a id="version-history-over-the-api"></a>
 
 - **Version history over the API.** `GET /api/content/:type/:id/revisions`

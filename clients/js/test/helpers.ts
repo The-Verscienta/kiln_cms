@@ -9,6 +9,8 @@ export interface RecordedCall {
   url: URL;
   method: string;
   headers: Record<string, string>;
+  /** The request body as sent — a string, a `FormData`, a `Blob`, or undefined. */
+  body: unknown;
   /** The request body, JSON-parsed; `undefined` when none was sent. */
   body: unknown;
 }
@@ -39,7 +41,7 @@ export function stubFetch(...responses: StubResponse[]): FetchStub {
       method: init?.method ?? "GET",
       url,
       headers: { ...((init?.headers ?? {}) as Record<string, string>) },
-      body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+      body: typeof init?.body === "string" ? JSON.parse(init.body) : init?.body,
     });
 
     const response = responses[Math.min(index, responses.length - 1)] ?? {};
