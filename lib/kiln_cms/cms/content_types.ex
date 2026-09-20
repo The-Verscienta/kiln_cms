@@ -570,8 +570,15 @@ defmodule KilnCMS.CMS.ContentTypes do
   # content the caller holds a verified grant for. Popped from `opts` into the
   # action's params, so every existing caller — which passes neither — keeps the
   # public, unlocked behaviour exactly.
+  #
+  # `:fallback` is the request's locale fallback mode (`KilnCMS.I18n.Fallback`):
+  # `:site` (the default — the site's chain), `:none`, or `{:only, locale}`. The
+  # record returned may therefore be in another locale than `locale`; its own
+  # `locale` says which.
   def get_published_by_slug(type, slug, locale, opts \\ []) do
     {params, opts} = audience_params(opts)
+    {mode, opts} = Keyword.pop(opts, :fallback, :site)
+    params = Map.merge(params, fallback_params(mode))
 
     case get!(type, org_from(opts)) do
       %{source: :dynamic, definition: definition} ->
@@ -615,6 +622,10 @@ defmodule KilnCMS.CMS.ContentTypes do
         call(type, "get_locked_#{atom(type, opts)}_by_slug!", [slug, locale, params, opts], opts)
     end
   end
+
+  defp fallback_params(:site), do: %{}
+  defp fallback_params(:none), do: %{fallback: false}
+  defp fallback_params({:only, locale}), do: %{fallback_locale: locale}
 
   # `:audiences` widens the read across the audience axis; `:unlocks` widens it
   # across the passphrase axis (#496). Both default to "nothing extra", so a

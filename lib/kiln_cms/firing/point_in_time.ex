@@ -34,6 +34,9 @@ defmodule KilnCMS.Firing.PointInTime do
   # regression.)
   @unpublish_actions [:unpublish, :unpublish_scheduled, :archive, :destroy]
   @state_actions @publish_actions ++ @unpublish_actions
+  # The one audience an anonymous reader holds, as stored: the `audience`
+  # column is text, and a version's `changes` map carries it as a string.
+  @anonymous_audience "public"
 
   @doc """
   The **collection view as of a date** (#338 phase 2): every document of
@@ -50,6 +53,17 @@ defmodule KilnCMS.Firing.PointInTime do
   `:type_definition_id` scopes the read to one **dynamic** type (D17). Every
   dynamic type shares the `KilnCMS.CMS.Entry` table, so without it an index
   for one type would list every other type's documents too.
+
+  **Only what an anonymous reader may discover is listed.** The index backs
+  unauthenticated surfaces (`GET /api/content/:type?as_of=`, GraphQL
+  `contentAsOf`), so a document is omitted unless it is public to an anonymous
+  reader both **now** — current `audience` is `:public` and no passphrase lock
+  (#496), the same rule `Audiences.public_to_anonymous?/1` states — and **then**
+  (`audience_then/3`). A locked document's title and slug are exactly what the
+  lock exists to withhold (#1032 closed the same leak on `:published`), and a
+  gated one's title is not the anonymous reader's to list. The rule takes no
+  caller input, which is what lets the controller keep caching the result in one
+  slot per `{org, type, as_of, limit}`.
   """
   @spec index(Ash.UUID.t(), module(), DateTime.t(), keyword()) :: [map()]
   def index(org_id, resource, %DateTime{} = as_of, opts \\ []) do
@@ -58,9 +72,7 @@ defmodule KilnCMS.Firing.PointInTime do
 
     version_module
     |> published_as_of(resource, as_of, org_id, limit, opts[:type_definition_id])
-    |> Enum.map(fn {id, published_at} ->
-      entry(version_module, resource, id, published_at, org_id)
-    end)
+    |> Enum.map(fn {id, published_at} -> entry(version_module, id, published_at) end)
     |> Enum.reject(&is_nil/1)
   end
 
@@ -91,12 +103,7 @@ defmodule KilnCMS.Firing.PointInTime do
     # that has no such column.
     {type_scope, params} =
       if definition_id do
-        {"""
-           AND EXISTS (
-             SELECT 1 FROM #{source_table} s
-             WHERE s.id = v.version_source_id AND s.type_definition_id = $6
-           )
-         """, params ++ [dump_uuid(definition_id)]}
+        {"AND s.type_definition_id = $6", params ++ [dump_uuid(definition_id)]}
       else
         {"", params}
       end
@@ -111,10 +118,21 @@ defmodule KilnCMS.Firing.PointInTime do
           WHERE version_inserted_at <= $1
             AND version_action_name = ANY($2)
             AND ($4::uuid IS NULL OR org_id = $4)
-            #{type_scope}
+            -- The source row must still exist (a hard purge is not re-exposed)
+            -- and be discoverable by an anonymous reader NOW: public, unlocked.
+            AND EXISTS (
+              SELECT 1 FROM #{source_table} s
+              WHERE s.id = v.version_source_id
+                AND s.audience = '#{@anonymous_audience}'
+                AND s.access_password_hash IS NULL
+                #{type_scope}
+            )
           ORDER BY version_source_id, version_inserted_at DESC, id DESC
         ) latest
         WHERE version_action_name = ANY($3)
+          -- ...and THEN. In SQL rather than after the fetch, so `limit` counts
+          -- only entries that will actually be returned.
+          AND #{audience_then_sql(table, "latest.version_source_id", "$1", "$4")} = '#{@anonymous_audience}'
         ORDER BY version_inserted_at DESC
         LIMIT $5
         """,
@@ -133,17 +151,56 @@ defmodule KilnCMS.Firing.PointInTime do
 
   # Index fields as of the effective publish — one slim query folding only the
   # versions that touched title/slug (never the full block-tree payloads).
-  # `nil` when no slug is reconstructible (history predating version tracking)
-  # or when the document row is GONE (hard purge — deliberately erased content
-  # must not be re-exposed by the historical index).
-  defp entry(version_module, resource, id, published_at, org_id) do
-    with true <- still_exists?(resource, id, org_id),
-         %{"slug" => slug} = state when is_binary(slug) <-
-           title_slug_at(version_module, id, published_at) do
-      %{id: id, slug: slug, title: state["title"], published_at: published_at}
-    else
-      _ -> nil
+  # `nil` when no slug is reconstructible (history predating version tracking).
+  # A document whose row is GONE (hard purge — deliberately erased content must
+  # not be re-exposed by the historical index) never reaches here: the
+  # `EXISTS` on the source row in `published_as_of/6` drops it.
+  defp entry(version_module, id, published_at) do
+    case title_slug_at(version_module, id, published_at) do
+      %{"slug" => slug} = state when is_binary(slug) ->
+        %{id: id, slug: slug, title: state["title"], published_at: published_at}
+
+      _ ->
+        nil
     end
+  end
+
+  # The audience a document carried at `as_of`, as a scalar SQL subquery: the
+  # last version at or before that moment whose diff touched `audience`.
+  # `:changes_only` tracking records every attribute on create — defaults
+  # included — so a document with any history has one. Shared by `index/4` and
+  # `read/5` so the two views cannot disagree about who could read a document
+  # then, for the reason `last_transition/4` mirrors the index's `DISTINCT ON`.
+  #
+  # Reads the ORG-LEADING version index (`org_id, version_source_id, …`), hence
+  # the org predicate even though a source id is already unique.
+  defp audience_then_sql(table, source_id, as_of, org_id) do
+    """
+    (SELECT a.changes->>'audience' FROM #{table} a
+     WHERE a.version_source_id = #{source_id}
+       AND a.version_inserted_at <= #{as_of}
+       AND (#{org_id}::uuid IS NULL OR a.org_id = #{org_id})
+       AND a.changes ? 'audience'
+     ORDER BY a.version_inserted_at DESC, a.id DESC
+     LIMIT 1)
+    """
+  end
+
+  # Whether `id` was public to an anonymous reader at `as_of` (#338, #917). No
+  # recorded audience fails closed, as `KilnCMS.CMS.Fragments` does for the
+  # same fold: "unknown" must not read as "public" on a path whose output is
+  # publicly cacheable.
+  # sobelow_skip ["SQL.Query"]
+  defp public_then?(version_module, id, as_of, org_id) do
+    table = AshPostgres.DataLayer.Info.table(version_module)
+
+    %{rows: [[audience]]} =
+      KilnCMS.Repo.query!(
+        "SELECT " <> audience_then_sql(table, "$1", "$2", "$3"),
+        [Ecto.UUID.dump!(id), DateTime.to_naive(as_of), dump_uuid(org_id)]
+      )
+
+    audience == @anonymous_audience
   end
 
   # The row still exists in ANY workflow state (archived/trashed rows do; hard
@@ -197,38 +254,47 @@ defmodule KilnCMS.Firing.PointInTime do
       publish here would assert that content was live at a moment it had
       already been taken down — the exact claim this endpoint exists to make
       truthfully.
+    * `{:error, :not_public}` — it was published, but not to an anonymous
+      reader: its `audience` at `as_of` was not `:public`.
+
+  **Who, as well as when.** The caller establishes that the document is
+  readable *now* (the delivery read's audience + lock filter); this checks
+  that it was public *then*. A document that was members-only at `as_of` and is
+  public today must not serve its old gated body to an anonymous caller — a
+  historical read is no more permissive than a live one was at that moment,
+  and never more permissive than a live one is now. The passphrase lock has
+  no history to check (`access_password_hash` is kept out of version rows, so a
+  bcrypt hash never outlives a rotation there), so only its current state
+  applies.
   """
   @spec read(Ash.UUID.t(), module(), Ash.UUID.t(), atom(), DateTime.t()) ::
-          {:ok, map(), DateTime.t()} | {:error, :not_published | :withdrawn}
+          {:ok, map(), DateTime.t()} | {:error, :not_published | :withdrawn | :not_public}
   def read(org_id, resource, id, surface, %DateTime{} = as_of) do
     version_module = Module.concat(resource, Version)
 
     # Version rows inherit the source's tenant (epic #336), so the history reads
     # are scoped to this org; the rebuilt document is re-stamped with `org_id` so
     # the in-memory re-fire stays in the right tenant.
-    case last_transition(version_module, id, as_of, org_id) do
-      {:ok, published_at} ->
-        {:ok, artifacts} =
-          version_module
-          |> replay(id, published_at, org_id)
-          |> build_document(resource, id, org_id)
-          # `:as_stored` — the replayed `custom_fields` are what this document
-          # actually carried at `as_of`. Recomputing them would derive from
-          # today's formulas, and projecting onto today's field definitions
-          # would add fields defined since and drop fields since deleted, making
-          # the historical artifact assert values that were never live then.
-          # `fragments: as_of` for the same reason (#917). `Fragments.expand/3`
-          # otherwise reads the target's *current* published blocks, so a
-          # historical read returned the fragment as edited today — or an empty
-          # `blocks` array where the content was, if the target has since been
-          # unpublished or gated. Both are silent wrong answers on the one
-          # endpoint whose entire promise is "what did this say on…".
-          |> Engine.fire(mode: :preview, custom_fields: :as_stored, fragments: as_of)
+    with {:ok, published_at} <- last_transition(version_module, id, as_of, org_id),
+         true <- public_then?(version_module, id, as_of, org_id) || {:error, :not_public} do
+      {:ok, artifacts} =
+        version_module
+        |> replay(id, published_at, org_id)
+        |> build_document(resource, id, org_id)
+        # `:as_stored` — the replayed `custom_fields` are what this document
+        # actually carried at `as_of`. Recomputing them would derive from
+        # today's formulas, and projecting onto today's field definitions
+        # would add fields defined since and drop fields since deleted, making
+        # the historical artifact assert values that were never live then.
+        # `fragments: as_of` for the same reason (#917). `Fragments.expand/3`
+        # otherwise reads the target's *current* published blocks, so a
+        # historical read returned the fragment as edited today — or an empty
+        # `blocks` array where the content was, if the target has since been
+        # unpublished or gated. Both are silent wrong answers on the one
+        # endpoint whose entire promise is "what did this say on…".
+        |> Engine.fire(mode: :preview, custom_fields: :as_stored, fragments: as_of)
 
-        {:ok, Map.fetch!(artifacts, surface), published_at}
-
-      {:error, reason} ->
-        {:error, reason}
+      {:ok, Map.fetch!(artifacts, surface), published_at}
     end
   end
 
@@ -284,10 +350,11 @@ defmodule KilnCMS.Firing.PointInTime do
   all — which expansion treats exactly as it treats an unpublished target
   today: it expands to nothing.
 
-  Deliberately reuses `last_transition/4` and `still_exists?/3`, so "published
-  then" and "not erased" mean the same thing here, in `read/5` and in
-  `index/4`. A fragment visible in one and not the others would be the same
-  class of disagreement those two guard against.
+  Deliberately reuses `last_transition/4`, and `still_exists?/3` applies the
+  same existence rule `index/4` does in SQL, so "published then" and "not
+  erased" mean the same thing here, in `read/5` and in `index/4`. A fragment
+  visible in one and not the others would be the same class of disagreement
+  those two guard against.
   """
   @spec snapshot_state(Ash.UUID.t(), module(), Ash.UUID.t(), DateTime.t()) ::
           {:ok, map()} | :absent

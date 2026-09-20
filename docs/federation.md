@@ -232,31 +232,46 @@ enable` does; the mix task remains for a shell.
 The site's own `last_delivered_at` (`SiteFederation.record_delivery`) is now
 written by `DeliveryWorker` on every successful delivery and shown on the page.
 
-## Key rotation (#967) — the explicit position
+## Key rotation (#967, #1487)
 
 There is **no automatic rotation**, and that is a decision rather than a gap.
 Peers cache `publicKeyPem` from the actor document at follow time and refetch
 it on their own schedule (Mastodon: on a signature failure, at most every few
 hours), so a `KilnCMS.Provenance.KeyRegistry`-style retired-key set — where a
 verifier consults the registry — buys nothing here: the verifier is someone
-else's server. Rotating therefore means publishing a new key under the same
-`keyId` and accepting that deliveries to each peer fail until that peer
-refetches, which its own retry-and-refetch loop does. What Kiln guarantees is
-that the *identity* survives: the handle, the actor id and the `keyId` are
-permanent, so a rotation is a new PEM behind an unchanged URL, never a new
-actor. To rotate today: generate a new keypair, write it with `:enable`'s
-`MintIdentity` change disabled (a mix task is the right shape for this and is
-deliberately not shipped until someone needs it — an accidental rotation is a
-day of failed deliveries), and expect the delivery ledger to show a burst of
-failures that clears as peers refetch. Do not rotate to recover from a leaked
-key on the assumption peers will pick it up promptly; they may not, and the
-old key signs valid-looking traffic until they do — treat that as the incident
-it is.
+else's server.
+
+**Re-keying on purpose** is `mix kiln.federation rekey` or *Re-key* on
+`/editor/federation`, both admin-only (`SiteFederation`'s `:rekey` action,
+#1487). It replaces both halves of the keypair and keeps the identity: the
+handle, the actor id and the `keyId` (`#main-key`) are permanent, so a
+rotation is a new PEM behind an unchanged URL, never a new actor. In the same
+transaction it queues `KilnCMS.Federation.ActorUpdateWorker`, which sends every
+deliverable follower an actor `Update` carrying the new `publicKeyPem`. Because
+the job only becomes visible at commit, the `Update` cannot leave before
+`/actor` serves the key that signs it. Expect the delivery ledger to show a
+short burst of failures from peers that verify against their cached key first.
+Mastodon then re-fetches the actor and accepts the retry. A peer that neither
+processes the `Update` nor re-fetches keeps failing, and the button's
+confirmation says so.
+
+Re-key when the key has leaked or has been lost, not as routine hygiene. **A
+`SECRET_KEY_BASE` rotation does not need a re-key**: the vault re-encryption
+task carries the key across unchanged (see
+[secrets-rotation.md](secrets-rotation.md#secret_key_base)). If the key leaked,
+do not assume re-keying contains it: until each peer has the new key, the old
+one still signs traffic those peers accept.
+
+**A key the vault cannot open** (a `SECRET_KEY_BASE` rotated out of order) is
+reported as such. The federation page and `mix kiln.federation status` show the
+signing key as unreadable, and each delivery fails with *"this site's signing
+key is unreadable"* instead of *"federation is not enabled"*.
 
 ## What phase 1 does not do
 
 - ~~No admin UI (phase 2).~~ Done in #967 — see above.
-- ~~No key rotation.~~ Not automated, by decision — see above.
+- ~~No key rotation.~~ Re-keying is an explicit admin action (#1487), and
+  not automated, by decision — see above.
 - No inbound replies, likes or boosts — accepted with a 202 and dropped. A 4xx
   would make the sending server retry for days over something not built yet,
   which is a way to get an instance blocked.

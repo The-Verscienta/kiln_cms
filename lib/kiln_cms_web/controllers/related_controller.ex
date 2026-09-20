@@ -5,6 +5,13 @@ defmodule KilnCMSWeb.RelatedController do
   index the site. Public and published-only on both ends (the anchor document
   must be published; results are filtered to published), org-scoped like the
   rest of delivery. An empty list when semantic search is disabled.
+
+  The anchor document is resolved through the site's locale fallback chain
+  like its `/api/content/:type/:slug` sibling — same `?locale=`, `?fallback=`
+  and `?fallback_locale=`, same `400` for a locale the site does not run, and
+  the served locale on the response (`KilnCMSWeb.DeliveryLocale`). Related
+  documents are whatever the anchor's own embeddings are closest to, in any
+  locale, as before.
   """
   use KilnCMSWeb, :controller
 
@@ -12,16 +19,23 @@ defmodule KilnCMSWeb.RelatedController do
   alias KilnCMS.Firing.Delivery
   alias KilnCMS.Search.Related
   alias KilnCMSWeb.ApiError
+  alias KilnCMSWeb.DeliveryLocale
   alias KilnCMSWeb.Params
 
   @max_age_seconds 300
 
   def show(conn, %{"type" => type, "slug" => slug} = params) do
+    case DeliveryLocale.parse(params) do
+      {:ok, request} -> show_related(conn, type, slug, request, params)
+      error -> DeliveryLocale.send_error(conn, error)
+    end
+  end
+
+  defp show_related(conn, type, slug, %{locale: locale, mode: mode}, params) do
     org_id = KilnCMSWeb.Tenant.current_org_id(conn)
-    locale = Params.string(params, "locale", KilnCMS.I18n.default_locale())
 
     with ct when not is_nil(ct) <- ContentTypes.get(type),
-         {:ok, record} <- Delivery.published(org_id, ct.type, slug, locale) do
+         {:ok, record} <- Delivery.published(org_id, ct.type, slug, locale, [], mode) do
       related =
         record
         |> Related.related_documents(limit: limit(params))
@@ -37,7 +51,8 @@ defmodule KilnCMSWeb.RelatedController do
 
       conn
       |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
-      |> json(%{type: type, slug: slug, related: related})
+      |> DeliveryLocale.put_served(record.locale)
+      |> json(%{type: type, slug: slug, locale: record.locale, related: related})
     else
       # Cache-first, DB-outage-aware resolution (same posture as delivery):
       # a database outage answers 503-retryable, never a cacheable 404.

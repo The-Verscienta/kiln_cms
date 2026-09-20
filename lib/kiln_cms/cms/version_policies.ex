@@ -29,9 +29,16 @@ defmodule KilnCMS.CMS.VersionPolicies do
       # were sequential scans over every version of every entry in the
       # deployment (#672). The composite covers the sort as well as the filter,
       # and supersedes the single-column pair.
+      #
+      # The second index serves the one read that starts from a TIME rather
+      # than a document: the sync API's "which documents changed in this
+      # window" (`KilnCMS.Firing.Sync`). Without it that question is a scan of
+      # every version the org has ever written, on every poll. (Tenant-scoped
+      # like the first, so both lead with `org_id`.)
       postgres do
         custom_indexes do
           index [:version_source_id, :version_inserted_at, :id]
+          index [:version_inserted_at]
         end
       end
 

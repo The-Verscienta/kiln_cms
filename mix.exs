@@ -190,6 +190,10 @@ defmodule KilnCMS.MixProject do
         "MapSet.t/1"
       ],
       extras: extras(),
+      # The committed API specs (`mix kiln.api.specs`) ship with the docs build,
+      # at `api/openapi.json` and `api/schema.graphql` beside the HTML, so a
+      # published docs site serves the spec of the version it documents.
+      assets: %{"docs/api" => "api"},
       groups_for_extras: groups_for_extras(),
       groups_for_modules: groups_for_modules()
     ]
@@ -560,6 +564,9 @@ defmodule KilnCMS.MixProject do
         # Lives in test/support (it calls excoveralls, an `only: :test` dep),
         # so it exists only in this env — see its moduledoc.
         "kiln.coverage.merge": :test,
+        # The committed API specs describe the :dev build; the test build adds
+        # a fixture plugin's block types — see the task's moduledoc.
+        "kiln.api.specs": :dev,
         "e2e.setup": :e2e,
         "e2e.reset": :e2e
       ]
@@ -751,6 +758,14 @@ defmodule KilnCMS.MixProject do
       {:tz, "~> 0.28"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
+      # The production consumer for `KilnCMSWeb.Telemetry.metrics/0` (#1362).
+      # Started only when KILN_METRICS_ENABLED is on, and served on its own
+      # listener rather than the public endpoint — see KilnCMSWeb.Metrics.
+      # Peep rather than telemetry_metrics_prometheus_core: it aggregates into
+      # fixed-size histograms as events arrive, where the core reporter keeps
+      # every distribution sample in ETS until a scrape drains it, so an
+      # enabled-but-unscraped node would grow without bound.
+      {:peep, "~> 5.0"},
       # Error tracking. No-op unless SENTRY_DSN is set (config/runtime.exs), so
       # dev/test/precommit stay offline. Uses Req (not hackney) for transport to
       # keep the project on a single HTTP client — see KilnCMS.SentryReqClient.

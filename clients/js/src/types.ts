@@ -8,6 +8,8 @@
  * client methods instead.
  */
 
+import type { GraphQLErrorObject } from "./errors.js";
+
 // ── JSON:API (flattened) ────────────────────────────────────────────────────
 
 /** A `{type, id}` resource linkage ref, as flattened from a relationship. */
@@ -269,4 +271,276 @@ export interface MintedPreview {
 export interface AsOfIndexOptions extends RequestOptions {
   /** Default 100, max 500. */
   limit?: number;
+}
+
+// ── sync (delta) API ────────────────────────────────────────────────────────
+
+/**
+ * A document an anonymous reader can fetch right now, with its fired artifact
+ * (the same body `artifact()` returns for that surface). Replace your copy.
+ */
+export interface SyncUpsert<A = ArtifactDocument> {
+  op: "upsert";
+  type: string;
+  id: string;
+  slug: string;
+  locale: string;
+  published_at: string | null;
+  updated_at: string;
+  artifact: A;
+}
+
+/**
+ * A document you were given earlier that is no longer publicly readable —
+ * unpublished, archived, deleted, locked or moved to a members-only audience.
+ * Remove your copy. Carries no reason, slug or body, by design.
+ */
+export interface SyncDelete {
+  op: "delete";
+  type: string;
+  id: string;
+}
+
+export type SyncItem<A = ArtifactDocument> = SyncUpsert<A> | SyncDelete;
+
+/** One page of `GET /api/sync`. */
+export interface SyncPage<A = ArtifactDocument> {
+  items: SyncItem<A>[];
+  /** Opaque; follow it now while `has_more`, store it once it is false. */
+  cursor: string;
+  has_more: boolean;
+}
+
+export interface SyncStartOptions extends RequestOptions {
+  /** Restrict the sync to one content type (singular, e.g. `"post"`). */
+  type?: string;
+  /** Artifact surface embedded in each upsert (default `json`). */
+  surface?: Surface;
+  /** Items per page (default 100, max 500). */
+  limit?: number;
+}
+
+export interface SyncOptions extends SyncStartOptions {
+  /**
+   * Resume from a stored cursor. Omit to start with a full snapshot
+   * (`initial=true`). `type`/`surface` are fixed by the cursor.
+   */
+  cursor?: string;
+  /**
+   * A page holding a just-published document can answer 503 while its
+   * artifact compiles; `sync()` waits `retryDelayMs` (default 2000) and asks
+   * again, up to `retries` times per page (default 3).
+   */
+  retries?: number;
+  retryDelayMs?: number;
+}
+
+export interface SyncResult<A = ArtifactDocument> {
+  /** Every item across every page, in order — apply them in this order. */
+  items: SyncItem<A>[];
+  /** Store this and pass it as `cursor` next time. */
+  cursor: string;
+}
+
+// ── media uploads ───────────────────────────────────────────────────────────
+
+/**
+ * A media library item, flattened like any other resource. The attributes
+ * below are the ones every item carries; `kind` and `processing` come back on
+ * upload responses only (see `KilnClient.uploadMedia`).
+ */
+export interface MediaItem extends Item {
+  filename: string;
+  content_type: string | null;
+  byte_size: number | null;
+  width: number | null;
+  height: number | null;
+  duration_seconds: number | null;
+  url: string | null;
+  alt: string | null;
+  caption: string | null;
+  decorative: boolean;
+  focal_x: number;
+  focal_y: number;
+  variants: Record<string, unknown>;
+  uploaded_by_id: string | null;
+  /** Upload responses only: what the server's byte-sniffing decided. */
+  kind?: "image" | "video" | "audio" | "captions" | "document";
+  /**
+   * Upload responses only: `true` while an A/V upload's metadata strip is
+   * still pending — the item exists, but its `url` serves nothing yet.
+   */
+  processing?: boolean;
+}
+
+/** Metadata settable on upload (and afterwards via `updateMedia`). */
+export interface MediaMetadata {
+  alt?: string;
+  caption?: string;
+  /** A decorative image correctly has no alt text (`alt=""`). */
+  decorative?: boolean;
+  /** Focal point for smart crops, 0.0–1.0 from the left. */
+  focalX?: number;
+  /** Focal point for smart crops, 0.0–1.0 from the top. */
+  focalY?: number;
+  /** Complete tag set (ids of tags on this site). */
+  tagIds?: string[];
+}
+
+export interface UploadMediaOptions extends MediaMetadata, RequestOptions {
+  /** Name to record. Default: the `File`'s own name, else `"upload"`. */
+  filename?: string;
+}
+
+export interface ImportMediaOptions extends MediaMetadata, RequestOptions {
+  /** Name to record instead of the one the URL's path implies. */
+  filename?: string;
+}
+
+/** `updateMedia` changes. Tags follow content's replace / merge verbs. */
+export interface MediaMetadataUpdate extends Omit<MediaMetadata, "tagIds"> {
+  /** Replaces the whole tag set. Don't combine with add/remove. */
+  tagIds?: string[];
+  addTagIds?: string[];
+  removeTagIds?: string[];
+}
+
+/** An issued direct upload: PUT the bytes to `uploadUrl`, then complete. */
+export interface DirectUpload {
+  token: string;
+  uploadUrl: string;
+  method: "PUT";
+  /** Signed headers — send them exactly as given (`content-length` among them). */
+  headers: Record<string, string>;
+  expiresAt: string;
+  maxBytes: number;
+}
+// ── editorial reads (editor-tier credential) ────────────────────────────────
+
+export interface RevisionListOptions extends RequestOptions {
+  /** Page size, 1–100 (server default 20; an out-of-range value gets the default). */
+  limit?: number;
+  /** Opaque keyset cursor — the previous page's `meta.next_cursor`. */
+  cursor?: string;
+}
+
+/**
+ * One entry of a document's version history. Carries the *names* of the
+ * editorial fields the write changed, never their values; the acting user is
+ * an id only (`null` for a system write).
+ */
+export interface Revision {
+  id: string;
+  /** The action that wrote it: `create`, `update`, `autosave`, `publish`, `restore_version`, … */
+  action: string;
+  action_type: "create" | "update" | "destroy";
+  inserted_at: string;
+  user_id: string | null;
+  changed_fields: string[];
+}
+
+/** `GET /api/content/:type/:id/revisions`, as served. */
+export interface RevisionList {
+  data: Revision[];
+  meta: {
+    limit: number;
+    /** Pass back as `cursor` for the next (older) page; `null` on the last. */
+    next_cursor: string | null;
+  };
+}
+
+/**
+ * One revision with its values: the version's own raw `changes`, and the
+ * full `snapshot` of the document at that revision (folded from every
+ * version up to it). Values are in their stored JSON shape.
+ */
+export interface RevisionDetail extends Revision {
+  changes: Record<string, unknown>;
+  snapshot: Record<string, unknown>;
+}
+
+/** The result of restoring a revision — the restore is itself a new revision. */
+export interface RestoreResult {
+  id: string;
+  type: string;
+  state: string;
+  restored_version_id: string;
+  revision: Revision;
+}
+
+/** A content release (`/api/json/releases`), flattened. */
+export interface ContentRelease extends Item {
+  name: string;
+  description: string | null;
+  state:
+    | "open"
+    | "scheduled"
+    | "publishing"
+    | "published"
+    | "failed"
+    | "rolling_back"
+    | "rolled_back"
+    | "archived";
+  scheduled_at: string | null;
+  published_at: string | null;
+  rolled_back_at: string | null;
+  failure_reason: string | null;
+  failed_item_id: string | null;
+}
+
+/** One pending change inside a release (`/api/json/release-items`), flattened. */
+export interface ContentReleaseItem extends Item {
+  release_id: string;
+  /** The document's content type name, and its id — resolve through that type's own route. */
+  content_type: string;
+  content_id: string;
+  action: "publish" | "unpublish";
+  status: "pending" | "applied" | "skipped" | "cancelled" | "rolled_back";
+  prior_state: string | null;
+  prior_version_id: string | null;
+  applied_at: string | null;
+}
+
+/** Options for the release index — the JSON:API list options, minus the `/published` switch. */
+export type ReleaseListOptions = Omit<ListOptions, "published" | "customFilter" | "customSort">;
+
+export interface ReleaseOptions extends RequestOptions {
+  /** Side-load relationships — `["items"]` for the release's contents. */
+  include?: string[];
+  fields?: Record<string, string[]>;
+}
+
+// ── writes (the JSON:API write surface, #330) ───────────────────────────────
+
+/**
+ * The workflow transitions the JSON:API routes as `PATCH /:plural/:id/<verb>`,
+ * by their Ash action names. `submit_for_review` needs an editor-or-above key;
+ * the other three are admin-only. Any other string passes through (kebab-cased
+ * into the route), so a verb a newer server adds is reachable before this list
+ * learns it.
+ */
+export type WorkflowVerb =
+  "submit_for_review" | "return_to_draft" | "publish" | "unpublish" | (string & {});
+
+export interface WriteOptions extends RequestOptions {
+  /**
+   * The JSON:API resource `type` sent as `data.type` — the singular type name
+   * the server validates against (`"post"`, `"page"`, `"entry"`). Derived from
+   * the plural route (`entries` → `entry`, `posts` → `post`); pass it for a
+   * content type whose plural is irregular (`people` → `"person"`).
+   */
+  type?: string;
+}
+
+// ── GraphQL ─────────────────────────────────────────────────────────────────
+
+export interface GraphQLOptions extends RequestOptions {
+  /** Which operation to run when `query` defines several. */
+  operationName?: string;
+}
+
+/** A `POST /gql` response body. */
+export interface GraphQLResponse<TData> {
+  data?: TData | null;
+  errors?: GraphQLErrorObject[];
 }

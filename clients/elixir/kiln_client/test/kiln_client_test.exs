@@ -275,6 +275,186 @@ defmodule KilnClientTest do
     end
   end
 
+  describe "sync/1" do
+    @upsert %{"op" => "upsert", "type" => "post", "id" => "p1", "artifact" => %{}}
+    @tombstone %{"op" => "delete", "type" => "post", "id" => "p2"}
+
+    test "starts with initial=true and follows has_more to the cursor to store" do
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      Req.Test.stub(KilnClient, fn conn ->
+        conn = record(conn)
+
+        case Agent.get_and_update(counter, &{&1, &1 + 1}) do
+          0 ->
+            Req.Test.json(conn, %{"items" => [@upsert], "cursor" => "c1", "has_more" => true})
+
+          _ ->
+            Req.Test.json(conn, %{"items" => [@tombstone], "cursor" => "c2", "has_more" => false})
+        end
+      end)
+
+      assert {:ok, %{items: [@upsert, @tombstone], cursor: "c2"}} =
+               KilnClient.sync(type: "post", limit: 50)
+
+      assert_received {:request, "/api/sync",
+                       %{"initial" => "true", "type" => "post", "limit" => "50"}}
+
+      # A cursor carries its own scope: the follow-up sends only the cursor.
+      assert_received {:request, "/api/sync", %{"cursor" => "c1"} = second}
+      refute Map.has_key?(second, "type")
+      refute Map.has_key?(second, "initial")
+    end
+
+    test "resumes from a stored cursor" do
+      stub_doc(%{"items" => [], "cursor" => "c9", "has_more" => false})
+
+      assert {:ok, %{items: [], cursor: "c9"}} = KilnClient.sync(cursor: "c8")
+      assert_received {:request, "/api/sync", %{"cursor" => "c8"}}
+    end
+
+    test "retries a 503 on the same cursor, then gives up" do
+      Req.Test.stub(KilnClient, fn conn ->
+        conn
+        |> record()
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.send_resp(503, "{}")
+      end)
+
+      assert {:error, {:http_status, 503, _}} =
+               KilnClient.sync(cursor: "c1", retries: 2, retry_delay_ms: 0)
+
+      for _ <- 1..3, do: assert_received({:request, "/api/sync", %{"cursor" => "c1"}})
+      refute_received {:request, _, _}
+    end
+  end
+
+  describe "revisions" do
+    @revision %{
+      "id" => "v2",
+      "action" => "update",
+      "action_type" => "update",
+      "inserted_at" => "2026-09-19T09:14:03.118220Z",
+      "user_id" => "u1",
+      "changed_fields" => ["title"]
+    }
+
+    test "list_revisions/3 reads a document's history with limit and cursor" do
+      stub_doc(%{"data" => [@revision], "meta" => %{"limit" => 1, "next_cursor" => "c2"}})
+
+      assert {:ok, %{"data" => [%{"changed_fields" => ["title"]}], "meta" => meta}} =
+               KilnClient.list_revisions("post", "p/1", limit: 1, cursor: "c1")
+
+      assert meta["next_cursor"] == "c2"
+      assert_received {:request, "/api/content/post/p%2F1/revisions", params}
+      assert params == %{"limit" => "1", "cursor" => "c1"}
+    end
+
+    test "revision/4 unwraps the {data} envelope" do
+      stub_doc(%{
+        "data" =>
+          Map.merge(@revision, %{
+            "changes" => %{"title" => "Two"},
+            "snapshot" => %{"title" => "Two"}
+          })
+      })
+
+      assert {:ok, %{"changes" => %{"title" => "Two"}, "snapshot" => %{"title" => "Two"}}} =
+               KilnClient.revision("page", "p1", "v2")
+
+      assert_received {:request, "/api/content/page/p1/revisions/v2", _params}
+    end
+
+    test "restore_revision/4 POSTs and returns the new revision" do
+      Req.Test.stub(KilnClient, fn conn ->
+        send(self(), {:method, conn.method, conn.request_path})
+
+        Req.Test.json(conn, %{
+          "data" => %{
+            "id" => "p1",
+            "type" => "page",
+            "state" => "draft",
+            "restored_version_id" => "v1",
+            "revision" => Map.put(@revision, "action", "restore_version")
+          }
+        })
+      end)
+
+      assert {:ok,
+              %{"restored_version_id" => "v1", "revision" => %{"action" => "restore_version"}}} =
+               KilnClient.restore_revision("page", "p1", "v1")
+
+      assert_received {:method, "POST", "/api/content/page/p1/revisions/v1/restore"}
+    end
+
+    test "a read-only key's refusal comes back as a 403 error" do
+      Req.Test.stub(KilnClient, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.send_resp(403, ~s({"errors":[{"code":"forbidden"}]}))
+      end)
+
+      assert {:error, {:http_status, 403, %{"errors" => [%{"code" => "forbidden"}]}}} =
+               KilnClient.restore_revision("page", "p1", "v1")
+    end
+  end
+
+  describe "releases" do
+    test "list_releases/1 reads the JSON:API index (no /published feed) with includes" do
+      stub_doc(%{
+        "data" => [
+          %{
+            "id" => "r1",
+            "type" => "release",
+            "attributes" => %{"name" => "Autumn launch", "state" => "scheduled"},
+            "relationships" => %{
+              "items" => %{"data" => [%{"type" => "release_item", "id" => "i1"}]}
+            }
+          }
+        ],
+        "included" => [
+          %{
+            "id" => "i1",
+            "type" => "release_item",
+            "attributes" => %{"content_type" => "page", "content_id" => "p1"}
+          }
+        ]
+      })
+
+      assert {:ok, %{items: [release], included: included}} =
+               KilnClient.list_releases(filter: %{state: "scheduled"}, include: ["items"])
+
+      assert_received {:request, "/api/json/releases", params}
+      assert params["filter"] == %{"state" => "scheduled"}
+      assert params["include"] == "items"
+      assert release["name"] == "Autumn launch"
+      assert [%{"content_id" => "p1"}] = KilnClient.resolve(release, "items", included)
+    end
+
+    test "release/2 fetches one release with its included lookup merged in" do
+      stub_doc(%{
+        "data" => %{"id" => "r1", "type" => "release", "attributes" => %{"name" => "Launch"}},
+        "included" => [
+          %{"id" => "i1", "type" => "release_item", "attributes" => %{"action" => "unpublish"}}
+        ]
+      })
+
+      assert {:ok, %{"name" => "Launch", "included" => included}} =
+               KilnClient.release("r1", include: ["items"])
+
+      assert included[{"release_item", "i1"}]["action"] == "unpublish"
+      assert_received {:request, "/api/json/releases/r1", %{"include" => "items"}}
+    end
+
+    test "list_release_items/1 filters by release" do
+      stub_doc(empty_doc())
+
+      assert {:ok, %{items: []}} = KilnClient.list_release_items(filter: %{release_id: "r1"})
+      assert_received {:request, "/api/json/release-items", params}
+      assert params["filter"] == %{"release_id" => "r1"}
+    end
+  end
+
   describe "transport" do
     test "sends the configured bearer key" do
       Application.put_env(:kiln_client, :api_key, "kiln_secret")

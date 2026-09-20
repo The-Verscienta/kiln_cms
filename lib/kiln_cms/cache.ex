@@ -76,7 +76,7 @@ defmodule KilnCMS.Cache do
   @doc """
   Return the cached **bare published record** for `{type, slug, locale}`, or
   compute it with `fun`, caching a non-nil result. Keyed by locale so each
-  locale variant (and the default-locale fallback served for a missing one)
+  locale variant (and the fallback-chain result served for a missing one)
   caches separately. A `nil` (not found) is never cached, so newly published
   content appears immediately. Falls back to `fun` if the cache is disabled or
   the backend errors.
@@ -242,10 +242,10 @@ defmodule KilnCMS.Cache do
 
   The precise alternative to `bust_published/0`: a publish or edit drops only the
   keys for the affected record instead of clearing the whole cache. All locales
-  are busted because a request for a missing locale caches the default-locale
-  fallback under the *requested* locale's key (same slug), so a single slug can
-  live under several locale keys. Both cached shapes (bare record + HTML
-  payload) are dropped.
+  are busted because a request for a missing locale caches the record its
+  fallback chain (`KilnCMS.I18n.Fallback`) landed on under the *requested*
+  locale's key (same slug), so a single slug can live under several locale
+  keys. Both cached shapes (bare record + HTML payload) are dropped.
   """
   @spec bust(Ash.UUID.t(), String.t(), String.t()) :: :ok
   def bust(org_id, type, slug) when is_binary(type) and is_binary(slug) do
@@ -719,6 +719,40 @@ defmodule KilnCMS.Cache do
   """
   @spec feed_policy_key(Ash.UUID.t()) :: String.t()
   def feed_policy_key(org_id), do: "feed_policy:#{org_id}"
+
+  @doc """
+  Cache key for a site's resolved locale fallback chains
+  (`KilnCMS.I18n.Fallback`) — the `SiteLocaleSettings` row with the operator
+  config folded in. Per-org.
+  """
+  @spec locale_fallbacks_key(Ash.UUID.t()) :: String.t()
+  def locale_fallbacks_key(org_id), do: "locale_fallbacks:#{org_id}"
+
+  @doc """
+  Drop everything a site's fallback chains decide, on every node, after a
+  `SiteLocaleSettings` write (`Changes.BustLocaleSettings`).
+
+  That is more than the chains: both cached published shapes hold the *result*
+  of a chain walk under the requested locale's key (see `bust/3`), so the org's
+  published records and payloads go too, by prefix — a chain change names no
+  record, so there is nothing narrower to aim at. Navigation trees move by
+  their generation token. Fired artifact bodies are keyed by record id and are
+  unaffected: a chain changes *which* record is served, never a record's body.
+  """
+  @spec bust_locale_fallbacks(Ash.UUID.t()) :: :ok
+  def bust_locale_fallbacks(org_id) do
+    if enabled?() do
+      ClusterBust.broadcast([locale_fallbacks_key(org_id)])
+
+      for shape <- @shapes do
+        ClusterBust.broadcast_prefix("published:#{shape}:#{org_id}:")
+      end
+
+      bump_menus_generation(org_id)
+    end
+
+    :ok
+  end
 
   @doc """
   Cache key for a site's resolved list of syndicating content types (#719).

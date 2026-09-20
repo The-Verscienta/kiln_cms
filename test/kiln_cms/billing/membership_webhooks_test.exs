@@ -25,6 +25,7 @@ defmodule KilnCMS.Billing.MembershipWebhooksTest do
   alias KilnCMS.Billing.MembershipWebhookWorker
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Audiences
+  alias KilnCMS.CMS.WebhookEndpoint
   alias KilnCMS.Webhooks
 
   doctest KilnCMS.Billing.MembershipWebhooks
@@ -178,7 +179,9 @@ defmodule KilnCMS.Billing.MembershipWebhooksTest do
       assert delivery["email"] == to_string(ctx.member.email)
 
       assert_received {:raw, headers, raw}
-      assert headers["x-kilncms-signature"] == Webhooks.signature(hook.secret, raw)
+      secret = WebhookEndpoint.secret(hook)
+      assert headers["x-kilncms-signature"] == Webhooks.signature(secret, raw)
+      assert Webhooks.verify(secret, raw, headers["x-kilncms-webhook-signature"]) == :ok
     end
 
     test "renewal and dunning are silent; the provider giving up is membership.canceled",

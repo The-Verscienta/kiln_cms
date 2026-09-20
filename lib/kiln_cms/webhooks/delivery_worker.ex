@@ -11,6 +11,7 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   use Oban.Worker, queue: :webhooks, max_attempts: 5
 
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.WebhookEndpoint
   alias KilnCMS.SafeFetch
   alias KilnCMS.Webhooks
 
@@ -38,7 +39,7 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
            tenant: KilnCMS.Accounts.default_org_id()
          ) do
       {:ok, %{active: true} = endpoint} ->
-        case deliver(endpoint, event, payload) do
+        case deliver(endpoint, nil, event, payload) do
           {:ok, _status} -> :ok
           error -> error
         end
@@ -59,7 +60,7 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
         :ok
 
       true ->
-        outcome = deliver(endpoint, delivery.event, delivery.payload)
+        outcome = deliver(endpoint, delivery.id, delivery.event, delivery.payload)
         settle(delivery, job, outcome, job.attempt >= job.max_attempts)
 
         case outcome do
@@ -129,14 +130,37 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   # from this function, and since #753 called from it rather than copied beside
   # it. There was one correct implementation and two copies of it; the next
   # TLS-option edit would have touched one.
-  defp deliver(endpoint, event, payload) do
-    body = Jason.encode!(%{event: event, data: payload})
+  #
+  # A secret that does not open (the `SECRET_KEY_BASE` it was encrypted under
+  # has been rotated away) refuses the delivery rather than sending it unsigned
+  # or signed with something the receiver never saw: either would be rejected
+  # at a receiver that verifies, and accepted at one that does not.
+  defp deliver(endpoint, delivery_id, event, payload) do
+    case WebhookEndpoint.secret(endpoint) do
+      nil -> {:error, "delivery failed: signing secret unreadable"}
+      secret -> post(endpoint, secret, delivery_id, event, payload)
+    end
+  end
 
-    headers = [
-      {"content-type", "application/json"},
-      {Webhooks.signature_header(), Webhooks.signature(endpoint.secret, body)},
-      {Webhooks.event_header(), event}
-    ]
+  defp post(endpoint, secret, delivery_id, event, payload) do
+    # `delivery_id` rides inside the body, so both signatures cover it; the
+    # header copy is for routing and logging without a parse. Stable across a
+    # delivery's retries — it is the ledger row's id.
+    envelope = %{event: event, data: payload}
+    envelope = if delivery_id, do: Map.put(envelope, :delivery_id, delivery_id), else: envelope
+    body = Jason.encode!(envelope)
+
+    timestamp = System.system_time(:second)
+
+    headers =
+      [
+        {"content-type", "application/json"},
+        {Webhooks.timestamped_signature_header(),
+         Webhooks.timestamped_signature(secret, timestamp, body)},
+        # Deprecated — body-only, no freshness. See `KilnCMS.Webhooks`.
+        {Webhooks.signature_header(), Webhooks.signature(secret, body)},
+        {Webhooks.event_header(), event}
+      ] ++ if(delivery_id, do: [{Webhooks.delivery_id_header(), delivery_id}], else: [])
 
     endpoint.url
     |> SafeFetch.post(body,

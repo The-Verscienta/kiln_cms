@@ -780,6 +780,48 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert {:error, _} = CMS.get_media_item(item.id, authorize?: false)
     end
 
+    test "purge also deletes the item's cached on-the-fly transforms", %{conn: conn} do
+      root = Path.join(System.tmp_dir!(), "kiln_ui_purge_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(root)
+      Application.put_env(:kiln_cms, KilnCMS.Storage.Local, root: root, base_url: "/uploads")
+
+      on_exit(fn ->
+        File.rm_rf!(root)
+        Application.delete_env(:kiln_cms, KilnCMS.Storage.Local)
+      end)
+
+      src = Path.join(System.tmp_dir!(), "purge-src-#{System.unique_integer([:positive])}.png")
+      {:ok, image} = Image.new(600, 400, color: :green)
+      {:ok, _} = Image.write(image, src)
+      key = "purge-orig-#{System.unique_integer([:positive])}.png"
+      {:ok, ^key} = KilnCMS.Storage.store(key, src)
+      File.rm(src)
+
+      item =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "cached.png",
+          url: "/uploads/#{key}",
+          storage_key: key,
+          content_type: "image/png",
+          width: 600,
+          height: 400
+        })
+
+      {:ok, params} = KilnCMS.Media.ImageTransform.parse("w_256")
+      {:ok, plan} = KilnCMS.Media.ImageTransform.plan(item, params)
+      {:ok, _} = KilnCMS.Media.Derivatives.render(item, plan)
+      derivative = Path.join(root, KilnCMS.Media.Derivatives.storage_key(plan))
+      assert File.exists?(derivative)
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/media")
+      lv |> element(~s(button[phx-value-id="#{item.id}"][phx-click="delete"])) |> render_click()
+      lv |> element("button", "Trash") |> render_click()
+      lv |> element(~s(button[phx-value-id="#{item.id}"][phx-click="purge"])) |> render_click()
+
+      assert {:error, _} = CMS.get_media_item(item.id, authorize?: false)
+      refute File.exists?(derivative)
+    end
+
     test "non-admins don't see the trash toggle", %{conn: conn} do
       {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
       refute html =~ ~s(phx-click="show_trash")

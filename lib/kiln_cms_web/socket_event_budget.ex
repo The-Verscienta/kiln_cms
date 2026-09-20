@@ -101,9 +101,11 @@ defmodule KilnCMSWeb.SocketEventBudget do
 
   Only `KilnCMSWeb.CollabChannel` charges it today — the surface whose events
   are cheapest to flood and most expensive to serve, per the issue's own
-  scoping. `/live` events (`handle_event/3` on every LiveView; no single hook
-  intercepts them before the handler body) and `/ws/gql` subscription
-  documents are still uncounted, and remain in threat-model item 10.
+  scoping. `/ws/gql` documents are charged per address instead, to the bucket
+  `/gql` uses (`KilnCMSWeb.GraphqlLimits.SocketDocumentBudget` says why not per
+  account). `/live` events (`handle_event/3` on every LiveView; no single hook
+  intercepts them before the handler body) are still uncounted, and remain in
+  threat-model item 10.
   """
 
   alias KilnCMSWeb.RateLimit

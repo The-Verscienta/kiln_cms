@@ -476,13 +476,27 @@ defmodule KilnCMSWeb.Tenant do
     end
   end
 
-  # `Accounts.default_org/0` reads the seed row, which can miss on a
-  # broken/uninitialized install, so a synthetic default-id-only struct is the
-  # final fallback rather than propagating a `nil` for callers to crash on.
-  # It also returns `:error` when the read itself fails — which must not be
-  # cached and must not be treated as “no such org”.
+  # The default org is exactly what the canonical base host resolves to, so the
+  # fallback reads through that host's `KilnCMS.Cache.Hosts` entry instead of
+  # the database. It used to call `Accounts.default_org/0` directly, which made
+  # every request on a host that resolves to nothing — a health check by IP, a
+  # platform's internal hostname when `PHX_HOST` is a custom domain, any
+  # unrecognised `Host` with strict matching off — cost an `organizations` read
+  # in the endpoint, above every rate limiter, even though that host's own miss
+  # was cached. Under load that read queued on the pool behind delivery's
+  # writes and was most of the endpoint's latency.
+  #
+  # One entry, not a second one beside it: the fallback and the apex are the
+  # same resolution, so they share its TTL and whatever invalidates it, and
+  # cannot disagree about which default org they are serving.
+  #
+  # The seed row can miss on a broken/uninitialized install, so a synthetic
+  # default-id-only struct is the final fallback rather than propagating a `nil`
+  # for callers to crash on. A failed read (`:error`) lands there too, uncached
+  # — `resolve_known/1` passes it through and `Cache.Hosts` never stores it —
+  # so it is neither remembered nor treated as “no such org”.
   defp default_org do
-    case read_degrading_exit(&Accounts.default_org/0) do
+    case resolve_cached(base_host()) do
       %Accounts.Organization{} = org -> org
       _ -> %Accounts.Organization{id: Accounts.default_org_id()}
     end

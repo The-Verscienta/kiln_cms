@@ -34,6 +34,9 @@ defmodule KilnCMS.Federation.DeliveryWorker do
 
   @accepted_statuses 200..299
 
+  @key_unreadable "this site's signing key is unreadable — was SECRET_KEY_BASE rotated " <>
+                    "without re-encrypting? See docs/secrets-rotation.md"
+
   @impl Oban.Worker
   def perform(%Oban.Job{args: args, attempt: attempt, max_attempts: max_attempts}) do
     %{"org_id" => org_id, "delivery_id" => delivery_id} = args
@@ -58,10 +61,22 @@ defmodule KilnCMS.Federation.DeliveryWorker do
       {:ok, settings} ->
         deliver(delivery, settings, org_id, attempt, last_attempt?)
 
-      :skip ->
-        # Federation was switched off, or the key is unreadable. Settle rather
-        # than retry: nothing about waiting makes an absent signing key appear.
+      # Settle rather than retry, either way: nothing about waiting switches
+      # federation back on or makes an unreadable key readable.
+      :off ->
         settle(delivery, org_id, :failed, attempt, nil, "federation is not enabled for this site")
+        :ok
+
+      # Told apart from `:off` (#1487): the site is on and means to deliver, but
+      # the vault cannot open its key — almost always `SECRET_KEY_BASE` rotated
+      # without `PREVIOUS_SECRET_KEY_BASE` or the re-encryption task. Saying
+      # "not enabled" here sent operators to the wrong switch.
+      :key_unreadable ->
+        Logger.warning(
+          "Federation delivery #{delivery.id} not sent: this site's signing key is unreadable"
+        )
+
+        settle(delivery, org_id, :failed, attempt, nil, @key_unreadable)
         :ok
     end
   end
@@ -173,12 +188,7 @@ defmodule KilnCMS.Federation.DeliveryWorker do
 
   # One query for the three callers (#967) — `Federation.active_settings/2`;
   # this one signs, so it needs the private key.
-  defp site_settings(org_id) do
-    case Federation.active_settings(org_id, require_key?: true) do
-      {:ok, settings} -> {:ok, settings}
-      :off -> :skip
-    end
-  end
+  defp site_settings(org_id), do: Federation.active_settings(org_id, require_key?: true)
 
   # The follower a delivery was addressed to, or `:error` when its row is gone
   # (a dropped dead instance). Read through the domain's list interface rather

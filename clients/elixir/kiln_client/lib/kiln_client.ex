@@ -1,9 +1,12 @@
 defmodule KilnClient do
   @moduledoc """
-  Official Elixir client for the KilnCMS delivery APIs — the JSON:API read
-  surface at `/api/json/*`, per-type and hybrid search, and fired artifacts at
-  `/api/content/:type/:slug` (see Kiln's `docs/json-api.md` and
-  `docs/headless-consumer-guide.md`).
+  Official Elixir client for the KilnCMS APIs — the JSON:API read surface at
+  `/api/json/*`, per-type and hybrid search, fired artifacts at
+  `/api/content/:type/:slug`, the JSON:API write surface (create, update,
+  workflow transitions, soft-delete), the media upload API (`upload_media/2`
+  and friends) the `/api/sync` delta API and a minimal `/gql` helper (see Kiln's `docs/json-api.md` and
+  `docs/headless-consumer-guide.md`). The writes and the uploads need a read +
+  write key on an editor account; the reads need no key at all.
 
   Extracted from the client Verscienta's production site hand-rolled and
   hardened against a live Kiln (kiln_cms#300); it encodes the safe defaults so
@@ -55,9 +58,39 @@ defmodule KilnClient do
   relationships reduced to `{type, id}` ref maps under `"relationships"`.
   Included resources come back as a `%{{type, id} => item}` lookup so callers
   can join links without re-walking the document (see `resolve/3`).
+
+  ## Writes need a key, and a different one
+
+  `create/3`, `update/4`, `transition/4` (and its wrappers `submit_for_review/3`,
+  `return_to_draft/3`, `publish/3`, `unpublish/3`) and `delete/3` drive the
+  JSON:API write surface (Kiln's `docs/json-api.md` → "Writing"). They take
+  the key from a per-call `:api_key` option, falling back to the configured
+  `:api_key`, and refuse to send anything without one —
+  `{:error, %KilnClient.Error{reason: :no_api_key}}` — because an anonymous
+  write can only ever be a 401/403.
+
+  The key must be a `:read_write` key: editor-or-above to create, update and
+  submit for review, admin to return to draft, publish, unpublish and delete.
+  That is the opposite of the `:viewer` key delivery reads want, so pass the
+  writer's key per call rather than widening the configured one:
+
+      KilnClient.create("posts", %{title: "Hi", slug: "hi"},
+        api_key: System.fetch_env!("KILN_WRITE_KEY"))
+
+  ## Errors
+
+  Writes and `graphql/3` return `{:error, %KilnClient.Error{}}` with a
+  `:reason` atom (`:forbidden`, `:validation`, `:conflict`, `:rate_limited`, …
+  — see `KilnClient.Error`). The read functions keep their original
+  `{:error, {:http_status, status, body}}` shape; `KilnClient.Error.normalize/1`
+  converts one when a caller wants a single error handler for both.
   """
 
   require Logger
+
+  alias KilnClient.Error
+
+  @json_api "application/vnd.api+json"
 
   @typedoc "A flattened JSON:API resource: attributes + id/type/relationships."
   @type item :: %{optional(String.t()) => term()}
@@ -309,12 +342,607 @@ defmodule KilnClient do
     end
   end
 
+  # --- sync (delta) API ---
+
+  @doc """
+  Mirror the site's public content through `GET /api/sync`: a full snapshot
+  when called without `:cursor`, otherwise only what changed since that
+  cursor — upserts **and** deletions. Follows `has_more` to the end and returns
+  every item in order plus the cursor to store for next time:
+
+      {:ok, %{items: items, cursor: cursor}} = KilnClient.sync(cursor: stored)
+
+      Enum.each(items, fn
+        %{"op" => "upsert", "id" => id, "artifact" => body} -> Mirror.put(id, body)
+        %{"op" => "delete", "id" => id} -> Mirror.delete(id)
+      end)
+
+  Visibility is always anonymous, whatever key is configured: an upsert is a
+  document anyone could read now, and one that became unpublished, archived,
+  deleted, locked or members-only arrives as a `"delete"` with no body. Items
+  are idempotent and may repeat across polls — apply them in order.
+
+  Options: `:cursor`; `:type` (one content type, singular) and `:surface`
+  (`"json"` default) for a new sync — a cursor carries its own; `:limit`
+  (items per page, max 500); `:retries` (default 3) and `:retry_delay_ms`
+  (default 2000) for a page answering 503 while a just-published document's
+  artifact compiles; `:req`.
+
+  `{:error, {:http_status, 400, %{"errors" => [%{"code" => "invalid_cursor"} | _]}}}`
+  means the cursor can no longer be honoured (the server's secret was
+  rotated, or it came from another site): start over without `:cursor`.
+  """
+  @spec sync(keyword()) :: {:ok, %{items: [map()], cursor: String.t()}} | {:error, term()}
+  def sync(opts \\ []), do: sync_pages(opts[:cursor], opts, [])
+
+  defp sync_pages(cursor, opts, acc) do
+    case sync_page(cursor, opts, Keyword.get(opts, :retries, 3)) do
+      {:ok, %{"items" => items, "cursor" => next, "has_more" => true}} ->
+        sync_pages(next, opts, [items | acc])
+
+      {:ok, %{"items" => items, "cursor" => next}} ->
+        {:ok, %{items: [items | acc] |> Enum.reverse() |> Enum.concat(), cursor: next}}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp sync_page(cursor, opts, retries) do
+    params =
+      case cursor do
+        nil ->
+          [{"initial", "true"}]
+          |> put_param(:type, opts[:type])
+          |> put_param(:surface, opts[:surface])
+
+        cursor ->
+          [{"cursor", cursor}]
+      end
+      |> put_param(:limit, opts[:limit])
+
+    case request(:get, "/api/sync", params: params, req: opts[:req]) do
+      {:error, {:http_status, 503, _}} when retries > 0 ->
+        Process.sleep(Keyword.get(opts, :retry_delay_ms, 2_000))
+        sync_page(cursor, opts, retries - 1)
+
+      other ->
+        other
+    end
+  end
+
+  # --- media uploads ---
+  #
+  # The one write surface this client covers. Every call needs a read + write
+  # API key on an editor (or admin) account; a read-only key is a 403. See
+  # Kiln's docs/api.md → "Uploading media".
+
+  # Uploads are bounded by the file and the link, not by server read latency.
+  @upload_timeout 300_000
+
+  @metadata_opts [:alt, :caption, :decorative, :focal_x, :focal_y, :tag_ids]
+
+  @doc """
+  Upload the file at `path` to the media library: `POST /api/media`
+  (multipart, streamed from disk).
+
+  The server byte-sniffs the file (its name is not trusted), strips its
+  metadata, stores it and queues its variants — the pipeline the editor's
+  library runs. Returns the created item, flattened like any other resource,
+  with `"processing" => true` while an A/V file's metadata strip is pending
+  (its `"url"` isn't live until then).
+
+  Options: `:filename` (default: the path's basename), the metadata `:alt`,
+  `:caption`, `:decorative`, `:focal_x`, `:focal_y` (0.0–1.0) and `:tag_ids`,
+  and `:req` (per-call `Req` overrides).
+  """
+  @spec upload_media(Path.t(), keyword()) :: {:ok, item()} | {:error, term()}
+  def upload_media(path, opts \\ []) do
+    filename = opts[:filename] || Path.basename(path)
+
+    # Req names multipart fields with atoms. `:"tag_ids[]"` is the one list
+    # (multipart repeats a `name[]` field per value); every key here comes
+    # from `@metadata_opts`, so no atom is minted from input.
+    fields =
+      Enum.flat_map(metadata(opts), fn
+        {:tag_ids, values} -> Enum.map(List.wrap(values), &{:"tag_ids[]", to_string(&1)})
+        {key, value} -> [{key, to_string(value)}]
+      end) ++ [file: {File.stream!(path, 65_536), filename: filename}]
+
+    :post
+    |> request("/api/media",
+      form_multipart: fields,
+      headers: [{"accept", "application/json"}],
+      receive_timeout: @upload_timeout,
+      req: opts[:req]
+    )
+    |> media_item()
+  end
+
+  @doc """
+  Import a file from a public URL: `POST /api/media/import-url`. The server
+  fetches it (public http(s) addresses only, a few re-validated redirects,
+  25 MB) and ingests it like an upload. Same options as `upload_media/2`,
+  `:filename` overriding the name the URL implies.
+  """
+  @spec import_media(String.t(), keyword()) :: {:ok, item()} | {:error, term()}
+  def import_media(url, opts \\ []) do
+    body =
+      opts
+      |> metadata()
+      |> Map.new()
+      |> Map.put(:url, url)
+      |> put_present(:filename, opts[:filename])
+
+    :post
+    |> request("/api/media/import-url",
+      json: body,
+      headers: [{"accept", "application/json"}],
+      receive_timeout: @upload_timeout,
+      req: opts[:req]
+    )
+    |> media_item()
+  end
+
+  @doc """
+  Edit an item's metadata: `PATCH /api/json/media-items/:id`. `changes` takes
+  `:alt`, `:caption`, `:decorative`, `:focal_x`/`:focal_y` (moving the point
+  re-derives the crops) and tags with content's verbs — `:tag_ids` replaces
+  the set, `:add_tag_ids`/`:remove_tag_ids` merge (don't combine the two).
+  """
+  @spec update_media(String.t(), keyword() | map(), keyword()) ::
+          {:ok, item()} | {:error, term()}
+  def update_media(id, changes, opts \\ []) do
+    attributes =
+      Map.new(changes, fn {key, value} -> {key, value} end)
+      |> Map.take(@metadata_opts ++ [:add_tag_ids, :remove_tag_ids])
+
+    :patch
+    |> request("/api/json/media-items/#{id}",
+      json: %{data: %{type: "media_item", id: id, attributes: attributes}},
+      headers: [
+        {"accept", "application/vnd.api+json"},
+        {"content-type", "application/vnd.api+json"}
+      ],
+      req: opts[:req]
+    )
+    |> media_item()
+  end
+
+  @doc """
+  First leg of a direct upload: `POST /api/media/uploads`. Returns
+  `{:ok, %{"token", "upload_url", "method", "headers", "expires_at", "max_bytes"}}`
+  — `PUT` exactly `byte_size` bytes to `"upload_url"` with `"headers"` as given,
+  then `complete_direct_upload/2`. A 501 means the server's storage can't
+  presign (it needs S3 with a private bucket); use `upload_media/2` instead.
+  """
+  @spec begin_direct_upload(String.t(), pos_integer(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def begin_direct_upload(filename, byte_size, opts \\ []) do
+    case request(:post, "/api/media/uploads",
+           json: %{filename: filename, byte_size: byte_size},
+           headers: [{"accept", "application/json"}],
+           req: opts[:req]
+         ) do
+      {:ok, %{"data" => upload}} -> {:ok, upload}
+      {:ok, other} -> {:error, {:unexpected_body, other}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Last leg of a direct upload: `POST /api/media/uploads/complete`. The server
+  runs the staged bytes through the normal pipeline and deletes the staged
+  copy; a token completes once. Takes the metadata options of `upload_media/2`.
+  """
+  @spec complete_direct_upload(String.t(), keyword()) :: {:ok, item()} | {:error, term()}
+  def complete_direct_upload(token, opts \\ []) do
+    :post
+    |> request("/api/media/uploads/complete",
+      json: opts |> metadata() |> Map.new() |> Map.put(:token, token),
+      headers: [{"accept", "application/json"}],
+      receive_timeout: @upload_timeout,
+      req: opts[:req]
+    )
+    |> media_item()
+  end
+
+  @doc """
+  `begin_direct_upload/3` → `PUT` → `complete_direct_upload/2` for the file at
+  `path`: the bytes go straight to object storage, streamed from disk, for a
+  file too large to send through the app. Same options as `upload_media/2`.
+  """
+  @spec upload_media_direct(Path.t(), keyword()) :: {:ok, item()} | {:error, term()}
+  def upload_media_direct(path, opts \\ []) do
+    filename = opts[:filename] || Path.basename(path)
+
+    with {:ok, %File.Stat{size: size}} <- File.stat(path),
+         {:ok, upload} <- begin_direct_upload(filename, size, opts),
+         :ok <- put_staged(upload, path) do
+      complete_direct_upload(upload["token"], opts)
+    end
+  end
+
+  # Straight to the bucket: no Kiln base URL and no Kiln credentials — the
+  # presigned URL is the authorization, and the signed `content-length` in
+  # `"headers"` is what the store checks the streamed body against.
+  defp put_staged(%{"upload_url" => url, "headers" => headers}, path) do
+    [
+      method: :put,
+      url: url,
+      headers: Map.to_list(headers),
+      body: File.stream!(path, 65_536),
+      receive_timeout: @upload_timeout,
+      retry: false
+    ]
+    |> Keyword.merge(Application.get_env(:kiln_client, :req_options, []))
+    |> Req.request()
+    |> case do
+      {:ok, %Req.Response{status: status}} when status in 200..299 ->
+        :ok
+
+      {:ok, %Req.Response{status: status, body: body}} ->
+        {:error, {:http_status, status, body}}
+
+      {:error, exception} ->
+        {:error, exception}
+    end
+  end
+
+  defp metadata(opts),
+    do: opts |> Keyword.take(@metadata_opts) |> Enum.reject(&is_nil(elem(&1, 1)))
+
+  defp put_present(map, _key, nil), do: map
+  defp put_present(map, key, value), do: Map.put(map, key, value)
+
+  # A created/updated media item: the resource flattened like a list item, plus
+  # the upload response's `meta.processing` when it carries one.
+  defp media_item({:ok, %{"data" => %{} = resource}}) do
+    item = flatten_resource(resource)
+
+    case resource do
+      %{"meta" => %{"processing" => processing}} -> {:ok, Map.put(item, "processing", processing)}
+      _ -> {:ok, item}
+    end
+  end
+
+  defp media_item({:ok, other}), do: {:error, {:unexpected_body, other}}
+  defp media_item({:error, reason}), do: {:error, reason}
+
+  # --- editorial reads (editor-tier credential) ---
+  #
+  # Unlike everything above, these need an editor's (or admin's) API key: an
+  # anonymous call is a 401, a viewer's key a 404. They are for tools *about*
+  # the content — never configure that key on a delivery site.
+
+  @doc """
+  A document's version history, newest first:
+  `GET /api/content/:type/:id/revisions` (singular type name; `id` is the
+  document's id, not its slug).
+
+  Each revision (`"id"`, `"action"`, `"action_type"`, `"inserted_at"`,
+  `"user_id"`, `"changed_fields"`) names the editorial fields its write
+  changed, never their values.
+
+  Options: `:limit` (1–100, server default 20), `:cursor` (the previous
+  page's `meta.next_cursor`), `:req`.
+
+  Returns `{:ok, %{"data" => [revision], "meta" => %{"limit" => n,
+  "next_cursor" => cursor | nil}}}` — page until `next_cursor` is `nil`.
+  """
+  @spec list_revisions(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def list_revisions(type, id, opts \\ []) do
+    params =
+      []
+      |> put_param(:limit, opts[:limit])
+      |> put_param(:cursor, opts[:cursor])
+
+    request(:get, revisions_path(type, id), params: params, req: opts[:req])
+  end
+
+  @doc """
+  One revision with its values: that version's own `"changes"` and the full
+  `"snapshot"` of the document as it stood at that revision (folded from
+  every version up to it), alongside the list fields. Returns
+  `{:ok, revision}`.
+  """
+  @spec revision(String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def revision(type, id, version_id, opts \\ []) do
+    path = revisions_path(type, id) <> "/" <> segment(version_id)
+
+    case request(:get, path, req: opts[:req]) do
+      {:ok, %{"data" => revision}} -> {:ok, revision}
+      other -> other
+    end
+  end
+
+  @doc """
+  Revert the document's content to a revision, as the key's owner:
+  `POST /api/content/:type/:id/revisions/:version_id/restore`.
+
+  Needs a `:read_write` key — a read-only key gets
+  `{:error, {:http_status, 403, body}}`. Workflow state is untouched; the
+  restore is itself recorded as a new revision, returned under `"revision"`
+  with `"id"`, `"type"`, `"state"` and `"restored_version_id"`.
+  """
+  @spec restore_revision(String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def restore_revision(type, id, version_id, opts \\ []) do
+    path = revisions_path(type, id) <> "/" <> segment(version_id) <> "/restore"
+
+    case request(:post, path, req: opts[:req]) do
+      {:ok, %{"data" => result}} -> {:ok, result}
+      other -> other
+    end
+  end
+
+  @doc """
+  Content releases — bundles of publishes/unpublishes that go live together:
+  `GET /api/json/releases`. Read-only.
+
+  Takes `list/2`'s JSON:API options (`:filter` — e.g. `%{state: "scheduled"}`
+  — `:sort`, `:include` — `["items"]` side-loads each release's contents —
+  `:fields`, `:limit`, `:offset`, `:count`, `:req`); there is no
+  `/published` feed here. Returns `{:ok, %{items:, included:, total:}}`.
+  """
+  @spec list_releases(keyword()) :: {:ok, list_result()} | {:error, term()}
+  def list_releases(opts \\ []), do: json_api_index("/api/json/releases", opts)
+
+  @doc """
+  One release by id: `GET /api/json/releases/:id`. `:include` (`["items"]`)
+  and `:fields` as for `list_releases/1`; the included lookup is merged into
+  the result under `"included"`, as `one/3` does.
+  """
+  @spec release(String.t(), keyword()) :: {:ok, item()} | {:error, term()}
+  def release(id, opts \\ []) do
+    params =
+      []
+      |> put_param(:include, join_list(opts[:include]))
+      |> sparse_fields(opts[:fields])
+
+    case request(:get, "/api/json/releases/" <> segment(id), params: params, req: opts[:req]) do
+      {:ok, doc} ->
+        %{items: [release | _], included: included} = flatten_doc(doc)
+        {:ok, Map.put(release, "included", included)}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Release items: `GET /api/json/release-items` — `filter: %{release_id: id}`
+  for one release's. Each names its document as `"content_type"` +
+  `"content_id"`. Same options as `list_releases/1`.
+  """
+  @spec list_release_items(keyword()) :: {:ok, list_result()} | {:error, term()}
+  def list_release_items(opts \\ []), do: json_api_index("/api/json/release-items", opts)
+
+  defp json_api_index(path, opts) do
+    case request(:get, path, params: query_params(opts), req: opts[:req]) do
+      {:ok, doc} -> {:ok, flatten_doc(doc)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp revisions_path(type, id), do: "/api/content/#{segment(type)}/#{segment(id)}/revisions"
+
+  # Path segments are caller data here (ids, type names), so they are encoded
+  # rather than interpolated raw.
+  defp segment(value), do: URI.encode(to_string(value), &URI.char_unreserved?/1)
+
+  # --- JSON:API writes (#330) ---
+
+  @typedoc """
+  A workflow transition the JSON:API routes as `PATCH /:plural/:id/<verb>`, by
+  its Ash action name. Any other atom or string passes through (kebab-cased
+  into the route), so a verb a newer server adds is reachable before this
+  client learns it.
+  """
+  @type workflow_verb ::
+          :submit_for_review | :return_to_draft | :publish | :unpublish | atom() | String.t()
+
+  @doc """
+  Create a record: `POST /api/json/:plural`.
+
+  Content is always created as a **draft**, attributed to the key's owner;
+  publishing is the separate, admin-only `publish/3`. Body content goes in
+  `"block_tree"` (a list of block maps) or `"body_markdown"` — never both.
+  Relationship arrays (`tag_ids`, `related_post_ids`) and `category_id` are
+  plain attributes. A dynamic-type entry needs `type_definition_id` (look it
+  up with `one("type-definitions", %{name: "product"})`).
+
+      {:ok, post} =
+        KilnClient.create("posts", %{title: "Hi", slug: "hi", body_markdown: "# Hi"},
+          api_key: writer_key)
+
+  Options:
+
+    * `:api_key` — the `:read_write` key for this call (falls back to the
+      configured `:api_key`; with neither, nothing is sent).
+    * `:type` — the JSON:API resource type sent as `data.type`, which the
+      server validates. Derived from `plural` (`"entries"` → `"entry"`,
+      `"posts"` → `"post"`); pass it for an irregular plural.
+    * `:req` — per-call `Req` overrides (see the module doc).
+
+  Returns `{:ok, item}` — the created record, flattened like a read — or
+  `{:error, %KilnClient.Error{}}`.
+  """
+  @spec create(String.t(), map(), keyword()) :: {:ok, item()} | {:error, Error.t()}
+  def create(plural, attributes, opts \\ []) do
+    # No `id`: the create schema is `additionalProperties: false`, so a
+    # client-chosen id is a 400, not a hint.
+    body = %{data: %{type: resource_type(plural, opts), attributes: attributes}}
+    :post |> write_request("/api/json/#{plural}", body, opts) |> only_item()
+  end
+
+  @doc """
+  Edit a record: `PATCH /api/json/:plural/:id`. Same options as `create/3`.
+
+  Only the attributes you send change — omit `"block_tree"` and the body is
+  untouched; `[]` clears it. Editing already-published content re-fires its
+  artifacts, so the live site never serves a stale render.
+
+  `tag_ids` **replaces** the whole tag set (a partial list detaches the rest);
+  send `add_tag_ids` / `remove_tag_ids` to merge instead — not both styles in
+  one call (a 400). When rewriting a body, echo each block's `_id` (read them
+  with `fields: %{"post" => ["block_ids"]}`) so the server can tell an edit
+  from a replacement.
+  """
+  @spec update(String.t(), String.t(), map(), keyword()) :: {:ok, item()} | {:error, Error.t()}
+  def update(plural, id, attributes, opts \\ []) do
+    body = %{data: %{type: resource_type(plural, opts), id: id, attributes: attributes}}
+    :patch |> write_request("/api/json/#{plural}/#{encode(id)}", body, opts) |> only_item()
+  end
+
+  @doc """
+  Run a workflow transition: `PATCH /api/json/:plural/:id/<verb>` with the
+  empty resource object the routes take. Same options as `create/3`.
+
+  A transition from the wrong state is `{:error, %KilnClient.Error{reason:
+  :conflict, code: "invalid_state_transition"}}` (the record's actual state
+  via `KilnClient.Error.current_state/1`); a key whose owner lacks the right
+  is `reason: :forbidden`. Returns `{:ok, item}` in its new state.
+  """
+  @spec transition(String.t(), String.t(), workflow_verb(), keyword()) ::
+          {:ok, item()} | {:error, Error.t()}
+  def transition(plural, id, verb, opts \\ []) do
+    route = verb |> to_string() |> String.replace("_", "-") |> encode()
+    body = %{data: %{type: resource_type(plural, opts), id: id, attributes: %{}}}
+
+    :patch
+    |> write_request("/api/json/#{plural}/#{encode(id)}/#{route}", body, opts)
+    |> only_item()
+  end
+
+  @doc "draft → in_review. Editor-or-above `:read_write` key. See `transition/4`."
+  @spec submit_for_review(String.t(), String.t(), keyword()) ::
+          {:ok, item()} | {:error, Error.t()}
+  def submit_for_review(plural, id, opts \\ []),
+    do: transition(plural, id, :submit_for_review, opts)
+
+  @doc "in_review → draft — the reviewer's \"send it back\". Admin key. See `transition/4`."
+  @spec return_to_draft(String.t(), String.t(), keyword()) :: {:ok, item()} | {:error, Error.t()}
+  def return_to_draft(plural, id, opts \\ []), do: transition(plural, id, :return_to_draft, opts)
+
+  @doc "Publish and fire the record's artifacts. Admin key. See `transition/4`."
+  @spec publish(String.t(), String.t(), keyword()) :: {:ok, item()} | {:error, Error.t()}
+  def publish(plural, id, opts \\ []), do: transition(plural, id, :publish, opts)
+
+  @doc "Take published content down and purge its artifacts. Admin key. See `transition/4`."
+  @spec unpublish(String.t(), String.t(), keyword()) :: {:ok, item()} | {:error, Error.t()}
+  def unpublish(plural, id, opts \\ []), do: transition(plural, id, :unpublish, opts)
+
+  @doc """
+  Soft-delete a record: `DELETE /api/json/:plural/:id`. Reversible — the
+  record moves to the trash, restorable from the editor. Admin key. There is
+  no hard delete over the API, by design. Options: `:api_key`, `:req`.
+
+  Returns `:ok` or `{:error, %KilnClient.Error{}}`.
+  """
+  @spec delete(String.t(), String.t(), keyword()) :: :ok | {:error, Error.t()}
+  def delete(plural, id, opts \\ []) do
+    case write_request(:delete, "/api/json/#{plural}/#{encode(id)}", nil, opts) do
+      {:ok, _body} -> :ok
+      {:error, %Error{} = error} -> {:error, error}
+    end
+  end
+
+  # --- GraphQL ---
+
+  @doc """
+  Run a GraphQL operation: `POST /gql`. Returns `{:ok, data}`; a response
+  carrying a top-level `errors` array is `{:error, %KilnClient.Error{reason:
+  :graphql}}` with the errors in `:errors` and any partial result in `:data`.
+
+      {:ok, %{"postBySlug" => post}} =
+        KilnClient.graphql(
+          "query ($slug: String!, $locale: String!) { postBySlug(slug: $slug, locale: $locale) { title } }",
+          %{slug: "hello-world", locale: "en"}
+        )
+
+  Sends the API key (`:api_key` option, else the configured one) when there
+  is one, but does not require it — the published-content queries are
+  anonymous. Options: `:api_key`, `:operation_name`, `:req`.
+
+  Ash mutations report a refused write *inside* `data` — the payload's own
+  `errors` field, with `result: nil` — not as a top-level error, so select
+  `errors { message code }` on mutations and check it.
+  """
+  @spec graphql(String.t(), map(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def graphql(query, variables \\ %{}, opts \\ []) do
+    payload =
+      case opts[:operation_name] do
+        nil -> %{query: query, variables: variables}
+        name -> %{query: query, variables: variables, operationName: name}
+      end
+
+    req_opts = [
+      json: payload,
+      headers: [{"accept", "application/json"}, {"content-type", "application/json"}],
+      req: opts[:req]
+    ]
+
+    case do_request(:post, "/gql", req_opts, api_key(opts)) do
+      {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
+        graphql_result(body, status)
+
+      # Absinthe refuses an unparseable document with a 400 whose body is
+      # still GraphQL-shaped; surface it as the GraphQL error it is.
+      {:ok, %Req.Response{status: 400, body: %{"errors" => [_ | _]} = body}} ->
+        graphql_result(body, 400)
+
+      other ->
+        to_error(other, :post, "/gql")
+    end
+  end
+
+  defp graphql_result(%{"errors" => [_ | _] = errors} = body, status) do
+    first = hd(errors)
+
+    code =
+      if is_map(first), do: first["code"] || get_in(first, ["extensions", "code"])
+
+    {:error,
+     %Error{
+       reason: :graphql,
+       status: status,
+       code: code,
+       errors: errors,
+       data: body["data"],
+       body: body,
+       method: :post,
+       path: "/gql"
+     }}
+  end
+
+  defp graphql_result(%{"data" => data}, _status), do: {:ok, data || %{}}
+  defp graphql_result(_body, _status), do: {:ok, %{}}
   @doc "Browser-facing Kiln base URL (media `url`s are absolute, so this is rarely needed)."
   @spec public_url() :: String.t()
   def public_url do
     Application.get_env(:kiln_client, :public_url) ||
       Application.get_env(:kiln_client, :base_url, "")
   end
+
+  # --- image transforms ---
+
+  @doc """
+  Absolute on-the-fly transform URL for a media item — see
+  `KilnClient.Image.url/2` for the options and signing.
+
+      KilnClient.image_url(media, width: 800, aspect_ratio: "16:9", format: :auto)
+  """
+  @spec image_url(map(), keyword()) :: String.t()
+  defdelegate image_url(media, opts \\ []), to: KilnClient.Image, as: :url
+
+  @doc """
+  `srcset` of transform URLs for a media item, or `nil` without dimensions —
+  see `KilnClient.Image.srcset/2`.
+  """
+  @spec image_srcset(map(), keyword()) :: String.t() | nil
+  defdelegate image_srcset(media, opts \\ []), to: KilnClient.Image, as: :srcset
 
   # --- shapes ---
 
@@ -434,30 +1062,42 @@ defmodule KilnClient do
   # alternative (opting *in* per call site) re-arms the moment someone adds one.
   defp published?(opts), do: Keyword.get(opts, :published, true)
 
+  # --- internal: write shapes ---
+
+  # The singular JSON:API `type` the server validates `data.type` against.
+  # Every built-in plural is regular (`posts`, `pages`) or `-ies` (`entries`);
+  # an irregular overlay type passes `:type` explicitly.
+  defp resource_type(plural, opts) do
+    cond do
+      opts[:type] -> to_string(opts[:type])
+      String.ends_with?(plural, "ies") -> String.slice(plural, 0..-4//1) <> "y"
+      String.ends_with?(plural, "s") -> String.slice(plural, 0..-2//1)
+      true -> plural
+    end
+  end
+
+  # Every write route answers a single-resource document.
+  defp only_item({:ok, body}) do
+    case flatten_doc(body || %{}) do
+      %{items: [item | _]} ->
+        {:ok, item}
+
+      _ ->
+        {:error, %Error{reason: :http, code: "empty_response", body: body}}
+    end
+  end
+
+  defp only_item({:error, %Error{}} = error), do: error
+
+  defp encode(segment), do: URI.encode(segment, &URI.char_unreserved?/1)
+
   # --- internal: transport ---
 
+  # Reads: the original return contract, `{:ok, body}` or
+  # `{:error, {:http_status, status, body}}` / `{:error, exception}` — kept
+  # as-is so existing callers' pattern matches hold.
   defp request(method, path, opts) do
-    base_url = Application.get_env(:kiln_client, :base_url, "http://localhost:4000")
-
-    # Per-call `:req` overrides apply LAST, via `Req.merge/2` — so they win
-    # over the defaults and the configured `req_options`, and composite
-    # options like `:headers` merge instead of clobbering.
-    {overrides, opts} = Keyword.pop(opts, :req)
-
-    req =
-      [
-        method: method,
-        url: base_url <> path,
-        headers: [{"accept", "application/vnd.api+json"}],
-        receive_timeout: 15_000
-      ]
-      |> Keyword.merge(opts)
-      |> maybe_auth(Application.get_env(:kiln_client, :api_key))
-      |> Keyword.merge(Application.get_env(:kiln_client, :req_options, []))
-      |> Req.new()
-      |> Req.merge(overrides || [])
-
-    case Req.request(req) do
+    case do_request(method, path, opts, Application.get_env(:kiln_client, :api_key)) do
       {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
         {:ok, body}
 
@@ -472,6 +1112,77 @@ defmodule KilnClient do
         Logger.error("Kiln #{method} #{path} failed: #{inspect(exception)}")
         {:error, exception}
     end
+  end
+
+  # Writes fail fast without a key: an anonymous write can only be refused,
+  # and finding that out client-side costs no round trip and no rate-limit
+  # budget. The error names the option, never a value.
+  defp write_request(method, path, body, opts) do
+    case api_key(opts) do
+      nil ->
+        {:error, %Error{reason: :no_api_key, method: method, path: path}}
+
+      key ->
+        # Req's `:json` encodes the body but only *defaults* the content
+        # type, so the JSON:API media type set here is the one sent.
+        req_opts =
+          if body == nil,
+            do: [headers: [{"accept", @json_api}], req: opts[:req]],
+            else: [
+              headers: [{"accept", @json_api}, {"content-type", @json_api}],
+              json: body,
+              req: opts[:req]
+            ]
+
+        case do_request(method, path, req_opts, key) do
+          # A soft-delete may answer 200 with the record or an empty 204.
+          {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
+            {:ok, if(body == "", do: nil, else: body)}
+
+          other ->
+            to_error(other, method, path)
+        end
+    end
+  end
+
+  defp to_error({:ok, %Req.Response{status: status, body: body, headers: headers}}, method, path) do
+    error = Error.from_response(status, body, headers, method: method, path: path)
+    Logger.warning("Kiln #{method} #{path} returned #{status} (#{error.code || error.reason})")
+    {:error, error}
+  end
+
+  defp to_error({:error, exception}, method, path) do
+    Logger.error("Kiln #{method} #{path} failed: #{inspect(exception)}")
+    {:error, %Error{reason: :transport, exception: exception, method: method, path: path}}
+  end
+
+  defp api_key(opts) do
+    case Keyword.get(opts, :api_key) || Application.get_env(:kiln_client, :api_key) do
+      key when key in [nil, ""] -> nil
+      key -> key
+    end
+  end
+
+  defp do_request(method, path, opts, key) do
+    base_url = Application.get_env(:kiln_client, :base_url, "http://localhost:4000")
+
+    # Per-call `:req` overrides apply LAST, via `Req.merge/2` — so they win
+    # over the defaults and the configured `req_options`, and composite
+    # options like `:headers` merge instead of clobbering.
+    {overrides, opts} = Keyword.pop(opts, :req)
+
+    [
+      method: method,
+      url: base_url <> path,
+      headers: [{"accept", @json_api}],
+      receive_timeout: 15_000
+    ]
+    |> Keyword.merge(opts)
+    |> maybe_auth(key)
+    |> Keyword.merge(Application.get_env(:kiln_client, :req_options, []))
+    |> Req.new()
+    |> Req.merge(overrides || [])
+    |> Req.request()
   end
 
   defp maybe_auth(opts, key) when key in [nil, ""], do: opts

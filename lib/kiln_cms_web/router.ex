@@ -56,8 +56,19 @@ defmodule KilnCMSWeb.Router do
 
   pipeline :graphql do
     plug KilnCMSWeb.Plugs.RateLimit, :gql
-    # Block schema introspection in production (config-gated).
-    plug KilnCMSWeb.Plugs.DisableGraphqlIntrospection
+    # Anonymous GET queries become CDN-cacheable with an ETag; anything carrying
+    # a credential is `private, no-store`. Mutations are never cached: Absinthe
+    # refuses them over GET, and only a 200 without `errors` qualifies.
+    # First in the pipeline so its `before_send` is registered even for a
+    # request a later plug refuses — a batch rejected below still leaves with
+    # an explicit `private, no-store` rather than no directive for a CDN to
+    # interpret.
+    plug KilnCMSWeb.Plugs.PublicCache, graphql: true
+    # A batched body (a JSON array of operations) is refused past a size, and
+    # every operation in it after the first is charged to `:gql` as well.
+    # Introspection is refused by the document pipeline (`KilnCMSWeb.GraphqlLimits`),
+    # which replaced the `DisableGraphqlIntrospection` plug that stood here.
+    plug KilnCMSWeb.Plugs.GraphqlBatchLimit, :gql
     plug :load_from_bearer
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
@@ -109,6 +120,22 @@ defmodule KilnCMSWeb.Router do
   # already go through `KilnCMSWeb.Params` (#751).
   pipeline :ash_json_api do
     plug KilnCMSWeb.Plugs.AshJsonApiParams
+    # `If-Match` on a single-record write → the action's version check (412).
+    plug KilnCMSWeb.Plugs.IfMatch
+  end
+
+  # The media upload API's own, much tighter, per-address budget — on top of
+  # `:api`'s (see the `/api/media` scope below).
+  pipeline :media_upload do
+    plug KilnCMSWeb.Plugs.RateLimit, :media_upload
+  end
+
+  # Shared-cache headers for anonymous reads of a headless read surface —
+  # `public` + a body ETag + 304s for a request with no credential, `private,
+  # no-store` for one with. See `KilnCMSWeb.Plugs.PublicCache` for exactly what
+  # counts as anonymous and why a surface must be audited before joining.
+  pipeline :public_cache do
+    plug KilnCMSWeb.Plugs.PublicCache
   end
 
   # Headless sign-in — exchanges credentials for a bearer token (issue #37).
@@ -152,6 +179,15 @@ defmodule KilnCMSWeb.Router do
     plug :protect_from_forgery
     plug :put_secure_browser_headers, @swagger_csp_headers
     plug :put_swagger_csp
+  end
+
+  # The GraphQL schema as SDL (`KilnCMSWeb.ApiSpecController`). Not `:api`:
+  # that pipeline's `accepts ["json"]` would answer a codegen tool asking for
+  # `application/graphql` with a 406. Metered on the `:docs` bucket, as the
+  # OpenAPI explorer is, and an API key is the only credential it reads.
+  pipeline :api_spec do
+    plug KilnCMSWeb.Plugs.RateLimit, :docs
+    plug KilnCMSWeb.Plugs.ApiKeyAuth
   end
 
   # Auth pages get a tighter per-IP limit to slow credential stuffing.
@@ -212,6 +248,19 @@ defmodule KilnCMSWeb.Router do
   end
 
   # Light per-IP ceiling for public HTML delivery (especially cache-miss paths).
+  # `/media/:id/t/:ops` — see the scope that uses it.
+  pipeline :media_transform do
+    plug KilnCMSWeb.Plugs.RateLimit, :media_transform
+    plug :fetch_session
+    # A GET-only image route has no state to forge, but every pipeline that
+    # reads the session carries the check (sobelow Config.CSRF). On a GET it
+    # verifies nothing and, since nothing here asks for a token, writes no
+    # cookie — which matters: a Set-Cookie would make the image uncacheable.
+    plug :protect_from_forgery
+    plug :load_from_session
+    plug :read_only_session
+  end
+
   pipeline :delivery do
     plug KilnCMSWeb.Plugs.RateLimit, :delivery
     # Per-site code injection (#490). ONLY here — the root layout is shared with
@@ -420,6 +469,10 @@ defmodule KilnCMSWeb.Router do
       # branding is: full-text syndication is a disclosure decision, and it used
       # to live in a config file no tenant admin could reach.
       live "/editor/feeds", FeedSettingsLive, :index
+      # Per-site locale fallback chains (`fr-CA → fr → en`) — what every
+      # delivery surface serves when a translation is missing. Org-scoped: one
+      # site's "never fall back" must not decide another's.
+      live "/editor/locales", LocaleSettingsLive, :index
       # Per-site claim checking (#857) — whether the editor's Compliance panel
       # runs here, whether it gates publishing, and this site's own claims
       # vocabulary. Org-scoped for the reason feeds are: a hard publish refusal
@@ -437,6 +490,9 @@ defmodule KilnCMSWeb.Router do
       # to take on it. Restore stays a documented ops procedure.
       live "/editor/backups", BackupLive, :index
       live "/editor/mail", MailSettingsLive, :index
+      # A site's own SMTP relay and From address (#1322). Org-scoped, unlike
+      # `/editor/mail` above: that is the operator's relay for every site.
+      live "/editor/site-mail", SiteMailLive, :index
       live "/editor/newsletter", NewsletterLive, :index
       # Paid memberships (#337 Phase 2). Instance-wide provider credentials plus
       # per-site tiers, so the page itself gates on `platform_admin?` — see the
@@ -512,14 +568,15 @@ defmodule KilnCMSWeb.Router do
   # Headless GraphQL — always available; the interactive playground is dev-only
   # (see the `dev_routes` block below).
   #
-  # Cap query cost/depth so a deeply nested or wide query can't force an
-  # unbounded resolve (DoS). Tune `max_complexity` up as list queries are added.
-  # One definition shared by the forward below and `PageController.gql_get/2`
-  # (which re-dispatches GET-based queries to Absinthe).
+  # The cost limits (complexity, depth, token count, introspection) are pinned by
+  # the pipeline, not set here as options: `KilnCMSWeb.GraphqlLimits` builds the
+  # same pipeline for `/ws/gql`, and options can be overridden per request where
+  # a pipeline cannot. One definition shared by the forward below, the dev
+  # playground and `PageController.gql_get/2` (which re-dispatches GET-based
+  # queries to Absinthe).
   @graphql_opts [
     schema: Module.concat(["KilnCMSWeb.GraphqlSchema"]),
-    analyze_complexity: true,
-    max_complexity: 200
+    pipeline: {Module.concat(["KilnCMSWeb.GraphqlLimits"]), :plug_pipeline}
   ]
 
   @doc "Absinthe.Plug options for the `/gql` endpoint (see the forward below)."
@@ -535,10 +592,10 @@ defmodule KilnCMSWeb.Router do
     scope "/gql" do
       pipe_through [:graphql]
 
-      forward "/playground", Absinthe.Plug.GraphiQL,
-        schema: Module.concat(["KilnCMSWeb.GraphqlSchema"]),
-        socket: Module.concat(["KilnCMSWeb.GraphqlSocket"]),
-        interface: :simple
+      forward "/playground",
+              Absinthe.Plug.GraphiQL,
+              @graphql_opts ++
+                [socket: Module.concat(["KilnCMSWeb.GraphqlSocket"]), interface: :simple]
     end
   end
 
@@ -571,7 +628,7 @@ defmodule KilnCMSWeb.Router do
   # `/api/json/open_api` follows the same `:api_docs` flag as the explorer
   # above (#567); the content routes are unaffected.
   scope "/api/json" do
-    pipe_through [:api, :ash_json_api]
+    pipe_through [:api, :ash_json_api, :public_cache]
 
     forward "/", KilnCMSWeb.AshJsonApiRouter
   end
@@ -608,6 +665,15 @@ defmodule KilnCMSWeb.Router do
       otp_app: :kiln_cms
   end
 
+  # The running schema for GraphQL codegen: public where introspection is on,
+  # API-key-only where it is off (production). The OpenAPI document's
+  # equivalent rule lives in `KilnCMSWeb.Plugs.ApiDocs`.
+  scope "/api", KilnCMSWeb do
+    pipe_through :api_spec
+
+    get "/graphql/schema.graphql", ApiSpecController, :graphql_sdl
+  end
+
   # Exchange a passphrase for a grant token (#496). Its own scope so it carries
   # the tight `:unlock` bucket rather than the API's generous one — this endpoint
   # is the guessing surface for a shared secret, and the rate limit is the only
@@ -616,6 +682,32 @@ defmodule KilnCMSWeb.Router do
     pipe_through [:api, :content_unlock]
 
     post "/content/:type/:slug/unlock", ArtifactController, :unlock
+  end
+
+  # Media upload API. Its own scope for its own bucket: every request here is a
+  # sniff + strip + store (+ a download, for an import), far costlier than a
+  # read, so it gets a far smaller budget than `:api`'s. `POST /api/media`'s
+  # body is left unread by the endpoint and parsed by the controller only
+  # after the caller is authenticated and authorized — see
+  # `KilnCMSWeb.Plugs.MultipartParser` and the controller's moduledoc.
+  scope "/api/media", KilnCMSWeb do
+    pipe_through [:api, :media_upload]
+
+    post "/", MediaUploadController, :create
+    post "/import-url", MediaUploadController, :import_url
+    post "/uploads", MediaUploadController, :begin_direct
+    post "/uploads/complete", MediaUploadController, :complete_direct
+  end
+
+  # Hybrid search (keyword + semantic RRF, reranked when enabled) — not
+  # expressible as one Ash action, so it gets a thin controller (roadmap #4).
+  # Its own scope for `:public_cache`: actorless (#1013), so its anonymous
+  # answer is the same for everyone at this URL. Declared before the scope
+  # below; the paths do not overlap.
+  scope "/api", KilnCMSWeb do
+    pipe_through [:api, :public_cache]
+
+    get "/search", SearchApiController, :index
   end
 
   # Headless delivery of fired artifacts (Kiln v2 — D9). The v2 content API serves
@@ -638,10 +730,24 @@ defmodule KilnCMSWeb.Router do
     # Authenticated (an editor's key or bearer token); see PreviewTokenController.
     post "/content/:type/:id/preview-token", PreviewTokenController, :create
 
+    # Version history (editor-tier, authenticated only): a document's revisions,
+    # one revision with its folded snapshot, and restore. Keyed by the record's
+    # id rather than its slug — a slug is per-locale and can change, a document's
+    # history cannot. 401 without a credential; 404 to anyone the version
+    # policies deny.
+    get "/content/:type/:id/revisions", RevisionController, :index
+    get "/content/:type/:id/revisions/:version_id", RevisionController, :show
+    post "/content/:type/:id/revisions/:version_id/restore", RevisionController, :restore
+
     # Visual-editing bridge (#355): the live working copy, stega-annotated so an
     # external front end's overlay maps a rendered value back to its Kiln field.
     # Draft-visible only to an editor/admin API key; `no-store`, per-actor.
     get "/visual-editing/:type/:slug", VisualEditingController, :show
+
+    # Delta sync (Contentful-style): the public corpus once, then upserts and
+    # tombstones since a signed cursor — so a mirror can see what was taken
+    # down, which `filter[updated_at][gt]` never could. KilnCMS.Firing.Sync.
+    get "/sync", SyncController, :index
 
     # Locale discovery — lets a headless consumer build a locale switcher /
     # hreflang set without hard-coding the site's configured languages.
@@ -666,10 +772,6 @@ defmodule KilnCMSWeb.Router do
     # Admin-defined form schemas, for headless frontends hydrating
     # `data-kiln-form` placeholders (submissions POST via :public_form below).
     get "/forms/:slug", FormController, :schema
-
-    # Hybrid search (keyword + semantic RRF, reranked when enabled) — not
-    # expressible as one Ash action, so it gets a thin controller (roadmap #4).
-    get "/search", SearchApiController, :index
 
     # RAG "ask your content" (#339): retrieval over published content + cited
     # sources, with an optional (config-gated) generated answer.
@@ -1094,6 +1196,18 @@ defmodule KilnCMSWeb.Router do
     get "/media/:id/stream", MediaDownloadController, :stream
   end
 
+  # On-the-fly image transforms. Registered before the `/:slug` catch-alls
+  # like the download routes, with the same session-resolved actor (so a gated
+  # item is visible to exactly who can download it) — but NOT `:browser`: its
+  # `accepts ["html"]` would 406 an `Accept: image/avif` fetch, and none of its
+  # CSP/frame headers mean anything on an image. `:delivery`'s bucket is sized
+  # for pages; a page's images get their own (see `KilnCMSWeb.RateLimit`).
+  scope "/", KilnCMSWeb do
+    pipe_through :media_transform
+
+    get "/media/:id/t/:ops", MediaTransformController, :show
+  end
+
   # Passphrase submission from a lock page (#496). Its own scope purely so it can
   # carry the tight `:unlock` bucket without putting it on every content GET —
   # `:delivery` still applies, so the failure re-render gets the same layout and
@@ -1136,6 +1250,13 @@ defmodule KilnCMSWeb.Router do
   #
   # Override the static CSP from `put_secure_browser_headers` above with a
   # per-request nonce (strict) or a relaxed dev-only policy (AshAdmin tooling).
+
+  # The transform route only READS the session (to know who is asking about a
+  # gated item). Left alone, the session plugs mark it for writing even when
+  # nothing changed, and the resulting `Set-Cookie` makes a shared cache refuse
+  # to store the image — every CDN in front of Kiln would pass transforms
+  # straight through.
+  defp read_only_session(conn, _opts), do: configure_session(conn, ignore: true)
 
   defp put_browser_csp(conn, _opts) do
     nonce = generate_csp_nonce()

@@ -347,11 +347,21 @@ defmodule KilnCMS.CMS do
       define :get_media_item, action: :read, get_by: [:id]
       define :create_media_item, action: :create
       define :update_media_item, action: :update
+      # The API's metadata-only write (alt/caption/decorative/focal/tags).
+      define :update_media_item_metadata, action: :update_metadata
       define :destroy_media_item, action: :destroy
       define :list_trashed_media_items, action: :trashed
       define :restore_media_item, action: :restore
       define :purge_media_item, action: :purge
       define :increment_media_downloads, action: :increment_downloads
+    end
+
+    # Cached on-the-fly transforms (`KilnCMS.Media.Derivatives`) — system-only,
+    # no API surface.
+    resource KilnCMS.CMS.MediaDerivative do
+      define :list_media_derivatives, action: :for_item, args: [:media_item_id]
+      define :record_media_derivative, action: :record
+      define :destroy_media_derivative, action: :destroy
     end
 
     resource KilnCMS.CMS.WebhookEndpoint do
@@ -429,6 +439,15 @@ defmodule KilnCMS.CMS do
       define :list_site_code_injection, action: :read
       define :save_site_code_injection, action: :save
       define :reset_site_code_injection, action: :destroy
+    end
+
+    # A site's own SMTP relay (#1322). Read through `KilnCMS.Mail.SiteRelay`,
+    # which owns the precedence rule and the fail direction — never directly.
+    resource KilnCMS.CMS.SiteMailRelay do
+      define :list_site_mail_relay, action: :read
+      define :save_site_mail_relay, action: :save
+      define :update_site_mail_relay, action: :update
+      define :reset_site_mail_relay, action: :destroy
     end
 
     # The version twin: "who added that script, and when". Registered because
@@ -664,6 +683,14 @@ defmodule KilnCMS.CMS do
       define :save_feed_settings, action: :save
       define :update_feed_settings, action: :update
       define :reset_feed_settings, action: :destroy
+    end
+
+    # Per-org locale fallback chains (`fr-CA → fr → en`), resolved on every
+    # delivery surface through `KilnCMS.I18n.Fallback`.
+    resource KilnCMS.CMS.SiteLocaleSettings do
+      define :list_site_locale_settings, action: :read
+      define :save_site_locale_settings, action: :save
+      define :reset_site_locale_settings, action: :destroy
     end
 
     # Taxonomy: categories (one-to-many to content) and tags (many-to-many).

@@ -72,6 +72,28 @@ defmodule KilnCMS.Forms.MailWorkersTest do
   end
 
   describe "NotificationWorker" do
+    test "goes out through the site's own relay when it has one (#1322)" do
+      form = form!(%{name: "Contact", notify_email: "team@example.com"})
+      org_id = KilnCMS.Accounts.default_org_id()
+
+      CMS.save_site_mail_relay!(
+        %{host: "smtp.example.com", from_email: "forms@site.example"},
+        tenant: org_id,
+        authorize?: false
+      )
+
+      assert :ok =
+               perform_job(NotificationWorker, %{
+                 "form_id" => form.id,
+                 "org_id" => org_id,
+                 "data" => %{"message" => "hello"}
+               })
+
+      assert_received {:site_relay_email, %{from: {_name, "forms@site.example"}}, config}
+      assert config[:relay] == "smtp.example.com"
+      assert_no_email_sent()
+    end
+
     test "mails notify_email a table of the submission" do
       form = form!(%{name: "Contact", notify_email: "team@example.com"})
 
