@@ -40,7 +40,7 @@ mix phx.server
 
 `mix setup` seeds a demo admin and editor. The full setup — optional infra
 profiles for cache, search and object storage, plus the environment quirks that
-bite people (PATH, spaced/iCloud paths, the `igniter` dependency) — is in
+bite people (PATH, a path with a space in it, the opt-in ML stack) — is in
 [Overview](https://github.com/The-Verscienta/kiln_cms/blob/main/README.md)
 and [Contributing](../CONTRIBUTING.md).
 
