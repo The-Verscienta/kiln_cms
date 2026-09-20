@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createClient, isKilnHttpError } from "../src/index.js";
+import { createClient, isKilnHttpError, KilnConfigError } from "../src/index.js";
 import { stubFetch } from "./helpers.js";
 
 function client(stub: { fetchImpl: typeof globalThis.fetch }) {
@@ -86,6 +86,32 @@ describe("uploadMedia", () => {
 
     expect(isKilnHttpError(error)).toBe(true);
     expect(error).toMatchObject({ status: 403, body: { errors: [{ code: "forbidden" }] } });
+  });
+});
+
+describe("the API key", () => {
+  it("is required client-side by every media write, like every other write", async () => {
+    const stub = stubFetch(created());
+    const anonymous = createClient({
+      baseUrl: "https://cms.example.com",
+      fetch: stub.fetchImpl,
+    });
+    const file = new Blob(["x"]);
+
+    await expect(anonymous.uploadMedia(file)).rejects.toBeInstanceOf(KilnConfigError);
+    await expect(
+      anonymous.importMediaFromUrl("https://example.com/cat.png"),
+    ).rejects.toMatchObject({ code: "missing_api_key" });
+    await expect(anonymous.updateMedia("m1", { alt: "x" })).rejects.toBeInstanceOf(
+      KilnConfigError,
+    );
+    await expect(anonymous.beginDirectUpload("a.mp4", 10)).rejects.toBeInstanceOf(
+      KilnConfigError,
+    );
+    await expect(anonymous.completeDirectUpload("tok")).rejects.toBeInstanceOf(KilnConfigError);
+
+    // Nothing was sent — in particular the file was never transferred.
+    expect(stub.calls).toHaveLength(0);
   });
 });
 

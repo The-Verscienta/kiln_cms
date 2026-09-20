@@ -18,6 +18,15 @@ tagged `kiln_client-vX.Y.Z` in the
   when there is none.
 - **`graphql/3`** — `POST /gql`, returns `{:ok, data}`; a top-level `errors`
   array is `{:error, %KilnClient.Error{reason: :graphql}}`.
+- **Media uploads (kiln_cms#1576):** `upload_media/2` (multipart
+  `POST /api/media`, streamed from disk), `import_media/2`,
+  `update_media/3` for alt text, caption, the decorative flag, the focal point
+  and tags, and `upload_media_direct/2` — which presigns, `PUT`s straight to
+  object storage and completes; `begin_direct_upload/3` /
+  `complete_direct_upload/2` are the two legs on their own. Uploads are
+  writes: they take the key per call (`api_key:`) or from config, refuse with
+  `reason: :no_api_key` before sending anything, and return the same
+  `%KilnClient.Error{}` as every other write.
 - **`KilnClient.Error`** — the error writes and `graphql/3` return, with a
   `:reason` atom per failure class (`:forbidden`, `:validation`, `:conflict`,
   `:rate_limited`, …), the JSON:API `errors` list, `:retry_after` from the

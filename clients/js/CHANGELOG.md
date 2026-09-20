@@ -17,6 +17,15 @@ tagged `client-js-vX.Y.Z` in the
   when the client has none.
 - **`graphql()`** — `POST /gql`, resolves to `data`; a top-level `errors`
   array throws `KilnGraphQLError`.
+- **Media uploads (kiln_cms#1576):** `uploadMedia(file)` (multipart
+  `POST /api/media`), `importMediaFromUrl(url)`, `updateMedia(id, changes)`
+  for alt text, caption, the decorative flag, the focal point and tags, and
+  `uploadMediaDirect(file)` — which presigns, `PUT`s straight to object
+  storage and completes; `beginDirectUpload()` / `completeDirectUpload()` are
+  the two legs on their own. Uploads are writes: they follow the same
+  `apiKey` rule, so an anonymous one throws `KilnConfigError` rather than
+  transferring the file to be refused. They use `uploadTimeoutMs` (default
+  five minutes) rather than `timeoutMs`.
 - **An error hierarchy** under a new `KilnError` base: `KilnAuthError`
   (401/403), `KilnNotFoundError`, `KilnValidationError` (400/422, with
   `pointers` and `fieldErrors()`), `KilnConflictError` (409, with
