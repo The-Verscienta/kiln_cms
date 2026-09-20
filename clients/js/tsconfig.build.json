@@ -1,4 +1,11 @@
 {
   "extends": "./tsconfig.json",
+  // `rootDir` lives here, not in the base config: it constrains which files may
+  // take part in the program, so a base-level `rootDir: src` made the
+  // test-inclusive `npm run typecheck` fail with TS6059 instead of type
+  // checking. Only the build emits, so only the build needs it.
+  "compilerOptions": {
+    "rootDir": "src"
+  },
   "include": ["src"]
 }
