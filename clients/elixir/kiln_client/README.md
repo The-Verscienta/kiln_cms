@@ -104,6 +104,42 @@ tags = KilnClient.resolve(post, "tags", included)
 Results are flattened JSON:API resources: the `attributes` map (string keys)
 plus `"id"`/`"type"`, with relationships reduced to `{type, id}` ref maps.
 
+## Image transforms
+
+`KilnClient.Image` builds URLs for Kiln's on-the-fly image transforms
+(`GET /media/:id/t/:ops`) from a media item as the client returns it. Pure
+string building — no request is made.
+
+```elixir
+# `media` is a media item as the client returns it — e.g. joined through
+# `resolve/3` — needing "id", "url", "focal_x"/"focal_y" (and "width"/"height"
+# for a srcset); atom keys work too.
+KilnClient.Image.url(media, width: 800, aspect_ratio: "16:9", format: :auto)
+#=> "https://cms.example.com/media/<id>/t/w_828,ar_16:9,fm_auto,v_4b87b277"
+
+KilnClient.Image.srcset(media, aspect_ratio: "16:9", format: :auto)
+#=> "https://cms.example.com/media/<id>/t/w_256,ar_16:9,fm_auto,v_… 256w, …"
+```
+
+Options: `:width`, `:height`, `:aspect_ratio` (`"16:9"` or `{16, 9}`),
+`:dpr` (1–3), `:fit` (`:cover`/`:contain`), `:crop` (`:focal`, `:center`,
+`:top`, `:bottom`, `:left`, `:right`), `:format` (`:auto`, `:jpg`, `:png`,
+`:webp`, `:avif`), `:quality` (1–100). `srcset/2` also takes `:widths`.
+`path/2` gives the root-relative path; `KilnClient.image_url/2` and
+`KilnClient.image_srcset/2` are shorthands.
+
+**Unsigned** (the default) URLs are served only for allowlisted values, so
+`:width`/`:height` snap up to Kiln's size ladder (pass `:sizes` if the server's
+ladder was changed). **Signed** URLs take any size exactly as given. Signing
+needs the server's `KILN_IMAGE_TRANSFORM_KEY`, which is a server-side secret —
+configure it only in code that runs on your server, never in a browser bundle:
+
+```elixir
+config :kiln_client, image_transform_key: System.get_env("KILN_IMAGE_TRANSFORM_KEY")
+```
+
+Pass `sign_key: nil` on a call to build an unsigned URL anyway.
+
 ## Verifying webhooks
 
 `KilnClient.Webhook.verify/4` checks a delivery's `x-kilncms-webhook-signature`

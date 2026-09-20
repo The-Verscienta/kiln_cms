@@ -83,6 +83,23 @@ defmodule KilnCMSWeb.MediaDownloadController do
   end
 
   defp with_item(conn, id, serve_fun) do
+    case readable_item(conn, id) do
+      {:ok, item} -> serve_fun.(conn, item, KilnCMSWeb.Tenant.current_org_id(conn))
+      :not_found -> send_resp(conn, 404, "Not found")
+    end
+  end
+
+  @doc """
+  The item `id` as this request may see it, or `:not_found` — the one
+  visibility rule for every route that serves a media item's bytes (download,
+  stream, and `KilnCMSWeb.MediaTransformController`), so they cannot disagree.
+
+  The ordinary policy-checked read under the request's actor and tenant: a
+  gated item is visible only to an actor holding its audience, and denied and
+  missing are the same answer.
+  """
+  @spec readable_item(Plug.Conn.t(), String.t()) :: {:ok, struct()} | :not_found
+  def readable_item(conn, id) do
     actor = conn.assigns[:current_user]
     org_id = KilnCMSWeb.Tenant.current_org_id(conn)
 
@@ -92,9 +109,9 @@ defmodule KilnCMSWeb.MediaDownloadController do
     # policy already hides the row from non-editors; this is the second half,
     # for the one reader the policy lets through.
     case CMS.get_media_item(id, actor: actor, tenant: org_id) do
-      {:ok, %{quarantined: true}} -> send_resp(conn, 404, "Not found")
-      {:ok, item} -> serve_fun.(conn, item, org_id)
-      _ -> send_resp(conn, 404, "Not found")
+      {:ok, %{quarantined: true}} -> :not_found
+      {:ok, item} -> {:ok, item}
+      _ -> :not_found
     end
   end
 

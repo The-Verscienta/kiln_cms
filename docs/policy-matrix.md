@@ -143,6 +143,7 @@ ever be authorized by an explicit clause below.
 | `CMS.FieldDefinition` | `read`, `for_type`, `for_definition` | Read-only. Firing needs the field schema to turn a document's `custom_fields` values into JSON-LD. Defining a field is still admin-only. |
 | `Search.BlockEmbedding` | `read`, `for_document`, `nearest`, `upsert`, `destroy` | The per-block semantic index. `Search.BlockIndexer` is the only writer it has ever had — rows are derived from the document's own block tree — and `BlockSearch` / `Search.Related` are its only readers. Whether a *caller* may see a hit is decided one tier up, when the matching document is hydrated under their own authorization. |
 | `Search.TagEmbedding` | `read`, `for_tags`, `nearest`, `upsert`, `destroy` | Same shape, for tag-name vectors: written by `TagEmbeddingWorker` and `Search.Related`, read by `Search.Related` only. |
+| `CMS.MediaDerivative` | all (`read`, `for_item`, `record`, `destroy`) | The bookkeeping row behind each cached on-the-fly image transform (`/media/:id/t/…`). `Media.Derivatives` is its only reader and writer: it counts an item's rows against the per-item budget, prunes the ones cut from a replaced original or around a moved focal point, and lists them for a purge. No person — admin included — reads or writes a row, and there is no API surface. Who may *see* a transform is decided on the `MediaItem`, by the transform controller's ordinary policy-checked read. |
 | `Automation.Rule` | `read` **only** | `KilnCMS.Automation.RuleWorker` re-reads the rule it was enqueued for. Authoring a rule is still admin-only — the grant is narrowed to reads inside the existing `policy always()` with `forbid_unless action_type(:read)`. |
 | `Social.Account` | `read`, `enabled_for_provider` **only** | The announcer lists a provider's enabled accounts for a publish. Minting, editing or deleting the credentials for a site's public voice stays an admin act, narrowed the same way. |
 | `CMS.Comment` | `create`, `read` | An editorial-intelligence reaction posts its findings as a document-level comment (#946) on a thread it must be able to read. No `author_id` is stamped — the actor has no `:id` — so `created_by_rule_id` carries the provenance. `update` is **not** admitted: automation posts, it does not edit what anyone said. |
@@ -240,6 +241,14 @@ managed through `manage_relationship` on the content resources).
 
 Media is world-readable because published content embeds it (featured images,
 inline assets).
+
+The routes that serve a media item's **bytes** — `/media/:id/download`,
+`/media/:id/stream` and the on-the-fly transforms at `/media/:id/t/:ops` — all
+read the row through this policy under the request's session actor
+(`MediaDownloadController.readable_item/2`), so a gated item is a 404 on every
+one of them to anyone without its audience, and a quarantined item is a 404 to
+everyone. The transform route additionally refuses out-of-bounds parameters
+(an off-allowlist size or a bad signature) before it reads anything.
 
 ## Webhooks — `WebhookEndpoint`
 

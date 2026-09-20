@@ -248,6 +248,19 @@ defmodule KilnCMSWeb.Router do
   end
 
   # Light per-IP ceiling for public HTML delivery (especially cache-miss paths).
+  # `/media/:id/t/:ops` — see the scope that uses it.
+  pipeline :media_transform do
+    plug KilnCMSWeb.Plugs.RateLimit, :media_transform
+    plug :fetch_session
+    # A GET-only image route has no state to forge, but every pipeline that
+    # reads the session carries the check (sobelow Config.CSRF). On a GET it
+    # verifies nothing and, since nothing here asks for a token, writes no
+    # cookie — which matters: a Set-Cookie would make the image uncacheable.
+    plug :protect_from_forgery
+    plug :load_from_session
+    plug :read_only_session
+  end
+
   pipeline :delivery do
     plug KilnCMSWeb.Plugs.RateLimit, :delivery
     # Per-site code injection (#490). ONLY here — the root layout is shared with
@@ -1177,6 +1190,18 @@ defmodule KilnCMSWeb.Router do
     get "/media/:id/stream", MediaDownloadController, :stream
   end
 
+  # On-the-fly image transforms. Registered before the `/:slug` catch-alls
+  # like the download routes, with the same session-resolved actor (so a gated
+  # item is visible to exactly who can download it) — but NOT `:browser`: its
+  # `accepts ["html"]` would 406 an `Accept: image/avif` fetch, and none of its
+  # CSP/frame headers mean anything on an image. `:delivery`'s bucket is sized
+  # for pages; a page's images get their own (see `KilnCMSWeb.RateLimit`).
+  scope "/", KilnCMSWeb do
+    pipe_through :media_transform
+
+    get "/media/:id/t/:ops", MediaTransformController, :show
+  end
+
   # Passphrase submission from a lock page (#496). Its own scope purely so it can
   # carry the tight `:unlock` bucket without putting it on every content GET —
   # `:delivery` still applies, so the failure re-render gets the same layout and
@@ -1219,6 +1244,13 @@ defmodule KilnCMSWeb.Router do
   #
   # Override the static CSP from `put_secure_browser_headers` above with a
   # per-request nonce (strict) or a relaxed dev-only policy (AshAdmin tooling).
+
+  # The transform route only READS the session (to know who is asking about a
+  # gated item). Left alone, the session plugs mark it for writing even when
+  # nothing changed, and the resulting `Set-Cookie` makes a shared cache refuse
+  # to store the image — every CDN in front of Kiln would pass transforms
+  # straight through.
+  defp read_only_session(conn, _opts), do: configure_session(conn, ignore: true)
 
   defp put_browser_csp(conn, _opts) do
     nonce = generate_csp_nonce()

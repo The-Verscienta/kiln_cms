@@ -34,6 +34,15 @@ defmodule KilnCMSWeb.RateLimit do
     register: {5, :timer.minutes(1)},
     # Public HTML delivery — generous, just a flood/abuse ceiling per IP.
     delivery: {300, :timer.minutes(1)},
+    # Image transform requests (`/media/:id/t/…`), cached or not. One page can
+    # hold dozens of images, each its own request, so this sits well above
+    # `:delivery` — it is a flood ceiling, not the cost bound.
+    media_transform: {1_200, :timer.minutes(1)},
+    # Transform cache MISSES only — each one a decode, resize and encode. This
+    # is the per-client cost bound; `KilnCMS.Media.TransformGate` is the
+    # per-node one. A first view of an image-heavy page misses once per image,
+    # and everything after is a storage read that never reaches this bucket.
+    media_render: {120, :timer.minutes(1)},
     # Signed preview links — tight, to slow token enumeration / draft scraping.
     preview: {30, :timer.minutes(1)},
     # Passphrase attempts against locked content (#496). Tighter than `:form`

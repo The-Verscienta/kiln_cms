@@ -15,7 +15,7 @@ defmodule KilnCMSWeb.MediaLive do
   require Logger
 
   alias KilnCMS.CMS
-  alias KilnCMS.Media.Ingest
+  alias KilnCMS.Media.{Derivatives, Ingest}
   alias KilnCMS.MediaKind
   alias KilnCMS.Storage
   alias KilnCMS.Unsplash
@@ -700,12 +700,18 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
-  # Permanent delete: drop the row and reclaim the original + variant blobs.
+  # Permanent delete: drop the row and reclaim the original + variant blobs,
+  # and the on-the-fly transforms cached from it. Those are listed BEFORE the
+  # purge: their rows go with the item through the foreign key, and after that
+  # nothing records where the blobs are.
   defp purge_item(socket, item, actor) do
+    derivatives = Derivatives.blobs(item)
+
     case CMS.purge_media_item(item, actor: actor, tenant: socket.assigns.current_org) do
       :ok ->
         if item.storage_key, do: Storage.delete(item.storage_key)
         delete_variant_blobs(item.variants)
+        Derivatives.delete_blobs(derivatives)
         put_flash(socket, :info, gettext("Permanently deleted %{name}.", name: item.filename))
 
       _ ->

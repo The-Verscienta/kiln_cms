@@ -105,6 +105,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Feeds** | `GET /feed.xml`, `GET /feed.json` | Atom 1.0 / JSON Feed 1.1 of newly published content. | [§ Feeds](#feeds) |
 | **Outbound webhooks** | (you host the receiver) | Timestamped HMAC-signed push on the content lifecycle. | [webhooks.md](webhooks.md) |
 | **Signed preview** | `GET /preview/:token` | One unpublished document via a short-lived token. | [§ Preview tokens](#preview-tokens) |
+| **Image transforms** | `GET /media/:id/t/:ops` | Resize, crop to the focal point, convert (AVIF/WebP) and re-encode an image on request; unsigned URLs are held to a size allowlist, signed ones are not. | [§ Image transforms](#image-transforms) |
 
 ## Authentication
 
@@ -1102,6 +1103,48 @@ submission is deliberately CSRF-free. See [forms.md](forms.md#embedding-on-anoth
 Inactive or unknown slugs render a framable "Form not found" page (HTTP 404)
 rather than a blank iframe.
 
+## Image transforms
+
+Any processed image can be resized, cropped and re-encoded on request:
+
+```
+GET /media/<media_item_id>/t/w_1080,ar_16:9,fm_auto,v_3f2a9c01
+```
+
+| Key | Values | |
+|---|---|---|
+| `w`, `h` | 1–4000 | Width / height in CSS px |
+| `ar` | `a:b` (1–99 each) | Aspect ratio, instead of `h` |
+| `dpr` | `1`–`3` | Pixel density multiplier |
+| `fit` | `cover` (default), `contain` | Crop to fill, or fit inside |
+| `crop` | `focal` (default), `center`, `top`, `bottom`, `left`, `right` | Anchor of a `cover` crop |
+| `fm` | `auto`, `jpg`, `png`, `webp`, `avif` | Output format (default: the source's); `auto` negotiates from `Accept` |
+| `q` | 1–100 | Quality (lossy formats) |
+| `v` | 8 hex | Version pin: makes the response `immutable` for a year |
+| `s` | 22 chars | HMAC signature: lifts the size allowlist |
+
+Unsigned URLs may only use the allowlisted sizes, ratios and qualities
+(off-list is a **400** naming them); signed ones any in-range value (a bad
+signature is a **403**). Output is never upscaled. A gated item is a **404**
+exactly where `/media/:id/download` would be; a non-image is a **422**; a
+saturated render queue is a **503** with `Retry-After`.
+
+Build the URLs with the SDKs rather than by hand — they snap to the allowlist,
+compute `v` from the item's `url`/`focal_x`/`focal_y`, and sign when given the
+server's `KILN_IMAGE_TRANSFORM_KEY` (server-side only):
+
+```ts
+kiln.imageUrl(media, { width: 800, aspectRatio: "16:9", format: "auto" });
+kiln.imageSrcset(media, { aspectRatio: "16:9" });
+```
+
+```elixir
+KilnClient.image_url(media, width: 800, aspect_ratio: "16:9", format: :auto)
+```
+
+Grammar, limits, caching and configuration in full:
+[media-pipeline.md § On-the-fly transforms](media-pipeline.md#on-the-fly-transforms).
+
 ## Caching and CDNs
 
 Every headless read surface tells a shared cache what it may keep, so a CDN in
@@ -1224,6 +1267,8 @@ Over the limit returns **429** with a `retry-after` header.
 | `auth` | sign-in / auth  | 40 requests / minute  |
 | `docs` | `/api/json/swaggerui` | 60 requests / minute |
 | `unlock` | `POST /api/content/:type/:slug/unlock` (and the built-in site's lock form) | 10 requests / minute |
+| `media_transform` | `GET /media/:id/t/:ops` (every request) | 1,200 requests / minute |
+| `media_render` | `GET /media/:id/t/:ops` that misses the derivative cache (each is a render) | 120 renders / minute |
 | `media_upload` | `/api/media/*` (uploads, URL imports, direct-upload begin/complete) — charged **on top of** `api` | 60 requests / minute |
 
 ## Error responses

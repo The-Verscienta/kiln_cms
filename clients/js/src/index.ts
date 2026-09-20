@@ -18,6 +18,21 @@ export {
 } from "./errors.js";
 export { flattenDocument, refKey, rel, resolve } from "./jsonapi.js";
 export { emitTypes, type SchemaDocument } from "./generator.js";
+export {
+  DEFAULT_TRANSFORM_SIZES,
+  signedTransformPath,
+  signedTransformSrcset,
+  snapTransformSize,
+  transformPath,
+  transformSrcset,
+  transformVersion,
+  type TransformCrop,
+  type TransformFit,
+  type TransformFormat,
+  type TransformMedia,
+  type TransformOptions,
+  type TransformSrcsetOptions,
+} from "./transform.js";
 export type {
   ArtifactDocument,
   ArtifactOptions,

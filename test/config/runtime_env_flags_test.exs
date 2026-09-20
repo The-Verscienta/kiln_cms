@@ -63,6 +63,8 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_FEDERATION_ENABLED
             KILN_MEDIA_ROOT MEDIA_DIR S3_PUBLIC_BASE_URL
             AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+            KILN_IMAGE_TRANSFORM_KEY KILN_IMAGE_TRANSFORM_UNSIGNED
+            KILN_IMAGE_TRANSFORM_AUTO_AVIF
             KILN_METRICS_ENABLED KILN_METRICS_PORT KILN_METRICS_BIND KILN_METRICS_TOKEN
           ) ++ Map.keys(@prod_env)
 
@@ -115,6 +117,40 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
 
   defp repo_ssl(value) do
     %{"DATABASE_SSL" => value} |> eval() |> get_in([:kiln_cms, KilnCMS.Repo, :ssl])
+  end
+
+  describe "image transforms" do
+    defp transforms(vars), do: vars |> eval() |> get_in([:kiln_cms, :image_transforms])
+
+    test "unset leaves every default in place" do
+      assert transforms(%{}) in [nil, []]
+    end
+
+    test "a 32-character key becomes the signing key" do
+      key = String.duplicate("k", 32)
+      assert transforms(%{"KILN_IMAGE_TRANSFORM_KEY" => key})[:signing_key] == key
+    end
+
+    test "a blank key is the same as none" do
+      assert transforms(%{"KILN_IMAGE_TRANSFORM_KEY" => ""})[:signing_key] == nil
+    end
+
+    test "a short key refuses to boot rather than sign with something guessable" do
+      assert_raise RuntimeError, ~r/at least 32 characters/, fn ->
+        eval(%{"KILN_IMAGE_TRANSFORM_KEY" => "short"})
+      end
+    end
+
+    test "unsigned URLs and auto-AVIF are on/off flags" do
+      config =
+        transforms(%{
+          "KILN_IMAGE_TRANSFORM_UNSIGNED" => "false",
+          "KILN_IMAGE_TRANSFORM_AUTO_AVIF" => "on"
+        })
+
+      assert config[:allow_unsigned] == false
+      assert config[:auto_avif] == true
+    end
   end
 
   describe "DATABASE_SSL (#606)" do
