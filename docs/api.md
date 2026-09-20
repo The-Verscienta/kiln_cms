@@ -977,6 +977,10 @@ them warns. `null` does warn: browsers send it for sandboxed iframes, `file://`
 and some redirects, so allowlisting it grants all of those at once — it is kept
 if you mean it.
 
+Cross-origin callers may send `If-Match` (and read `ETag` and `retry-after`
+back), so a browser front end can make the conditional writes described in
+[json-api.md](json-api.md) (*Concurrency*).
+
 Preflight `OPTIONS` requests are answered ahead of routing and are **not**
 counted against the caller's rate-limit budget. Browser/HTML routes are
 unaffected — CORS applies to the API paths only.

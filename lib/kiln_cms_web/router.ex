@@ -120,6 +120,8 @@ defmodule KilnCMSWeb.Router do
   # already go through `KilnCMSWeb.Params` (#751).
   pipeline :ash_json_api do
     plug KilnCMSWeb.Plugs.AshJsonApiParams
+    # `If-Match` on a single-record write → the action's version check (412).
+    plug KilnCMSWeb.Plugs.IfMatch
   end
 
   # The media upload API's own, much tighter, per-address budget — on top of

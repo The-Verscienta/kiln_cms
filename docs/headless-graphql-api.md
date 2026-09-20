@@ -310,6 +310,34 @@ curl -s http://localhost:4000/gql \
   -d '{"query":"mutation($id:ID!){ publishPost(id:$id){ result{ id state } errors{ message } } }","variables":{"id":"<uuid>"}}'
 ```
 
+### Concurrency: `expectedLockVersion`
+
+A mutation is last-write-wins by default: `updatePost` reads the record and
+applies your input in the same request, so writing from a copy you fetched
+earlier overwrites anything saved since. To make it conditional, read
+`lockVersion` (a read-only field on every content type, bumped by every content
+edit) and pass it back as `expectedLockVersion` in the input of `update*`,
+`submit*ForReview`, `return*ToDraft`, `publish*`, `unpublish*` or `delete*`:
+
+```graphql
+mutation ($id: ID!) {
+  updatePost(id: $id, input: { title: "New", expectedLockVersion: 4 }) {
+    result { id lockVersion }
+    errors { code message vars }
+  }
+}
+```
+
+If the record has moved on, nothing is written and the mutation returns an
+error with `code: "precondition_failed"`, with the current `lock_version`,
+`state` and `etag` in `vars`. The check runs inside the write's transaction
+against the locked row. Omit the argument and nothing changes.
+
+`lockVersion` does not move on a workflow transition (publishing doesn't edit
+content), so `expectedLockVersion: 4` on `publishPost` means "publish the
+content I reviewed", not "the record is still a draft". The JSON:API `ETag`
+covers both halves ([json-api.md](json-api.md), *Concurrency*).
+
 ### Re-fire semantics
 
 Firing (the immutable per-surface artifact regeneration) is bound to the
@@ -376,7 +404,8 @@ served in development only. `__typename` always works.
   editable tree. Render content from the fired artifacts or your own block
   renderer.
 - **Internal fields** — `search_text`, `embedding`, `published_version_id`,
-  `lock_version`, etc. are not `public?` and never serialized.
+  etc. are not `public?` and never serialized. (`lockVersion` is readable, but
+  never writable; see *Concurrency* above.)
 - **Author PII** — content exposes only the opaque `authorId` foreign key. `User`
   has no GraphQL type (and no JSON:API resource), so there is **no nested `author`
   object** through which `email` or `role` could be selected. Even if the author

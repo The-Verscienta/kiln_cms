@@ -73,6 +73,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#rotating-secretkeybase-keeps-stored-keys-now-if-the-steps-run-in-order))
 ### Added
 
+- **Conditional writes on the headless API: `ETag`, `If-Match` and
+  `expectedLockVersion`.**
+  ([long form](docs/changelog/unreleased.md#conditional-writes-on-the-headless-api-etag-if-match-and-expectedlockversion))
+
 - **Anonymous JSON:API, GraphQL and search reads are CDN-cacheable, with a body
   ETag and 304s.**
   ([#1571](https://github.com/The-Verscienta/kiln_cms/issues/1571) · [long form](docs/changelog/unreleased.md#anonymous-jsonapi-graphql-and-search-reads-are-cdn-cacheable-with-a-body-etag))
