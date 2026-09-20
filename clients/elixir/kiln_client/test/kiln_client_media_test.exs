@@ -5,6 +5,11 @@ defmodule KilnClientMediaTest do
 
   @moduletag :capture_log
 
+  alias KilnClient.Error
+
+  # Uploads are writes, so they carry a key like every other write.
+  @key "kiln_rw"
+
   @parsers Plug.Parsers.init(
              parsers: [:multipart, :json],
              pass: ["*/*"],
@@ -49,6 +54,7 @@ defmodule KilnClientMediaTest do
 
       assert {:ok, item} =
                KilnClient.upload_media(path,
+                 api_key: @key,
                  filename: "cat.png",
                  alt: "A cat",
                  focal_x: 0.25,
@@ -70,15 +76,50 @@ defmodule KilnClientMediaTest do
       assert item["processing"] == false
     end
 
-    test "a refusal comes back as the HTTP status and body" do
+    test "a refusal is the same %KilnClient.Error{} every other write returns" do
       Req.Test.stub(KilnClient, fn conn ->
         conn
         |> Plug.Conn.put_status(403)
-        |> Req.Test.json(%{"errors" => [%{"code" => "forbidden"}]})
+        |> Req.Test.json(%{"errors" => [%{"code" => "forbidden", "detail" => "read-only key"}]})
       end)
 
-      assert {:error, {:http_status, 403, %{"errors" => [%{"code" => "forbidden"}]}}} =
+      assert {:error, %Error{reason: :forbidden, status: 403, code: "forbidden"} = error} =
+               KilnClient.upload_media(tmp_file("x"), api_key: @key)
+
+      assert Exception.message(error) =~ "read-only key"
+    end
+
+    # The regression this file exists for: every other write takes the key per
+    # call, and the media functions used to read only the configured one — so
+    # `api_key:` was dropped on the floor and the upload went out anonymous.
+    test "the per-call api_key is what authenticates the upload" do
+      Req.Test.stub(KilnClient, fn conn ->
+        send(self(), {:auth, Plug.Conn.get_req_header(conn, "authorization")})
+        created(parse(conn))
+      end)
+
+      refute Application.get_env(:kiln_client, :api_key)
+
+      assert {:ok, _item} = KilnClient.upload_media(tmp_file("x"), api_key: @key)
+      assert_received {:auth, ["Bearer kiln_rw"]}
+    end
+
+    test "an upload with no API key is refused before any request is sent" do
+      Req.Test.stub(KilnClient, fn conn ->
+        send(self(), {:unexpected, conn.request_path})
+        created(conn)
+      end)
+
+      assert {:error, %Error{reason: :no_api_key, path: "/api/media"}} =
                KilnClient.upload_media(tmp_file("x"))
+
+      assert {:error, %Error{reason: :no_api_key}} =
+               KilnClient.import_media("https://example.com/cat.png")
+
+      assert {:error, %Error{reason: :no_api_key}} = KilnClient.begin_direct_upload("a.mp4", 10)
+      assert {:error, %Error{reason: :no_api_key}} = KilnClient.complete_direct_upload("tok")
+
+      refute_received {:unexpected, _}
     end
   end
 
@@ -90,7 +131,10 @@ defmodule KilnClientMediaTest do
     end)
 
     assert {:ok, %{"id" => "m1"}} =
-             KilnClient.import_media("https://example.com/cat.png", caption: "Imported")
+             KilnClient.import_media("https://example.com/cat.png",
+               api_key: @key,
+               caption: "Imported"
+             )
 
     assert_received {:request, "/api/media/import-url",
                      %{"url" => "https://example.com/cat.png", "caption" => "Imported"} = body}
@@ -114,7 +158,11 @@ defmodule KilnClientMediaTest do
     end)
 
     assert {:ok, %{"alt" => "New"}} =
-             KilnClient.update_media("m1", alt: "New", add_tag_ids: ["t3"], url: "ignored")
+             KilnClient.update_media(
+               "m1",
+               [alt: "New", add_tag_ids: ["t3"], url: "ignored"],
+               api_key: @key
+             )
 
     assert_received {:request, "PATCH", "/api/json/media-items/m1", [content_type], body}
     assert content_type =~ "application/vnd.api+json"
@@ -170,7 +218,11 @@ defmodule KilnClientMediaTest do
     on_exit(fn -> Application.delete_env(:kiln_client, :api_key) end)
 
     assert {:ok, %{"alt" => "Big"}} =
-             KilnClient.upload_media_direct(path, filename: "big.mp4", alt: "Big")
+             KilnClient.upload_media_direct(path,
+               api_key: @key,
+               filename: "big.mp4",
+               alt: "Big"
+             )
 
     assert_received {:begin, %{"filename" => "big.mp4", "byte_size" => 10}}
     # The bucket gets the bytes and the signed length — and no Kiln key.

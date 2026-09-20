@@ -903,6 +903,11 @@ export class KilnClient {
   // Writes with a body: JSON:API's mime on the `/api/json/*` routes, plain
   // JSON on the upload API, or a `FormData` whose multipart boundary `fetch`
   // sets itself. `upload` selects the longer default timeout.
+  //
+  // Every caller is a write, so this fails fast without a key for the same
+  // reason `write()` does: an anonymous upload can only be refused, and
+  // finding that out client-side costs no round trip, no rate-limit budget
+  // and — for an upload — no pointless transfer of the whole file.
   private sendBody(
     method: "POST" | "PATCH",
     path: string,
@@ -910,6 +915,7 @@ export class KilnClient {
     signal: AbortSignal | undefined,
     upload = false,
   ): Promise<unknown> {
+    this.requireApiKey(method, path);
     const mime = path.startsWith("/api/json/") ? JSON_API : "application/json";
     return this.send(method, path, {
       signal,
@@ -939,20 +945,23 @@ export class KilnClient {
     body: unknown,
     signal: AbortSignal | undefined,
   ): Promise<unknown> {
-    if (!this.hasApiKey()) {
-      throw new KilnConfigError(
-        `${method} ${path} writes to Kiln and needs an API key: pass \`apiKey\` to ` +
-          "createClient() — a :read_write key on an editor (create/update/submit) " +
-          "or admin (publish/unpublish/return/delete) account.",
-        "missing_api_key",
-      );
-    }
+    this.requireApiKey(method, path);
     return this.send(method, path, {
       signal,
       accept: JSON_API,
       contentType: body === undefined ? undefined : JSON_API,
       body,
     });
+  }
+
+  private requireApiKey(method: string, path: string): void {
+    if (this.hasApiKey()) return;
+    throw new KilnConfigError(
+      `${method} ${path} writes to Kiln and needs an API key: pass \`apiKey\` to ` +
+        "createClient() — a :read_write key on an editor (create/update/submit/upload) " +
+        "or admin (publish/unpublish/return/delete) account.",
+      "missing_api_key",
+    );
   }
 
   private hasApiKey(): boolean {
