@@ -782,6 +782,47 @@ relocation; and the stream route chunks its responses as described above. The
 one deliberate exception is `GET /media/:id/download`, which is a whole-file
 response by definition — keep the document caps in mind if you raise them.
 
+## Uploading over the API
+
+`POST /api/media`, `POST /api/media/import-url` and the direct-upload pair
+(documented in [api.md → Uploading media](api.md#uploading-media)) are the same
+pipeline as the library's upload form — `KilnCMS.Media.Ingest`, via
+`KilnCMS.Media.Upload` — so everything on this page applies to a file that
+arrives that way: the byte sniff, the per-kind caps, every metadata strip and
+its refusals, the #1122 quarantine and the derivation jobs. The API adds only
+what a remote caller needs: authorization *before* a large body is read, the
+editor-settable metadata (alt, caption, decorative, focal point, tags) in the
+same request, and a `media_upload` rate-limit bucket.
+
+### Direct uploads
+
+The presigned flow (`KilnCMS.Media.DirectUpload`) lets a client `PUT` a large
+file straight to the bucket instead of through the app. It needs the S3
+adapter **and** `S3_PRIVATE_BUCKET`: the client's bytes land in the private
+bucket under `direct-uploads/<uuid>` — never the public one, because nothing
+has sniffed or stripped them yet — and completion copies them down (8 MB at a
+time), ingests them like any upload, and deletes the staged object. The
+declared size is signed into the URL as `content-length`, so the store itself
+refuses a different body.
+
+Two pieces of bucket configuration, on the **private** bucket:
+
+* **CORS**, if browsers upload directly — allow `PUT` from your front end's
+  origin with the `content-length` header. Server-side clients need none.
+
+  ```json
+  [{ "AllowedOrigins": ["https://app.example.com"], "AllowedMethods": ["PUT"],
+     "AllowedHeaders": ["content-length", "content-type"], "MaxAgeSeconds": 3000 }]
+  ```
+
+* **A lifecycle rule** expiring `direct-uploads/` objects after a day, as a
+  backstop. Kiln already queues a delete for every issued upload once its
+  token expires (`KilnCMS.Media.StagedUploadCleanup`); the rule covers a job
+  lost with its node.
+
+Presigned `PUT` rather than a presigned `POST` form, so the flow works on R2
+and B2, which do not implement S3's POST Object.
+
 ## Production storage and CDN
 
 Development uses the Local adapter (`priv/uploads`, served by the app's own

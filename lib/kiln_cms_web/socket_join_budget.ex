@@ -73,7 +73,14 @@ defmodule KilnCMSWeb.SocketJoinBudget do
     end
   end
 
-  defp client_key(connect_info) do
+  @doc """
+  The `KilnCMSWeb.RateLimit` key for the client a connect came from, resolved as
+  the moduledoc describes. `KilnCMSWeb.GraphqlSocket` keeps it for the life of
+  the connection, so each document sent over it is charged to the same client
+  (`KilnCMSWeb.GraphqlLimits.SocketDocumentBudget`).
+  """
+  @spec client_key(map()) :: String.t()
+  def client_key(connect_info) when is_map(connect_info) do
     x_headers = Map.get(connect_info, :x_headers) || []
 
     peer_address =

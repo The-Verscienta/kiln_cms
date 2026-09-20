@@ -148,11 +148,12 @@ defmodule KilnCMS.Automation.RuleWorker do
     end
   end
 
-  defp run(%{action: :send_email, config: config}, event, payload) do
+  defp run(%{action: :send_email, config: config, org_id: org_id}, event, payload) do
     # Subject is a header: render it as plain text with CR/LF stripped so a
     # content title can't inject extra headers. Body is HTML: escape markup.
     send_rule_email(
       config,
+      org_id,
       render(config["subject"] || "Kiln automation: {{title}}", event, payload, :text),
       render(config["body"] || default_body(), event, payload, :html)
     )
@@ -602,7 +603,7 @@ defmodule KilnCMS.Automation.RuleWorker do
     case Map.get(context.config, "deliver_as") || "email" do
       "comment" -> deliver_as_comment(subject, html_body, context)
       "task" -> deliver_as_task(subject, html_body, context)
-      _email -> deliver_as_email(subject, html_body, context.config)
+      _email -> deliver_as_email(subject, html_body, context)
     end
   end
 
@@ -614,8 +615,8 @@ defmodule KilnCMS.Automation.RuleWorker do
   # then bill five generations, and ship five copies of each body off-site, to
   # deliver one email. Only these reactions swallow it; a `:send_email` or
   # `:newsletter` rule is the message, here the message is advisory.
-  defp deliver_as_email(subject, html_body, config) do
-    send_rule_email(config, escape(subject, :text), html_body)
+  defp deliver_as_email(subject, html_body, context) do
+    send_rule_email(context.config, context.org_id, escape(subject, :text), html_body)
   rescue
     error in [KilnCMS.Mail.TransientDeliveryError] ->
       Logger.warning(
@@ -628,7 +629,10 @@ defmodule KilnCMS.Automation.RuleWorker do
 
   # One delivery skeleton for every emailing reaction, so header/policy
   # changes (from-address, missing-`to` handling) can't diverge per action.
-  defp send_rule_email(config, subject_text, html) do
+  #
+  # `org_id` is the rule's site: its mail goes out through that site's own relay
+  # when it has one (#1322).
+  defp send_rule_email(config, org_id, subject_text, html) do
     to = config["to"]
 
     if is_binary(to) and to != "" do
@@ -637,7 +641,7 @@ defmodule KilnCMS.Automation.RuleWorker do
       |> to(to)
       |> subject(subject_text)
       |> html_body(html)
-      |> KilnCMS.Mail.deliver_for_worker()
+      |> KilnCMS.Mail.deliver_for_worker(org_id: org_id)
     else
       Logger.warning("Automation email rule missing a `to` address; skipping.")
       :ok

@@ -79,11 +79,34 @@ defmodule KilnCMS.Firing.Delivery do
   anonymous caller may read, and one keyed only on `{org, type, slug, locale}`
   cannot also hold a locked body without eventually serving it to someone who
   proved nothing.
+
+  ## Locale fallback
+
+  `mode` is the request's fallback mode (`KilnCMS.I18n.Fallback`), so the
+  record may be in another locale than `locale` — its own `locale` field says
+  which, and the caller reports that one.
+
+  Only the site's own chain (`:site`) is cached, under the requested locale's
+  key. A narrowed request (`:none`, `{:only, other}`) is answered **from those
+  same entries** rather than from keys of its own: it walks its chain and keeps
+  the first entry whose record is in the locale it was looked up under. That is
+  exact, because the site's chain always tries the requested locale first — a
+  `fr-CA` entry holding a French record means no readable `fr-CA` variant
+  existed when it was cached, and publishing one busts the entry (`KilnCMS.Cache.bust/3`
+  drops every locale key of a slug). So a narrowed request stays DB-free when
+  warm, and there is exactly one set of keys to invalidate.
   """
-  @spec published(Ash.UUID.t(), atom() | String.t(), String.t(), String.t(), [String.t()]) ::
+  @spec published(
+          Ash.UUID.t(),
+          atom() | String.t(),
+          String.t(),
+          String.t(),
+          [String.t()],
+          KilnCMS.I18n.Fallback.mode()
+        ) ::
           {:ok, struct()} | :not_found | :unavailable
-  def published(org_id, type, slug, locale, unlocks \\ []) do
-    resolve(org_id, type, slug, locale, unlocks)
+  def published(org_id, type, slug, locale, unlocks \\ [], mode \\ :site) do
+    resolve(org_id, type, slug, locale, unlocks, mode)
     |> case do
       nil -> :not_found
       record -> {:ok, record}
@@ -111,22 +134,37 @@ defmodule KilnCMS.Firing.Delivery do
       end
   end
 
-  defp resolve(org_id, type, slug, locale, []) do
-    KilnCMS.Cache.fetch_published(org_id, to_string(type), slug, locale, fn ->
-      read_published(org_id, type, slug, locale, [])
+  defp resolve(org_id, type, slug, locale, [], :site), do: cached(org_id, type, slug, locale)
+
+  # A narrowed chain, answered from the `:site` entries — see `published/6`.
+  defp resolve(org_id, type, slug, locale, [], mode) do
+    org_id
+    |> KilnCMS.I18n.Fallback.chain(locale, mode)
+    |> Enum.find_value(fn step ->
+      case cached(org_id, type, slug, step) do
+        %{locale: ^step} = record -> record
+        _other -> nil
+      end
     end)
   end
 
-  defp resolve(org_id, type, slug, locale, unlocks),
-    do: read_published(org_id, type, slug, locale, unlocks)
+  defp resolve(org_id, type, slug, locale, unlocks, mode),
+    do: read_published(org_id, type, slug, locale, unlocks, mode)
 
-  defp read_published(org_id, type, slug, locale, unlocks) do
+  defp cached(org_id, type, slug, locale) do
+    KilnCMS.Cache.fetch_published(org_id, to_string(type), slug, locale, fn ->
+      read_published(org_id, type, slug, locale, [], :site)
+    end)
+  end
+
+  defp read_published(org_id, type, slug, locale, unlocks, mode) do
     # Bypass kept (see the moduledoc's "Authorization on this path"): the
     # `:public_by_slug` action's own filter carries the published / audience /
     # unlock grant, and a system actor here would be a standing corpus-wide
     # grant rather than this one pinned filter.
     ContentTypes.get_published_by_slug(type, slug, locale,
       unlocks: unlocks,
+      fallback: mode,
       authorize?: false,
       tenant: org_id
     )
@@ -140,24 +178,42 @@ defmodule KilnCMS.Firing.Delivery do
   read's, so this can describe a document without being able to serve it. The
   caller uses it only to decide between "no such content" and "prove you know
   the passphrase".
+
+  Walks the same fallback chain `published/6` does (`mode`), and answers the
+  first locale on it with a locked variant, so the document a `401` names and
+  the one `POST …/unlock` verifies against are the same document. It is only
+  reached once `published/6` found nothing readable anywhere on the chain.
   """
-  @spec locked(Ash.UUID.t(), atom() | String.t(), String.t(), String.t()) ::
-          {:ok, struct()} | :not_found
-  def locked(org_id, type, slug, locale) do
-    # Bypass kept for the same reason as `read_published/5` — see the
+  @spec locked(
+          Ash.UUID.t(),
+          atom() | String.t(),
+          String.t(),
+          String.t(),
+          KilnCMS.I18n.Fallback.mode()
+        ) :: {:ok, struct()} | :not_found
+  def locked(org_id, type, slug, locale, mode \\ :site) do
+    org_id
+    |> KilnCMS.I18n.Fallback.chain(locale, mode)
+    |> Enum.find_value(:not_found, fn step ->
+      case locked_in(org_id, type, slug, step) do
+        nil -> nil
+        record -> {:ok, record}
+      end
+    end)
+  rescue
+    _ -> :not_found
+  end
+
+  defp locked_in(org_id, type, slug, locale) do
+    # Bypass kept for the same reason as `read_published/6` — see the
     # moduledoc. This action's filter is narrower still: published AND locked,
     # projected without the block tree, so it can describe a document it cannot
     # serve.
-    case ContentTypes.get_locked_by_slug(type, slug, locale,
-           not_found_error?: false,
-           authorize?: false,
-           tenant: org_id
-         ) do
-      nil -> :not_found
-      record -> {:ok, record}
-    end
-  rescue
-    _ -> :not_found
+    ContentTypes.get_locked_by_slug(type, slug, locale,
+      not_found_error?: false,
+      authorize?: false,
+      tenant: org_id
+    )
   end
 
   @doc """

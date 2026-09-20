@@ -106,6 +106,29 @@ defmodule KilnCMS.Federation.Activity do
   end
 
   @doc """
+  An `Update` of the site's own actor, sent after a re-key (#1487) so servers
+  that process actor updates replace the `publicKeyPem` they cached.
+
+  The object is the full actor document (`KilnCMS.Federation.Actor.document/1`)
+  rather than a key alone: an actor `Update` replaces the actor, and one
+  carrying only a key would read as the actor losing everything else. The id
+  is fresh per re-key — two re-keys are two updates, and a receiver that
+  deduplicates on activity id must not drop the second.
+  """
+  @spec update_actor(map(), map()) :: map()
+  def update_actor(actor_document, identity) do
+    %{
+      "@context" => actor_document["@context"],
+      "id" => "#{identity.origin}/ap/activity/update/actor/#{Ash.UUID.generate()}",
+      "type" => "Update",
+      "actor" => identity.actor_id,
+      "to" => [@public],
+      "cc" => [identity.followers],
+      "object" => Map.delete(actor_document, "@context")
+    }
+  end
+
+  @doc """
   An `Accept` of a remote `Follow`, which is what makes the follow stick.
 
   The echoed `object` is **rebuilt** from four known fields rather than being

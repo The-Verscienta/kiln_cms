@@ -26,12 +26,15 @@ defmodule KilnCMSWeb.Plugs.ApiCORS do
   # every response header that is not on this list, so without it
   # `res.headers.get('retry-after')` is `null` for exactly the allow-listed
   # front ends `CORS_ORIGINS` exists to serve — a documented header that the
-  # audience it was documented for cannot read.
+  # audience it was documented for cannot read. `etag` / `if-match` are the
+  # same argument for optimistic concurrency: a browser front end that cannot
+  # read the tag cannot send it back, and one that cannot send `If-Match`
+  # cross-origin cannot make a guarded write at all.
   @corsica Corsica.init(
              origins: {KilnCMSWeb.CORS, :allowed_origin?, []},
              allow_methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-             allow_headers: ["authorization", "content-type", "x-api-key"],
-             expose_headers: ["retry-after"],
+             allow_headers: ["authorization", "content-type", "x-api-key", "if-match"],
+             expose_headers: ["retry-after", "etag"],
              max_age: 600
            )
 

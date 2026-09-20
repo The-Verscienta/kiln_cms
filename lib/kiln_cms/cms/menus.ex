@@ -77,19 +77,32 @@ defmodule KilnCMS.CMS.Menus do
       fn ->
         case resolve(key, locale, org_id) do
           {:ok, _menu, tree} -> tree
-          :not_found -> []
+          :not_found -> not_found_tree(org_id)
         end
       end
-    )
+    ) || []
+  end
+
+  # A miss is cached as `[]` — except while the site's fallback settings cannot
+  # be read. The walk then tried the requested locale alone
+  # (`KilnCMS.I18n.Fallback.unavailable/0`), so "no menu" may only mean "the
+  # chain was not consulted", and caching that would blank a French page's
+  # navigation for the whole TTL on a site that chains `fr-CA → fr`. `nil` is
+  # never cached, so the next request walks the chain again.
+  defp not_found_tree(org_id) do
+    if KilnCMS.I18n.Fallback.chains(org_id).degraded?, do: nil, else: []
   end
 
   @doc """
   The menu `key` in `locale`, resolved for `org_id` — `{:ok, menu, tree}`, or
   `:not_found` when no such menu exists for that locale.
 
-  A missing locale variant is deliberately **not** a fallback to the default
-  locale: serving English navigation on a French page is a worse answer than
-  serving none, and only the caller knows which it prefers.
+  A missing locale variant falls back only along a chain someone **configured**
+  — the site's `SiteLocaleSettings`, the operator's `:i18n` `fallbacks`, or the
+  request's own `fallback_locale` (`KilnCMS.I18n.Fallback`). It never takes the
+  implicit last hop to the default locale that content takes: serving English
+  navigation on a French page is a worse answer than serving none unless the
+  site said otherwise. The returned menu's `locale` is the one served.
 
   ## Options
 
@@ -102,18 +115,26 @@ defmodule KilnCMS.CMS.Menus do
     * `:include_hidden?` — keep items an editor switched off and items whose
       target isn't published. For the editor's own preview of a menu; never for
       delivery. Defaults to `false`.
+    * `:fallback` — the request's fallback mode (`:site`, `:none`,
+      `{:only, locale}`). Defaults to `:site`.
   """
   @spec resolve(String.t(), String.t(), Ash.UUID.t(), keyword()) ::
           {:ok, Menu.t(), [node_map()]} | :not_found
   def resolve(key, locale, org_id, opts \\ []) do
-    case CMS.get_menu_by_key!(key, locale,
-           authorize?: false,
-           tenant: org_id,
-           not_found_error?: false
-         ) do
-      nil -> :not_found
-      menu -> {:ok, menu, tree(menu, org_id, opts)}
-    end
+    mode = Keyword.get(opts, :fallback, :site)
+
+    org_id
+    |> KilnCMS.I18n.Fallback.chain(locale, mode, implicit_default?: false)
+    |> Enum.find_value(:not_found, fn step ->
+      case CMS.get_menu_by_key!(key, step,
+             authorize?: false,
+             tenant: org_id,
+             not_found_error?: false
+           ) do
+        nil -> nil
+        menu -> {:ok, menu, tree(menu, org_id, opts)}
+      end
+    end)
   end
 
   @doc """

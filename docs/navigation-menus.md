@@ -95,9 +95,15 @@ than a per-item translations map. Labels, ordering, and *which items exist* all
 differ between locales in practice ("Impressum" has no English sibling), and a
 map can only translate the first of those.
 
-A missing locale variant is a **miss, not a fallback**: silently serving English
-navigation on a French page is a worse answer than serving none, and only the
-caller knows which it prefers.
+A missing locale variant falls back **only along a chain someone configured** —
+the site's locale fallback chains (`/editor/locales`, e.g. `fr-CA → fr`) or a
+request's `?fallback_locale=` — and otherwise is a miss. Unlike content, a menu
+never takes the implicit hop to the default locale on its own: silently serving
+English navigation on a French page is a worse answer than serving none unless
+the site said otherwise. The response's `locale` (and `x-kiln-locale` /
+`Content-Language`) names the variant served, and a locale the site does not
+run is `400 unsupported_locale` rather than the default menu. See
+[api.md → Locale fallback](api.md#locale-fallback).
 
 ## Delivery
 

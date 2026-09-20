@@ -101,6 +101,31 @@ defmodule KilnCMS.Storage do
                }}
               | {:error, term()}
 
+  @doc """
+  A time-limited URL a client can `PUT` exactly `byte_size` bytes to, landing
+  at `key` in **private** storage — the first leg of the direct-upload API
+  (`KilnCMS.Media.DirectUpload`).
+
+  Optional, because only an adapter with a separate object store has a URL
+  that is not this app: the S3 adapter presigns one against its private
+  bucket, the Local adapter has nothing to presign and does not implement it
+  (a file uploaded "directly" to the Local adapter would be uploaded to this
+  app, which is what `POST /api/media` already is). `direct_uploads_available?/0`
+  is the check.
+
+  The returned `headers` are part of the signature and the client MUST send
+  them as given — `content-length` among them, which is what makes the object
+  store itself refuse a body of any other size.
+  """
+  @callback presign_private_put(
+              key :: String.t(),
+              byte_size :: pos_integer(),
+              expires_in :: pos_integer()
+            ) ::
+              {:ok, %{url: String.t(), headers: %{String.t() => String.t()}}} | {:error, term()}
+
+  @optional_callbacks presign_private_put: 3
+
   @spec adapter() :: module()
   def adapter do
     :kiln_cms
@@ -144,6 +169,29 @@ defmodule KilnCMS.Storage do
 
   @spec private_available?() :: boolean()
   def private_available?, do: adapter().private_available?()
+
+  @doc """
+  Whether the direct-upload API can run: the adapter presigns
+  (`presign_private_put/3`) AND has private storage to presign into. The
+  staging object holds an upload nobody has sniffed or stripped yet, so it
+  must never land anywhere a delivery route serves from — hence private, and
+  hence no fallback to the public bucket when there is none.
+  """
+  @spec direct_uploads_available?() :: boolean()
+  def direct_uploads_available? do
+    adapter = adapter()
+
+    Code.ensure_loaded?(adapter) and function_exported?(adapter, :presign_private_put, 3) and
+      adapter.private_available?()
+  end
+
+  @spec presign_private_put(String.t(), pos_integer(), pos_integer()) ::
+          {:ok, %{url: String.t(), headers: %{String.t() => String.t()}}} | {:error, term()}
+  def presign_private_put(key, byte_size, expires_in) do
+    if direct_uploads_available?(),
+      do: adapter().presign_private_put(key, byte_size, expires_in),
+      else: {:error, :direct_uploads_unavailable}
+  end
 
   @type range_read :: %{
           bytes: binary(),

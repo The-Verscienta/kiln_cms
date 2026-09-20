@@ -69,8 +69,6 @@ The things an operator would hit in their first months of running Kiln.
   production consumer, and yet [`docs/performance.md`](performance.md) calls
   them scrapeable. Pick a reporter, or say plainly there is none, and make
   both docs agree. Without this, 1.0's performance targets cannot be measured.
-- **The half-done usability issue (#1323).** The Overview still ships as a
-  bagua, with a "taiji · centre" tile.
 - **Docs accuracy pass (#1532).** Fix the claims found stale while writing this page:
   - the README status section names `v0.8.0` and calls #1453 "in flight"
   - it says there are no external contributors (#1445 merged one)
@@ -94,7 +92,7 @@ The things an operator would hit in their first months of running Kiln.
   still accepted at 1.0. The ones most worth deciding explicitly:
   - `TENANT_STRICT_HOST` ships off. Decided: it turns on automatically
     once a second organization exists (#1547, in this milestone)
-  - `/live` events and `/ws/gql` subscription documents are not rate-limited
+  - `/live` events are not rate-limited
   - webhooks have no replay protection
   - `/api/ask` lets an anonymous caller drive LLM cost
 - **External review of the authentication surface (#1536).** This is the one

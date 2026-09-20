@@ -43,6 +43,9 @@ defmodule KilnCMSWeb.EditorLive do
        KilnCMS.CMS.EditorialSettings.editors_can_publish?(socket.assigns.current_org)
      )
      |> assign(:page_title, gettext("Content"))
+     # Words or the opt-in trigram glyph per row (#1323) — chosen on Your
+     # settings, so read once here rather than per render.
+     |> assign(:status_marks, status_marks(socket.assigns.current_user))
      # `:content_types` is owned by handle_params (which always runs after
      # mount) so the type filter, the "New …" buttons and the listing query all
      # read one freshly-loaded registry per navigation.
@@ -446,7 +449,7 @@ defmodule KilnCMSWeb.EditorLive do
     end
   end
 
-  # The "fully translated" bit of each row's status trigram: which visible
+  # The "fully translated" bit of each row's status marks: which visible
   # {kind, slug} groups have a variant in every configured locale. One
   # slug-batched query per kind on the visible page; `nil` (single-locale
   # site) means trivially covered.
@@ -968,6 +971,7 @@ defmodule KilnCMSWeb.EditorLive do
               class="size-4 shrink-0 rounded border border-base-content/30 accent-primary"
             />
             <.content_trigram
+              :if={@status_marks == :trigrams}
               published={record.state == :published}
               translated={translated?(@translated, kind, record.slug)}
               scheduled={scheduled?(record)}
@@ -981,6 +985,10 @@ defmodule KilnCMSWeb.EditorLive do
               <p class="truncate text-xs text-base-content/70">/{record.slug}</p>
             </div>
             <.state_badge state={record.state} />
+            <.content_status_marks
+              :if={@status_marks == :words}
+              translated={translated?(@translated, kind, record.slug)}
+            />
             <%!-- A live record whose working copy has run ahead of its
                   published text (docs/working-copy.md). --%>
             <span
@@ -1015,6 +1023,7 @@ defmodule KilnCMSWeb.EditorLive do
               title={gettext("Scheduled to publish")}
             >
               <.icon name="hero-clock" class="size-3.5" />
+              <span>{gettext("Publishes")}</span>
               <time
                 id={"scheduled-#{kind}-#{record.id}"}
                 phx-hook="LocalTime"
@@ -1027,6 +1036,7 @@ defmodule KilnCMSWeb.EditorLive do
               title={gettext("Scheduled to unpublish")}
             >
               <.icon name="hero-clock" class="size-3.5" />
+              <span>{gettext("Unpublishes")}</span>
               <time
                 id={"unpublish-#{kind}-#{record.id}"}
                 phx-hook="LocalTime"

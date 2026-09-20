@@ -10,6 +10,7 @@ defmodule KilnCMS.WebhookReliabilityTest do
   use KilnCMS.DataCase, async: false
 
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.WebhookEndpoint
   alias KilnCMS.Webhooks
 
   setup do
@@ -87,6 +88,8 @@ defmodule KilnCMS.WebhookReliabilityTest do
         {:received, conn.method, body,
          %{
            signature: Plug.Conn.get_req_header(conn, Webhooks.signature_header()),
+           timestamped: Plug.Conn.get_req_header(conn, Webhooks.timestamped_signature_header()),
+           delivery_id: Plug.Conn.get_req_header(conn, Webhooks.delivery_id_header()),
            event: Plug.Conn.get_req_header(conn, Webhooks.event_header()),
            content_type: Plug.Conn.get_req_header(conn, "content-type")
          }}
@@ -102,10 +105,21 @@ defmodule KilnCMS.WebhookReliabilityTest do
 
     assert_received {:received, "POST", body, headers}
 
-    assert Jason.decode!(body) == %{"event" => "page.published", "data" => %{"title" => "Hello"}}
+    [delivery] = CMS.recent_webhook_deliveries!(authorize?: false)
+
+    assert Jason.decode!(body) == %{
+             "event" => "page.published",
+             "delivery_id" => delivery.id,
+             "data" => %{"title" => "Hello"}
+           }
+
     assert headers.event == ["page.published"]
+    assert headers.delivery_id == [delivery.id]
     assert headers.content_type == ["application/json"]
-    assert headers.signature == [Webhooks.signature(endpoint.secret, body)]
+    secret = WebhookEndpoint.secret(endpoint)
+    assert headers.signature == [Webhooks.signature(secret, body)]
+    assert [timestamped] = headers.timestamped
+    assert Webhooks.verify(secret, body, timestamped) == :ok
   end
 
   test "a URL the address check refuses is recorded, not dialled" do
@@ -115,7 +129,7 @@ defmodule KilnCMS.WebhookReliabilityTest do
     endpoint =
       Ash.Seed.seed!(KilnCMS.CMS.WebhookEndpoint, %{
         url: "http://169.254.169.254/latest/meta-data/",
-        secret: "s3cret",
+        secret_encrypted: KilnCMS.Keys.Vault.encrypt("s3cret"),
         events: ["page.published"],
         active: true
       })

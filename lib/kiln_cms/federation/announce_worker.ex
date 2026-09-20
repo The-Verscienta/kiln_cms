@@ -29,8 +29,6 @@ defmodule KilnCMS.Federation.AnnounceWorker do
   alias KilnCMS.Federation
   alias KilnCMS.Federation.Activity
   alias KilnCMS.Federation.Actor
-  alias KilnCMS.Federation.DeliveryWorker
-  alias KilnCMS.Federation.Follower
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
@@ -124,31 +122,9 @@ defmodule KilnCMS.Federation.AnnounceWorker do
   defp fan_out(settings, document, verb, org_id) do
     identity = Actor.identity(settings)
     activity = build(verb, document, identity, settings, org_id)
+    activity_type = verb |> String.downcase() |> String.to_existing_atom()
 
-    # `:deliverable` (#967) — the read that names the rule, rather than the
-    # rule restated here.
-    followers = Federation.deliverable_followers!(authorize?: false, tenant: org_id)
-
-    Enum.each(followers, fn follower ->
-      {:ok, delivery} =
-        Federation.create_federation_delivery(
-          %{
-            follower_id: follower.id,
-            inbox_uri: Follower.delivery_inbox(follower),
-            activity_type: verb |> String.downcase() |> String.to_existing_atom(),
-            activity: activity,
-            document_id: document.id
-          },
-          authorize?: false,
-          tenant: org_id
-        )
-
-      %{"org_id" => org_id, "delivery_id" => delivery.id}
-      |> DeliveryWorker.new()
-      |> Oban.insert()
-    end)
-
-    :ok
+    Federation.deliver_to_followers(activity, activity_type, document.id, org_id)
   end
 
   defp build("Delete", document, identity, _settings, _org_id),
