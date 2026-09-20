@@ -22,8 +22,9 @@ what the surface exposes and how writes are authorized.
 | `/gql/playground` | **dev only** — not served by a production build | Interactive GraphiQL playground |
 | `/ws/gql` | always on | Absinthe websocket: subscriptions, and queries and mutations too |
 
-The endpoint is rate-limited (`KilnCMSWeb.Plugs.RateLimit, :gql`) and reads an
-optional bearer token (`load_from_bearer`). Anonymous requests are fully
+The endpoint is rate-limited to 60 documents a minute per client address, over
+`/gql` and `/ws/gql` together (the `:gql` bucket; see [Query cost](#query-cost)),
+and reads an optional bearer token (`load_from_bearer`). Anonymous requests are fully
 supported — they simply run through the resource read policies, which already
 make **published content world-readable and everything else editor-only**. So an
 unauthenticated query can only ever see published content and world-readable
@@ -51,7 +52,7 @@ from its singular type name. For `post`:
 
 | Query | Action | Arguments | Returns |
 |-------|--------|-----------|---------|
-| `postBySlug` | `:public_by_slug` | `slug: String!`, `locale: String!` | one published post (or `null`) |
+| `postBySlug` | `:public_by_slug` | `slug: String!`, `locale: String!`, `fallback`, `fallbackLocale` | one published post (or `null`), through the site's locale fallback chain |
 | `postTranslations` | `:published_translations` | `slug: String!` | every published locale variant of a slug |
 | `publishedPosts` | `:published` | `limit`, `offset`, `customFilter`, `customSort` | published posts, newest first, **offset-paginated** (`PageOfPost`) |
 | `searchPosts` | `:search` | `query: String!`, `locale`, `categoryId`, `authorId`, `state`, `tagIds`, `customFilter` | full-text matches, relevance-ranked |
@@ -78,6 +79,14 @@ consumers never need the plain, credential-widened list.
 > `*BySlug` queries require both `slug` and `locale` because content is modelled
 > per-locale (unique `[slug, locale]`). Use `postTranslations` to discover which
 > locales exist for a slug.
+>
+> A missing translation is answered along the **site's fallback chain**
+> (`fr-CA → fr → en`, set at `/editor/locales`): select `locale` on the result
+> to see which variant you got. `fallback: false` returns the requested locale
+> or `null`; `fallbackLocale: "fr"` tries that one instead of the chain. A
+> locale the site does not run is an error on the field, not the default
+> locale. The top-level `menu(key:, locale:, fallback:, fallbackLocale:)` query
+> follows only a *configured* chain. See [api.md → Locale fallback](api.md#locale-fallback).
 
 > `customFilter` (JSON) and `customSort` (String) query **admin-defined custom
 > fields**: `customFilter: {price: {gt: 10}}, customSort: "-price"`. The same
@@ -387,9 +396,17 @@ A list costs its row count times the cost of one row:
 If a listing page goes over, ask for a smaller page, pass `limit` on its
 relationships, or fetch the per-item detail separately.
 
+**Rate limit.** Each document counts once against a budget of 60 a minute per
+client address. The budget is shared by `/gql` and `/ws/gql`: a document sent
+over the socket costs the same as a request. Over it, `/gql` answers `429` with
+a `retry-after` header, and the socket answers that document with an error
+whose `extensions` are `{"code": "too_many_requests", "retry_after": <seconds>}`.
+The socket stays open. A subscription counts once, when you subscribe; the
+updates it pushes to you are free.
+
 **Batches.** A JSON array body runs each element as its own operation. Each one
-is counted against the `/gql` rate limit, so ten operations in one request
-cost the same as ten requests.
+is counted against the rate limit, so ten operations in one request cost the
+same as ten requests.
 
 **Introspection** (`__schema`, `__type`) is refused in production, however the
 document arrives. The playground needs it, which is why the playground is

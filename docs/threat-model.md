@@ -51,7 +51,7 @@ the router so preflights are answered before route matching).
 |---|---|---|---|
 | Public HTML delivery | `/`, `/:slug`, `/:type/:slug`, `/blog`, `/blog/:slug`, `/search`, `/*path` | none | `:delivery` |
 | Probes & SEO | `/up`, `/sitemap.xml`, `/robots.txt`, `/llms.txt` | none | `:probe` |
-| GraphQL | `/gql` (GET + POST), `/ws/gql` | optional JWT / API key | `:gql` (per operation), `:gql_join` (socket connects) |
+| GraphQL | `/gql` (GET + POST), `/ws/gql` | optional JWT / API key | `:gql` (per operation, on both transports), `:gql_join` (socket connects) |
 | JSON:API | `/api/json/**` (GET/POST/PATCH/DELETE) | optional JWT / API key | `:api` |
 | Headless REST | `/api/content/**`, `/api/resolve`, `/api/locales`, `/api/search`, `/api/ask`, `/api/provenance/**`, `/api/visual-editing/:type/:slug` | optional JWT / API key | `:api` |
 | OpenAPI & explorer | `/api/json/open_api`, `/api/json/swaggerui` | none — and **not served in prod** unless `API_DOCS_ENABLED` (#567); the document (never the explorer) also answers any valid API key | `:docs` |
@@ -68,8 +68,10 @@ the router so preflights are answered before route matching).
 | Second factor | `GET`/`POST /sign-in/verify` | signed `:pending_2fa` token + TOTP or recovery code | `:auth`; the `POST` also per-account, tighter than sign-in (#714) |
 | Credential submits over `/live` | LiveView `"submit"` on the sign-in, register, reset-request and magic-link forms — **all four render on all three auth pages** | credentials → session / account / mail | charged on the *action*, since no plug can reach them: sign-in `:auth` (#715) + per-account (#478); registration `:register` (#724); reset and magic-link `:auth` (#724) + the per-address mail budget |
 | Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none, except the three TOTP actions on `/editor/settings`: per-account, the second factor's own bucket (#727) |
+| Media bytes | `/media/:id/download`, `/media/:id/stream` | session (a gated item needs its audience) | `:delivery` |
+| Image transforms | `/media/:id/t/:ops` | session (same read as the download); unsigned URLs allowlisted, signed ones HMAC-checked | `:media_transform` per request + `:media_render` per cache miss, plus a per-node render gate |
 | Media blobs | `/uploads/*` (`Plug.Static`) | none | none |
-| Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token + per-document read / API key + per-document read | `/live` root joins `:live_join` per address (#1183); every frame on a `/ws/collab` connection `:collab_event` per account (#1305); otherwise none (except the sign-in submit, above) |
+| Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token + per-document read / preview token (one document, re-verified until it expires) or API key + per-document read | `/live` root joins `:live_join` per address (#1183); every frame on a `/ws/collab` connection `:collab_event` per account (#1305); otherwise none (except the sign-in submit, above) |
 | Dev tools | `/dev/dashboard`, `/dev/mailbox`, `/admin`, `/gql/playground` | compile-gated off in prod | — |
 
 **`/ws/collab` is a prototype surface.** Its joins are refused unless
@@ -233,10 +235,13 @@ build if a resource is ever registered without that authorizer.
   nest for free. A batched `/gql` body may carry 10 operations at most, and each
   is charged to `:gql` (`KilnCMSWeb.Plugs.GraphqlBatchLimit`). Introspection is
   refused in production by a pipeline phase that reads the parsed document, so
-  a batched body and a socket document are checked like a single query. Until
-  2026-09 the cap applied only to single `/gql` requests: the socket had no
-  limits, a batch was one request whatever it carried, and a batched body got
-  past the introspection block.
+  a batched body and a socket document are checked like a single query. Each
+  document sent over `/ws/gql` is charged to `:gql` too, under the address the
+  socket connected from (`KilnCMSWeb.GraphqlLimits.SocketDocumentBudget`); a
+  subscription's pushes are not. Until 2026-09 the cap applied only to single
+  `/gql` requests: the socket had no limits, a batch was one request whatever
+  it carried, a batched body got past the introspection block, and a socket
+  could send any number of documents once connected.
 - **HTTPS / HSTS** — `force_ssl` with `x_forwarded_proto` rewriting in
   `config/prod.exs`.
 - **Session cookies** — signed *and* encrypted, `SameSite=Lax`, `http_only`, and
@@ -333,6 +338,27 @@ build if a resource is ever registered without that authorizer.
 - **Scraping / enumeration** — content is public and the sitemap is intentional.
   The `:delivery` bucket caps volume; front with a CDN to absorb load.
 
+### Image transforms (`/media/:id/t/:ops`)
+- **Resource exhaustion** — every distinct parameter set is a decode, a resize
+  and an encode, and the route is anonymous. Bounded in layers: unsigned URLs
+  may only use an allowlist of sizes, ratios and qualities (a signed URL may use
+  any value, and signing needs `KILN_IMAGE_TRANSFORM_KEY` or `SECRET_KEY_BASE`);
+  every output side is capped at 4000px and every source at the upload pixel
+  cap, the latter checked from the recorded dimensions before decoding; cache
+  misses spend a per-IP `:media_render` budget and wait on a per-node
+  concurrency gate; and an item keeps at most 200 derivatives, after which
+  renders are served but not stored. Parameters and signatures are checked
+  before the item is read, so refusals cost no I/O. *Watch:* behind a proxy
+  or CDN that isn't configured as trusted, every client shares the proxy's
+  address and so one render budget — the same caveat as every per-IP bucket.
+- **Signing-key exposure** — a leaked `KILN_IMAGE_TRANSFORM_KEY` lifts the
+  allowlist, not the hard caps or the render gate. Rotating it invalidates
+  signed URLs already in pages. It must stay server-side; the SDKs say so.
+- **Gated media** — the route reads the item with the request's actor through
+  the same policy-checked read as `/media/:id/download`, so a gated or
+  quarantined item is a 404 there too, and a gated item's derivatives live in
+  private storage and are served `private, no-store`.
+
 ### GraphQL / JSON:API / REST
 - **Authorization bypass** — prevented by Ash policies running with the request
   actor and tenant; there is no unauthenticated mutation path that skips them.
@@ -344,9 +370,9 @@ build if a resource is ever registered without that authorizer.
   2,000 tokens on both transports, and a batch at 10 operations. Complexity is
   a price, not a row count: a relationship list without `limit` is priced at
   five rows and can return more, so the cap limits how deeply lists nest rather
-  than how many rows one document returns. Documents on `/ws/gql` are not
-  counted against `:gql` (residual item 10). Introspection is off in
-  production.
+  than how many rows one document returns. Each document on `/ws/gql` is
+  charged to `:gql` like a `/gql` request (residual item 10). Introspection is
+  off in production.
 - **Error verbosity** — keep `:logger` at `:info` in prod (already set).
 
 ### MCP (`/mcp`)
@@ -1017,15 +1043,30 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     4xx-during-mount shape to raise here, so the client's own reconnect logic
     backs off and retries, the same as any other refused socket connect.
 
+    **Narrowed further, `/ws/gql` documents:** each document a client sends
+    over an open `/ws/gql` connection (a query, a mutation or a subscription)
+    is now charged to `:gql`, the bucket `/gql` requests are charged to, under
+    the address the connect was charged under
+    (`KilnCMSWeb.GraphqlLimits.SocketDocumentBudget`, the first phase of the
+    socket's document pipeline). One bucket for both transports, so moving
+    from `/gql` to the socket gains a client nothing. Per address, not per
+    actor as `/ws/collab` frames are: documents are not a per-keystroke
+    stream, the per-address size `/gql` already has fits them, and an
+    anonymous socket, where the gap was, has no actor. A subscription's pushes
+    are not charged. They re-run the phases `Absinthe.Phase.Init` recorded when
+    the client subscribed, and the budget runs before Init. Over budget, the
+    document is answered with a GraphQL error (`too_many_requests`, with
+    `retry_after` in seconds) before it is parsed, and the connection and its
+    subscriptions stay up. Each document is also held to the complexity, depth
+    and token limits `/gql` has (`KilnCMSWeb.GraphqlLimits`).
+
     Still uncounted, and still this item's remaining gap: events on
     `/live` (no lifecycle hook runs before every `handle_event/3`; the sign-in
-    submit stays the one charged case, #715) and documents on `/ws/gql`
-    (queries, mutations and subscriptions alike). Each such document is now
-    held to the same complexity, depth and token limits as `/gql`
-    (`KilnCMSWeb.GraphqlLimits`). How many a connection may send is still not
-    limited. `/ws/collab`'s frames are the one event surface counted so far
-    (#1305, above); the other two remain the harder problem that issue
-    described (no single choke point, no obvious per-event cost model).
+    submit stays the one charged case, #715). `/ws/gql`'s `unsubscribe` frames
+    are not charged either; each removes one registry entry and runs no
+    document. `/ws/collab` frames and `/ws/gql` documents are the event
+    surfaces counted so far (above); `/live` events remain the harder problem
+    #1305 described (no single choke point, no obvious per-event cost model).
 12. **Periodic CSP re-review** as the editor adds third-party assets. The
     runtime `img-src` is widened by `CSP_IMG_SRC` and by the Unsplash
     integration — the only externally-influenced part of the policy.

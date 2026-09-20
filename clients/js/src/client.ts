@@ -4,10 +4,11 @@
  * `/api/content/:type/:slug` (including `?as_of=` point-in-time reads),
  * preview tokens — minting and redeeming them — the JSON:API write surface
  * (create, update, workflow transitions, soft-delete), the media upload API
- * (`uploadMedia` and friends; Kiln's `docs/api.md` → "Uploading media") and a
- * minimal `/gql` helper (see Kiln's `docs/json-api.md` and
- * `docs/headless-consumer-guide.md`). The writes and the uploads need a read +
- * write key on an editor account.
+ * (`uploadMedia` and friends; Kiln's `docs/api.md` → "Uploading media"),
+ * image-transform URLs, the `/api/sync` delta API and a minimal
+ * `/gql` helper (see Kiln's
+ * `docs/json-api.md` and `docs/headless-consumer-guide.md`). The writes and
+ * the uploads need a read + write key on an editor account.
  *
  * A port of the official Elixir client (`clients/elixir/kiln_client`), which
  * encodes the safe defaults so consumers don't rediscover the traps one
@@ -51,6 +52,15 @@ import {
 } from "./errors.js";
 import type { SchemaDocument } from "./generator.js";
 import {
+  buildSignedTransformSrcset,
+  buildTransformSrcset,
+  signedTransformPath,
+  transformPath,
+  type TransformMedia,
+  type TransformOptions,
+  type TransformSrcsetOptions,
+} from "./transform.js";
+import {
   appendArray,
   appendFilter,
   appendIfPresent,
@@ -77,12 +87,12 @@ import type {
   Item,
   ListOptions,
   ListResult,
+  MintedPreview,
   MediaItem,
   MediaMetadata,
   MediaMetadataUpdate,
   ReleaseListOptions,
   ReleaseOptions,
-  MintedPreview,
   RequestOptions,
   RestoreResult,
   RevisionDetail,
@@ -90,6 +100,10 @@ import type {
   RevisionListOptions,
   SchemaOptions,
   SearchOptions,
+  SyncOptions,
+  SyncPage,
+  SyncResult,
+  SyncStartOptions,
   UploadMediaOptions,
   WorkflowVerb,
   WriteOptions,
@@ -129,6 +143,13 @@ export interface KilnClientOptions {
   /** Extra headers merged into every request. */
   headers?: Record<string, string>;
   /**
+   * The server's `KILN_IMAGE_TRANSFORM_KEY`, enabling `signedImageUrl()` and
+   * `signedImageSrcset()`. **Server-side only** — anyone holding it can make
+   * the server render any size, so never configure it in a client that ships
+   * to a browser. Unsigned `imageUrl()`/`imageSrcset()` need no key.
+   */
+  imageTransformKey?: string;
+  /**
    * Timeout in milliseconds for the media upload calls (default 300000),
    * applied when a call passes no `signal`. Separate from `timeoutMs` because
    * an upload is bounded by the file's size and the network, not by the
@@ -149,6 +170,7 @@ export class KilnClient {
   private readonly timeoutMs: number;
   private readonly uploadTimeoutMs: number;
   private readonly headers: Record<string, string>;
+  private readonly imageTransformKey?: string;
 
   constructor(options: KilnClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
@@ -157,6 +179,7 @@ export class KilnClient {
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.uploadTimeoutMs = options.uploadTimeoutMs ?? 300_000;
     this.headers = options.headers ?? {};
+    this.imageTransformKey = options.imageTransformKey;
   }
 
   // ── JSON:API content reads ────────────────────────────────────────────────
@@ -389,6 +412,83 @@ export class KilnClient {
     )) as AsOfIndexResult;
   }
 
+  // ── sync (delta) API ──────────────────────────────────────────────────────
+
+  /**
+   * Mirror the site's public content: a full snapshot the first time, then
+   * only what changed — upserts *and* deletions — since the cursor you stored.
+   * Follows `has_more` to the end and returns every item plus the cursor to
+   * store:
+   *
+   *     const { items, cursor } = await kiln.sync({ cursor: stored });
+   *     for (const item of items) {
+   *       if (item.op === "upsert") mirror.set(item.id, item.artifact);
+   *       else mirror.delete(item.id);
+   *     }
+   *     save(cursor);
+   *
+   * Visibility is always anonymous, whatever key the client carries: an
+   * upsert is something anyone could read now, and a document that became
+   * unpublished, archived, deleted, locked or members-only arrives as a
+   * `delete` — never with its body. Items are idempotent and may repeat
+   * across polls; apply them in order. A `400 invalid_cursor` (a rotated
+   * server secret, or a cursor from another site) means start over without
+   * `cursor`.
+   */
+  async sync<A = ArtifactDocument>(options: SyncOptions = {}): Promise<SyncResult<A>> {
+    const items: SyncResult<A>["items"] = [];
+    let page = await this.syncPageWithRetry<A>(options.cursor, options);
+
+    for (;;) {
+      items.push(...page.items);
+      if (!page.has_more) return { items, cursor: page.cursor };
+      page = await this.syncPageWithRetry<A>(page.cursor, options);
+    }
+  }
+
+  /**
+   * One page of `GET /api/sync`: `initial=true` without a cursor, else the
+   * cursor's next page. Prefer `sync()` unless you want to stream pages.
+   */
+  async syncPage<A = ArtifactDocument>(
+    cursor?: string,
+    options: SyncStartOptions = {},
+  ): Promise<SyncPage<A>> {
+    const params = new URLSearchParams();
+    if (cursor === undefined) {
+      params.append("initial", "true");
+      appendIfPresent(params, "type", options.type);
+      appendIfPresent(params, "surface", options.surface);
+    } else {
+      params.append("cursor", cursor);
+    }
+    appendIfPresent(params, "limit", options.limit);
+    return (await this.request(
+      "/api/sync",
+      params,
+      options.signal,
+      "application/json",
+    )) as SyncPage<A>;
+  }
+
+  private async syncPageWithRetry<A>(
+    cursor: string | undefined,
+    options: SyncOptions,
+  ): Promise<SyncPage<A>> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.syncPage<A>(cursor, options);
+      } catch (error) {
+        const retriable =
+          error instanceof KilnHttpError &&
+          error.status === 503 &&
+          attempt < (options.retries ?? 3);
+        if (!retriable) throw error;
+        await sleep(options.retryDelayMs ?? 2_000, options.signal);
+      }
+    }
+  }
+
   /**
    * Redeem a preview token: `GET /preview/:token` returns one unpublished
    * draft as JSON (curated public fields, raw editable block tree). Tokens are
@@ -455,6 +555,57 @@ export class KilnClient {
       options.signal,
       "application/json",
     )) as SchemaDocument;
+  }
+
+  // ── image transforms ──────────────────────────────────────────────────────
+
+  /**
+   * Absolute URL of an on-the-fly transform of `media` (a flattened
+   * `media_item`): `GET /media/:id/t/:ops`. Unsigned, so `width`/`height`
+   * snap up to the server's size ladder — safe to call in a browser:
+   *
+   *     <img src={kiln.imageUrl(media, { width: 800, format: "auto" })} …>
+   *
+   * See `transformPath` for the options and the rules.
+   */
+  imageUrl(media: TransformMedia, options: TransformOptions = {}): string {
+    return this.baseUrl + transformPath(media, options);
+  }
+
+  /**
+   * An unsigned `srcset` of absolute transform URLs for `media`, or `null`
+   * when its dimensions are unknown. See `transformSrcset`.
+   */
+  imageSrcset(media: TransformMedia, options: TransformSrcsetOptions = {}): string | null {
+    return buildTransformSrcset(media, options, this.baseUrl);
+  }
+
+  /**
+   * `imageUrl`, signed with the `imageTransformKey` the client was created
+   * with: exact sizes, no snapping. Throws if no key was configured.
+   */
+  async signedImageUrl(media: TransformMedia, options: TransformOptions = {}): Promise<string> {
+    return this.baseUrl + (await signedTransformPath(media, options, this.transformKey()));
+  }
+
+  /**
+   * `imageSrcset`, signed with the `imageTransformKey`: widths used exactly as
+   * given. Throws if no key was configured.
+   */
+  async signedImageSrcset(
+    media: TransformMedia,
+    options: TransformSrcsetOptions = {},
+  ): Promise<string | null> {
+    return buildSignedTransformSrcset(media, options, this.transformKey(), this.baseUrl);
+  }
+
+  private transformKey(): string {
+    if (this.imageTransformKey === undefined || this.imageTransformKey === "") {
+      throw new Error(
+        "Signed image URLs need the imageTransformKey client option (the server's KILN_IMAGE_TRANSFORM_KEY).",
+      );
+    }
+    return this.imageTransformKey;
   }
 
   // ── media uploads ─────────────────────────────────────────────────────────

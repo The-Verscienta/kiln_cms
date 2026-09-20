@@ -54,6 +54,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Breaking
+
+- **Headless slug lookups now answer a missing translation from the site's
+  fallback chain, and an unsupported locale is a `400`.**
+  ([#1579](https://github.com/The-Verscienta/kiln_cms/pull/1579) · [long form](docs/changelog/unreleased.md#headless-slug-lookups-now-answer-a-missing-translation-from-the-sites-fallback))
+
 ### Upgrade notes
 
 - **Webhook signing secrets move to an encrypted column.**
@@ -80,6 +86,13 @@ Every summary line below that was shortened links to its own entry there.
   order.**
   ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#rotating-secretkeybase-keeps-stored-keys-now-if-the-steps-run-in-order))
 ### Added
+
+- **`GET /api/sync`: a delta API that sees deletions.**
+  ([#1581](https://github.com/The-Verscienta/kiln_cms/pull/1581) · [long form](docs/changelog/unreleased.md#get-apisync-a-delta-api-that-sees-deletions))
+
+- **Locale fallback chains (`fr-CA → fr → en`), per site, on every delivery
+  surface.**
+  ([#1579](https://github.com/The-Verscienta/kiln_cms/pull/1579) · [long form](docs/changelog/unreleased.md#locale-fallback-chains-fr-ca-fr-en-per-site-on-every-delivery-surface))
 
 - **Webhooks announce a document's whole lifecycle: `created`, `archived`,
   `deleted` and `restored`.**
@@ -110,18 +123,24 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A site can send its mail through its own SMTP relay, set from the console.**
   ([#1322](https://github.com/The-Verscienta/kiln_cms/issues/1322) · [long form](docs/changelog/unreleased.md#a-site-can-send-its-mail-through-its-own-smtp-relay-set-from-the-console))
-
 - **`Idempotency-Key` on the headless writes.**
   ([long form](docs/changelog/unreleased.md#idempotency-key-on-the-headless-writes))
-
 - **Memberships can notify other systems: `membership.activated` and
   `membership.canceled` webhook events.**
   ([#334](https://github.com/The-Verscienta/kiln_cms/issues/334) · [long form](docs/changelog/unreleased.md#memberships-can-notify-other-systems-membershipactivated-and-membershipcanceled))
+- **On-the-fly image transforms: `GET /media/:id/t/:ops`.**
+  ([#1584](https://github.com/The-Verscienta/kiln_cms/pull/1584) · [long form](docs/changelog/unreleased.md#on-the-fly-image-transforms-get-mediaidtops))
 - **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#one-click-deploy-templates-for-render-railway-flyio-and-digitalocean))
 
 - **`KILN_MEDIA_ROOT`: a stable directory for local media.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#kilnmediaroot-a-stable-directory-for-local-media))
+
+- **Share a draft: *Copy preview link* in the editor, and a preview-token API.**
+  ([long form](docs/changelog/unreleased.md#share-a-draft-copy-preview-link-in-the-editor-and-a-preview-token-api))
+
+- **The visual-editing bridge takes a preview token instead of an API key.**
+  ([long form](docs/changelog/unreleased.md#the-visual-editing-bridge-takes-a-preview-token-instead-of-an-api-key))
 
 - **Upload media over the API: `POST /api/media`, URL imports, presigned direct
   uploads, metadata `PATCH`, and SDK support.**
@@ -132,9 +151,6 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Content releases are readable over JSON:API.**
   ([#500](https://github.com/The-Verscienta/kiln_cms/issues/500) · [long form](docs/changelog/unreleased.md#content-releases-are-readable-over-jsonapi))
-
-- **Share a draft: *Copy preview link* in the editor, and a preview-token API.**
-  ([long form](docs/changelog/unreleased.md#share-a-draft-copy-preview-link-in-the-editor-and-a-preview-token-api))
 
 - **The GraphQL schema and the OpenAPI document are committed, and a production
   site hands its own to an API key.**
@@ -181,6 +197,16 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Security
 
+- **Point-in-time reads (`?as_of=`) apply the passphrase lock and the audience
+  as live delivery does.**
+  ([#496](https://github.com/The-Verscienta/kiln_cms/issues/496), [#1032](https://github.com/The-Verscienta/kiln_cms/issues/1032) · [long form](docs/changelog/unreleased.md#point-in-time-reads-asof-apply-the-passphrase-lock-and-the-audience-as-live))
+
+- **A request on a host that names no site no longer reads the database for the
+  default site every time.**
+  ([#1580](https://github.com/The-Verscienta/kiln_cms/pull/1580) · [long form](docs/changelog/unreleased.md#a-request-on-a-host-that-names-no-site-no-longer-reads-the-database-for-the))
+
+### Security
+
 - **Webhook signing secrets are encrypted at rest.**
   ([long form](docs/changelog/unreleased.md#webhook-signing-secrets-are-encrypted-at-rest))
 
@@ -188,13 +214,17 @@ Every summary line below that was shortened links to its own entry there.
   including six CRITICAL in `ash_authentication`.**
   ([long form](docs/changelog/unreleased.md#every-advisory-published-against-the-090-dependency-set-is-fixed-including-six))
 
-- **`mint` is bumped to 1.10.1, closing an HTTP/1 response-smuggling advisory
-  published hours after the sweep above landed.**
-  ([EEF-CVE-2026-82672](https://osv.dev/vulnerability/EEF-CVE-2026-82672))
+- **`mint` 1.10.1 closes a response-smuggling advisory in its HTTP/1 chunked
+  parser (EEF-CVE-2026-82672, MEDIUM).**
+  ([#1586](https://github.com/The-Verscienta/kiln_cms/pull/1586) · [long form](docs/changelog/unreleased.md#mint-1101-closes-a-response-smuggling-advisory-in-its-http1-chunked-parser-eef))
 
 - **`/ws/gql` runs under the same cost limits as `/gql`, batches are counted per
   operation, and introspection is refused however a document arrives.**
   ([long form](docs/changelog/unreleased.md#wsgql-runs-under-the-same-cost-limits-as-gql-batches-are-counted-per-operation))
+- **Each document sent over `/ws/gql` now counts against the `:gql` rate limit,
+  and a malformed document no longer strips a GraphQL socket of its tenant and
+  actor.**
+  ([long form](docs/changelog/unreleased.md#each-document-sent-over-wsgql-now-counts-against-the-gql-rate-limit-and-a))
 ## [0.9.0] - 2026-09-18
 
 Long form: [docs/changelog/v0.9.0.md](docs/changelog/v0.9.0.md) —

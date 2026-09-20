@@ -164,7 +164,9 @@ defmodule KilnCMS.ImageProcessor do
   # covers real photography. Runtime-configurable for tests/deployments.
   @default_max_pixels 50_000_000
 
-  defp max_pixels do
+  @doc "The decompression-bomb cap, in pixels (`config :kiln_cms, :media, max_pixels:`)."
+  @spec max_pixels() :: pos_integer()
+  def max_pixels do
     :kiln_cms |> Application.get_env(:media, []) |> Keyword.get(:max_pixels, @default_max_pixels)
   end
 
@@ -351,6 +353,104 @@ defmodule KilnCMS.ImageProcessor do
       Logger.warning("ImageProcessor.transform failed for #{path}: #{inspect(e)}")
       {:error, e}
   end
+
+  @typedoc """
+  One on-the-fly transform — what the pixels need of a
+  `KilnCMS.Media.ImageTransform.Plan` (which is passed as is, extra keys and
+  all): an optional crop window in source pixels, the exact output size, and
+  the encoding.
+  """
+  @type render_spec :: %{
+          optional(atom()) => term(),
+          crop: {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()} | nil,
+          width: pos_integer(),
+          height: pos_integer(),
+          format: :jpg | :png | :webp | :avif,
+          quality: 1..100 | nil,
+          ext: String.t()
+        }
+
+  @doc """
+  Renders one on-the-fly transform of the original at `path` to a temp file
+  (the caller owns it): crop to `spec.crop`, resize to exactly
+  `spec.width`×`spec.height`, strip metadata, encode.
+
+  The planner has already refused anything over the pixel cap using the
+  recorded dimensions; this re-checks the *decoded header*, because the row is
+  editable and the file is what actually gets decompressed. Only the first
+  frame is opened — an animated source becomes a still — so the check is per
+  frame rather than `within_pixel_limit/1`'s all-frames total.
+
+  `autorotate: false` throughout: the planner's geometry is in the stored
+  pixel orientation (`width`/`height` were read that way at upload), and an
+  EXIF rotation applied here would swap the axes under it.
+  """
+  # `tmp` is server-built (System.tmp_dir! + a UUID), never user input — the
+  # File.rm traversal warning is a false positive (same as strip_metadata/2).
+  # sobelow_skip ["Traversal.FileModule"]
+  @spec render(Path.t(), render_spec(), keyword()) ::
+          {:ok, %{path: Path.t(), width: pos_integer(), height: pos_integer()}}
+          | {:error, term()}
+  def render(path, spec, opts \\ []) do
+    tmp = Path.join(System.tmp_dir!(), "#{Ecto.UUID.generate()}-transform#{spec.ext}")
+    max = Keyword.get(opts, :max_pixels, max_pixels())
+
+    with {:ok, image} <- Image.open(path),
+         :ok <- frame_within(image, max),
+         {:ok, image} <- crop_window(image, spec.crop),
+         {:ok, image} <- resize_exact(image, spec.width, spec.height),
+         {:ok, image} <- flatten_for(image, spec.format),
+         {:ok, image} <- strip(image),
+         {:ok, _} <- Image.write(image, tmp, encode_options(spec)) do
+      {:ok, %{path: tmp, width: Image.width(image), height: Image.height(image)}}
+    else
+      {:error, reason} ->
+        File.rm(tmp)
+        {:error, reason}
+    end
+  rescue
+    e ->
+      Logger.warning("ImageProcessor.render failed for #{path}: #{inspect(e)}")
+      {:error, e}
+  end
+
+  defp frame_within(image, max) do
+    if Image.width(image) * Image.height(image) <= max,
+      do: :ok,
+      else: {:error, :too_many_pixels}
+  end
+
+  defp crop_window(image, nil), do: {:ok, image}
+
+  # Clamped to the decoded frame, in case the recorded dimensions and the file
+  # disagree: a crop past the edge is a libvips error, a slightly smaller
+  # window is only a slightly different framing.
+  defp crop_window(image, {left, top, width, height}) do
+    iw = Image.width(image)
+    ih = Image.height(image)
+    left = min(left, iw - 1)
+    top = min(top, ih - 1)
+    Image.crop(image, left, top, min(width, iw - left), min(height, ih - top))
+  end
+
+  defp resize_exact(image, width, height) do
+    if Image.width(image) == width and Image.height(image) == height,
+      do: {:ok, image},
+      else: Image.thumbnail(image, "#{width}x#{height}", resize: :force, autorotate: false)
+  end
+
+  # JPEG has no alpha channel, and libvips' own conversion flattens onto black.
+  # White is what a transparent logo on a web page was drawn against.
+  defp flatten_for(image, :jpg) do
+    if Image.has_alpha?(image),
+      do: Image.flatten(image, background_color: :white),
+      else: {:ok, image}
+  end
+
+  defp flatten_for(image, _format), do: {:ok, image}
+
+  defp encode_options(%{quality: quality}) when is_integer(quality), do: [quality: quality]
+  defp encode_options(_spec), do: []
 
   defp apply_op(image, :rotate_left), do: Image.rotate(image, -90.0)
   defp apply_op(image, :rotate_right), do: Image.rotate(image, 90.0)

@@ -147,29 +147,31 @@ cold-cache 503 once before throwing; everything else that fails throws — see
 
 ## API surface
 
-| Method                               | Endpoint                                            | Notes                                                   |
-| ------------------------------------ | --------------------------------------------------- | ------------------------------------------------------- |
-| `list(plural, opts)`                 | `GET /api/json/:plural[/published]`                 | filters, sorts, includes, sparse fieldsets, pagination  |
-| `one(plural, filter, opts)`          | 〃                                                  | first match or `null`, `included` merged in             |
-| `byIds(plural, ids, opts)`           | 〃                                                  | chunked at the 100-row page cap, results in `ids` order |
-| `textSearch(plural, q, opts)`        | `GET /api/json/:plural/search[/published]`          | relevance-ranked                                        |
-| `semanticSearch(plural, q, opts)`    | `GET /api/json/:plural/semantic-search[/published]` | cosine distance; empty without embeddings               |
-| `autocomplete(plural, prefix, opts)` | `GET /api/json/:plural/autocomplete[/published]`    | typo-tolerant, ≤ 10 suggestions                         |
-| `search(q, opts)`                    | `GET /api/search`                                   | hybrid; visibility follows the credential               |
-| `artifact(type, slug, opts)`         | `GET /api/content/:type/:slug`                      | `surface`, `locale`, `asOf`; 503 retried once           |
-| `contentAsOf(type, asOf, opts)`      | `GET /api/content/:type?as_of=`                     | what was published then                                 |
-| `mintPreview(type, id)`              | `POST /api/content/:type/:id/preview-token`         | server side; `{token, url, expires_at, …}`              |
-| `preview(token)`                     | `GET /preview/:token`                               | one draft, signed 15-minute token                       |
-| `schema(opts)`                       | `GET /api/schema`                                   | the live delivery schema; feed it to `emitTypes`        |
-| `create(plural, attrs, opts)`        | `POST /api/json/:plural`                            | a draft; `:read_write` key, editor+                     |
-| `update(plural, id, attrs, opts)`    | `PATCH /api/json/:plural/:id`                       | re-fires if published; editor+                          |
-| `transition(plural, id, verb, opts)` | `PATCH /api/json/:plural/:id/<verb>`                | empty resource object; wrappers below                   |
-| `submitForReview(plural, id)`        | `PATCH …/:id/submit-for-review`                     | draft → in_review; editor+                              |
-| `returnToDraft(plural, id)`          | `PATCH …/:id/return-to-draft`                       | in_review → draft; admin                                |
-| `publish(plural, id)`                | `PATCH …/:id/publish`                               | fires artifacts; admin                                  |
-| `unpublish(plural, id)`              | `PATCH …/:id/unpublish`                             | purges artifacts; admin                                 |
-| `delete(plural, id)`                 | `DELETE /api/json/:plural/:id`                      | reversible soft-delete; admin                           |
-| `graphql(query, variables, opts)`    | `POST /gql`                                         | resolves to `data`; `errors` throw `KilnGraphQLError`   |
+| Method                               | Endpoint                                            | Notes                                                        |
+| ------------------------------------ | --------------------------------------------------- | ------------------------------------------------------------ |
+| `list(plural, opts)`                 | `GET /api/json/:plural[/published]`                 | filters, sorts, includes, sparse fieldsets, pagination       |
+| `one(plural, filter, opts)`          | 〃                                                  | first match or `null`, `included` merged in                  |
+| `byIds(plural, ids, opts)`           | 〃                                                  | chunked at the 100-row page cap, results in `ids` order      |
+| `textSearch(plural, q, opts)`        | `GET /api/json/:plural/search[/published]`          | relevance-ranked                                             |
+| `semanticSearch(plural, q, opts)`    | `GET /api/json/:plural/semantic-search[/published]` | cosine distance; empty without embeddings                    |
+| `autocomplete(plural, prefix, opts)` | `GET /api/json/:plural/autocomplete[/published]`    | typo-tolerant, ≤ 10 suggestions                              |
+| `search(q, opts)`                    | `GET /api/search`                                   | hybrid; visibility follows the credential                    |
+| `artifact(type, slug, opts)`         | `GET /api/content/:type/:slug`                      | `surface`, `locale`, `asOf`; 503 retried once                |
+| `contentAsOf(type, asOf, opts)`      | `GET /api/content/:type?as_of=`                     | what was published then                                      |
+| `mintPreview(type, id)`              | `POST /api/content/:type/:id/preview-token`         | server side; `{token, url, expires_at, …}`                   |
+| `preview(token)`                     | `GET /preview/:token`                               | one draft, signed 15-minute token                            |
+| `schema(opts)`                       | `GET /api/schema`                                   | the live delivery schema; feed it to `emitTypes`             |
+| `imageUrl(media, opts)`              | `GET /media/:id/t/:ops`                             | builds the URL, no request; unsigned, sizes snapped          |
+| `imageSrcset(media, opts)`           | 〃                                                  | `null` without dimensions; `signedImage*` twins take the key |
+| `create(plural, attrs, opts)`        | `POST /api/json/:plural`                            | a draft; `:read_write` key, editor+                          |
+| `update(plural, id, attrs, opts)`    | `PATCH /api/json/:plural/:id`                       | re-fires if published; editor+                               |
+| `transition(plural, id, verb, opts)` | `PATCH /api/json/:plural/:id/<verb>`                | empty resource object; wrappers below                        |
+| `submitForReview(plural, id)`        | `PATCH …/:id/submit-for-review`                     | draft → in_review; editor+                                   |
+| `returnToDraft(plural, id)`          | `PATCH …/:id/return-to-draft`                       | in_review → draft; admin                                     |
+| `publish(plural, id)`                | `PATCH …/:id/publish`                               | fires artifacts; admin                                       |
+| `unpublish(plural, id)`              | `PATCH …/:id/unpublish`                             | purges artifacts; admin                                      |
+| `delete(plural, id)`                 | `DELETE /api/json/:plural/:id`                      | reversible soft-delete; admin                                |
+| `graphql(query, variables, opts)`    | `POST /gql`                                         | resolves to `data`; `errors` throw `KilnGraphQLError`        |
 
 ### Media uploads
 
@@ -198,6 +200,8 @@ trusted — and runs it through the same pipeline as the editor's media library
 on S3 storage with a private bucket; otherwise it throws `KilnHttpError` 501 and
 `uploadMedia` is the route. Upload calls use `uploadTimeoutMs` (default five
 minutes) rather than `timeoutMs` when no `signal` is passed.
+| `sync(opts)` | `GET /api/sync` | snapshot, then upserts + deletes since `cursor` |
+| `syncPage(cursor, opts)` | 〃 | one page, for streaming |
 
 Dynamic (admin-created) types go through the shared `entries` surface:
 `kiln.list("entries", { filter: { type_name: "product" } })`; their artifacts
@@ -206,6 +210,78 @@ are addressed by type name like compiled types
 `kiln.list("type-definitions", { filter: { name: "product" } })` — it needs an
 editor-or-above key, and `include: ["field_definitions"]` adds each type's
 custom-field schema.
+
+To mirror the site — a build cache or search index — and learn what was taken
+down as well as what changed, loop on `sync` and store its cursor:
+
+```ts
+const { items, cursor } = await kiln.sync({ cursor: stored }); // omit cursor the first time
+for (const item of items) {
+  if (item.op === "upsert") mirror.set(item.id, item.artifact);
+  else mirror.delete(item.id); // unpublished, archived, deleted, locked or gated
+}
+stored = cursor;
+```
+
+It always reads the anonymous view, whatever `apiKey` is set, and a `delete`
+never carries a body or a reason. A `400 invalid_cursor` means start over
+without `cursor`.
+
+## Image transforms
+
+Kiln resizes, crops and re-encodes media on the fly at
+`GET /media/:id/t/:ops` — e.g. `/media/<id>/t/w_828,ar_16:9,fm_auto,v_4b87b277`.
+The builders take a flattened `media_item` (`id`, `url`, `focal_x`, `focal_y`,
+`width`, `height` — what `kiln.list("media-items")` returns) and emit the
+canonical URL, including a `v` version pin (a hash of the item's `url` and focal
+point) that lets the server cache the result as `immutable`:
+
+```ts
+const src = kiln.imageUrl(media, { width: 800, aspectRatio: "16:9", format: "auto" });
+// → https://cms.example.com/media/<id>/t/w_828,ar_16:9,fm_auto,v_…
+
+const srcset = kiln.imageSrcset(media, { aspectRatio: "16:9", format: "auto" });
+// → "…/t/w_256,ar_16:9,fm_auto,v_… 256w, …/t/w_384,… 384w, …" (null without dimensions)
+```
+
+Options: `width`, `height` (CSS px), `aspectRatio` (`"16:9"` or `[16, 9]`, instead
+of `height`), `dpr` (1–3), `fit` (`cover` | `contain`), `crop` (`focal` |
+`center` | `top` | `bottom` | `left` | `right`), `format` (`auto` | `jpg` | `png` |
+`webp` | `avif`), `quality` (1–100). `format: "auto"` lets the server pick from
+the browser's `Accept` header (AVIF when the operator enabled it, then WebP, then
+the source format). The server never upscales, so a `srcset` describes each
+candidate by the width it really renders at and drops the duplicates past the
+source's own width. Invalid options throw.
+
+**Unsigned vs signed.** Every distinct transform costs the server a render, so
+**unsigned** URLs are held to an allowlist: widths and heights from a size ladder
+(`DEFAULT_TRANSFORM_SIZES`, Next.js's default device and image sizes), and by
+default aspect ratios `1:1 4:3 3:4 3:2 2:3 4:5 5:4 16:9 9:16 21:9` and qualities
+`50 75 90`. The unsigned builders **snap `width`/`height` up** to the next rung
+(pass `sizes` if the operator configured a different ladder); keep ratios and
+qualities on their lists. **Signed** URLs may use any in-range value and are not
+snapped:
+
+```ts
+const kiln = createClient({
+  baseUrl: "https://cms.example.com",
+  imageTransformKey: process.env.KILN_IMAGE_TRANSFORM_KEY, // server-side only!
+});
+const exact = await kiln.signedImageUrl(media, { width: 801, height: 451 });
+const set = await kiln.signedImageSrcset(media, { widths: [300, 600, 1200] });
+```
+
+> **The signing key is a server secret.** `KILN_IMAGE_TRANSFORM_KEY` lets whoever
+> holds it make the server render any size — sign on a server (SSR, a build
+> step), never in code that ships to a browser. Signing uses WebCrypto
+> (`globalThis.crypto.subtle`), hence the `await`.
+
+The same builders are exported as pure functions returning paths —
+`transformPath`, `transformSrcset`, `signedTransformPath`,
+`signedTransformSrcset`, `transformVersion`, `snapTransformSize` — for callers
+without a client. They reproduce the server's own builders byte for byte, a
+promise the shared vectors in `test/fixtures/image_transform_vectors.json` hold
+all three implementations (server, this SDK, the Elixir client) to.
 
 ## Verifying webhooks
 

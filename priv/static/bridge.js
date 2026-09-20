@@ -13,6 +13,13 @@
  *   3. optionally opens a live-preview WebSocket (`/ws/bridge`) so the page can
  *      re-fetch and re-render when an editor changes the content in Kiln.
  *
+ * Credentials: prefer a PREVIEW TOKEN — read-only, one document, 15 minutes —
+ * minted by your front-end SERVER (`POST /api/content/:type/:id/preview-token`
+ * with an editor's key that never leaves the server). Re-mint before it lapses
+ * and hand the new one to `KilnBridge.setPreviewToken(t)`; the live socket
+ * reconnects with whatever token is current. An editor API key still works but
+ * sees every draft until revoked, so keep it out of the browser.
+ *
  * Structural note: Kiln renders its own site with native in-context editing;
  * this bridge exists only because Kiln does NOT render an external front end, so
  * that front end must opt in (load this script; render the annotated preview in
@@ -21,7 +28,7 @@
  * Usage:
  *   <script src="https://cms.example.com/bridge.js"
  *           data-kiln-host="https://cms.example.com"
- *           data-kiln-api-key="kiln_…"        // for live push + annotated fetch
+ *           data-kiln-preview-token="SFMyNTY…"  // minted server-side, per render
  *           data-kiln-auto></script>
  */
 (function () {
@@ -47,6 +54,7 @@
   var config = {
     host: attr(script, "data-kiln-host") || origin(script && script.src) || "",
     apiKey: attr(script, "data-kiln-api-key") || null,
+    previewToken: attr(script, "data-kiln-preview-token") || null,
   };
 
   function attr(el, name) {
@@ -250,39 +258,124 @@
 
   // ---- live preview push (optional) ---------------------------------------
 
+  // One watched document. The server closes the socket whenever its periodic
+  // re-check refuses — an expired preview token, a revoked grant, a document
+  // that moved out of reach — so a close is answered by reconnecting with the
+  // CURRENT credential (a token handed over by `setPreviewToken` since), backing
+  // off while the server keeps refusing and giving up after a few minutes of
+  // refusals until the front end supplies a new token or calls `connect` again.
   var socket = null;
+  var watching = null; // {type, id} while live push is wanted
+  var retryTimer = null;
+  var failures = 0;
+  var MAX_FAILURES = 8; // 1+2+4+…+30s ≈ 2.5 minutes of refusals
+
+  function socketUrl(type, id) {
+    var base = config.host.replace(/^http/, "ws").replace(/\/$/, "");
+    var url = base + "/ws/bridge?type=" + encodeURIComponent(type) + "&id=" + encodeURIComponent(id);
+    // The token wins when both are configured: it is the narrower credential,
+    // and the server consults only it when it is present.
+    if (config.previewToken) url += "&preview_token=" + encodeURIComponent(config.previewToken);
+    else if (config.apiKey) url += "&api_key=" + encodeURIComponent(config.apiKey);
+    return url;
+  }
+
+  function clearRetry() {
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = null;
+  }
+
+  function closeSocket() {
+    if (!socket) return;
+    var s = socket;
+    socket = null;
+    s.onclose = null;
+    try {
+      s.close();
+    } catch (e) {
+      /* already closed */
+    }
+  }
+
+  function scheduleReconnect() {
+    if (!watching || retryTimer || failures >= MAX_FAILURES) return;
+    var delay = Math.min(30000, 1000 * Math.pow(2, failures));
+    failures += 1;
+    retryTimer = setTimeout(function () {
+      retryTimer = null;
+      open();
+    }, delay);
+  }
+
+  function open() {
+    if (!watching || !config.host) return;
+    closeSocket();
+    var s;
+    try {
+      s = new WebSocket(socketUrl(watching.type, watching.id));
+    } catch (e) {
+      /* live push is best-effort */
+      return;
+    }
+    socket = s;
+    s.onopen = function () {
+      failures = 0;
+    };
+    s.onclose = function () {
+      if (socket === s) socket = null;
+      scheduleReconnect();
+    };
+    s.onmessage = function (ev) {
+      var msg;
+      try {
+        msg = JSON.parse(ev.data);
+      } catch (e) {
+        return;
+      }
+      if (msg && msg.event === "update") {
+        updateCallbacks.forEach(function (cb) {
+          try {
+            cb(msg);
+          } catch (e) {
+            /* callback errors are the front end's problem */
+          }
+        });
+      }
+    };
+  }
 
   function connect(type, id) {
     if (!config.host || !type || !id) return api;
-    var base = config.host.replace(/^http/, "ws").replace(/\/$/, "");
-    var url = base + "/ws/bridge?type=" + encodeURIComponent(type) + "&id=" + encodeURIComponent(id);
-    if (config.apiKey) url += "&api_key=" + encodeURIComponent(config.apiKey);
-    try {
-      socket = new WebSocket(url);
-      socket.onmessage = function (ev) {
-        var msg;
-        try {
-          msg = JSON.parse(ev.data);
-        } catch (e) {
-          return;
-        }
-        if (msg && msg.event === "update") {
-          updateCallbacks.forEach(function (cb) {
-            try {
-              cb(msg);
-            } catch (e) {
-              /* callback errors are the front end's problem */
-            }
-          });
-        }
-      };
-    } catch (e) {
-      /* live push is best-effort */
+    watching = { type: type, id: id };
+    failures = 0;
+    clearRetry();
+    open();
+    return api;
+  }
+
+  function disconnect() {
+    watching = null;
+    clearRetry();
+    closeSocket();
+    return api;
+  }
+
+  // Hand the bridge a freshly minted token. An open socket keeps running on
+  // the old one until the server closes it at that token's expiry, then
+  // reconnects with this one; a socket that is already down (refused, backing
+  // off, or given up) reconnects now rather than waiting out its backoff.
+  function setPreviewToken(token) {
+    config.previewToken = token || null;
+    if (watching && !socket) {
+      failures = 0;
+      clearRetry();
+      open();
     }
     return api;
   }
 
-  // Fetch the annotated preview JSON for a document (draft-visible with the key).
+  // Fetch the annotated preview JSON for a document (draft-visible with a
+  // preview token for it, or with an editor key).
   function fetchPreview(type, slug, locale) {
     var url =
       config.host.replace(/\/$/, "") +
@@ -292,7 +385,8 @@
       encodeURIComponent(slug);
     if (locale) url += "?locale=" + encodeURIComponent(locale);
     var headers = {};
-    if (config.apiKey) headers["authorization"] = "Bearer " + config.apiKey;
+    if (config.previewToken) headers["x-kiln-preview-token"] = config.previewToken;
+    else if (config.apiKey) headers["authorization"] = "Bearer " + config.apiKey;
     return fetch(url, { headers: headers, credentials: "omit" }).then(function (r) {
       return r.ok ? r.json() : Promise.reject(r.status);
     });
@@ -305,8 +399,10 @@
     configure: function (opts) {
       if (opts && opts.host) config.host = opts.host;
       if (opts && opts.apiKey) config.apiKey = opts.apiKey;
+      if (opts && opts.previewToken) setPreviewToken(opts.previewToken);
       return api;
     },
+    setPreviewToken: setPreviewToken,
     enable: enable,
     disable: disable,
     onUpdate: function (cb) {
@@ -314,6 +410,7 @@
       return api;
     },
     connect: connect,
+    disconnect: disconnect,
     fetchPreview: fetchPreview,
     decode: decodeStega,
     clean: clean,

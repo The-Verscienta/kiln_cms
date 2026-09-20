@@ -7,6 +7,20 @@ defmodule KilnCMS.CMS.PreviewToken do
   until it expires. Tokens are signed with `Phoenix.Token` — stateless and
   tamper-proof, no DB storage.
 
+  A token is **read-only** (it is only ever redeemed by `GET /preview/:token`,
+  the shared view at `/preview/:token/live`, and the visual-editing bridge's
+  annotated read and live socket — `KilnCMSWeb.VisualEditingController`,
+  `KilnCMSWeb.BridgeSocket`), **per-document** (it names one
+  record and the site that owns it) and **short-lived** (15 minutes). That makes
+  it the credential to hand a browser in place of an API key: a leaked link
+  exposes one draft, briefly, and nothing else.
+
+  ## Minting
+
+  `mint/3` is the only way a token is issued on a request path — the content
+  editor's *Copy preview link* action and `POST /api/content/:type/:id/preview-token`
+  both go through it. `sign/1` is the unchecked primitive underneath.
+
   A token is **read-only** (it is only ever redeemed by `GET /preview/:token`
   and the shared view at `/preview/:token/live`), **per-document** (it names one
   record and the site that owns it) and **short-lived** (15 minutes). That makes

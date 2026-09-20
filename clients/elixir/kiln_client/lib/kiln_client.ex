@@ -4,7 +4,7 @@ defmodule KilnClient do
   `/api/json/*`, per-type and hybrid search, fired artifacts at
   `/api/content/:type/:slug`, the JSON:API write surface (create, update,
   workflow transitions, soft-delete), the media upload API (`upload_media/2`
-  and friends) and a minimal `/gql` helper (see Kiln's `docs/json-api.md` and
+  and friends) the `/api/sync` delta API and a minimal `/gql` helper (see Kiln's `docs/json-api.md` and
   `docs/headless-consumer-guide.md`). The writes and the uploads need a read +
   write key on an editor account; the reads need no key at all.
 
@@ -336,6 +336,75 @@ defmodule KilnClient do
           Process.sleep(Keyword.get(opts, :retry_delay_ms, 2_000))
           request(:get, path, params: params, req: opts[:req])
         end
+
+      other ->
+        other
+    end
+  end
+
+  # --- sync (delta) API ---
+
+  @doc """
+  Mirror the site's public content through `GET /api/sync`: a full snapshot
+  when called without `:cursor`, otherwise only what changed since that
+  cursor — upserts **and** deletions. Follows `has_more` to the end and returns
+  every item in order plus the cursor to store for next time:
+
+      {:ok, %{items: items, cursor: cursor}} = KilnClient.sync(cursor: stored)
+
+      Enum.each(items, fn
+        %{"op" => "upsert", "id" => id, "artifact" => body} -> Mirror.put(id, body)
+        %{"op" => "delete", "id" => id} -> Mirror.delete(id)
+      end)
+
+  Visibility is always anonymous, whatever key is configured: an upsert is a
+  document anyone could read now, and one that became unpublished, archived,
+  deleted, locked or members-only arrives as a `"delete"` with no body. Items
+  are idempotent and may repeat across polls — apply them in order.
+
+  Options: `:cursor`; `:type` (one content type, singular) and `:surface`
+  (`"json"` default) for a new sync — a cursor carries its own; `:limit`
+  (items per page, max 500); `:retries` (default 3) and `:retry_delay_ms`
+  (default 2000) for a page answering 503 while a just-published document's
+  artifact compiles; `:req`.
+
+  `{:error, {:http_status, 400, %{"errors" => [%{"code" => "invalid_cursor"} | _]}}}`
+  means the cursor can no longer be honoured (the server's secret was
+  rotated, or it came from another site): start over without `:cursor`.
+  """
+  @spec sync(keyword()) :: {:ok, %{items: [map()], cursor: String.t()}} | {:error, term()}
+  def sync(opts \\ []), do: sync_pages(opts[:cursor], opts, [])
+
+  defp sync_pages(cursor, opts, acc) do
+    case sync_page(cursor, opts, Keyword.get(opts, :retries, 3)) do
+      {:ok, %{"items" => items, "cursor" => next, "has_more" => true}} ->
+        sync_pages(next, opts, [items | acc])
+
+      {:ok, %{"items" => items, "cursor" => next}} ->
+        {:ok, %{items: [items | acc] |> Enum.reverse() |> Enum.concat(), cursor: next}}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp sync_page(cursor, opts, retries) do
+    params =
+      case cursor do
+        nil ->
+          [{"initial", "true"}]
+          |> put_param(:type, opts[:type])
+          |> put_param(:surface, opts[:surface])
+
+        cursor ->
+          [{"cursor", cursor}]
+      end
+      |> put_param(:limit, opts[:limit])
+
+    case request(:get, "/api/sync", params: params, req: opts[:req]) do
+      {:error, {:http_status, 503, _}} when retries > 0 ->
+        Process.sleep(Keyword.get(opts, :retry_delay_ms, 2_000))
+        sync_page(cursor, opts, retries - 1)
 
       other ->
         other
@@ -856,6 +925,24 @@ defmodule KilnClient do
     Application.get_env(:kiln_client, :public_url) ||
       Application.get_env(:kiln_client, :base_url, "")
   end
+
+  # --- image transforms ---
+
+  @doc """
+  Absolute on-the-fly transform URL for a media item — see
+  `KilnClient.Image.url/2` for the options and signing.
+
+      KilnClient.image_url(media, width: 800, aspect_ratio: "16:9", format: :auto)
+  """
+  @spec image_url(map(), keyword()) :: String.t()
+  defdelegate image_url(media, opts \\ []), to: KilnClient.Image, as: :url
+
+  @doc """
+  `srcset` of transform URLs for a media item, or `nil` without dimensions —
+  see `KilnClient.Image.srcset/2`.
+  """
+  @spec image_srcset(map(), keyword()) :: String.t() | nil
+  defdelegate image_srcset(media, opts \\ []), to: KilnClient.Image, as: :srcset
 
   # --- shapes ---
 

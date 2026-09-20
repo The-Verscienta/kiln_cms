@@ -5,6 +5,24 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Breaking
+
+<a id="headless-slug-lookups-now-answer-a-missing-translation-from-the-sites-fallback"></a>
+
+**Headless slug lookups now answer a missing translation from the site's
+fallback chain, and an unsupported locale is a `400`.** `GET /api/content/:type/:slug?locale=es`,
+`GET /api/resolve` and GraphQL `*BySlug` used to answer a slug with no `es`
+variant with a 404 / `null`; they now serve the first published variant along
+the site's chain — by default the default locale, exactly as the built-in site
+always did — and say which locale they served (`x-kiln-locale`,
+`Content-Language`, the record's `locale`). A front end that relied on the 404
+to detect a missing translation passes `?fallback=false` (GraphQL
+`fallback: false`) to keep it, or configures `[]` for that locale at
+`/editor/locales`. A locale the deployment does not run (`?locale=de`, a typo
+like `fr_CA`) is now `400 unsupported_locale` on the artifact API,
+`/api/resolve` and `/api/menus` — the menus endpoint used to answer it with the
+default-locale menu — and an error on GraphQL `*BySlug` and `menu`.
+
 ## Upgrade notes
 
 <a id="webhook-signing-secrets-move-to-an-encrypted-column"></a>
@@ -79,6 +97,48 @@ If you retire the old value before step 2, the DKIM key, social credentials,
 billing secrets and ActivityPub actor key are orphaned, exactly as before.
 Sessions are still signed out either way. See `docs/secrets-rotation.md`.
 ## Added
+
+<a id="get-apisync-a-delta-api-that-sees-deletions"></a>
+
+- **`GET /api/sync`: a delta API that sees deletions.** A headless mirror —
+  static build, search index, edge store — can now take the site's public
+  content once (`?initial=true`) and then only what changed since a signed,
+  opaque cursor: upserts carrying the fired artifact, and tombstones for any
+  document that stopped being publicly readable (unpublished, archived,
+  soft-deleted, purged, moved to a members audience, passphrase-locked).
+  `filter[updated_at][gt]` could never see a document leave, so a mirror kept
+  locked and paywalled documents indefinitely. Visibility is anonymous
+  whoever calls — the resource policies with no actor plus the same rule as an
+  explicit filter — and a tombstone is an id and a type only, never a body,
+  slug or reason. Changes come from the PaperTrail version tables; a tombstone
+  may only name a document the sync API has already served (a new
+  `sync_exposures` table), so a draft, gated or locked document that was
+  never public never appears in a delta, not even as an id. Windows trail the
+  clock by a commit lag (`config :kiln_cms, KilnCMS.Firing.Sync,
+  commit_lag_seconds:`, default 10) so an in-flight transaction is not
+  skipped; delivery is at-least-once. The migration also adds an
+  `(org_id, version_inserted_at)` index to each content version table, built
+  in the migration's transaction. Both official clients wrap the loop
+  (`kiln.sync()`, `KilnClient.sync/1`); see `docs/api.md` → "Sync".
+  ([#1581](https://github.com/The-Verscienta/kiln_cms/pull/1581))
+
+<a id="locale-fallback-chains-fr-ca-fr-en-per-site-on-every-delivery-surface"></a>
+
+- **Locale fallback chains (`fr-CA → fr → en`), per site, on every delivery
+  surface.** A site sets, per locale, what a missing translation serves at
+  `/editor/locales`: the default locale (unchanged behaviour), an explicit
+  ordered chain taken as written, or nothing — over an operator default in
+  `config :kiln_cms, :i18n, fallbacks:`. The chain is walked in one query by
+  `:public_by_slug` itself, so the artifact API, `/api/resolve`, the new
+  JSON:API `GET /api/json/<type>/by-slug/:slug` routes, GraphQL `*BySlug` and
+  the built-in site all answer alike; navigation menus follow a configured
+  chain but never the implicit hop to the default locale. Requests narrow it
+  with `?fallback=false` or `?fallback_locale=`, every response names the
+  locale served (`x-kiln-locale`, `Content-Language`, ETags), and
+  `GET /api/locales` publishes each locale's chain. A variant the reader may
+  not open is skipped like a missing one. Resolution is per locale, not per
+  document, so field-level localization (#1327) can reuse the same chains.
+  ([#1579](https://github.com/The-Verscienta/kiln_cms/pull/1579))
 
 <a id="webhooks-announce-a-documents-whole-lifecycle-created-archived-deleted-and"></a>
 
@@ -261,7 +321,6 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
 
   `docs/secrets-rotation.md` lists the new encrypted column: rotating
   `SECRET_KEY_BASE` means each site with its own relay re-enters the password.
-
 <a id="idempotency-key-on-the-headless-writes"></a>
 
 - **`Idempotency-Key` on the headless writes.** A write that times out left a
@@ -278,7 +337,6 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
   kept for 24 hours by an hourly-pruned `idempotent_requests` table. 2xx and
   request-level 4xx are stored; 401/403, 409, 429, 5xx and bodies over 1 MB
   are not, so those retry for real. Without the header nothing changes.
-
 <a id="memberships-can-notify-other-systems-membershipactivated-and-membershipcanceled"></a>
 
 - **Memberships can notify other systems: `membership.activated` and
@@ -290,6 +348,29 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
   retries and an `event_id` to dedupe on. The payload carries the member's
   email; `docs/data-flows.md` records the flow. Opt-in per endpoint.
   ([#334](https://github.com/The-Verscienta/kiln_cms/issues/334))
+<a id="on-the-fly-image-transforms-get-mediaidtops"></a>
+
+- **On-the-fly image transforms: `GET /media/:id/t/:ops`.** Any processed
+  image can now be resized, cropped and re-encoded on request —
+  `/media/<id>/t/w_1080,ar_16:9,fm_auto` — with width, height, aspect ratio,
+  `dpr`, `fit` (`cover`/`contain`), crop anchored on the item's focal point (or
+  an edge), format (`jpg`/`png`/`webp`/`avif`, or `auto` from `Accept`) and
+  quality. Output is never upscaled. Renders go through the existing libvips
+  pipeline and are cached as derivatives in blob storage, keyed on what is
+  rendered (so equivalent requests share one file and edits simply miss), and
+  served with an `ETag`; a URL carrying the `v` version pin is
+  `immutable` for a year. Abuse is bounded at every layer: unsigned URLs may
+  only use an allowlist of sizes, ratios and qualities, and HMAC-signed ones
+  (`KILN_IMAGE_TRANSFORM_KEY`) any value within a 4000px output cap; sources
+  over the upload pixel cap are refused before decoding; cache misses spend a
+  per-IP `:media_render` budget and wait on a per-node render gate; and each
+  item keeps at most 200 derivatives. The route reads the item exactly as
+  `/media/:id/download` does, so gated and quarantined media stay 404.
+  Builders ship in both SDKs (`kiln.imageUrl`/`imageSrcset`,
+  `KilnClient.image_url/2`/`image_srcset/2`) and as
+  `<KilnCMSWeb.MediaComponents.transform_img>` for public templates, all held
+  to one set of shared test vectors. One migration (`media_derivatives`). See
+  `docs/media-pipeline.md` ("On-the-fly transforms").
 <a id="one-click-deploy-templates-for-render-railway-flyio-and-digitalocean"></a>
 
 - **One-click deploy templates for Render, Railway, Fly.io and DigitalOcean.**
@@ -316,6 +397,50 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
   `/app/media` owned by `nobody`, and boot reports a directory the app cannot
   write to. Ignored under S3.
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529))
+
+<a id="share-a-draft-copy-preview-link-in-the-editor-and-a-preview-token-api"></a>
+
+- **Share a draft: *Copy preview link* in the editor, and a preview-token API.**
+  `GET /preview/:token` and its shared view `/preview/:token/live` have existed
+  since #379, but nothing outside the tests ever minted a token, so neither
+  could be used. The content editor now has a **Copy preview link** button: it
+  mints a read-only link to that one document, valid for 15 minutes, copies it
+  and shows it with what it grants. A headless front end's draft mode mints
+  server-side with `POST /api/content/:type/:id/preview-token` (an editor's
+  `:read` key is enough) and hands the browser the token instead of its key.
+  The response is `{token, url, type, id, expires_at, expires_in}`, where `url` is on
+  the owning site's host, the only one that honours it. The JS client gains
+  `mintPreview(type, id)`. Minting is gated on **editorial read visibility**
+  (`Checks.ReadableContentType`, the grant that shows an editor drafts), not on
+  reading the row. Otherwise a viewer or a type-scoped editor could mint a link
+  to a published page and read its pending working copy. `docs/api.md` →
+  Preview tokens has the refusals (401/403/404). `docs/visual-editing-bridge.md`
+  now asks for a `:read` key rather than `:read_write`, since the bridge only
+  reads. The bridge itself still takes a key, not a preview token.
+
+<a id="the-visual-editing-bridge-takes-a-preview-token-instead-of-an-api-key"></a>
+
+- **The visual-editing bridge takes a preview token instead of an API key.**
+  Until now `bridge.js` could see a draft only by putting an editor's API key
+  in the browser, where it sees every draft until someone revokes it. It now
+  accepts a preview token: set `data-kiln-preview-token`, or call
+  `KilnBridge.setPreviewToken(t)`. The token is read-only, opens one document
+  and lasts 15 minutes. `GET /api/visual-editing/:type/:slug` reads it from an
+  `x-kiln-preview-token` header (now on the CORS allowlist) or from
+  `?preview_token=`. It checks the token's type, site, slug and locale against the
+  route. It then serves that document's working copy, as `/preview/:token`
+  does, with `no-store`. An expired, tampered or mismatched token gets
+  `404 invalid_preview`, and a presented token is never swapped for the key or
+  for an anonymous read. `/ws/bridge?preview_token=` connects without an actor
+  only when the token names this type, id and host's org. Its periodic re-check
+  from #775 re-verifies the token and closes the connection once it expires, so a
+  leaked token streams for at most 15 minutes plus 30 seconds. `bridge.js` now
+  reconnects when the server closes the socket, which the socket's docs had
+  always claimed it did. It backs off while refused and uses whatever token it
+  holds. The front end re-mints to keep a long session going, either on every
+  render or on a timer. `docs/visual-editing-bridge.md` → *Preview tokens and
+  long edit sessions* has both patterns and now recommends the token over the
+  key.
 
 <a id="upload-media-over-the-api"></a>
 
@@ -378,26 +503,6 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
   gain `releases`/`list_releases`, `release` and
   `releaseItems`/`list_release_items`. See docs/json-api.md → "Content
   releases (read-only)".
-
-<a id="share-a-draft-copy-preview-link-in-the-editor-and-a-preview-token-api"></a>
-
-- **Share a draft: *Copy preview link* in the editor, and a preview-token API.**
-  `GET /preview/:token` and its shared view `/preview/:token/live` have existed
-  since #379, but nothing outside the tests ever minted a token, so neither
-  could be used. The content editor now has a **Copy preview link** button: it
-  mints a read-only link to that one document, valid for 15 minutes, copies it
-  and shows it with what it grants. A headless front end's draft mode mints
-  server-side with `POST /api/content/:type/:id/preview-token` (an editor's
-  `:read` key is enough) and hands the browser the token instead of its key.
-  The response is `{token, url, type, id, expires_at, expires_in}`, where `url` is on
-  the owning site's host, the only one that honours it. The JS client gains
-  `mintPreview(type, id)`. Minting is gated on **editorial read visibility**
-  (`Checks.ReadableContentType`, the grant that shows an editor drafts), not on
-  reading the row. Otherwise a viewer or a type-scoped editor could mint a link
-  to a published page and read its pending working copy. `docs/api.md` →
-  Preview tokens has the refusals (401/403/404). `docs/visual-editing-bridge.md`
-  now asks for a `:read` key rather than `:read_write`, since the bridge only
-  reads. The bridge itself still takes a key, not a preview token.
 
 <a id="the-graphql-schema-and-the-openapi-document-are-committed-and-a-production-site"></a>
 
@@ -568,6 +673,44 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
 
 ## Security
 
+<a id="point-in-time-reads-asof-apply-the-passphrase-lock-and-the-audience-as-live"></a>
+
+- **Point-in-time reads (`?as_of=`) apply the passphrase lock and the audience
+  as live delivery does.** Three gaps on an unauthenticated, CDN-cacheable
+  surface. A historical snapshot of a passphrase-locked document (#496), read
+  with a grant, was served `cache-control: public, max-age=300` — and the grant
+  usually rides in the `x-kiln-unlock` header, which no shared cache keys on, so
+  a CDN would hand the unlocked body to the next caller at that URL. It is now
+  `private, no-store`, as live delivery already was. The historical collection
+  (`GET /api/content/:type?as_of=`, GraphQL `contentAsOf`) listed the slug and
+  title of every document published at `as_of`, locked and members-only ones
+  included — the leak #1032 closed on `/published`. It now lists only documents
+  public to an anonymous reader both now and at `as_of`. And the snapshot
+  checked only today's audience, so a document that was members-only at
+  `as_of` and is public now served its old gated body; it now answers
+  `404 not_public` for dates it was not public. The lock has no history (its
+  hash is kept out of version rows), so its current state applies to every
+  date. See `docs/point-in-time.md`.
+
+<a id="a-request-on-a-host-that-names-no-site-no-longer-reads-the-database-for-the"></a>
+
+- **A request on a host that names no site no longer reads the database for the
+  default site every time.** With `TENANT_STRICT_HOST` off, a `Host` that
+  resolves to no organization — a health check by IP, the platform's own
+  hostname (`*.onrender.com`, `*.fly.dev`) when `PHX_HOST` is a custom domain,
+  any unrecognised header — is served the default site. That host's miss was
+  cached, but the default site behind it was one `organizations` read per
+  request, made in the endpoint above every rate limiter. Under delivery load
+  it queued on the connection pool behind view-tracking writes: measured while
+  baselining the metrics exporter, the endpoint's p95 was 11–19 ms on such a host against
+  about 3 ms on `PHX_HOST`, with the router under 1 ms on both. The fallback now
+  shares the canonical host's host-cache entry, so it is refreshed on the same
+  five-minute schedule as every other host (an edit to the default site no
+  longer shows up instantly on a stray host and late on `PHX_HOST`), and a
+  failed read is still never cached.
+
+## Security
+
 <a id="webhook-signing-secrets-are-encrypted-at-rest"></a>
 
 - **Webhook signing secrets are encrypted at rest.** They were a plaintext
@@ -578,6 +721,28 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
   refuses the delivery (`delivery failed: signing secret unreadable` on the
   ledger) rather than sending it unsigned, and the console says so on the
   endpoint's row.
+
+<a id="mint-1101-closes-a-response-smuggling-advisory-in-its-http1-chunked-parser-eef"></a>
+
+- **`mint` 1.10.1 closes a response-smuggling advisory in its HTTP/1 chunked
+  parser (EEF-CVE-2026-82672, MEDIUM).** Mint's HTTP/1 chunked-transfer decoder
+  treated everything after the chunk-size digits as a chunk extension without
+  validating it, so a chunk-size line of `5ZZZZZ` or `5 9` was accepted as a
+  5-byte chunk where RFC 9112 permits only an optional `;`-introduced
+  extension. A malicious HTTP/1 origin can use that difference to desynchronize
+  Mint from a stricter intermediary on a pooled connection and poison the
+  response queue for later requests that share it. Kiln reaches Mint through
+  Req and Finch, which carry every outbound HTTP path in the app — webhook
+  delivery, ActivityPub federation, media URL import, external link checking,
+  S3, Meilisearch, Stripe, Sentry, and Swoosh's `ApiClient.Req` in prod — and
+  webhooks, federation and URL import all aim at hosts an operator or an editor
+  supplies, so the hostile-origin half of the precondition is reachable rather
+  than theoretical. `mint` 1.10.1, published the same day as the advisory, is
+  the fix OSV names for it. `mint` is a transitive dependency, so this is a lockfile bump alone: every constraint on
+  it in the tree (`~> 1.0`, `~> 1.6`, `~> 1.8`) already admits 1.10.1, and no
+  Kiln code, configuration or API changed. It is the second advisory against
+  this package in two days — the 0.9.0 sweep had moved `mint` *to* 1.10.0 to
+  clear a connection-pinning and memory-exhaustion DoS.
 
 <a id="every-advisory-published-against-the-090-dependency-set-is-fixed-including-six"></a>
 
@@ -640,3 +805,29 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
   `limit` were priced as one row, so `relatedPosts { relatedPosts { … } }`
   cost about 2 a level while returning k^depth rows. They are now priced at
   five rows, and at `limit` rows when one is given.
+<a id="each-document-sent-over-wsgql-now-counts-against-the-gql-rate-limit-and-a"></a>
+
+- **Each document sent over `/ws/gql` now counts against the `:gql` rate limit,
+  and a malformed document no longer strips a GraphQL socket of its tenant and
+  actor.** Only the connect was counted (`:gql_join`), so an anonymous client
+  could connect once and send any number of documents, each allowed the full
+  complexity cap. `KilnCMSWeb.GraphqlLimits.SocketDocumentBudget`, the first
+  phase of the socket's document pipeline, now charges every document the
+  client sends to `:gql`, the 60-a-minute bucket `/gql` requests use, under the
+  address the connect was charged under. A client has one GraphQL budget
+  whichever transport it uses. The key is the address, not the account as for
+  `/ws/collab` frames (decision record 0002): documents are not a per-keystroke
+  stream, and an anonymous socket has no account. A subscription's pushes are
+  not charged. They re-run only the phases `Absinthe.Phase.Init` recorded, and
+  the budget runs before Init. Over budget, the document is answered before it
+  is parsed with a GraphQL error whose `extensions` are
+  `{code: "too_many_requests", retry_after: <seconds>}`, and the socket and its
+  subscriptions stay up. A second defect turned up on the way:
+  `Absinthe.Phoenix.Channel` keeps the context a document ends with as the
+  socket's context, and a document refused before Absinthe copied the context
+  onto it (a syntax error, the token limit) ended with none. One malformed
+  document left the socket with no tenant, no actor and no pubsub until it
+  reconnected, so its next query ran with no tenant and its next subscription
+  crashed the channel. The budget phase now puts the context on the document
+  before any other phase runs. This closes the `/ws/gql` part of threat-model
+  residual item 10; `/live` events are still uncounted.

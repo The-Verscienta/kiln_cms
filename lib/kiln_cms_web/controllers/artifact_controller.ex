@@ -15,6 +15,15 @@ defmodule KilnCMSWeb.ArtifactController do
   **not** compiled on the request path. Instead the endpoint enqueues a
   background firing job and answers `503` with `Retry-After`, so a four-surface
   render can't block (or be used to flood) the API hot path (perf #208).
+
+  ## Locale
+
+  `?locale=` picks where the site's fallback chain starts (`fr-CA → fr → en`,
+  `KilnCMS.I18n.Fallback`); `?fallback=false` serves that locale or nothing,
+  and `?fallback_locale=` replaces the chain with one locale. The served locale
+  is on the response as `x-kiln-locale` and `Content-Language`, and in the ETag.
+  A locale the site does not run is `400 unsupported_locale` — see
+  `KilnCMSWeb.DeliveryLocale`.
   """
   use KilnCMSWeb, :controller
 
@@ -25,6 +34,7 @@ defmodule KilnCMSWeb.ArtifactController do
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Firing.PointInTime
   alias KilnCMSWeb.ApiError
+  alias KilnCMSWeb.DeliveryLocale
   alias KilnCMSWeb.Params
   alias KilnCMSWeb.ViewTracking
 
@@ -39,7 +49,13 @@ defmodule KilnCMSWeb.ArtifactController do
   def show(conn, %{"as_of" => _} = params), do: show_point_in_time(conn, params)
 
   def show(conn, %{"type" => type, "slug" => slug} = params) do
-    locale = Params.string(params, "locale", KilnCMS.I18n.default_locale())
+    case DeliveryLocale.parse(params) do
+      {:ok, request} -> show_live(conn, type, slug, request, params)
+      error -> DeliveryLocale.send_error(conn, error)
+    end
+  end
+
+  defp show_live(conn, type, slug, %{locale: locale, mode: mode}, params) do
     # The request's tenant, resolved from the host by KilnCMSWeb.Plugs.SetTenant
     # (epic #336). Delivery is scoped to this org so one site's slug never serves
     # another's content.
@@ -50,7 +66,8 @@ defmodule KilnCMSWeb.ArtifactController do
     # all, so delivery keeps answering through a Postgres outage (#341).
     with ct when not is_nil(ct) <- ContentTypes.get(type),
          surface when not is_nil(surface) <- Map.get(@surfaces, params["surface"] || "json"),
-         {:ok, record} <- Delivery.published(org_id, ct.type, slug, locale, grants(conn, params)),
+         {:ok, record} <-
+           Delivery.published(org_id, ct.type, slug, locale, grants(conn, params), mode),
          {:ok, body} <- artifact(record, surface) do
       surface_name = params["surface"] || "json"
 
@@ -103,7 +120,7 @@ defmodule KilnCMSWeb.ArtifactController do
       # document at the same URL would have been served, and a nonexistent one
       # still 404s.
       _ ->
-        locked_or_not_found(conn, org_id, type, slug, locale)
+        locked_or_not_found(conn, org_id, type, slug, locale, mode)
     end
   end
 
@@ -120,11 +137,19 @@ defmodule KilnCMSWeb.ArtifactController do
   be used to enumerate which documents are locked.
   """
   def unlock(conn, %{"type" => type, "slug" => slug} = params) do
-    locale = Params.string(params, "locale", KilnCMS.I18n.default_locale())
+    case DeliveryLocale.parse(params) do
+      {:ok, request} -> unlock_document(conn, type, slug, request, params)
+      error -> DeliveryLocale.send_error(conn, error)
+    end
+  end
+
+  # The same chain walk the GET that answered `401` made, so the passphrase is
+  # verified against the document that 401 was about.
+  defp unlock_document(conn, type, slug, %{locale: locale, mode: mode}, params) do
     org_id = current_org_id(conn)
 
     with ct when not is_nil(ct) <- ContentTypes.get(type),
-         {:ok, record} <- Delivery.locked(org_id, ct.type, slug, locale),
+         {:ok, record} <- Delivery.locked(org_id, ct.type, slug, locale, mode),
          true <- ContentPassword.verify(record.access_password_hash, params["passphrase"]) do
       conn
       |> put_resp_header("cache-control", "private, no-store")
@@ -158,9 +183,9 @@ defmodule KilnCMSWeb.ArtifactController do
     end)
   end
 
-  defp locked_or_not_found(conn, org_id, type, slug, locale) do
+  defp locked_or_not_found(conn, org_id, type, slug, locale, mode) do
     with ct when not is_nil(ct) <- ContentTypes.get(type),
-         {:ok, _record} <- Delivery.locked(org_id, ct.type, slug, locale) do
+         {:ok, _record} <- Delivery.locked(org_id, ct.type, slug, locale, mode) do
       conn
       # Never shared-cached: this response is a function of the caller's grant,
       # not of the URL.
@@ -193,6 +218,11 @@ defmodule KilnCMSWeb.ArtifactController do
          {resource, definition_id} when not is_nil(resource) <- storage(ct) do
       limit = index_limit(params)
 
+      # One shared slot per `{org, type, as_of, limit}`, with no caller in the
+      # key — which is only sound because `PointInTime.index/4` takes no caller
+      # input: it lists what an ANONYMOUS reader may discover (public now and
+      # then, never locked), for everyone. Anything caller-dependent added to
+      # that read must key this slot on the caller, or skip it.
       entries =
         KilnCMS.Cache.fetch(
           {:pit_index, org_id, type, DateTime.to_iso8601(as_of), limit},
@@ -272,7 +302,13 @@ defmodule KilnCMSWeb.ArtifactController do
   # The content must still be resolvable now (lookup is by the current record's
   # id); see the module for scope.
   defp show_point_in_time(conn, %{"type" => type, "slug" => slug} = params) do
-    locale = Params.string(params, "locale", KilnCMS.I18n.default_locale())
+    case DeliveryLocale.parse(params) do
+      {:ok, request} -> show_as_of(conn, type, slug, request, params)
+      error -> DeliveryLocale.send_error(conn, error)
+    end
+  end
+
+  defp show_as_of(conn, type, slug, %{locale: locale, mode: mode}, params) do
     org_id = current_org_id(conn)
 
     # The storage resource comes from the resolved RECORD, not the registry
@@ -283,10 +319,12 @@ defmodule KilnCMSWeb.ArtifactController do
          ct when not is_nil(ct) <- ContentTypes.get(type, org_id),
          surface when not is_nil(surface) <- Map.get(@surfaces, params["surface"] || "json"),
          record when not is_nil(record) <-
-           published(org_id, ct.type, slug, locale, grants(conn, params)),
+           published(org_id, ct.type, slug, locale, grants(conn, params), mode),
          {:ok, body, published_at} <-
            PointInTime.read(org_id, record.__struct__, record.id, surface, as_of) do
-      serve_point_in_time(conn, as_of, published_at, params["surface"] || "json", body)
+      conn
+      |> DeliveryLocale.put_served(record.locale)
+      |> serve_point_in_time(record, as_of, published_at, params["surface"] || "json", body)
     else
       :error ->
         ApiError.send(
@@ -308,6 +346,17 @@ defmodule KilnCMSWeb.ArtifactController do
           :not_found,
           "withdrawn",
           "This content had been withdrawn as of that date."
+        )
+
+      # Readable now, but it was gated then (`PointInTime.read/5`). Saying so
+      # discloses only that a document the caller can already read was once
+      # members-only — never the body it had.
+      {:error, :not_public} ->
+        ApiError.send(
+          conn,
+          :not_found,
+          "not_public",
+          "This content was not publicly available as of that date."
         )
 
       _ ->
@@ -340,15 +389,29 @@ defmodule KilnCMSWeb.ArtifactController do
 
   # Historical snapshots are immutable for a given (content, as_of), so they're
   # cacheable; the headers name the requested moment and the effective publish.
-  defp serve_point_in_time(conn, as_of, published_at, surface, body) do
+  #
+  # Except a locked one (#496). It resolved above only because the caller
+  # presented a grant — often in the `x-kiln-unlock` HEADER, which no shared
+  # cache keys on — so its body is a function of the request, not the URL, and
+  # a `public` answer would hand the unlocked body to the next caller who
+  # presented nothing. The rule live delivery's `put_cache_headers/4` applies.
+  defp serve_point_in_time(conn, record, as_of, published_at, surface, body) do
+    locked? = not is_nil(Map.get(record, :access_password_hash))
+
     conn
-    |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
+    |> put_point_in_time_cache_headers(locked?)
     |> put_resp_header("x-kiln-as-of", DateTime.to_iso8601(as_of))
     |> put_resp_header("x-kiln-published-at", DateTime.to_iso8601(published_at))
     # Same per-surface envelope as live delivery — :llm is raw text/markdown
     # with or without as_of.
     |> respond(surface, body)
   end
+
+  defp put_point_in_time_cache_headers(conn, true),
+    do: put_resp_header(conn, "cache-control", "private, no-store")
+
+  defp put_point_in_time_cache_headers(conn, false),
+    do: put_resp_header(conn, "cache-control", "public, max-age=#{@max_age_seconds}")
 
   # Serve a fired artifact with CDN/static-build cache headers (#188). Honour a
   # matching `If-None-Match` with a 304 so revalidation skips the body.
@@ -359,6 +422,7 @@ defmodule KilnCMSWeb.ArtifactController do
     conn =
       conn
       |> put_cache_headers(record, etag, locked?)
+      |> DeliveryLocale.put_served(record.locale)
       |> put_variant_headers(variant)
       |> maybe_provenance_header(record, surface)
 
@@ -412,10 +476,13 @@ defmodule KilnCMSWeb.ArtifactController do
 
   # Strong ETag keyed on the record + surface + last-modified time, so it changes
   # whenever the document is republished — and on the variant, so a conditional
-  # request can never 304 a caller into an arm it was not assigned.
+  # request can never 304 a caller into an arm it was not assigned. The served
+  # locale is named too: the record id already differs per locale variant, but
+  # a validator that says which translation it validates is one a front end can
+  # reason about when a chain change moves a URL from one to another.
   defp etag(record, surface, variant) do
     suffix = if variant, do: "-#{variant.id}", else: ""
-    ~s("#{record.id}-#{surface}-#{DateTime.to_unix(record.updated_at)}#{suffix}")
+    ~s("#{record.id}-#{record.locale}-#{surface}-#{DateTime.to_unix(record.updated_at)}#{suffix}")
   end
 
   # No `Vary`. The assignment key is a **query parameter**, so it is already part
@@ -441,9 +508,10 @@ defmodule KilnCMSWeb.ArtifactController do
   # anonymous reader has no actor; the `:public_by_slug` action's own filter
   # carries the published + audience + unlock grant, and `tenant:` pins the
   # read to this site.
-  defp published(org_id, type, slug, locale, unlocks) do
+  defp published(org_id, type, slug, locale, unlocks, mode) do
     ContentTypes.get_published_by_slug(type, slug, locale,
       unlocks: unlocks,
+      fallback: mode,
       authorize?: false,
       tenant: org_id
     )

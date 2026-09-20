@@ -88,6 +88,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **JSON:API** | `/api/json` | Filterable reads of Page, Post and admin-defined types (Entry), media, taxonomy and redirects; per-type search and autocomplete; **writes** — create, update, workflow transitions, soft-delete — with a `read_write` API key. | [json-api.md](json-api.md) |
 | **GraphQL** | `POST /gql`, `/ws/gql` | Delivery reads, search, menus and point-in-time (`contentAsOf`); the same **writes** as mutations; subscriptions over the WebSocket. | [headless-graphql-api.md](headless-graphql-api.md) |
 | **Fired artifacts** | `GET /api/content/:type/:slug` | Pre-rendered output per surface: `json` (default), `json_ld`, `web`, and `llm` (raw `text/markdown`). `?as_of=` reads a document as it stood on a date; `GET /api/content/:type?as_of=` lists what was published then. | [`examples/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/examples/README.md), [point-in-time.md](point-in-time.md) |
+| **Sync (delta)** | `GET /api/sync` | Mirror public content: a snapshot, then upserts **and deletions** since an opaque cursor — the only surface that reports a document *leaving*. | [§ Sync](#sync-delta-api) |
 | **Version history** | `GET /api/content/:type/:id/revisions` | A document's revisions, one revision's snapshot, and restore. Editor-tier credential required. | [§ Version history](#version-history-revisions) |
 | **Hybrid search** | `GET /api/search?q=` | Keyword + semantic + title search across every type, fused and ranked; answers as an anonymous visitor whatever the credential. | [search-roadmap.md](search-roadmap.md) |
 | **Path resolution** | `GET /api/resolve?path=` | "What lives at this URL?" — content, a redirect to follow, or nothing — for a front end's catch-all route. | [json-api.md](json-api.md) (URLs, pathauto & redirects) |
@@ -95,7 +96,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Related content** | `GET /api/content/:type/:slug/related` | Published documents semantically closest to this one (empty when semantic search is off). | [rag.md](rag.md) |
 | **Ask your content** | `GET /api/ask?q=` | Cited published passages, plus a generated answer when a generator is configured. | [rag.md](rag.md) |
 | **Provenance** | `GET /api/provenance/:type/:slug`, `…/verify`, `GET /api/provenance/public-key` | Signed manifests proving an artifact is unaltered (404 unless provenance is on). | [provenance.md](provenance.md) |
-| **Locales** | `GET /api/locales` | Discover configured content locales + the default. | [§ Locale discovery](#locale-discovery) |
+| **Locales** | `GET /api/locales` | Configured content locales, the default, and each locale's fallback chain. | [§ Locale discovery](#locale-discovery), [§ Locale fallback](#locale-fallback) |
 | **Schema** | `GET /api/schema` | JSON Schema for the fired `json` payloads — generate types, validate responses. | [§ Schema discovery](#schema-discovery-typed-clients) |
 | **Media upload** | `POST /api/media`, `POST /api/media/import-url`, `/api/media/uploads[/complete]` | Upload a file, import one from a public URL, or send a large one straight to object storage; metadata edits ride the JSON:API `PATCH`. `read_write` key on an editor account. | [§ Uploading media](#uploading-media) |
 | **MCP** | `/mcp` | Model Context Protocol server for LLM authoring clients; **API key required**. | [mcp.md](mcp.md) |
@@ -105,6 +106,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Feeds** | `GET /feed.xml`, `GET /feed.json` | Atom 1.0 / JSON Feed 1.1 of newly published content. | [§ Feeds](#feeds) |
 | **Outbound webhooks** | (you host the receiver) | Timestamped HMAC-signed push on the content lifecycle. | [webhooks.md](webhooks.md) |
 | **Signed preview** | `GET /preview/:token` | One unpublished document via a short-lived token. | [§ Preview tokens](#preview-tokens) |
+| **Image transforms** | `GET /media/:id/t/:ops` | Resize, crop to the focal point, convert (AVIF/WebP) and re-encode an image on request; unsigned URLs are held to a size allowlist, signed ones are not. | [§ Image transforms](#image-transforms) |
 
 ## Authentication
 
@@ -623,14 +625,16 @@ Notes that matter in practice:
   different fingerprints, so a token for one will not read the other.
 - **Unlocked responses are `private, no-store` and carry no `ETag`.** The body
   is a function of your grant rather than of the URL, so it must not be
-  shared-cached. Budget for that: a locked document is not a CDN-friendly one.
+  shared-cached. That includes a point-in-time snapshot (`?as_of=`) read with
+  a grant. Budget for that: a locked document is not a CDN-friendly one.
 - **A wrong passphrase and an unlocked document answer identically** (`401`
   `invalid_passphrase` from the unlock endpoint), so it cannot be used to
   enumerate which documents are locked.
 - **Locked documents are absent from every discovery surface** — the sitemap,
   feeds, `llms.txt`, the blog index, the `/published` collection routes,
-  keyword and semantic search, related content, and any configured Meilisearch
-  index. If a document is locked, the only way to reach it is to know its URL
+  the historical collection (`GET /api/content/:type?as_of=` and GraphQL
+  `contentAsOf`), keyword and semantic search, related content, and any
+  configured Meilisearch index. If a document is locked, the only way to reach it is to know its URL
   *and* its passphrase.
 
   The `:published` read carries that as a **filter**, not a policy clause, so
@@ -649,6 +653,81 @@ The unlock endpoint has its own tight rate-limit bucket (see
 [Rate limits](#rate-limits)) — it is the guessing surface for a shared secret,
 and there is no account to lock out instead.
 
+## Sync (delta) API
+
+`GET /api/sync` mirrors a site's **public** content: the whole corpus once, then
+only what changed since — upserts **and deletions**. It is the Contentful Sync
+API shape (`initial=true` → cursor → deltas with deleted entries), and it exists
+because `filter[updated_at][gt]` on JSON:API cannot see a document *leave*: one
+that is unpublished, archived, deleted, locked or moved to a members-only
+audience simply stops matching, which a poller cannot tell from "unchanged".
+
+```bash
+# 1. First run: the full snapshot (optionally one type, one surface)
+curl -s 'https://cms.example.com/api/sync?initial=true&type=post&limit=100'
+
+# 2. While "has_more" is true, follow the cursor straight away
+curl -s 'https://cms.example.com/api/sync?cursor=SFMyNTY…'
+
+# 3. Once "has_more" is false, store the cursor; poll with it later
+curl -s 'https://cms.example.com/api/sync?cursor=<stored>'
+```
+
+Every response is `{"items": […], "cursor": "…", "has_more": bool}`, and each
+item is one of
+
+```json
+{"op": "upsert", "type": "post", "id": "…", "slug": "hello", "locale": "en",
+ "published_at": "…", "updated_at": "…", "artifact": { …the fired surface… }}
+{"op": "delete", "type": "post", "id": "…"}
+```
+
+`artifact` is exactly what `GET /api/content/:type/:slug?surface=…` serves.
+Apply items **in order**, keyed by `id`: an upsert replaces your copy, a delete
+removes it.
+
+| Parameter | Meaning |
+|---|---|
+| `initial=true` | Start a new sync. Exactly one of `initial` and `cursor`. |
+| `cursor` | Resume. Carries its own scope, so `type`/`surface` are ignored with it. |
+| `type` | One content type (singular, compiled or admin-defined). Default: every type. |
+| `surface` | Artifact surface embedded in upserts: `json` (default), `json_ld`, `web`, `llm`. |
+| `limit` | Items per page, 1–500 (default 100). |
+
+**Visibility is always anonymous — whoever calls.** An upsert is a document an
+anonymous reader could fetch right now: published, `audience` `:public`, not
+passphrase-locked, not archived, of a live content type. A bearer token does
+not widen it (use JSON:API for drafts). A document that stops qualifying
+arrives as a `delete` carrying its id and type **only** — never its body, slug,
+or the reason. And a delete only ever names a document this endpoint has
+already served: a draft, a members-only post or a locked page that was never
+public never appears in a delta at all, not even as an id.
+
+**Semantics a client must allow for.**
+
+* **At-least-once.** A delta window trails the clock by a few seconds (so a
+  write whose transaction is still committing is not skipped), and windows
+  overlap slightly after the snapshot. The same item can arrive twice; applying
+  it twice is harmless.
+* **A delete for something you don't hold** can happen (a document that became
+  public and private again between your polls). Ignore it.
+* **Edits re-send.** Any editorial write to a public document re-sends it,
+  even one that did not change the rendered body.
+* **Not seen:** a change that writes no version to the document itself —
+  editing a *fragment* it embeds, or its type's custom-field definitions. Its
+  artifact re-fires, but the document is not reported. A periodic full resync
+  (`initial=true`) covers that.
+
+**Errors.** `400 invalid_cursor` — the cursor was tampered with, belongs to
+another site, or was signed before a `SECRET_KEY_BASE` rotation: start again
+with `initial=true`. `404` — unknown `type`. `503 artifact_compiling` (with
+`Retry-After`) — a document on this page was published a moment ago and its
+artifact is still being fired; retry the **same** request. Responses are
+`Cache-Control: no-store`, and sync fetches are not counted as views.
+
+Both official clients wrap the loop: `kiln.sync({ cursor })` in
+`@kiln-cms/client`, `KilnClient.sync(cursor: …)` in `kiln_client`.
+
 ## Locale discovery
 
 `GET /api/locales` returns the site's configured content locales and the
@@ -659,11 +738,71 @@ redeploy.
 
 ```bash
 curl -s http://localhost:4000/api/locales
-# {"default":"en","locales":["en","fr"]}
+# {"default":"en","locales":["en","fr","fr-CA"],
+#  "fallbacks":{"en":[],"fr":["en"],"fr-CA":["fr","en"]}}
 ```
 
 Pass the returned codes as the `locale` argument/param to the other surfaces
 (`GET /api/content/:type/:slug?locale=fr`, `postBySlug(slug:, locale:)`, etc.).
+`fallbacks` is this site's chain for each locale — see the next section.
+
+## Locale fallback
+
+Content is one document per locale, so a translation that has not been
+published is a missing document. Every delivery surface answers that the same
+way: it walks the site's **fallback chain** for the requested locale and serves
+the first published variant it finds.
+
+    fr-CA → fr → en
+
+- **The chain is a site setting**, edited at `/editor/locales` (admins), over
+  an operator default — `config :kiln_cms, :i18n, fallbacks: %{"fr-CA" => ["fr", "en"]}`.
+- **A locale with no chain falls back to the default locale** — what the
+  built-in site has always done. A chain of `[]` means *never fall back* (a
+  missing translation is a 404). A chain is taken as written: `fr-CA → fr` does
+  not quietly continue to the default.
+- **Only readable variants take part.** A variant the caller may not read —
+  gated to an audience, passphrase-locked, unpublished — is skipped like a
+  missing one. On the artifact API, if nothing on the chain is readable but a
+  locked variant exists, the answer is `401 password_required` for the first
+  locked one, and `POST …/unlock` with the same `?locale=` verifies against it.
+- **Navigation is stricter.** `/api/menus/:key` and GraphQL `menu` follow a
+  configured chain but never take the implicit hop to the default locale on
+  their own: English navigation on a French page is worse than none unless the
+  site said otherwise.
+
+### Per request
+
+| Parameter | Meaning |
+|---|---|
+| `locale=fr-CA` | Where the walk starts. Defaults to the site's default locale. |
+| `fallback=false` | Serve `locale` or nothing (`true`/`false`/`1`/`0`; anything else is `400 invalid_fallback`). |
+| `fallback_locale=fr` | Try `locale`, then this one — instead of the site's chain. |
+
+They are accepted by `GET /api/content/:type/:slug` (and `POST …/unlock`),
+`GET /api/resolve`, `GET /api/menus/:key`, the JSON:API
+`GET /api/json/<type>/by-slug/:slug` routes, and GraphQL `*BySlug` and `menu`
+(as the `locale`, `fallback` and `fallbackLocale` arguments).
+
+### Which locale was served
+
+- **HTTP surfaces** set `x-kiln-locale` and `Content-Language` to the served
+  locale. `/api/resolve` and `/api/menus` also carry it as `locale` in the body;
+  the artifact `json` surface carries it in the document, and the JSON:API
+  resource in `attributes.locale`.
+- **GraphQL** cannot set a header per field: select `locale` on the result.
+- **ETags** name the served locale, and every cache key in front of Kiln is
+  the URL — which carries the *requested* locale and the fallback parameters —
+  so a shared cache never mixes two answers. A settings change drops the site's
+  cached delivery lookups at once rather than waiting out a TTL.
+
+### An unsupported locale is a `400`
+
+`?locale=de` on a site that does not run German answers
+`400 unsupported_locale` (naming `GET /api/locales`) on every surface above,
+instead of silently serving the default locale: a typo like `fr_CA` answered in
+English is indistinguishable from a missing translation. The same goes for
+`fallback_locale`. GraphQL returns an error on the field.
 
 ## Schema discovery (typed clients)
 
@@ -935,6 +1074,12 @@ will honour it). Keep your API key on the server and hand the browser the
 draft for a few minutes rather than every draft indefinitely. Mint a fresh one
 per preview render rather than caching it.
 
+The same token also authenticates the visual-editing bridge for its document:
+the annotated read (`x-kiln-preview-token` on `GET /api/visual-editing/:type/:slug`)
+and the live socket (`/ws/bridge?preview_token=`). See
+[visual-editing-bridge.md](visual-editing-bridge.md#preview-tokens-and-long-edit-sessions)
+for re-minting through a long edit session.
+
 Who may mint: anyone who sees this document's **drafts** as an editor — an
 admin, or an editor whose read scope covers the type (`readable_types`, see
 [granular-rbac.md](granular-rbac.md)). A `:read`-scoped API key is enough: the
@@ -1039,6 +1184,48 @@ submission is deliberately CSRF-free. See [forms.md](forms.md#embedding-on-anoth
 
 Inactive or unknown slugs render a framable "Form not found" page (HTTP 404)
 rather than a blank iframe.
+
+## Image transforms
+
+Any processed image can be resized, cropped and re-encoded on request:
+
+```
+GET /media/<media_item_id>/t/w_1080,ar_16:9,fm_auto,v_3f2a9c01
+```
+
+| Key | Values | |
+|---|---|---|
+| `w`, `h` | 1–4000 | Width / height in CSS px |
+| `ar` | `a:b` (1–99 each) | Aspect ratio, instead of `h` |
+| `dpr` | `1`–`3` | Pixel density multiplier |
+| `fit` | `cover` (default), `contain` | Crop to fill, or fit inside |
+| `crop` | `focal` (default), `center`, `top`, `bottom`, `left`, `right` | Anchor of a `cover` crop |
+| `fm` | `auto`, `jpg`, `png`, `webp`, `avif` | Output format (default: the source's); `auto` negotiates from `Accept` |
+| `q` | 1–100 | Quality (lossy formats) |
+| `v` | 8 hex | Version pin: makes the response `immutable` for a year |
+| `s` | 22 chars | HMAC signature: lifts the size allowlist |
+
+Unsigned URLs may only use the allowlisted sizes, ratios and qualities
+(off-list is a **400** naming them); signed ones any in-range value (a bad
+signature is a **403**). Output is never upscaled. A gated item is a **404**
+exactly where `/media/:id/download` would be; a non-image is a **422**; a
+saturated render queue is a **503** with `Retry-After`.
+
+Build the URLs with the SDKs rather than by hand — they snap to the allowlist,
+compute `v` from the item's `url`/`focal_x`/`focal_y`, and sign when given the
+server's `KILN_IMAGE_TRANSFORM_KEY` (server-side only):
+
+```ts
+kiln.imageUrl(media, { width: 800, aspectRatio: "16:9", format: "auto" });
+kiln.imageSrcset(media, { aspectRatio: "16:9" });
+```
+
+```elixir
+KilnClient.image_url(media, width: 800, aspect_ratio: "16:9", format: :auto)
+```
+
+Grammar, limits, caching and configuration in full:
+[media-pipeline.md § On-the-fly transforms](media-pipeline.md#on-the-fly-transforms).
 
 ## Caching and CDNs
 
@@ -1162,6 +1349,8 @@ Over the limit returns **429** with a `retry-after` header.
 | `auth` | sign-in / auth  | 40 requests / minute  |
 | `docs` | `/api/json/swaggerui` | 60 requests / minute |
 | `unlock` | `POST /api/content/:type/:slug/unlock` (and the built-in site's lock form) | 10 requests / minute |
+| `media_transform` | `GET /media/:id/t/:ops` (every request) | 1,200 requests / minute |
+| `media_render` | `GET /media/:id/t/:ops` that misses the derivative cache (each is a render) | 120 renders / minute |
 | `media_upload` | `/api/media/*` (uploads, URL imports, direct-upload begin/complete) — charged **on top of** `api` | 60 requests / minute |
 
 ## Idempotent writes

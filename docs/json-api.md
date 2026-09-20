@@ -34,16 +34,27 @@ Authorization: Bearer <token>
 
 | Resource  | Collection                  | Single record               | Extra reads |
 |-----------|-----------------------------|-----------------------------|-------------|
-| Page      | `GET /api/json/pages`       | `GET /api/json/pages/:id`   | `/pages/search`, `/pages/semantic-search`, `/pages/autocomplete`, `/pages/published` |
-| Post      | `GET /api/json/posts`       | `GET /api/json/posts/:id`   | `/posts/search`, `/posts/semantic-search`, `/posts/autocomplete`, `/posts/published` |
+| Page      | `GET /api/json/pages`       | `GET /api/json/pages/:id`   | `/pages/by-slug/:slug`, `/pages/search`, `/pages/semantic-search`, `/pages/autocomplete`, `/pages/published` |
+| Post      | `GET /api/json/posts`       | `GET /api/json/posts/:id`   | `/posts/by-slug/:slug`, `/posts/search`, `/posts/semantic-search`, `/posts/autocomplete`, `/posts/published` |
 | MediaItem | `GET /api/json/media-items` | `GET /api/json/media-items/:id` | `/media-items/search`, `/media-items/library`; `PATCH /media-items/:id` edits metadata ([below](#editing-media-metadata)) |
 | Category  | `GET /api/json/categories`  | `GET /api/json/categories/:id` | `/categories/by-slug/:slug` |
 | Tag       | `GET /api/json/tags`        | `GET /api/json/tags/:id`    | `/tags/by-slug/:slug` |
 | TagGroup  | `GET /api/json/tag-groups`  | `GET /api/json/tag-groups/:id` | `/tag-groups/by-slug/:slug` |
-| Entry (dynamic types) | `GET /api/json/entries` | `GET /api/json/entries/:id` | same set as Post, filtered by `filter[type_name]=` |
+| Entry (dynamic types) | `GET /api/json/entries` | `GET /api/json/entries/:id` | same set as Post, filtered by `filter[type_name]=`; `/entries/by-slug/:slug` takes `?type_definition_id=` |
 | TypeDefinition | `GET /api/json/type-definitions` | `GET /api/json/type-definitions/:id` | `/type-definitions/by-name/:name` — **editor-or-above** credential; see [Discovering dynamic types](#discovering-dynamic-types) |
 | ContentRelease | `GET /api/json/releases` | `GET /api/json/releases/:id` | `?include=items` — **editor-or-above** credential, read-only; see [Content releases](#content-releases-read-only) |
 | ReleaseItem | `GET /api/json/release-items` | `GET /api/json/release-items/:id` | `?filter[release_id]=` — same |
+
+`GET /api/json/<plural>/by-slug/:slug?locale=fr-CA` is the single published
+document for a slug, resolved through the site's **locale fallback chain** —
+`?fallback=false` and `?fallback_locale=` narrow it, the served locale is
+`attributes.locale` and the `x-kiln-locale` / `Content-Language` headers, and a
+locale the site does not run is a `400`. See
+[api.md → Locale fallback](api.md#locale-fallback). It authorizes like every
+route here, so a caller sees exactly the variants the read policies let it
+read; a variant it may not read is skipped along the chain like a missing one.
+(Filtering the collection with `filter[slug]=…&filter[locale]=…` still works
+and never falls back.)
 
 `GET /api/json/<plural>/published` returns published records only, ordered
 newest first (`-published_at`) — the delivery feed. It exists on **every**

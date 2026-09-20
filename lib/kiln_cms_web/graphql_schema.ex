@@ -67,23 +67,33 @@ defmodule KilnCMSWeb.GraphqlSchema do
     auto GraphQL surface: they carry references rather than URLs, and they carry
     exactly what those rules exist to withhold.
 
-    `locale` defaults to the site's default locale. A menu that has no variant
-    in the requested locale returns `null` rather than falling back — serving
-    English navigation on a French page is a worse answer than serving none.
+    `locale` defaults to the site's default locale; a locale the site does not
+    run is an error, not the default menu. A menu with no variant in the
+    requested locale follows the site's *configured* fallback chain only — never
+    the implicit hop to the default locale, because English navigation on a
+    French page is a worse answer than none unless the site said otherwise — and
+    otherwise returns `null`. `fallback: false` and `fallbackLocale` narrow the
+    chain as on every delivery surface. The result's `locale` is the variant
+    served.
     """
     field :menu, :menu do
       arg :key, non_null(:string)
       arg :locale, :string
+      arg :fallback, :boolean
+      arg :fallback_locale, :string
 
       resolve fn args, resolution ->
-        locale = KilnCMS.I18n.normalize(args[:locale])
+        params =
+          %{
+            "locale" => args[:locale],
+            "fallback" => if(is_boolean(args[:fallback]), do: to_string(args[:fallback])),
+            "fallback_locale" => args[:fallback_locale]
+          }
+          |> Map.reject(fn {_key, value} -> is_nil(value) end)
 
-        case KilnCMS.CMS.Menus.resolve(args.key, locale, graphql_org_id(resolution)) do
-          {:ok, menu, items} ->
-            {:ok, %{key: menu.key, name: menu.name, locale: menu.locale, items: items}}
-
-          :not_found ->
-            {:ok, nil}
+        case KilnCMSWeb.DeliveryLocale.parse(params) do
+          {:ok, request} -> resolve_menu(args.key, request, graphql_org_id(resolution))
+          {:error, _code, message} -> {:error, message}
         end
       end
     end
@@ -91,7 +101,8 @@ defmodule KilnCMSWeb.GraphqlSchema do
     @desc """
     The collection as of a date (#338): every document of `type` that was
     published at that instant, reconstructed from version history — the
-    GraphQL twin of `GET /api/content/:type?as_of=`.
+    GraphQL twin of `GET /api/content/:type?as_of=`. Lists only what an
+    anonymous reader may discover: public then and now, never passphrase-locked.
     """
     field :content_as_of, list_of(non_null(:point_in_time_entry)) do
       arg :type, non_null(:string)
@@ -115,6 +126,16 @@ defmodule KilnCMSWeb.GraphqlSchema do
             {:error, "unknown content type (historical collections cover compiled types)"}
         end
       end
+    end
+  end
+
+  defp resolve_menu(key, %{locale: locale, mode: mode}, org_id) do
+    case KilnCMS.CMS.Menus.resolve(key, locale, org_id, fallback: mode) do
+      {:ok, menu, items} ->
+        {:ok, %{key: menu.key, name: menu.name, locale: menu.locale, items: items}}
+
+      :not_found ->
+        {:ok, nil}
     end
   end
 

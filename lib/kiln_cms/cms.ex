@@ -356,6 +356,14 @@ defmodule KilnCMS.CMS do
       define :increment_media_downloads, action: :increment_downloads
     end
 
+    # Cached on-the-fly transforms (`KilnCMS.Media.Derivatives`) — system-only,
+    # no API surface.
+    resource KilnCMS.CMS.MediaDerivative do
+      define :list_media_derivatives, action: :for_item, args: [:media_item_id]
+      define :record_media_derivative, action: :record
+      define :destroy_media_derivative, action: :destroy
+    end
+
     resource KilnCMS.CMS.WebhookEndpoint do
       define :list_webhook_endpoints, action: :read
       define :get_webhook_endpoint, action: :read, get_by: [:id]
@@ -675,6 +683,14 @@ defmodule KilnCMS.CMS do
       define :save_feed_settings, action: :save
       define :update_feed_settings, action: :update
       define :reset_feed_settings, action: :destroy
+    end
+
+    # Per-org locale fallback chains (`fr-CA → fr → en`), resolved on every
+    # delivery surface through `KilnCMS.I18n.Fallback`.
+    resource KilnCMS.CMS.SiteLocaleSettings do
+      define :list_site_locale_settings, action: :read
+      define :save_site_locale_settings, action: :save
+      define :reset_site_locale_settings, action: :destroy
     end
 
     # Taxonomy: categories (one-to-many to content) and tags (many-to-many).

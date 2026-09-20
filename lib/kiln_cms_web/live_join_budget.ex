@@ -71,8 +71,8 @@ defmodule KilnCMSWeb.LiveJoinBudget do
   events on an established socket. Both were later narrowed:
   `KilnCMSWeb.SocketJoinBudget` charges the three `/ws/*` connects per address,
   and `KilnCMSWeb.SocketEventBudget` (#1305) counts `/ws/collab`'s frames per
-  account. `/live` events and `/ws/gql` subscription documents remain in
-  threat-model item 10.
+  account, and `KilnCMSWeb.GraphqlLimits.SocketDocumentBudget` counts `/ws/gql`
+  documents per address. `/live` events remain in threat-model item 10.
   """
 
   import Phoenix.LiveView, only: [connected?: 1, get_connect_info: 2]

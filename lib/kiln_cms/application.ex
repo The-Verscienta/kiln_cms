@@ -59,6 +59,8 @@ defmodule KilnCMS.Application do
       # host, so the table grows with the number of distinct hosts a sweep
       # touches — cleaned on the same schedule as the rest.
       {KilnCMS.Links.Throttle, clean_period: :timer.minutes(5)},
+      # Caps concurrent on-the-fly image renders (`/media/:id/t/…`).
+      KilnCMS.Media.TransformGate,
       # Bounded LRW content cache (see `KilnCMS.Cache.child_spec/1`).
       KilnCMS.Cache,
       # Host→org resolution, on its own eviction schedule and the only cache

@@ -517,6 +517,25 @@ defmodule KilnCMS.CMS.Content do
         index :published, route: "/published"
       end
 
+    # One published document by slug, through the locale fallback chain
+    # (`Preparations.LocaleFallback`) — `?locale=`, `?fallback=false`,
+    # `?fallback_locale=` arrive as the action's arguments. `modify_conn` puts
+    # the served locale on the response (`x-kiln-locale`, `Content-Language`),
+    # since a client that asked for `fr-CA` may have been answered in `fr`.
+    #
+    # The action's `audiences`/`unlocks` arguments are readable from the query
+    # string here too (AshJsonApi exposes every public argument of a read), and
+    # that is safe where it would not be on the actorless delivery path: this
+    # route authorizes, and the `Content` read policies filter gated and locked
+    # rows for a caller who is not entitled to them whatever the action's own
+    # filter admits. Pinned by a test.
+    by_slug_route =
+      quote do
+        get :public_by_slug,
+          route: "/by-slug/:slug",
+          modify_conn: &KilnCMSWeb.DeliveryLocale.modify_json_api_conn/4
+      end
+
     # The headless surface. Compiled types each get their own typed schema;
     # the entry tier gets ONE generic surface shared by every dynamic type —
     # per-type typed schemas at runtime are impossible (Absinthe schemas are
@@ -635,6 +654,7 @@ defmodule KilnCMS.CMS.Content do
               index :search_semantic_published, route: "/semantic-search/published"
               index :autocomplete_published, route: "/autocomplete/published"
               unquote(published_route)
+              unquote(by_slug_route)
               get :read, modify_conn: &KilnCMSWeb.ContentETag.put_etag/4
 
               # Write surface (#330) — the shared entry tier, same policy stack
@@ -806,6 +826,7 @@ defmodule KilnCMS.CMS.Content do
               index :search_semantic_published, route: "/semantic-search/published"
               index :autocomplete_published, route: "/autocomplete/published"
               unquote(published_route)
+              unquote(by_slug_route)
               # `/:id` last so it can't shadow the static sub-paths above. Every
               # single-record response — this read and the writes below —
               # carries an `ETag` for `If-Match` (`KilnCMSWeb.ContentETag`).
@@ -923,9 +944,22 @@ defmodule KilnCMS.CMS.Content do
                        (^ref(:audience) == :public or ^ref(:audience) in ^arg(:audiences)) and
                        (is_nil(^ref(:access_password_hash)) or
                           ^ref(:password_fingerprint) in ^arg(:unlocks)) and
-                       ^ref(:slug) == ^arg(:slug) and ^ref(:locale) == ^arg(:locale) and
+                       ^ref(:slug) == ^arg(:slug) and
                        ^ref(:type_definition_id) == ^arg(:type_definition_id)
                    )
+
+            # Locale fallback (`KilnCMS.I18n.Fallback`). `locale` is where the
+            # walk starts; the site's chain continues it unless the caller
+            # narrows it — `fallback: false` for the requested locale only,
+            # `fallback_locale:` for that one locale instead of the chain.
+            # Public on purpose: these are the request's own choice and widen
+            # nothing, since every variant is still read through the filter
+            # above. Resolved by `Preparations.LocaleFallback`, which also
+            # refuses a locale the deployment does not run.
+            argument :fallback, :boolean, default: true
+            argument :fallback_locale, :string
+
+            prepare KilnCMS.CMS.Preparations.LocaleFallback
           end
 
           read :published_translations do
@@ -1045,8 +1079,21 @@ defmodule KilnCMS.CMS.Content do
                        (^ref(:audience) == :public or ^ref(:audience) in ^arg(:audiences)) and
                        (is_nil(^ref(:access_password_hash)) or
                           ^ref(:password_fingerprint) in ^arg(:unlocks)) and
-                       ^ref(:slug) == ^arg(:slug) and ^ref(:locale) == ^arg(:locale)
+                       ^ref(:slug) == ^arg(:slug)
                    )
+
+            # Locale fallback (`KilnCMS.I18n.Fallback`). `locale` is where the
+            # walk starts; the site's chain continues it unless the caller
+            # narrows it — `fallback: false` for the requested locale only,
+            # `fallback_locale:` for that one locale instead of the chain.
+            # Public on purpose: these are the request's own choice and widen
+            # nothing, since every variant is still read through the filter
+            # above. Resolved by `Preparations.LocaleFallback`, which also
+            # refuses a locale the deployment does not run.
+            argument :fallback, :boolean, default: true
+            argument :fallback_locale, :string
+
+            prepare KilnCMS.CMS.Preparations.LocaleFallback
           end
 
           # Every published locale variant of a slug, for hreflang alternates

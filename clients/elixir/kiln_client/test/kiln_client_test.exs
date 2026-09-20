@@ -275,6 +275,60 @@ defmodule KilnClientTest do
     end
   end
 
+  describe "sync/1" do
+    @upsert %{"op" => "upsert", "type" => "post", "id" => "p1", "artifact" => %{}}
+    @tombstone %{"op" => "delete", "type" => "post", "id" => "p2"}
+
+    test "starts with initial=true and follows has_more to the cursor to store" do
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      Req.Test.stub(KilnClient, fn conn ->
+        conn = record(conn)
+
+        case Agent.get_and_update(counter, &{&1, &1 + 1}) do
+          0 ->
+            Req.Test.json(conn, %{"items" => [@upsert], "cursor" => "c1", "has_more" => true})
+
+          _ ->
+            Req.Test.json(conn, %{"items" => [@tombstone], "cursor" => "c2", "has_more" => false})
+        end
+      end)
+
+      assert {:ok, %{items: [@upsert, @tombstone], cursor: "c2"}} =
+               KilnClient.sync(type: "post", limit: 50)
+
+      assert_received {:request, "/api/sync",
+                       %{"initial" => "true", "type" => "post", "limit" => "50"}}
+
+      # A cursor carries its own scope: the follow-up sends only the cursor.
+      assert_received {:request, "/api/sync", %{"cursor" => "c1"} = second}
+      refute Map.has_key?(second, "type")
+      refute Map.has_key?(second, "initial")
+    end
+
+    test "resumes from a stored cursor" do
+      stub_doc(%{"items" => [], "cursor" => "c9", "has_more" => false})
+
+      assert {:ok, %{items: [], cursor: "c9"}} = KilnClient.sync(cursor: "c8")
+      assert_received {:request, "/api/sync", %{"cursor" => "c8"}}
+    end
+
+    test "retries a 503 on the same cursor, then gives up" do
+      Req.Test.stub(KilnClient, fn conn ->
+        conn
+        |> record()
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.send_resp(503, "{}")
+      end)
+
+      assert {:error, {:http_status, 503, _}} =
+               KilnClient.sync(cursor: "c1", retries: 2, retry_delay_ms: 0)
+
+      for _ <- 1..3, do: assert_received({:request, "/api/sync", %{"cursor" => "c1"}})
+      refute_received {:request, _, _}
+    end
+  end
+
   describe "revisions" do
     @revision %{
       "id" => "v2",

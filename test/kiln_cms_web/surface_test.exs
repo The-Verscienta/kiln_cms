@@ -25,7 +25,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor/funnels /editor/funnels/:id /editor/governance /editor/governance/:type/:id
     /editor/governance/:type/:id/export.csv /editor/governance/:type/:id/export.json
     /editor/governance/health.csv /editor/inbox
-    /editor/links /editor/mail /editor/menus /editor/menus/:id /editor/newsletter
+    /editor/links /editor/locales /editor/mail /editor/menus /editor/menus/:id /editor/newsletter
     /editor/overview /editor/pages/:id /editor/posts/:id /editor/presentation/:type/:slug
     /editor/preview/:kind/:id /editor/redirects /editor/releases /editor/releases/:id
     /editor/search /editor/settings /editor/site-mail /editor/site/:type/:slug /editor/slugs
@@ -36,20 +36,19 @@ defmodule KilnCMSWeb.SurfaceTest do
 
   @shared ~w(
     /account /api/ask /api/auth/sign_in /api/auth/sign_in/verify /api/content/:type
-    /api/content/:type/:id/revisions /api/content/:type/:id/revisions/:version_id
-    /api/content/:type/:id/revisions/:version_id/restore
-
-    /api/content/:type/:id/preview-token
-    /api/content/:type/:slug /api/content/:type/:slug/related /api/content/:type/:slug/unlock
-    /api/forms/:slug /api/graphql/schema.graphql /api/json /api/json/swaggerui /api/locales
-    /api/media /api/media/import-url /api/media/uploads /api/media/uploads/complete /api/menus
-    /api/menus/:key
-    /api/provenance/:type/:slug /api/provenance/:type/:slug/verify /api/provenance/public-key
-    /api/resolve /api/schema /api/search /api/visual-editing/:type/:slug /auth
-    /auth/passkey/options /auth/passkey/verify /confirm_new_user/:token /gql /locale/:locale
-    /magic_link/:token /manifest.webmanifest /mcp /media/:id/download /media/:id/stream
-    /offline.html /password-reset/:token /preview/:token /preview/:token/live
-    /preview/release/:token /ready /register /reset /sign-in /sign-in/verify /sign-out /up
+    /api/content/:type/:id/preview-token /api/content/:type/:id/revisions
+    /api/content/:type/:id/revisions/:version_id
+    /api/content/:type/:id/revisions/:version_id/restore /api/content/:type/:slug
+    /api/content/:type/:slug/related /api/content/:type/:slug/unlock /api/forms/:slug
+    /api/graphql/schema.graphql /api/json /api/json/swaggerui /api/locales /api/media
+    /api/media/import-url /api/media/uploads /api/media/uploads/complete /api/menus
+    /api/menus/:key /api/provenance/:type/:slug /api/provenance/:type/:slug/verify
+    /api/provenance/public-key /api/resolve /api/schema /api/search /api/sync
+    /api/visual-editing/:type/:slug /auth /auth/passkey/options /auth/passkey/verify
+    /confirm_new_user/:token /gql /locale/:locale /magic_link/:token /manifest.webmanifest /mcp
+    /media/:id/download /media/:id/stream /offline.html /password-reset/:token /preview/:token
+    /preview/:token/live /preview/release/:token /ready /register /reset /sign-in /sign-in/verify
+    /sign-out /up
   )
 
   test "the console list is exactly these routes" do
