@@ -743,6 +743,11 @@ defmodule KilnCMSWeb.Router do
     # Draft-visible only to an editor/admin API key; `no-store`, per-actor.
     get "/visual-editing/:type/:slug", VisualEditingController, :show
 
+    # Delta sync (Contentful-style): the public corpus once, then upserts and
+    # tombstones since a signed cursor — so a mirror can see what was taken
+    # down, which `filter[updated_at][gt]` never could. KilnCMS.Firing.Sync.
+    get "/sync", SyncController, :index
+
     # Locale discovery — lets a headless consumer build a locale switcher /
     # hreflang set without hard-coding the site's configured languages.
     get "/locales", LocalesController, :index

@@ -94,6 +94,10 @@ its visibility follows the credential, which is why viewer-minted keys matter.
 # Rendered content (fired artifact; retries once on a cold cache)
 {:ok, artifact} = KilnClient.artifact("posts", "hello-world", surface: "json")
 
+# Mirror the public site: a snapshot the first time, then upserts AND
+# deletes since the stored cursor (anonymous view, whatever key is set)
+{:ok, %{items: items, cursor: cursor}} = KilnClient.sync(cursor: stored_cursor)
+
 # Join relationships through the included lookup
 {:ok, %{items: [post | _], included: included}} =
   KilnClient.list("posts", include: ["tags"], limit: 1)

@@ -580,3 +580,73 @@ describe("transport", () => {
     await expect(client(stub).list("posts")).rejects.toMatchObject({ body: "boom" });
   });
 });
+
+describe("sync", () => {
+  const upsert = {
+    op: "upsert",
+    type: "post",
+    id: "p1",
+    slug: "hello",
+    locale: "en",
+    published_at: "2026-09-19T00:00:00Z",
+    updated_at: "2026-09-19T00:00:00Z",
+    artifact: { type: "post", title: "Hello", slug: "hello", blocks: [] },
+  };
+  const tombstone = { op: "delete", type: "post", id: "p2" };
+
+  it("starts with initial=true and follows has_more to the stored cursor", async () => {
+    const stub = stubFetch(
+      { body: { items: [upsert], cursor: "c1", has_more: true } },
+      { body: { items: [tombstone], cursor: "c2", has_more: false } },
+    );
+
+    const { items, cursor } = await client(stub).sync({ type: "post", limit: 50 });
+
+    const [first, second] = stub.calls;
+    expect(first!.url.pathname).toBe("/api/sync");
+    expect(first!.url.searchParams.get("initial")).toBe("true");
+    expect(first!.url.searchParams.get("type")).toBe("post");
+    expect(first!.url.searchParams.get("limit")).toBe("50");
+    expect(first!.url.searchParams.get("cursor")).toBeNull();
+
+    // A cursor carries its own scope: the follow-up sends only the cursor.
+    expect(second!.url.searchParams.get("cursor")).toBe("c1");
+    expect(second!.url.searchParams.get("initial")).toBeNull();
+    expect(second!.url.searchParams.get("type")).toBeNull();
+
+    expect(items).toEqual([upsert, tombstone]);
+    expect(cursor).toBe("c2");
+  });
+
+  it("resumes from a stored cursor", async () => {
+    const stub = stubFetch({ body: { items: [], cursor: "c9", has_more: false } });
+    const result = await client(stub).sync({ cursor: "c8" });
+
+    expect(stub.calls[0]!.url.searchParams.get("cursor")).toBe("c8");
+    expect(result).toEqual({ items: [], cursor: "c9" });
+  });
+
+  it("retries a 503 (artifact compiling) on the same cursor", async () => {
+    const stub = stubFetch(
+      { status: 503, body: { errors: [{ code: "artifact_compiling" }] } },
+      { body: { items: [upsert], cursor: "c2", has_more: false } },
+    );
+
+    const { items } = await client(stub).sync({ cursor: "c1", retryDelayMs: 0 });
+
+    expect(stub.calls.map((call) => call.url.searchParams.get("cursor"))).toEqual(["c1", "c1"]);
+    expect(items).toEqual([upsert]);
+  });
+
+  it("surfaces an invalid cursor rather than retrying it", async () => {
+    const stub = stubFetch({ status: 400, body: { errors: [{ code: "invalid_cursor" }] } });
+
+    const error = (await client(stub)
+      .sync({ cursor: "stale", retryDelayMs: 0 })
+      .catch((e: unknown) => e)) as KilnHttpError;
+
+    expect(isKilnHttpError(error)).toBe(true);
+    expect(error.status).toBe(400);
+    expect(stub.calls).toHaveLength(1);
+  });
+});

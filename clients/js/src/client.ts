@@ -5,7 +5,8 @@
  * preview tokens — minting and redeeming them — the JSON:API write surface
  * (create, update, workflow transitions, soft-delete), the media upload API
  * (`uploadMedia` and friends; Kiln's `docs/api.md` → "Uploading media"),
- * image-transform URLs and a minimal `/gql` helper (see Kiln's
+ * image-transform URLs, the `/api/sync` delta API and a minimal
+ * `/gql` helper (see Kiln's
  * `docs/json-api.md` and `docs/headless-consumer-guide.md`). The writes and
  * the uploads need a read + write key on an editor account.
  *
@@ -99,6 +100,10 @@ import type {
   RevisionListOptions,
   SchemaOptions,
   SearchOptions,
+  SyncOptions,
+  SyncPage,
+  SyncResult,
+  SyncStartOptions,
   UploadMediaOptions,
   WorkflowVerb,
   WriteOptions,
@@ -405,6 +410,83 @@ export class KilnClient {
       options.signal,
       "application/json",
     )) as AsOfIndexResult;
+  }
+
+  // ── sync (delta) API ──────────────────────────────────────────────────────
+
+  /**
+   * Mirror the site's public content: a full snapshot the first time, then
+   * only what changed — upserts *and* deletions — since the cursor you stored.
+   * Follows `has_more` to the end and returns every item plus the cursor to
+   * store:
+   *
+   *     const { items, cursor } = await kiln.sync({ cursor: stored });
+   *     for (const item of items) {
+   *       if (item.op === "upsert") mirror.set(item.id, item.artifact);
+   *       else mirror.delete(item.id);
+   *     }
+   *     save(cursor);
+   *
+   * Visibility is always anonymous, whatever key the client carries: an
+   * upsert is something anyone could read now, and a document that became
+   * unpublished, archived, deleted, locked or members-only arrives as a
+   * `delete` — never with its body. Items are idempotent and may repeat
+   * across polls; apply them in order. A `400 invalid_cursor` (a rotated
+   * server secret, or a cursor from another site) means start over without
+   * `cursor`.
+   */
+  async sync<A = ArtifactDocument>(options: SyncOptions = {}): Promise<SyncResult<A>> {
+    const items: SyncResult<A>["items"] = [];
+    let page = await this.syncPageWithRetry<A>(options.cursor, options);
+
+    for (;;) {
+      items.push(...page.items);
+      if (!page.has_more) return { items, cursor: page.cursor };
+      page = await this.syncPageWithRetry<A>(page.cursor, options);
+    }
+  }
+
+  /**
+   * One page of `GET /api/sync`: `initial=true` without a cursor, else the
+   * cursor's next page. Prefer `sync()` unless you want to stream pages.
+   */
+  async syncPage<A = ArtifactDocument>(
+    cursor?: string,
+    options: SyncStartOptions = {},
+  ): Promise<SyncPage<A>> {
+    const params = new URLSearchParams();
+    if (cursor === undefined) {
+      params.append("initial", "true");
+      appendIfPresent(params, "type", options.type);
+      appendIfPresent(params, "surface", options.surface);
+    } else {
+      params.append("cursor", cursor);
+    }
+    appendIfPresent(params, "limit", options.limit);
+    return (await this.request(
+      "/api/sync",
+      params,
+      options.signal,
+      "application/json",
+    )) as SyncPage<A>;
+  }
+
+  private async syncPageWithRetry<A>(
+    cursor: string | undefined,
+    options: SyncOptions,
+  ): Promise<SyncPage<A>> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.syncPage<A>(cursor, options);
+      } catch (error) {
+        const retriable =
+          error instanceof KilnHttpError &&
+          error.status === 503 &&
+          attempt < (options.retries ?? 3);
+        if (!retriable) throw error;
+        await sleep(options.retryDelayMs ?? 2_000, options.signal);
+      }
+    }
   }
 
   /**

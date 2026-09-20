@@ -139,6 +139,7 @@ ever be authorized by an explicit clause below.
 |---|---|---|
 | `Firing.ReferenceEdge` | `read`, `from_source`, `to_target`, `upsert`, `destroy` | The re-fire wave rebuilds a document's outgoing edges on every fire and walks them backwards to find referrers. The graph is derived from the document itself and has no caller-facing write path (`forbid_if always()` for everyone, admin included), so the fire path was the only thing the old bypass existed for. |
 | `Firing.PublishedArtifact` | `read`, `for_document`, `get_surface`, `upsert`, `destroy` | The firing engine is the only writer an artifact has ever had, and unpublish is the only destroyer. On read the actor is admitted **alongside** `Checks.DocumentReadable`, not instead of it: delivery settles the audience question on the *document* first (`Firing.Delivery.resolve/5`) and then fetches the body by id, so re-running the document check there with the anonymous actor would refuse every gated page delivery had just unlocked. |
+| `Firing.SyncExposure` | all (`read`, `for_documents`, `record`) | The sync API's record of which document ids it has handed an anonymous caller (`GET /api/sync`, `KilnCMS.Firing.Sync`). A tombstone may name only an id recorded here, so the table is what keeps a never-public draft, gated or locked document out of a delta. No person has a read or write path — `forbid_if always()` for everyone, admin included. |
 | `CMS.TypeDefinition` | `read`, `by_name`, `including_archived` | Read-only. The fire path resolves a dynamic document's public type name and its schema.org `@type` from its definition. Writing one is still admin-only. |
 | `CMS.FieldDefinition` | `read`, `for_type`, `for_definition` | Read-only. Firing needs the field schema to turn a document's `custom_fields` values into JSON-LD. Defining a field is still admin-only. |
 | `Search.BlockEmbedding` | `read`, `for_document`, `nearest`, `upsert`, `destroy` | The per-block semantic index. `Search.BlockIndexer` is the only writer it has ever had — rows are derived from the document's own block tree — and `BlockSearch` / `Search.Related` are its only readers. Whether a *caller* may see a hit is decided one tier up, when the matching document is hydrated under their own authorization. |
@@ -618,16 +619,17 @@ pipeline run as the **system** behind signed-token checks. The two token reads
 deliberately — the token is the secret, and the confirming visitor has no
 tenant context.
 
-## Delivery internals — `PublishedArtifact`, `ReferenceEdge`, `BlockEmbedding`
+## Delivery internals — `PublishedArtifact`, `ReferenceEdge`, `BlockEmbedding`, `SyncExposure`
 
 | Resource | read | `create` / `update` / `destroy` |
 |---|---|---|
 | `Firing.PublishedArtifact` | ✅ whoever may read the **source document** | ❌ **everyone, incl. admin** |
 | `Firing.ReferenceEdge` | ✅ editor / admin | ❌ **everyone, incl. admin** |
 | `Search.BlockEmbedding` | ✅ editor / admin | ❌ **everyone, incl. admin** |
+| `Firing.SyncExposure` | ❌ **everyone, incl. admin** | ❌ **everyone, incl. admin** |
 
-These three have no caller-facing write path: the firing engine and the search
-indexer write them as the **system**, so nobody — admin included — can create,
+These have no caller-facing write path: the firing engine, the search indexer
+and the sync API write them as the **system**, so nobody — admin included — can create,
 update or destroy one through a policy meant for people. All three now say so in
 the policy block rather than being reached around it: each admits
 `%KilnCMS.SystemActor{}` by name (#1402, and see

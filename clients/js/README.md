@@ -203,6 +203,8 @@ trusted — and runs it through the same pipeline as the editor's media library
 on S3 storage with a private bucket; otherwise it throws `KilnHttpError` 501 and
 `uploadMedia` is the route. Upload calls use `uploadTimeoutMs` (default five
 minutes) rather than `timeoutMs` when no `signal` is passed.
+| `sync(opts)` | `GET /api/sync` | snapshot, then upserts + deletes since `cursor` |
+| `syncPage(cursor, opts)` | 〃 | one page, for streaming |
 
 Dynamic (admin-created) types go through the shared `entries` surface:
 `kiln.list("entries", { filter: { type_name: "product" } })`; their artifacts
@@ -211,6 +213,22 @@ are addressed by type name like compiled types
 `kiln.list("type-definitions", { filter: { name: "product" } })` — it needs an
 editor-or-above key, and `include: ["field_definitions"]` adds each type's
 custom-field schema.
+
+To mirror the site — a build cache or search index — and learn what was taken
+down as well as what changed, loop on `sync` and store its cursor:
+
+```ts
+const { items, cursor } = await kiln.sync({ cursor: stored }); // omit cursor the first time
+for (const item of items) {
+  if (item.op === "upsert") mirror.set(item.id, item.artifact);
+  else mirror.delete(item.id); // unpublished, archived, deleted, locked or gated
+}
+stored = cursor;
+```
+
+It always reads the anonymous view, whatever `apiKey` is set, and a `delete`
+never carries a body or a reason. A `400 invalid_cursor` means start over
+without `cursor`.
 
 ## Image transforms
 

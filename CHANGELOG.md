@@ -87,6 +87,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#rotating-secretkeybase-keeps-stored-keys-now-if-the-steps-run-in-order))
 ### Added
 
+- **`GET /api/sync`: a delta API that sees deletions.**
+  ([#1581](https://github.com/The-Verscienta/kiln_cms/pull/1581) · [long form](docs/changelog/unreleased.md#get-apisync-a-delta-api-that-sees-deletions))
+
 - **Locale fallback chains (`fr-CA → fr → en`), per site, on every delivery
   surface.**
   ([#1579](https://github.com/The-Verscienta/kiln_cms/pull/1579) · [long form](docs/changelog/unreleased.md#locale-fallback-chains-fr-ca-fr-en-per-site-on-every-delivery-surface))

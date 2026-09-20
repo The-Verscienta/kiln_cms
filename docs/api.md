@@ -88,6 +88,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **JSON:API** | `/api/json` | Filterable reads of Page, Post and admin-defined types (Entry), media, taxonomy and redirects; per-type search and autocomplete; **writes** — create, update, workflow transitions, soft-delete — with a `read_write` API key. | [json-api.md](json-api.md) |
 | **GraphQL** | `POST /gql`, `/ws/gql` | Delivery reads, search, menus and point-in-time (`contentAsOf`); the same **writes** as mutations; subscriptions over the WebSocket. | [headless-graphql-api.md](headless-graphql-api.md) |
 | **Fired artifacts** | `GET /api/content/:type/:slug` | Pre-rendered output per surface: `json` (default), `json_ld`, `web`, and `llm` (raw `text/markdown`). `?as_of=` reads a document as it stood on a date; `GET /api/content/:type?as_of=` lists what was published then. | [`examples/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/examples/README.md), [point-in-time.md](point-in-time.md) |
+| **Sync (delta)** | `GET /api/sync` | Mirror public content: a snapshot, then upserts **and deletions** since an opaque cursor — the only surface that reports a document *leaving*. | [§ Sync](#sync-delta-api) |
 | **Version history** | `GET /api/content/:type/:id/revisions` | A document's revisions, one revision's snapshot, and restore. Editor-tier credential required. | [§ Version history](#version-history-revisions) |
 | **Hybrid search** | `GET /api/search?q=` | Keyword + semantic + title search across every type, fused and ranked; answers as an anonymous visitor whatever the credential. | [search-roadmap.md](search-roadmap.md) |
 | **Path resolution** | `GET /api/resolve?path=` | "What lives at this URL?" — content, a redirect to follow, or nothing — for a front end's catch-all route. | [json-api.md](json-api.md) (URLs, pathauto & redirects) |
@@ -651,6 +652,81 @@ Notes that matter in practice:
 The unlock endpoint has its own tight rate-limit bucket (see
 [Rate limits](#rate-limits)) — it is the guessing surface for a shared secret,
 and there is no account to lock out instead.
+
+## Sync (delta) API
+
+`GET /api/sync` mirrors a site's **public** content: the whole corpus once, then
+only what changed since — upserts **and deletions**. It is the Contentful Sync
+API shape (`initial=true` → cursor → deltas with deleted entries), and it exists
+because `filter[updated_at][gt]` on JSON:API cannot see a document *leave*: one
+that is unpublished, archived, deleted, locked or moved to a members-only
+audience simply stops matching, which a poller cannot tell from "unchanged".
+
+```bash
+# 1. First run: the full snapshot (optionally one type, one surface)
+curl -s 'https://cms.example.com/api/sync?initial=true&type=post&limit=100'
+
+# 2. While "has_more" is true, follow the cursor straight away
+curl -s 'https://cms.example.com/api/sync?cursor=SFMyNTY…'
+
+# 3. Once "has_more" is false, store the cursor; poll with it later
+curl -s 'https://cms.example.com/api/sync?cursor=<stored>'
+```
+
+Every response is `{"items": […], "cursor": "…", "has_more": bool}`, and each
+item is one of
+
+```json
+{"op": "upsert", "type": "post", "id": "…", "slug": "hello", "locale": "en",
+ "published_at": "…", "updated_at": "…", "artifact": { …the fired surface… }}
+{"op": "delete", "type": "post", "id": "…"}
+```
+
+`artifact` is exactly what `GET /api/content/:type/:slug?surface=…` serves.
+Apply items **in order**, keyed by `id`: an upsert replaces your copy, a delete
+removes it.
+
+| Parameter | Meaning |
+|---|---|
+| `initial=true` | Start a new sync. Exactly one of `initial` and `cursor`. |
+| `cursor` | Resume. Carries its own scope, so `type`/`surface` are ignored with it. |
+| `type` | One content type (singular, compiled or admin-defined). Default: every type. |
+| `surface` | Artifact surface embedded in upserts: `json` (default), `json_ld`, `web`, `llm`. |
+| `limit` | Items per page, 1–500 (default 100). |
+
+**Visibility is always anonymous — whoever calls.** An upsert is a document an
+anonymous reader could fetch right now: published, `audience` `:public`, not
+passphrase-locked, not archived, of a live content type. A bearer token does
+not widen it (use JSON:API for drafts). A document that stops qualifying
+arrives as a `delete` carrying its id and type **only** — never its body, slug,
+or the reason. And a delete only ever names a document this endpoint has
+already served: a draft, a members-only post or a locked page that was never
+public never appears in a delta at all, not even as an id.
+
+**Semantics a client must allow for.**
+
+* **At-least-once.** A delta window trails the clock by a few seconds (so a
+  write whose transaction is still committing is not skipped), and windows
+  overlap slightly after the snapshot. The same item can arrive twice; applying
+  it twice is harmless.
+* **A delete for something you don't hold** can happen (a document that became
+  public and private again between your polls). Ignore it.
+* **Edits re-send.** Any editorial write to a public document re-sends it,
+  even one that did not change the rendered body.
+* **Not seen:** a change that writes no version to the document itself —
+  editing a *fragment* it embeds, or its type's custom-field definitions. Its
+  artifact re-fires, but the document is not reported. A periodic full resync
+  (`initial=true`) covers that.
+
+**Errors.** `400 invalid_cursor` — the cursor was tampered with, belongs to
+another site, or was signed before a `SECRET_KEY_BASE` rotation: start again
+with `initial=true`. `404` — unknown `type`. `503 artifact_compiling` (with
+`Retry-After`) — a document on this page was published a moment ago and its
+artifact is still being fired; retry the **same** request. Responses are
+`Cache-Control: no-store`, and sync fetches are not counted as views.
+
+Both official clients wrap the loop: `kiln.sync({ cursor })` in
+`@kiln-cms/client`, `KilnClient.sync(cursor: …)` in `kiln_client`.
 
 ## Locale discovery
 
