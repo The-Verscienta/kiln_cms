@@ -35,6 +35,16 @@ defmodule KilnCMS.Cache.Hosts do
   That distinguishes it from bounding the work by rate limit, which cannot tell
   a flood from a legitimate request behind the same address and so can refuse
   hosts that do exist.
+
+  ## The canonical host's entry is also the default-org fallback
+
+  A host that resolves to nothing is served the default org when strict
+  matching is off, and `KilnCMSWeb.Tenant` reads that org through the canonical
+  base host's entry here rather than from the database. So a stray `Host` — a
+  health check by IP, a platform's internal hostname — costs its own cached
+  miss and nothing else, and the default org shows the same five-minute
+  staleness on every host it is served on instead of being fresh on some and
+  stale on others. Evicting that one key (or `clear/0`) is what refreshes both.
   """
 
   # Hosts a deployment serves are few; hosts an attacker can invent are not. Big

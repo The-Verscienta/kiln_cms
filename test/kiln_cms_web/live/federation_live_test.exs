@@ -126,6 +126,47 @@ defmodule KilnCMSWeb.FederationLiveTest do
       %{conn: log_in(conn, admin), admin: admin}
     end
 
+    # #1487: the button re-keys under the same handle, and the confirmation is
+    # honest that some servers will keep the old key.
+    test "re-keying replaces the key, keeps the handle, and says what peers may do", %{
+      conn: conn,
+      org_id: org_id
+    } do
+      [before] = Federation.list_site_federation!(authorize?: false, tenant: org_id)
+      {:ok, lv, html} = live(conn, ~p"/editor/federation")
+
+      assert html =~ "some remote servers may keep the old one"
+      key_line = lv |> element("#signing-key") |> render()
+      assert key_line =~ "readable"
+      refute key_line =~ "unreadable"
+
+      html = lv |> element("#rekey") |> render_click()
+      assert html =~ "Re-keyed."
+
+      [rekeyed] = Federation.list_site_federation!(authorize?: false, tenant: org_id)
+      refute rekeyed.public_key_pem == before.public_key_pem
+      assert rekeyed.origin == before.origin
+      assert rekeyed.username == before.username
+    end
+
+    test "an unreadable signing key is shown rather than left to the ledger", %{
+      conn: conn,
+      org_id: org_id
+    } do
+      [settings] = Federation.list_site_federation!(authorize?: false, tenant: org_id)
+
+      KilnCMS.Repo.query!(
+        "UPDATE site_federation SET private_key_encrypted = $1 WHERE id = $2",
+        [
+          KilnCMS.Keys.Vault.encrypt("pem", "rotated-away-" <> String.duplicate("r", 64)),
+          Ecto.UUID.dump!(settings.id)
+        ]
+      )
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/federation")
+      assert lv |> element("#signing-key") |> render() =~ "unreadable"
+    end
+
     test "the profile is editable through :save", %{conn: conn, org_id: org_id} do
       {:ok, lv, _html} = live(conn, ~p"/editor/federation")
 

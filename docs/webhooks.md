@@ -12,7 +12,11 @@ as [#570](https://github.com/The-Verscienta/kiln_cms/issues/570) — the feature
 
 Admins manage endpoints at **`/editor/webhooks`**. Adding one takes a URL and a
 set of events to subscribe to; Kiln generates a signing secret at creation time
-(shown on the endpoint's row — it never changes, even across edits). Toggling
+(shown on the endpoint's row — it never changes, even across edits). The secret
+is stored encrypted with the app's vault key, which is derived from
+`SECRET_KEY_BASE`. Rotating that key leaves every endpoint's secret unreadable:
+the row says so, and deliveries are refused rather than sent unsigned.
+Re-create the endpoints after a rotation ([secrets rotation](secrets-rotation.md)). Toggling
 **Active** or editing an endpoint gives it a clean slate: its failure count
 resets (see [Auto-disable](#auto-disable) below).
 
@@ -31,6 +35,22 @@ can emit, so a new content type has webhook events for free:
 | `updated` | A **published** document is edited (draft edits/autosaves stay silent) | Yes |
 | `in_review` | A document is submitted for review ([#375](https://github.com/The-Verscienta/kiln_cms/issues/375)) | **No — opt in** |
 | `returned_to_draft` | A review is sent back to draft | **No — opt in** |
+| `created` | A document is created (API, editor, or import) | **No — opt in** |
+| `archived` | A document is archived, from any state | Yes |
+| `deleted` | A document is moved to the trash (`DELETE` over the API is this too) | Yes |
+| `restored` | A document comes back from the trash, or is unarchived to draft | Yes |
+
+A mirror needs `archived`, `deleted` and `restored`, or it keeps serving
+documents the site no longer has. They are on by default for that reason, and
+they are safe defaults because of what they carry (see the payload
+shapes below): `archived` and `deleted` send a
+**tombstone**, the document's identity and nothing else, since they fire for
+drafts as readily as for live documents. `restored` sends the full body only
+when the document is published again (it is back on the delivery path and a
+mirror must re-ingest it); otherwise it sends the tombstone too.
+
+The trash is a soft delete. A hard purge from the trash, or the nightly
+auto-purge, sends nothing more: the receiver already heard `deleted`.
 
 `unpublished` fires for both an explicit unpublish **and** archiving a
 published document (#914) — both remove it from delivery, and a receiver
@@ -38,35 +58,56 @@ watching for content leaving delivery should not have to subscribe to two
 events to hear about it. The payload's `data.state` reflects which happened:
 `"draft"` for an unpublish, `"archived"` for an archive.
 
-`in_review` and `returned_to_draft` are opt-in only: unlike the other three,
-their payload is the full serialized body of a document that has **never been
-published** — a receiver built for publish-mirroring must not be sent
-draft/embargoed content it didn't ask for.
+`in_review`, `returned_to_draft` and `created` are opt-in only. Their payload is
+the full serialized body of a document that has **never been published**, and a
+receiver built for publish-mirroring must not be sent draft or embargoed content
+it didn't ask for. `created` fires for every create path, bulk
+[import](content-portability.md) included, so expect one per imported record.
 
-Two more event names exist outside the `<type>.<verb>` pattern:
+More event names exist outside the `<type>.<verb>` pattern:
 
 - **`form.submitted`** — a public form submission ([Forms](forms.md)); every
   endpoint is subscribed by default.
+- **`membership.activated`** / **`membership.canceled`** — a paid membership
+  started or stopped granting access ([Paid memberships](memberships.md#webhook-events));
+  opt in.
+- **`task.assigned`** / **`task.overdue`**, **`release.published`** /
+  **`release.rolled_back`** / **`release.failed`**, and
+  **`experiment.concluded`** — editorial tasks, content releases and A/B
+  experiments; opt in.
 - **`ping`** — a manual test delivery (see [Ping](#ping-and-redeliver) below);
   never subscribed to, and delivered on demand regardless of an endpoint's
   active state or event list.
 
-The request body is always `{"event": "<name>", "data": {...}}`. `data` shape
-depends on the event:
+The request body is always
+`{"event": "<name>", "delivery_id": "<uuid>", "data": {...}}`. `delivery_id` is
+the ledger row's id: the same on every retry of one delivery, and new for a
+redelivery. It is inside the signed body, so a receiver can trust it as a
+dedupe key. `data` shape depends on the event:
 
-- **Content lifecycle events** (`published`/`unpublished`/`updated`/`in_review`/
-  `returned_to_draft`) — the document's public fields (`id`, `title`, `slug`,
+- **Tombstones** (`archived`, `deleted`, and `restored` for a document that is
+  not published) — `{"id", "slug", "locale", "state", "updated_at"}`. `state`
+  is the document's workflow state: `"archived"` after an archive, and the state
+  it was trashed in for `deleted` (`"published"` tells you it was live).
+- **Other content lifecycle events** (`published`/`unpublished`/`updated`/
+  `in_review`/`returned_to_draft`/`created`, and `restored` for a published
+  document) — the document's public fields (`id`, `title`, `slug`,
   `excerpt`, `blocks`, `seo_*`, `canonical_url`, `locale`, `state`, `audience`,
   `locked`, `published_at`, `scheduled_at`, `inserted_at`, `updated_at`); each block
   trimmed to `type`, `content`, `data`, `order`, `children`. Internal-only
   fields (e.g. search text) are never included.
 - **`form.submitted`** — `{"form": "<slug>", "data": {...submitted fields...}}`.
+- **`membership.activated`** / **`membership.canceled`** — the member (`user_id`,
+  `email`), the tier (`id`, `slug`, `name`, `audience`), the transition
+  (`status`, `previous_status`, `occurred_at`) and `event_id` to dedupe on; see
+  [Paid memberships](memberships.md#webhook-events).
 - **`ping`** — `{"message": "KilnCMS webhook test", "endpoint_url": "...", "sent_at": "<ISO 8601>"}`.
 
 ```jsonc
 // POST to your endpoint, page.published
 {
   "event": "page.published",
+  "delivery_id": "0b9c…",
   "data": {
     "id": "…", "title": "Launch", "slug": "launch", "state": "published",
     "audience": "public", "locked": false,
@@ -106,39 +147,75 @@ an instruction to withdraw it.
 
 ## Verifying the signature
 
-Every request carries two headers:
+Every request carries these headers:
 
 | Header | Value |
 | --- | --- |
-| `x-kilncms-signature` | Lowercase hex HMAC-SHA256 of the **raw request body**, keyed by the endpoint's secret |
+| `x-kilncms-webhook-signature` | `t=<unix seconds>,v1=<hex>` where `v1` is the lowercase hex HMAC-SHA256 of `"<t>.<raw body>"`, keyed by the endpoint's secret |
+| `x-kilncms-delivery-id` | The delivery's id, the same value as the body's `delivery_id`. Stable across retries |
 | `x-kilncms-event` | The event name (redundant with the body's `event` field, for routing without a parse) |
+| `x-kilncms-signature` | **Deprecated.** Hex HMAC-SHA256 of the raw body alone, with no timestamp. Still sent so existing receivers keep working; it will be removed in a later release |
 
-Compute the HMAC over the exact bytes you received — not a re-serialization of
-the parsed JSON, since key order and whitespace aren't guaranteed to round-trip
-— and compare it to `x-kilncms-signature` with a constant-time comparison:
+To verify a delivery:
+
+1. Split the header on `,` into `t` and one or more `v1` values.
+2. Reject it if `t` is more than **300 seconds** (five minutes) from your own
+   clock, in either direction. This is what stops a captured request from
+   being replayed later. Kiln signs each attempt when it sends it, so a retry
+   carries a fresh `t`. Keep your clock NTP-synced.
+3. Compute the HMAC of the string `t`, then `.`, then the **raw request body**,
+   using the exact bytes you received. Do not re-serialize the parsed JSON: key
+   order and whitespace aren't guaranteed to round-trip.
+4. Accept if any `v1` matches, compared in constant time.
+5. Optionally, remember each `delivery_id` for the length of your window and
+   drop a repeat. That makes delivery exactly-once inside the window as well
+   as outside it.
+
+The official clients do all of this: `verifyWebhook` in the
+[JS client](https://github.com/The-Verscienta/kiln_cms/blob/main/clients/js/README.md) and `KilnClient.Webhook.verify/4` in the
+[Elixir client](https://github.com/The-Verscienta/kiln_cms/blob/main/clients/elixir/kiln_client/README.md). By hand:
 
 ```js
 // Node
 const crypto = require("crypto");
-function verify(secret, rawBody, signature) {
-  const expected = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+function verify(secret, rawBody, header, toleranceSeconds = 300) {
+  const pairs = header.split(",").map((p) => p.trim().split(/=(.*)/s));
+  const ts = pairs.filter(([k]) => k === "t").map(([, v]) => v);
+  if (ts.length !== 1 || !/^\d+$/.test(ts[0])) return false;
+  if (Math.abs(Date.now() / 1000 - Number(ts[0])) > toleranceSeconds) return false;
+  const expected = Buffer.from(
+    crypto.createHmac("sha256", secret).update(`${ts[0]}.`).update(rawBody).digest("hex"),
+  );
+  return pairs.some(([k, v]) => {
+    if (k !== "v1") return false;
+    const given = Buffer.from(v);
+    return given.length === expected.length && crypto.timingSafeEqual(given, expected);
+  });
 }
 ```
 
 ```python
 # Python
-import hmac, hashlib
+import hmac, hashlib, time
 
-def verify(secret: str, raw_body: bytes, signature: str) -> bool:
-    expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature)
+def verify(secret: str, raw_body: bytes, header: str, tolerance: int = 300) -> bool:
+    pairs = [p.split("=", 1) for p in header.split(",") if "=" in p]
+    ts = [v for k, v in pairs if k == "t"]
+    if len(ts) != 1 or not ts[0].isdigit() or abs(time.time() - int(ts[0])) > tolerance:
+        return False
+    expected = hmac.new(secret.encode(), ts[0].encode() + b"." + raw_body, hashlib.sha256).hexdigest()
+    return any(hmac.compare_digest(expected, v) for k, v in pairs if k == "v1")
 ```
 
-There is currently no timestamp or nonce in the scheme, so a captured request
-can be replayed verbatim — treat the signature as proof of *origin*, not of
-*freshness*. If your receiver needs replay protection, dedupe on the payload's
-own `id`/`updated_at` (content events) or track delivery IDs out of band.
+**Migrating from `x-kilncms-signature`.** The old header is the HMAC of the body
+alone. It proves a delivery came from Kiln unmodified, but not when it was sent,
+so a captured request can be replayed to a receiver that checks only that
+header, indefinitely (see the [threat model](threat-model.md#residual-risks)). Both
+headers are sent on every delivery, so a receiver can switch at any time, with
+no coordination.
+
+An admin **redelivery** is a new delivery: a new `delivery_id` and a fresh `t`.
+It is meant to be accepted.
 
 ## Egress protections (SSRF)
 
@@ -171,7 +248,8 @@ re-checked) on every delivery attempt, by `KilnCMS.Webhooks.SafeUrl`:
 
 A publish/unpublish/update/form-submit enqueues one Oban job per active,
 subscribed endpoint, plus one ledger row (`WebhookDelivery`) per job — the row
-is updated on every attempt, not just the outcome.
+is updated on every attempt, not just the outcome. The row's id is the
+`delivery_id` the receiver sees.
 
 - Delivery is a `POST` with a 5-second connect timeout and a 15-second
   response timeout.
@@ -179,6 +257,9 @@ is updated on every attempt, not just the outcome.
   exponential backoff up to **5 attempts**.
 - Once retries are exhausted, the delivery is marked `:failed` — permanently;
   nothing retries it further unless an admin redelivers it.
+- A delivery whose endpoint secret can no longer be decrypted (see
+  [Registering an endpoint](#registering-an-endpoint)) fails with
+  `delivery failed: signing secret unreadable` and is never sent.
 
 ### Auto-disable
 

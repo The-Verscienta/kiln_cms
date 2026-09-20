@@ -8,6 +8,7 @@ defmodule KilnCMSWeb.WebhookLiveTest do
 
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.WebhookEndpoint
 
   @password "password123456"
 
@@ -102,8 +103,8 @@ defmodule KilnCMSWeb.WebhookLiveTest do
       assert endpoint.url == "https://hooks.test/incoming"
       assert Enum.sort(endpoint.events) == ["page.published", "page.updated"]
       # A signing secret is generated and surfaced to the admin.
-      assert is_binary(endpoint.secret)
-      assert html =~ endpoint.secret
+      assert is_binary(WebhookEndpoint.secret(endpoint))
+      assert html =~ WebhookEndpoint.secret(endpoint)
     end
   end
 
@@ -113,7 +114,7 @@ defmodule KilnCMSWeb.WebhookLiveTest do
         url: "https://hooks.test/existing",
         events: ["page.published"],
         active: true,
-        secret: "s3cret"
+        secret_encrypted: KilnCMS.Keys.Vault.encrypt("s3cret")
       })
     end
 

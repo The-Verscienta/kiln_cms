@@ -69,6 +69,19 @@ your sink feeds a public surface the filtering is yours to do, and it takes both
 fields: a document published openly and locked afterwards still reads
 `"audience": "public"`.
 
+- **Deletions reach the receiver too:** `<type>.archived`, `<type>.deleted`
+  and `<type>.restored` are on by default and carry only the document's
+  identity (`id`, `slug`, `locale`, `state`, `updated_at`), so a mirror can
+  drop what the site dropped. The opt-in `<type>.created` carries a new
+  draft's full body.
+**Personal data in non-content events.** `form.submitted` carries the
+submitted fields, and `membership.activated` / `membership.canceled` carry the
+member's **email** and user id — only to endpoints an admin subscribed to those
+events (they are opt-in). Each delivered payload is kept in the delivery log
+for its retention window (30 days by default) so it can be redelivered; GDPR
+erasure does not rewrite that log. See
+[Paid memberships](memberships.md#webhook-events).
+
 - **Disable:** delete the webhook endpoint(s) in `/editor/webhooks` (admin only).
   No endpoints configured ⇒ nothing is sent.
 

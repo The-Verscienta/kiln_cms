@@ -66,6 +66,19 @@ defmodule KilnCMS.Media.Ingest do
           tenant: term(),
           alt: String.t() | nil,
           caption: String.t() | nil,
+          # The rest of the editor-settable metadata, for a caller that has it
+          # at upload time (the upload API) rather than setting it in a
+          # second write. Passed through to the `:create` as given — its
+          # constraints, and `tag_ids`' tenant-scoped lookup, are the create's.
+          decorative: boolean() | nil,
+          focal_x: float() | nil,
+          focal_y: float() | nil,
+          tag_ids: [String.t()] | nil,
+          # `store_url/2` only: the name to record instead of the one the URL's
+          # path implies, and how many redirects to follow (default 0 — each
+          # hop is re-validated by `SafeFetch`, see its moduledoc).
+          filename: String.t() | nil,
+          max_redirects: non_neg_integer(),
           max_bytes: pos_integer(),
           # `:none` skips the uploaded_by stamp — for callers whose actor
           # authorizes the create but didn't upload the asset (the
@@ -114,9 +127,9 @@ defmodule KilnCMS.Media.Ingest do
   # sobelow_skip ["Traversal.FileModule"]
   def store_url(url, opts \\ []) when is_binary(url) do
     with :ok <- safe_url(url),
-         {:ok, path} <- download(url) do
+         {:ok, path} <- download(url, Keyword.get(opts, :max_redirects, 0)) do
       try do
-        store_file(path, filename_from_url(url), opts)
+        store_file(path, opts[:filename] || filename_from_url(url), opts)
       after
         File.rm(path)
       end
@@ -172,6 +185,14 @@ defmodule KilnCMS.Media.Ingest do
       Logger.warning("Media #{item.id} stored but derivation was not queued: #{inspect(error)}")
       :ok
   end
+
+  @doc """
+  The largest body `store_url/2` will download. Smaller than
+  `max_upload_size/0` because a sideload is buffered in memory — see
+  `@max_download_size`.
+  """
+  @spec max_download_size() :: pos_integer()
+  def max_download_size, do: @max_download_size
 
   @doc "The per-kind byte ceiling, exposed so callers can advertise the same numbers."
   @spec max_upload_size() :: pos_integer()
@@ -573,6 +594,10 @@ defmodule KilnCMS.Media.Ingest do
       }
       |> put_present(:alt, opts[:alt])
       |> put_present(:caption, opts[:caption])
+      |> put_present(:decorative, opts[:decorative])
+      |> put_present(:focal_x, opts[:focal_x])
+      |> put_present(:focal_y, opts[:focal_y])
+      |> put_present(:tag_ids, opts[:tag_ids])
       |> put_quarantined(Keyword.get(opts, :quarantined?, false))
 
     # Named options, not a raw `:context` passthrough: the facade translates
@@ -660,10 +685,11 @@ defmodule KilnCMS.Media.Ingest do
   # fresh resolution the pin never sees) and enforces `:max_bytes` itself.
   #
   # sobelow_skip ["Traversal.FileModule"]
-  defp download(url) do
+  defp download(url, max_redirects) do
     case SafeFetch.get(url,
            max_bytes: @max_download_size,
            receive_timeout: @download_timeout,
+           max_redirects: max_redirects,
            req_options: req_options()
          ) do
       {:ok, %{status: status, body: body}} when status in 200..299 ->

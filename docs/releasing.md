@@ -74,6 +74,15 @@ people to pass the flag reflexively.
    instance reports (`Kiln.Version`) and what the update check compares
    against, so it must match the tag.
 
+   Then regenerate the committed API specs, whose OpenAPI document states the
+   version as `info.version`:
+
+   ```bash
+   mix kiln.api.specs
+   ```
+
+   CI's documentation job fails the release PR if you forget.
+
 5. **Commit, tag, push.**
 
    ```bash

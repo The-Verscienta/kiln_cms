@@ -21,7 +21,7 @@ defmodule KilnCMSWeb.Plugs.ApiDocs do
   which actions exist, what they accept, what they return.
 
   That is the same argument that already disabled GraphQL introspection in
-  production (`KilnCMSWeb.Plugs.DisableGraphqlIntrospection`), and leaving a
+  production (`KilnCMSWeb.GraphqlLimits.NoIntrospection`), and leaving a
   full OpenAPI document next to a disabled introspection endpoint was the
   inconsistency. The explorer carries a second, smaller reason: it needs a
   relaxed CSP allowing `https://cdnjs.cloudflare.com` for its bundle, and that
@@ -32,6 +32,27 @@ defmodule KilnCMSWeb.Plugs.ApiDocs do
   `config :kiln_cms, :api_docs` — `true` by default, `false` in `:prod`,
   overridable at runtime with `API_DOCS_ENABLED`. An operator publishing a
   public API wants these on; the default should not assume they are.
+
+  ## An API key opens the document, not the explorer
+
+  With the flag off, a request to the spec path that carries a valid API key
+  (`Authorization: Bearer kiln_…`, authenticated by `KilnCMSWeb.Plugs.ApiKeyAuth`
+  earlier in the `:api` pipeline) is served anyway. That is what a client
+  author needs to point codegen at their own production site — which has their
+  own content types in it, unlike the stock copy committed at
+  `docs/api/openapi.json` — and the disclosure argument above does not apply to
+  someone an admin has already issued a credential to (minting keys is
+  admin-only, see `KilnCMS.Accounts.ApiKey`). Any key will do, `read` or
+  `read_write`: the document describes routes, and each route still answers to
+  the key's own scope.
+
+  A JWT does not open it. Open registration hands one to anybody who signs up
+  as a viewer, so holding one says nothing about being an integration the site
+  chose.
+
+  The explorer stays closed either way. It is a browser page that cannot send
+  an `Authorization` header on its own navigation, and its relaxed CSP is the
+  part worth not shipping.
 
   ## 404, not 403
 
@@ -59,7 +80,11 @@ defmodule KilnCMSWeb.Plugs.ApiDocs do
 
   @doc false
   def call(%{path_info: path} = conn, _opts) do
-    if enabled?() or not gated?(path), do: conn, else: refuse(conn, path)
+    cond do
+      enabled?() or not gated?(path) -> conn
+      not explorer?(path) and KilnCMSWeb.ApiSpecs.api_key_caller?(conn) -> conn
+      true -> refuse(conn, path)
+    end
   end
 
   # Compared **decoded**, because that is what the router matched on and the two

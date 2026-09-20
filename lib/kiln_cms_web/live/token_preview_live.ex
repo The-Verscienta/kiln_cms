@@ -22,6 +22,7 @@ defmodule KilnCMSWeb.TokenPreviewLive do
 
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.PreviewToken
+  alias KilnCMS.CMS.WorkingCopy
   alias KilnCMSWeb.BlockComponents
   alias KilnCMSWeb.Presence
   alias KilnCMSWeb.PreviewLive
@@ -30,21 +31,26 @@ defmodule KilnCMSWeb.TokenPreviewLive do
   def mount(%{"token" => token}, _session, socket) do
     with {:ok, %{type: type, id: id, org_id: org_id}} <- PreviewToken.verify(token),
          :ok <- same_site(org_id, socket.assigns[:current_org]),
-         kind = to_string(type),
-         true <- ContentTypes.type?(kind),
+         # Resolved under the token's org: an admin-defined type lives there.
+         %{} = ct <- ContentTypes.get(type, org_id),
+         kind = to_string(ct.type),
          # `authorize?: false`: the signed token IS the grant (anonymous guests
          # hold no actor); type, id and the tenant come from the token, never
          # the URL — content is org-scoped, so the read carries `tenant:`, and
          # `same_site/2` has pinned it to the serving org (#1309).
          {:ok, record} <-
-           ContentTypes.get_record(kind, id, authorize?: false, tenant: org_id) do
+           ContentTypes.get_record(ct, id, authorize?: false, tenant: org_id) do
+      # What the editor sees: a live document's pending working copy, not the
+      # row readers get. Later edits arrive as `{:preview_update, …}` below.
+      record = WorkingCopy.view(record)
+
       socket =
         socket
         |> assign(:invalid?, false)
         |> assign(:kind, kind)
         |> assign(:record_id, id)
         |> assign(:page_title, gettext("Preview: %{title}", title: record.title))
-        |> assign(:excerpt?, ContentTypes.get!(kind).excerpt?)
+        |> assign(:excerpt?, ct.excerpt?)
         |> assign(:title, record.title)
         |> assign(:excerpt, Map.get(record, :excerpt))
         |> assign(:blocks, content_blocks(record))

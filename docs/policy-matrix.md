@@ -531,6 +531,27 @@ second half of that model is not a policy: `KilnCMSWeb.Plugs.CodeInjection` runs
 only in the `:delivery` pipeline, so the snippet can never render in the editor
 console. See [code-injection.md](code-injection.md).
 
+## Outgoing mail — `SiteMailRelay` (#1322)
+
+| Resource | read | writes |
+|---|---|---|
+| `SiteMailRelay` (`read`) | admin only | admin only (`save`, `update`, `destroy`) |
+
+A site's own SMTP relay and From address, at `/editor/site-mail`. It is
+org-admin on both sides, like every per-site settings row. Nothing here is shown
+to a visitor, and the row names the site's mail provider and account. The
+delivery jobs read it as the system (`KilnCMS.Mail.SiteRelay`).
+
+Org admin is the right tier, but on a hosted deployment an org admin is a
+tenant. That is why this row is stricter than the operator's `Mail.Settings`,
+and none of it is a policy. The password is encrypted and never read back into
+the form. It can't be pointed at an environment variable or a file, as the
+operator's keys can. The relay host is refused if it resolves to a private,
+loopback, link-local or metadata address, checked when it is saved and again on
+every connection. A site relay's hard rejects cancel the message but don't add
+the address to the instance-wide suppression list, because a relay the site
+chose could otherwise block any address for every site.
+
 ## Content types — `TypeDefinition`
 
 | Action | admin | editor | viewer | anonymous | system |
@@ -735,7 +756,7 @@ never had ids to begin with), is documented in full at
 `KilnCMS.CMS.Changes.EnforceBlockFieldPolicy`'s moduledoc rather than
 repeated here.
 
-See residual risk 8 in [`threat-model.md`](threat-model.md) for what this does
+See residual risk 9 in [`threat-model.md`](threat-model.md) for what this does
 and does not guarantee — in particular that a wholly id-less stored tree keeps
 the re-target until stamped, and that reusing another block's id remains open.
 

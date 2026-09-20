@@ -4,8 +4,26 @@ defmodule KilnCMS.Webhooks do
 
   When content is published, `dispatch/2` records one `WebhookDelivery` row
   and enqueues one `DeliveryWorker` Oban job per active, subscribed endpoint.
-  Deliveries are signed with HMAC-SHA256 over the request body using the
-  endpoint's secret, so receivers can verify authenticity.
+  Deliveries are signed with HMAC-SHA256 using the endpoint's secret, so
+  receivers can verify authenticity.
+
+  ## Signatures
+
+  Every delivery carries two signatures:
+
+    * `x-kilncms-webhook-signature: t=<unix seconds>,v1=<hex>` — the HMAC of
+      `"<t>.<raw body>"`. Binding the time into the MAC is what lets a receiver
+      refuse a captured request replayed later: reject anything whose `t` is
+      more than `signature_tolerance/0` seconds from its own clock. The body
+      also carries `delivery_id` (echoed in `x-kilncms-delivery-id`), stable
+      across a delivery's retries, so a receiver can drop a duplicate inside
+      the window too. `verify/4` is the reference implementation.
+    * `x-kilncms-signature: <hex>` — the HMAC of the raw body alone. The
+      original scheme, **deprecated**: it proves origin but not freshness. It
+      is still sent so existing receivers keep working, and will be removed
+      in a later release.
+
+  Each attempt is signed when it is sent, so a retry carries a fresh `t`.
 
   Reliability model (surfaced at `/editor/webhooks`):
 
@@ -26,16 +44,98 @@ defmodule KilnCMS.Webhooks do
   require Ash.Query
 
   @signature_header "x-kilncms-signature"
+  @timestamped_signature_header "x-kilncms-webhook-signature"
+  @delivery_id_header "x-kilncms-delivery-id"
   @event_header "x-kilncms-event"
+  @signature_tolerance 300
 
+  @doc "The deprecated body-only signature header."
   def signature_header, do: @signature_header
+  @doc "The timestamped signature header (`t=…,v1=…`)."
+  def timestamped_signature_header, do: @timestamped_signature_header
+  def delivery_id_header, do: @delivery_id_header
   def event_header, do: @event_header
 
-  @doc "Lowercase hex HMAC-SHA256 of `body` keyed by `secret`."
+  @doc """
+  How far, in seconds, a receiver should let a signature's `t` stray from its
+  own clock before refusing it: five minutes, the window the docs publish and
+  `verify/4` defaults to.
+  """
+  @spec signature_tolerance() :: pos_integer()
+  def signature_tolerance, do: @signature_tolerance
+
+  @doc """
+  Lowercase hex HMAC-SHA256 of `body` keyed by `secret` — the deprecated
+  `x-kilncms-signature` value.
+  """
   @spec signature(String.t(), iodata()) :: String.t()
-  def signature(secret, body) do
-    :hmac |> :crypto.mac(:sha256, secret, body) |> Base.encode16(case: :lower)
+  def signature(secret, body), do: hmac_hex(secret, body)
+
+  @doc """
+  The `x-kilncms-webhook-signature` value for `body` sent at `timestamp` (unix
+  seconds): `"t=<timestamp>,v1=<hex HMAC-SHA256 of \"<timestamp>.<body>\">"`.
+  """
+  @spec timestamped_signature(String.t(), integer(), iodata()) :: String.t()
+  def timestamped_signature(secret, timestamp, body) when is_integer(timestamp) do
+    "t=#{timestamp},v1=#{hmac_hex(secret, [Integer.to_string(timestamp), ".", body])}"
   end
+
+  @doc """
+  Verify an `x-kilncms-webhook-signature` header against the raw `body` — what
+  a receiver does, and what the client libraries mirror.
+
+  `:ok`, or `{:error, reason}` for a header that does not parse
+  (`:malformed`), a `t` outside the tolerance (`:expired`), or no `v1` that
+  matches (`:mismatch`). Several `v1` entries are accepted, any one matching,
+  so a receiver keeps working while a secret is rolled.
+
+  Options: `:tolerance` (seconds, default `signature_tolerance/0`) and `:now`
+  (unix seconds, default the system clock).
+  """
+  @spec verify(String.t(), iodata(), String.t() | nil, keyword()) ::
+          :ok | {:error, :malformed | :expired | :mismatch}
+  def verify(secret, body, header, opts \\ [])
+
+  def verify(secret, body, header, opts) when is_binary(header) do
+    tolerance = Keyword.get(opts, :tolerance, @signature_tolerance)
+    now = Keyword.get_lazy(opts, :now, fn -> System.system_time(:second) end)
+
+    with {:ok, timestamp, candidates} <- parse_signature(header),
+         :ok <- fresh(timestamp, now, tolerance) do
+      expected = hmac_hex(secret, [Integer.to_string(timestamp), ".", body])
+
+      if Enum.any?(candidates, &Plug.Crypto.secure_compare(&1, expected)),
+        do: :ok,
+        else: {:error, :mismatch}
+    end
+  end
+
+  def verify(_secret, _body, _header, _opts), do: {:error, :malformed}
+
+  defp parse_signature(header) do
+    pairs =
+      header
+      |> String.split(",")
+      |> Enum.map(&(&1 |> String.trim() |> String.split("=", parts: 2)))
+
+    timestamps = for [k, v] <- pairs, k == "t", do: v
+    candidates = for [k, v] <- pairs, k == "v1", v != "", do: String.downcase(v)
+
+    with [raw] <- timestamps,
+         {timestamp, ""} <- Integer.parse(raw),
+         [_ | _] <- candidates do
+      {:ok, timestamp, candidates}
+    else
+      _ -> {:error, :malformed}
+    end
+  end
+
+  defp fresh(timestamp, now, tolerance) do
+    if abs(now - timestamp) <= tolerance, do: :ok, else: {:error, :expired}
+  end
+
+  defp hmac_hex(secret, data),
+    do: :hmac |> :crypto.mac(:sha256, secret, data) |> Base.encode16(case: :lower)
 
   @doc "Exhausted deliveries in a row before an endpoint is auto-disabled."
   @spec auto_disable_after() :: pos_integer()
@@ -68,6 +168,11 @@ defmodule KilnCMS.Webhooks do
     # org, and it must never break a publish. Enqueue-only and non-raising,
     # like the automation call above.
     KilnCMS.Federation.handle_event(event, payload, org)
+
+    # The optional CDN purge (`KILN_CDN_PURGE_URL`) is the fourth: a publish
+    # changes what the site's cached API responses should say. Enqueue-only
+    # and non-raising, like the two above.
+    KilnCMS.CDN.handle_event(event, payload, org)
 
     :ok
   end
