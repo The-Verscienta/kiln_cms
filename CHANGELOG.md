@@ -80,6 +80,10 @@ Every summary line below that was shortened links to its own entry there.
 - **`KILN_MEDIA_ROOT`: a stable directory for local media.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#kilnmediaroot-a-stable-directory-for-local-media))
 
+- **The GraphQL schema and the OpenAPI document are committed, and a production
+  site hands its own to an API key.**
+  ([#567](https://github.com/The-Verscienta/kiln_cms/issues/567), [#1567](https://github.com/The-Verscienta/kiln_cms/issues/1567) · [long form](docs/changelog/unreleased.md#the-graphql-schema-and-the-openapi-document-are-committed-and-a-production-site))
+
 - **An opt-in Prometheus endpoint for the app's metrics.**
   ([#1362](https://github.com/The-Verscienta/kiln_cms/issues/1362) · [long form](docs/changelog/unreleased.md#an-opt-in-prometheus-endpoint-for-the-apps-metrics))
 

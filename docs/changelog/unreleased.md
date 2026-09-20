@@ -141,6 +141,21 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
   write to. Ignored under S3.
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529))
 
+<a id="the-graphql-schema-and-the-openapi-document-are-committed-and-a-production-site"></a>
+
+- **The GraphQL schema and the OpenAPI document are committed, and a production
+  site hands its own to an API key.** `mix kiln.api.specs` writes
+  `docs/api/schema.graphql` and `docs/api/openapi.json`; CI fails when they fall
+  behind the code, and the docs build publishes them. Production still refuses
+  introspection and the public OpenAPI document (#567), but
+  `GET /api/graphql/schema.graphql` and `GET /api/json/open_api` now answer any
+  valid API key, so codegen can target a site's own schema, overlay types
+  included. `GRAPHQL_INTROSPECTION_ENABLED` turns introspection back on at
+  runtime. The OpenAPI description now covers the write routes, entries,
+  taxonomy and API keys (an `apiKeyAuth` scheme) instead of calling the API
+  read-oriented.
+  ([#1567](https://github.com/The-Verscienta/kiln_cms/pull/1567))
+
 <a id="an-opt-in-prometheus-endpoint-for-the-apps-metrics"></a>
 
 - **An opt-in Prometheus endpoint for the app's metrics.** Before this, nothing

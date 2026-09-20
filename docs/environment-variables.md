@@ -54,7 +54,7 @@ three starts and serves.
 |----------|---------|-----------------|
 | `DATABASE_URL` | Postgres connection string, e.g. `ecto://USER:PASS@HOST/DATABASE`. Raises if missing. | [`config/runtime/prod/database.exs:11`](../config/runtime/prod/database.exs#L11) |
 | `SECRET_KEY_BASE` | Signs/encrypts session cookies and other secrets. Generate with `mix phx.gen.secret`. Raises if missing. | [`config/runtime/prod/web.exs:16`](../config/runtime/prod/web.exs#L16) |
-| `TOKEN_SIGNING_SECRET` | Signs authentication tokens (AshAuthentication). Raises if missing. | [`config/runtime/prod/web.exs:219`](../config/runtime/prod/web.exs#L219) |
+| `TOKEN_SIGNING_SECRET` | Signs authentication tokens (AshAuthentication). Raises if missing. | [`config/runtime/prod/web.exs:227`](../config/runtime/prod/web.exs#L227) |
 
 Those three are derived from the code rather than maintained by hand: they are
 the only raises a `:prod` evaluation of the runtime config reaches with nothing
@@ -109,14 +109,14 @@ optional: unset means the feature is off or keeps the default named in its row.
 | `PRESENTATION_PREVIEW_URL` | unset | The external front end's URL template for the Presentation console (`/editor/presentation/:type/:slug`, #355) — placeholders `{path}`/`{type}`/`{slug}`/`{locale}` (a bare base URL gets `{path}` appended). Unset ⇒ the console shows a setup hint. The front-end origin is derived from this for `postMessage` validation. See [visual-editing-bridge.md](visual-editing-bridge.md#the-presentation-console-side-by-side-editing) and [`KilnCMSWeb.Presentation`](../lib/kiln_cms_web/presentation.ex). | [`config/runtime/updates.exs:16`](../config/runtime/updates.exs#L16) |
 | `POOL_SIZE` | `10` | Ecto database connection pool size. See the pool-sizing formula in [`docs/performance.md`](performance.md). | [`config/runtime/prod/database.exs:51`](../config/runtime/prod/database.exs#L51) |
 | `ECTO_IPV6` | unset | Set to an on-spelling to connect to Postgres over IPv6. | [`config/runtime/prod/database.exs:17`](../config/runtime/prod/database.exs#L17) |
-| `PREVIOUS_SECRET_KEY_BASE` | unset | Set **only while rotating `SECRET_KEY_BASE`** (#1487): the old value, next to the new `SECRET_KEY_BASE`. `KilnCMS.Keys.Vault` then still opens the key material it stored under the old secret (the DKIM key, social credentials, billing secrets and the ActivityPub actor key), and every new write uses the new one. `mix kiln.vault.reencrypt` (or `KilnCMS.Release.reencrypt_vault/1`) uses it by default to move those values across. Unset it once a dry run reports nothing left to re-encrypt. This covers the vault only: session cookies, `Phoenix.Token`s and JWTs are still a hard cutover. A blank value, or one equal to `SECRET_KEY_BASE`, is ignored. See [secrets-rotation.md](secrets-rotation.md#secret_key_base). | [`config/runtime/prod/web.exs:215`](../config/runtime/prod/web.exs#L215) |
+| `PREVIOUS_SECRET_KEY_BASE` | unset | Set **only while rotating `SECRET_KEY_BASE`** (#1487): the old value, next to the new `SECRET_KEY_BASE`. `KilnCMS.Keys.Vault` then still opens the key material it stored under the old secret (the DKIM key, social credentials, billing secrets and the ActivityPub actor key), and every new write uses the new one. `mix kiln.vault.reencrypt` (or `KilnCMS.Release.reencrypt_vault/1`) uses it by default to move those values across. Unset it once a dry run reports nothing left to re-encrypt. This covers the vault only: session cookies, `Phoenix.Token`s and JWTs are still a hard cutover. A blank value, or one equal to `SECRET_KEY_BASE`, is ignored. See [secrets-rotation.md](secrets-rotation.md#secret_key_base). | [`config/runtime/prod/web.exs:223`](../config/runtime/prod/web.exs#L223) |
 | `TRUSTED_PROXIES` | unset | Comma-separated reverse-proxy CIDRs (e.g. `10.0.0.0/8,172.16.0.0/12`). When set, `KilnCMSWeb.Plugs.ClientIp` rewrites `remote_ip` from `X-Forwarded-For` for rate limiting. Leave unset **only** when the app is internet-facing directly, where `X-Forwarded-For` is spoofable. **If you run behind a proxy — Coolify, Traefik, nginx, a cloud load balancer — set this.** Unset there, every request carries the proxy's address, so every rate-limit bucket becomes one shared counter for the whole internet: one noisy client exhausts `:auth` (40/min) for everybody, and the per-IP brute-force protection on `/sign-in` stops being per-IP. Nothing errors, so the app logs a warning once per node the first time a forwarded request arrives while this is unset (#564). Note the CIDRs name **which hops to skip while walking the forwarded chain**, not which peers are allowed to forward — once this is set at all, `X-Forwarded-For` is honoured whatever address the request arrives from, so set it only on a deployment that really is behind a proxy. And **every private range is skipped regardless** (`10/8`, `172.16/12`, `192.168/16`, `127/8`, `::1`, `fc00::/7`), so listing those has no effect on the chain — its only job there is flipping the honour-the-header switch. If your proxy has a **public** address (a cloud load balancer), you must list *its* CIDR or the app will key every bucket on the balancer instead of the client. The same rule serves `/live` handshakes through `ClientIp.resolve/2`, so a socket keys the bucket on the same client its HTTP request would have (#715, #934). | [`config/runtime/prod/web.exs:81`](../config/runtime/prod/web.exs#L81) |
 | `DNS_CLUSTER_QUERY` | unset | DNS query for libcluster-style node discovery. | [`config/runtime/prod/web.exs:69`](../config/runtime/prod/web.exs#L69) |
 | `KILN_READING_TIME_WPM` | `230` | Words per minute behind the `reading_time_minutes` calculation and the `reading_time()` computed-field function (#492). A non-positive or unparseable value keeps the default and warns on stderr. 230 is a mid-range figure for adult silent reading of English prose; a single rate is an English assumption, so see the caveat in [headless-consumer-guide.md](headless-consumer-guide.md#word-count-and-reading-time). | [`config/runtime/delivery.exs:16`](../config/runtime/delivery.exs#L16) |
 | `CSP_IMG_SRC` | unset | Space-separated **extra** origins allowed in the browser CSP's `img-src` **and `media-src`** (#494) — needed when media serves from a CDN or media host on a different hostname than the site (e.g. `https://media.example.com`). Without it, `default-src 'self'` blocks a cross-host `<video>` as well as a cross-host `<img>`. See [media-pipeline.md](media-pipeline.md#production-storage-and-cdn). | [`config/runtime/console.exs:11`](../config/runtime/console.exs#L11) |
 
 > **Note on ports.** The public URL is hardcoded to port `443`/`https`
-> ([`config/runtime/prod/web.exs:195`](../config/runtime/prod/web.exs#L195)); the app itself listens
+> ([`config/runtime/prod/web.exs:203`](../config/runtime/prod/web.exs#L203)); the app itself listens
 > on `PORT`. The expected topology is a TLS-terminating reverse proxy on 443
 > forwarding to the app on `PORT`.
 
@@ -130,11 +130,18 @@ policies and the API key's scope still enforce every route), but it removes the
 guesswork.
 
 Disabled, both paths answer **404** rather than 403: a 403 confirms the route
-exists and is merely closed.
+exists and is merely closed. The one exception is a request carrying an **API
+key** (`Authorization: Bearer kiln_…`): the OpenAPI document answers it, and so
+does `GET /api/graphql/schema.graphql` where introspection is off, so a client
+author can run codegen against their own production site. The explorer never
+does. The stock build's specs are also committed, at
+[`docs/api/`](https://github.com/The-Verscienta/kiln_cms/tree/main/docs/api) —
+see [api.md](api.md#machine-readable-specs).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `API_DOCS_ENABLED` | on outside prod, **off in prod** | Serve `GET /api/json/open_api` and `GET /api/json/swaggerui`. Turn it on for a deployment that publishes a public API. | [`config/runtime/prod/web.exs:112`](../config/runtime/prod/web.exs#L112) |
+| `API_DOCS_ENABLED` | on outside prod, **off in prod** | Serve `GET /api/json/open_api` and `GET /api/json/swaggerui`. Turn it on for a deployment that publishes a public API. Off, the document still answers a request carrying an API key; the explorer does not. | [`config/runtime/prod/web.exs:112`](../config/runtime/prod/web.exs#L112) |
+| `GRAPHQL_INTROSPECTION_ENABLED` | on outside prod, **off in prod** | Answer GraphQL introspection (`__schema`/`__type`) on `/gql`, and serve `GET /api/graphql/schema.graphql` to anyone. Off, that SDL route still answers a request carrying an API key. | [`config/runtime/prod/web.exs:120`](../config/runtime/prod/web.exs#L120) |
 
 ### multi-tenancy (#336)
 
@@ -231,10 +238,10 @@ KilnCMS defaults. All four are read only under `:prod`; for dev or test, set
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `SITE_NAME` | `KilnCMS` | Instance name in the admin chrome, page titles and outbound email. Also the default provenance `signer` identity when `KilnCMS.Provenance`'s `:signer` is unset. | [`config/runtime/prod/web.exs:163`](../config/runtime/prod/web.exs#L163) |
-| `BRAND_LOGO_URL` | unset | Logo shown in the admin chrome and on branded error pages. If the host differs from the site's origin it must also be in `CSP_IMG_SRC`, or the browser blocks the image. | [`config/runtime/prod/web.exs:170`](../config/runtime/prod/web.exs#L170) |
-| `BRAND_FAVICON_URL` | unset | Favicon URL. Same `CSP_IMG_SRC` caveat as the logo. | [`config/runtime/prod/web.exs:177`](../config/runtime/prod/web.exs#L177) |
-| `BRAND_PRIMARY_COLOR` | unset | Hex colour driving the emitted OKLCH theme tokens — `#1d4ed8` or the `#1d4` shorthand, stored in canonical long lowercase form. Anything else is **ignored with a warning** rather than interpreted, since the value feeds contrast computation. Validated at boot alongside every other variable here, so a bad value reaches `Logger` and Sentry and not just container stdout (#1089); before that it was checked only at render time, where a bare `Logger.warning` never reaches Sentry. | [`config/runtime/prod/web.exs:130`](../config/runtime/prod/web.exs#L130) |
+| `SITE_NAME` | `KilnCMS` | Instance name in the admin chrome, page titles and outbound email. Also the default provenance `signer` identity when `KilnCMS.Provenance`'s `:signer` is unset. | [`config/runtime/prod/web.exs:171`](../config/runtime/prod/web.exs#L171) |
+| `BRAND_LOGO_URL` | unset | Logo shown in the admin chrome and on branded error pages. If the host differs from the site's origin it must also be in `CSP_IMG_SRC`, or the browser blocks the image. | [`config/runtime/prod/web.exs:178`](../config/runtime/prod/web.exs#L178) |
+| `BRAND_FAVICON_URL` | unset | Favicon URL. Same `CSP_IMG_SRC` caveat as the logo. | [`config/runtime/prod/web.exs:185`](../config/runtime/prod/web.exs#L185) |
+| `BRAND_PRIMARY_COLOR` | unset | Hex colour driving the emitted OKLCH theme tokens — `#1d4ed8` or the `#1d4` shorthand, stored in canonical long lowercase form. Anything else is **ignored with a warning** rather than interpreted, since the value feeds contrast computation. Validated at boot alongside every other variable here, so a bad value reaches `Logger` and Sentry and not just container stdout (#1089); before that it was checked only at render time, where a bare `Logger.warning` never reaches Sentry. | [`config/runtime/prod/web.exs:138`](../config/runtime/prod/web.exs#L138) |
 
 ### Unsplash (media library)
 
