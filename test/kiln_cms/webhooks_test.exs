@@ -6,6 +6,7 @@ defmodule KilnCMS.WebhooksTest do
   use KilnCMS.DataCase, async: true
 
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.WebhookEndpoint
   alias KilnCMS.Webhooks
 
   defp admin do
@@ -45,7 +46,9 @@ defmodule KilnCMS.WebhooksTest do
 
     assert_received {:delivered, "example.test", "/hook", headers, body}
     assert headers["x-kilncms-event"] == "page.published"
-    assert headers["x-kilncms-signature"] == Webhooks.signature(endpoint.secret, body)
+
+    assert headers["x-kilncms-signature"] ==
+             Webhooks.signature(WebhookEndpoint.secret(endpoint), body)
 
     assert %{
              "event" => "page.published",
@@ -187,6 +190,8 @@ defmodule KilnCMS.WebhooksTest do
     CMS.archive_page!(page, %{}, actor: admin)
     KilnCMS.DataCase.drain_oban()
 
+    # No `unpublished` — only the body-less `archived` tombstone.
+    assert_received {:delivered, _, _, %{"x-kilncms-event" => "page.archived"}, _}
     refute_received {:delivered, _, _, _, _}
   end
 
@@ -199,11 +204,15 @@ defmodule KilnCMS.WebhooksTest do
     CMS.archive_page!(page, %{}, actor: admin)
     KilnCMS.DataCase.drain_oban()
 
-    # A draft was never delivered, so archiving it must stay as silent as
-    # unpublishing would have been — this is what `only_when: :was_published`
-    # (rather than the generic `:published`, which checks the resulting
-    # state — always `:archived` here, so it would never gate anything) is
-    # for.
+    # A draft was never delivered, so archiving it must not say `unpublished`
+    # — this is what `only_when: :was_published` (rather than the generic
+    # `:published`, which checks the resulting state — always `:archived`
+    # here, so it would never gate anything) is for. It does say `archived`,
+    # with identity only: the draft's title and body stay home.
+    assert_received {:delivered, _, _, %{"x-kilncms-event" => "page.archived"}, body}
+    assert %{"data" => data} = Jason.decode!(body)
+    assert Map.keys(data) |> Enum.sort() == ~w(id locale slug state updated_at)
+    assert data["id"] == page.id
     refute_received {:delivered, _, _, _, _}
   end
 
@@ -300,6 +309,8 @@ defmodule KilnCMS.WebhooksTest do
     )
 
     page = CMS.create_page!(%{title: "Reviewable", slug: slug()}, actor: admin)
+    KilnCMS.DataCase.drain_oban()
+    assert_received {:delivered, _, _, %{"x-kilncms-event" => "page.created"}, _}
 
     page = CMS.submit_page_for_review!(page, %{}, actor: admin)
     KilnCMS.DataCase.drain_oban()
@@ -318,6 +329,253 @@ defmodule KilnCMS.WebhooksTest do
 
     assert %{"event" => "page.returned_to_draft", "data" => %{"state" => "draft"}} =
              Jason.decode!(body)
+  end
+
+  describe "the record's own lifecycle: created, archived, deleted, restored" do
+    defp events_received do
+      Stream.repeatedly(fn ->
+        receive do
+          {:delivered, _, _, %{"x-kilncms-event" => event}, body} -> {event, Jason.decode!(body)}
+        after
+          0 -> nil
+        end
+      end)
+      |> Enum.take_while(&(&1 != nil))
+    end
+
+    test "created carries the draft's body, and only to an endpoint that opted in" do
+      stub_capture()
+      admin = admin()
+      CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+      CMS.create_page!(%{title: "Secret draft", slug: slug()}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+      refute_received {:delivered, _, _, _, _}
+
+      CMS.create_webhook_endpoint!(
+        %{url: "https://example.test/all", events: ["page.created"]},
+        actor: admin
+      )
+
+      page = CMS.create_page!(%{title: "Opted in", slug: slug()}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      assert [{"page.created", %{"data" => data}}] = events_received()
+      assert data["id"] == page.id
+      assert data["title"] == "Opted in"
+      assert data["state"] == "draft"
+    end
+
+    test "trashing sends a body-less deleted tombstone to a default subscriber" do
+      stub_capture()
+      admin = admin()
+      CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+      page = CMS.create_page!(%{title: "Live then gone", slug: slug()}, actor: admin)
+      page = CMS.publish_page!(page, %{}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+      assert [{"page.published", _}] = events_received()
+
+      CMS.destroy_page!(page, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      assert [{"page.deleted", %{"data" => data}}] = events_received()
+
+      assert data == %{
+               "id" => page.id,
+               "slug" => page.slug,
+               "locale" => "en",
+               "state" => "published",
+               "updated_at" => data["updated_at"]
+             }
+    end
+
+    test "restoring a published document sends its body; a draft, the tombstone" do
+      stub_capture()
+      admin = admin()
+      CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+      live = CMS.create_page!(%{title: "Back on air", slug: slug()}, actor: admin)
+      live = CMS.publish_page!(live, %{}, actor: admin)
+      draft = CMS.create_page!(%{title: "Private words", slug: slug()}, actor: admin)
+      CMS.destroy_page!(live, actor: admin)
+      CMS.destroy_page!(draft, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+      _ = events_received()
+
+      [trashed_live] = CMS.list_trashed_pages!(actor: admin, query: [filter: [id: live.id]])
+      CMS.restore_page!(trashed_live, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      assert [{"page.restored", %{"data" => %{"title" => "Back on air", "blocks" => _}}}] =
+               events_received()
+
+      [trashed_draft] = CMS.list_trashed_pages!(actor: admin, query: [filter: [id: draft.id]])
+      CMS.restore_page!(trashed_draft, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      assert [{"page.restored", %{"data" => data}}] = events_received()
+      refute Map.has_key?(data, "title")
+      assert data["state"] == "draft"
+    end
+
+    # `TrashLive` lists trashed rows with a narrow select — no `blocks`, the
+    # heavy column it does not show — and restores from that record. Building
+    # the payload by loading calculations onto it raised inside Ash
+    # (`{:array, BlockUnion}` on an `%Ash.NotLoaded{}`), taking the restore
+    # down with it. The dispatch re-reads the record instead.
+    test "restoring from a narrow projection still sends the whole document" do
+      stub_capture()
+      admin = admin()
+      CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Narrow",
+            slug: slug(),
+            block_tree: [%{"type" => "heading", "content" => "Body"}]
+          },
+          actor: admin
+        )
+
+      page = CMS.publish_page!(page, %{}, actor: admin)
+
+      CMS.destroy_page!(page, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+      _ = events_received()
+
+      [trashed] =
+        CMS.list_trashed_pages!(
+          actor: admin,
+          query: [
+            filter: [id: page.id],
+            select: [:id, :org_id, :title, :slug, :locale, :state, :archived_at, :updated_at]
+          ]
+        )
+
+      CMS.restore_page!(trashed, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      assert [{"page.restored", %{"data" => data}}] = events_received()
+      assert data["title"] == "Narrow"
+      assert [%{"type" => "heading"}] = data["blocks"]
+    end
+
+    test "unarchiving says restored, as a tombstone" do
+      stub_capture()
+      admin = admin()
+      CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+      page = CMS.create_page!(%{title: "Shelved", slug: slug()}, actor: admin)
+      page = CMS.archive_page!(page, %{}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+      assert [{"page.archived", _}] = events_received()
+
+      CMS.unarchive_page!(page, %{}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      assert [{"page.restored", %{"data" => %{"state" => "draft"} = data}}] = events_received()
+      refute Map.has_key?(data, "title")
+    end
+  end
+
+  describe "signing" do
+    @secret "whsec-test"
+    @body ~s({"event":"page.published","data":{}})
+
+    test "the timestamped signature verifies, inside the window" do
+      header = Webhooks.timestamped_signature(@secret, 1_800_000_000, @body)
+      assert header =~ ~r/\At=1800000000,v1=[0-9a-f]{64}\z/
+
+      assert Webhooks.verify(@secret, @body, header, now: 1_800_000_000) == :ok
+      assert Webhooks.verify(@secret, @body, header, now: 1_800_000_300) == :ok
+      assert Webhooks.verify(@secret, @body, header, now: 1_799_999_700) == :ok
+    end
+
+    # The vector `clients/js/test/webhooks.test.ts` and
+    # `clients/elixir/kiln_client/test/webhook_test.exs` assert too: the
+    # three implementations are pinned to one answer.
+    test "matches the vector the client libraries verify" do
+      body = ~s({"event":"page.published","delivery_id":"d-1","data":{}})
+
+      assert Webhooks.timestamped_signature(@secret, 1_800_000_000, body) ==
+               "t=1800000000,v1=e09a0895dc1b7f726710de36079d36941c634959f61a2c547ff00e848c3df80a"
+    end
+
+    test "it refuses a stale or future timestamp, a changed body, and a wrong secret" do
+      header = Webhooks.timestamped_signature(@secret, 1_800_000_000, @body)
+
+      assert Webhooks.verify(@secret, @body, header, now: 1_800_000_301) == {:error, :expired}
+      assert Webhooks.verify(@secret, @body, header, now: 1_799_999_699) == {:error, :expired}
+
+      assert Webhooks.verify(@secret, @body <> " ", header, now: 1_800_000_000) ==
+               {:error, :mismatch}
+
+      assert Webhooks.verify("other", @body, header, now: 1_800_000_000) == {:error, :mismatch}
+      assert Webhooks.verify(@secret, @body, header, now: 1_800_000_900, tolerance: 900) == :ok
+    end
+
+    # The timestamp is inside the MAC: re-stamping a captured request with a
+    # fresh `t` and its old `v1` is exactly the replay the scheme exists to stop.
+    test "a captured v1 cannot be re-stamped with a fresh t" do
+      "t=1800000000," <> v1 = Webhooks.timestamped_signature(@secret, 1_800_000_000, @body)
+
+      assert Webhooks.verify(@secret, @body, "t=1800009999," <> v1, now: 1_800_009_999) ==
+               {:error, :mismatch}
+    end
+
+    test "several v1 entries: any one matching is enough (secret roll-over)" do
+      "t=1800000000,v1=" <> good = Webhooks.timestamped_signature(@secret, 1_800_000_000, @body)
+      header = "t=1800000000,v1=#{String.duplicate("0", 64)},v1=#{good}"
+
+      assert Webhooks.verify(@secret, @body, header, now: 1_800_000_000) == :ok
+    end
+
+    test "a header that does not parse is malformed, not a mismatch" do
+      for header <- [nil, "", "v1=abc", "t=soon,v1=abc", "t=1,t=2,v1=abc", "t=1800000000"] do
+        assert Webhooks.verify(@secret, @body, header, now: 1_800_000_000) ==
+                 {:error, :malformed},
+               inspect(header)
+      end
+    end
+  end
+
+  describe "the signing secret at rest" do
+    test "is stored encrypted, never as the plaintext" do
+      endpoint = CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin())
+      secret = WebhookEndpoint.secret(endpoint)
+      assert byte_size(secret) == 43
+
+      %{rows: [[stored]]} =
+        KilnCMS.Repo.query!(
+          "SELECT secret_encrypted FROM webhook_endpoints WHERE id = $1",
+          [Ecto.UUID.dump!(endpoint.id)]
+        )
+
+      refute stored =~ secret
+      assert KilnCMS.Keys.Vault.decrypt(stored) == {:ok, secret}
+    end
+
+    # Ciphertext from a `SECRET_KEY_BASE` this server no longer has: sending the
+    # delivery unsigned, or signed with anything else, would be accepted by a
+    # receiver that does not verify and rejected by one that does. Refused.
+    test "a secret that no longer opens refuses the delivery before dialling" do
+      Req.Test.stub(KilnCMS.Webhooks, fn _conn -> flunk("an unsigned delivery was sent") end)
+
+      Ash.Seed.seed!(WebhookEndpoint, %{
+        url: "https://example.test/hook",
+        events: ["page.published"],
+        active: true,
+        secret_encrypted: :crypto.strong_rand_bytes(60)
+      })
+
+      Webhooks.dispatch("page.published", %{})
+      Oban.drain_queue(queue: :webhooks)
+
+      assert [%{last_error: "delivery failed: signing secret unreadable"}] =
+               CMS.recent_webhook_deliveries!(authorize?: false)
+    end
   end
 
   test "webhook endpoints are admin-only" do

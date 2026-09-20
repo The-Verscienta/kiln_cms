@@ -6,6 +6,7 @@ defmodule Mix.Tasks.Kiln.Federation do
       mix kiln.federation status  [--org-id UUID]
       mix kiln.federation enable  [--org-id UUID] [--username NAME] [--origin URL]
       mix kiln.federation disable [--org-id UUID]
+      mix kiln.federation rekey   [--org-id UUID]
 
   Phase 1 has no admin screen — follower management and the settings UI are
   phase 2 — so this is how an operator turns federation on. It is deliberately
@@ -25,6 +26,15 @@ defmodule Mix.Tasks.Kiln.Federation do
   An actor id is its permanent name in the fediverse — remote servers store it,
   deduplicate on it, and deliver to it — so re-enabling never changes it. Moving
   a federating site to a new domain is a migration, not a settings edit.
+
+  ## Re-keying (#1487)
+
+  `rekey` replaces the actor's signing keypair and keeps everything else: the
+  handle, the actor id and the `keyId`. Followers are sent an actor `Update`
+  carrying the new public key. Servers that process actor updates switch
+  straight away. Others keep the old key until a delivery fails to verify and
+  they re-fetch the actor, and some may never do so. Re-key when the key is
+  unreadable (`status` says so) or has leaked, not as routine hygiene.
   """
   use Mix.Task
 
@@ -42,10 +52,20 @@ defmodule Mix.Tasks.Kiln.Federation do
     org_id = opts[:org_id] || KilnCMS.Accounts.default_org_id()
 
     case positional do
-      ["status"] -> status(org_id)
-      ["enable"] -> enable(org_id, opts)
-      ["disable"] -> disable(org_id)
-      _other -> Mix.raise("Usage: mix kiln.federation status|enable|disable [--org-id UUID]")
+      ["status"] ->
+        status(org_id)
+
+      ["enable"] ->
+        enable(org_id, opts)
+
+      ["disable"] ->
+        disable(org_id)
+
+      ["rekey"] ->
+        rekey(org_id)
+
+      _other ->
+        Mix.raise("Usage: mix kiln.federation status|enable|disable|rekey [--org-id UUID]")
     end
   end
 
@@ -65,6 +85,7 @@ defmodule Mix.Tasks.Kiln.Federation do
           Mix.shell().info("Handle:     #{identity.handle}")
           Mix.shell().info("Actor:      #{identity.actor_id}")
           Mix.shell().info("Followers:  #{follower_count(org_id)}")
+          Mix.shell().info("Key:        #{key_line(settings)}")
         end
     end
   end
@@ -112,6 +133,41 @@ defmodule Mix.Tasks.Kiln.Federation do
             "restores the same handle and key for existing followers."
         )
     end
+  end
+
+  defp rekey(org_id) do
+    case settings(org_id) do
+      nil ->
+        Mix.raise("Federation was never enabled for this site; there is no key to replace.")
+
+      settings ->
+        # `authorize?: false`: an operator at a shell on the host is the
+        # deployment's own authority, above any org role — the same bypass
+        # `enable` and `disable` take.
+        case Ash.update(settings, %{}, action: :rekey, authorize?: false, tenant: org_id) do
+          {:ok, _settings} ->
+            Mix.shell().info(
+              "Re-keyed. The handle, actor id and keyId are unchanged; the signing key is new."
+            )
+
+            Mix.shell().info(
+              "An actor Update is queued for #{follower_count(org_id)} follower(s). Some " <>
+                "remote servers may keep the old key until a delivery fails and they " <>
+                "re-fetch the actor."
+            )
+
+          {:error, error} ->
+            Mix.raise("Could not re-key: #{Exception.message(error)}")
+        end
+    end
+  end
+
+  # A key the vault cannot open is the one federation fault nothing else shows:
+  # the site looks enabled and every delivery quietly fails.
+  defp key_line(settings) do
+    if SiteFederation.private_key_pem(settings),
+      do: "readable",
+      else: "UNREADABLE — deliveries fail. See docs/secrets-rotation.md, or re-key"
   end
 
   defp deployment_line do

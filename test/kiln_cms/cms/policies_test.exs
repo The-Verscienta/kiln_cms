@@ -61,7 +61,7 @@ defmodule KilnCMS.CMS.PoliciesTest do
           url: "https://example.com/hooks/#{System.unique_integer([:positive])}",
           events: WebhookEndpoint.events(),
           active: true,
-          secret: WebhookEndpoint.generate_secret()
+          secret_encrypted: WebhookEndpoint.generate_encrypted_secret()
         },
         attrs
       )

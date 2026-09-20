@@ -22,6 +22,22 @@ defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
   `:archived`) is exactly that case (#914): a plain `only_when: :published`
   would never fire, since the resulting state is never `:published`, but the
   question that actually matters is whether delivery had anything to remove.
+
+  ## What the payload carries
+
+  Pass `payload:` to choose:
+
+    * `:full` (the default) — `ContentSerializer.to_map/1`, the document's
+      public fields including its block tree.
+    * `:tombstone` — `ContentSerializer.tombstone/1`: identity only (`id`,
+      `slug`, `locale`, `state`, `updated_at`). For `archived` and `deleted`,
+      which a mirror needs to hear about but which fire for drafts as readily
+      as for live documents — a body there would POST unpublished content to
+      every default subscriber.
+    * `:full_when_published` — the full map when the resulting record is
+      published, the tombstone otherwise. For `restored`: a document coming
+      back from the trash straight onto the delivery path is something a
+      mirror must re-ingest, and one coming back as a draft is not.
   """
   use Ash.Resource.Change
 
@@ -32,6 +48,7 @@ defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
   def change(changeset, opts, _context) do
     event = Keyword.get(opts, :event, "published")
     only_when = Keyword.get(opts, :only_when)
+    payload = Keyword.get(opts, :payload, :full)
 
     Ash.Changeset.after_transaction(changeset, fn
       changeset, {:ok, record} ->
@@ -46,18 +63,9 @@ defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
           # together; after COMMIT a crash between COMMIT and insert loses the
           # notification, which is the deliberate trade for a field on a
           # notification not being worth a lost publish.
-          record =
-            case Ash.load(record, [:effective_seo_title, :effective_seo_description],
-                   authorize?: false,
-                   tenant: record.org_id
-                 ) do
-              {:ok, loaded} -> loaded
-              _ -> record
-            end
-
           Webhooks.dispatch(
             "#{event_prefix(record)}.#{event}",
-            ContentSerializer.to_map(record),
+            payload(payload, record),
             record.org_id
           )
         end
@@ -67,6 +75,41 @@ defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
       _changeset, other ->
         other
     end)
+  end
+
+  defp payload(:tombstone, record), do: ContentSerializer.tombstone(record)
+
+  defp payload(:full_when_published, %{state: :published} = record),
+    do: payload(:full, record)
+
+  defp payload(:full_when_published, record), do: payload(:tombstone, record)
+
+  defp payload(:full, record), do: record |> reload() |> ContentSerializer.to_map()
+
+  # Re-read the record rather than `Ash.load/3`-ing the two calculations onto
+  # the one the action returned, because that one carries only what its caller
+  # selected. `TrashLive` lists trashed rows with a narrow select that leaves
+  # out `blocks` — deliberately, it is the heavy column — and `Ash.load/3` on a
+  # record whose union array is `%Ash.NotLoaded{}` raises inside Ash's
+  # field-auth cleanup, which would take the restore down with it. A full
+  # re-read is also what makes the payload the whole document rather than the
+  # caller's projection of it.
+  #
+  # Runs after COMMIT (see `change/3`), so this is a plain read: a failure
+  # costs the loaded fields, never the write. `ContentSerializer` drops
+  # whatever is still unloaded.
+  defp reload(record) do
+    # authorize?: false — a system notification of a write that has already
+    # happened, re-reading the record the actor just wrote, under its own org.
+    # The payload goes to the operator's own endpoints, not to the actor.
+    case Ash.get(record.__struct__, record.id,
+           authorize?: false,
+           tenant: record.org_id,
+           load: [:effective_seo_title, :effective_seo_description]
+         ) do
+      {:ok, loaded} -> loaded
+      _ -> record
+    end
   end
 
   defp dispatch?(nil, _changeset, _record), do: true

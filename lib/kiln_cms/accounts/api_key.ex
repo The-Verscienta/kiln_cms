@@ -7,10 +7,10 @@ defmodule KilnCMS.Accounts.ApiKey do
   (role + audiences). What it may *do* with that identity is bounded by its
   `access` scope:
 
-    * `:read` (the default) — delivery reads only. The headless JSON:API and
-      GraphQL surfaces expose only reads anyway (decision D7), and the content
-      policy additionally forbids any mutation performed with a read-scoped
-      key, so a leaked key can never write regardless of the owner's role.
+    * `:read` (the default) — delivery reads only. The JSON:API and GraphQL
+      surfaces do route writes since #330 (reversing decision D7), and the
+      content policy forbids every one of them to a read-scoped key, so a
+      leaked key can never write regardless of the owner's role.
     * `:read_write` — may also author content (create/update, including
       workflow transitions) as its owning user, within that user's role. Built
       for LLM / automation clients on the `/mcp` endpoint (see `docs/mcp.md`).

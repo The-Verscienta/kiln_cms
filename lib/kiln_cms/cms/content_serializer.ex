@@ -98,6 +98,11 @@ defmodule KilnCMS.CMS.ContentSerializer do
   def to_map(record) do
     record
     |> Map.take(@public_fields)
+    # A field the caller never selected is `%Ash.NotLoaded{}`, which is neither
+    # JSON-encodable nor something a subscriber could read as a value. Dropping
+    # it says "not in this payload" instead of shipping a struct — and keeps a
+    # narrow projection (`TrashLive`'s list) from crashing a dispatch.
+    |> Map.reject(fn {_field, value} -> match?(%Ash.NotLoaded{}, value) end)
     |> Map.update(:blocks, [], fn blocks ->
       blocks |> List.wrap() |> Enum.map(&Map.take(&1, @block_fields))
     end)
@@ -107,6 +112,21 @@ defmodule KilnCMS.CMS.ContentSerializer do
       :effective_seo_description,
       Patterns.effective(record, :seo_description, resolve: false)
     )
+  end
+
+  @tombstone_fields [:id, :slug, :locale, :state, :updated_at]
+
+  @doc """
+  Identity only — what a `archived` / `deleted` / draft `restored` webhook
+  carries. Enough for a mirror to find and drop (or re-fetch) its copy; no
+  title, excerpt or body, because these events fire for drafts too and a
+  draft's content is not something a default subscriber asked for.
+  """
+  @spec tombstone(struct()) :: map()
+  def tombstone(record) do
+    record
+    |> Map.take(@tombstone_fields)
+    |> Map.reject(fn {_field, value} -> match?(%Ash.NotLoaded{}, value) end)
   end
 
   # Derived, so the hash never leaves — see the moduledoc.
