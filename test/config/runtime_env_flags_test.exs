@@ -54,6 +54,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_UPDATE_REPO KILN_UPDATE_RELEASES_URL KILN_PIN_PATH
             MAIL_MODE SMTP_HOST SMTP_TLS SMTP_TLS_VERIFY S3_BUCKET
             KILN_PROVENANCE_ENABLED TENANT_STRICT_HOST API_DOCS_ENABLED
+            GRAPHQL_INTROSPECTION_ENABLED
             BACKUP_ENABLED OEMBED_ENABLED
             KILN_READING_TIME_WPM BACKUP_KEEP_DAYS BACKUP_STALE_AFTER_HOURS
             KILN_EXPERIMENTS_STICKY_DAYS REQUIRE_AV_METADATA_STRIP
@@ -62,6 +63,9 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_FEDERATION_ENABLED
             KILN_MEDIA_ROOT MEDIA_DIR S3_PUBLIC_BASE_URL
             AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+            KILN_IMAGE_TRANSFORM_KEY KILN_IMAGE_TRANSFORM_UNSIGNED
+            KILN_IMAGE_TRANSFORM_AUTO_AVIF
+            KILN_METRICS_ENABLED KILN_METRICS_PORT KILN_METRICS_BIND KILN_METRICS_TOKEN
           ) ++ Map.keys(@prod_env)
 
   setup do
@@ -113,6 +117,40 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
 
   defp repo_ssl(value) do
     %{"DATABASE_SSL" => value} |> eval() |> get_in([:kiln_cms, KilnCMS.Repo, :ssl])
+  end
+
+  describe "image transforms" do
+    defp transforms(vars), do: vars |> eval() |> get_in([:kiln_cms, :image_transforms])
+
+    test "unset leaves every default in place" do
+      assert transforms(%{}) in [nil, []]
+    end
+
+    test "a 32-character key becomes the signing key" do
+      key = String.duplicate("k", 32)
+      assert transforms(%{"KILN_IMAGE_TRANSFORM_KEY" => key})[:signing_key] == key
+    end
+
+    test "a blank key is the same as none" do
+      assert transforms(%{"KILN_IMAGE_TRANSFORM_KEY" => ""})[:signing_key] == nil
+    end
+
+    test "a short key refuses to boot rather than sign with something guessable" do
+      assert_raise RuntimeError, ~r/at least 32 characters/, fn ->
+        eval(%{"KILN_IMAGE_TRANSFORM_KEY" => "short"})
+      end
+    end
+
+    test "unsigned URLs and auto-AVIF are on/off flags" do
+      config =
+        transforms(%{
+          "KILN_IMAGE_TRANSFORM_UNSIGNED" => "false",
+          "KILN_IMAGE_TRANSFORM_AUTO_AVIF" => "on"
+        })
+
+      assert config[:allow_unsigned] == false
+      assert config[:auto_avif] == true
+    end
   end
 
   describe "DATABASE_SSL (#606)" do
@@ -264,6 +302,36 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
 
     test "an unrecognized value writes nothing rather than reading as on" do
       assert visual_editing("enabled") == nil
+    end
+  end
+
+  describe "GRAPHQL_INTROSPECTION_ENABLED" do
+    defp introspection(value) do
+      %{"GRAPHQL_INTROSPECTION_ENABLED" => value}
+      |> eval()
+      |> get_in([:kiln_cms, :graphql_introspection])
+    end
+
+    # `config/prod.exs` sets `false`, but that file is not what `eval/1` runs,
+    # so "writes nothing" is the observable form of "the build's setting stands".
+    test "unset writes nothing, leaving the production build's `false` in force" do
+      assert introspection(nil) == nil
+    end
+
+    test "on-spellings turn introspection back on" do
+      for value <- ["true", "True", " 1 ", "yes", "On"] do
+        assert introspection(value) == true
+      end
+    end
+
+    test "off-spellings write an explicit false" do
+      for value <- ["false", "0", "no", "OFF"] do
+        assert introspection(value) == false
+      end
+    end
+
+    test "an unrecognized value writes nothing rather than reading as on" do
+      assert introspection("enabled") == nil
     end
   end
 
@@ -805,6 +873,59 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
                config,
                [:kiln_cms, :config_warnings]
              )
+    end
+  end
+
+  describe "KILN_METRICS_* (#1362)" do
+    # Each variable writes only when set to something readable, so the compiled
+    # defaults in config/config.exs (off, 9568, loopback, no token) stand
+    # otherwise — the exporter must never switch itself on, or widen its bind,
+    # from a value nobody could read.
+    defp metrics_config(vars) do
+      {config, stderr} = eval_io(vars, :prod)
+      {get_in(config, [:kiln_cms, KilnCMSWeb.Metrics]) || [], stderr}
+    end
+
+    test "unset writes nothing" do
+      assert {[], _stderr} = metrics_config(%{})
+    end
+
+    test "on-spellings enable the exporter, off-spellings disable it" do
+      for value <- ["true", "ON", " 1 "] do
+        assert {[enabled: true], _} = metrics_config(%{"KILN_METRICS_ENABLED" => value})
+      end
+
+      assert {[enabled: false], _} = metrics_config(%{"KILN_METRICS_ENABLED" => "false"})
+    end
+
+    test "an unrecognized KILN_METRICS_ENABLED leaves it off and warns" do
+      assert {[], stderr} = metrics_config(%{"KILN_METRICS_ENABLED" => "yes please"})
+      assert stderr =~ "KILN_METRICS_ENABLED is set to"
+    end
+
+    test "the port is a positive integer or the default" do
+      assert {[port: 9100], _} = metrics_config(%{"KILN_METRICS_PORT" => "9100"})
+
+      assert {[], stderr} = metrics_config(%{"KILN_METRICS_PORT" => "http"})
+      assert stderr =~ "KILN_METRICS_PORT is set to"
+    end
+
+    test "the bind is loopback or all, and anything else keeps loopback" do
+      assert {[bind: :all], _} = metrics_config(%{"KILN_METRICS_BIND" => "All"})
+      assert {[bind: :loopback], _} = metrics_config(%{"KILN_METRICS_BIND" => "loopback"})
+
+      # An address is not a choice this reads — guessing at it could widen the
+      # bind, so it keeps the default and says so.
+      assert {[], stderr} = metrics_config(%{"KILN_METRICS_BIND" => "0.0.0.0"})
+      assert stderr =~ "KILN_METRICS_BIND is set to"
+    end
+
+    test "a token is trimmed, and a blank one is unset rather than an empty secret" do
+      assert {[token: "s3cret"], _} = metrics_config(%{"KILN_METRICS_TOKEN" => " s3cret\n"})
+
+      for value <- ["", "  "] do
+        assert {[], _} = metrics_config(%{"KILN_METRICS_TOKEN" => value})
+      end
     end
   end
 

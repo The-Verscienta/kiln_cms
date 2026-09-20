@@ -312,6 +312,148 @@ describe("contentAsOf", () => {
   });
 });
 
+describe("revisions", () => {
+  const revision = {
+    id: "v2",
+    action: "update",
+    action_type: "update",
+    inserted_at: "2026-09-19T09:14:03.118220Z",
+    user_id: "u1",
+    changed_fields: ["title"],
+  };
+
+  it("lists a document's revisions with limit and cursor, as plain JSON", async () => {
+    const stub = stubFetch({
+      body: { data: [revision], meta: { limit: 1, next_cursor: "c2" } },
+    });
+
+    const page = await client(stub, "editor-key").listRevisions("post", "p/1", {
+      limit: 1,
+      cursor: "c1",
+    });
+
+    const call = stub.calls[0]!;
+    expect(call.method).toBe("GET");
+    expect(call.url.pathname).toBe("/api/content/post/p%2F1/revisions");
+    expect(call.url.searchParams.get("limit")).toBe("1");
+    expect(call.url.searchParams.get("cursor")).toBe("c1");
+    expect(call.headers.accept).toBe("application/json");
+    expect(call.headers.authorization).toBe("Bearer editor-key");
+    expect(page.data[0]!.changed_fields).toEqual(["title"]);
+    expect(page.meta.next_cursor).toBe("c2");
+  });
+
+  it("sends no params for the first page", async () => {
+    const stub = stubFetch({ body: { data: [], meta: { limit: 20, next_cursor: null } } });
+    await client(stub).listRevisions("page", "p1");
+    expect(stub.calls[0]!.url.search).toBe("");
+  });
+
+  it("reads one revision and unwraps the {data} envelope", async () => {
+    const stub = stubFetch({
+      body: { data: { ...revision, changes: { title: "Two" }, snapshot: { title: "Two" } } },
+    });
+
+    const detail = await client(stub).revision("page", "p1", "v2");
+
+    expect(stub.calls[0]!.url.pathname).toBe("/api/content/page/p1/revisions/v2");
+    expect(detail.changes).toEqual({ title: "Two" });
+    expect(detail.snapshot.title).toBe("Two");
+  });
+
+  it("restores with a POST and returns the new revision", async () => {
+    const stub = stubFetch({
+      body: {
+        data: {
+          id: "p1",
+          type: "page",
+          state: "draft",
+          restored_version_id: "v1",
+          revision: { ...revision, id: "v4", action: "restore_version" },
+        },
+      },
+    });
+
+    const result = await client(stub, "rw-key").restoreRevision("page", "p1", "v1");
+
+    const call = stub.calls[0]!;
+    expect(call.method).toBe("POST");
+    expect(call.url.pathname).toBe("/api/content/page/p1/revisions/v1/restore");
+    expect(result.restored_version_id).toBe("v1");
+    expect(result.revision.action).toBe("restore_version");
+  });
+
+  it("surfaces a read-only key's refusal as KilnHttpError 403", async () => {
+    const stub = stubFetch({ status: 403, body: { errors: [{ code: "forbidden" }] } });
+    await expect(client(stub).restoreRevision("page", "p1", "v1")).rejects.toMatchObject({
+      status: 403,
+    });
+  });
+});
+
+describe("releases", () => {
+  it("lists releases through the JSON:API index (no /published feed)", async () => {
+    const stub = stubFetch({
+      body: {
+        data: [
+          {
+            id: "r1",
+            type: "release",
+            attributes: { name: "Autumn launch", state: "scheduled" },
+            relationships: { items: { data: [{ type: "release_item", id: "i1" }] } },
+          },
+        ],
+        included: [
+          {
+            id: "i1",
+            type: "release_item",
+            attributes: { content_type: "page", content_id: "p1", action: "publish" },
+          },
+        ],
+      },
+    });
+
+    const { items, included } = await client(stub).releases({
+      filter: { state: "scheduled" },
+      include: ["items"],
+      sort: ["scheduled_at"],
+    });
+
+    const call = stub.calls[0]!;
+    expect(call.url.pathname).toBe("/api/json/releases");
+    expect(call.url.searchParams.get("filter[state]")).toBe("scheduled");
+    expect(call.url.searchParams.get("include")).toBe("items");
+    expect(call.url.searchParams.get("sort")).toBe("scheduled_at");
+    expect(items[0]!.name).toBe("Autumn launch");
+    expect(resolve(items[0]!, "items", included)[0]!.content_id).toBe("p1");
+  });
+
+  it("fetches one release by id with its included items", async () => {
+    const stub = stubFetch({
+      body: {
+        data: { id: "r1", type: "release", attributes: { name: "Autumn launch" } },
+        included: [{ id: "i1", type: "release_item", attributes: { action: "unpublish" } }],
+      },
+    });
+
+    const release = await client(stub).release("r1", { include: ["items"] });
+
+    expect(stub.calls[0]!.url.pathname).toBe("/api/json/releases/r1");
+    expect(stub.calls[0]!.url.searchParams.get("include")).toBe("items");
+    expect(release.name).toBe("Autumn launch");
+    expect(release.included.get(refKey("release_item", "i1"))?.action).toBe("unpublish");
+  });
+
+  it("lists one release's items by filter", async () => {
+    const stub = stubFetch({ body: emptyDoc() });
+    await client(stub).releaseItems({ filter: { release_id: "r1" } });
+
+    const call = stub.calls[0]!;
+    expect(call.url.pathname).toBe("/api/json/release-items");
+    expect(call.url.searchParams.get("filter[release_id]")).toBe("r1");
+  });
+});
+
 describe("preview", () => {
   it("redeems the token at /preview/:token and unwraps the {data} envelope", async () => {
     // The server responds `{"data": {…draft…}}` (preview_controller.ex), not
@@ -321,7 +463,38 @@ describe("preview", () => {
     const draft = await client(stub).preview<{ title: string }>("tok/en+1");
 
     expect(stub.calls[0]!.url.pathname).toBe("/preview/tok%2Fen%2B1");
+    expect(stub.calls[0]!.method).toBe("GET");
     expect(draft.title).toBe("Draft");
+  });
+});
+
+describe("mintPreview", () => {
+  it("POSTs to the document's preview-token route with the key", async () => {
+    const minted = {
+      token: "tok",
+      url: "https://cms.example.com/preview/tok",
+      type: "post",
+      id: "p 1",
+      expires_at: "2026-09-19T14:15:00Z",
+      expires_in: 900,
+    };
+    const stub = stubFetch({ status: 201, body: minted });
+
+    const result = await client(stub, "kiln_key").mintPreview("post", "p 1");
+
+    const call = stub.calls[0]!;
+    expect(call.method).toBe("POST");
+    expect(call.url.pathname).toBe("/api/content/post/p%201/preview-token");
+    expect(call.headers.authorization).toBe("Bearer kiln_key");
+    expect(result).toEqual(minted);
+  });
+
+  it("throws KilnHttpError on a refusal", async () => {
+    const stub = stubFetch({ status: 403, body: { errors: [{ code: "forbidden" }] } });
+
+    await expect(client(stub, "kiln_key").mintPreview("post", "p1")).rejects.toMatchObject({
+      status: 403,
+    });
   });
 });
 

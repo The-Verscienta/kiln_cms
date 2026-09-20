@@ -168,7 +168,8 @@ defmodule KilnCMS.Accounts.User do
       :notify_on_publish,
       :notify_on_return_to_draft,
       :notify_on_comment,
-      :nav_preset
+      :nav_preset,
+      :status_marks
     ] do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
       authorize_if expr(id == ^actor(:id))
@@ -231,6 +232,15 @@ defmodule KilnCMS.Accounts.User do
     update :set_nav_preset do
       description "Choose how much of the console the sidebar shows."
       accept [:nav_preset]
+    end
+
+    # How the content list marks each row's schedule and translation status
+    # (`KilnCMSWeb.CoreComponents.content_status_marks/1`). Its own action for
+    # the same reason as `:set_nav_preset`: the switch on Your settings can
+    # write this column and nothing else.
+    update :set_status_marks do
+      description "Choose how the content list marks each item's status."
+      accept [:status_marks]
     end
 
     # Self-service workflow-notification preferences (issue #46). A user can
@@ -849,6 +859,10 @@ defmodule KilnCMS.Accounts.User do
       authorize_if expr(id == ^actor(:id))
     end
 
+    policy action(:set_status_marks) do
+      authorize_if expr(id == ^actor(:id))
+    end
+
     # 2FA is strictly self-service: a user manages the second factor on their own
     # account only (the admin bypass above still lets an operator intervene).
     # `:consume_totp_recovery_code` runs pre-auth as a system call
@@ -1068,6 +1082,18 @@ defmodule KilnCMS.Accounts.User do
     attribute :nav_preset, :atom do
       constraints one_of: [:essentials, :everything]
       default :essentials
+      allow_nil? false
+      public? true
+    end
+
+    # The content list's status marks (#1323): `:words` says "Missing
+    # translations" beside the state badge; `:trigrams` is the opt-in I-Ching
+    # glyph that packs published / translated / scheduled into three lines.
+    # Words for everyone by default — the glyph is a theme for people who
+    # already read it, not something a new editor should have to decode.
+    attribute :status_marks, :atom do
+      constraints one_of: [:words, :trigrams]
+      default :words
       allow_nil? false
       public? true
     end

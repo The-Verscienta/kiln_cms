@@ -34,14 +34,27 @@ Authorization: Bearer <token>
 
 | Resource  | Collection                  | Single record               | Extra reads |
 |-----------|-----------------------------|-----------------------------|-------------|
-| Page      | `GET /api/json/pages`       | `GET /api/json/pages/:id`   | `/pages/search`, `/pages/semantic-search`, `/pages/autocomplete`, `/pages/published` |
-| Post      | `GET /api/json/posts`       | `GET /api/json/posts/:id`   | `/posts/search`, `/posts/semantic-search`, `/posts/autocomplete`, `/posts/published` |
-| MediaItem | `GET /api/json/media-items` | `GET /api/json/media-items/:id` | `/media-items/search`, `/media-items/library` |
+| Page      | `GET /api/json/pages`       | `GET /api/json/pages/:id`   | `/pages/by-slug/:slug`, `/pages/search`, `/pages/semantic-search`, `/pages/autocomplete`, `/pages/published` |
+| Post      | `GET /api/json/posts`       | `GET /api/json/posts/:id`   | `/posts/by-slug/:slug`, `/posts/search`, `/posts/semantic-search`, `/posts/autocomplete`, `/posts/published` |
+| MediaItem | `GET /api/json/media-items` | `GET /api/json/media-items/:id` | `/media-items/search`, `/media-items/library`; `PATCH /media-items/:id` edits metadata ([below](#editing-media-metadata)) |
 | Category  | `GET /api/json/categories`  | `GET /api/json/categories/:id` | `/categories/by-slug/:slug` |
 | Tag       | `GET /api/json/tags`        | `GET /api/json/tags/:id`    | `/tags/by-slug/:slug` |
 | TagGroup  | `GET /api/json/tag-groups`  | `GET /api/json/tag-groups/:id` | `/tag-groups/by-slug/:slug` |
-| Entry (dynamic types) | `GET /api/json/entries` | `GET /api/json/entries/:id` | same set as Post, filtered by `filter[type_name]=` |
+| Entry (dynamic types) | `GET /api/json/entries` | `GET /api/json/entries/:id` | same set as Post, filtered by `filter[type_name]=`; `/entries/by-slug/:slug` takes `?type_definition_id=` |
 | TypeDefinition | `GET /api/json/type-definitions` | `GET /api/json/type-definitions/:id` | `/type-definitions/by-name/:name` — **editor-or-above** credential; see [Discovering dynamic types](#discovering-dynamic-types) |
+| ContentRelease | `GET /api/json/releases` | `GET /api/json/releases/:id` | `?include=items` — **editor-or-above** credential, read-only; see [Content releases](#content-releases-read-only) |
+| ReleaseItem | `GET /api/json/release-items` | `GET /api/json/release-items/:id` | `?filter[release_id]=` — same |
+
+`GET /api/json/<plural>/by-slug/:slug?locale=fr-CA` is the single published
+document for a slug, resolved through the site's **locale fallback chain** —
+`?fallback=false` and `?fallback_locale=` narrow it, the served locale is
+`attributes.locale` and the `x-kiln-locale` / `Content-Language` headers, and a
+locale the site does not run is a `400`. See
+[api.md → Locale fallback](api.md#locale-fallback). It authorizes like every
+route here, so a caller sees exactly the variants the read policies let it
+read; a variant it may not read is skipped along the chain like a missing one.
+(Filtering the collection with `filter[slug]=…&filter[locale]=…` still works
+and never falls back.)
 
 `GET /api/json/<plural>/published` returns published records only, ordered
 newest first (`-published_at`) — the delivery feed. It exists on **every**
@@ -80,6 +93,50 @@ answers as an anonymous visitor.
 discovery surface, and the rendered blog index publishes an audience-gated
 post's title and excerpt to anonymous visitors with a "Members" badge, so that
 metadata is already public. It pins `state` only.
+
+## Content releases (read-only)
+
+A **content release** (#500) is a named bundle of publishes and unpublishes that
+goes live as one unit. Releases are composed and shipped in `/editor/releases`;
+over the API they are **read-only**, for a headless editorial tool or a status
+board that needs to know what is planned to go live and when.
+
+| Route | Answers |
+|-------|---------|
+| `GET /api/json/releases` | Every release in the request's org; `filter[state]=scheduled`, `sort=scheduled_at`, `page[...]` as usual |
+| `GET /api/json/releases/:id` | One release; add `?include=items` for its contents |
+| `GET /api/json/release-items` | Release items; `filter[release_id]=<id>` for one release's |
+| `GET /api/json/release-items/:id` | One item |
+
+A release (`type: "release"`) carries `name`, `description`, `state` (`open`,
+`scheduled`, `publishing`, `published`, `failed`, `rolling_back`,
+`rolled_back`, `archived`), `scheduled_at`, `published_at`, `rolled_back_at`,
+`failure_reason` and `failed_item_id`. An item (`type: "release_item"`) carries
+`release_id`, `content_type` + `content_id` (the document it acts on — fetch it
+through that type's own route, under that route's own read policy), `action`
+(`publish` / `unpublish`), `status` (`pending`, `applied`, `skipped`,
+`cancelled`, `rolled_back`), `prior_state`, `prior_version_id` and `applied_at`.
+Who created, triggered or added to a release is not exposed — those are user
+ids.
+
+Same read and policy as the console: the credential must belong to an **editor
+or admin of the request's org** (a read-only key is enough). A viewer's key or
+an anonymous caller gets an empty list and a `404` on a single record; the host
+bounds the org, as everywhere else.
+
+There are **no write routes**. Shipping a release publishes every item it holds
+as the admin who triggered it — an admin approval step that stays in the
+console — so neither composing nor scheduling a release is reachable from a key.
+
+```bash
+# What goes live next, with its contents
+curl -s 'http://localhost:4000/api/json/releases?filter[state]=scheduled&sort=scheduled_at&include=items' \
+  -H 'accept: application/vnd.api+json' \
+  -H "authorization: Bearer $KILN_API_KEY"
+```
+
+A document's own version history is not a JSON:API resource — see
+[api.md → Version history](api.md#version-history-revisions).
 
 ## Filtering
 
@@ -586,6 +643,68 @@ admin-set nested value (a field behind `editable_by`), a non-admin write that
 drops the ids is **refused** (#954), with the error naming this surface. The
 fired `:json` artifact carries the same `_id`s for published content.
 
+### Concurrency: `ETag` and `If-Match`
+
+Without a precondition, a `PATCH` is last-write-wins: the server reads the
+record and applies your attributes in the same request, so a client editing
+from a copy it fetched earlier overwrites anything an editor saved in between,
+without an error. To make a write conditional on the version you read:
+
+1. Every single-record response carries an `ETag`: `GET /:id`, and the
+   responses to `PATCH /:id` and the workflow routes. It looks like `"4-draft"`
+   and is built from the record's `lock_version` (bumped by every content edit)
+   and its `state` (moved by every workflow transition). Treat it as opaque and
+   echo it back unchanged.
+2. Send it as `If-Match` on `PATCH /:id`, on `PATCH /:id/publish`,
+   `/unpublish`, `/submit-for-review`, `/return-to-draft`, or on `DELETE /:id`.
+   The write happens only if the record still carries that tag. Otherwise you
+   get **`412 Precondition Failed`** and nothing changes:
+
+```jsonc
+{
+  "errors": [{
+    "status": "412",
+    "code": "precondition_failed",
+    "detail": "this content was changed since you read it — it is now version 5 (draft); re-read it and retry",
+    "meta": { "etag": "\"5-draft\"", "lock_version": 5, "state": "draft" }
+  }]
+}
+```
+
+```bash
+# Read, keeping the ETag…
+curl -si http://localhost:4000/api/json/posts/<uuid> \
+  -H 'accept: application/vnd.api+json' -H "authorization: Bearer $KEY" | grep -i etag
+# etag: "4-draft"
+
+# …and write only if nobody has changed it since.
+curl -s -X PATCH http://localhost:4000/api/json/posts/<uuid> \
+  -H 'accept: application/vnd.api+json' -H 'content-type: application/vnd.api+json' \
+  -H "authorization: Bearer $KEY" -H 'if-match: "4-draft"' \
+  -d '{ "data": { "type": "post", "id": "<uuid>", "attributes": { "title": "New" } } }'
+```
+
+- **`If-Match: *`** passes whenever the record exists. Several tags,
+  comma-separated, pass if any one matches.
+- **A tag the server could not have issued fails with 412.** That covers a weak
+  `W/"…"` tag (`If-Match` uses strong comparison), a mistyped tag, or one
+  without quotes. It is not ignored: ignoring it would turn a typo into an
+  unguarded write.
+- **Publishing moves the tag even though it doesn't edit content.** A client
+  that read a draft and PATCHes after someone published it gets a 412 rather
+  than silently editing live content. `If-Match` on `/publish` likewise means
+  "publish the version I reviewed": an edit made after your read refuses it.
+- The check runs inside the write's transaction, against the row locked for
+  update, so a save that lands between your request arriving and the write
+  cannot slip past it.
+- No `If-Match`, no check: existing clients behave exactly as before.
+
+`lock_version` is also a read-only attribute on every content type, if you'd
+rather track versions yourself. The write routes accept it as an optional
+`expected_lock_version` attribute, which compares `lock_version` alone, like
+the GraphQL argument. Browsers can read `ETag` and send `If-Match` cross-origin:
+both are allowed in the CORS headers.
+
 ### Re-fire semantics
 
 Firing (immutable per-surface artifact regeneration) is bound to `:publish`, so
@@ -593,6 +712,37 @@ the publish route re-fires automatically. Editing already-published content with
 `PATCH /:id` **also** re-fires (a `published`-guarded re-fire on `:update`,
 #330), so a write-through to live content never leaves a stale artifact. Draft
 edits do not fire.
+
+### Editing media metadata
+
+Files are **created** through the upload API (`POST /api/media` — JSON:API has
+no file upload; see [api.md → Uploading media](api.md#uploading-media)). What
+an item says about itself is edited here:
+
+| Route | Action | Who | Effect |
+|-------|--------|-----|--------|
+| `PATCH /api/json/media-items/:id` | `:update_metadata` | `:read_write` key (or JWT), editor+ | Edits `alt`, `caption`, `decorative`, `focal_x`, `focal_y` and tags |
+
+```bash
+curl -s -X PATCH http://localhost:4000/api/json/media-items/<uuid> \
+  -H 'accept: application/vnd.api+json' \
+  -H 'content-type: application/vnd.api+json' \
+  -H "authorization: Bearer $KILN_API_KEY" \
+  -d '{ "data": { "type": "media_item", "id": "<uuid>",
+        "attributes": { "alt": "The kiln at dusk", "focal_x": 0.3, "add_tag_ids": ["<tag uuid>"] } } }'
+```
+
+- The focal point is `0.0`–`1.0` on each axis; moving it **re-derives** the
+  focal-aware crops in the background, as clicking the point in the media
+  library does.
+- Tags take the same three arguments as content — `tag_ids` replaces the set,
+  `add_tag_ids` / `remove_tag_ids` merge — with the same rules (see "Writing
+  tags — replace vs merge" above).
+- Nothing the pipeline owns is writable: `url`, `storage_key`, `variants`,
+  `content_type`, dimensions and sizes come from the bytes. Sending one is a
+  `400`, not a silent write. `audience` (gating a document) stays an editor-UI
+  action for now, because it moves the file between storage buckets.
+- Deleting media is not routed for any key.
 
 ### Workflow routes take an empty resource object
 

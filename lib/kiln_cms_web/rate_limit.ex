@@ -5,6 +5,11 @@ defmodule KilnCMSWeb.RateLimit do
   use Hammer, backend: :ets
 
   @default_limits %{
+    # GraphQL documents per client address, over both transports: each `/gql`
+    # request, each operation of a batched body
+    # (`KilnCMSWeb.Plugs.GraphqlBatchLimit`), and each document sent over an
+    # open `/ws/gql` connection (`KilnCMSWeb.GraphqlLimits.SocketDocumentBudget`).
+    # A subscription's pushes are not charged.
     gql: {60, :timer.minutes(1)},
     api: {120, :timer.minutes(1)},
     # Doubled from the original 20/min (#747). A two-factor sign-in is *two*
@@ -29,6 +34,15 @@ defmodule KilnCMSWeb.RateLimit do
     register: {5, :timer.minutes(1)},
     # Public HTML delivery — generous, just a flood/abuse ceiling per IP.
     delivery: {300, :timer.minutes(1)},
+    # Image transform requests (`/media/:id/t/…`), cached or not. One page can
+    # hold dozens of images, each its own request, so this sits well above
+    # `:delivery` — it is a flood ceiling, not the cost bound.
+    media_transform: {1_200, :timer.minutes(1)},
+    # Transform cache MISSES only — each one a decode, resize and encode. This
+    # is the per-client cost bound; `KilnCMS.Media.TransformGate` is the
+    # per-node one. A first view of an image-heavy page misses once per image,
+    # and everything after is a storage read that never reaches this bucket.
+    media_render: {120, :timer.minutes(1)},
     # Signed preview links — tight, to slow token enumeration / draft scraping.
     preview: {30, :timer.minutes(1)},
     # Passphrase attempts against locked content (#496). Tighter than `:form`
@@ -37,6 +51,14 @@ defmodule KilnCMSWeb.RateLimit do
     # for convenience, so it is short and guessable far more often than a
     # password is, and there is no account to lock out instead.
     unlock: {10, :timer.minutes(1)},
+    # The media upload API (`/api/media/*`), charged on top of `:api`. Every
+    # request is a byte-sniff, a metadata strip (an ffmpeg remux, for A/V),
+    # a store and a queued derivation — or a server-side download, for an
+    # import — so this bounds the work one address can queue, not just the
+    # request count. One a second sustained is a brisk migration script; an
+    # editor dragging files into the library goes through the LiveView, not
+    # here.
+    media_upload: {60, :timer.minutes(1)},
     # Public form submissions — tight per IP; a human fills a handful of
     # forms a minute, a spammer fills hundreds.
     form: {20, :timer.minutes(1)},
@@ -157,11 +179,16 @@ defmodule KilnCMSWeb.RateLimit do
   `KilnCMSWeb.SocketEventBudget.key/1` for the socket event buckets (#1305).
   Whichever it is, one function spells it, so two charges for the same client
   land on the same key.
+
+  `cost` is how many of the bucket's requests this one counts as. It is 1 except
+  for a batched GraphQL body (`KilnCMSWeb.Plugs.GraphqlBatchLimit`), which pays
+  for each operation it carries.
   """
-  def check(bucket, key) when is_atom(bucket) and is_binary(key) do
+  def check(bucket, key, cost \\ 1)
+      when is_atom(bucket) and is_binary(key) and is_integer(cost) and cost > 0 do
     {limit, scale} = Map.fetch!(limits(), bucket)
 
-    case hit(bucket_key(bucket, key), scale, limit) do
+    case hit(bucket_key(bucket, key), scale, limit, cost) do
       {:allow, _count} -> :allow
       {:deny, retry_after} -> {:deny, retry_after}
     end

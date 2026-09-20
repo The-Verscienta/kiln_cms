@@ -24,7 +24,7 @@ defmodule KilnCMSWeb.PreviewControllerTest do
     test "sign/verify round-trips a page reference, tenant included" do
       page = draft_page()
 
-      assert {:ok, %{type: :page, id: id, org_id: org_id}} =
+      assert {:ok, %{type: "page", id: id, org_id: org_id}} =
                page |> PreviewToken.sign() |> PreviewToken.verify()
 
       assert id == page.id

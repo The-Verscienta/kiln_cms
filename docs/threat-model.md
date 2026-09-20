@@ -27,7 +27,8 @@ document is about the network edge.
 - **Tenant isolation** — one deployment serves multiple organizations; content,
   media, branding and analytics must not cross org boundaries.
 - **Media & object storage** — uploaded files and their storage credentials.
-- **Outbound webhook secrets** — HMAC signing keys for delivery.
+- **Outbound webhook secrets** — HMAC signing keys for delivery, encrypted at
+  rest with `KilnCMS.Keys.Vault`.
 - **Payment credentials** — the provider API key and the inbound-webhook signing
   secret, both held through the `KilnCMS.Keys` provider model. The API key has
   full authority over the payment account; the signing secret is what stops
@@ -50,12 +51,14 @@ the router so preflights are answered before route matching).
 |---|---|---|---|
 | Public HTML delivery | `/`, `/:slug`, `/:type/:slug`, `/blog`, `/blog/:slug`, `/search`, `/*path` | none | `:delivery` |
 | Probes & SEO | `/up`, `/sitemap.xml`, `/robots.txt`, `/llms.txt` | none | `:probe` |
-| GraphQL | `/gql` (GET + POST), `/ws/gql` | optional JWT / API key | `:gql` |
+| GraphQL | `/gql` (GET + POST), `/ws/gql` | optional JWT / API key | `:gql` (per operation, on both transports), `:gql_join` (socket connects) |
 | JSON:API | `/api/json/**` (GET/POST/PATCH/DELETE) | optional JWT / API key | `:api` |
 | Headless REST | `/api/content/**`, `/api/resolve`, `/api/locales`, `/api/search`, `/api/ask`, `/api/provenance/**`, `/api/visual-editing/:type/:slug` | optional JWT / API key | `:api` |
-| OpenAPI & explorer | `/api/json/open_api`, `/api/json/swaggerui` | none — and **not served in prod** unless `API_DOCS_ENABLED` (#567) | `:docs` |
+| OpenAPI & explorer | `/api/json/open_api`, `/api/json/swaggerui` | none — and **not served in prod** unless `API_DOCS_ENABLED` (#567); the document (never the explorer) also answers any valid API key | `:docs` |
+| GraphQL SDL | `GET /api/graphql/schema.graphql` | none where introspection is on; **API key required** in prod unless `GRAPHQL_INTROSPECTION_ENABLED` | `:docs` |
 | Headless sign-in | `POST /api/auth/sign_in` | credentials → JWT, or a pending token for a 2FA account | `:auth` + per-account (#478) |
 | Headless second factor | `POST /api/auth/sign_in/verify` | encrypted pending token + TOTP or recovery code | `:auth`; the same per-account second-factor budget as the browser prompt (#714, #726) |
+| Media upload | `POST /api/media`, `/api/media/import-url`, `/api/media/uploads[/complete]` | JWT / API key; `:read_write` + editor, checked **before** `POST /api/media`'s body is parsed (the endpoint leaves it unread) | `:api` + `:media_upload` |
 | MCP (LLM authoring) | `/mcp` | **API key required** | `:api` |
 | Public forms | `GET /api/forms/:slug`, `POST /forms/:slug`, `POST /api/forms/:slug` | none (no CSRF by design) | `:form` |
 | Form embed | `GET /forms/:slug/embed` | none | `:delivery` |
@@ -65,6 +68,8 @@ the router so preflights are answered before route matching).
 | Second factor | `GET`/`POST /sign-in/verify` | signed `:pending_2fa` token + TOTP or recovery code | `:auth`; the `POST` also per-account, tighter than sign-in (#714) |
 | Credential submits over `/live` | LiveView `"submit"` on the sign-in, register, reset-request and magic-link forms — **all four render on all three auth pages** | credentials → session / account / mail | charged on the *action*, since no plug can reach them: sign-in `:auth` (#715) + per-account (#478); registration `:register` (#724); reset and magic-link `:auth` (#724) + the per-address mail budget |
 | Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none, except the three TOTP actions on `/editor/settings`: per-account, the second factor's own bucket (#727) |
+| Media bytes | `/media/:id/download`, `/media/:id/stream` | session (a gated item needs its audience) | `:delivery` |
+| Image transforms | `/media/:id/t/:ops` | session (same read as the download); unsigned URLs allowlisted, signed ones HMAC-checked | `:media_transform` per request + `:media_render` per cache miss, plus a per-node render gate |
 | Media blobs | `/uploads/*` (`Plug.Static`) | none | none |
 | Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token + per-document read / API key + per-document read | `/live` root joins `:live_join` per address (#1183); every frame on a `/ws/collab` connection `:collab_event` per account (#1305); otherwise none (except the sign-in submit, above) |
 | Dev tools | `/dev/dashboard`, `/dev/mailbox`, `/admin`, `/gql/playground` | compile-gated off in prod | — |
@@ -220,8 +225,23 @@ build if a resource is ever registered without that authorizer.
 - **CORS** — Corsica, scoped to `/api` and `/gql` only, with an exact-string
   origin allowlist that **defaults to deny** in production and no
   `allow_credentials`. Browser pages stay same-origin.
-- **GraphQL abuse limits** — `analyze_complexity: true, max_complexity: 200`,
-  and introspection disabled in production.
+- **GraphQL abuse limits** — one document pipeline for `/gql` and `/ws/gql`
+  (`KilnCMSWeb.GraphqlLimits`). Every document gets complexity analysis with a
+  cap of 200, a depth limit of 15 and a token limit of 2,000. These are pinned
+  where the pipeline is built, because the socket's Absinthe options are
+  replaced after its first document and a plug can override the HTTP ones.
+  To-many relationships without a `limit` are priced at five rows each, so a
+  relationship cycle (`relatedPosts`, `featuredImage { featuredPosts }`) cannot
+  nest for free. A batched `/gql` body may carry 10 operations at most, and each
+  is charged to `:gql` (`KilnCMSWeb.Plugs.GraphqlBatchLimit`). Introspection is
+  refused in production by a pipeline phase that reads the parsed document, so
+  a batched body and a socket document are checked like a single query. Each
+  document sent over `/ws/gql` is charged to `:gql` too, under the address the
+  socket connected from (`KilnCMSWeb.GraphqlLimits.SocketDocumentBudget`); a
+  subscription's pushes are not. Until 2026-09 the cap applied only to single
+  `/gql` requests: the socket had no limits, a batch was one request whatever
+  it carried, a batched body got past the introspection block, and a socket
+  could send any number of documents once connected.
 - **HTTPS / HSTS** — `force_ssl` with `x_forwarded_proto` rewriting in
   `config/prod.exs`.
 - **Session cookies** — signed *and* encrypted, `SameSite=Lax`, `http_only`, and
@@ -318,6 +338,27 @@ build if a resource is ever registered without that authorizer.
 - **Scraping / enumeration** — content is public and the sitemap is intentional.
   The `:delivery` bucket caps volume; front with a CDN to absorb load.
 
+### Image transforms (`/media/:id/t/:ops`)
+- **Resource exhaustion** — every distinct parameter set is a decode, a resize
+  and an encode, and the route is anonymous. Bounded in layers: unsigned URLs
+  may only use an allowlist of sizes, ratios and qualities (a signed URL may use
+  any value, and signing needs `KILN_IMAGE_TRANSFORM_KEY` or `SECRET_KEY_BASE`);
+  every output side is capped at 4000px and every source at the upload pixel
+  cap, the latter checked from the recorded dimensions before decoding; cache
+  misses spend a per-IP `:media_render` budget and wait on a per-node
+  concurrency gate; and an item keeps at most 200 derivatives, after which
+  renders are served but not stored. Parameters and signatures are checked
+  before the item is read, so refusals cost no I/O. *Watch:* behind a proxy
+  or CDN that isn't configured as trusted, every client shares the proxy's
+  address and so one render budget — the same caveat as every per-IP bucket.
+- **Signing-key exposure** — a leaked `KILN_IMAGE_TRANSFORM_KEY` lifts the
+  allowlist, not the hard caps or the render gate. Rotating it invalidates
+  signed URLs already in pages. It must stay server-side; the SDKs say so.
+- **Gated media** — the route reads the item with the request's actor through
+  the same policy-checked read as `/media/:id/download`, so a gated or
+  quarantined item is a 404 there too, and a gated item's derivatives live in
+  private storage and are served `private, no-store`.
+
 ### GraphQL / JSON:API / REST
 - **Authorization bypass** — prevented by Ash policies running with the request
   actor and tenant; there is no unauthenticated mutation path that skips them.
@@ -325,7 +366,13 @@ build if a resource is ever registered without that authorizer.
   publish/unpublish (#330). Gated by resource policies *and* the API-key access
   scope, not by the router. `destroy` is a soft delete; `purge` is never routed.
 - **Mass assignment** — Ash actions accept only declared inputs (`accept`).
-- **Query complexity** — bounded at 200; introspection off in production.
+- **Query cost** — each document is capped at complexity 200, depth 15 and
+  2,000 tokens on both transports, and a batch at 10 operations. Complexity is
+  a price, not a row count: a relationship list without `limit` is priced at
+  five rows and can return more, so the cap limits how deeply lists nest rather
+  than how many rows one document returns. Each document on `/ws/gql` is
+  charged to `:gql` like a `/gql` request (residual item 10). Introspection is
+  off in production.
 - **Error verbosity** — keep `:logger` at `:info` in prod (already set).
 
 ### MCP (`/mcp`)
@@ -547,11 +594,19 @@ build if a resource is ever registered without that authorizer.
   webhook endpoint's blast radius is therefore *every* document that fires an
   event, not only the public ones. Treat an endpoint URL as a credential.
 - **SSRF** — mitigated by `SafeUrl` with IP pinning (see Controls).
-- **Forgery at the receiver** — deliveries are HMAC-SHA256-signed over the raw
-  body; a receiver that verifies `x-kilncms-signature` knows a delivery is
-  genuinely from Kiln with unmodified content. There is no timestamp or nonce
-  in the scheme, so this proves origin and integrity, not freshness — see
-  residual risk 15 and [webhooks.md](webhooks.md#verifying-the-signature).
+- **Forgery at the receiver** — deliveries are HMAC-SHA256-signed; a receiver
+  that verifies `x-kilncms-webhook-signature` knows a delivery is genuinely
+  from Kiln, with unmodified content, and sent within the tolerance window it
+  enforces (five minutes by default), because the timestamp is inside the MAC.
+  Inside the window a receiver dedupes on the signed `delivery_id`. The older
+  body-only `x-kilncms-signature` is still sent, deprecated: it proves origin
+  and integrity, not freshness. See residual risk 15 and
+  [webhooks.md](webhooks.md#verifying-the-signature).
+- **Secret disclosure** — each endpoint's signing secret is vault-encrypted at
+  rest, so a database dump, backup or replica does not hand out the ability to
+  sign deliveries. The trade-off is the vault's: rotating `SECRET_KEY_BASE`
+  orphans the secrets, and each endpoint must be re-created
+  ([secrets-rotation.md](secrets-rotation.md)).
 
 ### oEmbed resolution (`OEMBED_ENABLED`, #489)
 - **Content choosing the destination** — prevented by design. Kiln does **not**
@@ -988,12 +1043,30 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     4xx-during-mount shape to raise here, so the client's own reconnect logic
     backs off and retries, the same as any other refused socket connect.
 
+    **Narrowed further, `/ws/gql` documents:** each document a client sends
+    over an open `/ws/gql` connection (a query, a mutation or a subscription)
+    is now charged to `:gql`, the bucket `/gql` requests are charged to, under
+    the address the connect was charged under
+    (`KilnCMSWeb.GraphqlLimits.SocketDocumentBudget`, the first phase of the
+    socket's document pipeline). One bucket for both transports, so moving
+    from `/gql` to the socket gains a client nothing. Per address, not per
+    actor as `/ws/collab` frames are: documents are not a per-keystroke
+    stream, the per-address size `/gql` already has fits them, and an
+    anonymous socket, where the gap was, has no actor. A subscription's pushes
+    are not charged. They re-run the phases `Absinthe.Phase.Init` recorded when
+    the client subscribed, and the budget runs before Init. Over budget, the
+    document is answered with a GraphQL error (`too_many_requests`, with
+    `retry_after` in seconds) before it is parsed, and the connection and its
+    subscriptions stay up. Each document is also held to the complexity, depth
+    and token limits `/gql` has (`KilnCMSWeb.GraphqlLimits`).
+
     Still uncounted, and still this item's remaining gap: events on
     `/live` (no lifecycle hook runs before every `handle_event/3`; the sign-in
-    submit stays the one charged case, #715) and subscription documents on
-    `/ws/gql`. `/ws/collab`'s frames are the one event surface counted so far
-    (#1305, above); the other two remain the harder problem that issue
-    described (no single choke point, no obvious per-event cost model).
+    submit stays the one charged case, #715). `/ws/gql`'s `unsubscribe` frames
+    are not charged either; each removes one registry entry and runs no
+    document. `/ws/collab` frames and `/ws/gql` documents are the event
+    surfaces counted so far (above); `/live` events remain the harder problem
+    #1305 described (no single choke point, no obvious per-event cost model).
 12. **Periodic CSP re-review** as the editor adds third-party assets. The
     runtime `img-src` is widened by `CSP_IMG_SRC` and by the Unsplash
     integration — the only externally-influenced part of the policy.
@@ -1001,17 +1074,35 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     `TOKEN_SIGNING_SECRET`, S3 keys) is not written down.~~ **Closed by
     #1304:** [`secrets-rotation.md`](secrets-rotation.md) is the per-secret
     procedure, verified against what the code does rather than what would be
-    reasonable. *Residual, and the reason to read it before an incident rather
-    than during one:* nothing in this application supports a dual-key
-    transition. `TOKEN_SIGNING_SECRET` and `SECRET_KEY_BASE` are hard
-    cutovers that sign every user out, and `SECRET_KEY_BASE` additionally
-    keys `KilnCMS.Keys.Vault`, so rotating it **permanently orphans**
-    database-stored key material — the DKIM key, social credentials, payment
-    secrets and the ActivityPub actor key — with no re-encryption path. Three
-    of those four have a documented way back; the federation actor key has
-    none, which the runbook flags as the one rotation that cannot be done
-    safely today. Pairs with [`backups.md`](backups.md), where the same
-    `SECRET_KEY_BASE` is part of the backup.
+    reasonable. ~~Rotating `SECRET_KEY_BASE` permanently orphans the
+    vault-encrypted columns, and the ActivityPub actor key cannot be
+    re-keyed.~~ **Closed by #1487:** `KilnCMS.Keys.Vault` reads under
+    `PREVIOUS_SECRET_KEY_BASE` as well while a rotation is under way, and
+    `mix kiln.vault.reencrypt` (`KilnCMS.Release.reencrypt_vault/1` in a
+    release) moves every vault column to the new secret. It finds those columns
+    by type, never overwrites a value it cannot open, and is safe to run twice.
+    `SiteFederation`'s admin-only `:rekey` replaces the actor's keypair under
+    the same actor id and sends followers a signed actor `Update`.
+    *Residual, and the reason to read the runbook before an incident rather
+    than during one:*
+    - **Sessions and tokens are still hard cutovers.** `TOKEN_SIGNING_SECRET`
+      and `SECRET_KEY_BASE` each sign every user out. The read window covers
+      the vault only: `Plug.Session` and `AshAuthentication.Jwt` each derive
+      one key from one secret.
+    - **The order of steps decides whether data survives.** If the old value is
+      retired before the task has run, the vault columns are orphaned exactly as
+      before. The only signal is the task's `unreadable` count, a warning in the
+      log and the federation panel.
+    - **Re-encryption is not revocation.** Backups taken before the task, and
+      any other copy of the database, still open with the old secret. After a
+      *leak*, the underlying secrets have to be rotated as well: the DKIM key,
+      billing and social credentials, and the actor key.
+    - **A re-keyed actor depends on its peers.** Servers that ignore actor
+      `Update`s keep the old key until they re-fetch the actor, and until then
+      the old key still signs traffic they accept.
+
+    Pairs with [`backups.md`](backups.md), where the same `SECRET_KEY_BASE` is
+    part of the backup.
 14. ~~**The collaborative-editing socket is scoped by topic, not by
     tenancy.**~~ **Closed by #655.** The socket token still names only a user,
     so it establishes *who* and nothing more; `CollabChannel.join/3` now
@@ -1136,21 +1227,26 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     publish's own write, and the room is told afterwards so its editors stop
     typing into a document nothing will persist. The authorization re-check is
     unchanged — collaborative editing of published content remains supported.
-15. **Webhook deliveries have no anti-replay.** The signature
-    (`x-kilncms-signature`, HMAC-SHA256 over the raw body) proves a delivery's
-    origin and integrity, not its freshness — there is no timestamp or nonce
-    binding it to a point in time, so anyone who captures one signed request
-    (TLS would have to fail first) can replay it to the receiver indefinitely.
-    Accepted for now: a replay re-announces old state rather than forging new
-    access — it delivers a payload the receiver was already sent once, to a
-    receiver the operator chose. Note this is **not** because the payload is
-    always public content: a content event carries an audience-gated or
-    passphrase-locked body too, marked by `audience`/`locked` (#1014), so the
-    replay window is bounded by the receiver's own retention of that body
-    rather than by the body being harmless. A
-    receiver with exactly-once requirements should dedupe on its own terms
-    (the content payload's `id`/`updated_at`, or a delivery id tracked out of
-    band) — see [webhooks.md](webhooks.md#verifying-the-signature).
+15. ~~**Webhook deliveries have no anti-replay.**~~ **Closed for receivers
+    that verify the timestamped signature.** Every delivery now carries
+    `x-kilncms-webhook-signature: t=<unix>,v1=<hex>`, an HMAC of
+    `"<t>.<body>"`, and a `delivery_id` inside the signed body (echoed in
+    `x-kilncms-delivery-id`) that stays the same across a delivery's retries.
+    A receiver that rejects a `t` outside its window (five minutes is the
+    documented default) and remembers the delivery ids it has seen inside that
+    window cannot be replayed to. Re-stamping a captured request with a fresh
+    `t` does not verify, because `t` is inside the MAC.
+
+    **Remainder.** The original body-only `x-kilncms-signature` is still sent
+    during a deprecation period. A receiver that verifies only that header is
+    as exposed as before: anyone who captures one signed request (TLS would
+    have to fail first) can replay it indefinitely. The replay re-announces old
+    state rather than granting new access, but the replayed body may be
+    audience-gated or passphrase-locked content (`audience`/`locked`, #1014).
+    So the exposure lasts as long as the receiver keeps that body, not merely
+    as long as the body is harmless. An admin **redelivery** is a new delivery
+    with a new id and a fresh timestamp, on purpose. See
+    [webhooks.md](webhooks.md#verifying-the-signature).
 
 ## Operating the dependency audit
 

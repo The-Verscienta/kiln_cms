@@ -47,3 +47,43 @@ end
 with {:ok, hours} <- Env.positive_integer("KILN_MEDIA_QUARANTINE_MAX_AGE_HOURS") do
   config :kiln_cms, :media_quarantine_max_age_hours, hours
 end
+
+# ## On-the-fly image transforms (`/media/:id/t/…`)
+#
+# KILN_IMAGE_TRANSFORM_KEY is the HMAC key for signed transform URLs. Unset,
+# Kiln derives one from SECRET_KEY_BASE — enough for its own templates, which
+# sign server-side. Set it to let a server-side frontend sign URLs with the
+# SDKs (any size, not just the allowlist). It is a secret: it must never reach
+# a browser. Refused below 32 characters, because a short key is a guessable
+# one and the only thing between a stranger and every render the endpoint can
+# be made to do. `mix phx.gen.secret 32` makes one.
+case System.get_env("KILN_IMAGE_TRANSFORM_KEY") do
+  blank when blank in [nil, ""] ->
+    :ok
+
+  key when byte_size(key) >= 32 ->
+    config :kiln_cms, :image_transforms, signing_key: key
+
+  _short ->
+    raise """
+    KILN_IMAGE_TRANSFORM_KEY must be at least 32 characters.
+
+    It signs on-the-fly image transform URLs, so a short key can be guessed and
+    then used to request renders of any size. Generate one with
+    `mix phx.gen.secret 32`, or unset it to derive a key from SECRET_KEY_BASE.
+    """
+end
+
+# KILN_IMAGE_TRANSFORM_UNSIGNED=false serves only signed transform URLs. On by
+# default: unsigned URLs are held to an allowlist of sizes, ratios and
+# qualities, which is what lets a browser build them.
+with {:ok, allow?} <- Env.fetch("KILN_IMAGE_TRANSFORM_UNSIGNED") do
+  config :kiln_cms, :image_transforms, allow_unsigned: allow?
+end
+
+# KILN_IMAGE_TRANSFORM_AUTO_AVIF=true lets `fm_auto` answer AVIF to a browser
+# that accepts it. Off by default for the same reason AVIF variants are opt-in:
+# an AVIF encode costs roughly ten times a WebP one.
+with {:ok, avif?} <- Env.fetch("KILN_IMAGE_TRANSFORM_AUTO_AVIF") do
+  config :kiln_cms, :image_transforms, auto_avif: avif?
+end

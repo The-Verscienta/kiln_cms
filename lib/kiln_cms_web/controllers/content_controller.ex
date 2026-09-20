@@ -37,6 +37,7 @@ defmodule KilnCMSWeb.ContentController do
   alias KilnCMS.Experiments
   alias KilnCMS.Feeds
   alias KilnCMS.I18n
+  alias KilnCMS.I18n.Fallback
   alias KilnCMS.Seo.Patterns
   alias KilnCMSWeb.ContentLock
   alias KilnCMSWeb.EventIndex
@@ -311,7 +312,7 @@ defmodule KilnCMSWeb.ContentController do
 
     lookup = fn loc -> KilnCMS.CMS.Slugs.find_locked_by_alias(path, loc, org_id, audiences) end
 
-    case lookup.(locale) || lookup.(I18n.default_locale()) do
+    case localized(lookup, locale, org_id) do
       {_ct, _record} = found -> found
       nil -> {ct, locked_record(conn, path, ct, locale)}
     end
@@ -335,7 +336,7 @@ defmodule KilnCMSWeb.ContentController do
       )
     end
 
-    localized(fetch, locale)
+    localized(fetch, locale, current_org_id(conn))
   rescue
     # A content type compiled against an older macro has no locked read — no
     # lock page rather than a 500, exactly as the teaser path degrades.
@@ -364,6 +365,7 @@ defmodule KilnCMSWeb.ContentController do
     # being indexed in the document's place — the canonical below still points at
     # the document's own URL, so nothing about it moves in an index.
     |> put_resp_header("x-robots-tag", "noindex, nofollow")
+    |> put_resp_header("content-language", teaser.locale)
     |> put_status(:unauthorized)
     |> assign(:locale, teaser.locale)
     |> assign(:page_title, teaser.seo_title || teaser.title)
@@ -407,7 +409,7 @@ defmodule KilnCMSWeb.ContentController do
       )
     end
 
-    case localized(fetch, locale) do
+    case localized(fetch, locale, org_id) do
       nil -> nil
       record -> render_teaser(conn, record, ct)
     end
@@ -435,6 +437,7 @@ defmodule KilnCMSWeb.ContentController do
     # URL returns the full document for an entitled reader — a shared cache keyed
     # on URL alone would eventually cross the two.
     |> put_private_delivery_headers()
+    |> put_resp_header("content-language", teaser.locale)
     |> assign(:locale, teaser.locale)
     |> assign(:page_title, teaser.seo_title || teaser.title)
     |> assign(:meta_description, teaser.seo_description)
@@ -474,7 +477,7 @@ defmodule KilnCMSWeb.ContentController do
       KilnCMS.CMS.Slugs.find_published_by_alias(path, loc, org_id, audiences, unlocks)
     end
 
-    case lookup.(locale) || lookup.(I18n.default_locale()) do
+    case localized(lookup, locale, org_id) do
       nil ->
         lock_alias(conn, path, locale, org_id, audiences) ||
           teaser_alias(conn, path, locale, org_id)
@@ -503,7 +506,7 @@ defmodule KilnCMSWeb.ContentController do
       KilnCMS.CMS.Slugs.find_locked_by_alias(path, loc, org_id, audiences)
     end
 
-    case lookup.(locale) || lookup.(I18n.default_locale()) do
+    case localized(lookup, locale, org_id) do
       nil -> nil
       {ct, record} -> render_lock(conn, record, ct, path)
     end
@@ -514,7 +517,7 @@ defmodule KilnCMSWeb.ContentController do
   defp teaser_alias(conn, path, locale, org_id) do
     lookup = fn loc -> KilnCMS.CMS.Slugs.find_teaser_by_alias(path, loc, org_id) end
 
-    case lookup.(locale) || lookup.(I18n.default_locale()) do
+    case localized(lookup, locale, org_id) do
       nil -> nil
       {ct, record} -> render_teaser(conn, record, ct)
     end
@@ -828,7 +831,9 @@ defmodule KilnCMSWeb.ContentController do
   # translations and issues no further DB queries. Returns `nil` (not cached)
   # when nothing is found.
   defp payload(fetch, locale, ct, org_id, audiences) do
-    case localized(fetch, locale) do
+    # One call, not a walk: `:public_by_slug` resolves the site's fallback
+    # chain itself (`Preparations.LocaleFallback`), in a single query.
+    case fetch.(locale) do
       nil ->
         nil
 
@@ -841,14 +846,12 @@ defmodule KilnCMSWeb.ContentController do
     end
   end
 
-  # Fetch the record in `locale`, falling back to the default locale's version.
-  defp localized(fetch, locale) do
-    default = I18n.default_locale()
-
-    case fetch.(locale) do
-      nil when locale != default -> fetch.(default)
-      record -> record
-    end
+  # The first hit of `fetch` along the site's fallback chain for `locale`
+  # (`KilnCMS.I18n.Fallback`) — `fr-CA → fr → en`, or whatever this site
+  # configured. For the lookups whose read action has no chain of its own (the
+  # teaser, the lock page, path aliases); `:public_by_slug` walks it in SQL.
+  defp localized(fetch, locale, org_id) do
+    org_id |> Fallback.chain(locale) |> Enum.find_value(fetch)
   end
 
   # Assign SEO metadata (read by the root layout) and the pre-enriched blocks,
@@ -899,6 +902,11 @@ defmodule KilnCMSWeb.ContentController do
       if private?,
         do: put_private_delivery_headers(conn),
         else: put_delivery_cache_headers(conn, record)
+
+    # The locale actually served, which a fallback chain can make differ from
+    # the one in the URL (`/fr-CA/…` answered in French). `<html lang>` already
+    # follows `record.locale`; this is the same fact for HTTP.
+    conn = put_resp_header(conn, "content-language", record.locale)
 
     start = System.monotonic_time()
 
@@ -1453,7 +1461,7 @@ defmodule KilnCMSWeb.ContentController do
   # ETag or a revalidating client keeps a 304 body whose links are already wrong.
   defp etag(record, org_id) do
     raw =
-      "#{record.id}:#{record.updated_at}:#{record.published_version_id}" <>
+      "#{record.id}:#{record.locale}:#{record.updated_at}:#{record.published_version_id}" <>
         ":#{record.seo_title}:#{record.seo_description}" <>
         ":#{KilnCMS.Cache.head_generation(org_id)}"
 

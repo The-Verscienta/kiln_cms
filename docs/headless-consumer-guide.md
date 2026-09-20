@@ -13,12 +13,15 @@ the Swagger UI / OpenAPI spec links (#319).
 **Building in Elixir?** Use the official client,
 [`kiln_client`](https://github.com/The-Verscienta/kiln_cms/blob/main/clients/elixir/kiln_client/README.md)
 — it wraps the JSON:API reads, search, and artifact surfaces with the safe
-defaults below (published-only reads, `Req.Test`-stubbable) already encoded.
+defaults below (published-only reads, `Req.Test`-stubbable) already encoded,
+plus the [JSON:API writes](json-api.md#writing-330) (create, update, workflow
+transitions, soft-delete — a `:read_write` key required) and a small `/gql`
+helper.
 
 **Building in JS/TS?** Use the official client,
 [`@kiln-cms/client`](https://github.com/The-Verscienta/kiln_cms/blob/main/clients/js/README.md)
 — the same surfaces and safe defaults as the Elixir client (published-only
-reads, injectable `fetch`), plus
+reads, writes, GraphQL, injectable `fetch`), plus
 preview tokens, `?as_of=` point-in-time reads, the `/api/sync` delta loop, and a bundled `kiln-types`
 generator that emits per-site TypeScript types from `GET /api/schema` (dynamic
 content types and custom fields included). `examples/astro-blog` consumes it
@@ -29,12 +32,39 @@ end to end.
 | You want… | Use | Returns |
 |-----------|-----|---------|
 | The **rendered body** of a published page/post (blocks, HTML, JSON-LD) | Artifact: `GET /api/content/:type/:slug?surface=json\|json_ld\|web` | Fired artifact — the immutable, pre-compiled output (Kiln v2 `_type` block model) |
+| To **preview a specific draft** by share link (draft mode) | Mint: `POST /api/content/:type/:id/preview-token` (editor key, server side) — or an editor's **Copy preview link**. Redeem: `GET /preview/:token` | The draft's raw, editable block tree (curated public fields) — the working copy for a live document — behind a signed, read-only 15-minute token for that one document |
 | To **mirror** the public site — a build cache, search index or edge store — and learn what was **taken down** | Sync: `GET /api/sync?initial=true`, then `?cursor=` | Upserts (with the fired artifact) and id-only deletes since your last cursor — see [api.md → Sync](api.md#sync-delta-api) |
-| To **preview a specific draft** by share link | `GET /preview/:token` | The draft's raw, editable block tree (curated public fields), behind a signed 15-minute token |
 | **Filterable lists / metadata** (slug, title, SEO, dates, relationships), incl. drafts with a bearer token | JSON:API: `GET /api/json/...` | Resource attributes + relationship linkage. **No block body** (`blocks` is `public? false`) |
 | **Taxonomy** (categories, tags) | JSON:API `/api/json/categories`,`/tags` **or** GraphQL `categories`,`tags` | Name, slug, description |
 | **Search** (keyword, semantic, autocomplete) | JSON:API `/<type>/search`,`/semantic-search`,`/autocomplete` **or** GraphQL `search*`/`semanticSearch*`/`autocomplete*` | Matching records (metadata; no block body). Published-only **for anonymous callers** — with a bearer token, drafts match too. Delivery sites: use the `…/published` twins (`searchPublished*` etc.), which pin `state == :published` server-side (see "Drafts") |
 | A **typed query** over published content by slug/locale | GraphQL `/gql` (`postBySlug`, `pageBySlug`, …) | Selected fields; no block body, author is the opaque `authorId` only |
+| An **image at a size, crop or format** the upload variants don't have | `GET /media/:id/t/:ops` via `kiln.imageUrl` / `KilnClient.image_url` | The image bytes, cached and immutable when version-pinned (see "Images") |
+
+## Locales: what you get when a translation is missing
+
+Every slug lookup — the artifact API, `/api/resolve`, JSON:API
+`/<plural>/by-slug/:slug`, GraphQL `*BySlug`, and the built-in site — answers a
+missing translation the same way: it walks the **site's fallback chain** for
+the requested locale (`fr-CA → fr → en`, set at `/editor/locales`; a locale
+with no chain falls back to the default locale) and serves the first published
+variant. So:
+
+- **Always read back which locale you got.** `x-kiln-locale` /
+  `Content-Language` on HTTP responses, `locale` on the JSON:API resource and
+  the GraphQL result, `locale` in `/api/resolve` and `/api/menus` bodies. A
+  static build that generates `/fr-ca/…` pages should decide whether an
+  English answer there is a page it wants (and whether it canonicalises to the
+  English URL) — the API tells you, it does not decide for you.
+- **Want exactly one locale?** Pass `fallback=false` (GraphQL
+  `fallback: false`): you get that locale or a 404 / `null`. `fallback_locale=`
+  replaces the chain with one locale.
+- **A locale the site does not run is a `400 unsupported_locale`**, never a
+  silent default — check `GET /api/locales`, which also publishes every
+  locale's chain.
+- **Navigation** follows a configured chain only, never the implicit hop to
+  the default locale.
+
+Details and the full parameter table: [api.md → Locale fallback](api.md#locale-fallback).
 
 ## Admin-defined (dynamic) content types
 
@@ -48,7 +78,7 @@ scoped by the type's name:
 | Artifact | `GET /api/content/<type name>/<slug>` — identical to compiled types; the `json` surface's `type` field is the dynamic type's name |
 | JSON:API | `GET /api/json/entries?filter[type_name]=<name>` (+ `/entries/search`, `/semantic-search`, `/autocomplete` with `?query=…`, each with a published-only `…/published` twin) |
 | GraphQL | `entryBySlug(slug, locale, typeDefinitionId)`, `searchEntries(query, filter: {typeName: {eq: "<name>"}})`, `entryTranslations`, `semanticSearchEntries`, `autocompleteEntries` (+ `searchPublishedEntries` / `semanticSearchPublishedEntries` / `autocompletePublishedEntries`) |
-| Webhooks | Events are named by the dynamic type — `"<name>.published"` / `.updated` / `.unpublished` — exactly like compiled types |
+| Webhooks | Events are named by the dynamic type — `"<name>.published"` / `.updated` / `.unpublished` / `.archived` / `.deleted` / `.restored` / `.created` — exactly like compiled types |
 
 Admin-defined **custom fields** are delivered in each entry's `custom_fields`
 map on every surface — including the fired artifact's `json` surface — and are
@@ -106,7 +136,62 @@ up, so any content at all is at least `1` and only genuinely empty content is
 **Rule of thumb:** render published bodies from the **artifact** surface (it has
 CDN cache headers — `Cache-Control`/`ETag`/`Last-Modified`, see #188); use
 **JSON:API/GraphQL** for discovery, lists, filtering, taxonomy, and search; use
-**preview tokens** to share an unpublished draft.
+**preview tokens** to share an unpublished draft. The artifact, JSON:API,
+GraphQL `GET` and search surfaces are all CDN-cacheable when read anonymously —
+see [Caching](#caching).
+
+### Draft mode with a preview token
+
+A front end's draft/preview mode needs one draft in a browser, and the browser
+must not hold your API key. Mint on the server, redeem in the page:
+
+1. Your server (holding an editor's `:read` key) calls
+   `POST /api/content/:type/:id/preview-token` — or the editor pastes a link
+   from **Copy preview link**, whose last path segment is the token.
+2. Pass the returned `token` to the page (a cookie, a query param).
+3. The page reads `GET /preview/:token` — no credential — until it expires 15
+   minutes later; mint again on the next render.
+
+See [api.md → Preview tokens](api.md#preview-tokens) for the response shape and
+who may mint.
+
+## Images: sizes, crops and formats on request
+
+A `media_item` (JSON:API `/api/json/media-items`, GraphQL `featuredImage`)
+carries `url`, `width`, `height`, `focal_x`, `focal_y` and a `variants` map of
+the fixed renditions made at upload. For anything else — a 16:9 crop at 1080px,
+a square thumbnail, AVIF — ask the transform endpoint:
+
+```ts
+import { createClient } from "@kiln-cms/client";
+
+const kiln = createClient({ baseUrl: "https://cms.example.com" });
+
+// <img src srcset sizes> for a 16:9 card, cropped around the editor's focal point
+const src = kiln.imageUrl(media, { width: 1080, aspectRatio: "16:9", format: "auto" });
+const srcset = kiln.imageSrcset(media, { aspectRatio: "16:9", format: "auto" });
+```
+
+What to know:
+
+- **The builders need the media object, not just its id.** `v` (the version
+  pin that makes a response cacheable for a year) is computed from `url` and
+  the focal point, so pass the whole `media_item`. Without `url` the URL still
+  works, with a five-minute lifetime.
+- **Unsigned URLs snap.** From a browser the builders round `width`/`height`
+  up to the server's size ladder, because the server only renders allowlisted
+  sizes for unsigned URLs. Use `aspectRatio` rather than `height` for a fixed
+  crop — snapping two sides independently changes the shape.
+- **Signed URLs don't.** A server-side frontend holding the operator's
+  `KILN_IMAGE_TRANSFORM_KEY` can sign (`kiln.signedImageUrl`,
+  `KilnClient.image_url(media, sign_key: key)`) and ask for exact sizes. The
+  key is a secret — never ship it to a browser bundle.
+- **`format: "auto"`** returns the best format the browser accepts and sends
+  `Vary: Accept`; behind a CDN that ignores `Vary`, pick explicit formats.
+- **Visibility matches downloads.** A gated item's transforms are 404 for
+  anyone who couldn't download it.
+
+Full reference: [media-pipeline.md § On-the-fly transforms](media-pipeline.md#on-the-fly-transforms).
 
 ## Author / PII
 
@@ -179,6 +264,59 @@ What sync reports is the **anonymous** view whatever key you configure, so it
 is safe to point a delivery key at it — and a delete never says why a document
 left, or names one you were never sent.
 
+## Editorial tooling: version history and releases
+
+Two editor-tier reads exist for tools *about* the content rather than sites
+that render it — a migration script, an audit export, a launch dashboard. Both
+need an editor's (or admin's) credential and answer nothing to an anonymous
+caller or a viewer key, so they never belong in a delivery site's config.
+
+* **Version history** — `GET /api/content/:type/:id/revisions` lists a
+  document's revisions (who, when, which fields), `…/revisions/:version_id`
+  returns one revision's changes plus the full document as it stood then, and
+  `POST …/revisions/:version_id/restore` reverts the content to it (a
+  `:read_write` key; a read-only key is refused). Keyed by document id, paged
+  with a cursor. See [api.md](api.md) → "Version history (revisions)".
+* **Content releases** — `GET /api/json/releases` (`?include=items`) shows what
+  is scheduled to go live together, when, and what each release will publish or
+  take down. Read-only: releases are shipped from the console. See
+  [json-api.md](json-api.md) → "Content releases (read-only)".
+
+To show a visitor "what this page said on a date", use the public
+point-in-time read (`GET /api/content/:type/:slug?as_of=`), not revisions: it
+serves only what was *published* at that instant, to anyone.
+
+## Caching
+
+Anonymous reads of the main delivery surfaces are shared-cacheable: fired
+artifacts (`public, max-age=300`), and JSON:API, GraphQL queries over `GET` and
+`/api/search` (`public, max-age=60, stale-while-revalidate=60`). Each carries an
+`ETag`; send it back as `If-None-Match` and an unchanged response is a bodyless
+`304`. The full table, the headers and CDN setup are in
+[api.md → Caching and CDNs](api.md#caching-and-cdns).
+
+What that means for a front end:
+
+* **Read delivery anonymously if you want it cached.** Any credential — an
+  `Authorization` header (including a delivery API key), an unlock grant, even a
+  cookie — makes the response `private, no-store`. That is deliberate: an
+  editor's token sees drafts on the same URLs, so its answer must not land in a
+  shared cache. If a build or server needs a key, keep it off the requests your
+  CDN serves to readers ([Delivery sites](#delivery-sites-an-api-key-widens-what-you-see)
+  has the other reason to).
+* **Query GraphQL with `GET` for cacheable reads.** `POST /gql` is never cached.
+  Put the document (and `variables`, JSON-encoded) in the query string — a
+  document sent in a `GET` body is never cached — and a query that returns
+  `errors` is not cached either.
+* **A publish shows up within the `max-age`**, or at once if the operator set
+  `KILN_CDN_PURGE_URL`, which purges the site's `Surrogate-Key`/`Cache-Tag` on
+  every publish, unpublish and live edit (not on taxonomy or schema edits,
+  which age out). Static builds and ISR should still
+  rebuild from [webhooks](webhooks.md); the purge only covers the CDN in front of
+  Kiln.
+* **Don't build your own ETag from fields.** Kiln's is a digest of the response
+  body, so it already changes whenever anything in the body does — keying on
+  `updatedAt` or an id misses changes that do not touch them.
 ## Analytics: your fetches are what get counted
 
 A successful `GET /api/content/:type/:slug` records a view against that

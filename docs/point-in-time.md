@@ -28,6 +28,12 @@ default, `json_ld`, `web`), plus response headers:
 - `withdrawn` — it *had* been published, but was unpublished or archived
   before `as_of` and not republished by then. See
   [Withdrawn content](#withdrawn-content).
+- `not_public` — it was published, but not to an anonymous reader: its
+  audience at `as_of` was not public. See [Who can read history](#who-can-read-history).
+
+A passphrase-locked document (#496) takes the same grant as live delivery
+(`x-kiln-unlock` or `?unlock=`), and a snapshot read with one is served
+`private, no-store` — never `public` — for the same reason.
 
 ## How it works
 
@@ -63,6 +69,33 @@ Bounded (`limit`, default 100, max 500) — the last-transition scan runs as one
 `DISTINCT ON` SQL pass, so cost scales with matching documents, never with
 total publish history — and results are server-cached for 5 minutes. Content
 whose history predates version tracking can't be reconstructed and is omitted.
+
+## Who can read history
+
+`?as_of=` is on the unauthenticated API and its answers are CDN-cacheable, so
+it applies every rule live delivery applies to *who* may read a document. The
+feature is about *when*; it widens nothing else.
+
+- **The snapshot** resolves the document through the live delivery read first
+  (published now, `:public` audience, passphrase lock unless a grant is
+  presented), then checks that it was **public at `as_of`** — the last
+  `audience` on its version history at or before that moment. A document that
+  was members-only then and is public now answers `404 not_public` for dates
+  it was gated; one that was public then and is gated now is not found at all.
+  Edits to a published document land on the live row without a republish, so
+  this is the audience *at `as_of`*, not at the last publish before it.
+- **The collection index** (REST and GraphQL) lists only documents public to an
+  anonymous reader both **now** (public audience, no passphrase lock) and
+  **then**. The rule takes no caller input, which is what lets the index keep
+  one server-cache slot per `{org, type, as_of, limit}`; a locked document is
+  never listed, grant or not.
+- **The passphrase lock has no history.** Its hash is deliberately kept out of
+  version rows (so a bcrypt hash never outlives a rotation there), so the
+  current lock is the only one there is and it applies to every date: locking
+  a document hides it from the historical index for dates it was open too.
+- A document whose history records no audience at all fails closed.
+  Version tracking records every attribute on create, defaults included, so
+  this only affects history older than the `audience` column itself.
 
 ## Dynamic (D17) types
 
