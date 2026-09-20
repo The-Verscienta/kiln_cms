@@ -42,8 +42,10 @@ defmodule KilnCMS.CMS.OrgSettings do
       `:admin` (`OrgAdmin`, the default). Writes are always `OrgAdmin`.
     * `:update?` — whether to emit the primary `update :update`. Defaults to
       `true`.
-    * `:save_arguments` — `[{name, type}]` arguments declared on `:save` and
-      `:update` alike (a paired value a change derives a stored field from).
+    * `:save_arguments` — `[{name, type}]` or `[{name, type, opts}]` arguments
+      declared on `:save` and `:update` alike (a paired value a change derives
+      a stored field from; `opts` is the argument's own, e.g. `sensitive?: true`
+      for a secret a change encrypts into a column).
     * `:save_changes` — change modules run on `:save` and `:update` (not
       `:destroy`; a resource-wide bust belongs in its own `changes do` block).
     * `:admin_columns` — AshAdmin `table_columns`; when given, the
@@ -104,9 +106,16 @@ defmodule KilnCMS.CMS.OrgSettings do
       end
 
     argument_decls =
-      for {name, type} <- save_arguments do
+      for argument <- save_arguments do
+        # A two-tuple is its own AST; a three-tuple arrives quoted as `{:{}, _, _}`.
+        {name, type, argument_opts} =
+          case argument do
+            {name, type} -> {name, type, []}
+            {:{}, _meta, [name, type, argument_opts]} -> {name, type, argument_opts}
+          end
+
         quote do
-          argument unquote(name), unquote(type)
+          argument unquote(name), unquote(type), unquote(argument_opts)
         end
       end
 

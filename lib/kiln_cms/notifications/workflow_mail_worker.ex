@@ -95,7 +95,10 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
     # retries of this job carry the *same* ID rather than a fresh one each
     # attempt (and so gen_smtp doesn't fill in one from the container hostname).
     |> Mail.ensure_message_id("workflow-#{id}")
-    |> Mail.deliver_for_worker()
+    # Through the site's own relay when it has one (#1322). Jobs queued before
+    # `org_id` was in the args carry none and use the operator's relay, as
+    # they would have.
+    |> Mail.deliver_for_worker(org_id: args["org_id"])
   end
 
   @impl Oban.Worker
