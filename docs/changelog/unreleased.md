@@ -48,6 +48,25 @@ carries the reasoning.
 
 ## Changed
 
+<a id="the-content-list-says-an-items-status-in-words-the-trigram-glyph-is-opt-in"></a>
+
+- **The content list says an item's status in words; the trigram glyph is
+  opt-in.** Each row used to carry an I-Ching trigram whose three lines meant
+  published, translated and scheduled, named in its tooltip as "li · fire" or
+  "kun · earth" — the last of the bagua theming, which the Overview had
+  already dropped, and a mark a new editor had to learn to decode. Rows now say
+  "Missing translations" when a slug group lacks a locale, and the schedule
+  line reads "Publishes Sep 22, 2026, 11:07 AM" (or "Unpublishes …") instead of
+  a bare date explained only by a hover title; the state badge already said the
+  rest. Anyone who
+  reads the glyph can turn it back on under Your settings → Content list
+  (`User.status_marks`, a new column that defaults every account, existing
+  ones included, to words). `docs/design-language.md` extends its "no internal
+  metaphors" rule to pictures.
+  ([#1323](https://github.com/The-Verscienta/kiln_cms/issues/1323))
+
+## Changed
+
 <a id="the-dependency-audit-also-reads-hexs-own-advisory-feed"></a>
 
 - **The dependency audit also reads Hex's own advisory feed.** `mix deps.audit` reads
@@ -70,7 +89,6 @@ carries the reasoning.
   old count was graphemes, where one grapheme can carry any number of
   combining characters; a value that only passed because of that gap is now
   rejected with the same validation error as any other over-long string.
-
 ## Fixed
 
 <a id="mix-setup-stops-early-with-the-real-reason-when-the-checkouts-path-has-a-space"></a>

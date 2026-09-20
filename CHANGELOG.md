@@ -68,12 +68,17 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **The content list says an item's status in words; the trigram glyph is
+  opt-in.**
+  ([#1323](https://github.com/The-Verscienta/kiln_cms/issues/1323) · [long form](docs/changelog/unreleased.md#the-content-list-says-an-items-status-in-words-the-trigram-glyph-is-opt-in))
+
+### Changed
+
 - **The dependency audit also reads Hex's own advisory feed.**
   ([long form](docs/changelog/unreleased.md#the-dependency-audit-also-reads-hexs-own-advisory-feed))
 
 - **String lengths are counted in codepoints, as Postgres counts them.**
   ([long form](docs/changelog/unreleased.md#string-lengths-are-counted-in-codepoints-as-postgres-counts-them))
-
 ### Fixed
 
 - **`mix setup` stops early, with the real reason, when the checkout's path has
