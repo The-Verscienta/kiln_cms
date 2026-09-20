@@ -382,6 +382,50 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
   write to. Ignored under S3.
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529))
 
+<a id="share-a-draft-copy-preview-link-in-the-editor-and-a-preview-token-api"></a>
+
+- **Share a draft: *Copy preview link* in the editor, and a preview-token API.**
+  `GET /preview/:token` and its shared view `/preview/:token/live` have existed
+  since #379, but nothing outside the tests ever minted a token, so neither
+  could be used. The content editor now has a **Copy preview link** button: it
+  mints a read-only link to that one document, valid for 15 minutes, copies it
+  and shows it with what it grants. A headless front end's draft mode mints
+  server-side with `POST /api/content/:type/:id/preview-token` (an editor's
+  `:read` key is enough) and hands the browser the token instead of its key.
+  The response is `{token, url, type, id, expires_at, expires_in}`, where `url` is on
+  the owning site's host, the only one that honours it. The JS client gains
+  `mintPreview(type, id)`. Minting is gated on **editorial read visibility**
+  (`Checks.ReadableContentType`, the grant that shows an editor drafts), not on
+  reading the row. Otherwise a viewer or a type-scoped editor could mint a link
+  to a published page and read its pending working copy. `docs/api.md` →
+  Preview tokens has the refusals (401/403/404). `docs/visual-editing-bridge.md`
+  now asks for a `:read` key rather than `:read_write`, since the bridge only
+  reads. The bridge itself still takes a key, not a preview token.
+
+<a id="the-visual-editing-bridge-takes-a-preview-token-instead-of-an-api-key"></a>
+
+- **The visual-editing bridge takes a preview token instead of an API key.**
+  Until now `bridge.js` could see a draft only by putting an editor's API key
+  in the browser, where it sees every draft until someone revokes it. It now
+  accepts a preview token: set `data-kiln-preview-token`, or call
+  `KilnBridge.setPreviewToken(t)`. The token is read-only, opens one document
+  and lasts 15 minutes. `GET /api/visual-editing/:type/:slug` reads it from an
+  `x-kiln-preview-token` header (now on the CORS allowlist) or from
+  `?preview_token=`. It checks the token's type, site, slug and locale against the
+  route. It then serves that document's working copy, as `/preview/:token`
+  does, with `no-store`. An expired, tampered or mismatched token gets
+  `404 invalid_preview`, and a presented token is never swapped for the key or
+  for an anonymous read. `/ws/bridge?preview_token=` connects without an actor
+  only when the token names this type, id and host's org. Its periodic re-check
+  from #775 re-verifies the token and closes the connection once it expires, so a
+  leaked token streams for at most 15 minutes plus 30 seconds. `bridge.js` now
+  reconnects when the server closes the socket, which the socket's docs had
+  always claimed it did. It backs off while refused and uses whatever token it
+  holds. The front end re-mints to keep a long session going, either on every
+  render or on a timer. `docs/visual-editing-bridge.md` → *Preview tokens and
+  long edit sessions* has both patterns and now recommends the token over the
+  key.
+
 <a id="upload-media-over-the-api"></a>
 
 - **Upload media over the API.** Until now no headless surface could create a
@@ -443,26 +487,6 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
   gain `releases`/`list_releases`, `release` and
   `releaseItems`/`list_release_items`. See docs/json-api.md → "Content
   releases (read-only)".
-
-<a id="share-a-draft-copy-preview-link-in-the-editor-and-a-preview-token-api"></a>
-
-- **Share a draft: *Copy preview link* in the editor, and a preview-token API.**
-  `GET /preview/:token` and its shared view `/preview/:token/live` have existed
-  since #379, but nothing outside the tests ever minted a token, so neither
-  could be used. The content editor now has a **Copy preview link** button: it
-  mints a read-only link to that one document, valid for 15 minutes, copies it
-  and shows it with what it grants. A headless front end's draft mode mints
-  server-side with `POST /api/content/:type/:id/preview-token` (an editor's
-  `:read` key is enough) and hands the browser the token instead of its key.
-  The response is `{token, url, type, id, expires_at, expires_in}`, where `url` is on
-  the owning site's host, the only one that honours it. The JS client gains
-  `mintPreview(type, id)`. Minting is gated on **editorial read visibility**
-  (`Checks.ReadableContentType`, the grant that shows an editor drafts), not on
-  reading the row. Otherwise a viewer or a type-scoped editor could mint a link
-  to a published page and read its pending working copy. `docs/api.md` →
-  Preview tokens has the refusals (401/403/404). `docs/visual-editing-bridge.md`
-  now asks for a `:read` key rather than `:read_write`, since the bridge only
-  reads. The bridge itself still takes a key, not a preview token.
 
 <a id="the-graphql-schema-and-the-openapi-document-are-committed-and-a-production-site"></a>
 

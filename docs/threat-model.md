@@ -71,7 +71,7 @@ the router so preflights are answered before route matching).
 | Media bytes | `/media/:id/download`, `/media/:id/stream` | session (a gated item needs its audience) | `:delivery` |
 | Image transforms | `/media/:id/t/:ops` | session (same read as the download); unsigned URLs allowlisted, signed ones HMAC-checked | `:media_transform` per request + `:media_render` per cache miss, plus a per-node render gate |
 | Media blobs | `/uploads/*` (`Plug.Static`) | none | none |
-| Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token + per-document read / API key + per-document read | `/live` root joins `:live_join` per address (#1183); every frame on a `/ws/collab` connection `:collab_event` per account (#1305); otherwise none (except the sign-in submit, above) |
+| Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token + per-document read / preview token (one document, re-verified until it expires) or API key + per-document read | `/live` root joins `:live_join` per address (#1183); every frame on a `/ws/collab` connection `:collab_event` per account (#1305); otherwise none (except the sign-in submit, above) |
 | Dev tools | `/dev/dashboard`, `/dev/mailbox`, `/admin`, `/gql/playground` | compile-gated off in prod | — |
 
 **`/ws/collab` is a prototype surface.** Its joins are refused unless

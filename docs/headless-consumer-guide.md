@@ -193,6 +193,21 @@ What to know:
 
 Full reference: [media-pipeline.md § On-the-fly transforms](media-pipeline.md#on-the-fly-transforms).
 
+### Draft mode with a preview token
+
+A front end's draft/preview mode needs one draft in a browser, and the browser
+must not hold your API key. Mint on the server, redeem in the page:
+
+1. Your server (holding an editor's `:read` key) calls
+   `POST /api/content/:type/:id/preview-token` — or the editor pastes a link
+   from **Copy preview link**, whose last path segment is the token.
+2. Pass the returned `token` to the page (a cookie, a query param).
+3. The page reads `GET /preview/:token` — no credential — until it expires 15
+   minutes later; mint again on the next render.
+
+See [api.md → Preview tokens](api.md#preview-tokens) for the response shape and
+who may mint.
+
 ## Author / PII
 
 No surface exposes author email or role. Content carries only the opaque

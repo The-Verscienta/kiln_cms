@@ -7,11 +7,12 @@ defmodule KilnCMSWeb.BridgeSocket do
   `new WebSocket(...)` and JSON frames — no Phoenix JS client required. One
   connection watches one document:
 
+      wss://<host>/ws/bridge?type=post&id=<uuid>&preview_token=<token>
       wss://<host>/ws/bridge?type=post&id=<uuid>&api_key=kiln_…
 
-  On connect it authenticates the `api_key` to its owning user (or stays
-  anonymous), authorizes that the actor may **read** that document (so a draft is
-  never pushed to someone who couldn't fetch it), and subscribes to the same
+  On connect it authorizes the watcher to **read** that document (so a draft is
+  never pushed to someone who couldn't fetch it), by one of three credentials —
+  a preview token, an API key, or none — and subscribes to the same
   `content_preview:<type>:<id>` PubSub topic the structured editor broadcasts on
   (`ContentEditorLive.broadcast_preview/1`). Each `{:preview_update, payload}` is
   forwarded as a `{"event":"update", …}` JSON frame; the bridge fires its
@@ -23,6 +24,20 @@ defmodule KilnCMSWeb.BridgeSocket do
   Works for every content type — compiled (page/post) and the dynamic entry
   tier alike — since the topic is keyed by the public type name (`ct.type`), the
   same value the editor broadcasts with.
+
+  ## Credentials
+
+    * **`preview_token`** (recommended for a browser) — a `KilnCMS.CMS.PreviewToken`
+      minted for *this* document. It admits the connection only when it
+      verifies and its claims name the requested `type` and `id` and the
+      connecting host's org; there is no actor behind it, so the read that
+      confirms the document exists is a system read (`authorize?: false`),
+      the grant being the signature. When `preview_token` is present it is the
+      only credential consulted: a bad one refuses the connect rather than
+      falling back to `api_key` or to an anonymous read.
+    * **`api_key`** — authenticated to its owning user, whose read policy
+      decides. An invalid key falls back to anonymous.
+    * **none** — anonymous: published documents only.
 
   ## The connect check runs again, periodically (#775)
 
@@ -50,6 +65,19 @@ defmodule KilnCMSWeb.BridgeSocket do
   record that `Checks.ApiKeyWithoutWriteAccess` reads) means the same thing on
   the re-check as it did at connect, rather than the reloaded struct quietly
   presenting as a session actor.
+
+  A **preview-token** connection has no actor to reload and no grant eviction
+  could revoke, so its re-check is the token itself: it is verified again on
+  every tick, against the same document and org, and the connection closes
+  once it no longer verifies. A token lives 15 minutes
+  (`KilnCMS.CMS.PreviewToken.max_age_seconds/0`), so a leaked one streams for
+  at most that plus one interval — never for as long as a tab stays open.
+  `bridge.js` reconnects with whatever token it holds by then, which is how a
+  front end that re-minted (`KilnBridge.setPreviewToken/1`) keeps streaming.
+
+  Unlike the API key, the token *is* kept in the state — it has to be, to be
+  re-verified — but only behind a zero-arity closure, which an inspected or
+  crash-reported state prints as `#Function<…>` rather than the credential.
   """
   @behaviour Phoenix.Socket.Transport
 
@@ -58,6 +86,7 @@ defmodule KilnCMSWeb.BridgeSocket do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.SessionEviction
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.PreviewToken
   alias KilnCMSWeb.PreviewLive
   alias KilnCMSWeb.SocketReauth
 
@@ -74,8 +103,7 @@ defmodule KilnCMSWeb.BridgeSocket do
          true <- KilnCMS.VisualEditing.enabled?(),
          {:ok, ct, id} <- fetch_target(params),
          {:ok, org} <- fetch_org(info),
-         actor <- authenticate(params["api_key"]),
-         :ok <- authorize_read(ct, id, actor, org) do
+         {:ok, credential} <- authorize_connect(ct, id, org, params) do
       # The actor rides along so `init/1` can subscribe to that user's eviction
       # topic. A raw transport has no `id/1` callback, so this socket cannot be
       # dropped the way a `Phoenix.Socket` is — it has to listen for itself
@@ -85,7 +113,10 @@ defmodule KilnCMSWeb.BridgeSocket do
       # The org rides along too, so the periodic re-check (#775) re-reads the
       # document under the tenant this connection was authorized against rather
       # than re-deriving one from a host it can no longer see.
-      {:ok, %{type: to_string(ct.type), id: id, actor: actor, org: org}}
+      #
+      # A preview-token connection carries the token (behind a closure — see
+      # the moduledoc) instead of an actor, for the re-check to verify again.
+      {:ok, Map.merge(%{type: to_string(ct.type), id: id, org: org}, credential)}
     else
       _ -> :error
     end
@@ -153,6 +184,22 @@ defmodule KilnCMSWeb.BridgeSocket do
 
   # --- helpers --------------------------------------------------------------
 
+  # A presented `preview_token` is the only credential looked at — a bad one is
+  # a refusal, never a quiet downgrade to the key or to an anonymous read.
+  defp authorize_connect(ct, id, org, %{"preview_token" => token}) when is_binary(token) do
+    with :ok <- authorize_token(ct, id, token, org) do
+      {:ok, %{actor: nil, preview_token: fn -> token end}}
+    end
+  end
+
+  defp authorize_connect(ct, id, org, params) do
+    actor = authenticate(params["api_key"])
+
+    with :ok <- authorize_read(ct, id, actor, org) do
+      {:ok, %{actor: actor, preview_token: nil}}
+    end
+  end
+
   defp fetch_target(%{"type" => type, "id" => id}) when is_binary(type) and is_binary(id) do
     case ContentTypes.get(type) do
       nil -> :error
@@ -183,6 +230,34 @@ defmodule KilnCMSWeb.BridgeSocket do
   # can't watch another site's document.
   defp authorize_read(ct, id, actor, org) do
     ContentTypes.get_record!(ct.type, id, actor: actor, tenant: org)
+    :ok
+  rescue
+    _ -> :error
+  end
+
+  # The token must verify (signature and 15-minute age) and name this document
+  # — its public type name and id — on this host's org; a token for another
+  # document, or one minted on another site, admits nothing here.
+  defp authorize_token(ct, id, token, org) do
+    with {:ok, claims} <- PreviewToken.verify(token),
+         true <- names?(claims, to_string(ct.type), id, org) do
+      token_read(ct, id, org)
+    else
+      _ -> :error
+    end
+  end
+
+  defp names?(%{type: type, id: id, org_id: org_id}, type, id, %{id: org_id}), do: true
+  defp names?(_claims, _type, _id, _org), do: false
+
+  # The document must still exist (a trashed or deleted one stops the stream,
+  # exactly as it does for an actor). `authorize?: false`: a token connection
+  # has no actor to authorize — the grant is the signature `authorize_token/4`
+  # just verified, which binds this read to the ONE id an editor with draft
+  # visibility minted it for (`PreviewToken.mint/3`), and the tenant is the
+  # connecting host's org, which the token's `org_id` was just pinned to.
+  defp token_read(ct, id, org) do
+    ContentTypes.get_record!(ct.type, id, authorize?: false, tenant: org)
     :ok
   rescue
     _ -> :error
@@ -234,6 +309,19 @@ defmodule KilnCMSWeb.BridgeSocket do
   #
   # No timer ref is kept and none is cancelled: nothing else here triggers a
   # check, so unlike the collab room this timer never needs resetting.
+  #
+  # A preview-token connection re-verifies its token instead — the moduledoc's
+  # "a leaked token can't stream forever": once it is past its 15 minutes this
+  # refuses, and the connection closes.
+  defp reauthorize(%{preview_token: reveal} = state) when is_function(reveal, 0) do
+    with ct when not is_nil(ct) <- ContentTypes.get(state.type),
+         :ok <- authorize_token(ct, state.id, reveal.(), state.org) do
+      {:ok, state}
+    else
+      _refused -> :error
+    end
+  end
+
   defp reauthorize(state) do
     with {:ok, actor} <- SocketReauth.reload_actor(state.actor),
          ct when not is_nil(ct) <- ContentTypes.get(state.type),

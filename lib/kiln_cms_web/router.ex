@@ -725,6 +725,11 @@ defmodule KilnCMSWeb.Router do
     # semantically closest to this one.
     get "/content/:type/:slug/related", RelatedController, :show
 
+    # Mint a short-lived, read-only preview link for one draft — keyed by id,
+    # not slug: it names one record, the one `GET /preview/:token` redeems.
+    # Authenticated (an editor's key or bearer token); see PreviewTokenController.
+    post "/content/:type/:id/preview-token", PreviewTokenController, :create
+
     # Version history (editor-tier, authenticated only): a document's revisions,
     # one revision with its folded snapshot, and restore. Keyed by the record's
     # id rather than its slug — a slug is per-locale and can change, a document's
@@ -734,10 +739,6 @@ defmodule KilnCMSWeb.Router do
     get "/content/:type/:id/revisions/:version_id", RevisionController, :show
     post "/content/:type/:id/revisions/:version_id/restore", RevisionController, :restore
 
-    # Mint a short-lived, read-only preview link for one draft — keyed by id,
-    # not slug: it names one record, the one `GET /preview/:token` redeems.
-    # Authenticated (an editor's key or bearer token); see PreviewTokenController.
-    post "/content/:type/:id/preview-token", PreviewTokenController, :create
     # Visual-editing bridge (#355): the live working copy, stega-annotated so an
     # external front end's overlay maps a rendered value back to its Kiln field.
     # Draft-visible only to an editor/admin API key; `no-store`, per-actor.

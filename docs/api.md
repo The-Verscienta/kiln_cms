@@ -1074,6 +1074,12 @@ will honour it). Keep your API key on the server and hand the browser the
 draft for a few minutes rather than every draft indefinitely. Mint a fresh one
 per preview render rather than caching it.
 
+The same token also authenticates the visual-editing bridge for its document:
+the annotated read (`x-kiln-preview-token` on `GET /api/visual-editing/:type/:slug`)
+and the live socket (`/ws/bridge?preview_token=`). See
+[visual-editing-bridge.md](visual-editing-bridge.md#preview-tokens-and-long-edit-sessions)
+for re-minting through a long edit session.
+
 Who may mint: anyone who sees this document's **drafts** as an editor — an
 admin, or an editor whose read scope covers the type (`readable_types`, see
 [granular-rbac.md](granular-rbac.md)). A `:read`-scoped API key is enough: the

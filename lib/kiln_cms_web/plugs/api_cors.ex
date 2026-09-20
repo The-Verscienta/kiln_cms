@@ -30,10 +30,19 @@ defmodule KilnCMSWeb.Plugs.ApiCORS do
   # same argument for optimistic concurrency: a browser front end that cannot
   # read the tag cannot send it back, and one that cannot send `If-Match`
   # cross-origin cannot make a guarded write at all.
+  # `x-kiln-preview-token` is how `bridge.js` presents a preview token to
+  # `GET /api/visual-editing/...`; a custom request header is refused at the
+  # preflight unless it is listed here.
   @corsica Corsica.init(
              origins: {KilnCMSWeb.CORS, :allowed_origin?, []},
              allow_methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-             allow_headers: ["authorization", "content-type", "x-api-key", "if-match"],
+             allow_headers: [
+               "authorization",
+               "content-type",
+               "x-api-key",
+               "if-match",
+               "x-kiln-preview-token"
+             ],
              expose_headers: ["retry-after", "etag"],
              max_age: 600
            )

@@ -134,6 +134,12 @@ Every summary line below that was shortened links to its own entry there.
 - **`KILN_MEDIA_ROOT`: a stable directory for local media.**
   ([#1529](https://github.com/The-Verscienta/kiln_cms/issues/1529) · [long form](docs/changelog/unreleased.md#kilnmediaroot-a-stable-directory-for-local-media))
 
+- **Share a draft: *Copy preview link* in the editor, and a preview-token API.**
+  ([long form](docs/changelog/unreleased.md#share-a-draft-copy-preview-link-in-the-editor-and-a-preview-token-api))
+
+- **The visual-editing bridge takes a preview token instead of an API key.**
+  ([long form](docs/changelog/unreleased.md#the-visual-editing-bridge-takes-a-preview-token-instead-of-an-api-key))
+
 - **Upload media over the API: `POST /api/media`, URL imports, presigned direct
   uploads, metadata `PATCH`, and SDK support.**
   ([#1576](https://github.com/The-Verscienta/kiln_cms/pull/1576) · [long form](docs/changelog/unreleased.md#upload-media-over-the-api))
@@ -143,9 +149,6 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Content releases are readable over JSON:API.**
   ([#500](https://github.com/The-Verscienta/kiln_cms/issues/500) · [long form](docs/changelog/unreleased.md#content-releases-are-readable-over-jsonapi))
-
-- **Share a draft: *Copy preview link* in the editor, and a preview-token API.**
-  ([long form](docs/changelog/unreleased.md#share-a-draft-copy-preview-link-in-the-editor-and-a-preview-token-api))
 
 - **The GraphQL schema and the OpenAPI document are committed, and a production
   site hands its own to an API key.**
