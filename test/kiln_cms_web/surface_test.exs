@@ -28,7 +28,8 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor/links /editor/mail /editor/menus /editor/menus/:id /editor/newsletter
     /editor/overview /editor/pages/:id /editor/posts/:id /editor/presentation/:type/:slug
     /editor/preview/:kind/:id /editor/redirects /editor/releases /editor/releases/:id
-    /editor/search /editor/settings /editor/site/:type/:slug /editor/slugs /editor/social
+    /editor/search /editor/settings /editor/site-mail /editor/site/:type/:slug /editor/slugs
+    /editor/social
     /editor/system /editor/tasks /editor/taxonomy /editor/team /editor/translations
     /editor/translations/export.xlf /editor/trash /editor/types /editor/webhooks /media
   )
@@ -37,8 +38,10 @@ defmodule KilnCMSWeb.SurfaceTest do
     /account /api/ask /api/auth/sign_in /api/auth/sign_in/verify /api/content/:type
     /api/content/:type/:id/revisions /api/content/:type/:id/revisions/:version_id
     /api/content/:type/:id/revisions/:version_id/restore
+
+    /api/content/:type/:id/preview-token
     /api/content/:type/:slug /api/content/:type/:slug/related /api/content/:type/:slug/unlock
-    /api/forms/:slug /api/json /api/json/swaggerui /api/locales /api/menus /api/menus/:key
+    /api/forms/:slug /api/graphql/schema.graphql /api/json /api/json/swaggerui /api/locales /api/menus /api/menus/:key
     /api/provenance/:type/:slug /api/provenance/:type/:slug/verify /api/provenance/public-key
     /api/resolve /api/schema /api/search /api/visual-editing/:type/:slug /auth
     /auth/passkey/options /auth/passkey/verify /confirm_new_user/:token /gql /locale/:locale

@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.PreviewController do
   alias KilnCMS.CMS.ContentSerializer
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.PreviewToken
+  alias KilnCMS.CMS.WorkingCopy
   alias KilnCMSWeb.ApiError
 
   # A browser opening a shared preview link lands on the human multiplayer
@@ -21,7 +22,9 @@ defmodule KilnCMSWeb.PreviewController do
     with {:ok, %{type: type, id: id, org_id: org_id}} <- PreviewToken.verify(token),
          :ok <- same_site(org_id, conn.assigns[:current_org]),
          {:ok, record} <- fetch(type, id, org_id) do
-      json(conn, %{data: ContentSerializer.to_map(record)})
+      # The draft the editor is looking at: for a live document with unpublished
+      # edits that is the working copy, not the row readers get.
+      json(conn, %{data: record |> WorkingCopy.view() |> ContentSerializer.to_map()})
     else
       _ ->
         ApiError.send(
@@ -33,7 +36,8 @@ defmodule KilnCMSWeb.PreviewController do
     end
   end
 
-  # The token carries the content type; resolve it generically via the registry.
+  # The token carries the content type's public name; resolve it via the
+  # registry under the token's org, where an admin-defined type lives.
   #
   # A token minted on one site and presented on another's host is refused
   # (same as `ReleasePreviewLive`): the record must belong to the site that
@@ -48,9 +52,12 @@ defmodule KilnCMSWeb.PreviewController do
   # tenant-less read would be refused under strict tenancy, and `same_site/2`
   # has already pinned it to the serving org.
   defp fetch(type, id, org_id) do
-    if ContentTypes.type?(type),
-      do:
-        ContentTypes.get_record(type, id,
+    case ContentTypes.get(type, org_id) do
+      nil ->
+        {:error, :unknown_type}
+
+      ct ->
+        ContentTypes.get_record(ct, id,
           authorize?: false,
           tenant: org_id,
           # The payload carries both the stored SEO fields and their effective
@@ -58,7 +65,7 @@ defmodule KilnCMSWeb.PreviewController do
           # `[category]` and `[field:<name>]` resolve to what the delivered page
           # shows, rather than to what a record read with no loads can see.
           load: KilnCMS.Seo.Patterns.loads([:seo_title, :seo_description])
-        ),
-      else: {:error, :unknown_type}
+        )
+    end
   end
 end

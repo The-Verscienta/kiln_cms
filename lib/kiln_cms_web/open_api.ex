@@ -25,9 +25,12 @@ defmodule KilnCMSWeb.OpenApi do
   @version Mix.Project.config()[:version]
 
   @description """
-  Read-oriented, [JSON:API](https://jsonapi.org/)-compliant delivery surface for
-  **KilnCMS** headless consumers, covering the core content types **Page**,
-  **Post** and **MediaItem**.
+  The [JSON:API](https://jsonapi.org/)-compliant headless surface of
+  **KilnCMS**: reads, search and — since #330 — writes, for the core content
+  types **Page** and **Post**, admin-defined types through **Entry**
+  (`/api/json/entries`, described by `/api/json/type-definitions`), the
+  **MediaItem** library, and the taxonomy (**Tag**, **TagGroup**, **Category**)
+  plus **Redirect**.
 
   ## Authentication
 
@@ -35,17 +38,25 @@ defmodule KilnCMSWeb.OpenApi do
   policy, so an unauthenticated caller only ever sees **published** content — no
   credentials are required for the public delivery use case.
 
-  To read drafts / in-review / archived content, authenticate as an editor or
-  admin with a JWT bearer token:
+  A credential widens that, as far as its account's role allows. Both kinds go
+  in the same header:
 
   ```
-  Authorization: Bearer <token>
+  Authorization: Bearer <credential>
   ```
 
-  The token is an AshAuthentication user JWT (the `bearerAuth` scheme below).
-  The same token authenticates the GraphQL endpoint (`POST /gql`) and its
-  WebSocket. Obtain one for server-to-server use by posting credentials to
-  **`POST /api/auth/sign_in`** (documented below); see also `docs/api.md`.
+    * **API key** (`kiln_…`, the `apiKeyAuth` scheme) — minted at
+      `/editor/api-keys`, acting as the account that minted it and bounded by
+      the key's `access` scope. A `read` key reads what its account may read;
+      a `read_write` key may also **write**: create and update drafts, submit
+      for review, and — on an admin account — publish, unpublish, return to
+      draft and soft-delete. The key for server-to-server use.
+    * **User JWT** (the `bearerAuth` scheme) — an AshAuthentication token from
+      **`POST /api/auth/sign_in`** (documented below), with that user's role.
+
+  Either credential also authenticates the GraphQL endpoint (`POST /gql`) and
+  its WebSocket. See `docs/api.md` and, for the write routes, `docs/json-api.md`
+  → "Writing".
 
   ## Content negotiation
 
@@ -53,6 +64,7 @@ defmodule KilnCMSWeb.OpenApi do
 
   ```
   Accept: application/vnd.api+json
+  Content-Type: application/vnd.api+json
   ```
 
   ## Filtering, sorting & pagination
@@ -64,12 +76,26 @@ defmodule KilnCMSWeb.OpenApi do
 
   ## Beyond JSON:API
 
-  The JSON:API router is one of several headless surfaces:
+  The JSON:API router is one of several headless surfaces. Those with an
+  operation below are marked; the rest are in `docs/api.md`.
 
-    * **GraphQL** delivery + search at `POST /gql` (`docs/headless-graphql-api.md`).
-    * **Fired artifacts** (rendered block tree) at `GET /api/content/:type/:slug`.
+    * **GraphQL** delivery, search and authoring at `POST /gql`
+      (`docs/headless-graphql-api.md`); its schema as SDL at
+      `GET /api/graphql/schema.graphql` (operation below).
+    * **Fired artifacts** — the rendered block tree — at
+      `GET /api/content/:type/:slug` (operation below).
+    * **Search, resolve, menus, locales, forms, related, ask, provenance** under
+      `/api/*`.
+    * **MCP** for LLM authoring clients at `/mcp` (`docs/mcp.md`).
     * **Outbound webhooks** (HMAC-signed) on publish/unpublish/update.
-    * **Signed preview URLs** for unpublished content at `GET /preview/:token`.
+    * **Signed preview URLs** for unpublished content at `GET /preview/:token`
+      (operation below).
+
+  ## This document
+
+  A production build serves it only to a caller holding an API key, unless the
+  operator turns the public documentation on (`API_DOCS_ENABLED`). The copy
+  committed at `docs/api/openapi.json` describes the stock build.
   """
 
   @doc """
@@ -96,11 +122,33 @@ defmodule KilnCMSWeb.OpenApi do
             }
         },
         servers: servers(spec, conn),
-        # Published content is world-readable; a bearer token only widens access.
-        # An empty requirement alongside `bearerAuth` marks auth as optional
+        components: add_api_key_scheme(spec.components),
+        # Published content is world-readable; a credential only widens access.
+        # An empty requirement alongside the two schemes marks auth as optional
         # rather than required on every operation.
-        security: [%{}, %{"bearerAuth" => []}]
+        security: [%{}, %{"apiKeyAuth" => []}, %{"bearerAuth" => []}]
     }
+  end
+
+  # AshJsonApi declares one scheme, the user JWT. API keys ride the same
+  # `Authorization: Bearer` header (`KilnCMSWeb.Plugs.ApiKeyAuth` tells them
+  # apart by prefix), and they are the credential the write routes are built
+  # for, so they get a scheme of their own for clients to generate against.
+  defp add_api_key_scheme(components) do
+    schemes =
+      components
+      |> Map.get(:securitySchemes, %{})
+      |> Map.put("apiKeyAuth", %OpenApiSpex.SecurityScheme{
+        type: "http",
+        scheme: "bearer",
+        bearerFormat: "kiln_ API key",
+        description:
+          "An API key minted at `/editor/api-keys`, sent as " <>
+            "`Authorization: Bearer kiln_…`. Acts as its owning account, bounded " <>
+            "by the key's `access` scope (`read` or `read_write`)."
+      })
+
+    Map.put(components, :securitySchemes, schemes)
   end
 
   # The headless sign-in endpoint lives outside the AshJsonApi domain (it's a
@@ -292,13 +340,40 @@ defmodule KilnCMSWeb.OpenApi do
           }
         }
       },
+      "/api/graphql/schema.graphql" => %OpenApiSpex.PathItem{
+        get: %OpenApiSpex.Operation{
+          tags: ["Delivery"],
+          operationId: "getGraphqlSchema",
+          summary: "Fetch the GraphQL schema as SDL",
+          description:
+            "The running site's GraphQL schema, for codegen where introspection " <>
+              "is off. Public wherever GraphQL introspection is enabled; " <>
+              "otherwise it needs an API key (`apiKeyAuth`), and anyone else " <>
+              "gets a 404.",
+          security: [%{}, %{"apiKeyAuth" => []}],
+          responses: %{
+            200 => %OpenApiSpex.Response{
+              description: "The schema in GraphQL SDL",
+              content: %{
+                "application/graphql" => %OpenApiSpex.MediaType{
+                  schema: %OpenApiSpex.Schema{type: :string}
+                }
+              }
+            },
+            404 => %OpenApiSpex.Response{
+              description: "Introspection is off and the request carried no API key"
+            }
+          }
+        }
+      },
       "/preview/{token}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           tags: ["Delivery"],
           operationId: "getPreview",
           summary: "Fetch an unpublished document via a signed preview token",
           description:
-            "Returns a single referenced draft Page/Post (curated public fields) " <>
+            "Returns a single referenced draft of any content type (curated public fields; " <>
+              "a live document's unpublished working copy) " <>
               "for a short-lived signed token. No account needed; the token is the " <>
               "credential.",
           security: [],
@@ -306,6 +381,33 @@ defmodule KilnCMSWeb.OpenApi do
           responses: %{
             200 => %OpenApiSpex.Response{description: "The draft document"},
             404 => %OpenApiSpex.Response{description: "Invalid or expired preview link"}
+          }
+        }
+      },
+      "/api/content/{type}/{id}/preview-token" => %OpenApiSpex.PathItem{
+        post: %OpenApiSpex.Operation{
+          tags: ["Delivery"],
+          operationId: "createPreviewToken",
+          summary: "Mint a short-lived preview link for one draft",
+          description:
+            "Returns a signed, read-only token for this one document (redeem it at " <>
+              "`GET /preview/{token}`), its shareable `url` on the owning site's host, " <>
+              "and when it expires (15 minutes). Requires a caller who sees this " <>
+              "document's drafts as an editor; a `:read` API key is enough.",
+          security: [%{"bearerAuth" => []}],
+          parameters: [
+            path_param(:type, "Content type name, e.g. `post`"),
+            path_param(:id, "The document's id")
+          ],
+          responses: %{
+            201 => %OpenApiSpex.Response{
+              description: "`{token, url, type, id, expires_at, expires_in}`"
+            },
+            401 => %OpenApiSpex.Response{description: "No (valid) credential"},
+            403 => %OpenApiSpex.Response{
+              description: "Readable, but not as an editor (e.g. a viewer on a published page)"
+            },
+            404 => %OpenApiSpex.Response{description: "Unknown type or document"}
           }
         }
       }

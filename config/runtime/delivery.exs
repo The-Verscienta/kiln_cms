@@ -43,3 +43,41 @@ end
 if console_host = System.get_env("KILN_CONSOLE_HOST") do
   config :kiln_cms, :console_host, console_host
 end
+
+# ## Anonymous API caching (KilnCMSWeb.Plugs.PublicCache)
+#
+# Anonymous reads of JSON:API, GraphQL GET and /api/search go out as
+# `public, max-age=60, stale-while-revalidate=60` with a body ETag. Set
+# KILN_API_CACHE=false to keep them at Plug's `private` default; credentialed
+# requests are `private, no-store` either way. Only a recognized spelling or a
+# positive integer writes config, so an unset var keeps the compiled default.
+with {:ok, api_cache?} <- Env.fetch("KILN_API_CACHE") do
+  config :kiln_cms, KilnCMSWeb.Plugs.PublicCache, enabled: api_cache?
+end
+
+with {:ok, max_age} <- Env.positive_integer("KILN_API_CACHE_MAX_AGE") do
+  config :kiln_cms, KilnCMSWeb.Plugs.PublicCache, max_age: max_age
+end
+
+with {:ok, swr} <- Env.positive_integer("KILN_API_CACHE_SWR") do
+  config :kiln_cms, KilnCMSWeb.Plugs.PublicCache, stale_while_revalidate: swr
+end
+
+# ## CDN purge on publish (KilnCMS.CDN)
+#
+# Unset, cached API responses age out on their max-age. Set, every publish,
+# unpublish or live edit POSTs the site's surrogate key to this URL (Cloudflare
+# purge-by-tag body, Fastly `Surrogate-Key` header). The token stays a provider
+# tuple so it resolves through `KilnCMS.Keys` at call time, like the governance
+# witness token.
+purge_url = "KILN_CDN_PURGE_URL" |> System.get_env("") |> String.trim()
+
+if purge_url != "" do
+  config :kiln_cms, KilnCMS.CDN,
+    purge_url: purge_url,
+    purge_token:
+      if(System.get_env("KILN_CDN_PURGE_TOKEN"),
+        do: {:env, %{"var" => "KILN_CDN_PURGE_TOKEN"}}
+      ),
+    purge_token_header: System.get_env("KILN_CDN_PURGE_TOKEN_HEADER", "authorization")
+end

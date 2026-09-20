@@ -383,6 +383,9 @@ defmodule KilnCMSWeb.ArtifactController do
     |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
     |> put_resp_header("etag", etag)
     |> put_resp_header("last-modified", http_date(record.updated_at))
+    # The site's surrogate key, so the publish purge `KilnCMS.CDN` sends reaches
+    # this response as well as the JSON:API/GraphQL/search ones.
+    |> KilnCMSWeb.Plugs.PublicCache.put_surrogate_keys()
   end
 
   # The :llm surface is raw Markdown (#357) — LLM crawlers fetch it directly,

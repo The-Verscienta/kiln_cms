@@ -1,0 +1,301 @@
+# Publishes the two official SDKs — `@kiln-cms/client` to npm and
+# `kiln_client` to Hex — when their own release tag is pushed. The clients'
+# READMEs ("Releasing") are the surrounding checklist, including the one-time
+# registry setup a maintainer has to do before the first run can succeed.
+#
+# Why its own workflow rather than jobs in `release.yml`: the SDKs version
+# independently of the CMS (a client fix should not need a core release, and
+# a core release should not re-publish unchanged clients), so they need their
+# own tags, and a publish to a public registry is a different permission set
+# from pushing a container image. Keeping the three publishes apart also means
+# a broken npm setup cannot block a Hex release or vice versa.
+name: Release clients
+
+on:
+  push:
+    # One tag scheme per package, prefixed with the package so the tag says
+    # what it releases. These can never collide with `release.yml`'s
+    # `v*.*.*`: GitHub matches a tag filter against the WHOLE tag name, from
+    # its first character, so `v*.*.*` only matches names that start with
+    # `v` — `client-js-v0.2.0` and `kiln_client-v0.3.0` start with `c` and `k`.
+    # (And the reverse: `v0.10.0` matches neither pattern below.) As in
+    # `release.yml`, `*.*.*` requires all three version components, so a
+    # scratch tag like `client-js-v-wip` publishes nothing.
+    tags:
+      - "client-js-v*.*.*"
+      - "kiln_client-v*.*.*"
+
+# A second push of the same tag would race itself to the registry. Not
+# cancel-in-progress: a half-finished publish is worse than a queued run, and
+# both registries refuse a re-publish of the same version anyway.
+concurrency:
+  group: release-clients-${{ github.ref }}
+  cancel-in-progress: false
+
+# Nothing by default; each publish job asks for exactly what it needs.
+permissions:
+  contents: read
+
+jobs:
+  # ── @kiln-cms/client (npm) ────────────────────────────────────────────────
+
+  js-build:
+    name: Verify and pack @kiln-cms/client
+    if: startsWith(github.ref_name, 'client-js-v')
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: clients/js
+
+    outputs:
+      tarball: ${{ steps.pack.outputs.tarball }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            clients/js/package-lock.json
+            examples/astro-blog/package-lock.json
+
+      - name: Tag version must equal package.json version
+        # A tag that disagrees with the manifest publishes a version nobody
+        # tagged — or, worse, re-tags an old one. Fail before any work.
+        # The ref reaches the shell through `env`, never `${{ }}` inside
+        # `run:` (see `release.yml`'s "Summarize" step for why).
+        env:
+          REF: ${{ github.ref_name }}
+        run: |
+          tag_version="${REF#client-js-v}"
+          package_version="$(node -p 'require("./package.json").version')"
+          if [ "$tag_version" != "$package_version" ]; then
+            echo "::error::Tag $REF says $tag_version but clients/js/package.json says $package_version"
+            exit 1
+          fi
+
+      # The same gate as `ci.yml`'s `client-js` job. The tagged commit has
+      # already passed it on its pull request; running it again here is what
+      # lets this workflow stand alone if someone tags a commit that never
+      # went through one.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (eslint + prettier)
+        run: npm run lint
+
+      - name: Build (tsc, strict)
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+      - name: Typecheck examples/astro-blog against the built client
+        working-directory: examples/astro-blog
+        run: |
+          npm ci
+          npm run check
+
+      - name: Pack
+        # `npm pack` produces exactly the bytes a publish from this directory
+        # would upload. The publish job attests and publishes THIS file, so
+        # the provenance statement and the registry artifact are the same
+        # bytes by construction rather than by rebuilding and hoping.
+        id: pack
+        run: |
+          tarball="$(npm pack --silent)"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: npm-tarball
+          path: clients/js/${{ steps.pack.outputs.tarball }}
+          if-no-files-found: error
+          retention-days: 7
+
+  js-publish:
+    name: Publish @kiln-cms/client to npm
+    needs: js-build
+    runs-on: ubuntu-latest
+
+    # The pause point. Add required reviewers to the `npm` environment
+    # (Settings → Environments) and nothing reaches the registry until one of
+    # them approves the run; `NPM_TOKEN` should be an environment secret there
+    # rather than a repository one, so no other job can read it.
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@kiln-cms/client
+
+    permissions:
+      contents: read
+      # OIDC token for npm provenance and for the build-provenance attestation.
+      id-token: write
+      # Write the attestation to this repository's attestation store.
+      attestations: write
+
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: npm-tarball
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: ${{ needs.js-build.outputs.tarball }}
+
+      - name: Set up Node (npm registry auth)
+        # `registry-url` makes setup-node write an `.npmrc` that reads the
+        # token from NODE_AUTH_TOKEN, so the token never lands in a file.
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+
+      - name: Publish
+        # `--provenance` has npm sign a SLSA provenance statement with this
+        # run's OIDC identity and show it on the package page; `--access
+        # public` because a scoped package defaults to private (and would
+        # fail without a paid org). Both repeat `publishConfig` in
+        # package.json on purpose — the flags are what this step guarantees.
+        #
+        # Publishing a tarball runs no lifecycle scripts, so `prepublishOnly`
+        # (lint + build + test) does not re-run here: the build job ran the
+        # same gate against the same commit.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          TARBALL: ${{ needs.js-build.outputs.tarball }}
+        run: npm publish "./$TARBALL" --provenance --access public
+
+  # ── kiln_client (Hex) ─────────────────────────────────────────────────────
+
+  hex-build:
+    name: Verify and build kiln_client
+    if: startsWith(github.ref_name, 'kiln_client-v')
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: clients/elixir/kiln_client
+
+    outputs:
+      tarball: ${{ steps.build.outputs.tarball }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          # Same toolchain as `ci.yml`'s `client` job: .tool-versions is the
+          # single source of truth (#600).
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Tag version must equal mix.exs version
+        # Read with sed rather than `mix run`: this runs before `deps.get`,
+        # and mix.exs keeps the version in exactly one `@version "X.Y.Z"`
+        # line. An empty match fails the comparison, which is the safe way
+        # round if that line is ever reshaped.
+        env:
+          REF: ${{ github.ref_name }}
+        run: |
+          tag_version="${REF#kiln_client-v}"
+          project_version="$(sed -n 's/^  @version "\(.*\)"$/\1/p' mix.exs)"
+          if [ "$tag_version" != "$project_version" ]; then
+            echo "::error::Tag $REF says $tag_version but clients/elixir/kiln_client/mix.exs says $project_version"
+            exit 1
+          fi
+
+      # The same gate as `ci.yml`'s `client` job.
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Check formatting
+        run: mix format --check-formatted
+
+      - name: Compile (warnings as errors)
+        run: mix compile --warnings-as-errors
+
+      - name: Run tests
+        run: mix test
+
+      - name: Build the Hex tarball
+        id: build
+        run: |
+          version="$(sed -n 's/^  @version "\(.*\)"$/\1/p' mix.exs)"
+          tarball="kiln_client-$version.tar"
+          mix hex.build --output "$tarball"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: hex-tarball
+          path: clients/elixir/kiln_client/${{ steps.build.outputs.tarball }}
+          if-no-files-found: error
+          retention-days: 7
+
+  hex-publish:
+    name: Publish kiln_client to Hex
+    needs: hex-build
+    runs-on: ubuntu-latest
+
+    # Same pause point as `npm` above: required reviewers on the `hex`
+    # environment, and `HEX_API_KEY` as an environment secret there.
+    environment:
+      name: hex
+      url: https://hex.pm/packages/kiln_client
+
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    defaults:
+      run:
+        working-directory: clients/elixir/kiln_client
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: hex-tarball
+          path: attested
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: attested/${{ needs.hex-build.outputs.tarball }}
+
+      - name: Install dependencies
+        # Dev deps included: `mix hex.publish` builds the HexDocs with ex_doc.
+        run: mix deps.get
+
+      - name: Prove the publish builds the attested bytes
+        # Unlike npm, Hex has no "publish this tarball" task — `mix
+        # hex.publish` always builds its own. Hex tarballs are reproducible
+        # (fixed mtimes, sorted entries), so rebuild from the same commit and
+        # require byte equality: if it holds, what the publish below uploads
+        # is exactly the file just attested; if it ever stops holding, this
+        # fails instead of publishing something the attestation doesn't cover.
+        env:
+          TARBALL: ${{ needs.hex-build.outputs.tarball }}
+        run: |
+          mix hex.build --output rebuilt.tar
+          cmp "$GITHUB_WORKSPACE/attested/$TARBALL" rebuilt.tar
+          rm rebuilt.tar
+
+      - name: Publish package and docs
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+        run: mix hex.publish --yes

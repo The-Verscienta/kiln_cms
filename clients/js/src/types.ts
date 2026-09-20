@@ -8,6 +8,8 @@
  * client methods instead.
  */
 
+import type { GraphQLErrorObject } from "./errors.js";
+
 // ── JSON:API (flattened) ────────────────────────────────────────────────────
 
 /** A `{type, id}` resource linkage ref, as flattened from a relationship. */
@@ -249,11 +251,27 @@ export interface AsOfIndexResult {
   entries: AsOfIndexEntry[];
 }
 
+/**
+ * A freshly minted draft preview link (`POST /api/content/:type/:id/preview-token`).
+ * Hand `token` (or `url`) to the browser — never the API key that minted it.
+ */
+export interface MintedPreview {
+  /** Signed, read-only, this document only. Redeem with `preview(token)`. */
+  token: string;
+  /** The shareable link, on the host of the site that owns the document. */
+  url: string;
+  type: string;
+  id: string;
+  /** ISO 8601. */
+  expires_at: string;
+  /** Seconds (900). */
+  expires_in: number;
+}
+
 export interface AsOfIndexOptions extends RequestOptions {
   /** Default 100, max 500. */
   limit?: number;
 }
-
 // ── editorial reads (editor-tier credential) ────────────────────────────────
 
 export interface RevisionListOptions extends RequestOptions {
@@ -347,4 +365,39 @@ export interface ReleaseOptions extends RequestOptions {
   /** Side-load relationships — `["items"]` for the release's contents. */
   include?: string[];
   fields?: Record<string, string[]>;
+}
+
+// ── writes (the JSON:API write surface, #330) ───────────────────────────────
+
+/**
+ * The workflow transitions the JSON:API routes as `PATCH /:plural/:id/<verb>`,
+ * by their Ash action names. `submit_for_review` needs an editor-or-above key;
+ * the other three are admin-only. Any other string passes through (kebab-cased
+ * into the route), so a verb a newer server adds is reachable before this list
+ * learns it.
+ */
+export type WorkflowVerb =
+  "submit_for_review" | "return_to_draft" | "publish" | "unpublish" | (string & {});
+
+export interface WriteOptions extends RequestOptions {
+  /**
+   * The JSON:API resource `type` sent as `data.type` — the singular type name
+   * the server validates against (`"post"`, `"page"`, `"entry"`). Derived from
+   * the plural route (`entries` → `entry`, `posts` → `post`); pass it for a
+   * content type whose plural is irregular (`people` → `"person"`).
+   */
+  type?: string;
+}
+
+// ── GraphQL ─────────────────────────────────────────────────────────────────
+
+export interface GraphQLOptions extends RequestOptions {
+  /** Which operation to run when `query` defines several. */
+  operationName?: string;
+}
+
+/** A `POST /gql` response body. */
+export interface GraphQLResponse<TData> {
+  data?: TData | null;
+  errors?: GraphQLErrorObject[];
 }
