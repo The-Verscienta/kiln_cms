@@ -85,7 +85,7 @@ Deploy on Railway button for it can go in the README.
    Postgres 18 is not yet verified. The plain Railway Postgres template has
    no pgvector and will fail the first migration.
 2. **App service.** Add a service from the Docker image
-   `ghcr.io/the-verscienta/kiln_cms:0.9.0` with these variables:
+   `ghcr.io/the-verscienta/kiln_cms:0.10.0` with these variables:
 
    | Variable | Value |
    |----------|-------|

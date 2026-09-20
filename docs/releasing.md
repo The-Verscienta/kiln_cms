@@ -83,6 +83,26 @@ people to pass the flag reflexively.
 
    CI's documentation job fails the release PR if you forget.
 
+   Then bump the image tag in the one-click deploy templates, which pin an
+   exact version so a stranger's first deploy is reproducible (#1529). Nothing
+   gates these — a missed one silently keeps handing new users the previous
+   release:
+
+   - [`render.yaml`](../render.yaml)
+   - [`fly.toml`](../fly.toml)
+   - [`.do/app.yaml`](../.do/app.yaml)
+   - the Railway recipe in [`docs/deploy-platforms.md`](deploy-platforms.md)
+
+   and the `Pre-1.0 (vX.Y.Z)` line in
+   [`README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/README.md).
+   The
+   `:latest` references in `README.md` and `docs/getting-started.md` float on
+   purpose — leave them.
+
+   ```bash
+   git grep -nE '(^|[^0-9.])v?0\.9\.0([^0-9.]|$)'   # the version you just left
+   ```
+
 5. **Commit, tag, push.**
 
    ```bash
