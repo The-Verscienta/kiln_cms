@@ -8,15 +8,17 @@ checklist in the [README](https://github.com/The-Verscienta/kiln_cms/blob/main/R
 
 ## SLO targets
 
-| Surface                     | p95 target |
-| --------------------------- | ---------- |
-| Public HTML — cache **hit** | < 50 ms    |
-| Public HTML — cache **miss**| < 250 ms   |
-| Editor autosave             | < 500 ms   |
-| Publish response            | < 2 s      |
+| Surface                                    | p95 target | Baseline (see [below](#baseline)) |
+| ------------------------------------------ | ---------- | --------------------------------- |
+| Public HTML — cache **hit**                | < 50 ms    | 1.7–10.4 ms                       |
+| Public HTML — cache **miss**               | < 250 ms   | not yet measured                  |
+| Headless API — fired artifact (`GET /api/content/:type/:slug`) | < 50 ms | 2.7–7.4 ms |
+| Editor autosave                            | < 500 ms   | not yet measured                  |
+| Publish response                           | < 2 s      | not yet measured                  |
 
 These are origin-side targets (excluding network/CDN). The delivery path is designed so the
-**hit** path does no database work — see below.
+**hit** path does no database work — see below. The headless-API row is the v1.0 success
+metric "headless API p95 under 50 ms" (#1546).
 
 ## How the targets are met
 
@@ -46,7 +48,7 @@ These are origin-side targets (excluding network/CDN). The delivery path is desi
   second node that would clear its own empty caches and start draining
   production Oban queues on the way.
 - **Publish returns before firing.** The publish transition enqueues a `Firing.FireWorker`
-  (queue `:firing`) instead of rendering 3 surfaces inline, so the publish response isn't
+  (queue `:firing`) instead of rendering every surface inline, so the publish response isn't
   blocked on firing. Delivery falls back to a live render on miss; the artifact API answers
   `503` + `Retry-After` for the brief window before the artifact lands.
 - **Analytics never block or exhaust the pool.** `track_view` and search-query recording run
@@ -101,7 +103,19 @@ lower if embeddings dominate.
 
 ## Telemetry to watch
 
-Visible in LiveDashboard → Metrics (`/dev/dashboard` in dev) and scrapeable into Prometheus:
+These are defined in `KilnCMSWeb.Telemetry.metrics/0`. Two things can read them:
+
+- **LiveDashboard → Metrics**, at `/dev/dashboard` in development.
+- **The Prometheus exporter**, in production, but **only when `KILN_METRICS_ENABLED` is on**.
+  It is off by default, and a stock install records none of them. For the listener, its
+  exposure and the scrape config, see
+  [`observability.md`](observability.md#prometheus-and-grafana).
+
+Durations are histograms in milliseconds, so a p95 is
+`histogram_quantile(0.95, sum by (le, route) (rate(<name>_bucket[5m])))`.
+
+- `phoenix.router_dispatch.stop.duration` (tag `route`) — **per-route latency**. The
+  headless-API row above is this metric with `route="/api/content/:type/:slug"`.
 
 - `kiln_cms.cache.content.count` (tag `result: hit | miss`) — **cache hit rate**
 - `kiln_cms.delivery.render.duration` (tags `type`, `status`) — delivery latency
@@ -142,7 +156,63 @@ export default function () {
 // BASE=http://localhost:4000 SLUG=my-page k6 run delivery.js
 ```
 
-Watch `kiln_cms.cache.content.count` (should be almost all `hit`), `delivery.render.duration`
-p95 against the table above, and `repo.query.queue_time` for pool pressure. For the editor
-autosave / publish SLOs, the matching `kiln_cms.editor.*` metrics already exist
-(`KilnCMSWeb.EditorTelemetry`).
+Watch `kiln_cms.cache.content.count` (should be almost all `hit`), the route p95 against
+the table above, and `repo.query.queue_time` for pool pressure. For the editor
+autosave / publish SLOs, the matching `kiln_cms.editor.*` metrics exist
+(`KilnCMSWeb.EditorTelemetry`). They are recorded only when the exporter is on, like
+everything else.
+
+Two things make a single-machine load test measure the wrong thing:
+
+- **The per-IP rate limits.** `KilnCMSWeb.RateLimit` allows `api` 120 requests a minute
+  and `delivery` 300 a minute from one address. From a single client, anything past the
+  first second is a `429`. Check the status counts: if `ab` reports `Non-2xx responses`,
+  the run measured the limiter, not delivery. For a benchmark run, raise the limits on
+  the node under test:
+  `Application.put_env(:kiln_cms, KilnCMSWeb.RateLimit, limits: %{api: {100_000_000, 60_000}, delivery: {100_000_000, 60_000}})`.
+- **The `Host` header.** Send the canonical `PHX_HOST`. A host that names no org (such as
+  `127.0.0.1` when `PHX_HOST=localhost`) falls back to the default org through a database
+  read on every request. Under load that read queues on the pool behind the view-tracking
+  writes and adds 10–20 ms at p95. Real traffic doesn't pay that, so the run would
+  overstate latency.
+
+To read p95 off the exporter rather than the load tool, scrape `/metrics` before and after
+the run and apply `histogram_quantile` to the difference in bucket counts. Sub-millisecond
+values all fall in the first bucket (`le="1.0"`), so the histograms can't resolve below
+1 ms.
+
+## Baseline
+
+The first recorded baseline, taken on 2026-09-19 against `main` after v0.9.0, plus the exporter (#1362).
+**It comes from a laptop, not a server.** Treat it as an order of magnitude, and as proof
+that the measuring path works. It is not a capacity figure.
+
+- **Host:** Apple M5 Pro, 18 cores, 24 GB. The machine was shared with other workloads
+  during the run (load average 27–52), which is why the ranges are wide.
+- **Stack:** Erlang/OTP 29 with Elixir 1.20, PostgreSQL 17 on the same
+  host, `MIX_ENV=prod mix phx.server`, default `POOL_SIZE` (10), logging at `:info`.
+- **Data:** one published page with its artifacts fired, so every request is a cache hit.
+- **Load:** `ab -k -c 20 -n 30000 -H "Host: localhost"`, after a 3,000-request warm-up.
+  Rate limits were raised as described above.
+- **How p95 was read:** from `phoenix_router_dispatch_stop_duration` on the exporter,
+  using the difference between scrapes. It is origin-side and excludes the client and the
+  network.
+
+| Route | Runs | Throughput (req/s) | Server-side p50 | Server-side p95 | Server-side p99 |
+|---|---|---|---|---|---|
+| `GET /api/content/page/welcome` (fired JSON artifact) | 4 | 6,400–15,300 | 0.6–1.6 ms | **2.7–7.4 ms** | 5.7–16.7 ms |
+| `GET /welcome` (HTML, cache hit) | 4 | 3,600–18,000 | 0.8–3.1 ms | **1.7–10.4 ms** | 2.6–23.3 ms |
+
+Both are well inside the 50 ms targets. `GET /api/locales`, which does no database work
+and no view tracking, reached 16,000 req/s at a p95 of 1.9 ms, which is roughly the cost of
+the endpoint and the `:api` pipeline alone.
+
+The spread tracks the other load on the machine more than anything Kiln did. The delivery
+routes also pay for their own side effect: each view writes two upserts from a supervised
+task (`KilnCMSWeb.ViewTracking`), and with every request on one document those upserts
+contend for the same rows. `repo.query.queue_time` p95 reached 56 ms (API) and 232 ms (HTML) in the runs where it was recorded,
+without reaching request latency. The writes are asynchronous, and the task supervisor
+sheds them at `max_children`. Under a real spread of documents the contention is lower.
+
+Still to measure for #1546: the cache-miss HTML path, editor autosave and publish, and
+the same runs on production-shaped hardware.

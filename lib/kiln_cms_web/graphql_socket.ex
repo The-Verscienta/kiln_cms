@@ -1,8 +1,14 @@
 defmodule KilnCMSWeb.GraphqlSocket do
   use Phoenix.Socket
 
+  # The pipeline carries the cost limits `/gql` has: complexity, depth, token
+  # count and the production introspection block (`KilnCMSWeb.GraphqlLimits`).
+  # Options set with `put_options/2` in `do_connect/3` would not hold them:
+  # `Absinthe.Phoenix.Channel` replaces a socket's options with `[context: …]`
+  # after its first document.
   use Absinthe.Phoenix.Socket,
-    schema: KilnCMSWeb.GraphqlSchema
+    schema: KilnCMSWeb.GraphqlSchema,
+    pipeline: {KilnCMSWeb.GraphqlLimits, :socket_pipeline}
 
   alias KilnCMSWeb.BearerAuth
 

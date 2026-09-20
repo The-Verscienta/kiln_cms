@@ -36,12 +36,14 @@ Authorization: Bearer <token>
 |-----------|-----------------------------|-----------------------------|-------------|
 | Page      | `GET /api/json/pages`       | `GET /api/json/pages/:id`   | `/pages/search`, `/pages/semantic-search`, `/pages/autocomplete`, `/pages/published` |
 | Post      | `GET /api/json/posts`       | `GET /api/json/posts/:id`   | `/posts/search`, `/posts/semantic-search`, `/posts/autocomplete`, `/posts/published` |
-| MediaItem | `GET /api/json/media-items` | `GET /api/json/media-items/:id` | `/media-items/search`, `/media-items/library` |
+| MediaItem | `GET /api/json/media-items` | `GET /api/json/media-items/:id` | `/media-items/search`, `/media-items/library`; `PATCH /media-items/:id` edits metadata ([below](#editing-media-metadata)) |
 | Category  | `GET /api/json/categories`  | `GET /api/json/categories/:id` | `/categories/by-slug/:slug` |
 | Tag       | `GET /api/json/tags`        | `GET /api/json/tags/:id`    | `/tags/by-slug/:slug` |
 | TagGroup  | `GET /api/json/tag-groups`  | `GET /api/json/tag-groups/:id` | `/tag-groups/by-slug/:slug` |
 | Entry (dynamic types) | `GET /api/json/entries` | `GET /api/json/entries/:id` | same set as Post, filtered by `filter[type_name]=` |
 | TypeDefinition | `GET /api/json/type-definitions` | `GET /api/json/type-definitions/:id` | `/type-definitions/by-name/:name` — **editor-or-above** credential; see [Discovering dynamic types](#discovering-dynamic-types) |
+| ContentRelease | `GET /api/json/releases` | `GET /api/json/releases/:id` | `?include=items` — **editor-or-above** credential, read-only; see [Content releases](#content-releases-read-only) |
+| ReleaseItem | `GET /api/json/release-items` | `GET /api/json/release-items/:id` | `?filter[release_id]=` — same |
 
 `GET /api/json/<plural>/published` returns published records only, ordered
 newest first (`-published_at`) — the delivery feed. It exists on **every**
@@ -80,6 +82,50 @@ answers as an anonymous visitor.
 discovery surface, and the rendered blog index publishes an audience-gated
 post's title and excerpt to anonymous visitors with a "Members" badge, so that
 metadata is already public. It pins `state` only.
+
+## Content releases (read-only)
+
+A **content release** (#500) is a named bundle of publishes and unpublishes that
+goes live as one unit. Releases are composed and shipped in `/editor/releases`;
+over the API they are **read-only**, for a headless editorial tool or a status
+board that needs to know what is planned to go live and when.
+
+| Route | Answers |
+|-------|---------|
+| `GET /api/json/releases` | Every release in the request's org; `filter[state]=scheduled`, `sort=scheduled_at`, `page[...]` as usual |
+| `GET /api/json/releases/:id` | One release; add `?include=items` for its contents |
+| `GET /api/json/release-items` | Release items; `filter[release_id]=<id>` for one release's |
+| `GET /api/json/release-items/:id` | One item |
+
+A release (`type: "release"`) carries `name`, `description`, `state` (`open`,
+`scheduled`, `publishing`, `published`, `failed`, `rolling_back`,
+`rolled_back`, `archived`), `scheduled_at`, `published_at`, `rolled_back_at`,
+`failure_reason` and `failed_item_id`. An item (`type: "release_item"`) carries
+`release_id`, `content_type` + `content_id` (the document it acts on — fetch it
+through that type's own route, under that route's own read policy), `action`
+(`publish` / `unpublish`), `status` (`pending`, `applied`, `skipped`,
+`cancelled`, `rolled_back`), `prior_state`, `prior_version_id` and `applied_at`.
+Who created, triggered or added to a release is not exposed — those are user
+ids.
+
+Same read and policy as the console: the credential must belong to an **editor
+or admin of the request's org** (a read-only key is enough). A viewer's key or
+an anonymous caller gets an empty list and a `404` on a single record; the host
+bounds the org, as everywhere else.
+
+There are **no write routes**. Shipping a release publishes every item it holds
+as the admin who triggered it — an admin approval step that stays in the
+console — so neither composing nor scheduling a release is reachable from a key.
+
+```bash
+# What goes live next, with its contents
+curl -s 'http://localhost:4000/api/json/releases?filter[state]=scheduled&sort=scheduled_at&include=items' \
+  -H 'accept: application/vnd.api+json' \
+  -H "authorization: Bearer $KILN_API_KEY"
+```
+
+A document's own version history is not a JSON:API resource — see
+[api.md → Version history](api.md#version-history-revisions).
 
 ## Filtering
 
@@ -655,6 +701,37 @@ the publish route re-fires automatically. Editing already-published content with
 `PATCH /:id` **also** re-fires (a `published`-guarded re-fire on `:update`,
 #330), so a write-through to live content never leaves a stale artifact. Draft
 edits do not fire.
+
+### Editing media metadata
+
+Files are **created** through the upload API (`POST /api/media` — JSON:API has
+no file upload; see [api.md → Uploading media](api.md#uploading-media)). What
+an item says about itself is edited here:
+
+| Route | Action | Who | Effect |
+|-------|--------|-----|--------|
+| `PATCH /api/json/media-items/:id` | `:update_metadata` | `:read_write` key (or JWT), editor+ | Edits `alt`, `caption`, `decorative`, `focal_x`, `focal_y` and tags |
+
+```bash
+curl -s -X PATCH http://localhost:4000/api/json/media-items/<uuid> \
+  -H 'accept: application/vnd.api+json' \
+  -H 'content-type: application/vnd.api+json' \
+  -H "authorization: Bearer $KILN_API_KEY" \
+  -d '{ "data": { "type": "media_item", "id": "<uuid>",
+        "attributes": { "alt": "The kiln at dusk", "focal_x": 0.3, "add_tag_ids": ["<tag uuid>"] } } }'
+```
+
+- The focal point is `0.0`–`1.0` on each axis; moving it **re-derives** the
+  focal-aware crops in the background, as clicking the point in the media
+  library does.
+- Tags take the same three arguments as content — `tag_ids` replaces the set,
+  `add_tag_ids` / `remove_tag_ids` merge — with the same rules (see "Writing
+  tags — replace vs merge" above).
+- Nothing the pipeline owns is writable: `url`, `storage_key`, `variants`,
+  `content_type`, dimensions and sizes come from the bytes. Sending one is a
+  `400`, not a silent write. `audience` (gating a document) stays an editor-UI
+  action for now, because it moves the file between storage buckets.
+- Deleting media is not routed for any key.
 
 ### Workflow routes take an empty resource object
 

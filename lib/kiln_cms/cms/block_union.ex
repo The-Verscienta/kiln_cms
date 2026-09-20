@@ -10,11 +10,14 @@ defmodule KilnCMS.CMS.BlockUnion do
   Storage uses the default `:type_and_value` shape (`%{"type" => ..., "value" =>
   ...}`); at runtime each element is an `%Ash.Union{type: atom, value: struct}`.
 
-  > The on-disk `Page.blocks`/`Post.blocks` columns still hold the legacy
-  > `KilnCMS.CMS.Block` shape; `KilnCMS.CMS.TypedBlocks` bridges legacy → typed so
-  > firing/search/embeddings (Phases D–J) operate on this typed representation.
-  > Flipping the stored column + the native-union editor is the remaining Phase C
-  > increment.
+  > `Page.blocks`/`Post.blocks` (and every content type's `blocks`) have been
+  > typed `{:array, BlockUnion}` since the storage flip, and any write that
+  > touches the blocks stores the typed shape. There was no backfill, so a row
+  > whose blocks have not been rewritten since the flip still holds the legacy
+  > `KilnCMS.CMS.Block` shape at rest; the tolerant cast below converts it on
+  > every read. Public delivery and the previews also still convert back to the
+  > legacy shape at the boundary (`KilnCMS.CMS.TypedBlocks.to_legacy/1`).
+  > Retiring the legacy rows and that bridge is #1537.
   """
   # The member list is the compile-time union of core + plugin blocks (D18) —
   # see `KilnCMS.Blocks.union_types/0`. A plugin's `blocks/0` joins storage,

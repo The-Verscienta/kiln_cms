@@ -35,6 +35,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.Mentions
+  alias KilnCMS.CMS.PreviewToken
   alias KilnCMS.CMS.VersionDiff
   alias KilnCMS.CMS.VersionSnapshot
   alias KilnCMS.CMS.WorkingCopy
@@ -258,6 +259,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
     )
     |> assign(:has_excerpt, content_type.excerpt?)
     |> assign(:actor, actor)
+    # The last preview link this session minted (Copy preview link), shown
+    # until dismissed — `nil` until somebody asks for one.
+    |> assign(:share_preview, nil)
     |> assign(:tier, KilnCMSWeb.LiveUserAuth.effective_tier(socket))
     # Whether this site lets editors publish — only which workflow button
     # is OFFERED; the content policy (`Checks.EditorMayPublish`) decides.
@@ -817,6 +821,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:page_title, view.title)
     |> assign(:slug_customized?, slug_customized?(socket))
     |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
+    # Only OFFERS the Copy preview link action; `share_preview` asks again.
+    |> assign(:may_share_preview?, PreviewToken.mintable?(record, socket.assigns.actor))
     # Recomputed alongside `may_write?` and for the same reason: a reload that
     # lands a change (a publish, a re-scoped grant) must re-evaluate both.
     |> assign(
@@ -1904,6 +1910,40 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # view, so it had no handler until now.
   def handle_event("copied", _params, socket),
     do: {:noreply, put_flash(socket, :info, gettext("Copied to clipboard."))}
+
+  # Copy preview link: a short-lived, read-only link to this one draft for
+  # someone without an editor account (`KilnCMS.CMS.PreviewToken`). Minted on
+  # demand, like a release's preview link (`ReleaseLive`) — the link exists
+  # because somebody asked to share it.
+  #
+  # `@may_share_preview?` only decides whether the button is offered.
+  # `PreviewToken.mint/3` re-reads the record with the actor and asks the
+  # editorial read grant again, now, so a forged event or a grant revoked since
+  # mount is refused here rather than trusted from an assign.
+  #
+  # Replies with the URL for the `CopyPreviewLink` hook to put on the
+  # clipboard, and assigns it so it is on screen when the clipboard refuses:
+  # a write after a server round-trip has left the click's user activation,
+  # which some browsers require.
+  def handle_event("share_preview", _params, %{assigns: %{record: %{id: id}}} = socket) do
+    case PreviewToken.mint(socket.assigns.kind, id,
+           actor: socket.assigns.actor,
+           tenant: socket.assigns.current_org
+         ) do
+      {:ok, minted} ->
+        {:reply, %{url: minted.url}, assign(socket, :share_preview, minted)}
+
+      {:error, _refused} ->
+        {:noreply,
+         put_flash(socket, :error, gettext("You can't share a preview of this document."))}
+    end
+  end
+
+  # The unsaved new-draft screen has no document to share (and no button).
+  def handle_event("share_preview", _params, socket), do: {:noreply, socket}
+
+  def handle_event("dismiss_share_preview", _params, socket),
+    do: {:noreply, assign(socket, :share_preview, nil)}
 
   def handle_event("seo_dismiss", %{"field" => field}, socket) when is_binary(field),
     do:
@@ -5289,6 +5329,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
               {gettext("Preview")} &nearr;
               <span class="sr-only">{gettext("(opens in a new tab)")}</span>
             </.link>
+            <%!-- A link for someone WITHOUT an editor account: read-only, this
+                  one document, 15 minutes (`KilnCMS.CMS.PreviewToken`). Offered
+                  to whoever sees this draft as an editor — sharing it
+                  distributes what they can already read, so it is a read
+                  grant, not `@may_write?`. --%>
+            <button
+              :if={@may_share_preview?}
+              id="share-preview-button"
+              type="button"
+              phx-hook="CopyPreviewLink"
+              class="btn btn-sm btn-default"
+            >
+              <.icon name="hero-link" class="mr-1 size-4" />{gettext("Copy preview link")}
+            </button>
             <%!-- In-context (front-end) editing on Kiln's own rendered page
                   (#354) — a primary mode, not a detour (Theme C). --%>
             <.link
@@ -5331,6 +5385,50 @@ defmodule KilnCMSWeb.ContentEditorLive do
               class="btn btn-sm btn-default"
             >
               <.icon name="hero-document-duplicate" class="mr-1 size-4" />{gettext("Duplicate")}
+            </button>
+          </div>
+        </div>
+
+        <%!-- The link just minted, on screen as well as on the clipboard: the
+              copy can be refused, and whoever shares it should see what it
+              grants. --%>
+        <div
+          :if={@share_preview}
+          id="share-preview-link"
+          class="rounded-lg border border-base-content/15 bg-base-200/60 p-3 text-sm"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <p class="text-base-content/70">
+              {gettext(
+                "Anyone with this link can view this draft, without signing in, for 15 minutes. It follows your edits live."
+              )}
+            </p>
+            <button
+              type="button"
+              phx-click="dismiss_share_preview"
+              class="btn btn-ghost btn-sm"
+              aria-label={gettext("Dismiss")}
+            >
+              <.icon name="hero-x-mark" class="size-4" />
+            </button>
+          </div>
+          <div class="mt-2 flex items-center gap-2">
+            <label for="share-preview-url" class="sr-only">{gettext("Preview link")}</label>
+            <input
+              id="share-preview-url"
+              type="text"
+              readonly
+              value={@share_preview.url}
+              class="field-input min-w-0 flex-1 font-mono text-xs"
+            />
+            <button
+              id="share-preview-copy"
+              type="button"
+              phx-hook="Clipboard"
+              data-clipboard-text={@share_preview.url}
+              class="btn btn-sm btn-default"
+            >
+              {gettext("Copy")}
             </button>
           </div>
         </div>

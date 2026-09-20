@@ -86,6 +86,43 @@ defmodule KilnCMSWeb.ApiDocsTest do
     end
   end
 
+  # The upload API is hand-written Phoenix routes, which AshJsonApi cannot
+  # derive — `KilnCMSWeb.OpenApi` describes them itself, and this pins that it
+  # does (they were missing from the first cut of the upload PR).
+  describe "media upload routes" do
+    setup do
+      set_api_docs(true)
+      :ok
+    end
+
+    test "are described alongside the JSON:API metadata PATCH", %{conn: conn} do
+      conn = conn |> put_req_header("accept", "application/json") |> get(@spec_path)
+      paths = Jason.decode!(response(conn, 200))["paths"]
+
+      for {path, operation_id} <- [
+            {"/api/media", "uploadMedia"},
+            {"/api/media/import-url", "importMediaFromUrl"},
+            {"/api/media/uploads", "beginDirectUpload"},
+            {"/api/media/uploads/complete", "completeDirectUpload"}
+          ] do
+        assert %{"post" => %{"operationId" => ^operation_id} = op} = paths[path],
+               "expected #{path} to be described"
+
+        assert op["security"] == [%{"bearerAuth" => []}], "#{path} should require a bearer"
+        assert Map.has_key?(op["responses"], "403")
+      end
+
+      assert get_in(paths, ["/api/media", "post", "requestBody", "content"])
+             |> Map.has_key?("multipart/form-data")
+
+      # The metadata write is AshJsonApi-derived; pinned so the two halves of
+      # the media write surface are both in the document.
+      assert Enum.any?(paths, fn {path, item} ->
+               path =~ ~r{/media-items/\{id\}$} and Map.has_key?(item, "patch")
+             end)
+    end
+  end
+
   describe "disabled" do
     setup do
       set_api_docs(false)

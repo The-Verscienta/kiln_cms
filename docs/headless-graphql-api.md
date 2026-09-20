@@ -17,8 +17,10 @@ what the surface exposes and how writes are authorized.
 
 | Path | Availability | Purpose |
 |------|--------------|---------|
+| `GET /api/graphql/schema.graphql` | public where introspection is on; **API key** in production | The running schema as SDL, for codegen. The stock build's copy is committed at [`docs/api/schema.graphql`](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/api/schema.graphql) — see [api.md](api.md#machine-readable-specs) |
 | `POST /gql` | always on | GraphQL query endpoint (headless consumers) |
 | `/gql/playground` | **dev only** — not served by a production build | Interactive GraphiQL playground |
+| `/ws/gql` | always on | Absinthe websocket: subscriptions, and queries and mutations too |
 
 The endpoint is rate-limited (`KilnCMSWeb.Plugs.RateLimit, :gql`) and reads an
 optional bearer token (`load_from_bearer`). Anonymous requests are fully
@@ -106,6 +108,47 @@ list of content-type name strings (`["post"]`) scoping where the group applies,
 and **an empty list means every content type**; filter on it client-side to
 mirror the editor's sectioning.
 
+### Navigation menus
+
+`menu(key: String!, locale: String): Menu` — one navigation menu, resolved: the
+GraphQL twin of `GET /api/menus/:key` (see [navigation-menus.md](navigation-menus.md)).
+Each item's `url` is its target's *current* published path; items pointing at
+unpublished content, or hidden by an editor, are left out with their children.
+`locale` defaults to the site's default, and a menu with no variant in the
+requested locale is `null` rather than a fallback.
+
+```graphql
+query {
+  menu(key: "main", locale: "en") {
+    name
+    items { label url linkType openInNewTab children { label url } }
+  }
+}
+```
+
+### Point in time — `contentAsOf`
+
+`contentAsOf(type: String!, asOf: DateTime!, limit: Int): [PointInTimeEntry!]`
+— "what was published on this site at `asOf`?", reconstructed from version
+history: the GraphQL twin of `GET /api/content/:type?as_of=`. Each entry is
+`slug`, `title` and `publishedAt`, as they stood at that instant (a later
+rename does not leak in, and since-unpublished content is left out). `limit`
+defaults to 100 and is capped at 500. Compiled types only (`page`, `post`, an
+overlay's types); a dynamic type is an error. See
+[point-in-time.md](point-in-time.md) ("The collection view") for how
+the index is built, and `GET /api/content/:type/:slug?as_of=` for one
+document's body at that date.
+
+```graphql
+query {
+  contentAsOf(type: "post", asOf: "2026-03-01T00:00:00Z", limit: 20) {
+    slug
+    title
+    publishedAt
+  }
+}
+```
+
 ### Health
 
 `health: String` — a lightweight probe that returns `"ok"`.
@@ -170,6 +213,30 @@ create/update/submit; **return-to-draft, publish, unpublish and delete require a
 `:admin`** account — an editor submits for review, and deciding the outcome
 (approve or return) is the admin's half. The hard delete (`:purge`) is **never** exposed as a mutation and is
 API-key-banned regardless of scope.
+
+### Media metadata — `updateMediaItem`
+
+`updateMediaItem(id:, input:)` edits what a media item says about itself —
+`alt`, `caption`, `decorative`, `focalX`/`focalY` (0.0–1.0; moving the point
+re-derives the focal-aware crops) and tags (`tagIds` / `addTagIds` /
+`removeTagIds`, same rules as content). Same gate as the content writes: a
+`:read_write` key (or JWT) on an editor or admin account.
+
+```graphql
+mutation ($id: ID!) {
+  updateMediaItem(id: $id, input: { alt: "The kiln at dusk", focalX: 0.3 }) {
+    result { id alt focalX focalY }
+    errors { message }
+  }
+}
+```
+
+**Uploads are not GraphQL.** Files are created over REST —
+`POST /api/media` (multipart), `POST /api/media/import-url`, or the presigned
+direct-upload pair; see [api.md → Uploading media](api.md#uploading-media).
+The upload route needs its own body limit, its own rate-limit bucket, and to
+refuse an unauthorized caller *before* reading a large body; `/gql` can offer
+none of those per operation.
 
 ### Writing tags — replace vs merge
 
@@ -279,6 +346,49 @@ already-published content with `updatePost` **also** re-fires (the `:update`
 action carries a `published`-guarded re-fire, #330) — so a write-through to live
 content never leaves a stale artifact. Draft edits do not fire.
 
+## Query cost
+
+Every document is checked before any of it runs, over `POST`/`GET /gql` and
+over `/ws/gql` alike. A document over a limit is answered with `errors` and no
+`data`:
+
+| Limit | Value |
+|-------|-------|
+| Complexity | 200 |
+| Depth | 15 nested fields |
+| Size | 2,000 tokens |
+| Batch | 10 operations in one JSON-array body |
+
+**Complexity.** A field costs 1 plus the cost of the fields selected inside it.
+A list costs its row count times the cost of one row:
+
+- **A paginated query** (`publishedPosts`) counts `limit` rows. With no `limit`
+  it counts its default page, 25.
+- **A to-many relationship** (`tags`, `relatedPosts`, a media item's
+  `featuredPosts`) counts `limit` rows if you pass one. Without `limit` it
+  counts five, however many it returns. That makes a list nested inside itself
+  (`relatedPosts { relatedPosts { … } }`) expensive quickly.
+
+| Query | Cost |
+|-------|------|
+| [`postBySlug`](#fetch-a-published-post-by-slug) below | 32 |
+| [`publishedPosts(limit: 10)`](#list-the-published-blog-index) below | 100 |
+| `publishedPosts { results { title tags { name } } }` | 25 × 7 = 175 |
+| `publishedPosts { results { title tags { name } relatedPosts { title } } }` | 25 × 12 = 300, **refused** |
+| the same with `limit: 15` | 15 × 12 = 180 |
+| the same with `tags(limit: 3)` and `relatedPosts(limit: 3)` | 25 × 8 = 200 |
+
+If a listing page goes over, ask for a smaller page, pass `limit` on its
+relationships, or fetch the per-item detail separately.
+
+**Batches.** A JSON array body runs each element as its own operation. Each one
+is counted against the `/gql` rate limit, so ten operations in one request
+cost the same as ten requests.
+
+**Introspection** (`__schema`, `__type`) is refused in production, however the
+document arrives. The playground needs it, which is why the playground is
+served in development only. `__typename` always works.
+
 ## Deliberately *not* exposed
 
 - **Hard delete.** `deletePost` is a reversible soft-delete; the permanent
@@ -287,7 +397,8 @@ content never leaves a stale artifact. Draft edits do not fire.
   authored through the admin editor (or `/mcp`'s `create_tag`/`create_category`).
 - **The media library as a list.** `MediaItem` has a GraphQL *type* (so it
   resolves as the nested `featuredImage` on content) but **no top-level query** —
-  there is no public "list all media" endpoint.
+  there is no public "list all media" endpoint. Its one mutation is the
+  metadata edit above; uploads are REST.
 - **The raw `blocks` tree.** Blocks are a typed union not rendered over the auto
   API; the v2 content API surface is the *fired artifacts* (`/api/...`), not the
   editable tree. Render content from the fired artifacts or your own block
@@ -342,11 +453,12 @@ Variables:
 `publishedPosts` is **offset-paginated** (parity with the JSON:API `/published`
 feed) — it returns a `PageOfPost` with `results`, `count`, and `hasNextPage`.
 `limit` is capped server-side (max 100, default 25), so use `limit`/`offset` to
-page.
+page. A page's [cost](#query-cost) is its size times the fields of one row, so
+this selection fits a page of 10; at 25 it would cost 250 and be refused.
 
 ```graphql
 {
-  publishedPosts(limit: 25, offset: 0) {
+  publishedPosts(limit: 10, offset: 0) {
     count
     hasNextPage
     results {

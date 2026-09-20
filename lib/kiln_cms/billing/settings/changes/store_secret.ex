@@ -5,9 +5,10 @@ defmodule KilnCMS.Billing.Settings.Changes.StoreSecret do
 
   The zero-ops default tier: no env var or mounted file to arrange, at the cost
   of an encryption key derived from `SECRET_KEY_BASE`
-  (`KilnCMS.Keys.Providers.Database`). Rotating `SECRET_KEY_BASE` therefore
-  invalidates the stored secret — `KilnCMS.Keys.describe_error/1` says as much
-  when decryption later fails.
+  (`KilnCMS.Keys.Providers.Database`). Rotating `SECRET_KEY_BASE` without the
+  re-encryption step (`mix kiln.vault.reencrypt`, #1487) therefore invalidates
+  the stored secret — `KilnCMS.Keys.describe_error/1` says as much when
+  decryption later fails.
 
   The pasted value is trimmed: a key copied from a dashboard or a mounted secret
   file routinely carries trailing whitespace, which would otherwise be sent

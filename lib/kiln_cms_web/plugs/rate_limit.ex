@@ -16,17 +16,24 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
 
   def call(conn, bucket) do
     case RateLimit.check(bucket, remote_ip(conn)) do
-      :allow ->
-        conn
-
-      {:deny, retry_after_ms} ->
-        retry_after_s = div(retry_after_ms, 1000)
-
-        conn
-        |> put_resp_header("retry-after", Integer.to_string(retry_after_s))
-        |> render_denial(retry_after_s)
-        |> halt()
+      :allow -> conn
+      {:deny, retry_after_ms} -> deny(conn, retry_after_ms)
     end
+  end
+
+  @doc """
+  Answers `conn` with this plug's 429 and halts it. Public for a plug that
+  charges a bucket again after this one has (`KilnCMSWeb.Plugs.GraphqlBatchLimit`),
+  so its refusal is the same response.
+  """
+  @spec deny(Plug.Conn.t(), non_neg_integer()) :: Plug.Conn.t()
+  def deny(conn, retry_after_ms) do
+    retry_after_s = div(retry_after_ms, 1000)
+
+    conn
+    |> put_resp_header("retry-after", Integer.to_string(retry_after_s))
+    |> render_denial(retry_after_s)
+    |> halt()
   end
 
   # A browser navigation (Accept: text/html) gets a readable page; everything

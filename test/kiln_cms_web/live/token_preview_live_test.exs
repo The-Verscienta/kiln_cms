@@ -103,6 +103,31 @@ defmodule KilnCMSWeb.TokenPreviewLiveTest do
     refute html =~ "Theirs"
   end
 
+  test "a live document shows its unpublished working copy, not the published row",
+       %{conn: conn} do
+    # What the editor sharing the link is looking at (docs/working-copy.md). The
+    # published text is what readers already have; showing it here would make
+    # the link useless for reviewing the edit it was shared for.
+    page =
+      Ash.Seed.seed!(KilnCMS.CMS.Page, %{
+        title: "Published title",
+        slug: "tp-#{System.unique_integer([:positive])}",
+        state: :published,
+        blocks: [%{type: :heading, content: "Published body", data: %{"level" => 1}, order: 0}],
+        working_title: "Edited title",
+        working_blocks: [
+          %{type: :heading, content: "Edited body", data: %{"level" => 1}, order: 0}
+        ],
+        working_copy_at: DateTime.utc_now()
+      })
+
+    {:ok, _lv, html} = live(conn, "/preview/#{PreviewToken.sign(page)}/live")
+
+    assert html =~ "Edited title"
+    assert html =~ "Edited body"
+    refute html =~ "Published body"
+  end
+
   test "an invalid token shows a dead-link notice, never content", %{conn: conn} do
     {:ok, _lv, html} = live(conn, "/preview/garbage-token/live")
 

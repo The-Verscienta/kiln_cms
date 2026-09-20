@@ -477,7 +477,9 @@ defmodule KilnCMS.Notifications do
       "id" => record.id,
       "actor_name" => actor_name(actor),
       "block_id" => comment.block_id,
-      "excerpt" => snippet(comment.body)
+      "excerpt" => snippet(comment.body),
+      # Which site's relay the mail goes out through (#1322).
+      "org_id" => comment.org_id
     }
     |> then(fn args -> if args["to"], do: enqueue_args(args), else: :ok end)
   end
@@ -635,7 +637,9 @@ defmodule KilnCMS.Notifications do
       "kind" => kind(record),
       "title" => record.title,
       "id" => record.id,
-      "actor_name" => actor_name(actor)
+      "actor_name" => actor_name(actor),
+      # Which site's relay the mail goes out through (#1322).
+      "org_id" => Map.get(record, :org_id)
     }
     |> WorkflowMailWorker.new()
     |> Oban.insert!()

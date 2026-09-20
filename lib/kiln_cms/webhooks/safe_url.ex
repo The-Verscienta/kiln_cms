@@ -69,6 +69,29 @@ defmodule KilnCMS.Webhooks.SafeUrl do
 
   def resolve_pinned(_), do: {:error, "must be a valid URL with a host"}
 
+  @doc """
+  `resolve_pinned/1` for a bare host rather than a URL — for a connection that
+  is not HTTP, such as a site's SMTP relay (`KilnCMS.Mail.SiteRelay`), where
+  there is no scheme to check and the port comes from its own field.
+
+  Same rules and the same return shape: the one validated address to connect
+  to, `{:ok, nil}` when DNS resolution is disabled (test env) and the host is a
+  name, or `{:error, message}`.
+  """
+  @spec resolve_host_pinned(String.t()) ::
+          {:ok, :inet.ip_address() | nil} | {:error, String.t()}
+  def resolve_host_pinned(host) when is_binary(host) do
+    case String.trim(host) do
+      "" ->
+        {:error, "must be a host name"}
+
+      host ->
+        with :ok <- validate_host(host), do: pin_address(host)
+    end
+  end
+
+  def resolve_host_pinned(_), do: {:error, "must be a host name"}
+
   # Resolve the host to the one address the caller should pin to. IP literals
   # pin to themselves; hostnames resolve once here (and every answer must be
   # safe, matching `validate/1`'s all-or-nothing check). When DNS resolution is

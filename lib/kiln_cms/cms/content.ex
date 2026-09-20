@@ -528,6 +528,13 @@ defmodule KilnCMS.CMS.Content do
           graphql do
             type :entry
 
+            # Prices every to-many relationship that points at this type (the
+            # related-content list, a media item's featured content) at its
+            # `limit`, or at a fixed row count without one. ash_graphql priced it
+            # as a single row, so the related list could nest inside itself
+            # almost for free (`KilnCMSWeb.GraphqlLimits.list_complexity/3`).
+            complexity {KilnCMSWeb.GraphqlLimits, :list_complexity}
+
             # Real-time headless: notifies on every entry write, resolved per
             # subscriber through the policy-scoped :read — anonymous
             # subscribers only ever receive published-visible data.
@@ -666,6 +673,10 @@ defmodule KilnCMS.CMS.Content do
           graphql do
             type unquote(type)
 
+            # See the entry tier above: to-many relationships pointing here
+            # (`relatedPosts`, `featuredPosts`) are priced per row.
+            complexity {KilnCMSWeb.GraphqlLimits, :list_complexity}
+
             # Real-time headless: notifies on create/update/destroy, resolved
             # per subscriber through the policy-scoped :read — anonymous
             # subscribers only ever receive published-visible data.
@@ -678,11 +689,11 @@ defmodule KilnCMS.CMS.Content do
               end
             end
 
-            # Curated, read-only public surface (D7 — deliberate exposure). The
-            # GraphQL endpoint is a *delivery* API: it exposes published-content
-            # reads only. Authoring/workflow actions (create/update/publish/…) are
-            # intentionally NOT surfaced here — they run through the admin editor
-            # (and the bearer-authenticated JSON:API), behind the role policies.
+            # Curated public queries (D7 — deliberate exposure): published-content
+            # delivery and search, nothing that lists drafts by default. The
+            # authoring/workflow actions are exposed too, as the `mutations`
+            # block below (#330 reversed D7's read-only stance), behind the same
+            # role policies and API-key scope as the JSON:API write routes.
             queries do
               # Published-content delivery: one record by slug+locale, and every
               # published locale variant of a slug (hreflang alternates). Both reads

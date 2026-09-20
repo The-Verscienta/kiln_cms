@@ -6,13 +6,14 @@ defmodule KilnCMSWeb.ArtifactController do
   output a published document compiled to on publish — read from the artifact
   cache/table via `KilnCMS.Firing.Engine.read/4`, **never** the live block tree.
   This is the v2 headless surface (the raw editable block tree is no longer auto-
-  exposed). Surfaces: `json` (default, structured intent), `json_ld` (schema.org
-  graph), `web` (`%{"html" => …}`).
+  exposed). Surfaces (`KilnCMS.Firing.Surfaces`): `json` (default, structured
+  intent), `json_ld` (schema.org graph), `web` (`%{"html" => …}`) and `llm`
+  (raw `text/markdown`, #357).
 
   A published document with no stored artifact yet (the brief window after an
   async publish — perf #201 — or content published before firing shipped) is
   **not** compiled on the request path. Instead the endpoint enqueues a
-  background firing job and answers `503` with `Retry-After`, so a 3-surface
+  background firing job and answers `503` with `Retry-After`, so a four-surface
   render can't block (or be used to flood) the API hot path (perf #208).
   """
   use KilnCMSWeb, :controller
@@ -382,6 +383,9 @@ defmodule KilnCMSWeb.ArtifactController do
     |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
     |> put_resp_header("etag", etag)
     |> put_resp_header("last-modified", http_date(record.updated_at))
+    # The site's surrogate key, so the publish purge `KilnCMS.CDN` sends reaches
+    # this response as well as the JSON:API/GraphQL/search ones.
+    |> KilnCMSWeb.Plugs.PublicCache.put_surrogate_keys()
   end
 
   # The :llm surface is raw Markdown (#357) — LLM crawlers fetch it directly,
@@ -451,7 +455,7 @@ defmodule KilnCMSWeb.ArtifactController do
 
   # Serve the fired artifact. On a miss, enqueue a background firing job (deduped
   # by FireWorker's uniqueness) and signal `:backfilling` rather than compiling
-  # 3 surfaces synchronously on this request.
+  # every surface synchronously on this request.
   # Artifacts are stored under the record's *storage* type — for dynamic types
   # that's the generic `:entry` tier (D17), not the requested type name, so the
   # key comes from the record struct rather than the registry descriptor.

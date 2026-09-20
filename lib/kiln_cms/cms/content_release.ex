@@ -62,7 +62,7 @@ defmodule KilnCMS.CMS.ContentRelease do
     domain: KilnCMS.CMS,
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer],
-    extensions: [AshStateMachine, AshOban, AshAdmin.Resource]
+    extensions: [AshStateMachine, AshOban, AshAdmin.Resource, AshJsonApi.Resource]
 
   # States in which a release is still *composing*: its items keep reserving
   # their content records against every other release (the partial unique
@@ -83,6 +83,31 @@ defmodule KilnCMS.CMS.ContentRelease do
   @spec editable_states() :: [atom()]
   def editable_states, do: @editable_states
 
+  # Read-only over JSON:API, for an editor's key (#500 + the 2026-09-19 headless
+  # API review): a headless editorial tool or a status board can see what is
+  # planned to go live and when, and what each release holds
+  # (`?include=items`). Same `:read`, same policy as the console — editor-tier
+  # of the request's org; viewers and anonymous callers get an empty list.
+  #
+  # No write routes, deliberately. Shipping a release publishes every item as
+  # its triggering admin with `authorize?: false` (see the moduledoc), so the
+  # schedule/start/rollback verbs are an admin approval step that stays in the
+  # console, and composing one is not a surface a key should reach either.
+  #
+  # Who created or last triggered a release stays off this surface: those are
+  # User ids, and `creator_id`/`triggered_by_id` are not `public?`.
+  json_api do
+    type "release"
+
+    includes [:items]
+
+    routes do
+      base "/releases"
+      index :read
+      get :read
+    end
+  end
+
   admin do
     resource_group :content
     # `:state` is deliberately absent: AshStateMachine adds that attribute in a
@@ -90,16 +115,6 @@ defmodule KilnCMS.CMS.ContentRelease do
     # it here fails a CLEAN compile while passing an incremental one. The content
     # resources' own `table_columns` leave it out for the same reason.
     table_columns [:name, :scheduled_at, :published_at, :inserted_at]
-  end
-
-  postgres do
-    table "content_releases"
-    repo KilnCMS.Repo
-
-    custom_indexes do
-      # The scheduler's due-release scan and the console's state tabs.
-      index [:org_id, :state, :scheduled_at], name: "content_releases_state_index"
-    end
   end
 
   state_machine do
@@ -152,6 +167,16 @@ defmodule KilnCMS.CMS.ContentRelease do
         worker_module_name KilnCMS.CMS.ContentRelease.Workers.GoLive
         scheduler_module_name KilnCMS.CMS.ContentRelease.Schedulers.GoLive
       end
+    end
+  end
+
+  postgres do
+    table "content_releases"
+    repo KilnCMS.Repo
+
+    custom_indexes do
+      # The scheduler's due-release scan and the console's state tabs.
+      index [:org_id, :state, :scheduled_at], name: "content_releases_state_index"
     end
   end
 

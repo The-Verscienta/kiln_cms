@@ -66,6 +66,7 @@ defmodule KilnCMS.Federation do
       define :save_site_federation, action: :save
       define :enable_site_federation, action: :enable, args: [:origin, :username]
       define :disable_site_federation, action: :disable
+      define :rekey_site_federation, action: :rekey
       define :record_site_delivery, action: :record_delivery
     end
 
@@ -126,22 +127,66 @@ defmodule KilnCMS.Federation do
   (#967).
 
   `{:ok, settings}` or `:off`. Pass `require_key?: true` for a caller that is
-  about to *sign* — the delivery worker — so a site whose private key is
-  unavailable (a rotated `FEDERATION_KEY_SECRET`, an unreadable secret) is
-  `:off` to it while the inbox, which only verifies, still answers.
+  about to *sign* — the delivery workers — and a site that is on but whose
+  private key the vault cannot open answers `:key_unreadable` instead (#1487):
+  a `SECRET_KEY_BASE` rotated without the re-encryption step, which is a
+  different fault with a different fix from federation being switched off. The
+  inbox, which only verifies, still answers either way.
   """
-  @spec active_settings(Ash.UUID.t(), keyword()) :: {:ok, struct()} | :off
+  @spec active_settings(Ash.UUID.t(), keyword()) :: {:ok, struct()} | :off | :key_unreadable
   def active_settings(org_id, opts \\ []) do
     with true <- enabled?(),
          {:ok, [%{enabled: true, origin: origin} = settings]} when is_binary(origin) <-
-           list_site_federation(authorize?: false, tenant: org_id),
-         true <-
-           not Keyword.get(opts, :require_key?, false) or
-             is_binary(KilnCMS.Federation.SiteFederation.private_key_pem(settings)) do
-      {:ok, settings}
+           list_site_federation(authorize?: false, tenant: org_id) do
+      cond do
+        not Keyword.get(opts, :require_key?, false) -> {:ok, settings}
+        is_binary(KilnCMS.Federation.SiteFederation.private_key_pem(settings)) -> {:ok, settings}
+        true -> :key_unreadable
+      end
     else
       _ -> :off
     end
+  end
+
+  @doc """
+  Queue `activity` for every deliverable follower of `org_id`: one ledger row
+  and one `KilnCMS.Federation.DeliveryWorker` job each. The fan-out
+  `AnnounceWorker` (a document's `Create`/`Update`/`Delete`) and
+  `ActorUpdateWorker` (the actor's own `Update` after a re-key, #1487) share.
+
+  `:deliverable` (#967) is the read that names who gets it, rather than the
+  rule restated here. The signature is added by the delivery worker at send
+  time, with whatever key the site holds then.
+  """
+  @spec deliver_to_followers(map(), atom(), Ash.UUID.t() | nil, Ash.UUID.t()) :: :ok
+  def deliver_to_followers(activity, activity_type, document_id, org_id) do
+    # `authorize?: false` on both calls below: this runs inside a worker, as the
+    # system, after the gates that matter have passed (federation on for the
+    # deployment and the site). The follower read and the ledger writes are
+    # scoped by `tenant: org_id`, and neither has an actor to authorize.
+    followers = deliverable_followers!(authorize?: false, tenant: org_id)
+
+    Enum.each(followers, fn follower ->
+      # authorize? bypass: the system writing its own ledger — see above.
+      {:ok, delivery} =
+        create_federation_delivery(
+          %{
+            follower_id: follower.id,
+            inbox_uri: KilnCMS.Federation.Follower.delivery_inbox(follower),
+            activity_type: activity_type,
+            activity: activity,
+            document_id: document_id
+          },
+          authorize?: false,
+          tenant: org_id
+        )
+
+      %{"org_id" => org_id, "delivery_id" => delivery.id}
+      |> KilnCMS.Federation.DeliveryWorker.new()
+      |> Oban.insert()
+    end)
+
+    :ok
   end
 
   @doc """
