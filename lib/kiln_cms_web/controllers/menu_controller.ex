@@ -6,6 +6,12 @@ defmodule KilnCMSWeb.MenuController do
       GET /api/menus/:key            → one resolved menu tree (request locale)
       GET /api/menus/:key?locale=fr  → the French variant
 
+  A missing locale variant follows the site's *configured* fallback chain
+  only (`KilnCMS.CMS.Menus.resolve/4`), plus `?fallback=false` and
+  `?fallback_locale=` as on every delivery surface. The body's `locale` and the
+  `x-kiln-locale` / `Content-Language` headers name the variant served. A
+  locale the site does not run is `400 unsupported_locale`.
+
   A resolved item carries a **live** `url`: a `content` item's destination is
   computed from the target's current published path, so renaming a slug moves
   the nav with it. Items whose target isn't published — and items an editor has
@@ -23,6 +29,7 @@ defmodule KilnCMSWeb.MenuController do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Menus
   alias KilnCMS.I18n
+  alias KilnCMSWeb.DeliveryLocale
 
   # Navigation changes rarely and is fetched on every page of a front end, so
   # let shared caches hold it briefly — same posture as the artifact endpoint.
@@ -45,13 +52,20 @@ defmodule KilnCMSWeb.MenuController do
   end
 
   def show(conn, %{"key" => key} = params) do
-    locale = requested_locale(conn, params)
+    case conn |> requested_locale(params) |> DeliveryLocale.parse() do
+      {:ok, request} -> show_menu(conn, key, request)
+      error -> DeliveryLocale.send_error(conn, error)
+    end
+  end
+
+  defp show_menu(conn, key, %{locale: locale, mode: mode}) do
     org_id = KilnCMSWeb.Tenant.current_org_id(conn)
 
-    case Menus.resolve(key, locale, org_id) do
+    case Menus.resolve(key, locale, org_id, fallback: mode) do
       {:ok, menu, tree} ->
         conn
         |> cache_headers()
+        |> DeliveryLocale.put_served(menu.locale)
         |> json(%{key: menu.key, name: menu.name, locale: menu.locale, items: tree})
 
       :not_found ->
@@ -69,13 +83,15 @@ defmodule KilnCMSWeb.MenuController do
   # (`/fr/api/menus/main`) is already a distinct cache key and still works,
   # because `SetLocale` rewrites `path_info` before the router.
   #
-  # Unknown values fall back rather than 404 — a front end asking for a locale
-  # the site doesn't run is asking for the default, not for an error.
+  # Returns the params with the locale to start from filled in, for
+  # `DeliveryLocale.parse/1` to validate — which refuses a locale the site does
+  # not run (`400 unsupported_locale`) rather than silently answering with the
+  # default menu, as this endpoint used to: a typo and a missing translation
+  # looked identical to the front end.
   defp requested_locale(conn, params) do
-    case Map.get(params, "locale") do
-      requested when is_binary(requested) -> I18n.normalize(requested)
-      _absent -> conn.assigns[:path_locale] || I18n.default_locale()
-    end
+    if Map.has_key?(params, "locale"),
+      do: params,
+      else: Map.put(params, "locale", conn.assigns[:path_locale] || I18n.default_locale())
   end
 
   defp cache_headers(conn) do

@@ -15320,6 +15320,172 @@
         ]
       }
     },
+    "/api/json/entries/by-slug/{slug}": {
+      "get": {
+        "callbacks": {},
+        "deprecated": false,
+        "description": "/entries/by-slug/:slug operation on entry resource",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Relationship paths to include in the response",
+            "explode": false,
+            "in": "query",
+            "name": "include",
+            "required": false,
+            "schema": {
+              "pattern": "^(tags|category|featured_image|content_links|incoming_links|related_entrys)(,(tags|category|featured_image|content_links|incoming_links|related_entrys))*$",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Limits the response fields to only those listed for each type",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "additionalProperties": true,
+              "example": {
+                "entry": "id,title,slug,excerpt,seo_title,seo_description,seo_keywords,path_alias,seo_image,canonical_url,locale,audience,custom_fields,published_at,scheduled_at,unpublish_at,expiry_action,review_after_days,last_reviewed_at,lock_version,inserted_at,updated_at,type_definition_id,author_id,category_id,featured_image_id,state"
+              },
+              "properties": {
+                "entry": {
+                  "description": "Comma separated field names for entry",
+                  "example": "id,title,slug,excerpt,seo_title,seo_description,seo_keywords,path_alias,seo_image,canonical_url,locale,audience,custom_fields,published_at,scheduled_at,unpublish_at,expiry_action,review_after_days,last_reviewed_at,lock_version,inserted_at,updated_at,type_definition_id,author_id,category_id,featured_image_id,state",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "locale",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "type_definition_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "audiences",
+            "required": false,
+            "schema": {
+              "items": {
+                "enum": [
+                  "public",
+                  "member"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "unlocks",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "fallback",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "fallback_locale",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/vnd.api+json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/entry"
+                    },
+                    "included": {
+                      "items": {
+                        "oneOf": [
+                          {
+                            "$ref": "#/components/schemas/tag"
+                          },
+                          {
+                            "$ref": "#/components/schemas/category"
+                          },
+                          {
+                            "$ref": "#/components/schemas/media_item"
+                          },
+                          {
+                            "$ref": "#/components/schemas/content_link"
+                          },
+                          {
+                            "$ref": "#/components/schemas/entry"
+                          }
+                        ]
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "meta": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "$ref": "#/components/responses/errors"
+          }
+        },
+        "tags": [
+          "entry"
+        ]
+      }
+    },
     "/api/json/entries/published": {
       "get": {
         "callbacks": {},
@@ -19298,6 +19464,162 @@
         ]
       }
     },
+    "/api/json/pages/by-slug/{slug}": {
+      "get": {
+        "callbacks": {},
+        "deprecated": false,
+        "description": "/pages/by-slug/:slug operation on page resource",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Relationship paths to include in the response",
+            "explode": false,
+            "in": "query",
+            "name": "include",
+            "required": false,
+            "schema": {
+              "pattern": "^(tags|category|featured_image|content_links|incoming_links|related_pages)(,(tags|category|featured_image|content_links|incoming_links|related_pages))*$",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Limits the response fields to only those listed for each type",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "additionalProperties": true,
+              "example": {
+                "page": "id,title,slug,seo_title,seo_description,seo_keywords,path_alias,seo_image,canonical_url,locale,audience,custom_fields,published_at,scheduled_at,unpublish_at,expiry_action,review_after_days,last_reviewed_at,lock_version,inserted_at,updated_at,author_id,category_id,featured_image_id,state"
+              },
+              "properties": {
+                "page": {
+                  "description": "Comma separated field names for page",
+                  "example": "id,title,slug,seo_title,seo_description,seo_keywords,path_alias,seo_image,canonical_url,locale,audience,custom_fields,published_at,scheduled_at,unpublish_at,expiry_action,review_after_days,last_reviewed_at,lock_version,inserted_at,updated_at,author_id,category_id,featured_image_id,state",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "locale",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "audiences",
+            "required": false,
+            "schema": {
+              "items": {
+                "enum": [
+                  "public",
+                  "member"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "unlocks",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "fallback",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "fallback_locale",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/vnd.api+json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/page"
+                    },
+                    "included": {
+                      "items": {
+                        "oneOf": [
+                          {
+                            "$ref": "#/components/schemas/tag"
+                          },
+                          {
+                            "$ref": "#/components/schemas/category"
+                          },
+                          {
+                            "$ref": "#/components/schemas/media_item"
+                          },
+                          {
+                            "$ref": "#/components/schemas/content_link"
+                          },
+                          {
+                            "$ref": "#/components/schemas/page"
+                          }
+                        ]
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "meta": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "$ref": "#/components/responses/errors"
+          }
+        },
+        "tags": [
+          "page"
+        ]
+      }
+    },
     "/api/json/pages/published": {
       "get": {
         "callbacks": {},
@@ -22436,6 +22758,162 @@
                     }
                   },
                   "type": "object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "$ref": "#/components/responses/errors"
+          }
+        },
+        "tags": [
+          "post"
+        ]
+      }
+    },
+    "/api/json/posts/by-slug/{slug}": {
+      "get": {
+        "callbacks": {},
+        "deprecated": false,
+        "description": "/posts/by-slug/:slug operation on post resource",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Relationship paths to include in the response",
+            "explode": false,
+            "in": "query",
+            "name": "include",
+            "required": false,
+            "schema": {
+              "pattern": "^(tags|category|featured_image|content_links|incoming_links|related_posts)(,(tags|category|featured_image|content_links|incoming_links|related_posts))*$",
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Limits the response fields to only those listed for each type",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "additionalProperties": true,
+              "example": {
+                "post": "id,title,slug,excerpt,seo_title,seo_description,seo_keywords,path_alias,seo_image,canonical_url,locale,audience,custom_fields,published_at,scheduled_at,unpublish_at,expiry_action,review_after_days,last_reviewed_at,lock_version,inserted_at,updated_at,author_id,category_id,featured_image_id,state"
+              },
+              "properties": {
+                "post": {
+                  "description": "Comma separated field names for post",
+                  "example": "id,title,slug,excerpt,seo_title,seo_description,seo_keywords,path_alias,seo_image,canonical_url,locale,audience,custom_fields,published_at,scheduled_at,unpublish_at,expiry_action,review_after_days,last_reviewed_at,lock_version,inserted_at,updated_at,author_id,category_id,featured_image_id,state",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "style": "deepObject"
+          },
+          {
+            "in": "query",
+            "name": "locale",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "audiences",
+            "required": false,
+            "schema": {
+              "items": {
+                "enum": [
+                  "public",
+                  "member"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "unlocks",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "fallback",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "fallback_locale",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/vnd.api+json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/post"
+                    },
+                    "included": {
+                      "items": {
+                        "oneOf": [
+                          {
+                            "$ref": "#/components/schemas/tag"
+                          },
+                          {
+                            "$ref": "#/components/schemas/category"
+                          },
+                          {
+                            "$ref": "#/components/schemas/media_item"
+                          },
+                          {
+                            "$ref": "#/components/schemas/content_link"
+                          },
+                          {
+                            "$ref": "#/components/schemas/post"
+                          }
+                        ]
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "meta": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  }
                 }
               }
             },

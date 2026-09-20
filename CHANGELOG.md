@@ -54,6 +54,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Breaking
+
+- **Headless slug lookups now answer a missing translation from the site's
+  fallback chain, and an unsupported locale is a `400`.**
+  ([#1579](https://github.com/The-Verscienta/kiln_cms/pull/1579) · [long form](docs/changelog/unreleased.md#headless-slug-lookups-now-answer-a-missing-translation-from-the-sites-fallback))
+
 ### Upgrade notes
 
 - **Webhook signing secrets move to an encrypted column.**
@@ -80,6 +86,10 @@ Every summary line below that was shortened links to its own entry there.
   order.**
   ([#1487](https://github.com/The-Verscienta/kiln_cms/issues/1487) · [long form](docs/changelog/unreleased.md#rotating-secretkeybase-keeps-stored-keys-now-if-the-steps-run-in-order))
 ### Added
+
+- **Locale fallback chains (`fr-CA → fr → en`), per site, on every delivery
+  surface.**
+  ([#1579](https://github.com/The-Verscienta/kiln_cms/pull/1579) · [long form](docs/changelog/unreleased.md#locale-fallback-chains-fr-ca-fr-en-per-site-on-every-delivery-surface))
 
 - **Webhooks announce a document's whole lifecycle: `created`, `archived`,
   `deleted` and `restored`.**
@@ -110,7 +120,6 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A site can send its mail through its own SMTP relay, set from the console.**
   ([#1322](https://github.com/The-Verscienta/kiln_cms/issues/1322) · [long form](docs/changelog/unreleased.md#a-site-can-send-its-mail-through-its-own-smtp-relay-set-from-the-console))
-
 - **Memberships can notify other systems: `membership.activated` and
   `membership.canceled` webhook events.**
   ([#334](https://github.com/The-Verscienta/kiln_cms/issues/334) · [long form](docs/changelog/unreleased.md#memberships-can-notify-other-systems-membershipactivated-and-membershipcanceled))

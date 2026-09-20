@@ -38,6 +38,32 @@ end to end.
 | **Search** (keyword, semantic, autocomplete) | JSON:API `/<type>/search`,`/semantic-search`,`/autocomplete` **or** GraphQL `search*`/`semanticSearch*`/`autocomplete*` | Matching records (metadata; no block body). Published-only **for anonymous callers** — with a bearer token, drafts match too. Delivery sites: use the `…/published` twins (`searchPublished*` etc.), which pin `state == :published` server-side (see "Drafts") |
 | A **typed query** over published content by slug/locale | GraphQL `/gql` (`postBySlug`, `pageBySlug`, …) | Selected fields; no block body, author is the opaque `authorId` only |
 
+## Locales: what you get when a translation is missing
+
+Every slug lookup — the artifact API, `/api/resolve`, JSON:API
+`/<plural>/by-slug/:slug`, GraphQL `*BySlug`, and the built-in site — answers a
+missing translation the same way: it walks the **site's fallback chain** for
+the requested locale (`fr-CA → fr → en`, set at `/editor/locales`; a locale
+with no chain falls back to the default locale) and serves the first published
+variant. So:
+
+- **Always read back which locale you got.** `x-kiln-locale` /
+  `Content-Language` on HTTP responses, `locale` on the JSON:API resource and
+  the GraphQL result, `locale` in `/api/resolve` and `/api/menus` bodies. A
+  static build that generates `/fr-ca/…` pages should decide whether an
+  English answer there is a page it wants (and whether it canonicalises to the
+  English URL) — the API tells you, it does not decide for you.
+- **Want exactly one locale?** Pass `fallback=false` (GraphQL
+  `fallback: false`): you get that locale or a 404 / `null`. `fallback_locale=`
+  replaces the chain with one locale.
+- **A locale the site does not run is a `400 unsupported_locale`**, never a
+  silent default — check `GET /api/locales`, which also publishes every
+  locale's chain.
+- **Navigation** follows a configured chain only, never the implicit hop to
+  the default locale.
+
+Details and the full parameter table: [api.md → Locale fallback](api.md#locale-fallback).
+
 ## Admin-defined (dynamic) content types
 
 Types created in the admin UI (`/editor/types` — decision D17) are served

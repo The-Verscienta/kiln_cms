@@ -5,6 +5,24 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Breaking
+
+<a id="headless-slug-lookups-now-answer-a-missing-translation-from-the-sites-fallback"></a>
+
+**Headless slug lookups now answer a missing translation from the site's
+fallback chain, and an unsupported locale is a `400`.** `GET /api/content/:type/:slug?locale=es`,
+`GET /api/resolve` and GraphQL `*BySlug` used to answer a slug with no `es`
+variant with a 404 / `null`; they now serve the first published variant along
+the site's chain — by default the default locale, exactly as the built-in site
+always did — and say which locale they served (`x-kiln-locale`,
+`Content-Language`, the record's `locale`). A front end that relied on the 404
+to detect a missing translation passes `?fallback=false` (GraphQL
+`fallback: false`) to keep it, or configures `[]` for that locale at
+`/editor/locales`. A locale the deployment does not run (`?locale=de`, a typo
+like `fr_CA`) is now `400 unsupported_locale` on the artifact API,
+`/api/resolve` and `/api/menus` — the menus endpoint used to answer it with the
+default-locale menu — and an error on GraphQL `*BySlug` and `menu`.
+
 ## Upgrade notes
 
 <a id="webhook-signing-secrets-move-to-an-encrypted-column"></a>
@@ -79,6 +97,24 @@ If you retire the old value before step 2, the DKIM key, social credentials,
 billing secrets and ActivityPub actor key are orphaned, exactly as before.
 Sessions are still signed out either way. See `docs/secrets-rotation.md`.
 ## Added
+
+<a id="locale-fallback-chains-fr-ca-fr-en-per-site-on-every-delivery-surface"></a>
+
+- **Locale fallback chains (`fr-CA → fr → en`), per site, on every delivery
+  surface.** A site sets, per locale, what a missing translation serves at
+  `/editor/locales`: the default locale (unchanged behaviour), an explicit
+  ordered chain taken as written, or nothing — over an operator default in
+  `config :kiln_cms, :i18n, fallbacks:`. The chain is walked in one query by
+  `:public_by_slug` itself, so the artifact API, `/api/resolve`, the new
+  JSON:API `GET /api/json/<type>/by-slug/:slug` routes, GraphQL `*BySlug` and
+  the built-in site all answer alike; navigation menus follow a configured
+  chain but never the implicit hop to the default locale. Requests narrow it
+  with `?fallback=false` or `?fallback_locale=`, every response names the
+  locale served (`x-kiln-locale`, `Content-Language`, ETags), and
+  `GET /api/locales` publishes each locale's chain. A variant the reader may
+  not open is skipped like a missing one. Resolution is per locale, not per
+  document, so field-level localization (#1327) can reuse the same chains.
+  ([#1579](https://github.com/The-Verscienta/kiln_cms/pull/1579))
 
 <a id="webhooks-announce-a-documents-whole-lifecycle-created-archived-deleted-and"></a>
 
@@ -261,7 +297,6 @@ Sessions are still signed out either way. See `docs/secrets-rotation.md`.
 
   `docs/secrets-rotation.md` lists the new encrypted column: rotating
   `SECRET_KEY_BASE` means each site with its own relay re-enters the password.
-
 <a id="memberships-can-notify-other-systems-membershipactivated-and-membershipcanceled"></a>
 
 - **Memberships can notify other systems: `membership.activated` and

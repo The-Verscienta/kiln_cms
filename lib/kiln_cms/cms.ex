@@ -677,6 +677,14 @@ defmodule KilnCMS.CMS do
       define :reset_feed_settings, action: :destroy
     end
 
+    # Per-org locale fallback chains (`fr-CA → fr → en`), resolved on every
+    # delivery surface through `KilnCMS.I18n.Fallback`.
+    resource KilnCMS.CMS.SiteLocaleSettings do
+      define :list_site_locale_settings, action: :read
+      define :save_site_locale_settings, action: :save
+      define :reset_site_locale_settings, action: :destroy
+    end
+
     # Taxonomy: categories (one-to-many to content) and tags (many-to-many).
     resource KilnCMS.CMS.Category do
       define :list_categories, action: :read
