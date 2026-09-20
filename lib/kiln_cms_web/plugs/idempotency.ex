@@ -225,6 +225,13 @@ defmodule KilnCMSWeb.Plugs.Idempotency do
 
   defp log_failure(_ok), do: :ok
 
+  # sobelow_skip ["XSS.SendResp"]
+  #
+  # The body is not user input reflected into a page: it is this same server's
+  # own earlier response to this same actor, stored verbatim and replayed with
+  # the `content-type` it was sent under (`application/vnd.api+json` or
+  # `application/json` — the API pipelines answer nothing else). Re-encoding it
+  # would be worse: a replay has to be byte-identical to be a replay.
   defp replay(conn, record) do
     conn =
       Enum.reduce(record.response_headers || %{}, conn, fn {name, value}, conn ->
