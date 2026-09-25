@@ -3943,9 +3943,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # whose value already equals the changeset's data, so a title submitted as
   # the basis title — which is what an edit to the BODY alone submits — would
   # be dropped against the doctored struct and never written, leaving the
-  # column NULL on a stamped working copy. The block tree escapes this only
-  # because a tree cast from params is never `==` to one loaded from the row
-  # (see `WorkingCopy.same_blocks?/3`).
+  # column NULL on a stamped working copy.
+  #
+  # The block tree used to escape that only because `Ash.Type.Union` compared
+  # two equal trees as *unequal*, so a tree cast from params was never `==` to
+  # one loaded from the row. `ash` 3.33.11 fixed that comparison, and the
+  # doctored `working_blocks` immediately became the same trap the title was
+  # already dodging: a title-only save submits the basis tree, which now equals
+  # the doctored data, so the write was elided and the copy was stamped with an
+  # empty body. `force_change_attribute/3` does NOT help — it bypasses the
+  # acceptance checks, not the equal-to-data elision (verified against 3.33.11).
+  #
+  # So `prepare_source` puts the ROW's tree back on the changeset's data. The
+  # doctored struct still seeds the sub-forms — which is all it was ever for —
+  # while the changeset diffs against what is actually stored, and an unchanged
+  # body on a document that has no copy yet is a real change again. When the row
+  # already holds that tree the write is elided, which is correct: the column
+  # already says what this save means to say.
   defp autosave_working_copy(socket, params) do
     record = socket.assigns.record
     basis = WorkingCopy.basis(record)
@@ -3956,7 +3970,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
         :save_working_copy,
         actor: socket.assigns.actor,
         tenant: record.org_id,
-        forms: [auto?: true]
+        forms: [auto?: true],
+        prepare_source: &undoctor_working_blocks(&1, record)
       )
 
     copy = %{
@@ -3995,6 +4010,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # `WorkingCopy.view/1`) and "Publish changes" then failed for good, because
   # `PromoteWorkingCopy` moved that `nil` onto a `title` that cannot be null.
   # The body saved to the working copy and never reached the live columns.
+  # The changeset must diff `working_blocks` against the row, not against the
+  # tree the form was seeded with. See `autosave_working_copy/2`.
+  defp undoctor_working_blocks(%Ash.Changeset{} = changeset, record) do
+    %{changeset | data: %{changeset.data | working_blocks: record.working_blocks}}
+  end
+
   defp unchanged_to(params, key, basis) do
     case Map.get(params, key) do
       nil -> basis
