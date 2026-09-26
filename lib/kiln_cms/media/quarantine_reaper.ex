@@ -59,7 +59,7 @@ defmodule KilnCMS.Media.QuarantineReaper do
         "completed within #{max_age_hours()}h. Re-upload the file."
     )
 
-    Storage.delete_private(item.storage_key)
+    Storage.delete_private(item.storage_key, item)
 
     case CMS.purge_media_item(item, authorize?: false, tenant: item.org_id) do
       :ok ->

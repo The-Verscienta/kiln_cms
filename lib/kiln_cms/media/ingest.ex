@@ -108,10 +108,16 @@ defmodule KilnCMS.Media.Ingest do
   @spec store_file(Path.t(), String.t(), opts()) :: {:ok, struct()} | {:error, term()}
   def store_file(path, filename, opts \\ []) when is_binary(path) and is_binary(filename) do
     with {:ok, kind} <- classify(path),
-         :ok <- check_size(path, Keyword.get(opts, :max_bytes) || cap_for(kind)) do
-      persist(path, kind, filename, opts)
+         :ok <- check_size(path, Keyword.get(opts, :max_bytes) || cap_for(kind)),
+         {:ok, target} <- Storage.upload_target(upload_org_id(opts)) do
+      persist(path, kind, filename, Keyword.put(opts, :storage_target, target))
     end
   end
+
+  # The site the upload is for — the store it goes to is that site's (#1559).
+  # A tenant-less caller creates in the default org (`MediaItem.org_id`'s
+  # default), so it asks the default org's setting.
+  defp upload_org_id(opts), do: KilnCMS.Accounts.org_id(opts[:tenant])
 
   @doc """
   Download `url` and ingest it under the filename its path implies.
@@ -365,7 +371,7 @@ defmodule KilnCMS.Media.Ingest do
   # sobelow_skip ["Traversal.FileModule"]
   defp persist(path, %{kind: kind, ext: ext, content_type: content_type} = spec, filename, opts)
        when kind in [:video, :audio] do
-    if defer_av_strip?() do
+    if defer_av_strip?(opts[:storage_target]) do
       quarantine_av(path, ext, content_type, filename, opts)
     else
       strip_av_now(path, spec, ext, content_type, filename, opts)
@@ -387,7 +393,7 @@ defmodule KilnCMS.Media.Ingest do
   defp quarantine_av(path, ext, content_type, filename, opts) do
     key = Storage.generate_key_with_ext(ext)
 
-    case Storage.store_private(key, path) do
+    case Storage.store_private(key, path, opts[:storage_target]) do
       {:ok, ^key} ->
         case create_item(
                key,
@@ -451,11 +457,11 @@ defmodule KilnCMS.Media.Ingest do
   an operator-configured private bucket — and falls back to the sync path,
   with a warning, when it is not.
   """
-  @spec defer_av_strip?() :: boolean()
-  def defer_av_strip? do
+  @spec defer_av_strip?(Storage.Profile.t() | nil) :: boolean()
+  def defer_av_strip?(target \\ nil) do
     case Application.get_env(:kiln_cms, :av_metadata_strip, :sync) do
       :deferred ->
-        if Storage.private_available?() do
+        if Storage.private_available?(target) do
           true
         else
           warn_no_private_storage()
@@ -567,7 +573,7 @@ defmodule KilnCMS.Media.Ingest do
   defp store_and_create(source, ext, content_type, filename, opts) do
     key = Storage.generate_key_with_ext(ext)
 
-    case Storage.store(key, source) do
+    case Storage.store(key, source, opts[:storage_target]) do
       {:ok, ^key} ->
         create_item(key, content_type, stored_size(source), with_ext(filename, ext), opts)
 
@@ -590,8 +596,9 @@ defmodule KilnCMS.Media.Ingest do
         content_type: content_type,
         byte_size: byte_size,
         storage_key: key,
-        url: Storage.url(key)
+        url: Storage.url(key, opts[:storage_target])
       }
+      |> put_present(:storage_profile_id, Storage.profile_id(opts[:storage_target]))
       |> put_present(:alt, opts[:alt])
       |> put_present(:caption, opts[:caption])
       |> put_present(:decorative, opts[:decorative])
@@ -620,8 +627,8 @@ defmodule KilnCMS.Media.Ingest do
         # a refused create leaves bytes nothing will ever reference or delete.
         # A quarantined upload's blob is in the private store.
         if Keyword.get(opts, :quarantined?, false),
-          do: Storage.delete_private(key),
-          else: Storage.delete(key)
+          do: Storage.delete_private(key, opts[:storage_target]),
+          else: Storage.delete(key, opts[:storage_target])
 
         # `:create_failed`, not the raw Ash error. `MediaLive` maps this atom to
         # a localized "couldn't be saved" — handing it the struct instead sent

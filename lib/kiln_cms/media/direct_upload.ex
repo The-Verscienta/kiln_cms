@@ -45,6 +45,15 @@ defmodule KilnCMS.Media.DirectUpload do
 
   A token is not single-use by any record of its own: completion deletes the
   staged object, and a second completion finds nothing to ingest.
+
+  ## A site's own store (#1559)
+
+  A site with its own object storage stages into *its* private bucket, with a
+  URL signed by *its* key — the operator's credentials never sign a URL for a
+  site's store. The token records which store it staged into (`profile_id`), so
+  completion and the cleanup job read and delete the staged object there even
+  if the site's setting changed in between. The ingest that follows asks the
+  site's setting afresh, like any upload.
   """
 
   alias KilnCMS.Media.{Ingest, StagedUploadCleanup, Upload}
@@ -55,9 +64,17 @@ defmodule KilnCMS.Media.DirectUpload do
   @token_ttl 3_600
   @staging_prefix "direct-uploads/"
 
-  @doc "Whether this deployment can offer direct uploads (see the moduledoc)."
-  @spec available?() :: boolean()
-  def available?, do: Storage.direct_uploads_available?()
+  @doc """
+  Whether this deployment can offer direct uploads (see the moduledoc) — for the
+  site `org_id`, whose own store (#1559) may differ from the deployment's.
+  """
+  @spec available?(Ash.UUID.t() | nil) :: boolean()
+  def available?(org_id \\ nil) do
+    case Storage.upload_target(org_id) do
+      {:ok, site} -> Storage.direct_uploads_available?(site)
+      {:error, _reason} -> false
+    end
+  end
 
   @doc "Seconds an issued upload URL stays valid."
   @spec url_ttl() :: pos_integer()
@@ -77,13 +94,14 @@ defmodule KilnCMS.Media.DirectUpload do
   """
   @spec begin(map(), term(), String.t() | nil) :: {:ok, map()} | {:error, term()}
   def begin(params, actor, org_id) do
-    with :ok <- check_available(),
+    with {:ok, site} <- Storage.upload_target(org_id),
+         :ok <- check_available(site),
          {:ok, filename} <- filename(params),
          {:ok, byte_size} <- declared_size(params),
          key = @staging_prefix <> Ecto.UUID.generate(),
          {:ok, %{url: url, headers: headers}} <-
-           Storage.presign_private_put(key, byte_size, @url_ttl) do
-      StagedUploadCleanup.schedule(key, @token_ttl + 60)
+           Storage.presign_private_put(key, byte_size, @url_ttl, site) do
+      StagedUploadCleanup.schedule(key, @token_ttl + 60, org_id, Storage.profile_id(site))
 
       token =
         Phoenix.Token.sign(KilnCMSWeb.Endpoint, @salt, %{
@@ -91,7 +109,8 @@ defmodule KilnCMS.Media.DirectUpload do
           filename: filename,
           byte_size: byte_size,
           actor_id: actor.id,
-          org_id: org_id
+          org_id: org_id,
+          profile_id: Storage.profile_id(site)
         })
 
       {:ok,
@@ -119,20 +138,37 @@ defmodule KilnCMS.Media.DirectUpload do
   @spec complete(String.t(), Upload.metadata(), term(), String.t() | nil) ::
           {:ok, struct()} | {:error, term()}
   def complete(token, metadata, actor, org_id) when is_binary(token) do
-    with :ok <- check_available(),
-         {:ok, claims} <- verify(token, actor, org_id) do
+    with {:ok, claims} <- verify(token, actor, org_id),
+         {:ok, staged} <- staged_store(claims, org_id) do
       try do
-        ingest_staged(claims, metadata, actor, org_id)
+        ingest_staged(claims, staged, metadata, actor, org_id)
       after
-        Storage.delete_private(claims.key)
+        Storage.delete_private(claims.key, staged)
       end
     end
   end
 
   def complete(_token, _metadata, _actor, _org_id), do: {:error, :invalid_token}
 
-  defp check_available do
-    if available?(), do: :ok, else: {:error, :direct_uploads_unavailable}
+  defp check_available(site) do
+    if Storage.direct_uploads_available?(site),
+      do: :ok,
+      else: {:error, :direct_uploads_unavailable}
+  end
+
+  # The store the token staged into — the operator's (`nil`) or a site profile,
+  # read tenant-scoped to the token's own site. A token from before #1559 has
+  # no `profile_id` and staged into the operator's store.
+  defp staged_store(claims, org_id) do
+    case Map.get(claims, :profile_id) do
+      nil ->
+        if Storage.direct_uploads_available?(nil),
+          do: {:ok, nil},
+          else: {:error, :direct_uploads_unavailable}
+
+      profile_id ->
+        Storage.locate(%{storage_profile_id: profile_id, org_id: org_id})
+    end
   end
 
   # One refusal for every way a token can be wrong, so a caller holding
@@ -151,13 +187,13 @@ defmodule KilnCMS.Media.DirectUpload do
   # The staged size is re-read rather than trusted from the token: the signed
   # `content-length` should make them equal, but "should" is the object
   # store's promise, and the check is one ranged read.
-  defp ingest_staged(claims, metadata, actor, org_id) do
+  defp ingest_staged(claims, staged, metadata, actor, org_id) do
     tmp = Path.join(System.tmp_dir!(), "kiln-direct-#{Ecto.UUID.generate()}")
 
     try do
-      with {:ok, size} <- staged_size(claims.key),
+      with {:ok, size} <- staged_size(claims.key, staged),
            :ok <- same_size(size, claims.byte_size),
-           :ok <- Storage.copy_to_file(claims.key, tmp, private?: true) do
+           :ok <- Storage.copy_to_file(claims.key, tmp, private?: true, at: staged) do
         Upload.from_file(tmp, claims.filename, metadata, actor, org_id)
       end
     after
@@ -165,8 +201,8 @@ defmodule KilnCMS.Media.DirectUpload do
     end
   end
 
-  defp staged_size(key) do
-    case Storage.fetch_private_range(key, 0, 0) do
+  defp staged_size(key, staged) do
+    case Storage.fetch_private_range(key, 0, 0, staged) do
       {:ok, %{total: total}} -> {:ok, total}
       {:error, _reason} -> {:error, :not_uploaded}
     end

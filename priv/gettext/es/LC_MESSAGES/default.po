@@ -26,6 +26,11 @@ msgstr "«Directo» es una categoría general: incluye un referente que el naveg
 msgid "\"In feeds\" also covers the fediverse."
 msgstr "La opción «En los feeds» también afecta al fediverso."
 
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "\"auto\" for Cloudflare R2."
+msgstr "\"auto\" para Cloudflare R2."
+
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "\"fr, en\" tries French, then English, then stops. Navigation menus follow a chain you write here, but never fall back to the default locale on their own. A headless request can narrow the chain with ?fallback=false or ?fallback_locale=, and every response says which locale it served."
@@ -1223,6 +1228,11 @@ msgstr "Acceso denegado"
 #, elixir-autogen, elixir-format
 msgid "Access ends on %{date}"
 msgstr "El acceso termina el %{date}"
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Access key ID"
+msgstr "ID de clave de acceso"
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
@@ -2446,6 +2456,11 @@ msgstr "Enlaces rotos"
 msgid "Browse the blog"
 msgstr "Explorar el blog"
 
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Bucket"
+msgstr "Bucket"
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Buckets that tags are filed under, so the editor's tag picker stays scannable."
@@ -2665,6 +2680,11 @@ msgstr "Cambios solicitados"
 #, elixir-autogen, elixir-format
 msgid "Changes requested — content I authored was returned to draft"
 msgstr "Cambios solicitados — contenido de mi autoría volvió a borrador"
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Changing this moves nothing. Files already uploaded stay where they were stored and are still read from there, so keep an old bucket and its key working until you have moved its files yourself."
+msgstr "Cambiar esto no mueve nada. Los archivos ya subidos se quedan donde se guardaron y se siguen leyendo desde allí, así que mantén el bucket anterior y su clave funcionando hasta que hayas movido sus archivos tú mismo."
 
 #: lib/kiln_cms_web/live/link_report_live.ex
 #: lib/kiln_cms_web/live/system_live.ex
@@ -5039,6 +5059,7 @@ msgstr "¿Finalizar este rol temporal ahora?"
 msgid "End this temporary tier now?"
 msgstr "¿Finalizar este nivel temporal ahora?"
 
+#: lib/kiln_cms_web/live/site_storage_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Endpoint"
@@ -6730,6 +6751,11 @@ msgstr "Diseño"
 msgid "Leave all unchecked to offer this group on every content type."
 msgstr "Deje todo sin marcar para ofrecer este grupo en todos los tipos de contenido."
 
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Leave blank for AWS S3."
+msgstr "Déjalo en blanco para AWS S3."
+
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Leave blank to keep the current one."
@@ -7471,6 +7497,16 @@ msgstr "Nuevo nivel"
 #, elixir-autogen, elixir-format
 msgid "New types of document, without a code change."
 msgstr "Nuevos tipos de documento, sin cambiar el código."
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "New uploads go to the bucket %{bucket}, served from %{url}."
+msgstr "Las nuevas subidas van al bucket %{bucket}, servido desde %{url}."
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "New uploads go to the deployment's storage."
+msgstr "Las nuevas subidas van al almacenamiento del despliegue."
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/account_live.ex
@@ -8241,6 +8277,22 @@ msgstr "noviembre"
 msgid "Number"
 msgstr "Número"
 
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Object storage"
+msgstr "Almacenamiento de objetos"
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Object storage could not be saved."
+msgstr "No se pudo guardar el almacenamiento de objetos."
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Object storage saved."
+msgstr "Almacenamiento de objetos guardado."
+
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Object storage, outgoing email, and search are configured with environment variables, not in the console — see the environment variables guide in the docs when you need them."
@@ -8529,6 +8581,11 @@ msgstr "Opción 2"
 #, elixir-autogen, elixir-format
 msgid "Optional"
 msgstr "Opcional"
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Optional. For members-only documents and direct uploads."
+msgstr "Opcional. Para documentos solo para miembros y subidas directas."
 
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
 #, elixir-autogen, elixir-format
@@ -9096,6 +9153,11 @@ msgstr "Color primario"
 msgid "Privacy-first content views — aggregate counts only, no visitor tracking."
 msgstr "Visualizaciones de contenido que respetan la privacidad — solo recuentos agregados, sin seguimiento de visitantes."
 
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Private bucket"
+msgstr "Bucket privado"
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Probing…"
@@ -9148,10 +9210,20 @@ msgstr "Identificador de precio del proveedor"
 msgid "Provisioning URI"
 msgstr "URI de aprovisionamiento"
 
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Public URL"
+msgstr "URL pública"
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "Public forms and the submissions they collect."
 msgstr "Formularios públicos y los envíos que recogen."
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Public read, set on the bucket itself."
+msgstr "Lectura pública, configurada en el propio bucket."
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -9540,6 +9612,11 @@ msgstr "Regenerar variantes"
 msgid "Regeneration queued — renames apply in the background."
 msgstr "Regeneración puesta en cola: los cambios de nombre se aplican en segundo plano."
 
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Region"
+msgstr "Región"
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Related %{kind}s"
@@ -9665,6 +9742,7 @@ msgstr "Se recargó la última versión."
 #: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
+#: lib/kiln_cms_web/live/site_storage_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -9841,6 +9919,11 @@ msgid "Removed the tag from %{count} item."
 msgid_plural "Removed the tag from %{count} items."
 msgstr[0] "Se quitó la etiqueta de %{count} elemento."
 msgstr[1] "Se quitó la etiqueta de %{count} elementos."
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Removed. New uploads go to the deployment's storage again; files already in your bucket are still read from it."
+msgstr "Eliminado. Las nuevas subidas vuelven al almacenamiento del despliegue; los archivos que ya están en tu bucket se siguen leyendo desde él."
 
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #, elixir-autogen, elixir-format
@@ -10377,6 +10460,7 @@ msgstr "sáb"
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #: lib/kiln_cms_web/live/site_push_live.ex
+#: lib/kiln_cms_web/live/site_storage_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
@@ -10492,6 +10576,7 @@ msgstr "Guardado."
 
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
+#: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saved. Leave blank to keep it."
 msgstr "Guardada. Déjala en blanco para conservarla."
@@ -10506,6 +10591,7 @@ msgstr "Guardada. Déjala en blanco para conservarla."
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #: lib/kiln_cms_web/live/site_push_live.ex
+#: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saving…"
 msgstr "Guardando…"
@@ -10658,6 +10744,11 @@ msgstr "Las búsquedas se registran de forma anónima — sin ID de usuario ni I
 #, elixir-autogen, elixir-format
 msgid "Searching…"
 msgstr "Buscando…"
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Secret access key"
+msgstr "Clave de acceso secreta"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -11473,6 +11564,21 @@ msgstr "¿Dejar de enviar boletines a %{email}?"
 msgid "Stop sending notifications to this device?"
 msgstr "¿Dejar de enviar notificaciones a este dispositivo?"
 
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Stop using this bucket for new uploads? Files already in it stay there and are still read from it."
+msgstr "¿Dejar de usar este bucket para nuevas subidas? Los archivos que ya contiene se quedan allí y se siguen leyendo desde él."
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Store this site's new uploads in this bucket"
+msgstr "Guardar las nuevas subidas de este sitio en este bucket"
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Stored encrypted and never shown again."
+msgstr "Se guarda cifrada y no se vuelve a mostrar."
+
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #, elixir-autogen, elixir-format
 msgid "Stored encrypted and never shown again. Changing the provider or endpoint removes it."
@@ -11820,10 +11926,20 @@ msgstr "Correo de prueba"
 msgid "Test ping queued — see deliveries below."
 msgstr "Prueba puesta en cola: consulte las entregas más abajo."
 
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Test the saved bucket"
+msgstr "Probar el bucket guardado"
+
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "Testing “%{title}”"
 msgstr "Probando «%{title}»"
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Testing…"
+msgstr "Probando…"
 
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
@@ -12106,6 +12222,11 @@ msgstr "La biblioteca de medios de KilnCMS con una cuadrícula de imágenes."
 msgid "The KilnCMS publishing calendar with scheduled posts."
 msgstr "El calendario de publicación de KilnCMS con entradas programadas."
 
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "The S3-compatible bucket this site's new uploads are stored in."
+msgstr "El bucket compatible con S3 donde se guardan las nuevas subidas de este sitio."
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "The SEO title just repeats the page title — a distinct one usually reads better."
@@ -12145,6 +12266,16 @@ msgstr "No se puede determinar el estado de las copias de seguridad."
 #, elixir-autogen, elixir-format
 msgid "The block this task was anchored to has been removed."
 msgstr "El bloque al que estaba anclada esta tarea ha sido eliminado."
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "The bucket this site's new uploads are stored in."
+msgstr "El bucket donde se guardan las nuevas subidas de este sitio."
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "The bucket works: a test file was written, read back and deleted."
+msgstr "El bucket funciona: se escribió, se volvió a leer y se eliminó un archivo de prueba."
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
@@ -12221,6 +12352,11 @@ msgstr "La clave secreta de la instalación ha cambiado desde que se guardó. Ha
 #, elixir-autogen, elixir-format
 msgid "The deployment's secret key has changed since it was saved. Until you enter it again, this site's mail is held and retried, not sent."
 msgstr "La clave secreta del despliegue ha cambiado desde que se guardó. Hasta que la vuelvas a introducir, el correo de este sitio se retiene y se reintenta, pero no se envía."
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "The deployment's secret key has changed since it was saved. Until you enter it again, uploads to this site are refused, and its files in this bucket can't be read."
+msgstr "La clave secreta del despliegue cambió desde que se guardó. Hasta que la vuelvas a introducir, se rechazan las subidas a este sitio y sus archivos en este bucket no se pueden leer."
 
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
@@ -12436,6 +12572,11 @@ msgstr "No se puede leer la contraseña guardada. Vuelve a introducirla."
 msgid "The saved private key can't be read. Rotate it."
 msgstr "No se puede leer la clave privada guardada. Rótela."
 
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "The saved secret access key can't be read. Re-enter it."
+msgstr "No se puede leer la clave de acceso secreta guardada. Vuelve a introducirla."
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "The shipped pack deliberately leaves out bare marketing words — \"best\", \"free\", \"proven\" — because they have too many legitimate uses to flag without knowing a publication's subject. That is what the phrase list above is for."
@@ -12487,10 +12628,20 @@ msgstr "Los bloques del destino se insertan donde está este bloque. Editar el d
 msgid "The test didn't send: %{reason}"
 msgstr "La prueba no se envió: %{reason}"
 
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "The test failed: %{reason}"
+msgstr "La prueba falló: %{reason}"
+
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "The test send stopped unexpectedly."
 msgstr "El envío de prueba se detuvo inesperadamente."
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "The test stopped unexpectedly."
+msgstr "La prueba se detuvo inesperadamente."
 
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
@@ -13872,6 +14023,11 @@ msgstr "A dónde apuntan las URL movidas, y qué pidieron en vano los visitantes
 msgid "Where readers came from"
 msgstr "De dónde vinieron los lectores"
 
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Where the bucket's files are served from: a CDN or the bucket's public URL."
+msgstr "Desde dónde se sirven los archivos del bucket: una CDN o la URL pública del bucket."
+
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Which of this site's content types appear in its Atom and JSON feeds, and how much of each entry they carry."
@@ -14104,6 +14260,11 @@ msgstr "No tiene permiso para cambiar la configuración de formularios de este s
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's locale settings."
 msgstr "No tienes permiso para cambiar la configuración de idiomas de este sitio."
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's object storage."
+msgstr "No tienes permiso para cambiar el almacenamiento de objetos de este sitio."
 
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -14537,10 +14698,40 @@ msgstr "no se pudo guardar"
 msgid "couldn't be stored"
 msgstr "no se pudo almacenar"
 
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "couldn't delete the test file (%{detail})"
+msgstr "no se pudo eliminar el archivo de prueba (%{detail})"
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "couldn't delete the test file from the private bucket (%{detail})"
+msgstr "no se pudo eliminar el archivo de prueba del bucket privado (%{detail})"
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "couldn't have its metadata removed, so it wasn't stored"
 msgstr "no se pudieron eliminar sus metadatos, así que no se almacenó"
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "couldn't read the test file back (%{detail})"
+msgstr "no se pudo volver a leer el archivo de prueba (%{detail})"
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "couldn't read the test file back from the private bucket (%{detail})"
+msgstr "no se pudo volver a leer el archivo de prueba del bucket privado (%{detail})"
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "couldn't write a test file to the bucket (%{detail})"
+msgstr "no se pudo escribir un archivo de prueba en el bucket (%{detail})"
+
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "couldn't write a test file to the private bucket (%{detail})"
+msgstr "no se pudo escribir un archivo de prueba en el bucket privado (%{detail})"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
@@ -15286,6 +15477,12 @@ msgstr "error al subir"
 #, elixir-autogen, elixir-format
 msgid "vs. previous step"
 msgstr "frente al paso anterior"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "wasn't stored — this site's own object storage can't be used right now. An admin can check it under Integrations → Object storage."
+msgstr "no se guardó: el almacenamiento de objetos propio de este sitio no se puede usar ahora mismo. Un administrador puede revisarlo en Integraciones → Almacenamiento de objetos."
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format

@@ -213,6 +213,21 @@ defmodule KilnCMSWeb.MediaUploadController do
   defp refuse(conn, :storage_failed),
     do: ApiError.send(conn, 502, "storage_failed", "The file couldn't be stored. Try again.")
 
+  # The site has its own object storage (#1559) and it can't be used right
+  # now. Refused, never stored in the deployment's bucket instead
+  # (`KilnCMS.Storage.SiteProfiles`); a site admin fixes it at
+  # /editor/site-storage. No detail: a refused endpoint's reason can name the
+  # address it resolved to, which is not an API caller's to learn.
+  defp refuse(conn, {:site_storage, _reason}),
+    do:
+      ApiError.send(
+        conn,
+        503,
+        "site_storage_unavailable",
+        "This site's own object storage can't be used right now, so the file wasn't stored. " <>
+          "A site admin can check it at /editor/site-storage."
+      )
+
   defp refuse(conn, :create_failed),
     do:
       ApiError.send(
