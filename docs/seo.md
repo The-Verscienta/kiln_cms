@@ -198,9 +198,13 @@ the operator made this choice and the editor clicking the button did not. If you
 enable a hosted provider, add it to your DPA's subprocessor list — see
 `docs/data-flows.md`.
 
-**Kiln never reads or stores provider API keys.** `req_llm` resolves them from
-its own configuration and environment, so no new secret enters Kiln's config,
-database or release environment.
+**Kiln never reads or stores the operator's provider API keys.** `req_llm`
+resolves them from its own configuration and environment, so no new secret
+enters Kiln's config, database or release environment.
+
+A site admin can instead give the site its own provider, key and model at
+`/editor/site-ai`; that site then uses it and nothing of the operator's. See
+[Per-site provider](ai-assist.md#per-site-provider).
 
 ### Settings
 

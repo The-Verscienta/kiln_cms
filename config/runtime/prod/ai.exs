@@ -97,3 +97,12 @@ end
 with {:ok, ask_rerank?} <- Env.fetch("ASK_RERANK") do
   config :kiln_cms, KilnCMS.Ask, rerank: ask_rerank?
 end
+
+# ## A site's own AI provider (#1557)
+#
+# Every AI switch above is the OPERATOR's layer. A site admin can give their
+# site its own provider, key and models at /editor/site-ai; that site then
+# uses its own and none of the above — not the key, not a `base_url`
+# override, not a *_GENERATOR module. See docs/ai-assist.md, "Per-site
+# provider". (Kept at the end of this file so the line anchors
+# docs/environment-variables.md cites above do not move.)

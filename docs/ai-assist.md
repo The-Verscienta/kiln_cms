@@ -53,15 +53,52 @@ ASSIST_MODEL=anthropic:claude-sonnet-5
 ANTHROPIC_API_KEY=...
 ```
 
-Kiln never reads or stores provider API keys. `req_llm` resolves them from its
-own environment, so no new secret enters Kiln's config, database or release env
-template.
+Kiln never reads or stores the operator's provider API keys. `req_llm`
+resolves them from its own environment, so no new secret enters Kiln's config,
+database or release env template. (A site's *own* key, below, is a different
+thing: a site admin enters it, and it is stored encrypted.)
 
 When a hosted provider is configured, Kiln logs a warning at boot and the
 editor shows a standing, non-dismissible notice next to the control naming the
 provider. The operator chose it; the editor clicking Generate did not.
 
 `ASSIST_GENERATOR` overrides the adapter module if you have written your own.
+
+## Per-site provider
+
+A site admin can give the site its own AI provider, API key and a model for each
+feature — SEO suggestions, block assist and `/api/ask` answers — under
+**Configure → Integrations → AI provider** (`/editor/site-ai`, #1557). No
+redeploy, and on a multi-site deployment each site pays its own provider.
+
+- **Precedence.** A site with its own provider switched on uses it for all three
+  features and nothing of the operator's: not the key, not `base_url`, not a
+  bespoke `*_GENERATOR`. A model left blank switches that feature **off** for
+  the site; the operator's `*_MODEL` does not take it over. A site with no
+  provider, or with it switched off, uses the environment configuration above,
+  exactly as before.
+- **Fail direction.** If the site's settings can't be read, or its key can't be
+  decrypted (after a `SECRET_KEY_BASE` rotation — see
+  [secrets-rotation.md](secrets-rotation.md)), the request is **refused**, and
+  the editor says why. `/api/ask` answers retrieval-only with
+  `"generation": "failed"`. It is never sent to the operator's provider instead:
+  that would send the site's content through an account it chose not to use,
+  and bill the operator.
+- **Providers.** Anthropic, OpenAI, Google Gemini, Mistral, Groq, OpenRouter and
+  xAI, each at the provider's own API host, or any **OpenAI-compatible**
+  endpoint by URL. That URL must be `https://` and publicly reachable: it is
+  SSRF-checked when saved and on every request, and reached through
+  `KilnCMS.SafeFetch`. An on-prem model on the operator's network belongs in
+  the environment configuration, not here.
+- **The key** is stored encrypted, never shown again, and has no env-var or file
+  source. Changing the provider or the endpoint removes it, so it has to be
+  entered again for the new destination.
+- **Budgets.** The per-user, per-caller and per-site limits under
+  [Settings](#settings) apply to a site's own key too. They are abuse limits as
+  much as spend limits, and every call holds a process on this server for up to
+  the feature's timeout, whoever pays the provider.
+- **Automation.** A metadata rule treats a site's own provider as egress, so it
+  still needs `"allow_egress": true`.
 
 ## Why this is a separate switch from SEO drafting
 

@@ -93,6 +93,7 @@ defmodule KilnCMS.Keys.VaultRotationTest do
     @known [
       {KilnCMS.Billing.Settings, :secret_key_encrypted},
       {KilnCMS.Billing.Settings, :webhook_secret_encrypted},
+      {KilnCMS.CMS.SiteAiProvider, :api_key_encrypted},
       {KilnCMS.CMS.SiteMailRelay, :password_encrypted},
       {KilnCMS.CMS.SiteVapidKey, :private_key_encrypted},
       {KilnCMS.CMS.WebhookEndpoint, :secret_encrypted},
