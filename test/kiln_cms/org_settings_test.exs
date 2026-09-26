@@ -144,8 +144,8 @@ defmodule KilnCMS.OrgSettingsTest do
       KilnCMS.CMS.SiteLinkCheck,
       KilnCMS.CMS.SiteLocaleSettings,
       KilnCMS.CMS.SiteMailRelay,
-      KilnCMS.CMS.SiteSsoProvider,
       KilnCMS.CMS.SiteMeilisearch,
+      KilnCMS.CMS.SiteSsoProvider,
       KilnCMS.CMS.SiteStorage,
       KilnCMS.CMS.SiteVapidKey,
       KilnCMS.Federation.SiteFederation
