@@ -91,10 +91,10 @@ config :kiln_cms,
 config :kiln_cms, :tenant_base_host, System.get_env("TENANT_BASE_HOST") || host
 
 # Reject requests whose Host matches no organization instead of serving them
-# the default org (#563). Recommended for any multi-tenant deployment; leave
-# off for a single-host install, where the bare host / an IP / the load
-# balancer's health-check Host all legitimately arrive unmatched and would
-# start 404ing.
+# the default org (#563). Unset, this is AUTO (#1547): off while there is one
+# organization — where the bare host / an IP / the load balancer's
+# health-check Host all legitimately arrive unmatched — and on once a second
+# exists. `true` or `false` overrides auto either way.
 #
 # `fetch/1`, not `flag/2`: this must only OVERRIDE config when the operator
 # actually set the variable. `flag/2` writes unconditionally, so an unset
