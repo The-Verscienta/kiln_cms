@@ -3140,6 +3140,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp ingest_failure_reason(:too_large), do: gettext("file is too large for its type")
   defp ingest_failure_reason(:storage_failed), do: gettext("couldn't be stored")
   defp ingest_failure_reason(:create_failed), do: gettext("couldn't be saved")
+
+  defp ingest_failure_reason({:site_storage, _reason}),
+    do:
+      gettext(
+        "wasn't stored — this site's own object storage can't be used right now. An admin can check it under Integrations → Object storage."
+      )
+
   defp ingest_failure_reason(_other), do: gettext("upload failed")
 
   defp upload_error_text(:too_large),

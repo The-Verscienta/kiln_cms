@@ -13,13 +13,22 @@ defmodule KilnCMS.Search.Meilisearch.Client do
   and returns the decoded JSON body.
   """
 
-  @typedoc "A configured Meilisearch endpoint: base URL + optional master key."
-  @type config :: %{required(:url) => String.t(), required(:master_key) => String.t() | nil}
+  @typedoc """
+  A configured Meilisearch endpoint: base URL, optional key, and whether the
+  URL was chosen by a site rather than the operator (`safe: true`), in which
+  case the request must go through `KilnCMS.SafeFetch` — see
+  `KilnCMS.Search.Meilisearch.SiteInstance`.
+  """
+  @type config :: %{
+          required(:url) => String.t(),
+          required(:master_key) => String.t() | nil,
+          optional(:safe) => boolean()
+        }
 
   @callback request(
               method :: :get | :post | :put | :patch | :delete,
               path :: String.t(),
-              body :: map() | nil,
+              body :: map() | list() | nil,
               config :: config()
             ) :: {:ok, term()} | {:error, term()}
 end

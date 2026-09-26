@@ -18,10 +18,16 @@ defmodule KilnCMS.Media.StagedUploadCleanup do
 
   require Logger
 
-  @doc "Queue the delete of `key` to run `in_seconds` from now."
-  @spec schedule(String.t(), pos_integer()) :: :ok
-  def schedule(key, in_seconds) do
-    case %{key: key} |> new(schedule_in: in_seconds) |> Oban.insert() do
+  @doc """
+  Queue the delete of `key` to run `in_seconds` from now, in the store it was
+  staged into: the operator's (`profile_id` nil) or the site `org_id`'s own
+  (#1559).
+  """
+  @spec schedule(String.t(), pos_integer(), Ash.UUID.t() | nil, Ash.UUID.t() | nil) :: :ok
+  def schedule(key, in_seconds, org_id \\ nil, profile_id \\ nil) do
+    args = %{key: key, org_id: org_id, profile_id: profile_id}
+
+    case args |> new(schedule_in: in_seconds) |> Oban.insert() do
       {:ok, _job} ->
         :ok
 
@@ -36,8 +42,8 @@ defmodule KilnCMS.Media.StagedUploadCleanup do
   end
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"key" => "direct-uploads/" <> _ = key}}) do
-    case KilnCMS.Storage.delete_private(key) do
+  def perform(%Oban.Job{args: %{"key" => "direct-uploads/" <> _ = key} = args}) do
+    case KilnCMS.Storage.delete_private(key, store(args)) do
       :ok -> :ok
       {:error, reason} -> {:error, reason}
     end
@@ -50,4 +56,13 @@ defmodule KilnCMS.Media.StagedUploadCleanup do
     Logger.error("StagedUploadCleanup refused a non-staging key: #{inspect(args)}")
     {:cancel, :not_a_staging_key}
   end
+
+  # Jobs queued before #1559 carry no profile: the operator's store. A site
+  # profile is read tenant-scoped to the job's own site, so a job row pointed
+  # at another site's profile finds nothing and deletes nothing there.
+  defp store(%{"profile_id" => profile_id, "org_id" => org_id})
+       when is_binary(profile_id) and is_binary(org_id),
+       do: %{storage_profile_id: profile_id, org_id: org_id}
+
+  defp store(_args), do: nil
 end

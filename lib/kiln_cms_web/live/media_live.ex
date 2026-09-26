@@ -687,8 +687,8 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
-  defp delete_variant_blobs(variants) do
-    for {_label, %{"key" => key}} <- variants || %{}, do: Storage.delete(key)
+  defp delete_variant_blobs(variants, item) do
+    for {_label, %{"key" => key}} <- variants || %{}, do: Storage.delete(key, item)
   end
 
   # Soft delete: stamp `archived_at` but keep the row and blobs, so content still
@@ -709,9 +709,10 @@ defmodule KilnCMSWeb.MediaLive do
 
     case CMS.purge_media_item(item, actor: actor, tenant: socket.assigns.current_org) do
       :ok ->
-        if item.storage_key, do: Storage.delete(item.storage_key)
-        delete_variant_blobs(item.variants)
-        Derivatives.delete_blobs(derivatives)
+        # Every blob of the item is in its own store (#1559).
+        if item.storage_key, do: Storage.delete(item.storage_key, item)
+        delete_variant_blobs(item.variants, item)
+        Derivatives.delete_blobs(derivatives, item)
         put_flash(socket, :info, gettext("Permanently deleted %{name}.", name: item.filename))
 
       _ ->
@@ -1325,6 +1326,14 @@ defmodule KilnCMSWeb.MediaLive do
   defp upload_failure_reason(:too_large), do: gettext("file is too large for its type")
   defp upload_failure_reason(:storage_failed), do: gettext("couldn't be stored")
   defp upload_failure_reason(:create_failed), do: gettext("couldn't be saved")
+
+  # #1559. The site's own bucket is set but unusable, and the upload is refused
+  # rather than put in the deployment's — so the message points at the setting.
+  defp upload_failure_reason({:site_storage, _reason}),
+    do:
+      gettext(
+        "wasn't stored — this site's own object storage can't be used right now. An admin can check it under Integrations → Object storage."
+      )
 
   # #807. Both of these mean "we could not remove this PDF's metadata", and the
   # upload is refused rather than stored unstripped — so the message has to name

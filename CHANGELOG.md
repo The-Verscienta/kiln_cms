@@ -54,6 +54,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Added
+
+- **A site can offer its own single sign-on provider, honoured only for email
+  domains it has verified by DNS.**
+  ([#1561](https://github.com/The-Verscienta/kiln_cms/issues/1561) · [long form](docs/changelog/unreleased.md#a-site-can-offer-its-own-single-sign-on-provider))
+
 ### Breaking
 
 - **Multi-org installs now refuse unknown hosts unless `TENANT_STRICT_HOST=false`.**
@@ -65,6 +71,16 @@ Every summary line below that was shortened links to its own entry there.
   console.**
   ([#1560](https://github.com/The-Verscienta/kiln_cms/issues/1560) · [long form](docs/changelog/unreleased.md#a-site-can-sign-its-push-notifications-with-its-own-key-generated-in-the-console))
 
+- **A site can index its content into its own Meilisearch, set from the console.**
+  ([#1558](https://github.com/The-Verscienta/kiln_cms/issues/1558) · [long form](docs/changelog/unreleased.md#a-site-can-index-its-content-into-its-own-meilisearch-set-from-the-console))
+
+- **A site can keep its uploads in its own object storage bucket, set from the
+  console.**
+  ([#1559](https://github.com/The-Verscienta/kiln_cms/issues/1559) · [long form](docs/changelog/unreleased.md#a-site-can-keep-its-uploads-in-its-own-object-storage-bucket-set-from-the-console))
+
+- **A site on its own SMTP relay keeps its own bounce list.**
+  ([#1562](https://github.com/The-Verscienta/kiln_cms/issues/1562) · [long form](docs/changelog/unreleased.md#a-site-on-its-own-smtp-relay-keeps-its-own-bounce-list))
+
 - **A site can use its own AI provider key and models, set from the console.**
   ([#1557](https://github.com/The-Verscienta/kiln_cms/issues/1557) · [long form](docs/changelog/unreleased.md#a-site-can-use-its-own-ai-provider-key-and-models-set-from-the-console))
 
@@ -75,6 +91,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Sign-in and the other account pages show the site's own name and logo.**
   ([#1613](https://github.com/The-Verscienta/kiln_cms/pull/1613) · [long form](docs/changelog/unreleased.md#sign-in-and-the-other-account-pages-show-the-sites-own-name-and-logo))
+
+- **A site's relay refusing its password no longer pages the operator.**
+  ([#1562](https://github.com/The-Verscienta/kiln_cms/issues/1562) · [long form](docs/changelog/unreleased.md#a-sites-relay-refusing-its-password-no-longer-pages-the-operator))
 
 ### Security
 

@@ -62,6 +62,15 @@ defmodule KilnCMS.Mail do
       define :get_suppressed_recipient, action: :read, get_by: [:email]
       define :unsuppress_recipient, action: :destroy
     end
+
+    # Per-site (#1562): written from a site's own relay's rejects, consulted
+    # only for that site's mail. Every call carries the site as `tenant:`.
+    resource KilnCMS.Mail.SiteSuppressedRecipient do
+      define :suppress_site_recipient, action: :suppress
+      define :list_site_suppressed_recipients, action: :read
+      define :get_site_suppressed_recipient, action: :read, get_by: [:email]
+      define :unsuppress_site_recipient, action: :destroy
+    end
   end
 
   defmodule TransientDeliveryError do
@@ -85,7 +94,9 @@ defmodule KilnCMS.Mail do
   restriction deliberately when a real use case arrives.
 
   `org_id:` names the site the mail is sent for, so it goes out through that
-  site's relay (`KilnCMS.Mail.SiteRelay`). Leave it out for account mail.
+  site's relay (`KilnCMS.Mail.SiteRelay`), and that site's own suppression list
+  applies to it as well as the instance-wide one (`suppressed?/2`). Leave it
+  out for account mail, which only the instance-wide list can stop.
   """
   @spec enqueue!(Swoosh.Email.t(), keyword()) :: :ok
   def enqueue!(%Swoosh.Email{} = email, opts \\ []) do
@@ -118,8 +129,9 @@ defmodule KilnCMS.Mail do
     email.to
     # Drop recipients that previously hard-bounced: re-attempting a dead
     # address wastes retries and signals spamminess. An admin clears the
-    # suppression from /editor/mail to resume.
-    |> Enum.reject(fn {_name, address} -> suppressed?(address) end)
+    # suppression from /editor/mail (a site's own list, from /editor/site-mail)
+    # to resume.
+    |> Enum.reject(fn {_name, address} -> suppressed?(address, org_id: org_id) end)
     |> Enum.each(fn recipient ->
       email
       |> serialize(recipient)
@@ -148,6 +160,69 @@ defmodule KilnCMS.Mail do
     |> Enum.map(&summarize_failure/1)
   end
 
+  @doc """
+  `recent_delivery_failures/1` for one site (#1562): that site's mail and
+  newsletter jobs that were hard-bounced (a permanent reject, not a job cancelled
+  for another reason, such as a subscriber who unsubscribed in the meantime) or
+  gave up, newest first — for the delivery panel on `/editor/site-mail`.
+
+  Same map shape: the recipient **domain**, never the address. A newsletter job
+  carries a subscriber id rather than an address, so its domain is looked up
+  from that site's subscribers, in one read.
+  """
+  @spec recent_site_delivery_failures(Ash.UUID.t(), pos_integer()) :: [map()]
+  def recent_site_delivery_failures(org_id, limit \\ 20) when is_binary(org_id) do
+    jobs =
+      Ecto.Query.from(j in Oban.Job,
+        where:
+          j.queue in ["mail", "newsletter"] and j.state in ["cancelled", "discarded"] and
+            fragment("?->>'org_id'", j.args) == ^org_id,
+        order_by: [desc: j.attempted_at],
+        # Headroom for the non-bounce cancels filtered out below.
+        limit: ^(limit * 4)
+      )
+      |> KilnCMS.Repo.all()
+      |> Enum.filter(&delivery_failure?/1)
+      |> Enum.take(limit)
+
+    domains = subscriber_domains(jobs, org_id)
+
+    Enum.map(jobs, fn job ->
+      job
+      |> summarize_failure()
+      |> Map.update!(:domain, fn
+        "unknown" -> Map.get(domains, job.args["subscriber_id"], "unknown")
+        domain -> domain
+      end)
+    end)
+  end
+
+  # A cancelled job is a delivery failure only when the relay rejected the
+  # message (`cancel_permanent/5`'s reason); workers also cancel for reasons
+  # that aren't about delivery at all. A discarded job ran out of retries.
+  defp delivery_failure?(%{state: "discarded"}), do: true
+
+  defp delivery_failure?(job),
+    do: String.contains?(last_error(job.errors) || "", "permanent delivery failure")
+
+  defp subscriber_domains(jobs, org_id) do
+    ids = for %{args: %{"subscriber_id" => id}} <- jobs, is_binary(id), uniq: true, do: id
+
+    if ids == [] do
+      %{}
+    else
+      # `authorize?: false`: a system read, scoped to the site by `tenant:`,
+      # that turns ids into domains only — the caller is the site's own admin
+      # page, whose mount guard is the org-admin tier.
+      KilnCMS.Newsletter.list_subscribers!(
+        tenant: org_id,
+        authorize?: false,
+        query: [filter: [id: [in: ids]], select: [:id, :email]]
+      )
+      |> Map.new(&{&1.id, domain_of(to_string(&1.email))})
+    end
+  end
+
   defp summarize_failure(job) do
     %{
       domain: failure_domain(job.args),
@@ -169,27 +244,63 @@ defmodule KilnCMS.Mail do
 
   defp last_error(_errors), do: nil
 
-  @doc "Whether `address` is on the bounce-suppression list (case-insensitive)."
-  @spec suppressed?(String.t()) :: boolean()
-  def suppressed?(address) do
-    # Bang variant returns the record or nil directly; the non-bang one wraps
+  @doc """
+  Whether mail to `address` should be skipped because it hard-bounced
+  (case-insensitive).
+
+  With no `org_id:` (account mail) only the instance-wide list counts —
+  `KilnCMS.Mail.SuppressedRecipient`, the operator's relay's word. With
+  `org_id:` (mail sent for that site) the site's own list counts too —
+  `KilnCMS.Mail.SiteSuppressedRecipient`, its relay's word. No site's list is
+  consulted for another site's mail or for account mail, so a site's relay can
+  only ever stop its own site's mail.
+  """
+  @spec suppressed?(String.t(), keyword()) :: boolean()
+  def suppressed?(address, opts \\ []) do
+    # Bang variants return the record or nil directly; the non-bang ones wrap
     # it in `{:ok, _}`, which would read as "always suppressed".
-    case get_suppressed_recipient!(address, authorize?: false, not_found_error?: false) do
-      nil -> false
-      _record -> true
-    end
+    # `authorize?: false`: the delivery pipeline asks as the system, with no
+    # actor, and learns only a boolean.
+    instance = get_suppressed_recipient!(address, authorize?: false, not_found_error?: false)
+
+    not is_nil(instance) or site_suppressed?(address, Keyword.get(opts, :org_id))
   end
 
-  # Suppress every recipient of a hard-bounced message. Best-effort: a failure
-  # to record must not mask the delivery outcome, so the result is ignored and
-  # any unexpected raise is swallowed.
-  defp suppress_recipients(email, reason) do
+  defp site_suppressed?(_address, nil), do: false
+
+  defp site_suppressed?(address, org_id) do
+    # `authorize?: false`: the pipeline's system lookup, as above; `tenant:`
+    # keeps it to this one site's list.
+    record =
+      get_site_suppressed_recipient!(address,
+        tenant: org_id,
+        authorize?: false,
+        not_found_error?: false
+      )
+
+    not is_nil(record)
+  end
+
+  # Suppress every recipient of a hard-bounced message, on the list of the
+  # relay that said so: the instance-wide one for the operator's relay, the
+  # site's own for a site's relay. Best-effort: a failure to record must not
+  # mask the delivery outcome, so the result is ignored and any unexpected
+  # raise is swallowed.
+  defp suppress_recipients(email, reason, relay, org_id) do
     Enum.each(email.to, fn {_name, address} ->
-      _ = suppress_recipient(%{email: address, reason: reason}, authorize?: false)
+      _ = suppress_one(%{email: address, reason: reason}, relay, org_id)
     end)
   rescue
     _error -> :ok
   end
+
+  # `authorize?: false`: only the pipeline writes either list, on a relay's
+  # reject naming the recipient — no caller may (both forbid `:suppress`).
+  defp suppress_one(attrs, :operator, _org_id), do: suppress_recipient(attrs, authorize?: false)
+
+  # `authorize?: false`: the same system write, to the site's own list only.
+  defp suppress_one(attrs, :site, org_id) when is_binary(org_id),
+    do: suppress_site_recipient(attrs, tenant: org_id, authorize?: false)
 
   @doc """
   Deliver an email from inside an Oban worker, translating the outcome into
@@ -199,7 +310,10 @@ defmodule KilnCMS.Mail do
 
   A permanent reject suppresses the recipient only when it is about the
   recipient — a 5xx to `RCPT`/`DATA` whose enhanced status names a dead mailbox
-  or domain (`5.1.1`, `5.2.1`, ...). A permanent refusal of our side — the relay
+  or domain (`5.1.1`, `5.2.1`, ...) — on the instance-wide list when the
+  operator's relay said so, on the site's own list
+  (`KilnCMS.Mail.SiteSuppressedRecipient`) when the site's relay did. A
+  permanent refusal of our side — the relay
   rejecting AUTH (a rotated `SMTP_PASSWORD`) or STARTTLS, or the sender — says
   nothing about the recipient: it retries, raising one aggregated
   `KilnCMS.Mail.RelayAlert`, so the operator can fix the relay before the mail
@@ -227,9 +341,9 @@ defmodule KilnCMS.Mail do
         safe_reason = redact_reason(reason)
 
         case failure_class(reason) do
-          :recipient -> cancel_permanent(email, safe_reason, true, relay)
-          :message -> cancel_permanent(email, safe_reason, false, relay)
-          :relay -> retry_relay_refused(email, safe_reason)
+          :recipient -> cancel_permanent(email, safe_reason, true, relay, org_id)
+          :message -> cancel_permanent(email, safe_reason, false, relay, org_id)
+          :relay -> retry_relay_refused(email, safe_reason, relay)
           :transient -> retry_transient(email, reason, safe_reason, relay)
         end
     end
@@ -252,10 +366,9 @@ defmodule KilnCMS.Mail do
     end
   end
 
-  # A hard 5xx: log + emit a bounce event + (when it names the recipient, and
-  # it was the operator's own relay that said so) suppress the address, then
-  # cancel.
-  defp cancel_permanent(email, safe_reason, suppress?, relay) do
+  # A hard 5xx: log + emit a bounce event + (when it names the recipient)
+  # suppress the address on the list of whichever relay said so, then cancel.
+  defp cancel_permanent(email, safe_reason, suppress?, relay, org_id) do
     # Log so a systematic 5xx (e.g. a content filter rejecting every message) is
     # visible in server logs and Sentry, not just as `cancelled` rows in
     # `oban_jobs` — a cancel is otherwise silent (no job exception, and Sentry's
@@ -275,20 +388,19 @@ defmodule KilnCMS.Mail do
     )
 
     # Remember the dead address so future sends skip it (enqueue!) — only when
-    # both guards agree. They answer different questions, and the list is
-    # instance-wide, so either one alone leaves a way to poison it.
+    # the reject actually says the address is dead (`5.1.1`, `5.2.1`, ...). A
+    # refusal of our side of the conversation says nothing about the
+    # recipient, and a guess here silently stops a person's mail until an
+    # admin notices.
     #
-    # `suppress?` — only a reject that actually says the address is dead
-    # (`5.1.1`, `5.2.1`, ...). A refusal of our side of the conversation says
-    # nothing about the recipient, and a guess here silently stops a person's
-    # password resets until an admin notices.
-    #
-    # `relay == :operator` — only on the operator's word. A site's relay is a
-    # server that site chose, and it may answer 550 to any address it likes;
-    # believing it would let one site stop every site, account mail included,
-    # from reaching an address. A site relay's hard reject cancels this one
-    # message and nothing more.
-    if suppress? and relay == :operator, do: suppress_recipients(email, safe_reason)
+    # *Which* list is decided by whose word it is. The operator's relay writes
+    # the instance-wide list, which stops the address everywhere, account mail
+    # included. A site's relay is a server that site chose, and it may answer
+    # 550 to any address it likes; believing it instance-wide would let one
+    # site stop every site from reaching an address, password resets included.
+    # So its reject goes on that site's own list (#1562), which only that
+    # site's mail ever consults.
+    if suppress?, do: suppress_recipients(email, safe_reason, relay, org_id)
 
     {:cancel, "permanent delivery failure: #{safe_reason}"}
   end
@@ -298,8 +410,13 @@ defmodule KilnCMS.Mail do
   # about to hit the same wall, so raise one aggregated alert and retry: the
   # operator fixing the password or sender within the ~16h retry window gets
   # the mail out, where cancelling would lose it.
-  defp retry_relay_refused(email, safe_reason) do
-    RelayAlert.notify_refused(recipient_domain(email), safe_reason)
+  #
+  # The alert is the operator's, so only for the operator's relay, as with
+  # `retry_transient/4`. A site's relay refusing its own password is that
+  # site's to fix, and alerting on it would also spend the alert's cooldown, so
+  # the operator's own relay failing in the next 15 minutes would go unreported.
+  defp retry_relay_refused(email, safe_reason, relay) do
+    if relay == :operator, do: RelayAlert.notify_refused(recipient_domain(email), safe_reason)
 
     raise TransientDeliveryError, message: "relay refused delivery, retrying: #{safe_reason}"
   end

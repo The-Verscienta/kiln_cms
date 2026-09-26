@@ -122,7 +122,10 @@ defmodule KilnCMSWeb.MediaDownloadController do
   # or a fixed fallback — sobelow can't see that from the call site.
   # sobelow_skip ["XSS.SendResp", "XSS.ContentType"]
   defp serve(conn, item, org_id) do
-    fetch = if item.audience == :public, do: &Storage.fetch/1, else: &Storage.fetch_private/1
+    fetch =
+      if item.audience == :public,
+        do: &Storage.fetch(&1, item),
+        else: &Storage.fetch_private(&1, item)
 
     case fetch.(item.storage_key) do
       {:ok, bytes} ->
@@ -232,7 +235,10 @@ defmodule KilnCMSWeb.MediaDownloadController do
 
   # sobelow_skip ["XSS.SendResp"]
   defp send_unranged(conn, item) do
-    read = if item.audience == :public, do: &Storage.fetch/1, else: &Storage.fetch_private/1
+    read =
+      if item.audience == :public,
+        do: &Storage.fetch(&1, item),
+        else: &Storage.fetch_private(&1, item)
 
     case read.(item.storage_key) do
       {:ok, bytes} -> send_resp(conn, 200, bytes)
@@ -272,8 +278,8 @@ defmodule KilnCMSWeb.MediaDownloadController do
   defp fetch_range(item, first, last) do
     read =
       if item.audience == :public,
-        do: &Storage.fetch_range/3,
-        else: &Storage.fetch_private_range/3
+        do: &Storage.fetch_range(&1, &2, &3, item),
+        else: &Storage.fetch_private_range(&1, &2, &3, item)
 
     read.(item.storage_key, first, last)
   end

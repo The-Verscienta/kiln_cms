@@ -155,6 +155,46 @@ for one type, and no single filter value returns the whole set until
    bin/kiln_cms rpc 'KilnCMS.Search.Meilisearch.reindex_all()'
    ```
 
+## A site's own instance (#1558)
+
+A site admin can point their site at their own Meilisearch from **Configure →
+Integrations → Search instance** (`/editor/site-search`): a URL, an API key and
+an index. No redeploy, and no other site is affected.
+
+- **What is sent.** Every published document on that site that an anonymous
+  visitor could read — the same documents, and the same fields, described in
+  *What is in the index* above. The
+  page says so above the form.
+- **Precedence.** The site's row, switched on, wins. Otherwise the site uses
+  the operator's `MEILI_*` instance, or no Meilisearch if there is none.
+  `KilnCMS.Search.Meilisearch.SiteInstance` is the one resolver, asked by the
+  indexing jobs, by `search/2` and by the publish path's enqueue gate, so
+  indexing and search can't disagree about which instance a site uses.
+- **The key** is encrypted in the database (`KilnCMS.Keys.Vault`), never shown
+  again, and has no env-var or file source. It needs to be able to write
+  documents and index settings to that index.
+- **The URL** must be HTTPS and may not resolve to a private, loopback,
+  link-local or metadata address. It is checked when it is saved and again on
+  every request, which goes through `KilnCMS.SafeFetch` (resolved once,
+  pinned, never redirected). An internal instance belongs in `MEILI_URL`.
+- **Reindex on change.** Every save, switch-off or removal enqueues a full
+  reindex of the site into whichever instance it now uses; the page shows how
+  many jobs are left and refreshes until it is done. **Reindex now** does the
+  same by hand. Moving a site off an instance does not delete what is already
+  there — clear it on that instance if you need it gone.
+
+**When the site's instance can't be used** — its settings can't be read, or its
+key can't be decrypted after a `SECRET_KEY_BASE` rotation — the two directions
+fail differently, and neither falls back to the operator's instance:
+
+| | What happens | Why not the operator's instance |
+|---|---|---|
+| **Indexing** | Held. The job fails and Oban retries it for about 16 hours; a reindex that succeeds releases everything held | It would write the site's content into an index the site chose not to use |
+| **Search** (`search/2`) | Returns `{:error, {:site_instance, reason}}` without making a request; the caller falls back to the built-in Postgres search | That index holds other sites' content, separated only by an `org_id` filter |
+
+A site's instance that is reachable but refuses a request (a wrong key, an
+index it may not write) is the ordinary retry path: the job fails and retries.
+
 ## Querying
 
 ```elixir

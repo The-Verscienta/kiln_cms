@@ -284,7 +284,9 @@ Opt into the S3 storage adapter by setting `S3_BUCKET`. When it is set,
 required (the latter two raise via `System.fetch_env!`). See
 [`KilnCMS.Storage.S3`](../lib/kiln_cms/storage/s3.ex) for per-provider hosts,
 and [`media-pipeline.md`](media-pipeline.md#production-storage-and-cdn) for the
-CDN deployment guide.
+CDN deployment guide. A site admin can give their site its own bucket at
+`/editor/site-storage` (#1559); that site's new uploads then use it and none of
+these. See [Per-site buckets](media-pipeline.md#per-site-buckets-1559).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
@@ -389,6 +391,12 @@ relay belongs here, where the operator sets it.
 Opt into the typo-tolerant search backend by setting `MEILI_URL`; otherwise
 Postgres full-text search is the only backend. Run `mix kiln.meili.reindex` once
 after enabling. See [`docs/meilisearch.md`](meilisearch.md).
+
+These variables set the **deployment's** instance. A site admin can index their
+site into their own Meilisearch instead, from `/editor/site-search` (#1558),
+with no redeploy; the instance set here stays in use for every site that hasn't
+set one. A site's instance must be HTTPS and may not be a private address. An
+internal instance belongs here, where the operator sets it.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|

@@ -5,6 +5,29 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Added
+
+<a id="a-site-can-offer-its-own-single-sign-on-provider"></a>
+
+- **A site can offer its own single sign-on provider.** A site admin sets an
+  OpenID Connect issuer, client ID and client secret at `/editor/site-sso`, and
+  the site's sign-in page offers "Sign in with …" beside the password form. The
+  operator's `OIDC_*` provider is unchanged. Accounts belong to the whole
+  deployment, so the site's provider is honoured only for addresses in email
+  domains the site verified with a DNS TXT record (`_kiln-sso.<domain>`), looked
+  up again on every sign-in, and never for an account with access on another
+  site or across the deployment — a platform admin, another site's member, or a
+  membership-less global editor. Those people sign in the other ways. The flow is
+  deliberately not an AshAuthentication strategy: a per-site strategy would
+  share the operator's identity namespace, so a site's provider asserting a
+  `sub` the operator's had already linked would sign in as that account. It is
+  Assent's OIDC callback (state, nonce, PKCE, `RS256` only) behind two routes,
+  with every provider request through `SafeFetch`. The client secret is
+  vault-encrypted and write-only; if it can't be decrypted, the site's SSO says
+  it is unavailable rather than falling back to the operator's provider. Turning
+  password sign-in off per site, SAML, and several providers per site are not
+  in this change.
+
 ## Breaking
 
 <a id="multi-org-installs-now-refuse-unknown-hosts-unless-tenantstricthostfalse"></a>
@@ -70,6 +93,105 @@ carries the reasoning.
     `SECRET_KEY_BASE` rotation) or read holds that site's pushes, keeps the
     subscriptions and says so on the page. It never signs with the deployment's
     key instead.
+
+<a id="a-site-can-index-its-content-into-its-own-meilisearch-set-from-the-console"></a>
+
+- **A site can index its content into its own Meilisearch, set from the console.**
+  `/editor/site-search` (Configure → Integrations → Search instance) lets a
+  site admin set the URL, API key and index their site's published content is
+  indexed into. No `MEILI_*` variables and no redeploy (#1558). The `MEILI_*`
+  variables are unchanged: they are the instance for every site that hasn't
+  set its own. The third integration #1322 moves out of the environment,
+  built the way the site SMTP relay was:
+
+  - **Says what leaves.** The page states, above the form, that every
+    published document an anonymous visitor could read — full text included —
+    is sent to that URL.
+  - **One resolver.** `KilnCMS.Search.Meilisearch.SiteInstance` is asked by
+    the indexing jobs, by `Meilisearch.search/2` and by the publish path's
+    enqueue gate, so indexing and search can't disagree about a site's
+    instance. The site's requests are built from its row alone; nothing of the
+    operator's URL, key or index goes with them.
+  - **Key encrypted.** Stored with `KilnCMS.Keys.Vault` (a
+    `Vault.Ciphertext` column, so `mix kiln.vault.reencrypt` rotates it),
+    never shown again, kept on a blank save, and with no env-var or file
+    source.
+  - **Fails closed, one direction per axis.** If the row can't be read or the
+    key can't be decrypted, *indexing* is held and retried for ~16 hours
+    (never written into the operator's instance), and *search* returns an
+    error without a request so the caller uses the built-in Postgres search
+    (never the operator's index, which holds other sites' content).
+  - **SSRF-checked.** HTTPS only, and refused if it resolves to a private,
+    loopback, link-local or metadata address — at save, and on every request,
+    which goes through `KilnCMS.SafeFetch` (pinned, no redirects).
+    `SafeFetch.request/3` is new, for PUT/PATCH/DELETE.
+  - **Reindexes on change.** Every save, switch-off or removal enqueues a full
+    reindex of the site into the instance it now uses, and the page counts the
+    jobs left. A reindex that succeeds releases jobs held behind a broken
+    instance instead of leaving them to their backoff.
+
+  `MeilisearchWorker` now retries up to 9 times over ~16 hours (was 3), for
+  the operator's instance too.
+
+<a id="a-site-can-keep-its-uploads-in-its-own-object-storage-bucket-set-from-the-console"></a>
+
+- **A site can keep its uploads in its own object storage bucket, set from the
+  console.** Configure → Integrations → **Object storage**
+  (`/editor/site-storage`, #1559) takes an S3-compatible endpoint (blank for
+  AWS), region, bucket, an optional private bucket, the bucket's public URL and
+  a key pair; the site's new uploads then go there instead of to the
+  operator's `S3_*` storage. Storage holds data, which is what made this
+  harder than the other per-site integrations: every media item now records
+  the store its file went to (`storage_profile_id`, a nullable column with no
+  default, so the migration rewrites nothing and every existing row reads as
+  "the operator's store"). Reads, downloads, streaming, variants, posters,
+  transforms, gating and deletes follow the row, never the site's current
+  setting, and a store's location never changes in place — moving the site to
+  another bucket makes a new `StorageProfile` and leaves the old one, so
+  nothing is stranded and nothing needs a backfill. There is no background
+  copy job: files stay where they were stored. `KilnCMS.Storage.S3` and its
+  `ReqClient` now take a site's credentials, endpoint and buckets per call, and
+  that config is built from the site's settings alone and handed to
+  `ExAws.Operation.perform/2` — `ExAws.request/2` would have merged the
+  operator's session token, endpoint and instance-role credentials underneath
+  it (`SiteStorageIsolationTest` plants them and checks). The private bucket
+  (gated documents) and presigned direct uploads get the same treatment. The
+  secret is vault-encrypted, write-only and database-only; the endpoint must be
+  `https://` and is refused if it resolves to a private or metadata address, at
+  save and on every connection, which is pinned to the checked address. A site
+  whose bucket can't be used — unreadable settings, an undecryptable secret,
+  a refused endpoint — has its uploads **refused**, never written to the
+  operator's bucket. A **Test** button writes, reads back and deletes a probe
+  object, and the site's bucket origin is added to that site's `img-src` and
+  `media-src`.
+
+<a id="a-site-on-its-own-smtp-relay-keeps-its-own-bounce-list"></a>
+
+- **A site on its own SMTP relay keeps its own bounce list.** When a site's own
+  relay (`/editor/site-mail`) rejects a recipient as dead (`5.1.1`, `5.2.1` and
+  the like, in the mail transaction), the address goes on that site's own
+  suppression list (`KilnCMS.Mail.SiteSuppressedRecipient`, keyed by site and
+  address), and that site's newsletters and other queued mail skip it (#1562).
+  Before, a site relay's hard reject cancelled that one message and nothing
+  more, so a site on its own relay kept mailing dead addresses on every
+  newsletter, which hurts its standing with its provider.
+
+  The list stops only that site's mail. The relay is a server the site chose,
+  and it may answer 550 to any address, so its word never reaches the
+  instance-wide list, another site's mail, or account mail (sign-in links,
+  password resets), which carries no site and never consults a site's list.
+  The worst a hostile relay can do with it is stop mail its own site sends. The
+  instance-wide list stays the operator's relay's alone, and it still applies
+  to every site's mail. Only a reject naming the recipient suppresses: a relay
+  refusing our AUTH, TLS or sender, and a reject that doesn't say whose fault
+  it is, suppress nobody, as on the operator's relay.
+
+  `/editor/site-mail` gains the **Delivery health** panel `/editor/mail` has,
+  scoped to the site: its recent hard bounces and give-ups by recipient domain
+  (newsletter jobs included), and its suppressed addresses, each with
+  **Remove**. The list is read and cleared by the site's admins only, and
+  written by nothing but the delivery pipeline. One new table,
+  `site_suppressed_recipients`.
 
 <a id="a-site-can-use-its-own-ai-provider-key-and-models-set-from-the-console"></a>
 
@@ -151,6 +273,16 @@ carries the reasoning.
   `TENANT_STRICT_HOST` on, a connected mount of these pages from an unknown host
   is now refused with the same 404 the HTTP request already got.
   ([#1613](https://github.com/The-Verscienta/kiln_cms/pull/1613))
+
+<a id="a-sites-relay-refusing-its-password-no-longer-pages-the-operator"></a>
+
+- **A site's relay refusing its password no longer pages the operator.** A
+  site's own relay refusing AUTH, TLS or the sender raised the operator's
+  "relay refused" alert (log error, Sentry message, telemetry) as if the
+  deployment's relay were broken, and spent that alert's 15-minute cooldown, so
+  the operator's own relay failing in that window went unreported. It now
+  alerts only for the operator's relay, as the relay-unreachable alert already
+  did (#1562).
 
 ## Security
 

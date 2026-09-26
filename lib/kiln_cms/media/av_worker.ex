@@ -67,6 +67,10 @@ defmodule KilnCMS.Media.AVWorker do
         broadcast(item.id)
         :ok
 
+      # Its store (#1559) could not be resolved — retry; the file is there.
+      {:error, {:site_storage, _reason} = error} ->
+        {:error, error}
+
       # Original isn't readable (e.g. removed) — nothing to do.
       {:error, _reason} ->
         :ok
@@ -86,7 +90,7 @@ defmodule KilnCMS.Media.AVWorker do
     tmp = Path.join(System.tmp_dir!(), "kiln-av-#{Ecto.UUID.generate()}#{ext}")
 
     # A gated item's bytes live in private storage; the ordinary case is public.
-    case Storage.copy_to_file(key, tmp, private?: item.audience != :public) do
+    case Storage.copy_to_file(key, tmp, private?: item.audience != :public, at: item) do
       :ok ->
         {:ok, tmp}
 
@@ -148,7 +152,7 @@ defmodule KilnCMS.Media.AVWorker do
         :ok
 
       variants ->
-        for {_label, %{"key" => key}} <- variants, is_binary(key), do: Storage.delete(key)
+        for {_label, %{"key" => key}} <- variants, is_binary(key), do: Storage.delete(key, item)
 
         {:ok, _cleared} =
           CMS.update_media_item(item, %{variants: %{}}, authorize?: false, tenant: tenant)
@@ -197,17 +201,17 @@ defmodule KilnCMS.Media.AVWorker do
   defp store_poster(item, poster_path, probed) do
     key = Storage.generate_key_with_ext(".jpg")
 
-    case Storage.store(key, poster_path) do
-      {:ok, ^key} ->
-        poster = %{
-          "key" => key,
-          "url" => Storage.url(key),
-          "width" => probed.width,
-          "height" => probed.height
-        }
+    with {:ok, site} <- Storage.locate(item),
+         {:ok, ^key} <- Storage.store(key, poster_path, site) do
+      poster = %{
+        "key" => key,
+        "url" => Storage.url(key, site),
+        "width" => probed.width,
+        "height" => probed.height
+      }
 
-        Map.put(item.variants || %{}, AVProcessor.poster_label(), poster)
-
+      Map.put(item.variants || %{}, AVProcessor.poster_label(), poster)
+    else
       other ->
         Logger.warning("AVWorker couldn't store a poster for #{item.id}: #{inspect(other)}")
         item.variants || %{}

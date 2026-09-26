@@ -79,7 +79,7 @@ defmodule KilnCMS.Media.Derivatives do
     src = Path.join(System.tmp_dir!(), "kiln-transform-src-#{Ecto.UUID.generate()}")
 
     try do
-      with :ok <- Storage.copy_to_file(item.storage_key, src, private?: private?(item)),
+      with :ok <- Storage.copy_to_file(item.storage_key, src, private?: private?(item), at: item),
            {:ok, out} <-
              ImageProcessor.render(src, plan, max_pixels: ImageTransform.max_source_pixels()) do
         keep_and_read(item, plan, out)
@@ -116,7 +116,11 @@ defmodule KilnCMS.Media.Derivatives do
 
   defp store(item, plan, out, size) do
     key = storage_key(plan)
-    put = if private?(item), do: &Storage.store_private/2, else: &Storage.store/2
+
+    put =
+      if private?(item),
+        do: &Storage.store_private(&1, &2, item),
+        else: &Storage.store(&1, &2, item)
 
     with {:ok, ^key} <- put.(key, out.path),
          {:ok, _row} <-
@@ -148,7 +152,7 @@ defmodule KilnCMS.Media.Derivatives do
     case CMS.list_media_derivatives(item.id, actor: actor(), tenant: item.org_id) do
       {:ok, rows} ->
         {stale, live} = Enum.split_with(rows, &stale?(&1, item))
-        Enum.each(stale, &delete(&1, item.org_id))
+        Enum.each(stale, &delete(&1, item))
         live
 
       {:error, error} ->
@@ -163,16 +167,17 @@ defmodule KilnCMS.Media.Derivatives do
       (not is_nil(row.focal) and row.focal != ImageTransform.focal_key(item))
   end
 
-  defp delete(row, org_id) do
-    delete_blob(row.storage_key, row.private)
-    CMS.destroy_media_derivative(row, actor: actor(), tenant: org_id)
+  defp delete(row, item) do
+    delete_blob(row.storage_key, row.private, item)
+    CMS.destroy_media_derivative(row, actor: actor(), tenant: item.org_id)
   end
 
   @doc """
   The blobs `item`'s derivatives occupy, as `{key, private?}`. Read these
   **before** purging the item: the rows go with it through the foreign key,
-  and then nothing knows where the blobs were. Pass them to `delete_blobs/1`
-  once the purge has succeeded.
+  and then nothing knows where the blobs were. Pass them to `delete_blobs/2`
+  once the purge has succeeded, with the item: its derivatives are in its own
+  store (#1559).
   """
   @spec blobs(map()) :: [{String.t(), boolean()}]
   def blobs(item) do
@@ -183,16 +188,16 @@ defmodule KilnCMS.Media.Derivatives do
   end
 
   @doc "Deletes the blobs `blobs/1` returned."
-  @spec delete_blobs([{String.t(), boolean()}]) :: :ok
-  def delete_blobs(blobs) do
-    Enum.each(blobs, fn {key, private?} -> delete_blob(key, private?) end)
+  @spec delete_blobs([{String.t(), boolean()}], Storage.at()) :: :ok
+  def delete_blobs(blobs, at \\ nil) do
+    Enum.each(blobs, fn {key, private?} -> delete_blob(key, private?, at) end)
   end
 
-  defp delete_blob(key, true), do: Storage.delete_private(key)
-  defp delete_blob(key, _public), do: Storage.delete(key)
+  defp delete_blob(key, true, at), do: Storage.delete_private(key, at)
+  defp delete_blob(key, _public, at), do: Storage.delete(key, at)
 
   defp read(item, key) do
-    if private?(item), do: Storage.fetch_private(key), else: Storage.fetch(key)
+    if private?(item), do: Storage.fetch_private(key, item), else: Storage.fetch(key, item)
   end
 
   defp private?(item), do: Map.get(item, :audience, :public) != :public
