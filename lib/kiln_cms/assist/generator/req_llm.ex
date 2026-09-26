@@ -18,31 +18,25 @@ defmodule KilnCMS.Assist.Generator.ReqLLM do
 
   alias KilnCMS.Assist
   alias KilnCMS.Assist.Prompt
+  alias KilnCMS.LLM.Client
 
   @impl KilnCMS.Assist.Generator
   def generate(request, opts \\ []) do
     {system, user} = Prompt.build(request)
-    model = Assist.model()
+    # `:llm` is a site's own route (#1557), put there by `KilnCMS.Assist.run/2`;
+    # without one this is the operator's configuration, as it always was.
+    route = Keyword.get(opts, :llm) || Assist.operator_route()
 
     req_opts =
-      Assist.request_opts()
+      route
+      |> Assist.request_opts()
       |> Keyword.merge(Keyword.take(opts, [:temperature, :max_tokens, :receive_timeout]))
       |> Keyword.put(:system_prompt, system)
 
-    with {:ok, response} <- ReqLLM.generate_text(model, user, req_opts),
-         text when is_binary(text) <- ReqLLM.Response.text(response) do
-      {:ok, text, usage(response)}
-    else
+    case Client.text(route, user, req_opts) do
+      {:ok, text, usage} -> {:ok, text, usage}
       {:error, %{__exception__: true} = exception} -> {:error, Exception.message(exception)}
       {:error, reason} -> {:error, reason}
-      _other -> {:error, :unparsable}
-    end
-  end
-
-  defp usage(response) do
-    case ReqLLM.Response.usage(response) do
-      %{} = usage -> usage
-      _ -> %{}
     end
   end
 end

@@ -584,7 +584,26 @@ operator's keys can. The relay host is refused if it resolves to a private,
 loopback, link-local or metadata address, checked when it is saved and again on
 every connection. A site relay's hard rejects cancel the message but don't add
 the address to the instance-wide suppression list, because a relay the site
-chose could otherwise block any address for every site.
+chose could otherwise block any address for every site. They go on the site's
+own list instead (next section).
+
+## Site bounce suppression — `Mail.SiteSuppressedRecipient` (#1562)
+
+| Action | admin | editor | viewer | anonymous | system |
+|--------|:-----:|:------:|:------:|:---------:|:------:|
+| read, `destroy` | ✅ | ❌ | ❌ | ❌ | ✅ |
+| `suppress` | ❌ | ❌ | ❌ | ❌ | ✅ |
+
+The addresses one site's own relay rejected as dead, per site
+(`org_id`, `email`). Org admin reads and clears it from `/editor/site-mail`; a
+non-admin read filters to nothing. Only the delivery pipeline writes it, as
+the **system** (`authorize?: false`), on a reject naming the recipient that
+came through that site's relay. Not even the site's admin can add a row: that
+would stop the site's mail to an address without a bounce ever happening.
+
+It is consulted only for mail sent for that site (`KilnCMS.Mail.suppressed?/2`
+with `org_id:`). Account mail carries no site and never reads it, and no site
+reads another's, so a hostile relay can stop only its own site's mail.
 
 ## Push notification key — `SiteVapidKey` (#1560)
 
@@ -601,6 +620,25 @@ against the old key as a system write, since those rows belong to the
 reviewers and not to the admin. `KilnCMS.Push.Keys` reads the row as the
 system, for the push worker (which has no actor) and for a reviewer
 subscribing on `/editor/settings`, who is not the site's admin.
+
+## AI provider — `SiteAiProvider` (#1557)
+
+| Resource | read | writes |
+|---|---|---|
+| `SiteAiProvider` (`read`) | admin only | admin only (`save`, `update`, `destroy`) |
+
+A site's own AI provider, API key and model per feature (SEO suggestions, block
+assist, `/api/ask` answers), at `/editor/site-ai`. Org-admin on both sides, like
+`SiteMailRelay`: the row names the site's AI vendor and account. The features
+read it as the system (`KilnCMS.LLM.SiteProvider`) — `/api/ask` has no actor at
+all — tenant-scoped to the one site the request is for.
+
+The same tenant rules as the mail relay, none of them a policy: the key is
+encrypted, never read back into the form, and has no env-var or file source;
+an OpenAI-compatible endpoint must be `https://` and is refused if it resolves
+to a private, loopback, link-local or metadata address, at save and on every
+request. Changing the provider or endpoint drops the stored key, so a co-admin
+cannot send a key they were never shown to a host of their choosing.
 
 ## Content types — `TypeDefinition`
 

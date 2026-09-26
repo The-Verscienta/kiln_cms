@@ -107,8 +107,9 @@ build if a resource is ever registered without that authorizer.
   (subdomain of `TENANT_BASE_HOST`, then custom domain) and sets it as the Ash
   tenant for the whole request, so tenant scoping applies to GraphQL and
   JSON:API without resolver changes. A host matching neither falls back to the
-  default org unless `TENANT_STRICT_HOST=true`, which 404s it instead — see
-  residual risk 3.
+  default org unless strict host matching is on — `TENANT_STRICT_HOST=true`, or
+  unset on a deployment with more than one org (#1547) — which 404s it instead;
+  see residual risk 3.
 - **Rate limiting** — `Plugs.RateLimit` (Hammer/ETS, per-IP) across nine
   buckets; limits in `lib/kiln_cms_web/rate_limit.ex`. **The credential forms
   submit where no plug can reach them:** each is an AshAuthentication
@@ -633,12 +634,48 @@ build if a resource is ever registered without that authorizer.
   claims the URL *and* the block has no title yet, so a resolved document does
   not re-fetch; and by Oban's per-document uniqueness window.
 
+### A site's own AI provider (`/editor/site-ai`, #1557)
+A site admin — a tenant, on a hosted deployment — can point the site's SEO
+suggestions, block assist and `/api/ask` answers at their own provider account.
+That makes the site admin the one choosing where this server sends content and
+a credential, so the operator's trust assumptions do not carry over:
+
+- **The destination** — a closed list of hosted providers, each dialled at the
+  provider's own published API root, or one `https://` OpenAI-compatible URL.
+  That URL is SSRF-checked at save (`Validations.AiBaseUrl`) and dialled only
+  through `KilnCMS.SafeFetch` (re-checked and pinned per request, no redirects,
+  1MB response cap), never through `req_llm`'s own client. `ollama` and `vllm`
+  are not offered: their default endpoint is `localhost`, the operator's box.
+- **Exfiltrating the operator's secrets** — the key is database-only, with no
+  env-var or file source, so it cannot be pointed at `SECRET_KEY_BASE` or the
+  operator's `ANTHROPIC_API_KEY`. And because `req_llm` fills an unset key or
+  endpoint from the operator's `config :req_llm` and `<PROVIDER>_API_KEY`, a
+  site request always passes both explicitly (an absent key is sent as `""`,
+  which `req_llm` refuses rather than fills). `SiteProviderIsolationTest`
+  plants the operator's key and endpoint in every place `req_llm` reads.
+- **Exfiltrating the site's own key** — write-only in the form, and dropped
+  when the provider or endpoint changes, so a co-admin who was never shown the
+  key cannot redirect it to a host they control. Vault-encrypted at rest;
+  a `SECRET_KEY_BASE` rotation makes it unreadable
+  ([secrets-rotation.md](secrets-rotation.md)).
+- **Falling back** — a site whose provider is set but unusable (unreadable
+  row, undecryptable key) is refused, never served by the operator's provider.
+  Falling back would send its content through an account and DPA it opted out
+  of, billed to the operator. See `KilnCMS.LLM.SiteProvider`.
+- **Cost** — the `KilnCMS.LLM.Budget` buckets apply to a site's key as to the
+  operator's, so `/api/ask` stays rate-limited per caller and per site; each
+  call still occupies a process here for up to the feature's timeout.
+- **What the provider sees** — the same as the operator's provider would: a
+  page's text, a block and the editor's instruction, or published passages and
+  an anonymous visitor's question. It is the site's choice and the page says so.
+
 ### Other outbound calls
 `Kiln.Updates` (GitHub releases, admin-triggered), `KilnCMS.Unsplash`,
 Meilisearch, S3/MinIO, the mailer, and the LLM providers behind `/api/ask` and
 SEO drafting all make outbound requests to *operator-configured or fixed*
 endpoints, not user-supplied ones — so they are not SSRF vectors in the way
-webhooks are. Note that `/api/ask` lets an anonymous caller drive an outbound
+webhooks are. The exceptions are a site's own SMTP relay (#1322) and AI
+endpoint (above), which are tenant-chosen and SSRF-checked. Note that `/api/ask` lets an anonymous caller drive an outbound
 LLM request; it is config-gated and rate-limited under `:api`, but it is a cost
 amplification surface.
 
@@ -766,15 +803,25 @@ number.
    documentation. The pointer to `api.md` already meets it: audiences are the
    access-control axis.
 
-3. **Unknown `Host` headers resolve to the default organization — unless
-   `TENANT_STRICT_HOST` is set.** #563 added the control; it ships **off**, so
-   an existing deployment is exactly as exposed as before until an operator
-   turns it on. Do that on any multi-tenant deployment: an unresolvable `Host`
-   is then refused with a bare 404 rather than served the default org, across
-   everything the router serves plus LiveView mounts and the GraphQL and
-   visual-editing sockets. The app logs a warning at boot when it is off and
-   more than one org exists. Terminating unknown hosts at the proxy is still
-   worth doing as well.
+3. **Unknown `Host` headers resolve to the default organization — on a
+   single-org deployment, or where `TENANT_STRICT_HOST=false`.** #563 added
+   the control; since #1547 an unset `TENANT_STRICT_HOST` turns it on by
+   itself once a second organization exists, on every node and with no
+   restart, so a multi-tenant deployment is no longer exposed by default. With
+   it on, an unresolvable `Host` is refused with a bare 404 rather than served
+   the default org, across everything the router serves plus LiveView mounts
+   and the GraphQL and visual-editing sockets. What remains:
+   - An operator can still set `TENANT_STRICT_HOST=false` on a multi-org
+     deployment. The app warns about that at boot, when the second org is
+     created, and on `/editor/system`.
+   - A node that misses the create's `Phoenix.PubSub` broadcast (partitioned,
+     or mid-boot) stays lenient until its periodic recount, at most five
+     minutes later.
+   - If the organizations cannot be counted at all (boot with Postgres down),
+     an unset setting fails **closed**: unknown hosts are refused until a
+     count succeeds.
+
+   Terminating unknown hosts at the proxy is still worth doing as well.
 
    A host whose lookup could not *run* — Postgres down — is refused too, since
    falling back would reopen exactly this leak on an unrecognized host, but with
@@ -856,16 +903,13 @@ number.
    on_mount fails loudly in test instead of serving the wrong tenant in
    production.
 
-   **1.0 verdict (decided, #1547): fix before 1.0.**
-   Roadmap decision 4 (2026-09-18) settled this: `TENANT_STRICT_HOST` turns on
-   automatically once a second organization exists, and an explicit setting
-   still wins. It is tracked as #1547 in v0.11.0 and is being implemented
-   separately. On main it is still a plain opt-in read by
-   `KilnCMSWeb.Tenant.strict_host?/0` (`lib/kiln_cms_web/tenant.ex:292`), and
-   the multi-org boot warning is the only nudge. The sub-residuals stay
-   accepted: the plain-text refusal lets a sweep enumerate org slugs, and
-   nothing router-reachable can meter `/live` longpoll. Both are documented with
-   a proxy-level remedy. Rewrite this item once #1547 lands.
+   **1.0 verdict (decided, #1547): fixed.**
+   Roadmap decision 4 (2026-09-18) settled this, and #1547 implements it: an
+   unset `TENANT_STRICT_HOST` turns on once a second organization exists, and
+   an explicit setting still wins (see the top of this item). The
+   sub-residuals stay accepted: the plain-text refusal lets a sweep enumerate
+   org slugs, and nothing router-reachable can meter `/live` longpoll. Both are
+   documented with a proxy-level remedy.
 4. **The OpenAPI spec and Swagger explorer describe the write surface** —
    *closed (#567).* Both were unauthenticated in every environment, production
    included, while GraphQL introspection was already disabled there for the

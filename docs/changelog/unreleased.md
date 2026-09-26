@@ -5,6 +5,39 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Breaking
+
+<a id="multi-org-installs-now-refuse-unknown-hosts-unless-tenantstricthostfalse"></a>
+
+- **Multi-org installs now refuse unknown hosts unless `TENANT_STRICT_HOST=false`.**
+  `TENANT_STRICT_HOST` has a third state, and it is the new default: **unset
+  means auto** — strict host matching is on if and only if more than one
+  organization exists. A single-org install behaves exactly as before; a
+  deployment with two or more organizations, where `TENANT_STRICT_HOST` was
+  never set, now answers a request whose `Host` matches no organization (a bare
+  hostname, an IP literal, a platform's internal hostname, an attacker-supplied
+  header) with a `404` — or a retryable `503` if the database is down — instead
+  of the default org's content, branding and analytics. The `PHX_HOST` apex, the
+  `KILN_CONSOLE_HOST`, the health probes (`/up`, `/ready`) and the payment
+  webhook are never refused.
+
+  **To keep the old behaviour**, set `TENANT_STRICT_HOST=false`. Kiln then warns
+  about it at boot and on `/editor/system`, as it has since #660, and those
+  warnings now name the explicit `false` as the cause. An explicit
+  `TENANT_STRICT_HOST=true` is unchanged.
+
+  Auto follows the organization count without a restart: creating the second
+  organization turns it on immediately on the node that served the create, and
+  on the others through a `Phoenix.PubSub` broadcast (a node that misses it
+  recounts within five minutes). The per-request check reads a cached verdict,
+  never a count. If the count cannot be read at all — a node that booted while
+  Postgres was unreachable — auto fails **closed** and refuses unknown hosts
+  until a count succeeds, because serving another tenant's site to an
+  unrecognized host cannot be undone and a retryable refusal can. See
+  `KilnCMSWeb.Tenant.OrgCount`, `docs/multi-tenancy.md` and
+  `docs/environment-variables.md`. Decision 4 of `docs/roadmap-1.0.md`
+  ([#1547](https://github.com/The-Verscienta/kiln_cms/issues/1547)).
+
 ## Added
 
 <a id="a-site-can-sign-its-push-notifications-with-its-own-key-generated-in-the-console"></a>
@@ -70,6 +103,70 @@ carries the reasoning.
   object, and the site's bucket origin is added to that site's `img-src` and
   `media-src`.
 
+<a id="a-site-on-its-own-smtp-relay-keeps-its-own-bounce-list"></a>
+
+- **A site on its own SMTP relay keeps its own bounce list.** When a site's own
+  relay (`/editor/site-mail`) rejects a recipient as dead (`5.1.1`, `5.2.1` and
+  the like, in the mail transaction), the address goes on that site's own
+  suppression list (`KilnCMS.Mail.SiteSuppressedRecipient`, keyed by site and
+  address), and that site's newsletters and other queued mail skip it (#1562).
+  Before, a site relay's hard reject cancelled that one message and nothing
+  more, so a site on its own relay kept mailing dead addresses on every
+  newsletter, which hurts its standing with its provider.
+
+  The list stops only that site's mail. The relay is a server the site chose,
+  and it may answer 550 to any address, so its word never reaches the
+  instance-wide list, another site's mail, or account mail (sign-in links,
+  password resets), which carries no site and never consults a site's list.
+  The worst a hostile relay can do with it is stop mail its own site sends. The
+  instance-wide list stays the operator's relay's alone, and it still applies
+  to every site's mail. Only a reject naming the recipient suppresses: a relay
+  refusing our AUTH, TLS or sender, and a reject that doesn't say whose fault
+  it is, suppress nobody, as on the operator's relay.
+
+  `/editor/site-mail` gains the **Delivery health** panel `/editor/mail` has,
+  scoped to the site: its recent hard bounces and give-ups by recipient domain
+  (newsletter jobs included), and its suppressed addresses, each with
+  **Remove**. The list is read and cleared by the site's admins only, and
+  written by nothing but the delivery pipeline. One new table,
+  `site_suppressed_recipients`.
+
+<a id="a-site-can-use-its-own-ai-provider-key-and-models-set-from-the-console"></a>
+
+- **A site can use its own AI provider key and models, set from the console.**
+  `/editor/site-ai` (under Configure → Integrations) lets a site admin choose
+  the provider, API key and a model for each of SEO suggestions, block assist
+  and `/api/ask` answers. No `SEO_MODEL` / `ASSIST_MODEL` / `ASK_MODEL` and no
+  redeploy (#1557). Those variables are unchanged: they are the configuration
+  for every site that hasn't set its own. The second integration #1322 moves
+  out of the environment, built the way the SMTP relay set the pattern.
+
+  - **Precedence.** A site with its own provider switched on uses it for all
+    three features and nothing of the operator's: not the key, not `base_url`,
+    not a bespoke generator module. A blank model switches that feature off
+    for the site rather than handing it to the operator's provider.
+  - **Fails closed.** If the row can't be read, or its key can't be decrypted,
+    the request is refused and the editor says why; `/api/ask` answers
+    retrieval-only with `"generation": "failed"`. It never falls back to the
+    operator's provider (`KilnCMS.LLM.SiteProvider`), which would send the
+    site's content through an account it opted out of and bill the operator.
+  - **Key encrypted, write-only, database-only.** Stored with
+    `KilnCMS.Keys.Vault` in a `Vault.Ciphertext` column, never shown again, no
+    env-var or file source. Changing the provider or endpoint drops it.
+  - **Nothing of the operator's rides along.** `req_llm` fills an unset key or
+    endpoint from the operator's config and environment, so a site request
+    always passes both explicitly; a test plants the operator's credentials in
+    every place `req_llm` reads and inspects the request that leaves.
+  - **SSRF-checked.** Hosted providers are dialled at their own API host. An
+    OpenAI-compatible endpoint must be `https://`, is refused if it resolves
+    to a private, loopback, link-local or metadata address, and is reached only
+    through `KilnCMS.SafeFetch`.
+  - **Budgets apply.** The per-user, per-caller and per-site `KilnCMS.LLM.Budget`
+    limits apply to a site's own key as to the operator's.
+
+  New table `site_ai_providers` (one migration). Its `api_key_encrypted` column
+  is walked by `mix kiln.vault.reencrypt`; see `docs/secrets-rotation.md`.
+
 ## Fixed
 
 <a id="an-open-calendar-no-longer-re-queries-once-per-write-during-a-bulk-import"></a>
@@ -89,6 +186,16 @@ carries the reasoning.
   `kiln_cms.calendar.requery` telemetry and `CalendarRequeryMonitor` log line
   keep their meaning: messages answered per re-query.
   ([#1336](https://github.com/The-Verscienta/kiln_cms/issues/1336))
+
+<a id="a-sites-relay-refusing-its-password-no-longer-pages-the-operator"></a>
+
+- **A site's relay refusing its password no longer pages the operator.** A
+  site's own relay refusing AUTH, TLS or the sender raised the operator's
+  "relay refused" alert (log error, Sentry message, telemetry) as if the
+  deployment's relay were broken, and spent that alert's 15-minute cooldown, so
+  the operator's own relay failing in that window went unreported. It now
+  alerts only for the operator's relay, as the relay-unreachable alert already
+  did (#1562).
 
 ## Security
 

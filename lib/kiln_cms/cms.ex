@@ -478,6 +478,16 @@ defmodule KilnCMS.CMS do
       define :reset_site_vapid_key, action: :destroy
     end
 
+    # A site's own AI provider, key and models (#1557). Read through
+    # `KilnCMS.LLM.SiteProvider`, which owns the precedence rule and the fail
+    # direction — never directly.
+    resource KilnCMS.CMS.SiteAiProvider do
+      define :list_site_ai_provider, action: :read
+      define :save_site_ai_provider, action: :save
+      define :update_site_ai_provider, action: :update
+      define :reset_site_ai_provider, action: :destroy
+    end
+
     # The version twin: "who added that script, and when". Registered because
     # AshPaperTrail generates it into this domain.
     resource KilnCMS.CMS.SiteCodeInjection.Version do

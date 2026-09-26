@@ -542,6 +542,17 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("The key this site's review notifications are signed with."),
             keywords: ["vapid", "web push", "notifications", "key", "rotate"]
           },
+          # A site's own AI provider (#1557), beside its own mail relay: both
+          # are this site's account at an outside service instead of the
+          # deployment's.
+          %{
+            key: :site_ai,
+            label: gettext("AI provider"),
+            path: ~p"/editor/site-ai",
+            icon: "hero-sparkles",
+            description: gettext("The AI account and models this site's AI features use."),
+            keywords: ["llm", "model", "api key", "openai", "anthropic", "assist", "ask"]
+          },
           %{
             key: :automation,
             label: gettext("Automation"),

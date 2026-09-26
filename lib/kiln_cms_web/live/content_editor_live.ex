@@ -333,14 +333,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # Side-by-side preview: `:rail` keeps the inspector a narrow column,
     # `:split` widens it to half the editor (`toggle_preview_layout`).
     |> assign(:preview_layout, :rail)
-    # AI-assisted SEO drafting (#60). Read once at mount: this is global
-    # app config, so it can't change under a live session. `seo_drafts`
+    # AI-assisted SEO drafting (#60). Read once at mount, for this site: its
+    # own AI provider (#1557) when it has one switched on, the operator's
+    # config otherwise. A provider changed mid-session is picked up by the
+    # draft call itself, which resolves again. `seo_drafts`
     # holds the current proposal (never persisted, never broadcast — each
     # editor's suggestions are their own); `seo_dismissed` tracks fields
     # already accepted or waved away so their cards stop rendering.
-    |> assign(:seo_enabled?, KilnCMS.Seo.enabled?())
-    |> assign(:seo_egress?, KilnCMS.Seo.egress?())
-    |> assign(:seo_provider, KilnCMS.Seo.provider())
+    |> assign_ai_summary(:seo, KilnCMS.Seo.summary(Accounts.org_id(org)))
     |> assign(:seo_drafting?, false)
     |> assign(:seo_drafts, nil)
     |> assign(:seo_dismissed, MapSet.new())
@@ -349,9 +349,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # without the other. Read once at mount for the same reason.
     # `assist_block` is the id of the block whose panel is open (nil =
     # closed); only one is ever open, so one suggestion is ever in flight.
-    |> assign(:assist_enabled?, KilnCMS.Assist.enabled?())
-    |> assign(:assist_egress?, KilnCMS.Assist.egress?())
-    |> assign(:assist_provider, KilnCMS.Assist.provider())
+    |> assign_ai_summary(
+      :assist,
+      KilnCMS.Assist.summary(Accounts.org_id(org))
+    )
     |> assign(:assist_block, nil)
     |> assign(:assist_action, :rewrite)
     |> assign(:assist_instruction, nil)
@@ -4558,6 +4559,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp seo_error_message(:disabled),
     do: gettext("AI suggestions aren't configured.")
 
+  defp seo_error_message({:site_provider, reason}), do: site_provider_error_message(reason)
+
   defp seo_error_message({:rate_limited, retry_after_ms}),
     do:
       gettext("Too many suggestions requested. Try again in %{seconds}s.",
@@ -4723,6 +4726,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp assist_error_message(:disabled), do: gettext("AI assist isn't configured.")
 
+  defp assist_error_message({:site_provider, reason}), do: site_provider_error_message(reason)
+
   defp assist_error_message(:empty),
     do: gettext("The model returned nothing usable. Try again, or rephrase your instruction.")
 
@@ -4734,6 +4739,36 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp assist_error_message(_reason),
     do: gettext("Couldn't generate text. Please try again.")
+
+  # This site's own AI provider (#1557) is on but can't be used. Said plainly,
+  # because nothing was sent anywhere and retrying won't help until an admin
+  # fixes the setting.
+  defp site_provider_error_message(:credentials_unreadable),
+    do:
+      gettext(
+        "This site's AI provider key can't be read, so nothing was sent. A site admin needs to enter it again under Configure → AI provider."
+      )
+
+  defp site_provider_error_message(_reason),
+    do:
+      gettext(
+        "This site's AI provider settings couldn't be read, so nothing was sent. Try again in a moment."
+      )
+
+  # The editor's assigns for one AI feature on this site, from one resolve.
+  defp assign_ai_summary(socket, :seo, summary) do
+    socket
+    |> assign(:seo_enabled?, summary.enabled?)
+    |> assign(:seo_egress?, summary.egress?)
+    |> assign(:seo_provider, summary.provider)
+  end
+
+  defp assign_ai_summary(socket, :assist, summary) do
+    socket
+    |> assign(:assist_enabled?, summary.enabled?)
+    |> assign(:assist_egress?, summary.egress?)
+    |> assign(:assist_provider, summary.provider)
+  end
 
   # Write `seo_image` from a server-side action (picker / featured-image copy).
   #
