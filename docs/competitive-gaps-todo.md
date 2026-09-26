@@ -165,10 +165,11 @@ be first-party.
       multitenancy** on ~53 resources (content and its versions, taxonomy,
       media, forms, analytics, …). The request `Host` picks the org — a
       subdomain of `TENANT_BASE_HOST`, or a full custom domain — resolved by
-      `KilnCMSWeb.Tenant`. Set **`TENANT_STRICT_HOST=true`** on any real
-      multi-tenant deployment: without it an unmatched `Host` (a bare hostname,
-      an IP literal, `localhost`, or an attacker-supplied header) is served the
-      **default org's** content, branding and analytics. Config table:
+      `KilnCMSWeb.Tenant`. Strict host matching turns on by itself once a
+      second org exists (#1547); without it an unmatched `Host` (a bare
+      hostname, an IP literal, `localhost`, or an attacker-supplied header) is
+      served the **default org's** content, branding and analytics, so leave
+      `TENANT_STRICT_HOST` unset (or `true`) on a multi-tenant deployment. Config table:
       [environment-variables.md](environment-variables.md#multi-tenancy-336).
 
 **Note:** a few deliberate single-org-bridge fallbacks remain where a nil tenant

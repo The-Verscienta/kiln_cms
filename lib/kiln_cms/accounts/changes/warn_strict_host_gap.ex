@@ -1,7 +1,13 @@
 defmodule KilnCMS.Accounts.Changes.WarnStrictHostGap do
   @moduledoc """
   Warn when the organization just created is the one that makes this deployment
-  multi-tenant while `TENANT_STRICT_HOST` is still off (#660).
+  multi-tenant while `TENANT_STRICT_HOST` is off (#660).
+
+  Since #1547 that means *explicitly* off. Unset, `TENANT_STRICT_HOST` turns
+  strict matching on by itself once a second organization exists
+  (`KilnCMS.Accounts.Changes.RecordOrgCount`, which runs first), so this only
+  fires for an operator who set `TENANT_STRICT_HOST=false` — and says that the
+  override is what is keeping unknown hosts on the default org.
 
   ## Why here, when boot already checks
 
@@ -57,9 +63,10 @@ defmodule KilnCMS.Accounts.Changes.WarnStrictHostGap do
       Logger.warning(
         "Created organization #{inspect(org.slug)}, the second on this deployment — " <>
           "so the Host header now decides which site a request gets, and " <>
-          "TENANT_STRICT_HOST is off. A request whose Host matches no organization " <>
-          "is served the DEFAULT org's content, branding and analytics. Set " <>
-          "TENANT_STRICT_HOST=true to reject those instead; see " <>
+          "TENANT_STRICT_HOST=false overrides the default that would now reject " <>
+          "unrecognized hosts. A request whose Host matches no organization is " <>
+          "served the DEFAULT org's content, branding and analytics. Unset " <>
+          "TENANT_STRICT_HOST (or set it to true) to reject those instead; see " <>
           "docs/environment-variables.md."
       )
     end

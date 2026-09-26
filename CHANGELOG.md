@@ -54,6 +54,11 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Breaking
+
+- **Multi-org installs now refuse unknown hosts unless `TENANT_STRICT_HOST=false`.**
+  ([#1547](https://github.com/The-Verscienta/kiln_cms/issues/1547) · [long form](docs/changelog/unreleased.md#multi-org-installs-now-refuse-unknown-hosts-unless-tenantstricthostfalse))
+
 ## [0.10.0] - 2026-09-19
 
 Long form: [docs/changelog/v0.10.0.md](docs/changelog/v0.10.0.md) —

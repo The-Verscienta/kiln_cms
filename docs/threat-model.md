@@ -107,8 +107,9 @@ build if a resource is ever registered without that authorizer.
   (subdomain of `TENANT_BASE_HOST`, then custom domain) and sets it as the Ash
   tenant for the whole request, so tenant scoping applies to GraphQL and
   JSON:API without resolver changes. A host matching neither falls back to the
-  default org unless `TENANT_STRICT_HOST=true`, which 404s it instead — see
-  residual risk 3.
+  default org unless strict host matching is on — `TENANT_STRICT_HOST=true`, or
+  unset on a deployment with more than one org (#1547) — which 404s it instead;
+  see residual risk 3.
 - **Rate limiting** — `Plugs.RateLimit` (Hammer/ETS, per-IP) across nine
   buckets; limits in `lib/kiln_cms_web/rate_limit.ex`. **The credential forms
   submit where no plug can reach them:** each is an AshAuthentication
@@ -706,15 +707,25 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    [api.md](api.md#password-protected-content) before they use this for anything
    that would matter if it leaked.
 
-3. **Unknown `Host` headers resolve to the default organization — unless
-   `TENANT_STRICT_HOST` is set.** #563 added the control; it ships **off**, so
-   an existing deployment is exactly as exposed as before until an operator
-   turns it on. Do that on any multi-tenant deployment: an unresolvable `Host`
-   is then refused with a bare 404 rather than served the default org, across
-   everything the router serves plus LiveView mounts and the GraphQL and
-   visual-editing sockets. The app logs a warning at boot when it is off and
-   more than one org exists. Terminating unknown hosts at the proxy is still
-   worth doing as well.
+3. **Unknown `Host` headers resolve to the default organization — on a
+   single-org deployment, or where `TENANT_STRICT_HOST=false`.** #563 added
+   the control; since #1547 an unset `TENANT_STRICT_HOST` turns it on by
+   itself once a second organization exists, on every node and with no
+   restart, so a multi-tenant deployment is no longer exposed by default. With
+   it on, an unresolvable `Host` is refused with a bare 404 rather than served
+   the default org, across everything the router serves plus LiveView mounts
+   and the GraphQL and visual-editing sockets. What remains:
+   - An operator can still set `TENANT_STRICT_HOST=false` on a multi-org
+     deployment. The app warns about that at boot, when the second org is
+     created, and on `/editor/system`.
+   - A node that misses the create's `Phoenix.PubSub` broadcast (partitioned,
+     or mid-boot) stays lenient until its periodic recount, at most five
+     minutes later.
+   - If the organizations cannot be counted at all (boot with Postgres down),
+     an unset setting fails **closed**: unknown hosts are refused until a
+     count succeeds.
+
+   Terminating unknown hosts at the proxy is still worth doing as well.
 
    A host whose lookup could not *run* — Postgres down — is refused too, since
    falling back would reopen exactly this leak on an unrecognized host, but with

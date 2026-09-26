@@ -98,6 +98,11 @@ defmodule KilnCMS.Application do
       # deleted code-injection snippet stops executing everywhere rather than
       # on whichever node served the delete. After PubSub, which it needs.
       KilnCMS.Cache.ClusterBust,
+      # Whether more than one organization exists — what an unset
+      # TENANT_STRICT_HOST decides strict host matching by (#1547). Counts
+      # once in `init/1`, before the endpoint starts, so the first request
+      # already has a verdict; after the Repo and PubSub, which it needs.
+      KilnCMSWeb.Tenant.OrgCount,
       # Fire-and-forget tasks off the request hot path (best-effort page-view
       # analytics, search-query recording) so a DB write can't queue/slow
       # delivery. `max_children` bounds in-flight tasks: under a crawler/traffic
@@ -381,12 +386,14 @@ defmodule KilnCMS.Application do
     end
   end
 
-  # A deployment that leaves `TENANT_STRICT_HOST` off serves the DEFAULT org's
+  # A deployment that turns `TENANT_STRICT_HOST` off serves the DEFAULT org's
   # content, branding and analytics to any request carrying an unrecognized Host
   # (#563). That is the correct behaviour for the single-host install the
-  # fallback exists for, so it can't just be flipped — but on a deployment that
-  # has actually created a second org it is a live misconfig, and the operator
-  # should hear it from a log line rather than from an incident.
+  # fallback exists for — and since #1547 an unset flag gives exactly that: off
+  # with one org, on once a second exists. So the gap left to warn about is an
+  # explicit `TENANT_STRICT_HOST=false` on a deployment that has actually
+  # created a second org, and the operator should hear it from a log line
+  # rather than from an incident.
   #
   # Boot is the WEAKEST of the three places this is checked, and deliberately
   # not the only one: it already happened by the time someone creates the second
@@ -403,10 +410,12 @@ defmodule KilnCMS.Application do
     if KilnCMSWeb.Tenant.strict_host_gap?() do
       KilnCMS.Config.Report.warn(
         "strict_host",
-        "TENANT_STRICT_HOST is off on a deployment with more than one organization. " <>
+        "TENANT_STRICT_HOST=false on a deployment with more than one organization. " <>
           "A request whose Host matches no org — a bare hostname, an IP, or an " <>
           "attacker-supplied header — is served the DEFAULT org's content, branding " <>
-          "and analytics. Set TENANT_STRICT_HOST=true to reject those instead; see " <>
+          "and analytics. Unset TENANT_STRICT_HOST (the default turns strict host " <>
+          "matching on once a second organization exists) or set it to true to " <>
+          "reject those instead; see " <>
           "docs/environment-variables.md."
       )
     end
