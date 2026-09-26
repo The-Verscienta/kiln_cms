@@ -479,11 +479,14 @@ defmodule KilnCMSWeb.Layouts do
           </span>
           <%!-- Two buttons rather than one that flips: CSS shows each only in the
                 state it names, so each one's static `aria-expanded` is always
-                true while it is on screen — no script has to keep it honest. --%>
+                true while it is on screen — no script has to keep it honest.
+                Both name the panel they fold, like the drawer's hamburger and
+                the nav section heads. --%>
           <button
             type="button"
             class="side-icon-btn side-collapse"
             data-sidebar-toggle
+            aria-controls="console-sidebar"
             aria-expanded="true"
             aria-label={gettext("Collapse sidebar")}
             title={gettext("Collapse sidebar")}
@@ -494,6 +497,7 @@ defmodule KilnCMSWeb.Layouts do
             type="button"
             class="side-icon-btn side-expand"
             data-sidebar-toggle
+            aria-controls="console-sidebar"
             aria-expanded="false"
             data-side-tip={gettext("Expand sidebar")}
             aria-label={gettext("Expand sidebar")}

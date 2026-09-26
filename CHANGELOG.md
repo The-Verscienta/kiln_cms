@@ -94,6 +94,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **The sidebar's collapse and expand buttons name the panel they fold.**
+  ([long form](docs/changelog/unreleased.md#the-sidebars-collapse-and-expand-buttons-name-the-panel-they-fold))
+
 - **An open calendar no longer re-queries once per write during a bulk import.**
   ([#1336](https://github.com/The-Verscienta/kiln_cms/issues/1336) · [long form](docs/changelog/unreleased.md#an-open-calendar-no-longer-re-queries-once-per-write-during-a-bulk-import))
 

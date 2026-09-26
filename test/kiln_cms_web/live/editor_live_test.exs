@@ -2894,16 +2894,21 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
 
       # Each toggle is on screen only in the state it names, so its static
-      # `aria-expanded` is the truth whenever a reader can reach it.
+      # `aria-expanded` is the truth whenever a reader can reach it, and both
+      # name the panel they fold.
       assert has_element?(
                lv,
-               ~s(aside [data-sidebar-toggle][aria-label="Collapse sidebar"][aria-expanded="true"])
+               ~s(aside [data-sidebar-toggle][aria-label="Collapse sidebar"][aria-expanded="true"][aria-controls="console-sidebar"])
              )
 
       assert has_element?(
                lv,
-               ~s(aside [data-sidebar-toggle][aria-label="Expand sidebar"][aria-expanded="false"])
+               ~s(aside [data-sidebar-toggle][aria-label="Expand sidebar"][aria-expanded="false"][aria-controls="console-sidebar"])
              )
+
+      # The id those two point at, and the one the drawer's hamburger already
+      # named: a dangling IDREF is worse than no attribute.
+      assert has_element?(lv, ~s(aside#console-sidebar))
 
       assert has_element?(lv, ~s(aside .side-theme button[data-phx-theme="dark"]))
       refute has_element?(lv, ~s(header [data-phx-theme]))
