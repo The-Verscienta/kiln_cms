@@ -26,29 +26,6 @@ carries the reasoning.
   lists at boot and on `/editor/system`
   ([#1618](https://github.com/The-Verscienta/kiln_cms/issues/1618)).
 
-## Added
-
-<a id="a-site-can-offer-its-own-single-sign-on-provider"></a>
-
-- **A site can offer its own single sign-on provider.** A site admin sets an
-  OpenID Connect issuer, client ID and client secret at `/editor/site-sso`, and
-  the site's sign-in page offers "Sign in with …" beside the password form. The
-  operator's `OIDC_*` provider is unchanged. Accounts belong to the whole
-  deployment, so the site's provider is honoured only for addresses in email
-  domains the site verified with a DNS TXT record (`_kiln-sso.<domain>`), looked
-  up again on every sign-in, and never for an account with access on another
-  site or across the deployment — a platform admin, another site's member, or a
-  membership-less global editor. Those people sign in the other ways. The flow is
-  deliberately not an AshAuthentication strategy: a per-site strategy would
-  share the operator's identity namespace, so a site's provider asserting a
-  `sub` the operator's had already linked would sign in as that account. It is
-  Assent's OIDC callback (state, nonce, PKCE, `RS256` only) behind two routes,
-  with every provider request through `SafeFetch`. The client secret is
-  vault-encrypted and write-only; if it can't be decrypted, the site's SSO says
-  it is unavailable rather than falling back to the operator's provider. Turning
-  password sign-in off per site, SAML, and several providers per site are not
-  in this change.
-
 ## Breaking
 
 <a id="multi-org-installs-now-cap-form-embeds-at-embedorigins-unless"></a>
@@ -116,6 +93,27 @@ carries the reasoning.
   ([#1547](https://github.com/The-Verscienta/kiln_cms/issues/1547)).
 
 ## Added
+
+<a id="a-site-can-offer-its-own-single-sign-on-provider"></a>
+
+- **A site can offer its own single sign-on provider.** A site admin sets an
+  OpenID Connect issuer, client ID and client secret at `/editor/site-sso`, and
+  the site's sign-in page offers "Sign in with …" beside the password form. The
+  operator's `OIDC_*` provider is unchanged. Accounts belong to the whole
+  deployment, so the site's provider is honoured only for addresses in email
+  domains the site verified with a DNS TXT record (`_kiln-sso.<domain>`), looked
+  up again on every sign-in, and never for an account with access on another
+  site or across the deployment — a platform admin, another site's member, or a
+  membership-less global editor. Those people sign in the other ways. The flow is
+  deliberately not an AshAuthentication strategy: a per-site strategy would
+  share the operator's identity namespace, so a site's provider asserting a
+  `sub` the operator's had already linked would sign in as that account. It is
+  Assent's OIDC callback (state, nonce, PKCE, `RS256` only) behind two routes,
+  with every provider request through `SafeFetch`. The client secret is
+  vault-encrypted and write-only; if it can't be decrypted, the site's SSO says
+  it is unavailable rather than falling back to the operator's provider. Turning
+  password sign-in off per site, SAML, and several providers per site are not
+  in this change.
 
 <a id="a-site-can-sign-its-push-notifications-with-its-own-key-generated-in-the-console"></a>
 
