@@ -796,12 +796,12 @@ choosing a host this server sends signed requests and file bodies to:
 Known and accepted, in rough order of how much they should worry an operator.
 Each is a deliberate trade-off, not an oversight — but each is worth revisiting.
 
-**1.0 review (#1535).** Each item below ends with a **proposed** 1.0 verdict:
-*still accepted at 1.0*, *fix before 1.0*, or *fix after 1.0*, with the reason
-and the code it was checked against on `main` (v0.10.0). They are proposals for
-the maintainer to confirm or overturn, except item 3, which roadmap decision 4
-already settled. Items keep their numbers because other files cite them by
-number.
+**1.0 review (#1535).** Each item below ends with its 1.0 verdict: *still
+accepted at 1.0*, *fix before 1.0*, or *fix after 1.0*, with the reason and the
+code it was checked against on `main` (v0.10.0). The maintainer accepted every
+verdict on 2026-09-26; item 3 was already settled by roadmap decision 4. Each
+*fix before 1.0* has an issue on the v0.12.0 milestone. Items keep their numbers
+because other files cite them by number.
 
 1. ~~**Form embeds default to `frame-ancestors *`.**~~ **Closed in #562.**
    `EMBED_ORIGINS` unset now means same-origin only, so cross-site embedding is
@@ -836,17 +836,17 @@ number.
    used to lack: under the cap, a taken-over admin account cannot re-open the
    overlay-and-harvest surface #562 closed beyond what the operator listed.
 
-   **1.0 verdict (proposed, #1535): still accepted at 1.0.** Verified on main:
+   **1.0 verdict (decided, #1535): still accepted at 1.0.** Verified on main:
    the default is same-origin (#562), a form's list resolves form -> org ->
    deployment in `KilnCMS.Forms.EmbedPolicy` (#1131), and the operator ceiling
    is `KilnCMS.Forms.EmbedCeiling` behind `EMBED_ORIGINS_LOCKED`
-   (`config/runtime/cross_origin.exs:37`, #1133). What remains is a stated
+   (`config/runtime/cross_origin.exs`, #1133). What remains is a stated
    choice: an org admin decides who may frame that org's own forms, which grants
    nothing across the tenant boundary, and an operator who disagrees has a
-   switch. One question for the maintainer to take alongside #1547, not proposed
-   here: should `EMBED_ORIGINS_LOCKED` also default on once a second
-   organization exists? The case is weaker than for an unknown `Host`, because
-   the uncapped default leaks nothing to another tenant.
+   switch. Decided alongside #1547: `EMBED_ORIGINS_LOCKED` also defaults on
+   once a second organization exists, so on a multi-org install the operator's
+   `EMBED_ORIGINS` caps every tenant unless the operator says otherwise
+   (#1618).
 2. **Passphrase-locked content is weak by construction (#496).** A shared secret
    typed into a public form is not access control in the sense the rest of this
    document uses the phrase: there is no per-reader identity, so no audit trail
@@ -870,7 +870,7 @@ number.
    [api.md](api.md#password-protected-content) before they use this for anything
    that would matter if it leaked.
 
-   **1.0 verdict (proposed, #1535): still accepted at 1.0.** Nothing here is a
+   **1.0 verdict (decided, #1535): still accepted at 1.0.** Nothing here is a
    bug to fix. A shared passphrase is weak by construction, and the item says
    so. The bounds it lists still hold on main: the `:unlock` bucket is 10/min
    per address (`lib/kiln_cms_web/rate_limit.ex:53`), and grants live 12 hours
@@ -1000,7 +1000,7 @@ number.
    `KilnCMSWeb.Plugs.ApiDocs` too. A test pins that the content routes it sits
    in front of are unaffected.
 
-   **1.0 verdict (proposed, #1535): still accepted at 1.0.** The residual is a
+   **1.0 verdict (decided, #1535): still accepted at 1.0.** The residual is a
    maintenance hazard, not an exposure, and it is pinned.
    `KilnCMSWeb.Plugs.ApiDocs` hard-codes both paths
    (`lib/kiln_cms_web/plugs/api_docs.ex:78-79`), and
@@ -1032,7 +1032,7 @@ number.
    `TRUSTED_PROXIES` is what makes the buckets per-*client* and is the real
    remedy on any deployment behind a proxy.
 
-   **1.0 verdict (proposed, #1535): still accepted at 1.0 (correct the
+   **1.0 verdict (decided, #1535): still accepted at 1.0 (correct the
    arithmetic).** Detection is in `KilnCMSWeb.Plugs.ClientIp`
    (`lib/kiln_cms_web/plugs/client_ip.ex:164-170`, a once-per-node warning that
    names the fix). Honouring forwarding headers without a trusted list would be
@@ -1047,7 +1047,7 @@ number.
    `:assign_current_org`, added in #563, so the preview LiveView resolves the
    host it is served from — but the token lookup itself is still tenant-less.)
 
-   **1.0 verdict (proposed, #1535): still accepted at 1.0 (rewrite the item).**
+   **1.0 verdict (decided, #1535): still accepted at 1.0 (rewrite the item).**
    The item is out of date. #1309 closed the tenant half. Every redeemer pins
    the token's `org_id` to the serving org and then reads with `tenant: org_id`:
    `PreviewController`
@@ -1087,7 +1087,7 @@ number.
    because they read as the system (`authorize?: false`). See
    [`policy-matrix.md`](policy-matrix.md) for the resulting grants.
 
-   **1.0 verdict (proposed, #1535): nothing to decide (closed).** Closed in #565
+   **1.0 verdict (decided, #1535): nothing to decide (closed).** Closed in #565
    and re-checked on main. `PublishedArtifact` reads through
    `Firing.Checks.DocumentReadable`
    (`lib/kiln_cms/firing/published_artifact.ex:103`), and the only `authorize_if
@@ -1097,8 +1097,8 @@ number.
    Policies still run, so the audience and published filters hold, but the
    tenant boundary does not for that request.
 
-   **1.0 verdict (proposed, #1535): fix before 1.0 (a test and a rewrite, not
-   new code).** The item is stale. `KilnCMSWeb.Plugs.SetTenant` runs in the
+   **1.0 verdict (decided, #1535 → #1614): fix before 1.0 (a test and a
+   rewrite, not new code).** The item is stale. `KilnCMSWeb.Plugs.SetTenant` runs in the
    endpoint (`lib/kiln_cms_web/endpoint.ex:187`) and sets the Ash tenant on
    every HTTP request (`lib/kiln_cms_web/plugs/set_tenant.ex:221`).
    `AshGraphql.Plug` copies that tenant into the Absinthe context for `/gql`
@@ -1200,7 +1200,7 @@ number.
    child an id names is believed, and only the two-children-one-id case is
    decidable without an ownership check.
 
-   **1.0 verdict (proposed, #1535): fix after 1.0.** Verified unchanged on main
+   **1.0 verdict (decided, #1535): fix after 1.0.** Verified unchanged on main
    (`lib/kiln_cms/cms/changes/enforce_block_field_policy.ex:140-153`). What
    remains needs an editor who may already write that document in that org. Such
    an editor can move or drop an admin-set block field by relabelling ids, or
@@ -1223,16 +1223,14 @@ number.
    suppression is logged for exactly that reason. Revisit if Kiln is ever
    deployed multi-node.
 
-    **1.0 verdict (proposed, #1535): still accepted at 1.0, if 1.0 says single
-    node.** The trade is unchanged: `AccountThrottle` counts with
-    `:ets.update_counter`, and `KilnCMSWeb.RateLimit` is Hammer with `backend:
-    :ets` (`lib/kiln_cms_web/rate_limit.ex:5`). It is still right for one node,
-    because a row-backed counter reopens enumeration and turns every guess into
-    a write. The app is multi-node *capable*, though: `DNSCluster` is supervised
-    and PubSub is distributed. So 1.0's supported-deployment statement has to
-    say plainly that budgets are per node, and that N nodes multiply every
-    budget by N. If 1.0 instead promises multi-node, this becomes a fix before
-    1.0, because the budgets need a shared counter.
+    **1.0 verdict (decided, #1535 → #1619): fix before 1.0.** `AccountThrottle`
+    counts with `:ets.update_counter`, and `KilnCMSWeb.RateLimit` is Hammer with
+    `backend: :ets` (`lib/kiln_cms_web/rate_limit.ex:5`). The app is multi-node
+    *capable*: `DNSCluster` is supervised and PubSub is distributed. So on N
+    nodes every budget is multiplied by N, and 1.0 will not declare
+    single-node-only support. The budgets need a shared counter that keeps this
+    item's own constraints: nothing on the user row (that reopens enumeration
+    and turns every guess into a write), and a bounded, expiring key space.
 11. **The `:browser` pipeline is not rate-limited**, so `/`, `/developers`, all
     `/editor/**` LiveView mounts, and the account/governance export endpoints
     are unthrottled. They are session-gated (except the first two), so this is
@@ -1339,7 +1337,7 @@ number.
     surfaces counted so far (above); `/live` events remain the harder problem
     #1305 described (no single choke point, no obvious per-event cost model).
 
-    **1.0 verdict (proposed, #1535): fix after 1.0.** Every path this item
+    **1.0 verdict (decided, #1535): fix after 1.0.** Every path this item
     called a confidentiality concern is now closed or metered.
     `KilnCMSWeb.LiveJoinBudget` meters `/live` root joins,
     `KilnCMSWeb.SocketJoinBudget` meters `/ws/*` connects, `SocketEventBudget`
@@ -1359,8 +1357,8 @@ number.
     runtime `img-src` is widened by `CSP_IMG_SRC` and by the Unsplash
     integration — the only externally-influenced part of the policy.
 
-    **1.0 verdict (proposed, #1535): fix before 1.0 (do the review once; it
-    finds one directive).** More sources now widen the policy than when this was
+    **1.0 verdict (decided, #1535 → #1615): fix before 1.0 (do the review
+    once; it finds one directive).** More sources now widen the policy than when this was
     written. `img-src` also takes the enabled oEmbed providers' thumbnail hosts
     (#489), and `media-src` takes the storage hosts (#494)
     (`lib/kiln_cms_web/router.ex:1286-1304`). More important, `connect-src
@@ -1406,7 +1404,7 @@ number.
     Pairs with [`backups.md`](backups.md), where the same `SECRET_KEY_BASE` is
     part of the backup.
 
-    **1.0 verdict (proposed, #1535): still accepted at 1.0.** The two gaps this
+    **1.0 verdict (decided, #1535): still accepted at 1.0.** The two gaps this
     item was opened for are closed: the runbook (#1304), and the vault read
     window with `mix kiln.vault.reencrypt` and the actor `:rekey` (#1487). The
     four remaining bullets are properties of the mechanisms, and no change in
@@ -1539,7 +1537,7 @@ number.
     typing into a document nothing will persist. The authorization re-check is
     unchanged — collaborative editing of published content remains supported.
 
-    **1.0 verdict (proposed, #1535): still accepted at 1.0.** Closed by #655,
+    **1.0 verdict (decided, #1535): still accepted at 1.0.** Closed by #655,
     #675 and #775. The residual is that the re-check catches exactly what a
     fresh join would refuse, and that is the intended meaning: it is an
     authorization check. Its one data-loss consequence, publishing under an open
@@ -1567,8 +1565,8 @@ number.
     with a new id and a fresh timestamp, on purpose. See
     [webhooks.md](webhooks.md#verifying-the-signature).
 
-    **1.0 verdict (proposed, #1535): fix before 1.0 (remove the deprecated
-    header).** The timestamped scheme closes replay for receivers that verify it
+    **1.0 verdict (decided, #1535 → #1616): fix before 1.0 (remove the
+    deprecated header).** The timestamped scheme closes replay for receivers that verify it
     (`lib/kiln_cms/webhooks.ex:46-65`; both headers are sent at
     `lib/kiln_cms/webhooks/delivery_worker.ex:158-161`). The remainder exists
     only because the body-only `x-kilncms-signature` is still sent. 0.10.0
@@ -1580,7 +1578,7 @@ number.
 
 **Not on this list, but named by the 1.0 roadmap: `/api/ask` lets an anonymous
 caller drive LLM cost** (see *Other outbound calls* above). **1.0 verdict
-(proposed, #1535): still accepted at 1.0.** Generation is off by default
+(decided, #1535): still accepted at 1.0.** Generation is off by default
 (`generator: nil`, `KilnCMS.Ask`). When an operator turns it on, `/api/ask` has
 its own `KilnCMS.LLM.Budget` buckets on top of the `:api` limiter. One is per
 caller and falls back to the client address; the other is per org and is the
