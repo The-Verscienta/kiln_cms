@@ -65,6 +65,9 @@ Every summary line below that was shortened links to its own entry there.
   console.**
   ([#1560](https://github.com/The-Verscienta/kiln_cms/issues/1560) · [long form](docs/changelog/unreleased.md#a-site-can-sign-its-push-notifications-with-its-own-key-generated-in-the-console))
 
+- **A site on its own SMTP relay keeps its own bounce list.**
+  ([#1562](https://github.com/The-Verscienta/kiln_cms/issues/1562) · [long form](docs/changelog/unreleased.md#a-site-on-its-own-smtp-relay-keeps-its-own-bounce-list))
+
 - **A site can use its own AI provider key and models, set from the console.**
   ([#1557](https://github.com/The-Verscienta/kiln_cms/issues/1557) · [long form](docs/changelog/unreleased.md#a-site-can-use-its-own-ai-provider-key-and-models-set-from-the-console))
 
@@ -72,6 +75,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **An open calendar no longer re-queries once per write during a bulk import.**
   ([#1336](https://github.com/The-Verscienta/kiln_cms/issues/1336) · [long form](docs/changelog/unreleased.md#an-open-calendar-no-longer-re-queries-once-per-write-during-a-bulk-import))
+
+- **A site's relay refusing its password no longer pages the operator.**
+  ([#1562](https://github.com/The-Verscienta/kiln_cms/issues/1562) · [long form](docs/changelog/unreleased.md#a-sites-relay-refusing-its-password-no-longer-pages-the-operator))
 
 ### Security
 

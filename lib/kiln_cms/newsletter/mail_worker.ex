@@ -46,7 +46,8 @@ defmodule KilnCMS.Newsletter.MailWorker do
       subscriber.status != :confirmed ->
         {:cancel, "subscriber not confirmed (#{subscriber.status})"}
 
-      Mail.suppressed?(to_string(subscriber.email)) ->
+      # The instance-wide list, and this site's own relay's list (#1562).
+      Mail.suppressed?(to_string(subscriber.email), org_id: tenant) ->
         {:cancel, "recipient suppressed (bounced)"}
 
       true ->

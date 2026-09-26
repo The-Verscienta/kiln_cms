@@ -560,7 +560,26 @@ operator's keys can. The relay host is refused if it resolves to a private,
 loopback, link-local or metadata address, checked when it is saved and again on
 every connection. A site relay's hard rejects cancel the message but don't add
 the address to the instance-wide suppression list, because a relay the site
-chose could otherwise block any address for every site.
+chose could otherwise block any address for every site. They go on the site's
+own list instead (next section).
+
+## Site bounce suppression — `Mail.SiteSuppressedRecipient` (#1562)
+
+| Action | admin | editor | viewer | anonymous | system |
+|--------|:-----:|:------:|:------:|:---------:|:------:|
+| read, `destroy` | ✅ | ❌ | ❌ | ❌ | ✅ |
+| `suppress` | ❌ | ❌ | ❌ | ❌ | ✅ |
+
+The addresses one site's own relay rejected as dead, per site
+(`org_id`, `email`). Org admin reads and clears it from `/editor/site-mail`; a
+non-admin read filters to nothing. Only the delivery pipeline writes it, as
+the **system** (`authorize?: false`), on a reject naming the recipient that
+came through that site's relay. Not even the site's admin can add a row: that
+would stop the site's mail to an address without a bounce ever happening.
+
+It is consulted only for mail sent for that site (`KilnCMS.Mail.suppressed?/2`
+with `org_id:`). Account mail carries no site and never reads it, and no site
+reads another's, so a hostile relay can stop only its own site's mail.
 
 ## Push notification key — `SiteVapidKey` (#1560)
 

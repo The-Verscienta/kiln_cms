@@ -277,6 +277,32 @@ If an address was suppressed in error (or the mailbox is fixed), click
 case-insensitive; the admin test-send is *not* suppressed, so you can always
 re-test a fixed address.
 
+#### Sites on their own relay
+
+A site that sends through its own SMTP relay (`/editor/site-mail`) keeps its
+own suppression list (#1562). A reject from *that* relay naming the recipient
+puts the address on the site's list, never on the instance-wide one above.
+
+Which mail each list can stop:
+
+| List | Written from | Stops |
+|------|--------------|-------|
+| Instance-wide (`/editor/mail`) | the operator's relay (or direct MX) | every site's mail, and account mail |
+| A site's own (`/editor/site-mail`) | that site's relay | that site's mail only |
+
+A site's relay is a server the site chose, and it may answer 550 to any
+address. If it could write the instance-wide list, one site could stop an
+address getting anything from any site, password resets included. So a site's
+list is consulted only for mail sent for that site: its newsletters and their
+confirmations. Account mail (sign-in links, password resets, confirmations,
+sign-in alerts) carries no site and never reads a site's list, and no site
+reads another's. The same rule decides what suppresses: only a reject naming
+the recipient.
+
+The site's admins see its list, and its recent bounces by recipient domain,
+under **Delivery health** on `/editor/site-mail`, and **Remove** clears an
+entry there.
+
 ## Operational notes
 
 - **Async bounces** (rejected *after* the receiving server accepted the
