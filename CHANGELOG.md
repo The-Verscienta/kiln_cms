@@ -54,66 +54,72 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+## [0.11.0] - 2026-09-26
+
+Long form: [docs/changelog/v0.11.0.md](docs/changelog/v0.11.0.md) —
+the 0.11.0 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
 ### Upgrade notes
 
 - **On a multi-org deployment with `EMBED_ORIGINS` unset, every cross-site form
   embed stops working on upgrade — set `EMBED_ORIGINS` first.**
-  ([#1618](https://github.com/The-Verscienta/kiln_cms/issues/1618) · [long form](docs/changelog/unreleased.md#on-a-multi-org-deployment-with-embedorigins-unset-every-cross-site-form-embed))
+  ([#1618](https://github.com/The-Verscienta/kiln_cms/issues/1618) · [long form](docs/changelog/v0.11.0.md#on-a-multi-org-deployment-with-embedorigins-unset-every-cross-site-form-embed))
 
 ### Breaking
 
 - **Multi-org installs now cap form embeds at `EMBED_ORIGINS` unless
   `EMBED_ORIGINS_LOCKED=false`.**
-  ([#1618](https://github.com/The-Verscienta/kiln_cms/issues/1618) · [long form](docs/changelog/unreleased.md#multi-org-installs-now-cap-form-embeds-at-embedorigins-unless))
+  ([#1618](https://github.com/The-Verscienta/kiln_cms/issues/1618) · [long form](docs/changelog/v0.11.0.md#multi-org-installs-now-cap-form-embeds-at-embedorigins-unless))
 
 - **Multi-org installs now refuse unknown hosts unless `TENANT_STRICT_HOST=false`.**
-  ([#1547](https://github.com/The-Verscienta/kiln_cms/issues/1547) · [long form](docs/changelog/unreleased.md#multi-org-installs-now-refuse-unknown-hosts-unless-tenantstricthostfalse))
+  ([#1547](https://github.com/The-Verscienta/kiln_cms/issues/1547) · [long form](docs/changelog/v0.11.0.md#multi-org-installs-now-refuse-unknown-hosts-unless-tenantstricthostfalse))
 
 ### Added
 
 - **A site can offer its own single sign-on provider, honoured only for email
   domains it has verified by DNS.**
-  ([#1561](https://github.com/The-Verscienta/kiln_cms/issues/1561) · [long form](docs/changelog/unreleased.md#a-site-can-offer-its-own-single-sign-on-provider))
+  ([#1561](https://github.com/The-Verscienta/kiln_cms/issues/1561) · [long form](docs/changelog/v0.11.0.md#a-site-can-offer-its-own-single-sign-on-provider))
 
 - **A site can sign its push notifications with its own key, generated in the
   console.**
-  ([#1560](https://github.com/The-Verscienta/kiln_cms/issues/1560) · [long form](docs/changelog/unreleased.md#a-site-can-sign-its-push-notifications-with-its-own-key-generated-in-the-console))
+  ([#1560](https://github.com/The-Verscienta/kiln_cms/issues/1560) · [long form](docs/changelog/v0.11.0.md#a-site-can-sign-its-push-notifications-with-its-own-key-generated-in-the-console))
 
 - **A site can index its content into its own Meilisearch, set from the console.**
-  ([#1558](https://github.com/The-Verscienta/kiln_cms/issues/1558) · [long form](docs/changelog/unreleased.md#a-site-can-index-its-content-into-its-own-meilisearch-set-from-the-console))
+  ([#1558](https://github.com/The-Verscienta/kiln_cms/issues/1558) · [long form](docs/changelog/v0.11.0.md#a-site-can-index-its-content-into-its-own-meilisearch-set-from-the-console))
 
 - **A site can keep its uploads in its own object storage bucket, set from the
   console.**
-  ([#1559](https://github.com/The-Verscienta/kiln_cms/issues/1559) · [long form](docs/changelog/unreleased.md#a-site-can-keep-its-uploads-in-its-own-object-storage-bucket-set-from-the-console))
+  ([#1559](https://github.com/The-Verscienta/kiln_cms/issues/1559) · [long form](docs/changelog/v0.11.0.md#a-site-can-keep-its-uploads-in-its-own-object-storage-bucket-set-from-the-console))
 
 - **A site on its own SMTP relay keeps its own bounce list.**
-  ([#1562](https://github.com/The-Verscienta/kiln_cms/issues/1562) · [long form](docs/changelog/unreleased.md#a-site-on-its-own-smtp-relay-keeps-its-own-bounce-list))
+  ([#1562](https://github.com/The-Verscienta/kiln_cms/issues/1562) · [long form](docs/changelog/v0.11.0.md#a-site-on-its-own-smtp-relay-keeps-its-own-bounce-list))
 
 - **A site can use its own AI provider key and models, set from the console.**
-  ([#1557](https://github.com/The-Verscienta/kiln_cms/issues/1557) · [long form](docs/changelog/unreleased.md#a-site-can-use-its-own-ai-provider-key-and-models-set-from-the-console))
+  ([#1557](https://github.com/The-Verscienta/kiln_cms/issues/1557) · [long form](docs/changelog/v0.11.0.md#a-site-can-use-its-own-ai-provider-key-and-models-set-from-the-console))
 
 ### Fixed
 
 - **The sidebar's collapse and expand buttons name the panel they fold.**
-  ([long form](docs/changelog/unreleased.md#the-sidebars-collapse-and-expand-buttons-name-the-panel-they-fold))
+  ([long form](docs/changelog/v0.11.0.md#the-sidebars-collapse-and-expand-buttons-name-the-panel-they-fold))
 
 - **An open calendar no longer re-queries once per write during a bulk import.**
-  ([#1336](https://github.com/The-Verscienta/kiln_cms/issues/1336) · [long form](docs/changelog/unreleased.md#an-open-calendar-no-longer-re-queries-once-per-write-during-a-bulk-import))
+  ([#1336](https://github.com/The-Verscienta/kiln_cms/issues/1336) · [long form](docs/changelog/v0.11.0.md#an-open-calendar-no-longer-re-queries-once-per-write-during-a-bulk-import))
 
 - **Sign-in and the other account pages show the site's own name and logo.**
-  ([#1613](https://github.com/The-Verscienta/kiln_cms/pull/1613) · [long form](docs/changelog/unreleased.md#sign-in-and-the-other-account-pages-show-the-sites-own-name-and-logo))
+  ([#1613](https://github.com/The-Verscienta/kiln_cms/pull/1613) · [long form](docs/changelog/v0.11.0.md#sign-in-and-the-other-account-pages-show-the-sites-own-name-and-logo))
 
 - **A site's relay refusing its password no longer pages the operator.**
-  ([#1562](https://github.com/The-Verscienta/kiln_cms/issues/1562) · [long form](docs/changelog/unreleased.md#a-sites-relay-refusing-its-password-no-longer-pages-the-operator))
+  ([#1562](https://github.com/The-Verscienta/kiln_cms/issues/1562) · [long form](docs/changelog/v0.11.0.md#a-sites-relay-refusing-its-password-no-longer-pages-the-operator))
 
 - **A first sync of a site with never-fired content no longer fails.**
-  ([#1621](https://github.com/The-Verscienta/kiln_cms/issues/1621) · [long form](docs/changelog/unreleased.md#a-first-sync-of-a-site-with-never-fired-content-no-longer-fails))
+  ([#1621](https://github.com/The-Verscienta/kiln_cms/issues/1621) · [long form](docs/changelog/v0.11.0.md#a-first-sync-of-a-site-with-never-fired-content-no-longer-fails))
 
 ### Security
 
 - **Two Hex advisories closed (`ash` 3.33.11, `lazy_html` 0.1.13); the working
   copy keeps its body through the `ash` union-comparison fix.**
-  ([#1600](https://github.com/The-Verscienta/kiln_cms/issues/1600) · [long form](docs/changelog/unreleased.md#two-hex-advisories-closed-and-the-working-copy-survives-the-ash-fix))
+  ([#1600](https://github.com/The-Verscienta/kiln_cms/issues/1600) · [long form](docs/changelog/v0.11.0.md#two-hex-advisories-closed-and-the-working-copy-survives-the-ash-fix))
 
 ## [0.10.0] - 2026-09-19
 
@@ -1540,7 +1546,8 @@ that `mix kiln.update` compares against.
   one that can't be described by a changelog diff.
   ([long form](docs/changelog/v0.1.0.md#if-your-project-pins-a-sha-from-before-this-tag-your-first-update-is-the-only))
 
-[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.7.0...v0.8.0
