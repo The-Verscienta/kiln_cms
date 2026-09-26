@@ -634,12 +634,48 @@ build if a resource is ever registered without that authorizer.
   claims the URL *and* the block has no title yet, so a resolved document does
   not re-fetch; and by Oban's per-document uniqueness window.
 
+### A site's own AI provider (`/editor/site-ai`, #1557)
+A site admin — a tenant, on a hosted deployment — can point the site's SEO
+suggestions, block assist and `/api/ask` answers at their own provider account.
+That makes the site admin the one choosing where this server sends content and
+a credential, so the operator's trust assumptions do not carry over:
+
+- **The destination** — a closed list of hosted providers, each dialled at the
+  provider's own published API root, or one `https://` OpenAI-compatible URL.
+  That URL is SSRF-checked at save (`Validations.AiBaseUrl`) and dialled only
+  through `KilnCMS.SafeFetch` (re-checked and pinned per request, no redirects,
+  1MB response cap), never through `req_llm`'s own client. `ollama` and `vllm`
+  are not offered: their default endpoint is `localhost`, the operator's box.
+- **Exfiltrating the operator's secrets** — the key is database-only, with no
+  env-var or file source, so it cannot be pointed at `SECRET_KEY_BASE` or the
+  operator's `ANTHROPIC_API_KEY`. And because `req_llm` fills an unset key or
+  endpoint from the operator's `config :req_llm` and `<PROVIDER>_API_KEY`, a
+  site request always passes both explicitly (an absent key is sent as `""`,
+  which `req_llm` refuses rather than fills). `SiteProviderIsolationTest`
+  plants the operator's key and endpoint in every place `req_llm` reads.
+- **Exfiltrating the site's own key** — write-only in the form, and dropped
+  when the provider or endpoint changes, so a co-admin who was never shown the
+  key cannot redirect it to a host they control. Vault-encrypted at rest;
+  a `SECRET_KEY_BASE` rotation makes it unreadable
+  ([secrets-rotation.md](secrets-rotation.md)).
+- **Falling back** — a site whose provider is set but unusable (unreadable
+  row, undecryptable key) is refused, never served by the operator's provider.
+  Falling back would send its content through an account and DPA it opted out
+  of, billed to the operator. See `KilnCMS.LLM.SiteProvider`.
+- **Cost** — the `KilnCMS.LLM.Budget` buckets apply to a site's key as to the
+  operator's, so `/api/ask` stays rate-limited per caller and per site; each
+  call still occupies a process here for up to the feature's timeout.
+- **What the provider sees** — the same as the operator's provider would: a
+  page's text, a block and the editor's instruction, or published passages and
+  an anonymous visitor's question. It is the site's choice and the page says so.
+
 ### Other outbound calls
 `Kiln.Updates` (GitHub releases, admin-triggered), `KilnCMS.Unsplash`,
 Meilisearch, S3/MinIO, the mailer, and the LLM providers behind `/api/ask` and
 SEO drafting all make outbound requests to *operator-configured or fixed*
 endpoints, not user-supplied ones — so they are not SSRF vectors in the way
-webhooks are. Note that `/api/ask` lets an anonymous caller drive an outbound
+webhooks are. The exceptions are a site's own SMTP relay (#1322) and AI
+endpoint (above), which are tenant-chosen and SSRF-checked. Note that `/api/ask` lets an anonymous caller drive an outbound
 LLM request; it is config-gated and rate-limited under `:api`, but it is a cost
 amplification surface.
 

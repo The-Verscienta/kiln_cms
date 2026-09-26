@@ -213,6 +213,7 @@ is neither that type nor explained, so the list cannot fall behind the code.
 | `secret_key_encrypted`, `webhook_secret_encrypted` | `KilnCMS.Billing.Settings` | Payments and inbound payment webhooks stop | `/editor/billing`: paste the provider API key and the `whsec_…` from the provider dashboard again |
 | `password_encrypted` | `KilnCMS.CMS.SiteMailRelay` (one per site that set its own relay) | That site's mail is **held**: the delivery jobs retry for ~16 hours and then give up. It is never sent through the operator's relay instead | `/editor/site-mail` on each such site: enter the relay password again |
 | `private_key_encrypted` | `KilnCMS.CMS.SiteVapidKey` (one per site that generated its own push key) | That site's push notifications are **held**, and its settings page stops offering a key to new devices. They are never signed with the deployment's `KILN_VAPID_*` key instead | `/editor/site-push` on each such site: *Rotate key*. Every device subscribed with the old key has to turn notifications on again |
+| `api_key_encrypted` | `KilnCMS.CMS.SiteAiProvider` (one per site that set its own AI provider) | That site's SEO suggestions, block assist and `/api/ask` answers are **refused**: the editor says the key can't be read, and `/api/ask` answers retrieval-only with `"generation": "failed"`. They are never sent to the operator's AI provider instead | `/editor/site-ai` on each such site: enter the API key again |
 | `secret_encrypted` | `KilnCMS.CMS.WebhookEndpoint` (one per endpoint) | Outbound webhook deliveries are refused — the ledger says `"delivery failed: signing secret unreadable"` and the endpoint row reports the secret unreadable | `/editor/webhooks`: delete and re-create each endpoint, then give its receiver the new secret |
 | `private_key_encrypted` | `KilnCMS.Federation.SiteFederation` | The site can no longer sign ActivityPub deliveries | `/editor/federation` → *Re-key*, or `mix kiln.federation rekey`. See [Re-keying the ActivityPub actor](#re-keying-the-activitypub-actor) |
 
@@ -271,6 +272,11 @@ fails at boot and nothing sends an alert:
   private key can't be read"*, and each held delivery logs `"Cannot send push
   notifications: :key_unreadable"`. The subscriptions are kept, so restoring
   the old secret brings them back; rotating the key instead drops them.
+- **A site's own AI provider** (#1557): `/editor/site-ai` shows *"The saved
+  API key can't be read"*, an editor clicking *Suggest* or an assist action is
+  told the same, and each refused request logs `"Refusing AI requests for
+  site …: … its API key could not be decrypted"`. Nothing is sent through the
+  operator's provider instead.
 
 `mix kiln.vault.reencrypt --dry-run` with no old secret is the one check that
 covers all of them at once. It should report `0 unreadable` for every column.

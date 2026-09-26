@@ -71,6 +71,42 @@ carries the reasoning.
     subscriptions and says so on the page. It never signs with the deployment's
     key instead.
 
+<a id="a-site-can-use-its-own-ai-provider-key-and-models-set-from-the-console"></a>
+
+- **A site can use its own AI provider key and models, set from the console.**
+  `/editor/site-ai` (under Configure → Integrations) lets a site admin choose
+  the provider, API key and a model for each of SEO suggestions, block assist
+  and `/api/ask` answers. No `SEO_MODEL` / `ASSIST_MODEL` / `ASK_MODEL` and no
+  redeploy (#1557). Those variables are unchanged: they are the configuration
+  for every site that hasn't set its own. The second integration #1322 moves
+  out of the environment, built the way the SMTP relay set the pattern.
+
+  - **Precedence.** A site with its own provider switched on uses it for all
+    three features and nothing of the operator's: not the key, not `base_url`,
+    not a bespoke generator module. A blank model switches that feature off
+    for the site rather than handing it to the operator's provider.
+  - **Fails closed.** If the row can't be read, or its key can't be decrypted,
+    the request is refused and the editor says why; `/api/ask` answers
+    retrieval-only with `"generation": "failed"`. It never falls back to the
+    operator's provider (`KilnCMS.LLM.SiteProvider`), which would send the
+    site's content through an account it opted out of and bill the operator.
+  - **Key encrypted, write-only, database-only.** Stored with
+    `KilnCMS.Keys.Vault` in a `Vault.Ciphertext` column, never shown again, no
+    env-var or file source. Changing the provider or endpoint drops it.
+  - **Nothing of the operator's rides along.** `req_llm` fills an unset key or
+    endpoint from the operator's config and environment, so a site request
+    always passes both explicitly; a test plants the operator's credentials in
+    every place `req_llm` reads and inspects the request that leaves.
+  - **SSRF-checked.** Hosted providers are dialled at their own API host. An
+    OpenAI-compatible endpoint must be `https://`, is refused if it resolves
+    to a private, loopback, link-local or metadata address, and is reached only
+    through `KilnCMS.SafeFetch`.
+  - **Budgets apply.** The per-user, per-caller and per-site `KilnCMS.LLM.Budget`
+    limits apply to a site's own key as to the operator's.
+
+  New table `site_ai_providers` (one migration). Its `api_key_encrypted` column
+  is walked by `mix kiln.vault.reencrypt`; see `docs/secrets-rotation.md`.
+
 ## Fixed
 
 <a id="an-open-calendar-no-longer-re-queries-once-per-write-during-a-bulk-import"></a>

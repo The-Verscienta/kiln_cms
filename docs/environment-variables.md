@@ -406,6 +406,11 @@ are read in the production branch of `runtime.exs`; for dev or test, set
 (`ollama:`/`vllm:`); a hosted provider is announced at boot and in the editor,
 and should be added to your DPA's subprocessor list. See [`docs/seo.md`](seo.md).
 
+These AI variables (this section and the two after it) are the operator's
+layer. A site admin can give their site its own provider, API key and models at
+`/editor/site-ai` (#1557); that site then uses its own and none of these. See
+[Per-site provider](ai-assist.md#per-site-provider).
+
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
 | `SEO_MODEL` | unset | `req_llm` model spec, e.g. `ollama:llama3.1` or `anthropic:claude-sonnet-5`. Enables drafting when set. | [`config/runtime/prod/ai.exs:22`](../config/runtime/prod/ai.exs#L22) |
