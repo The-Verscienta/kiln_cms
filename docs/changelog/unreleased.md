@@ -283,6 +283,16 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="the-sidebars-collapse-and-expand-buttons-name-the-panel-they-fold"></a>
+
+- **The sidebar's collapse and expand buttons name the panel they fold.** They
+  already said whether the sidebar was expanded (#1525); now they also say
+  *what* is expanded, with the `aria-controls` the nav section heads and the
+  mobile drawer's hamburger both carry. It was left out when those buttons got
+  `aria-expanded` because the id it points at, `#console-sidebar`, arrived in a
+  different pull request (#1523) — and an `aria-controls` pointing at nothing
+  is worse than none at all. Both landed, so this finishes it.
+
 <a id="an-open-calendar-no-longer-re-queries-once-per-write-during-a-bulk-import"></a>
 
 - **An open calendar no longer re-queries once per write during a bulk
