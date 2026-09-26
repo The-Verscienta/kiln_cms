@@ -735,10 +735,10 @@ because other files cite them by number.
    (`config/runtime/cross_origin.exs:37`, #1133). What remains is a stated
    choice: an org admin decides who may frame that org's own forms, which grants
    nothing across the tenant boundary, and an operator who disagrees has a
-   switch. One question for the maintainer to take alongside #1547, not proposed
-   here: should `EMBED_ORIGINS_LOCKED` also default on once a second
-   organization exists? The case is weaker than for an unknown `Host`, because
-   the uncapped default leaks nothing to another tenant.
+   switch. Decided alongside #1547: `EMBED_ORIGINS_LOCKED` also defaults on
+   once a second organization exists, so on a multi-org install the operator's
+   `EMBED_ORIGINS` caps every tenant unless the operator says otherwise
+   (#1618).
 2. **Passphrase-locked content is weak by construction (#496).** A shared secret
    typed into a public form is not access control in the sense the rest of this
    document uses the phrase: there is no per-reader identity, so no audit trail
@@ -1115,16 +1115,14 @@ because other files cite them by number.
    suppression is logged for exactly that reason. Revisit if Kiln is ever
    deployed multi-node.
 
-    **1.0 verdict (decided, #1535): still accepted at 1.0, and 1.0 declares
-    single-node support (#1545).** The trade is unchanged: `AccountThrottle` counts with
-    `:ets.update_counter`, and `KilnCMSWeb.RateLimit` is Hammer with `backend:
-    :ets` (`lib/kiln_cms_web/rate_limit.ex:5`). It is still right for one node,
-    because a row-backed counter reopens enumeration and turns every guess into
-    a write. The app is multi-node *capable*, though: `DNSCluster` is supervised
-    and PubSub is distributed. So 1.0's supported-deployment statement has to
-    say plainly that budgets are per node, and that N nodes multiply every
-    budget by N. If 1.0 instead promises multi-node, this becomes a fix before
-    1.0, because the budgets need a shared counter.
+    **1.0 verdict (decided, #1535 → #1619): fix before 1.0.** `AccountThrottle`
+    counts with `:ets.update_counter`, and `KilnCMSWeb.RateLimit` is Hammer with
+    `backend: :ets` (`lib/kiln_cms_web/rate_limit.ex:5`). The app is multi-node
+    *capable*: `DNSCluster` is supervised and PubSub is distributed. So on N
+    nodes every budget is multiplied by N, and 1.0 will not declare
+    single-node-only support. The budgets need a shared counter that keeps this
+    item's own constraints: nothing on the user row (that reopens enumeration
+    and turns every guess into a write), and a bounded, expiring key space.
 11. **The `:browser` pipeline is not rate-limited**, so `/`, `/developers`, all
     `/editor/**` LiveView mounts, and the account/governance export endpoints
     are unthrottled. They are session-gated (except the first two), so this is
