@@ -32,9 +32,9 @@ defmodule KilnCMS.CMS.Validations.AiBaseUrl do
   end
 
   @doc false
-  # Shared with `KilnCMS.LLM.SiteProvider`, so a row written before a rule
+  # Shared with `KilnCMS.LLM.Client`, so a row written before a rule
   # tightened is refused at call time by the same words.
-  @spec check(String.t()) :: :ok | {:error, InvalidAttribute.t()}
+  @spec check(String.t()) :: :ok | {:error, Exception.t()}
   def check(url) do
     case URI.parse(url) do
       %URI{scheme: "https", host: host, query: nil, fragment: nil, userinfo: nil}
