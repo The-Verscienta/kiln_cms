@@ -178,9 +178,12 @@ Stated rather than discovered later.
 
 - **The block upcast path has never run in anger.** No block has shipped a
   version above 1, so the automatic upcast the major/minor rule leans on is
-  designed and tested but not exercised by a real migration. Worse, a declared
-  step that is missing bumps `_version` silently instead of failing. If your
-  overlay is the first to version a block, treat that path as new code.
+  designed and tested but not exercised by a real migration. If your overlay
+  is the first to version a block, treat that path as new code. A missing
+  `migrate` step is a compile warning (`Kiln.Block.MigrationChain`; an error
+  from Kiln 2.0), and a stored block behind the gap is refused — left as
+  stored, `_version` included — rather than stamped current;
+  `KilnCMS.Blocks.Upcaster.try_upcast/2` says why.
 - **Eager backfill is not wired up.** Upcasting happens lazily on read; there
   is no job that rewrites stored blocks, so already-fired artifacts need
   re-firing after a block's shape changes.

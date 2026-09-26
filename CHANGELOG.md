@@ -54,10 +54,20 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Changed
+
+- **A block whose `migrate` steps skip a version now warns at compile time;
+  from Kiln 2.0 it is an error.**
+  ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642) · [long form](docs/changelog/unreleased.md#a-block-whose-migrate-steps-skip-a-version-now-warns-at-compile-time))
+
 ### Fixed
 
 - **A 429's `retry-after` is rounded up, never 0.**
   ([long form](docs/changelog/unreleased.md#a-429s-retry-after-is-rounded-up-never-0))
+
+- **The block upcaster refuses a gap in the `migrate` chain instead of
+  stamping the block current.**
+  ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642) · [long form](docs/changelog/unreleased.md#the-block-upcaster-refuses-a-gap-in-the-migrate-chain))
 
 ## [0.11.0] - 2026-09-26
 
