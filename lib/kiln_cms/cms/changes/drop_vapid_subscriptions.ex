@@ -29,12 +29,19 @@ defmodule KilnCMS.CMS.Changes.DropVapidSubscriptions do
     end
   end
 
-  # A system write: the admin rotating the key does not own the reviewers'
+  # A system write. The admin rotating the key does not own the reviewers'
   # subscriptions, and the policy that stops them deleting those rows directly
-  # is right everywhere else.
+  # is right everywhere else. This runs only inside the admin-authorized
+  # `:rotate`/`:destroy` of this site's own key.
   defp drop(org_id, key) do
-    org_id
-    |> Accounts.push_subscriptions_bound_to_key!(key, authorize?: false)
-    |> Enum.each(&Accounts.remove_push_subscription!(&1, authorize?: false))
+    # `authorize?: false`: `bound_to_key` is system-only by policy, and its own
+    # filter (this org, this key) is the whole grant.
+    subscriptions = Accounts.push_subscriptions_bound_to_key!(org_id, key, authorize?: false)
+
+    Enum.each(subscriptions, fn subscription ->
+      # `authorize?: false`: each row came from the scoped read above; the
+      # destroy policy (owner only) would refuse the rotating admin.
+      Accounts.remove_push_subscription!(subscription, authorize?: false)
+    end)
   end
 end
