@@ -54,6 +54,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Security
+
+- **Two Hex advisories closed (`ash` 3.33.11, `lazy_html` 0.1.13); the working
+  copy keeps its body through the `ash` union-comparison fix.**
+  ([#1600](https://github.com/The-Verscienta/kiln_cms/issues/1600) · [long form](docs/changelog/unreleased.md#two-hex-advisories-closed-and-the-working-copy-survives-the-ash-fix))
+
 ## [0.10.0] - 2026-09-19
 
 Long form: [docs/changelog/v0.10.0.md](docs/changelog/v0.10.0.md) —
