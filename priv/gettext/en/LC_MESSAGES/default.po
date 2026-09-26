@@ -10789,11 +10789,6 @@ msgstr ""
 msgid "Set PRESENTATION_PREVIEW_URL to your front end (e.g. https://site.example.com{path}) to enable side-by-side editing."
 msgstr ""
 
-#: lib/kiln_cms_web/live/system_live.ex
-#, elixir-autogen, elixir-format
-msgid "Set TENANT_STRICT_HOST=true to reject unrecognized hosts instead, then restart. Leave it off only if an unmatched host reaching the default organization is what you want."
-msgstr ""
-
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set by the operator in configuration, and used by any site that has not saved its own chains above."
@@ -11561,6 +11556,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "System"
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "TENANT_STRICT_HOST is unset, so host matching turns on by itself once a second organization exists, but this server has not noticed the new organization yet. It will within five minutes, or on restart."
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "TENANT_STRICT_HOST=false is overriding the default, which rejects unrecognized hosts once a second organization exists. Remove the setting or set TENANT_STRICT_HOST=true, then restart. Keep it only if an unmatched host reaching the default organization is what you want."
 msgstr ""
 
 #: lib/kiln_cms_web/live/site_mail_live.ex

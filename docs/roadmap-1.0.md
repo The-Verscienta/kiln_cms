@@ -90,8 +90,8 @@ The things an operator would hit in their first months of running Kiln.
 - **Re-review the accepted security risks (#1535).** Go through the threat model's
   accepted residual risks one at a time and record, for each, whether it is
   still accepted at 1.0. The ones most worth deciding explicitly:
-  - `TENANT_STRICT_HOST` ships off. Decided: it turns on automatically
-    once a second organization exists (#1547, in this milestone)
+  - `TENANT_STRICT_HOST` shipped off. Decided and done: it turns on
+    automatically once a second organization exists (#1547)
   - `/live` events are not rate-limited
   - webhooks have no replay protection
   - `/api/ask` lets an anonymous caller drive LLM cost

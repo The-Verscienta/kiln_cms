@@ -10789,11 +10789,6 @@ msgstr "IP pública del servidor (para las comprobaciones de SPF y DNS inverso)"
 msgid "Set PRESENTATION_PREVIEW_URL to your front end (e.g. https://site.example.com{path}) to enable side-by-side editing."
 msgstr "Defina PRESENTATION_PREVIEW_URL con la URL de su front-end (p. ej. https://site.example.com{path}) para habilitar la edición en paralelo."
 
-#: lib/kiln_cms_web/live/system_live.ex
-#, elixir-autogen, elixir-format
-msgid "Set TENANT_STRICT_HOST=true to reject unrecognized hosts instead, then restart. Leave it off only if an unmatched host reaching the default organization is what you want."
-msgstr "Establece TENANT_STRICT_HOST=true para rechazar los hosts no reconocidos y reinicia. Déjalo desactivado solo si quieres que un host sin coincidencia llegue a la organización predeterminada."
-
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set by the operator in configuration, and used by any site that has not saved its own chains above."
@@ -11562,6 +11557,16 @@ msgstr "Sindicar el cuerpo completo de cada %{type}"
 #, elixir-autogen, elixir-format
 msgid "System"
 msgstr "Sistema"
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "TENANT_STRICT_HOST is unset, so host matching turns on by itself once a second organization exists, but this server has not noticed the new organization yet. It will within five minutes, or on restart."
+msgstr "TENANT_STRICT_HOST no está definido, así que la verificación del host se activa sola en cuanto existe una segunda organización, pero este servidor aún no ha detectado la nueva organización. Lo hará en un máximo de cinco minutos, o al reiniciar."
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "TENANT_STRICT_HOST=false is overriding the default, which rejects unrecognized hosts once a second organization exists. Remove the setting or set TENANT_STRICT_HOST=true, then restart. Keep it only if an unmatched host reaching the default organization is what you want."
+msgstr "TENANT_STRICT_HOST=false anula el comportamiento predeterminado, que rechaza los hosts no reconocidos en cuanto existe una segunda organización. Elimina el ajuste o establece TENANT_STRICT_HOST=true y reinicia. Consérvalo solo si quieres que un host sin coincidencia llegue a la organización predeterminada."
 
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
