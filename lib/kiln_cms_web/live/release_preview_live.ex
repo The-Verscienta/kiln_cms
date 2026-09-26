@@ -61,10 +61,7 @@ defmodule KilnCMSWeb.ReleasePreviewLive do
   defp same_site(_org_id, _org), do: :error
 
   defp blocks(record) do
-    record.blocks
-    |> KilnCMS.CMS.TypedBlocks.to_typed()
-    |> KilnCMS.CMS.TypedBlocks.to_legacy()
-    |> BlockComponents.thin_blocks()
+    BlockComponents.view_blocks(record.blocks)
   end
 
   defp anchor(entry), do: "release-item-#{entry.item.id}"

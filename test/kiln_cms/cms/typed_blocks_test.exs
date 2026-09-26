@@ -56,7 +56,7 @@ defmodule KilnCMS.CMS.TypedBlocksTest do
         %Block{type: :columns, data: %{"cols" => 2}, order: 6}
       ]
 
-      typed = TypedBlocks.from_legacy(legacy)
+      typed = KilnCMS.LegacyBridge.from_legacy(legacy)
 
       assert [
                %Blocks.Heading{text: "Title", level: 1},
@@ -76,7 +76,7 @@ defmodule KilnCMS.CMS.TypedBlocksTest do
       child = %{"type" => "heading", "content" => "Left", "data" => %{"level" => 3}}
 
       assert [%Blocks.Columns{layout: "1-2", gap: "lg", columns: [%{"blocks" => [^child]}]}] =
-               TypedBlocks.from_legacy([
+               KilnCMS.LegacyBridge.from_legacy([
                  %{
                    "type" => "columns",
                    "data" => %{
@@ -92,7 +92,7 @@ defmodule KilnCMS.CMS.TypedBlocksTest do
     # stored string was never an atom in this build.
     test "an unmapped legacy type keeps the name it was stored under" do
       assert [%Blocks.Custom{legacy_type: "never_an_atom_pricing_table_1537"}] =
-               TypedBlocks.from_legacy([%{"type" => "never_an_atom_pricing_table_1537"}])
+               KilnCMS.LegacyBridge.from_legacy([%{"type" => "never_an_atom_pricing_table_1537"}])
     end
 
     test "legacy_loss/1: nothing, for a block the typed mapping holds whole" do
@@ -131,14 +131,16 @@ defmodule KilnCMS.CMS.TypedBlocksTest do
     end
 
     test "preserves block ids and renders via the typed serializers" do
-      [heading] = TypedBlocks.from_legacy([%Block{id: "abc", type: :heading, content: "T"}])
+      [heading] =
+        KilnCMS.LegacyBridge.from_legacy([%Block{id: "abc", type: :heading, content: "T"}])
+
       assert heading.id == "abc"
       assert heading |> Blocks.render(:web) |> IO.iodata_to_binary() == "<h2>T</h2>"
     end
 
     test "tolerates nested string-keyed maps from jsonb" do
       typed =
-        TypedBlocks.from_legacy([
+        KilnCMS.LegacyBridge.from_legacy([
           %{"type" => "heading", "content" => "Hi", "data" => %{"level" => 4}}
         ])
 
@@ -146,7 +148,9 @@ defmodule KilnCMS.CMS.TypedBlocksTest do
     end
 
     test "a divider maps to the Divider block and renders as <hr/>" do
-      assert [%Blocks.Divider{} = divider] = TypedBlocks.from_legacy([%Block{type: :divider}])
+      assert [%Blocks.Divider{} = divider] =
+               KilnCMS.LegacyBridge.from_legacy([%Block{type: :divider}])
+
       assert Blocks.render(divider, :web) |> IO.iodata_to_binary() == "<hr/>"
     end
   end
@@ -158,7 +162,7 @@ defmodule KilnCMS.CMS.TypedBlocksTest do
       assert [
                %{type: :heading, content: "T", data: %{"level" => 2}},
                %{type: :quote, content: "q", data: %{"citation" => "c"}}
-             ] = TypedBlocks.to_legacy(typed)
+             ] = KilnCMS.LegacyBridge.to_legacy(typed)
     end
   end
 

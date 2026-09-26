@@ -1124,9 +1124,10 @@ defmodule KilnCMSWeb.ContentController do
   end
 
   defp blocks(record, org_id, audiences) do
-    # Blocks are stored as the typed union (Kiln v2); convert back to legacy block
-    # structs so the existing media-enriching renderer (`BlockComponents`) is
-    # unchanged. A `columns` block (#335) nests child blocks, so the tree is built
+    # Blocks are stored as the typed union (Kiln v2) and rendered from the view
+    # maps `BlockComponents.view_blocks/1` builds from them — the same maps every
+    # preview renders — plus the media and form enrichment only delivery adds.
+    # A `columns` block (#335) nests child blocks, so the tree is built
     # recursively and flattened once for the media/form preloads — a nested image
     # or form is loaded in the same batched query as a top-level one.
     #
@@ -1135,7 +1136,9 @@ defmodule KilnCMSWeb.ContentController do
     # renders live from the block tree rather than from the fired artifact, so
     # the expansion has to happen on this path too. `audiences` is the reader's,
     # and the payload cache is already keyed on it.
-    tree = record |> expand_fragments(org_id, audiences) |> block_tree()
+    tree =
+      record |> expand_fragments(org_id, audiences) |> KilnCMSWeb.BlockComponents.view_blocks()
+
     flat = flatten_block_tree(tree)
 
     media = load_block_media(flat, org_id)
@@ -1160,32 +1163,11 @@ defmodule KilnCMSWeb.ContentController do
     )
   end
 
-  # Typed union → legacy `KilnCMS.CMS.Block` structs, recursing into `columns`
-  # children so each nested block is itself a legacy struct the renderer handles.
-  defp block_tree(blocks) do
-    blocks
-    |> KilnCMS.CMS.TypedBlocks.to_typed()
-    |> KilnCMS.CMS.TypedBlocks.to_legacy()
-    |> Enum.map(&struct(KilnCMS.CMS.Block, &1))
-    |> Enum.map(&nest_columns/1)
-  end
-
-  defp nest_columns(%KilnCMS.CMS.Block{type: :columns, data: data} = block) do
-    cols =
-      for col <- data["columns"] || [] do
-        %{"blocks" => col |> Map.get("blocks", []) |> block_tree()}
-      end
-
-    %{block | data: Map.put(data, "columns", cols)}
-  end
-
-  defp nest_columns(block), do: block
-
   # Depth-first block list, so the media/form preloads see nested blocks too.
   defp flatten_block_tree(blocks) do
     Enum.flat_map(blocks, fn
-      %KilnCMS.CMS.Block{type: :columns, data: %{"columns" => cols}} = block ->
-        [block | Enum.flat_map(cols, &flatten_block_tree(&1["blocks"] || []))]
+      %{type: "columns", columns: cols} = block ->
+        [block | Enum.flat_map(cols, &flatten_block_tree(&1.blocks))]
 
       block ->
         [block]
@@ -1197,8 +1179,8 @@ defmodule KilnCMSWeb.ContentController do
   defp load_block_forms(blocks, org_id) do
     slugs =
       for b <- blocks,
-          to_string(b.type) == "form",
-          slug = b.data["form_slug"] || b.content,
+          b.type == "form",
+          slug = b[:form_slug] || b.content,
           is_binary(slug) and slug != "",
           uniq: true,
           do: slug
@@ -1244,34 +1226,32 @@ defmodule KilnCMSWeb.ContentController do
   # 500s for every visitor. `KilnCMS.Firing.References` has guarded this since
   # it was written; delivery never did, and a gallery multiplies the exposure
   # from one id per block to N.
-  defp block_media_ids(%{type: type, data: data}) do
-    type |> to_string() |> media_ids_for(data) |> Enum.filter(&valid_media_id?/1)
-  end
+  defp block_media_ids(%{type: "image"} = block),
+    do: Enum.filter([block[:media_id]], &valid_media_id?/1)
+
+  defp block_media_ids(%{type: "gallery", images: images}),
+    do: images |> Enum.map(& &1[:media_id]) |> Enum.filter(&valid_media_id?/1)
 
   defp block_media_ids(_block), do: []
-
-  defp media_ids_for("image", data), do: [data["media_id"]]
-
-  defp media_ids_for("gallery", data) do
-    data["images"] |> List.wrap() |> Enum.filter(&is_map/1) |> Enum.map(& &1["media_id"])
-  end
-
-  defp media_ids_for(_type, _data), do: []
 
   defp valid_media_id?(id) when is_binary(id), do: match?({:ok, _}, Ecto.UUID.cast(id))
   defp valid_media_id?(_id), do: false
 
-  defp enrich_block(block, media, forms) do
-    base = %{type: to_string(block.type), content: block.content}
+  # The view map already carries everything the renderer reads from the block
+  # itself (`BlockComponents.view_blocks/1`); what only delivery adds is what
+  # the batched media and form loads found.
+  defp enrich_block(%{type: "columns", columns: cols} = block, media, forms) do
+    # Each column's blocks go through the same enrichment a top-level block does.
+    cols =
+      for col <- cols, do: %{col | blocks: Enum.map(col.blocks, &enrich_block(&1, media, forms))}
 
-    cond do
-      block.type == :columns ->
-        enrich_columns(base, block, media, forms)
+    %{block | columns: cols}
+  end
 
-      block.type == :image && match?(%{}, media[block.data["media_id"]]) ->
-        item = media[block.data["media_id"]]
-
-        Map.merge(base, %{
+  defp enrich_block(%{type: "image"} = block, media, _forms) do
+    case media[block[:media_id]] do
+      %{} = item ->
+        Map.merge(block, %{
           srcset: srcset(item),
           # Alternate encodings for `<picture>` (#473). Separate from `srcset`
           # on purpose — see `Media.Presentation`.
@@ -1286,54 +1266,42 @@ defmodule KilnCMSWeb.ContentController do
           # library row nobody had filled in, passed the gate and then shipped
           # `alt=""` on the live site — the one surface the gate exists to
           # protect (#403, #482).
-          alt: presence(block.data["alt"]) || item.alt,
+          alt: presence(block[:alt]) || item.alt,
           width: item.width,
           height: item.height,
           focal: focal_style(item)
         })
 
-      block.type == :gallery ->
-        enrich_gallery(base, block, media)
-
-      block.type == :form ->
-        # nil form (inactive/unknown slug) → the component renders nothing.
-        Map.put(base, :form, forms[block.data["form_slug"] || block.content])
-
-      true ->
-        enrich_geo(base, block)
+      _none ->
+        block
     end
   end
 
-  # Per-item media enrichment (#482), mirroring what the `image` branch does for
+  # Per-item media enrichment (#482), mirroring what the `image` clause does for
   # a single image. An item whose `media_id` resolved to nothing still renders
   # from its stored url — just without srcset/focal/dimensions — which is what
   # happens when media is deleted out from under a published document.
-  defp enrich_gallery(base, block, media) do
-    images =
-      for image <- block.data["images"] || [], is_map(image) do
-        gallery_image(image, media[image["media_id"]])
-      end
+  defp enrich_block(%{type: "gallery", images: images} = block, media, _forms),
+    do: %{block | images: Enum.map(images, &gallery_image(&1, media[&1[:media_id]]))}
 
-    Map.merge(base, %{
-      images: images,
-      style: KilnCMS.Blocks.Gallery.layout_style(block.data["layout"])
-    })
-  end
+  # nil form (inactive/unknown slug) → the component renders nothing.
+  defp enrich_block(%{type: "form"} = block, _media, forms),
+    do: Map.put(block, :form, forms[block[:form_slug] || block.content])
+
+  defp enrich_block(block, _media, _forms), do: block
 
   defp gallery_image(image, item) do
-    %{
-      url: image["url"],
+    Map.merge(image, %{
       # The item's own alt wins: it is the one written *for this placement*,
       # and `MediaItem.alt` is the library-wide default behind it. Same
       # precedence #403 established for the single-image block.
-      alt: presence(image["alt"]) || (item && item.alt),
-      caption: image["caption"],
+      alt: presence(image[:alt]) || (item && item.alt),
       srcset: item && KilnCMS.Media.Presentation.srcset(item),
       sources: (item && KilnCMS.Media.Presentation.sources(item)) || [],
       width: item && item.width,
       height: item && item.height,
       focal: item && KilnCMS.Media.Presentation.focal_style(item)
-    }
+    })
   end
 
   defp presence(value) when is_binary(value) do
@@ -1344,60 +1312,6 @@ defmodule KilnCMSWeb.ContentController do
   end
 
   defp presence(_value), do: nil
-
-  # Embed cards (#489). Without these fields an embed reaches `BlockComponents`
-  # as `%{type, content}` and the card branch — which needs a title — renders
-  # nothing at all: the fired artifact and every preview showed a card while the
-  # public page, the one surface that matters, showed an empty div.
-  defp enrich_geo(base, %{type: :embed} = block) do
-    Map.merge(base, %{
-      title: block.data["title"],
-      author_name: block.data["author_name"],
-      provider_name: block.data["provider_name"],
-      thumbnail_url: block.data["thumbnail_url"],
-      resolved_url: block.data["resolved_url"]
-    })
-  end
-
-  # GEO blocks (#357): surface the data-side fields the renderer reads.
-  defp enrich_geo(base, %{type: :faq} = block),
-    do: Map.put(base, :items, block.data["items"] || [])
-
-  defp enrich_geo(base, %{type: :accordion} = block) do
-    Map.merge(base, %{
-      panels: block.data["panels"] || [],
-      first_open: block.data["first_open"] == true
-    })
-  end
-
-  defp enrich_geo(base, %{type: :how_to} = block) do
-    Map.merge(base, %{description: block.data["description"], steps: block.data["steps"] || []})
-  end
-
-  defp enrich_geo(base, %{type: :claim} = block) do
-    Map.merge(base, %{
-      source_title: block.data["source_title"],
-      source_url: block.data["source_url"]
-    })
-  end
-
-  defp enrich_geo(base, _block), do: base
-
-  # Recursively enrich a columns block's nested children (each column's blocks go
-  # through the same `enrich_block/3` a top-level block does), and attach the grid
-  # style so `BlockComponents` lays the container out identically to firing.
-  defp enrich_columns(base, block, media, forms) do
-    cols =
-      for col <- block.data["columns"] || [] do
-        %{blocks: Enum.map(col["blocks"] || [], &enrich_block(&1, media, forms))}
-      end
-
-    Map.merge(base, %{
-      columns: cols,
-      style:
-        KilnCMS.Blocks.Columns.grid_style(block.data["layout"], block.data["gap"], length(cols))
-    })
-  end
 
   # `srcset/1` and `focal_style/1` live in `KilnCMS.Media.Presentation` — the
   # gallery block (#482) is the second consumer, and `srcset`'s exclusion of

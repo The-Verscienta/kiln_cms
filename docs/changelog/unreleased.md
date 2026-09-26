@@ -61,6 +61,28 @@ carries the reasoning.
   did; the fixes it found are under Fixed.
   ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537))
 
+## Changed
+
+<a id="public-delivery-the-previews-and-the-in-context-editor-render-from-the-typed"></a>
+
+- **Public delivery, the previews and the in-context editor render from the
+  typed blocks, not through the legacy block shape.** A new
+  `KilnCMSWeb.BlockComponents.view_blocks/1` builds the maps `render_block/1`
+  takes straight from the typed structs; delivery adds its media and form
+  enrichment on top of the same maps every preview renders, so the two cannot
+  drift. Nothing in the core calls `TypedBlocks.to_legacy/1` any more. Rich
+  text renders through the block's own `:web` serializer — Portable Text first,
+  sanitized `legacy_html` only where there is no body. Two visible
+  differences on the public page: each block now carries the `data-block-id`
+  anchor `render_block/1` documents (delivery's enrichment used to drop the
+  id), and an image with no media-library item shows its own alt text instead
+  of `alt=""`. The in-context editor's HTML compatibility path and the nested
+  columns editor now write Portable Text whenever it holds the HTML
+  faithfully, and the starter home page, the beta-round seeds, `seeds.exs` and
+  the example overlay's import write typed blocks with Portable Text instead of
+  legacy params that stored `legacy_html`.
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537))
+
 ## Fixed
 
 <a id="a-hard-line-break-in-a-paragraph-heading-quote-or-list-item-is-delivered-as-br"></a>
@@ -110,4 +132,24 @@ carries the reasoning.
   least a second on any 429 and retries up to five times, since a full sync
   (~3 requests a guide) is larger than the `:api` bucket and keeps talking to
   sites that haven't picked this fix up.
+
+## Deprecated
+
+<a id="the-legacy-block-bridge-is-deprecated-for-removal-at-10"></a>
+
+- **The legacy block bridge is deprecated for removal at 1.0:
+  `KilnCMS.CMS.TypedBlocks.to_legacy/1`, `from_legacy/1`, `RichText.legacy_html`
+  and the legacy `KilnCMS.CMS.Block` write shape.** `to_legacy/1` and
+  `from_legacy/1` carry `@deprecated`, so a caller gets a compile warning:
+  render from typed blocks (`KilnCMSWeb.BlockComponents.view_blocks/1`), and
+  read stored blocks with `TypedBlocks.to_typed/1`, which accepts everything
+  `from_legacy/1` did. `KilnCMS.CMS.Block` carries `@moduledoc deprecated:`:
+  passing `blocks` as `%{type: :heading, content: …, data: …}` still casts
+  until 1.0 — write `%{"_type" => "heading", "text" => …}`. The rich-text
+  block's `legacy_html` is marked `deprecated` in the exported block JSON
+  Schema, so typed clients see it at codegen time; read `body`. It is still
+  rendered and round-tripped for blocks `mix kiln.blocks.backfill` could not
+  convert, and dropped at 1.0 — convert those blocks before then. Version
+  history keeps being read in whatever shape it was written.
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537))
 

@@ -188,8 +188,8 @@ defmodule KilnCMS.Blocks.GeoBlocksTest do
 
       [faq2, how_to2, claim2] =
         [faq, how_to, claim]
-        |> KilnCMS.CMS.TypedBlocks.to_legacy()
-        |> KilnCMS.CMS.TypedBlocks.from_legacy()
+        |> KilnCMS.LegacyBridge.to_legacy()
+        |> KilnCMS.LegacyBridge.from_legacy()
 
       assert %Faq{title: "T", items: [%{"question" => "Q?", "answer" => "A."}]} = faq2
 

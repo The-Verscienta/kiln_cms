@@ -238,8 +238,10 @@ defmodule KilnCMS.OEmbedPipelineTest do
             &1,
             %{
               blocks:
-                TypedBlocks.to_legacy(TypedBlocks.to_typed(&1.blocks)) ++
-                  [%{type: :heading, content: "Added while fetching", data: %{"level" => 2}}]
+                Enum.map(TypedBlocks.to_typed(&1.blocks), fn block ->
+                  TypedBlocks.input_map(block)
+                end) ++
+                  [%{"_type" => "heading", "text" => "Added while fetching", "level" => 2}]
             },
             actor: admin
           )
@@ -331,21 +333,18 @@ defmodule KilnCMS.OEmbedPipelineTest do
       [job] = all_enqueued(worker: ResolveWorker)
       assert :ok = perform_job(ResolveWorker, job.args)
 
-      # Delivery, both previews and the in-context editor all render through
-      # `to_legacy/1`. It used to emit `data: %{}` for an embed, so the card
-      # existed in the fired artifact and nowhere a human would look.
-      [legacy] =
+      # Delivery, both previews and the in-context editor all render from
+      # `BlockComponents.view_blocks/1`. The path it replaced (#1537) once
+      # emitted `data: %{}` for an embed, so the card existed in the fired
+      # artifact and nowhere a human would look.
+      [view] =
         page.id
         |> CMS.get_page!(authorize?: false)
         |> Map.fetch!(:blocks)
-        |> TypedBlocks.to_typed()
-        |> TypedBlocks.to_legacy()
+        |> KilnCMSWeb.BlockComponents.view_blocks()
 
-      assert legacy.data["title"] == "A track"
-      assert legacy.data["provider_name"] == "SoundCloud"
-
-      [thin] = KilnCMSWeb.BlockComponents.thin_blocks([legacy])
-      assert thin.title == "A track"
+      assert view.title == "A track"
+      assert view.provider_name == "SoundCloud"
     end
   end
 

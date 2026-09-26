@@ -28,12 +28,12 @@ defmodule KilnCMS.Firing.ReferencesTest do
 
   describe "extract/1" do
     test "pulls reference edges out of legacy ref blocks via the bridge" do
-      typed = KilnCMS.CMS.TypedBlocks.from_legacy([ref_block("abc123")])
+      typed = KilnCMS.LegacyBridge.from_legacy([ref_block("abc123")])
       assert References.extract(typed) == [{:page, "abc123"}]
     end
 
     test "a document with no references yields no edges (tree walk suffices)" do
-      typed = KilnCMS.CMS.TypedBlocks.from_legacy([%{type: :heading, content: "x"}])
+      typed = KilnCMS.LegacyBridge.from_legacy([%{type: :heading, content: "x"}])
       assert References.extract(typed) == []
     end
   end

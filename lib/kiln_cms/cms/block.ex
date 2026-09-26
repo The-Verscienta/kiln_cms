@@ -6,7 +6,14 @@ defmodule KilnCMS.CMS.Block do
   carries a `type` (the variant), free-form `content` (e.g. rich-text HTML/JSON),
   a flexible `data` map for type-specific attributes, and an `order` for layout.
   Nested/slice blocks are supported via `children`.
+
+  **Deprecated — the pre-typed block shape, removed at 1.0 (#1537).** Content
+  blocks have been `KilnCMS.CMS.BlockUnion` members since the storage flip; this
+  resource survives only as the shape `BlockUnion`'s cast still converts on the
+  way in (legacy write params) and on the way out (rows written before the flip,
+  until `mix kiln.blocks.backfill` rewrites them). Write the typed shape.
   """
+  @moduledoc deprecated: "Write typed blocks (KilnCMS.CMS.BlockUnion members); removed at 1.0"
   use Ash.Resource,
     data_layer: :embedded,
     embed_nil_values?: false

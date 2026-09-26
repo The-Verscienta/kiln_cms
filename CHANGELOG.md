@@ -67,6 +67,12 @@ Every summary line below that was shortened links to its own entry there.
   shape.**
   ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/unreleased.md#mix-kilnblocksbackfill-rewrites-legacy-shaped-stored-blocks-to-the-typed-shape))
 
+### Changed
+
+- **Public delivery, the previews and the in-context editor render from the
+  typed blocks, not through the legacy block shape.**
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/unreleased.md#public-delivery-the-previews-and-the-in-context-editor-render-from-the-typed))
+
 ### Fixed
 
 - **A hard line break in a paragraph, heading, quote or list item is delivered
@@ -83,6 +89,13 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A 429's `retry-after` is rounded up, never 0.**
   ([long form](docs/changelog/unreleased.md#a-429s-retry-after-is-rounded-up-never-0))
+
+### Deprecated
+
+- **The legacy block bridge is deprecated for removal at 1.0:
+  `KilnCMS.CMS.TypedBlocks.to_legacy/1`, `from_legacy/1`, `RichText.legacy_html`
+  and the legacy `KilnCMS.CMS.Block` write shape.**
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/unreleased.md#the-legacy-block-bridge-is-deprecated-for-removal-at-10))
 
 ## [0.11.0] - 2026-09-26
 
