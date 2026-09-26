@@ -6,9 +6,9 @@ defmodule KilnCMS.Blocks.Upcaster do
   current version, the declared `migrate` chain (`Kiln.Block.Info.migrations/1`)
   runs to bring it to head. Upcasting is **lazy on read** (`upcast/2`,
   `upcast_block_map/1`, applied wherever typed blocks are obtained) and the same
-  function powers **eager backfill** (`upcast_all/1`, wrap in Oban once the stored
-  column is union — Phase C flip). Idempotent: a head-version map is returned
-  unchanged.
+  function powers the **eager backfill**, `mix kiln.blocks.backfill`
+  (`KilnCMS.CMS.BlockBackfill`, #1537), which writes the upcast shape back to
+  disk. Idempotent: a head-version map is returned unchanged.
 
   For already-*fired* artifacts on a schema bump, the strategy is **re-fire the
   affected types** (decision H1) — re-firing reads the now-upcast blocks.

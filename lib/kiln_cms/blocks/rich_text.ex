@@ -2,7 +2,9 @@ defmodule KilnCMS.Blocks.RichText do
   @moduledoc """
   A rich-prose block (Kiln v2 typed block — D10). `body` is canonical Portable
   Text (D12); `legacy_html` is a transitional fallback for content not yet
-  migrated off stored TipTap HTML (removed once the Phase C data migration lands).
+  migrated off stored TipTap HTML. `mix kiln.blocks.backfill` (#1537) is that
+  migration: it converts `legacy_html` to `body` wherever the conversion is
+  faithful, and reports the blocks where it is not.
   """
   use Kiln.Block
 
