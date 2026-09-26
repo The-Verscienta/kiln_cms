@@ -11,6 +11,24 @@ defmodule KilnCMSWeb.LiveUserAuth do
 
   require Logger
 
+  # Runs several of the clauses below in order, as ONE `on_mount` entry, halting
+  # at the first that halts: `on_mount {KilnCMSWeb.LiveUserAuth, [:a, :b]}`.
+  #
+  # For the AshAuthentication route macros (`sign_in_route`, `reset_route`,
+  # `sign_out_route`, `confirm_route`, `magic_sign_in_route`). Each one
+  # `Enum.uniq_by/2`s its `on_mount` list BY MODULE, so a second
+  # `{KilnCMSWeb.LiveUserAuth, _}` entry is silently dropped — listed as three
+  # entries, only the first ran, and the auth pages never assigned
+  # `:current_org`. A `live_session` of Kiln's own takes the separate entries.
+  def on_mount(steps, params, session, socket) when is_list(steps) do
+    Enum.reduce_while(steps, {:cont, socket}, fn step, {:cont, socket} ->
+      case on_mount(step, params, session, socket) do
+        {:cont, socket} -> {:cont, {:cont, socket}}
+        halt -> {:halt, halt}
+      end
+    end)
+  end
+
   # This is used for nested liveviews to fetch the current user.
   # To use, place the following at the top of that liveview:
   # on_mount {KilnCMSWeb.LiveUserAuth, :current_user}
