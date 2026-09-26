@@ -15,9 +15,10 @@ defmodule KilnCMSWeb.Tenant do
   Step 3 is the single-host convenience, and on a multi-tenant deployment it is
   the wrong answer: any request carrying an unrecognised `Host` gets the default
   org's content, branding and analytics. `TENANT_STRICT_HOST=true` (#563) drops
-  that fallback — an unresolvable host is refused instead. It is off by default
-  so an existing single-host install is unaffected, and recommended for every
-  multi-tenant one.
+  that fallback — an unresolvable host is refused instead. Unset, it is on
+  exactly when more than one organization exists (#1547), so a single-host
+  install keeps its fallback and a multi-tenant one loses it without being told
+  to; `true`/`false` still win. See `strict_host?/0`.
 
   `fetch_org/1` is the single resolver — `{:ok, org}`, `:error` under strict
   matching, or `:unavailable` when the lookup itself failed on a host strict
@@ -282,27 +283,67 @@ defmodule KilnCMSWeb.Tenant do
   Whether an unresolvable request host is rejected rather than served the
   default org (`TENANT_STRICT_HOST`, #563).
 
-  Read at request time, not compile time, so a release flips it with a restart
-  and no rebuild. Defaults to `false`: a single-host install is served entirely
-  through the "unknown host → default org" path (bare `localhost`, an IP, the
-  load balancer's health-check host), and turning this on there would 404 the
-  whole site.
+  Three settings (#1547), from `strict_host_setting/0`:
+
+    * `true` — always strict.
+    * `false` — never strict. The pre-0.11 default; an operator who wants the
+      default-org fallback on a multi-org deployment says so explicitly.
+    * `:auto` (unset — the default) — strict if and only if more than one
+      organization exists. With one org, "an unknown Host is served the
+      default org" describes the only org there is, which is what a
+      single-host install is served through (bare `localhost`, an IP, the load
+      balancer's health-check host). With two, it serves an unrecognized Host
+      another tenant's site.
+
+  Runs on every request, so auto reads a cached verdict rather than counting —
+  see `KilnCMSWeb.Tenant.OrgCount` for how it is kept current across nodes, and
+  for why a count nobody has managed to read yet (`:unknown`) counts as strict.
+
+  Read at request time, not compile time, so a release changes it with a
+  restart and no rebuild.
   """
   @spec strict_host?() :: boolean()
-  def strict_host?, do: Application.get_env(:kiln_cms, :tenant_strict_host, false)
+  def strict_host? do
+    case strict_host_setting() do
+      :auto -> KilnCMSWeb.Tenant.OrgCount.verdict() != :single
+      explicit -> explicit
+    end
+  end
+
+  @doc """
+  The configured `TENANT_STRICT_HOST`: `true`, `false`, or `:auto` when unset.
+
+  Anything that is not a boolean is `:auto`. `KilnCMS.Config.Env.fetch/1`
+  already leaves an unrecognized `TENANT_STRICT_HOST` spelling unset, so this
+  only matters for an overlay's own `config :kiln_cms, :tenant_strict_host`,
+  and auto is the default that value would otherwise have replaced.
+  """
+  @spec strict_host_setting() :: boolean() | :auto
+  def strict_host_setting do
+    case Application.get_env(:kiln_cms, :tenant_strict_host, :auto) do
+      explicit when is_boolean(explicit) -> explicit
+      _auto -> :auto
+    end
+  end
 
   @doc """
   Whether this deployment is serving the default org to unrecognized hosts while
   more than one organization exists (#660).
 
-  `TENANT_STRICT_HOST` is off by default, and that is right for the single-host
-  install the fallback exists for: with one org, "an unknown Host is served the
-  default org" describes the only org there is. The moment a second one exists it
-  becomes a live misconfiguration — an unrecognized Host, an IP, or an
-  attacker-supplied header is served *another tenant's* content, branding and
-  analytics.
+  The fallback is right for the single-host install it exists for: with one org,
+  "an unknown Host is served the default org" describes the only org there is.
+  The moment a second one exists it becomes a live misconfiguration — an
+  unrecognized Host, an IP, or an attacker-supplied header is served *another
+  tenant's* content, branding and analytics.
 
-  Nothing about that moment is loud. `KilnCMS.Application` checks it at boot, but
+  Since #1547 an unset `TENANT_STRICT_HOST` closes this gap by itself, so it is
+  open only where an operator set `TENANT_STRICT_HOST=false` — or, briefly, on a
+  node that has not yet heard about the second org (`KilnCMSWeb.Tenant.OrgCount`
+  recounts to catch that). The predicate asks the *effective* `strict_host?/0`
+  rather than the setting for exactly that second case.
+
+  Nothing about an explicit `false` meeting a second org is loud.
+  `KilnCMS.Application` checks it at boot, but
   boot happened before the second org existed and may not happen again for
   months; #563 shipped a CHANGELOG note, which helps only an operator reading it
   at the right time. So the same predicate also runs where the decision is made

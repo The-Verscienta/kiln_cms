@@ -13,6 +13,11 @@ defmodule KilnCMS.Mail.SuppressedRecipient do
 
   The address is a `ci_string`, so suppression and lookup are
   case-insensitive.
+
+  Instance-wide, so written only on the **operator's** relay's word: it stops
+  the address for every site and for account mail. A reject from a site's own
+  relay goes on that site's list instead (`KilnCMS.Mail.SiteSuppressedRecipient`,
+  #1562).
   """
   use Ash.Resource,
     domain: KilnCMS.Mail,

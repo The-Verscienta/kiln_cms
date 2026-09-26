@@ -175,6 +175,65 @@ defmodule KilnCMSWeb.SiteMailLiveTest do
     end
   end
 
+  describe "delivery health" do
+    test "lists this site's suppressed addresses only, and Remove clears one",
+         %{conn: conn, org: org} do
+      other = seed_org()
+      suppress!(org, "dead@reader.example")
+      suppress!(other, "elsewhere@reader.example")
+
+      # The operator's instance-wide list isn't this page's to show or clear.
+      KilnCMS.Mail.suppress_recipient!(%{email: "operator@reader.example"}, authorize?: false)
+
+      lv = mount_as_admin(conn, org)
+      html = render(lv)
+
+      assert html =~ "dead@reader.example"
+      refute html =~ "elsewhere@reader.example"
+      refute html =~ "operator@reader.example"
+
+      [entry] = KilnCMS.Mail.list_site_suppressed_recipients!(tenant: org, authorize?: false)
+      lv |> element("#site-suppressed-#{entry.id} button", "Remove") |> render_click()
+
+      refute render(lv) =~ "dead@reader.example"
+      refute KilnCMS.Mail.suppressed?("dead@reader.example", org_id: org.id)
+      assert KilnCMS.Mail.suppressed?("elsewhere@reader.example", org_id: other.id)
+    end
+
+    test "a forged Remove for another site's entry clears nothing", %{conn: conn, org: org} do
+      other = seed_org()
+      theirs = suppress!(other, "elsewhere@reader.example")
+
+      lv = mount_as_admin(conn, org)
+      assert render_click(lv, "unsuppress", %{"id" => theirs.id}) =~ "Couldn&#39;t remove"
+
+      assert KilnCMS.Mail.suppressed?("elsewhere@reader.example", org_id: other.id)
+    end
+
+    test "shows this site's recent bounces by domain", %{conn: conn, org: org} do
+      KilnCMS.Repo.insert!(%Oban.Job{
+        worker: "KilnCMS.Mail.DeliveryWorker",
+        queue: "mail",
+        state: "cancelled",
+        args: %{"to" => ["", "gone@bounced-site.example"], "org_id" => org.id},
+        errors: [%{"error" => "{:cancel, \"permanent delivery failure: 550 5.1.1\"}"}],
+        attempted_at: DateTime.utc_now()
+      })
+
+      html = conn |> mount_as_admin(org) |> element("#site-mail-failures") |> render()
+
+      assert html =~ "bounced-site.example"
+      refute html =~ "gone@"
+    end
+  end
+
+  defp suppress!(org, address) do
+    KilnCMS.Mail.suppress_site_recipient!(%{email: address, reason: "550 5.1.1"},
+      tenant: org,
+      authorize?: false
+    )
+  end
+
   defp mount_as_admin(conn, org) do
     {:ok, lv, _html} =
       conn |> org_conn(org) |> log_in(authed_user(:admin)) |> live(~p"/editor/site-mail")

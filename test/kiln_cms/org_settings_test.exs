@@ -135,6 +135,7 @@ defmodule KilnCMS.OrgSettingsTest do
     @expected [
       KilnCMS.CMS.FeedSettings,
       KilnCMS.CMS.FormSpamSettings,
+      KilnCMS.CMS.SiteAiProvider,
       KilnCMS.CMS.SiteBranding,
       KilnCMS.CMS.SiteCodeInjection,
       KilnCMS.CMS.SiteCompliance,
@@ -144,6 +145,9 @@ defmodule KilnCMS.OrgSettingsTest do
       KilnCMS.CMS.SiteLocaleSettings,
       KilnCMS.CMS.SiteMailRelay,
       KilnCMS.CMS.SiteSsoProvider,
+      KilnCMS.CMS.SiteMeilisearch,
+      KilnCMS.CMS.SiteStorage,
+      KilnCMS.CMS.SiteVapidKey,
       KilnCMS.Federation.SiteFederation
     ]
 

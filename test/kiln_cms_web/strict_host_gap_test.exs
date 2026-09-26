@@ -75,12 +75,19 @@ defmodule KilnCMSWeb.StrictHostGapTest do
       refute Tenant.gap?(50)
     end
 
-    # `TENANT_STRICT_HOST` reaches config through `KilnCMS.Config.Env`, which
-    # fails to the DEFAULT rather than to safe — so a garbage value leaves the
-    # flag off, and the gap is real.
-    test "a non-boolean flag counts as off, because that is what routing does" do
+    # A non-boolean is auto (#1547), which is what an unset flag means. Auto
+    # routes strictly once the verdict is `:multi`, so there is no gap — and
+    # while the verdict still says `:single` (a node that has not heard about
+    # the second org yet) routing is lenient and the gap is real.
+    test "a non-boolean flag counts as auto, because that is what routing does" do
+      previous = KilnCMSWeb.Tenant.OrgCount.verdict()
+      on_exit(fn -> KilnCMSWeb.Tenant.OrgCount.put(previous) end)
       Application.put_env(:kiln_cms, :tenant_strict_host, :yes)
 
+      KilnCMSWeb.Tenant.OrgCount.put(:multi)
+      refute Tenant.gap?(2)
+
+      KilnCMSWeb.Tenant.OrgCount.put(:single)
       assert Tenant.gap?(2)
     end
   end
@@ -245,6 +252,7 @@ defmodule KilnCMSWeb.StrictHostGapTest do
       {:ok, _lv, html} = live(on_host(conn, org("gap-panel")), ~p"/editor/system")
 
       assert html =~ "Host matching is off"
+      assert html =~ "TENANT_STRICT_HOST=false is overriding the default"
       assert html =~ "TENANT_STRICT_HOST=true"
     end
 

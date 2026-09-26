@@ -60,6 +60,38 @@ Every summary line below that was shortened links to its own entry there.
   domains it has verified by DNS.**
   ([#1561](https://github.com/The-Verscienta/kiln_cms/issues/1561) · [long form](docs/changelog/unreleased.md#a-site-can-offer-its-own-single-sign-on-provider))
 
+### Breaking
+
+- **Multi-org installs now refuse unknown hosts unless `TENANT_STRICT_HOST=false`.**
+  ([#1547](https://github.com/The-Verscienta/kiln_cms/issues/1547) · [long form](docs/changelog/unreleased.md#multi-org-installs-now-refuse-unknown-hosts-unless-tenantstricthostfalse))
+
+### Added
+
+- **A site can sign its push notifications with its own key, generated in the
+  console.**
+  ([#1560](https://github.com/The-Verscienta/kiln_cms/issues/1560) · [long form](docs/changelog/unreleased.md#a-site-can-sign-its-push-notifications-with-its-own-key-generated-in-the-console))
+
+- **A site can index its content into its own Meilisearch, set from the console.**
+  ([#1558](https://github.com/The-Verscienta/kiln_cms/issues/1558) · [long form](docs/changelog/unreleased.md#a-site-can-index-its-content-into-its-own-meilisearch-set-from-the-console))
+
+- **A site can keep its uploads in its own object storage bucket, set from the
+  console.**
+  ([#1559](https://github.com/The-Verscienta/kiln_cms/issues/1559) · [long form](docs/changelog/unreleased.md#a-site-can-keep-its-uploads-in-its-own-object-storage-bucket-set-from-the-console))
+
+- **A site on its own SMTP relay keeps its own bounce list.**
+  ([#1562](https://github.com/The-Verscienta/kiln_cms/issues/1562) · [long form](docs/changelog/unreleased.md#a-site-on-its-own-smtp-relay-keeps-its-own-bounce-list))
+
+- **A site can use its own AI provider key and models, set from the console.**
+  ([#1557](https://github.com/The-Verscienta/kiln_cms/issues/1557) · [long form](docs/changelog/unreleased.md#a-site-can-use-its-own-ai-provider-key-and-models-set-from-the-console))
+
+### Fixed
+
+- **An open calendar no longer re-queries once per write during a bulk import.**
+  ([#1336](https://github.com/The-Verscienta/kiln_cms/issues/1336) · [long form](docs/changelog/unreleased.md#an-open-calendar-no-longer-re-queries-once-per-write-during-a-bulk-import))
+
+- **A site's relay refusing its password no longer pages the operator.**
+  ([#1562](https://github.com/The-Verscienta/kiln_cms/issues/1562) · [long form](docs/changelog/unreleased.md#a-sites-relay-refusing-its-password-no-longer-pages-the-operator))
+
 ### Security
 
 - **Two Hex advisories closed (`ash` 3.33.11, `lazy_html` 0.1.13); the working

@@ -56,6 +56,11 @@ defmodule KilnCMS.Accounts do
       define :get_push_subscription, action: :read, get_by: [:id]
       define :touch_push_subscription, action: :touch_delivered
       define :push_subscriptions_for, action: :for_users, args: [:user_ids]
+
+      define :push_subscriptions_bound_to_key,
+        action: :bound_to_key,
+        args: [:org_id, :vapid_public_key]
+
       define :subscribe_to_push, action: :subscribe
       define :remove_push_subscription, action: :destroy
     end

@@ -121,8 +121,9 @@ defmodule KilnCMS.Firing.FireWorker do
       |> Oban.insert()
     end
 
-    # Keep the optional Meilisearch index in step (Phase 6). No-op when disabled.
-    if KilnCMS.Search.Meilisearch.enabled?() do
+    # Keep the optional Meilisearch index in step (Phase 6) — the site's own
+    # instance or the operator's (#1558). No-op when the site uses neither.
+    if KilnCMS.Search.Meilisearch.enabled_for?(org_id) do
       %{"org_id" => org_id, "op" => meili_op(document), "type" => to_string(type), "id" => id}
       |> KilnCMS.Search.MeilisearchWorker.new()
       |> Oban.insert()

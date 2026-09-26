@@ -25,9 +25,18 @@ defmodule KilnCMS.Assist do
   third-party provider is configured, and the editor shows a standing notice
   next to the control.
 
-  API keys are never read or stored by Kiln: `req_llm` resolves them itself
-  from its own config and environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-  …), so no new secret enters Kiln's config, database or release env.
+  The operator's API keys are never read or stored by Kiln: `req_llm`
+  resolves them itself from its own config and environment
+  (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …).
+
+  ## A site's own provider (#1557)
+
+  As for `KilnCMS.Seo`: `route/1` resolves the site's own provider first
+  (`KilnCMS.LLM.SiteProvider`). A site with one switched on uses it and
+  nothing of the operator's; a site whose provider is set but unusable gets
+  `{:error, {:site_provider, reason}}`, never the operator's provider. The
+  zero-arity `enabled?/0`, `egress?/0` and friends describe the operator's
+  configuration only; the editor uses `summary/1`.
 
   ## What this module will not do
 
@@ -45,6 +54,8 @@ defmodule KilnCMS.Assist do
   alias KilnCMS.Assist.Suggestion
   alias KilnCMS.LLM
   alias KilnCMS.LLM.Budget
+  alias KilnCMS.LLM.Route
+  alias KilnCMS.LLM.SiteProvider
 
   @doc "Whether block assist is configured. False on a default install."
   @spec enabled?() :: boolean()
@@ -86,16 +97,49 @@ defmodule KilnCMS.Assist do
   @spec max_output_chars() :: pos_integer()
   def max_output_chars, do: cfg(:max_output_chars, 6_000)
 
+  @doc """
+  Where assist goes for the site `org_id` — the same contract as
+  `KilnCMS.Seo.route/1`.
+  """
+  @spec route(term()) ::
+          {:ok, module(), Route.t()} | {:error, :disabled | {:site_provider, term()}}
+  def route(org_id) do
+    case SiteProvider.resolve(org_id, :assist) do
+      :operator -> if enabled?(), do: {:ok, generator(), operator_route()}, else: disabled()
+      :off -> disabled()
+      {:site, route} -> {:ok, KilnCMS.Assist.Generator.ReqLLM, route}
+      {:error, reason} -> {:error, {:site_provider, reason}}
+    end
+  end
+
+  defp disabled, do: {:error, :disabled}
+
+  @doc false
+  @spec operator_route() :: Route.t()
+  def operator_route, do: Route.operator(model())
+
+  @doc "What the editor needs to know about assist on the site `org_id`. See `KilnCMS.Seo.summary/1`."
+  @spec summary(Ash.UUID.t() | nil) :: LLM.summary()
+  def summary(org_id), do: LLM.summary(route(org_id), cfg(:base_url, nil))
+
   @spec request_opts() :: keyword()
-  def request_opts do
-    [
+  def request_opts, do: request_opts(operator_route())
+
+  @doc """
+  Request options for `route`. The operator's `base_url` is added only to the
+  operator's route: a site's route carries its own endpoint.
+  """
+  @spec request_opts(Route.t()) :: keyword()
+  def request_opts(%Route{source: source}) do
+    opts = [
       # Warmer than SEO's 0.3: that path wants the most predictable phrasing of
       # a fixed fact, this one is drafting prose a person will edit.
       temperature: cfg(:temperature, 0.6),
       max_tokens: cfg(:max_tokens, 1_200),
       receive_timeout: cfg(:timeout_ms, 45_000)
     ]
-    |> put_base_url(cfg(:base_url, nil))
+
+    if source == :operator, do: put_base_url(opts, cfg(:base_url, nil)), else: opts
   end
 
   # `base_url` has to reach the request, not just `egress?/0`. Read only by the
@@ -118,18 +162,17 @@ defmodule KilnCMS.Assist do
   `KilnCMS.Ask` take.
 
   `opts` accepts `:org_id` and `:user_id` for rate limiting; both buckets are
-  skipped when they aren't supplied (a mix task or a test).
+  skipped when they aren't supplied (a mix task or a test). `:org_id` also
+  picks the site's own provider when it has one (`route/1`).
   """
   @spec run(Request.t(), keyword()) :: {:ok, Suggestion.t()} | {:error, term()}
   def run(%Request{} = request, opts \\ []) do
-    with :ok <- check_enabled(),
+    with {:ok, generator, route} <- route(opts[:org_id]),
          :ok <- Request.validate(request),
          :ok <- Budget.check("assist", opts[:org_id], opts[:user_id], budget_limits()) do
-      measured(request, opts)
+      measured(generator, route, request, opts)
     end
   end
-
-  defp check_enabled, do: if(enabled?(), do: :ok, else: {:error, :disabled})
 
   defp budget_limits do
     [
@@ -138,9 +181,9 @@ defmodule KilnCMS.Assist do
     ]
   end
 
-  defp measured(request, opts) do
+  defp measured(generator, route, request, opts) do
     started = System.monotonic_time()
-    result = safe_generate(request, opts)
+    result = safe_generate(generator, route, request, opts)
 
     :telemetry.execute(
       [:kiln_cms, :assist, :generate, :stop],
@@ -148,8 +191,9 @@ defmodule KilnCMS.Assist do
       %{
         org_id: opts[:org_id],
         action: request.action,
-        model: model(),
-        provider: provider(),
+        model: route.model,
+        provider: LLM.route_provider(route),
+        source: route.source,
         outcome: outcome(result)
       }
     )
@@ -157,14 +201,14 @@ defmodule KilnCMS.Assist do
     result
   end
 
-  defp safe_generate(request, opts) do
+  defp safe_generate(generator, route, request, opts) do
     request
     # The rate-limiting ids stay here. `Request` is documented — in its own
     # moduledoc, in the behaviour, and in docs/ai-assist.md — as the complete
     # list of what a generator sees, and a bespoke generator written against
     # that contract would otherwise be handed the tenant and actor uuids.
-    |> generator().generate(Keyword.drop(opts, [:org_id, :user_id]))
-    |> normalize(request)
+    |> generator.generate(generator_opts(route, Keyword.drop(opts, [:org_id, :user_id])))
+    |> normalize(request, route)
   rescue
     exception ->
       Logger.error("Assist generator crashed: #{Exception.message(exception)}")
@@ -178,17 +222,22 @@ defmodule KilnCMS.Assist do
   # The generator returns raw text; every path through here goes via
   # `Suggestion.normalize/2`, so no generator can hand a caller text it hasn't
   # cleaned. Usage is optional so a bespoke implementation needn't fake it.
-  defp normalize({:ok, text}, request), do: normalize({:ok, text, %{}}, request)
+  defp normalize({:ok, text}, request, route), do: normalize({:ok, text, %{}}, request, route)
 
-  defp normalize({:ok, text, usage}, request) do
+  defp normalize({:ok, text, usage}, request, route) do
     case Suggestion.normalize(text, request.action) do
-      {:ok, suggestion} -> {:ok, %{suggestion | model: model(), usage: usage}}
+      {:ok, suggestion} -> {:ok, %{suggestion | model: route.model, usage: usage}}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp normalize({:error, reason}, _request), do: {:error, reason}
-  defp normalize(other, _request), do: {:error, {:unexpected, other}}
+  defp normalize({:error, reason}, _request, _route), do: {:error, reason}
+  defp normalize(other, _request, _route), do: {:error, {:unexpected, other}}
+
+  # Only a site's route is handed over: it always runs the shipped adapter,
+  # and an operator's bespoke generator is given exactly what it was before.
+  defp generator_opts(%Route{source: :site} = route, opts), do: Keyword.put(opts, :llm, route)
+  defp generator_opts(_route, opts), do: opts
 
   defp usage_measurements({:ok, %Suggestion{usage: %{} = usage}}) do
     Map.take(usage, [:input_tokens, :output_tokens])

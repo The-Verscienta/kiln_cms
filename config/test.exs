@@ -364,3 +364,13 @@ config :kiln_cms,
 # stub, so the suite runs the real OIDC flow without a network.
 config :kiln_cms, KilnCMS.Accounts.SiteSso,
   req_options: [plug: {Req.Test, KilnCMS.Accounts.SiteSso}]
+
+# Host matching (#1547): pinned OFF rather than left on `:auto`. Auto reads a
+# VM-global verdict (`KilnCMSWeb.Tenant.OrgCount`) that any test creating an
+# org through the action flips to `:multi` for every other test in the run —
+# and the suite's default `www.example.com` Host matches no org, so it would
+# start refusing requests depending on test order. The periodic recount is off
+# for the same reason: it runs outside the SQL sandbox. Tests of auto set
+# `:auto` and the verdict themselves.
+config :kiln_cms, :tenant_strict_host, false
+config :kiln_cms, :tenant_org_recount, false

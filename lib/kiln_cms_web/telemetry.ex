@@ -166,7 +166,7 @@ defmodule KilnCMSWeb.Telemetry do
       distribution("kiln_cms.calendar.requery.messages",
         description:
           "How many :calendar_changed messages each calendar re-query coalesced " <>
-            "(1 = a lone change; consistently 1 under bursty writes = the drain is broken)"
+            "(1 = a lone change; consistently 1 under bursty writes = coalescing is broken)"
       ),
 
       # Delivery / cache / firing Metrics (#206)

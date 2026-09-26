@@ -54,15 +54,29 @@ it is wrong: any request with an unrecognized `Host`, including an
 attacker-supplied one, would be served the default org's content, branding and
 analytics.
 
-**Set `TENANT_STRICT_HOST=true` on every multi-tenant deployment.** An
-unmatched host then gets a `404` (or a `503` with `retry-after` if the lookup
-could not run because the database is down) instead of the default org. The
-apex (`PHX_HOST`) is never refused; health probes and the payment webhook are
-exempt. The full behaviour, including what static files do, is under
+**Strict host matching turns itself on once a second organization exists**
+(#1547). With `TENANT_STRICT_HOST` unset — the default — a single-org install
+keeps the fallback, and the create that makes a deployment multi-tenant removes
+it: an unmatched host then gets a `404` (or a `503` with `retry-after` if the
+lookup could not run because the database is down) instead of the default org.
+No restart, and every node follows — the creating node tells the others over
+`Phoenix.PubSub`, and a node that missed the message recounts within five
+minutes. The apex (`PHX_HOST`) is never refused; health probes and the payment
+webhook are exempt. The full behaviour, including what static files do, is under
 [`TENANT_STRICT_HOST`](environment-variables.md#multi-tenancy-336).
 
-Kiln warns if you forget: at boot, when the second org is created, and on
-`/editor/system` for as long as the gap stays open.
+An explicit setting wins either way. `TENANT_STRICT_HOST=true` refuses unknown
+hosts even with one org; `TENANT_STRICT_HOST=false` keeps the fallback even with
+many, which was the behaviour of every release before 0.11. Kiln warns if
+`false` is what keeps a multi-org deployment on the fallback: at boot, when the
+second org is created, and on `/editor/system` for as long as the gap stays
+open.
+
+If the organizations cannot be counted — a node that booted while Postgres was
+unreachable — an unset setting behaves as multi-org and refuses unknown hosts
+until the count succeeds. Serving an unrecognized host another tenant's site
+cannot be undone; a retryable refusal on a single-org install for the length of
+an outage can. See `KilnCMSWeb.Tenant.OrgCount`.
 
 ## What is per-org and what is deployment-wide
 
@@ -100,6 +114,10 @@ Creating and updating orgs is a **platform-admin** action
 screen for it yet. An org has a `name`, a `slug` (its subdomain) and an
 optional `custom_domain`. Members are then managed per org at
 `/editor/team`.
+
+Creating the **second** org turns strict host matching on unless
+`TENANT_STRICT_HOST` is set (see above), so before you create it, make sure
+every host the deployment answers on is either `PHX_HOST` or belongs to an org.
 
 Orgs cannot be deleted: paper-trail version rows outlive the content they
 describe, and deleting an org would strand them. A single-tenant install that

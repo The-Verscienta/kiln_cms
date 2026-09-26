@@ -541,6 +541,30 @@ second half of that model is not a policy: `KilnCMSWeb.Plugs.CodeInjection` runs
 only in the `:delivery` pipeline, so the snippet can never render in the editor
 console. See [code-injection.md](code-injection.md).
 
+## Object storage — `SiteStorage`, `StorageProfile` (#1559)
+
+| Resource | read | writes |
+|---|---|---|
+| `SiteStorage` (`read`) | admin only | admin only (`save`, `update`, `destroy`) |
+| `StorageProfile` (`read`) | admin only | admin only (`create`, `update_credentials`); no destroy |
+
+A site's own S3-compatible bucket, at `/editor/site-storage`. Org-admin on both
+sides, like every per-site integration; the rows name the site's storage
+provider and account. Profiles are written only through `SiteStorage`'s saves,
+and uploads, downloads and media jobs read them as the system
+(`KilnCMS.Storage.SiteProfiles`), tenant-scoped to the item's own site — a
+media row can name only a profile of its own site.
+
+There is no destroy on `StorageProfile` on purpose: media rows record the
+profile their file is in, and deleting one would strand every file in it.
+Moving the site to another bucket makes a new profile and leaves the old one.
+
+As for the mail relay below, the stricter parts are not policies: the secret
+is encrypted, write-only and database-only; the endpoint must be `https://` and
+is refused if it resolves to a private, loopback, link-local or metadata
+address, at save and on every connection; and a request to it carries nothing
+from the operator's ExAws config.
+
 ## Outgoing mail — `SiteMailRelay` (#1322)
 
 | Resource | read | writes |
@@ -560,7 +584,80 @@ operator's keys can. The relay host is refused if it resolves to a private,
 loopback, link-local or metadata address, checked when it is saved and again on
 every connection. A site relay's hard rejects cancel the message but don't add
 the address to the instance-wide suppression list, because a relay the site
-chose could otherwise block any address for every site.
+chose could otherwise block any address for every site. They go on the site's
+own list instead (next section).
+
+## Site bounce suppression — `Mail.SiteSuppressedRecipient` (#1562)
+
+| Action | admin | editor | viewer | anonymous | system |
+|--------|:-----:|:------:|:------:|:---------:|:------:|
+| read, `destroy` | ✅ | ❌ | ❌ | ❌ | ✅ |
+| `suppress` | ❌ | ❌ | ❌ | ❌ | ✅ |
+
+The addresses one site's own relay rejected as dead, per site
+(`org_id`, `email`). Org admin reads and clears it from `/editor/site-mail`; a
+non-admin read filters to nothing. Only the delivery pipeline writes it, as
+the **system** (`authorize?: false`), on a reject naming the recipient that
+came through that site's relay. Not even the site's admin can add a row: that
+would stop the site's mail to an address without a bounce ever happening.
+
+It is consulted only for mail sent for that site (`KilnCMS.Mail.suppressed?/2`
+with `org_id:`). Account mail carries no site and never reads it, and no site
+reads another's, so a hostile relay can stop only its own site's mail.
+
+## Push notification key — `SiteVapidKey` (#1560)
+
+| Resource | read | writes |
+|---|---|---|
+| `SiteVapidKey` (`read`) | admin only | admin only (`save`, `update`, `rotate`, `destroy`) |
+
+A site's own Web Push (VAPID) key pair, at `/editor/site-push`. Org-admin on
+both sides, like every per-site settings row. No action accepts a key: `save`
+mints the pair on first use and `rotate` replaces it, so a site admin can
+never set a key, only generate one. The private half is encrypted and never
+rendered. `rotate` and `destroy` delete the site's push subscriptions made
+against the old key as a system write, since those rows belong to the
+reviewers and not to the admin. `KilnCMS.Push.Keys` reads the row as the
+system, for the push worker (which has no actor) and for a reviewer
+subscribing on `/editor/settings`, who is not the site's admin.
+
+## Search instance — `SiteMeilisearch` (#1558)
+
+| Resource | read | writes |
+|---|---|---|
+| `SiteMeilisearch` (`read`) | admin only | admin only (`save`, `update`, `destroy`) |
+
+A site's own Meilisearch instance — URL, API key and index — at
+`/editor/site-search`. Org-admin on both sides, like every per-site settings
+row; a read by anyone else is filtered to nothing. The indexing jobs and
+`Meilisearch.search/2` read it as the system
+(`KilnCMS.Search.Meilisearch.SiteInstance`), tenant-scoped to the one site.
+
+As with the site relay, the stricter parts are not policies: the key is
+encrypted, never read back into the form, and has no env-var or file source;
+the URL must be HTTPS and is refused if it resolves to a private, loopback,
+link-local or metadata address, at save and on every request (through
+`KilnCMS.SafeFetch`). "Reindex now" re-asks the update policy before
+enqueueing (#1166).
+
+## AI provider — `SiteAiProvider` (#1557)
+
+| Resource | read | writes |
+|---|---|---|
+| `SiteAiProvider` (`read`) | admin only | admin only (`save`, `update`, `destroy`) |
+
+A site's own AI provider, API key and model per feature (SEO suggestions, block
+assist, `/api/ask` answers), at `/editor/site-ai`. Org-admin on both sides, like
+`SiteMailRelay`: the row names the site's AI vendor and account. The features
+read it as the system (`KilnCMS.LLM.SiteProvider`) — `/api/ask` has no actor at
+all — tenant-scoped to the one site the request is for.
+
+The same tenant rules as the mail relay, none of them a policy: the key is
+encrypted, never read back into the form, and has no env-var or file source;
+an OpenAI-compatible endpoint must be `https://` and is refused if it resolves
+to a private, loopback, link-local or metadata address, at save and on every
+request. Changing the provider or endpoint drops the stored key, so a co-admin
+cannot send a key they were never shown to a host of their choosing.
 
 ## Single sign-on — `SiteSsoProvider`, `SiteSsoDomain` (#1561)
 

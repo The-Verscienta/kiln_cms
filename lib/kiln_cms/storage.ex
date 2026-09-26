@@ -10,7 +10,27 @@ defmodule KilnCMS.Storage do
 
   Callers go through this module (`Storage.store/2`, `Storage.url/1`, …) rather
   than a concrete adapter.
+
+  ## A site's own store (#1559)
+
+  A site can bring its own bucket (`/editor/site-storage`). Every function
+  here takes an optional last argument saying which store to use — see
+  `t:at/0`. The rule every caller follows:
+
+    * **A new upload** asks `upload_target/1` for the site's current store and
+      records it on the media row (`MediaItem.storage_profile_id`,
+      `profile_id/1`).
+    * **Anything about an existing file** — reading it, deleting it, deriving
+      variants, posters or transforms from it, moving it between the public and
+      private buckets — passes the *item*, so it goes to the store the row
+      names, never to the site's current setting. A derived file goes to its
+      item's store too, so an item's files never straddle two stores.
+
+  `nil` (the default) is the operator's store, so every existing call and every
+  existing row behave exactly as before.
   """
+
+  alias KilnCMS.Storage.{Profile, S3, SiteProfiles}
 
   @doc "Persist the file at `source_path` under `key`; returns `{:ok, key}`."
   @callback store(key :: String.t(), source_path :: String.t()) ::
@@ -133,64 +153,171 @@ defmodule KilnCMS.Storage do
     |> Keyword.get(:adapter, KilnCMS.Storage.Local)
   end
 
-  @spec store(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
-  def store(key, source_path), do: adapter().store(key, source_path)
+  @typedoc """
+  Which store an operation is aimed at (#1559):
 
-  @spec fetch(String.t()) :: {:ok, binary()} | {:error, term()}
-  def fetch(key), do: adapter().fetch(key)
+    * `nil` — the operator's (`adapter/0`), as every call was before sites
+      could bring their own;
+    * a `KilnCMS.Storage.Profile` — a site's own, already resolved;
+    * a media item (anything with `:org_id` and `:storage_profile_id`) — the
+      store that item's file is in, resolved through
+      `KilnCMS.Storage.SiteProfiles.for_item/1`. A `nil` profile on the row is
+      the operator's.
 
-  @doc """
-  Remove the blob at `key` — except in demo mode, where the delete is deferred
-  to the next reset and this returns `:ok` (`KilnCMS.Demo.Blobs`): a visitor
-  purging or re-deriving a golden image must not remove a file the golden
-  snapshot still references.
+  An item whose profile can't be resolved fails the operation with
+  `{:error, {:site_storage, reason}}` — never a quiet retry against the
+  operator's store, which doesn't have the file. `url/2` takes only `nil` or a
+  resolved profile: it returns a string, so it has no way to fail.
   """
-  @spec delete(String.t()) :: :ok | {:error, term()}
-  def delete(key) do
-    if KilnCMS.Demo.enabled?(), do: KilnCMS.Demo.Blobs.defer(key), else: adapter().delete(key)
-  end
-
-  @spec url(String.t()) :: String.t()
-  def url(key), do: adapter().url(key)
-
-  @spec store_private(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
-  def store_private(key, source_path), do: adapter().store_private(key, source_path)
-
-  @spec fetch_private(String.t()) :: {:ok, binary()} | {:error, term()}
-  def fetch_private(key), do: adapter().fetch_private(key)
-
-  @doc "`delete/1` for private storage — deferred in demo mode the same way."
-  @spec delete_private(String.t()) :: :ok | {:error, term()}
-  def delete_private(key) do
-    if KilnCMS.Demo.enabled?(),
-      do: KilnCMS.Demo.Blobs.defer(key),
-      else: adapter().delete_private(key)
-  end
-
-  @spec private_available?() :: boolean()
-  def private_available?, do: adapter().private_available?()
+  @type at :: Profile.t() | map() | nil
 
   @doc """
-  Whether the direct-upload API can run: the adapter presigns
-  (`presign_private_put/3`) AND has private storage to presign into. The
-  staging object holds an upload nobody has sniffed or stripped yet, so it
+  Resolves `at` (see `t:at/0`) to `nil` (the operator's store) or a site's
+  `Profile` — once, for a caller about to make several calls against the same
+  item's store.
+  """
+  @spec locate(at()) :: {:ok, Profile.t() | nil} | {:error, {:site_storage, term()}}
+  def locate(nil), do: {:ok, nil}
+  def locate(%Profile{} = profile), do: {:ok, profile}
+
+  def locate(item) when is_map(item) do
+    case SiteProfiles.for_item(item) do
+      {:ok, profile} -> {:ok, profile}
+      {:error, reason} -> {:error, {:site_storage, reason}}
+    end
+  end
+
+  @doc """
+  Where a new upload for the site `org_id` goes: `{:ok, nil}` for the
+  operator's store or `{:ok, profile}` for the site's own. `{:error,
+  {:site_storage, reason}}` when the site's own is set but unusable — the
+  upload must then be refused, never written to the operator's store (see
+  `KilnCMS.Storage.SiteProfiles`). Record the profile's id on the media row.
+  """
+  @spec upload_target(Ash.UUID.t() | nil) ::
+          {:ok, Profile.t() | nil} | {:error, {:site_storage, term()}}
+  def upload_target(org_id) do
+    # A tenant-less upload is created in the default org, so it goes where the
+    # default org's files go.
+    case SiteProfiles.for_upload(KilnCMS.Accounts.org_id(org_id)) do
+      {:ok, profile} -> {:ok, profile}
+      {:error, reason} -> {:error, {:site_storage, reason}}
+    end
+  end
+
+  @doc "The profile id to record on a media row for `at`: `nil` for the operator's store."
+  @spec profile_id(Profile.t() | nil) :: Ash.UUID.t() | nil
+  def profile_id(nil), do: nil
+  def profile_id(%Profile{id: id}), do: id
+
+  @spec store(String.t(), String.t(), at()) :: {:ok, String.t()} | {:error, term()}
+  def store(key, source_path, at \\ nil),
+    do: run(at, fn -> adapter().store(key, source_path) end, &S3.store(key, source_path, &1))
+
+  @spec fetch(String.t(), at()) :: {:ok, binary()} | {:error, term()}
+  def fetch(key, at \\ nil), do: run(at, fn -> adapter().fetch(key) end, &S3.fetch(key, &1))
+
+  @doc """
+  Remove the blob at `key` — except in demo mode, where the delete of an
+  operator-store blob is deferred to the next reset and this returns `:ok`
+  (`KilnCMS.Demo.Blobs`): a visitor purging or re-deriving a golden image must
+  not remove a file the golden snapshot still references. The golden snapshot
+  is never in a site's own store, so those deletes are not deferred.
+  """
+  @spec delete(String.t(), at()) :: :ok | {:error, term()}
+  def delete(key, at \\ nil) do
+    run(
+      at,
+      fn ->
+        if KilnCMS.Demo.enabled?(),
+          do: KilnCMS.Demo.Blobs.defer(key),
+          else: adapter().delete(key)
+      end,
+      &S3.delete(key, &1)
+    )
+  end
+
+  @spec url(String.t(), Profile.t() | nil) :: String.t()
+  def url(key, site \\ nil)
+  def url(key, nil), do: adapter().url(key)
+  def url(key, %Profile{} = profile), do: S3.url(key, profile)
+
+  @spec store_private(String.t(), String.t(), at()) :: {:ok, String.t()} | {:error, term()}
+  def store_private(key, source_path, at \\ nil),
+    do:
+      run(
+        at,
+        fn -> adapter().store_private(key, source_path) end,
+        &S3.store_private(key, source_path, &1)
+      )
+
+  @spec fetch_private(String.t(), at()) :: {:ok, binary()} | {:error, term()}
+  def fetch_private(key, at \\ nil),
+    do: run(at, fn -> adapter().fetch_private(key) end, &S3.fetch_private(key, &1))
+
+  @doc "`delete/2` for private storage — deferred in demo mode the same way."
+  @spec delete_private(String.t(), at()) :: :ok | {:error, term()}
+  def delete_private(key, at \\ nil) do
+    run(
+      at,
+      fn ->
+        if KilnCMS.Demo.enabled?(),
+          do: KilnCMS.Demo.Blobs.defer(key),
+          else: adapter().delete_private(key)
+      end,
+      &S3.delete_private(key, &1)
+    )
+  end
+
+  @doc """
+  Whether `at`'s store has private storage. An item whose store can't be
+  resolved has none, as far as a caller deciding whether to gate it is
+  concerned.
+  """
+  @spec private_available?(at()) :: boolean()
+  def private_available?(at \\ nil) do
+    case locate(at) do
+      {:ok, nil} -> adapter().private_available?()
+      {:ok, profile} -> S3.private_available?(profile)
+      {:error, _reason} -> false
+    end
+  end
+
+  @doc """
+  Whether the direct-upload API can run against `at`'s store: the store
+  presigns (`presign_private_put/3`) AND has private storage to presign into.
+  The staging object holds an upload nobody has sniffed or stripped yet, so it
   must never land anywhere a delivery route serves from — hence private, and
-  hence no fallback to the public bucket when there is none.
+  hence no fallback to the public bucket when there is none. A site's own store
+  is always S3, so it presigns whenever it has a private bucket.
   """
-  @spec direct_uploads_available?() :: boolean()
-  def direct_uploads_available? do
-    adapter = adapter()
+  @spec direct_uploads_available?(at()) :: boolean()
+  def direct_uploads_available?(at \\ nil) do
+    case locate(at) do
+      {:ok, nil} ->
+        adapter = adapter()
 
-    Code.ensure_loaded?(adapter) and function_exported?(adapter, :presign_private_put, 3) and
-      adapter.private_available?()
+        Code.ensure_loaded?(adapter) and function_exported?(adapter, :presign_private_put, 3) and
+          adapter.private_available?()
+
+      {:ok, profile} ->
+        S3.private_available?(profile)
+
+      {:error, _reason} ->
+        false
+    end
   end
 
-  @spec presign_private_put(String.t(), pos_integer(), pos_integer()) ::
+  @spec presign_private_put(String.t(), pos_integer(), pos_integer(), at()) ::
           {:ok, %{url: String.t(), headers: %{String.t() => String.t()}}} | {:error, term()}
-  def presign_private_put(key, byte_size, expires_in) do
-    if direct_uploads_available?(),
-      do: adapter().presign_private_put(key, byte_size, expires_in),
-      else: {:error, :direct_uploads_unavailable}
+  def presign_private_put(key, byte_size, expires_in, at \\ nil) do
+    with {:ok, site} <- locate(at) do
+      cond do
+        not direct_uploads_available?(site) -> {:error, :direct_uploads_unavailable}
+        is_nil(site) -> adapter().presign_private_put(key, byte_size, expires_in)
+        true -> S3.presign_private_put(key, byte_size, expires_in, site)
+      end
+    end
   end
 
   @type range_read :: %{
@@ -200,13 +327,34 @@ defmodule KilnCMS.Storage do
           total: non_neg_integer()
         }
 
-  @spec fetch_range(String.t(), non_neg_integer(), non_neg_integer() | :eof) ::
+  @spec fetch_range(String.t(), non_neg_integer(), non_neg_integer() | :eof, at()) ::
           {:ok, range_read()} | {:error, term()}
-  def fetch_range(key, first, last), do: adapter().fetch_range(key, first, last)
+  def fetch_range(key, first, last, at \\ nil),
+    do:
+      run(
+        at,
+        fn -> adapter().fetch_range(key, first, last) end,
+        &S3.fetch_range(key, first, last, &1)
+      )
 
-  @spec fetch_private_range(String.t(), non_neg_integer(), non_neg_integer() | :eof) ::
+  @spec fetch_private_range(String.t(), non_neg_integer(), non_neg_integer() | :eof, at()) ::
           {:ok, range_read()} | {:error, term()}
-  def fetch_private_range(key, first, last), do: adapter().fetch_private_range(key, first, last)
+  def fetch_private_range(key, first, last, at \\ nil),
+    do:
+      run(
+        at,
+        fn -> adapter().fetch_private_range(key, first, last) end,
+        &S3.fetch_private_range(key, first, last, &1)
+      )
+
+  # Resolve `at` once, then run the operator's or the site's half.
+  defp run(at, operator, site) do
+    case locate(at) do
+      {:ok, nil} -> operator.()
+      {:ok, profile} -> site.(profile)
+      {:error, _reason} = error -> error
+    end
+  end
 
   # Bytes held in memory at once by `copy_to_file/3`.
   @copy_chunk 8 * 1024 * 1024
@@ -220,7 +368,8 @@ defmodule KilnCMS.Storage do
   accepts uploads up to 500 MB, so every `fetch/1` that exists only to write a
   temp file became a half-gigabyte binary on the heap — several at once, given
   a background queue with concurrency. Pass `private?: true` for a gated
-  item's blob.
+  item's blob, and `at:` (`t:at/0`) for a file in a site's own store — it is
+  resolved once, not per chunk.
 
   A zero-length blob copies successfully as an empty file; only a failure on
   the FIRST read is an error, since a later one means a short file is already
@@ -231,10 +380,13 @@ defmodule KilnCMS.Storage do
   # sobelow_skip ["Traversal.FileModule"]
   @spec copy_to_file(String.t(), Path.t(), keyword()) :: :ok | {:error, term()}
   def copy_to_file(key, dest, opts \\ []) do
-    read =
-      if Keyword.get(opts, :private?, false), do: &fetch_private_range/3, else: &fetch_range/3
+    with {:ok, site} <- locate(Keyword.get(opts, :at)),
+         {:ok, io} <- File.open(dest, [:write, :binary]) do
+      read =
+        if Keyword.get(opts, :private?, false),
+          do: &fetch_private_range(&1, &2, &3, site),
+          else: &fetch_range(&1, &2, &3, site)
 
-    with {:ok, io} <- File.open(dest, [:write, :binary]) do
       try do
         copy_chunks(read, key, io, 0)
       after

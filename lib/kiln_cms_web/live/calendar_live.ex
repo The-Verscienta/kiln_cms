@@ -36,16 +36,27 @@ defmodule KilnCMSWeb.CalendarLive do
   A burst of writes (a bulk import, a release going out, a scheduler sweep —
   or simply many things saving at once) queues one `:calendar_changed` per
   write, and each one asks for exactly the same thing: re-run the window
-  query. `handle_info/2` drains every additional `:calendar_changed` already
-  waiting in the mailbox before it re-queries, so a burst of N writes costs
-  one re-query rather than N run back to back. Without that, this process's
-  own mailbox — not the database — becomes the bottleneck: every message is
-  handled strictly in arrival order, so a `render_click`/`render` call queued
-  behind a long run of stale, superseded re-queries waits for all of them
-  first. That is what a heavily-loaded shared org (the test suite's default
-  org, or in principle a very busy production one) turns into an apparent
-  hang: not a slow query and not a deadlock, just a mailbox that fell behind
-  its own reactivity and had no way to catch up.
+  query. So the first `:calendar_changed` does not re-query; it arms a single
+  100ms timer, every further message inside that window is absorbed by it,
+  and the one re-query runs when the timer fires. A burst costs one re-query
+  per window it spans, whatever its write rate or however the scheduler
+  interleaves the writers with this process.
+
+  The window is fixed from the *first* message and deliberately not reset by
+  later ones: a reset-on-every-message debounce would let a sustained write
+  stream — which is what a bulk import is — hold the calendar stale for as long
+  as the import ran. As written, the calendar is never more than one window
+  behind.
+
+  This replaced a `receive ... after 0` mailbox drain (#1336). A drain only
+  collapses messages *already queued*, so it helped only once this process
+  had fallen behind: a sequential import whose writes arrive a few
+  milliseconds apart is handled one message at a time, one full re-query per
+  write, on every open calendar in the org. Measured against real sequential
+  writes, a 100-page import cost 43 re-queries per open calendar with the
+  drain — and that in the test sandbox, where the calendar shares the
+  writer's connection and so falls behind *more* easily than in production.
+  The window makes it one per 100ms.
   """
   use KilnCMSWeb, :live_view
 
@@ -55,6 +66,13 @@ defmodule KilnCMSWeb.CalendarLive do
   # Chips per day cell before the month grid collapses the rest into "+N more".
   # The cell is a fixed height so the grid stays a grid; four is what fits.
   @month_cell_chips 4
+
+  # How long the first `:calendar_changed` of a burst waits before re-querying,
+  # absorbing every later one (moduledoc, "Live"). Short enough that one
+  # editor's save still reads as instant; long enough to span a burst of
+  # back-to-back writes. MediaLive coalesces its `:media_processed` broadcasts
+  # the same way.
+  @requery_window_ms 100
 
   @views ~w(month week list)
   @healths ~w(fresh due_soon due overdue expired)a
@@ -71,6 +89,7 @@ defmodule KilnCMSWeb.CalendarLive do
     {:ok,
      socket
      |> assign(:page_title, gettext("Calendar"))
+     |> assign(:requery_pending, nil)
      # Present from the first render: an aria-live region inserted later is not
      # announced by every screen reader, so it has to exist (empty) up front.
      |> assign(:announcement, nil)}
@@ -95,40 +114,43 @@ defmodule KilnCMSWeb.CalendarLive do
   # and reconciling one event against three views' worth of grouping is more
   # code than the query costs.
   #
-  # `drain_calendar_changed/1` first, so a burst already queued behind this
-  # message collapses into the one re-query it actually needs (see the
-  # moduledoc's "Live" section) instead of running once per message.
-  #
-  # The telemetry event is the coalescing made observable: one event per
-  # re-query, carrying how many `:calendar_changed` messages it answered. A
-  # busy org shows up as a high `messages` summary, a broken drain as the
-  # event firing once per message with `messages: 1` — and the burst test
-  # counts these events rather than repo query telemetry, because one
-  # re-query is one *logical* query but several physical ones (one per
-  # content type, plus the dynamic-type registry, tasks and releases).
+  # Not re-queried here, though: the first message of a burst arms the
+  # coalescing window (see the moduledoc's "Live" section) and every later one
+  # is only counted. The count is what the telemetry below reports.
   @impl true
   def handle_info({:calendar_changed, _id}, socket) do
-    drained = drain_calendar_changed(0)
+    case socket.assigns.requery_pending do
+      nil ->
+        Process.send_after(self(), :requery_calendar, @requery_window_ms)
+        {:noreply, assign(socket, :requery_pending, 1)}
 
+      absorbed ->
+        {:noreply, assign(socket, :requery_pending, absorbed + 1)}
+    end
+  end
+
+  # The window closed: one re-query answering every `:calendar_changed` the
+  # window absorbed. Any message behind this one arms a fresh window.
+  #
+  # The telemetry event is the coalescing made observable: one event per
+  # re-query, carrying how many `:calendar_changed` messages it answered —
+  # read in production by `KilnCMS.CMS.CalendarRequeryMonitor`. A busy org
+  # shows up as a high `messages` summary, broken coalescing as the event
+  # firing once per message with `messages: 1`.
+  def handle_info(:requery_calendar, socket) do
     :telemetry.execute(
       [:kiln_cms, :calendar, :requery],
-      %{messages: drained + 1},
+      %{messages: socket.assigns.requery_pending},
       %{org_id: socket.assigns.current_org.id}
     )
 
-    {:noreply, load_events(socket)}
+    {:noreply, socket |> assign(:requery_pending, nil) |> load_events()}
   end
 
-  # Non-blocking: `after 0` returns immediately once the mailbox holds no more
-  # `:calendar_changed` messages, so this costs nothing beyond a mailbox scan
-  # when writes are not currently bursting. Returns how many messages it ate.
-  defp drain_calendar_changed(count) do
-    receive do
-      {:calendar_changed, _id} -> drain_calendar_changed(count + 1)
-    after
-      0 -> count
-    end
-  end
+  @doc false
+  # The coalescing window, for tests that bound the re-query count by it.
+  @spec requery_window_ms() :: pos_integer()
+  def requery_window_ms, do: @requery_window_ms
 
   @impl true
   def handle_event("filter", params, socket) when is_map(params) do

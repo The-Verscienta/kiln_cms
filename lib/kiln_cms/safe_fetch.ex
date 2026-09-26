@@ -121,12 +121,20 @@ defmodule KilnCMS.SafeFetch do
   @spec post(String.t(), iodata(), [option()]) :: {:ok, response()} | {:error, String.t()}
   def post(url, body, opts \\ []), do: request(:post, url, Keyword.put(opts, :body, body))
 
-  defp request(method, url, opts) when is_binary(url) do
+  @doc """
+  Any `method` to `url`, under the same pinning, redirect and byte-cap rules as
+  `get/2` — for a caller whose far end speaks more than GET and POST, such as a
+  site's own Meilisearch instance (`KilnCMS.Search.Meilisearch.ReqClient`),
+  which is written to with `PUT`, `PATCH` and `DELETE`. Pass a body as `:body`.
+  """
+  @spec request(:get | :head | :post | :put | :patch | :delete, String.t(), [option()]) ::
+          {:ok, response()} | {:error, String.t()}
+  def request(method, url, opts) when is_binary(url) do
     hops = opts |> Keyword.get(:max_redirects, 0) |> clamp_hops()
     follow(method, url, opts, hops, [])
   end
 
-  defp request(_method, _url, _opts), do: {:error, "blocked URL: must be a valid URL with a host"}
+  def request(_method, _url, _opts), do: {:error, "blocked URL: must be a valid URL with a host"}
 
   defp clamp_hops(hops) when is_integer(hops) and hops > 0, do: min(hops, @max_redirect_hops)
   defp clamp_hops(_hops), do: 0
