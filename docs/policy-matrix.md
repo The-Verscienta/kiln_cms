@@ -659,6 +659,26 @@ to a private, loopback, link-local or metadata address, at save and on every
 request. Changing the provider or endpoint drops the stored key, so a co-admin
 cannot send a key they were never shown to a host of their choosing.
 
+## Single sign-on — `SiteSsoProvider`, `SiteSsoDomain` (#1561)
+
+| Resource | read | writes |
+|---|---|---|
+| `SiteSsoProvider` (`read`) | admin only | admin only (`save`, `update`, `destroy`) |
+| `SiteSsoDomain` (`read`) | admin only | admin only (`add`, `verify`, `remove`) |
+
+A site's own OpenID Connect provider and the email domains it may vouch for, at
+`/editor/site-sso`. Org-admin on both sides; the sign-in path reads them as the
+system (`KilnCMS.Accounts.SiteSso`). `verified_at` is not writable: only
+`:verify`, after a DNS lookup that found the record, sets it.
+
+The two `User` actions the sign-in uses — `:sign_in_with_site_sso` (mints the
+session token) and `:register_with_site_sso` (provisions a new account) — are
+`forbid_if always()` to every authorized caller. The platform-admin bypass would
+still pass that, so both also refuse any actor-carrying call in their own
+preparation/change: only `SiteSso.Admission`, with `authorize?: false`, reaches
+them, after the ID token, the verified domain and the cross-site rule have all
+passed.
+
 ## Content types — `TypeDefinition`
 
 | Action | admin | editor | viewer | anonymous | system |

@@ -107,6 +107,24 @@ defmodule KilnCMSWeb.SignInLive do
     # `MatchError` on the production sign-in page.
     {:ok, socket} = Upstream.mount(params, session, socket)
 
+    # A site's own identity provider (#1561), drawn under the library's forms.
+    #
+    # The org is resolved here, from the socket's host, by the same hook the
+    # router lists — because that listing never takes effect: `sign_in_route`
+    # de-duplicates its `on_mount` list *by module*, so of the three
+    # `KilnCMSWeb.LiveUserAuth` hooks only the first (`:restore_locale`) runs,
+    # and `:current_org` is never assigned on this page. Only the org is taken
+    # from the hook's socket; this page's assigns are left as they were.
+    {:cont, resolved} =
+      KilnCMSWeb.LiveUserAuth.on_mount(:assign_current_org, params, session, socket)
+
+    socket =
+      assign(
+        socket,
+        :site_sso,
+        KilnCMS.Accounts.SiteSso.sign_in_option(resolved.assigns.current_org)
+      )
+
     if charge_here?(socket) do
       {:ok, update(socket, :context, &Map.merge(&1, client_ip_context(socket)))}
     else
@@ -125,8 +143,49 @@ defmodule KilnCMSWeb.SignInLive do
   def handle_params(params, uri, socket),
     do: Upstream.handle_params(params, KilnCMSWeb.LiveUserAuth.vouch_uri(socket, uri), socket)
 
+  # Upstream's page, then — on `/sign-in` only — the site's own single sign-on
+  # (#1561): a button when the site has a usable provider with a verified
+  # domain, or a line saying it is unavailable when the site has one that cannot
+  # be used. Never a substitute provider in its place.
   @impl true
-  def render(assigns), do: Upstream.render(assigns)
+  def render(assigns) do
+    ~H"""
+    {Upstream.render(assigns)}
+    <.site_sso :if={@live_action == :sign_in} option={@site_sso} />
+    """
+  end
+
+  attr :option, :any, required: true
+
+  defp site_sso(%{option: {:ok, _label}} = assigns) do
+    ~H"""
+    <div id="site-sso" class="mx-auto -mt-8 w-full max-w-sm pb-12 lg:max-w-md">
+      <.button href={~p"/auth/site-sso"} class="w-full" id="site-sso-sign-in">
+        <.icon name="hero-finger-print" class="size-4" />
+        {site_sso_label(@option)}
+      </.button>
+    </div>
+    """
+  end
+
+  defp site_sso(%{option: :unavailable} = assigns) do
+    ~H"""
+    <p
+      id="site-sso-unavailable"
+      role="status"
+      class="mx-auto -mt-8 w-full max-w-sm pb-12 text-center text-sm text-base-content/70 lg:max-w-md"
+    >
+      {gettext("This site's single sign-on is unavailable right now. Sign in another way.")}
+    </p>
+    """
+  end
+
+  defp site_sso(assigns), do: ~H""
+
+  defp site_sso_label({:ok, label}) when is_binary(label),
+    do: gettext("Sign in with %{provider}", provider: label)
+
+  defp site_sso_label(_option), do: gettext("Sign in with single sign-on")
 
   # A connected ROOT mount, which is the only socket that has a handshake to
   # read. `get_connect_info/2` raises `raise_root_and_mount_only!` when

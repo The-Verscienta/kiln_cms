@@ -63,11 +63,66 @@ The sign-in page then offers "Sign in with Sso" alongside password/magic-link.
 - SSO users are auto-confirmed (the IdP verified the email) — no second
   confirmation loop.
 
+## Per-site providers
+
+On a deployment with several sites, a site admin can give their site its own
+OpenID Connect provider at **Configure → Integrations → Single sign-on**
+(`/editor/site-sso`, #1561). It sits *beside* the operator's provider above —
+which is unchanged and still offered where it was — and needs no rebuild and no
+environment variables.
+
+1. Register a client at your provider with the callback URL the page shows:
+   the site's own address plus `/auth/site-sso/callback`.
+2. Enter the provider's **issuer URL** (`https://` only; discovery is at
+   `<issuer>/.well-known/openid-configuration`, and its `issuer` must match
+   exactly), the **client ID** and the **client secret**. The secret is stored
+   encrypted and never shown again; leave it blank to keep it.
+3. Add each **email domain** the provider may sign in, publish the TXT record
+   the page shows — `_kiln-sso.<domain>` with the value
+   `kiln-sso-verification=<token>` — and press **Verify**.
+
+The sign-in page on that site then shows a "Sign in with …" button. Until a
+domain is verified it shows nothing, because the provider could admit no one.
+
+### What a site's provider may do
+
+Accounts belong to the whole deployment, so a provider a site admin chose is
+not trusted for everything it asserts:
+
+- **Only verified domains.** An address is admitted only if its domain is one
+  the site verified, *exactly* (`example.com` does not cover
+  `mail.example.com`), and the provider says `email_verified: true`. The TXT
+  record is looked up again on **every** sign-in — keep it in place; taking it
+  down stops the provider signing anyone in.
+- **Never an account with access elsewhere.** The provider cannot sign in a
+  platform admin, anyone with a membership on another site (at any tier), or a
+  membership-less account whose global editor/admin role or legacy audiences
+  reach beyond this site. Those people sign in with a password, an email link,
+  a passkey, or the operator's provider instead.
+- **No pre-registered accounts.** An account whose address was never confirmed
+  is refused rather than handed to the provider's user.
+- **New people** get an account (`:viewer`) and a `:viewer` membership on this
+  site only — unless open registration is off, in which case only existing
+  accounts can sign in.
+- **A second factor still applies.**
+- **`RS256` ID tokens only**, from the keys at the provider's `jwks_uri`. Every
+  request Kiln makes to the provider goes through the same SSRF guard as
+  webhooks: `https://`, no private or metadata addresses, no redirects.
+
+If the settings can't be read, or the client secret can't be decrypted (after
+a `SECRET_KEY_BASE` rotation — see [secrets-rotation.md](secrets-rotation.md)),
+the sign-in page says the site's single sign-on is unavailable. It never sends
+people to the operator's provider instead.
+
+Not yet: turning password sign-in off for a site, SAML, and more than one
+provider per site.
+
 ## The rest of #331
 
 - **SAML** — needs a dependency decision (`esaml`/`samly`); OIDC covers most
   modern IdPs (including Entra/Okta/Google) so SAML is deferred until a
   concrete need.
 - **Passkeys / WebAuthn** — a separate, browser-API-heavy effort; deferred.
-- **Multiple simultaneous IdPs** — the strategy is singular (`:sso`) today;
-  lifting to N providers is config plumbing when needed.
+- **Multiple simultaneous IdPs** — the operator's strategy is singular
+  (`:sso`); each site can add one of its own
+  ([above](#per-site-providers)).

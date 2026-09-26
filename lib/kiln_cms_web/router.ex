@@ -505,6 +505,9 @@ defmodule KilnCMSWeb.Router do
       # A site's own SMTP relay and From address (#1322). Org-scoped, unlike
       # `/editor/mail` above: that is the operator's relay for every site.
       live "/editor/site-mail", SiteMailLive, :index
+      # A site's own single sign-on provider and its verified email domains
+      # (#1561). Org-scoped, like `/editor/site-mail`.
+      live "/editor/site-sso", SiteSsoLive, :index
       # A site's own Web Push (VAPID) key pair (#1560), generated here.
       live "/editor/site-push", SitePushLive, :index
       # A site's own Meilisearch instance (#1558). Org-scoped; the operator's
@@ -1010,6 +1013,10 @@ defmodule KilnCMSWeb.Router do
     # these paths otherwise.
     post "/auth/passkey/options", PasskeyController, :options
     post "/auth/passkey/verify", PasskeyController, :verify
+    # A site's own single sign-on provider (#1561). Before `auth_routes` for
+    # the same reason as the passkey routes above.
+    get "/auth/site-sso", SiteSsoController, :request
+    get "/auth/site-sso/callback", SiteSsoController, :callback
 
     auth_routes AuthController, KilnCMS.Accounts.User, path: "/auth"
     # Two routes, not one: a `DELETE` to the controller *and* a `live` route in

@@ -443,6 +443,16 @@ msgstr[1] "%{count} mots"
 msgid "%{covered} of %{total} fully translated"
 msgstr "%{covered} sur %{total} entièrement traduits"
 
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{domain} is verified."
+msgstr "%{domain} est vérifié."
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{domain} removed."
+msgstr "%{domain} supprimé."
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{failed} failed in 24h · %{disabled} auto-disabled"
@@ -1318,6 +1328,11 @@ msgstr "Compte supprimé."
 msgid "Accounts"
 msgstr "Comptes"
 
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Accounts belong to the whole deployment, so your provider can only sign in addresses in the domains you verify here. It can't sign in anyone who has access to another site, or who administers the deployment: they sign in with a password or an email link instead. A second factor, if the account has one, is still asked for."
+msgstr "Les comptes appartiennent à toute l'installation : votre fournisseur ne peut donc connecter que des adresses des domaines que vous vérifiez ici. Il ne peut connecter personne qui a accès à un autre site ou qui administre l'installation : ces personnes se connectent avec un mot de passe ou un lien par e-mail. Si le compte a un second facteur, il est toujours demandé."
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Action"
@@ -1369,6 +1384,11 @@ msgstr "Activité"
 msgid "Actor"
 msgstr "Acteur"
 
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add"
+msgstr "Ajouter"
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add %{count} item(s)"
@@ -1378,6 +1398,11 @@ msgstr "Ajouter %{count} élément(s)"
 #, elixir-autogen, elixir-format
 msgid "Add %{kind}"
 msgstr "Ajouter une %{kind}"
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add a domain"
+msgstr "Ajouter un domaine"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -2515,6 +2540,11 @@ msgstr "Intégré"
 msgid "Bundle a campaign's publishes and unpublishes and ship them as one coordinated change. A release goes live all at once, or not at all."
 msgstr "Regroupez les publications et retraits d'une campagne et livrez-les comme un seul changement coordonné. Un lancement passe en ligne d'un bloc, ou pas du tout."
 
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Button label"
+msgstr "Libellé du bouton"
+
 #: lib/kiln_cms_web/controllers/content_html/show_post.html.heex
 #, elixir-autogen, elixir-format
 msgid "By %{author}"
@@ -2699,6 +2729,11 @@ msgstr "Modifications demandées — un contenu dont je suis l'auteur a été re
 msgid "Changing this moves nothing. Files already uploaded stay where they were stored and are still read from there, so keep an old bucket and its key working until you have moved its files yourself."
 msgstr "Modifier ce réglage ne déplace rien. Les fichiers déjà téléversés restent là où ils ont été stockés et y sont toujours lus : gardez l’ancien bucket et sa clé fonctionnels jusqu’à ce que vous ayez déplacé ses fichiers vous-même."
 
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Check again"
+msgstr "Vérifier à nouveau"
+
 #: lib/kiln_cms_web/live/link_report_live.ex
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -2742,6 +2777,7 @@ msgstr "Recherche de mises à jour…"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
+#: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Checking…"
 msgstr "Vérification…"
@@ -2917,6 +2953,16 @@ msgstr "Effacer les filtres"
 #, elixir-autogen, elixir-format
 msgid "Click a highlighted region in your site to edit it here."
 msgstr "Cliquez sur une zone mise en évidence de votre site pour la modifier ici."
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Client ID"
+msgstr "ID client"
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Client secret"
+msgstr "Secret client"
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
@@ -4605,6 +4651,11 @@ msgstr "Documents de ce lancement"
 msgid "Documents: PDF, Word, Excel, PowerPoint, ZIP up to 25 MB"
 msgstr "Documents : PDF, Word, Excel, PowerPoint, ZIP jusqu'à 25 Mo"
 
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Domain added. Publish its DNS record, then verify it."
+msgstr "Domaine ajouté. Publiez son enregistrement DNS, puis vérifiez-le."
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Domains"
@@ -4952,6 +5003,11 @@ msgstr "Dans les deux cas, vous pourrez le modifier plus tard sur la page Équip
 #, elixir-autogen, elixir-format
 msgid "Email"
 msgstr "E-mail"
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Email domains"
+msgstr "Domaines de messagerie"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -6534,6 +6590,11 @@ msgstr "Interne"
 msgid "Internal links"
 msgstr "Liens internes"
 
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Issuer URL"
+msgstr "URL de l'émetteur"
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Items"
@@ -6836,6 +6897,11 @@ msgstr "Laissez ce champ vide"
 #, elixir-autogen, elixir-format
 msgid "Let editors publish"
 msgstr "Autoriser les éditeurs à publier"
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Let people sign in to this site through your own identity provider."
+msgstr "Permettez la connexion à ce site via votre propre fournisseur d'identité."
 
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
@@ -8148,6 +8214,11 @@ msgstr "Vous ne savez pas quelle surface utiliser ? Commencez par le guide du co
 msgid "Not used by any published document."
 msgstr "Utilisée par aucun document publié."
 
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not verified"
+msgstr "Non vérifié"
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Not yet anchored — anchors are minted at publish"
@@ -8363,6 +8434,11 @@ msgstr "Désactivé"
 #, elixir-autogen, elixir-format
 msgid "Off-site"
 msgstr "Hors site"
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Offer this provider on the sign-in page"
+msgstr "Proposer ce fournisseur sur la page de connexion"
 
 #: lib/kiln_cms_web/controllers/offline_controller.ex
 #, elixir-autogen, elixir-format
@@ -9252,6 +9328,7 @@ msgstr "Protégée"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
+#: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Provider"
 msgstr "Prestataire"
@@ -9673,6 +9750,11 @@ msgstr "Régénération mise en file d'attente — les renommages s'appliquent e
 msgid "Region"
 msgstr "Région"
 
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Register this callback URL with your provider:"
+msgstr "Enregistrez cette URL de retour auprès de votre fournisseur :"
+
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reindex now"
@@ -9809,12 +9891,18 @@ msgstr "Dernière version rechargée."
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #: lib/kiln_cms_web/live/site_search_live.ex
+#: lib/kiln_cms_web/live/site_sso_live.ex
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove"
 msgstr "Retirer"
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove %{domain}?"
+msgstr "Supprimer %{domain} ?"
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -9948,6 +10036,11 @@ msgstr "Retirer l'instance de ce site ? Plus rien ne lui sera envoyé, et ce qu'
 msgid "Remove this site's locale fallbacks and follow the deployment defaults again?"
 msgstr "Supprimer les replis de langue de ce site et revenir aux valeurs du déploiement ?"
 
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove this site's provider? Its sign-in button goes away at once."
+msgstr "Supprimer le fournisseur de ce site ? Son bouton de connexion disparaît aussitôt."
+
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove this site's relay? Its mail will use the deployment's relay again."
@@ -10011,6 +10104,11 @@ msgstr "Retiré. Les fonctions d'IA de ce site utilisent de nouveau la configura
 #, elixir-autogen, elixir-format
 msgid "Removed. This site's mail uses the deployment's relay again."
 msgstr "Supprimé. Le courrier de ce site utilise de nouveau le relais du déploiement."
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Removed. This site's sign-in page no longer offers it."
+msgstr "Supprimé. La page de connexion de ce site ne le propose plus."
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -10538,6 +10636,7 @@ msgstr "sam."
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #: lib/kiln_cms_web/live/site_push_live.ex
 #: lib/kiln_cms_web/live/site_search_live.ex
+#: lib/kiln_cms_web/live/site_sso_live.ex
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
@@ -10635,6 +10734,11 @@ msgstr "Détails enregistrés."
 msgid "Saved to the working copy"
 msgstr "Enregistré dans la copie de travail"
 
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Saved, but not offered yet: verify at least one email domain below first."
+msgstr "Enregistré, mais pas encore proposé : vérifiez d'abord au moins un domaine de messagerie ci-dessous."
+
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -10655,6 +10759,7 @@ msgstr "Enregistré."
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #: lib/kiln_cms_web/live/site_search_live.ex
+#: lib/kiln_cms_web/live/site_sso_live.ex
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saved. Leave blank to keep it."
@@ -10676,6 +10781,7 @@ msgstr "En enregistrant ceci, le contenu de ce site est envoyé à l'URL ci-dess
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #: lib/kiln_cms_web/live/site_push_live.ex
 #: lib/kiln_cms_web/live/site_search_live.ex
+#: lib/kiln_cms_web/live/site_sso_live.ex
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saving…"
@@ -11190,6 +11296,11 @@ msgstr "Affichage des %{limit} premières étiquettes. Filtrez pour trouver les 
 msgid "Shown"
 msgstr "Affiché"
 
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Shown as \"Sign in with …\". Leave blank for \"single sign-on\"."
+msgstr "Affiché comme « Se connecter avec … ». Laissez vide pour « authentification unique »."
+
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Shown as the author byline on what you publish."
@@ -11237,6 +11348,16 @@ msgstr "Se connecter"
 #, elixir-autogen, elixir-format
 msgid "Sign in to edit"
 msgstr "Connectez-vous pour modifier"
+
+#: lib/kiln_cms_web/live/sign_in_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sign in with %{provider}"
+msgstr "Se connecter avec %{provider}"
+
+#: lib/kiln_cms_web/live/sign_in_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sign in with single sign-on"
+msgstr "Se connecter par authentification unique"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -11304,10 +11425,36 @@ msgstr "Depuis"
 msgid "Single line text"
 msgstr "Texte sur une ligne"
 
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Single sign-on"
+msgstr "Authentification unique"
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Single sign-on could not be saved."
+msgstr "L'authentification unique n'a pas pu être enregistrée."
+
 #: lib/kiln_cms_web/controllers/auth_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Single sign-on failed — the identity couldn't be verified or linked. Try again, or contact an administrator."
 msgstr "L'authentification unique a échoué — l'identité n'a pas pu être vérifiée ou liée. Réessayez, ou contactez un administrateur."
+
+#: lib/kiln_cms_web/controllers/site_sso_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Single sign-on failed. Try again, or sign in another way."
+msgstr "L'authentification unique a échoué. Réessayez ou connectez-vous autrement."
+
+#: lib/kiln_cms_web/controllers/site_sso_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Single sign-on isn't available on this site right now. Sign in another way."
+msgstr "L'authentification unique n'est pas disponible sur ce site pour le moment. Connectez-vous autrement."
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Single sign-on saved."
+msgstr "Authentification unique enregistrée."
 
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -11670,6 +11817,7 @@ msgstr "Ne plus utiliser ce bucket pour les nouveaux téléversements ? Les fich
 msgid "Store this site's new uploads in this bucket"
 msgstr "Stocker les nouveaux téléversements de ce site dans ce bucket"
 
+#: lib/kiln_cms_web/live/site_sso_live.ex
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Stored encrypted and never shown again."
@@ -11861,6 +12009,16 @@ msgstr "TENANT_STRICT_HOST=false remplace le comportement par défaut, qui rejet
 #, elixir-autogen, elixir-format
 msgid "TLS (usually port 465)"
 msgstr "TLS (généralement le port 465)"
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "TXT name"
+msgstr "Nom TXT"
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "TXT value"
+msgstr "Valeur TXT"
 
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
@@ -12268,6 +12426,11 @@ msgstr "Ce lancement n'existe plus."
 msgid "That segment no longer exists."
 msgstr "Ce segment n'existe plus."
 
+#: lib/kiln_cms_web/controllers/site_sso_controller.ex
+#, elixir-autogen, elixir-format
+msgid "That sign-in link has expired. Start again."
+msgstr "Ce lien de connexion a expiré. Recommencez."
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "That tier no longer exists."
@@ -12444,6 +12607,11 @@ msgstr "Le fournisseur du déploiement (%{provider})"
 msgid "The deployment's secret key has changed since it was generated. Until you rotate it, this site's notifications are held, not sent."
 msgstr "La clé secrète du déploiement a changé depuis sa génération. Tant que vous ne la renouvelez pas, les notifications de ce site sont retenues, pas envoyées."
 
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "The deployment's secret key has changed since it was saved. Until you enter it again, the sign-in page says single sign-on is unavailable."
+msgstr "La clé secrète de l'installation a changé depuis l'enregistrement. Tant que vous ne l'avez pas saisi à nouveau, la page de connexion indique que l'authentification unique est indisponible."
+
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #, elixir-autogen, elixir-format
 msgid "The deployment's secret key has changed since it was saved. Until you enter it again, this site's AI requests are refused, not sent anywhere else."
@@ -12483,6 +12651,11 @@ msgstr "Le document testé n'existe plus."
 #, elixir-autogen, elixir-format
 msgid "The document's content type is no longer on this site."
 msgstr "Le type de contenu du document n'existe plus sur ce site."
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "The domain could not be saved."
+msgstr "Le domaine n'a pas pu être enregistré."
 
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
@@ -12643,6 +12816,11 @@ msgstr "L'URL préférée, si ce contenu est accessible à plusieurs adresses."
 msgid "The preflight check failed unexpectedly."
 msgstr "La vérification préalable a échoué de manière inattendue."
 
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "The provider's OpenID Connect issuer, exactly as its discovery document states it. Must be https://."
+msgstr "L'émetteur OpenID Connect du fournisseur, exactement comme l'indique son document de découverte. Doit être en https://."
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "The publish gate acts only on rules marked as blocking. Authors editing a document that already carried a flagged phrase are not stopped for words they did not add."
@@ -12668,6 +12846,11 @@ msgstr "La même liste est disponible sur le serveur via %{list}, et %{doctor} v
 #, elixir-autogen, elixir-format
 msgid "The saved API key can't be read. Re-enter it."
 msgstr "La clé d'API enregistrée est illisible. Saisissez-la à nouveau."
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "The saved client secret can't be read. Re-enter it."
+msgstr "Le secret client enregistré est illisible. Saisissez-le à nouveau."
 
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -12826,6 +13009,11 @@ msgstr "Ce compte a écrit :"
 #, elixir-autogen, elixir-format
 msgid "This account belongs to no site, so it authorizes from its platform role alone."
 msgstr "Ce compte n'appartient à aucun site : il s'autorise donc uniquement par son rôle de plateforme."
+
+#: lib/kiln_cms_web/controllers/site_sso_controller.ex
+#, elixir-autogen, elixir-format
+msgid "This account can't use this site's single sign-on. Sign in with your password or an email link instead."
+msgstr "Ce compte ne peut pas utiliser l'authentification unique de ce site. Connectez-vous avec votre mot de passe ou un lien par e-mail."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
@@ -13168,6 +13356,21 @@ msgstr "Les échecs d'envoi définitifs récents de ce site, et les adresses ref
 #, elixir-autogen, elixir-format
 msgid "This site's relay said these addresses don't exist, so this site's mail skips them. It stops only this site's mail: other sites, and sign-in and password-reset mail, still reach them. Remove one to let this site mail it again."
 msgstr "Le relais de ce site a indiqué que ces adresses n'existent pas, donc le courrier de ce site les ignore. Seul le courrier de ce site est concerné : les autres sites, et les e-mails de connexion et de réinitialisation du mot de passe, les atteignent toujours. Retirez-en une pour que ce site puisse de nouveau lui écrire."
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's sign-in page doesn't offer its own single sign-on."
+msgstr "La page de connexion de ce site ne propose pas sa propre authentification unique."
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's sign-in page offers single sign-on through %{issuer}."
+msgstr "La page de connexion de ce site propose l'authentification unique via %{issuer}."
+
+#: lib/kiln_cms_web/live/sign_in_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's single sign-on is unavailable right now. Sign in another way."
+msgstr "L'authentification unique de ce site est indisponible pour le moment. Connectez-vous autrement."
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
@@ -13872,6 +14075,7 @@ msgid "Variants"
 msgstr "Variantes"
 
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Verified"
 msgstr "Vérifié"
@@ -13882,6 +14086,7 @@ msgid "Verifies inbound webhooks. Copy it from the webhook endpoint you created 
 msgstr "Vérifie les webhooks entrants. Copiez-le depuis le point de terminaison webhook que vous avez créé dans le tableau de bord du prestataire ; il commence par whsec_."
 
 #: lib/kiln_cms_web/controllers/two_factor_controller.ex
+#: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Verify"
 msgstr "Vérifier"
@@ -14373,6 +14578,11 @@ msgstr "Vous n'avez pas la permission de modifier la vérification des allégati
 msgid "You don't have permission to change this site's code injection."
 msgstr "Vous n'avez pas la permission de modifier l'injection de code de ce site."
 
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's domains."
+msgstr "Vous n'avez pas l'autorisation de modifier les domaines de ce site."
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's federation settings."
@@ -14412,6 +14622,11 @@ msgstr "Vous n'avez pas l'autorisation de modifier la clé push de ce site."
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's search instance."
 msgstr "Vous n'avez pas l'autorisation de modifier l'instance de recherche de ce site."
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's single sign-on."
+msgstr "Vous n'avez pas l'autorisation de modifier l'authentification unique de ce site."
 
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
@@ -14596,6 +14811,11 @@ msgstr "Votre nom d'affichage sert de signature d'auteur sur le contenu que vous
 msgid "Your email address has now been confirmed"
 msgstr "Votre adresse e-mail a bien été confirmée"
 
+#: lib/kiln_cms_web/controllers/site_sso_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Your email address isn't in a domain this site's single sign-on may vouch for. Sign in another way."
+msgstr "Votre adresse e-mail n'appartient pas à un domaine que l'authentification unique de ce site peut garantir. Connectez-vous autrement."
+
 #: lib/kiln_cms_web/live/form_live.ex
 #, elixir-autogen, elixir-format
 msgid "Your forms"
@@ -14616,6 +14836,11 @@ msgstr "Vos entonnoirs"
 msgid "Your name"
 msgstr "Votre nom"
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Your own identity provider on this site's sign-in page."
+msgstr "Votre propre fournisseur d'identité sur la page de connexion de ce site."
+
 #: lib/kiln_cms_web/controllers/auth_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Your password has successfully been reset"
@@ -14630,6 +14855,11 @@ msgstr "Votre formule"
 #, elixir-autogen, elixir-format
 msgid "Your profile, password, two-factor, passkeys and notifications."
 msgstr "Votre profil, mot de passe, double authentification, clés d'accès et notifications."
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your provider may only sign in addresses in these domains, once each is verified. Publish the TXT record shown, then press Verify. Keep the record in place: it is checked again at every sign-in. Each domain is exact — example.com does not cover mail.example.com."
+msgstr "Votre fournisseur ne peut connecter que des adresses de ces domaines, une fois chacun vérifié. Publiez l'enregistrement TXT indiqué, puis cliquez sur Vérifier. Laissez l'enregistrement en place : il est revérifié à chaque connexion. Chaque domaine est exact : example.com ne couvre pas mail.example.com."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -14905,6 +15135,11 @@ msgstr "à réviser le %{date}"
 #, elixir-autogen, elixir-format
 msgid "e.g. /about/team"
 msgstr "ex. /about/team"
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "e.g. Acme staff"
+msgstr "ex. Personnel Acme"
 
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format

@@ -6,6 +6,11 @@ defmodule KilnCMS.Accounts.Preparations.PasskeySessionToken do
   which `store_in_session/2` requires
   (`require_token_presence_for_authentication?`).
 
+  Also the token step for a site's own identity provider (#1561,
+  `:sign_in_with_site_sso`), which passes `forgive_throttle?: false`: a provider
+  a site chose is not a stronger proof than the password the per-account budget
+  protects, so it does not release that budget the way a passkey does.
+
   Two fail-closed guards:
 
     * an **actor-carrying** call returns nothing — token minting is reserved
@@ -24,20 +29,22 @@ defmodule KilnCMS.Accounts.Preparations.PasskeySessionToken do
   require Ash.Query
 
   @impl true
-  def prepare(query, _opts, context) do
+  def prepare(query, opts, context) do
     if context.actor do
       Ash.Query.filter(query, false)
     else
-      Ash.Query.after_action(query, fn _query, users -> mint_all(users) end)
+      forgive? = Keyword.get(opts, :forgive_throttle?, true)
+      Ash.Query.after_action(query, fn _query, users -> mint_all(users, forgive?) end)
     end
   end
 
-  defp mint_all(users) do
+  defp mint_all(users, forgive?) do
     # A passkey is a strictly stronger proof of ownership than the password the
     # per-account budget is protecting, so completing one releases it (#478) —
     # the owner of an address someone is guessing at shouldn't have to wait out
     # a window they didn't cause.
-    Enum.each(users, &KilnCMS.Accounts.AccountThrottle.forgive(to_string(&1.email)))
+    if forgive?,
+      do: Enum.each(users, &KilnCMS.Accounts.AccountThrottle.forgive(to_string(&1.email)))
 
     users
     |> Enum.reduce_while({:ok, []}, fn user, {:ok, acc} ->
