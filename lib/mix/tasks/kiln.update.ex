@@ -54,13 +54,33 @@ defmodule Mix.Tasks.Kiln.Update do
     * `--exit-code` — with `--check`, exit 1 when an update *is* available, so
       CI can fail a "you're behind upstream" check.
     * `--to VERSION` — target a specific release (`--to v0.3.0`) instead of the
-      newest one.
+      newest one. Naming a pre-release (`--to v1.0.0-rc.1`) opts into that one
+      candidate.
+    * `--pre` — let the newest *pre-release* be the default target. Without
+      it, a tag like `v1.0.0-rc.1` is never chosen, however new it is.
     * `--ref REF` — target an arbitrary git ref (`--ref main`, `--ref a1b2c3d`)
       instead of a release tag. Skips version comparison and upgrade notes;
       for tracking bleeding edge deliberately.
     * `--allow-major` — permit a major-version jump.
     * `--force` — proceed even though the pin has diverged from upstream.
     * `--no-fetch` — skip `git fetch`; compare against already-fetched refs.
+
+  ## Pre-releases
+
+  A release candidate is tagged `vX.Y.Z-rc.N` (see `docs/releasing.md`). By
+  semver it sorts *below* `vX.Y.Z` but *above* every earlier release, so
+  taking the highest tag would move every downstream pin onto a candidate the
+  moment one was pushed (#1541). The default target is therefore the highest
+  **final** release; `--pre` or `--to` opts in.
+
+  A pin already on a candidate stays there under a plain update until a final
+  release overtakes it: until then the newest final release is *older* than
+  the pin, and moving to it would be a downgrade nobody asked for. The task
+  says so and changes nothing.
+
+  A candidate is tagged with its changes still under `## [Unreleased]` in the
+  changelog, so moving to one prints that section's Breaking and Upgrade
+  notes as the candidate's own.
 
   ## Exit status
 
@@ -92,6 +112,7 @@ defmodule Mix.Tasks.Kiln.Update do
     ref: :string,
     allow_major: :boolean,
     force: :boolean,
+    pre: :boolean,
     fetch: :boolean
   ]
 
@@ -105,18 +126,43 @@ defmodule Mix.Tasks.Kiln.Update do
     current = current_pin(repo)
     target = resolve_target!(repo, opts)
 
-    if current.sha == target.sha do
-      Mix.shell().info([
-        :green,
-        "Already up to date",
-        :reset,
-        " - pinned at #{describe(target)}."
-      ])
-    else
-      report = report(repo, current, target)
-      proceed(repo, current, target, {report, opts})
+    cond do
+      current.sha == target.sha ->
+        Mix.shell().info([
+          :green,
+          "Already up to date",
+          :reset,
+          " - pinned at #{describe(target)}."
+        ])
+
+      ahead_of_default_target?(current, target, opts) ->
+        Mix.shell().info([
+          :green,
+          "Already ahead of the latest release",
+          :reset,
+          " - pinned at #{describe(current)}, newer than #{describe(target)}.\n",
+          "Pass --pre to follow pre-releases, or --to to name a release."
+        ])
+
+      true ->
+        report = report(repo, current, target)
+        proceed(repo, current, target, {report, opts})
     end
   end
+
+  # A pin on a pre-release (`v1.0.0-rc.1`) is newer than every final release
+  # until the final one ships, so the default finals-only target is then an
+  # *older* release. Moving there is a downgrade nobody asked for. `--to` and
+  # `--ref` are explicit requests and are honoured as they always were.
+  defp ahead_of_default_target?(
+         %{version: %Version{} = current},
+         %{version: %Version{} = target},
+         opts
+       ) do
+    is_nil(opts[:to]) and is_nil(opts[:ref]) and Version.compare(current, target) == :gt
+  end
+
+  defp ahead_of_default_target?(_current, _target, _opts), do: false
 
   # The guards only gate *changing* the pin. --check promises to report and
   # change nothing, so it must not fail on a dirty tree or a major jump —
@@ -267,7 +313,7 @@ defmodule Mix.Tasks.Kiln.Update do
         %{sha: sha, tag: tag, version: version}
 
       true ->
-        latest_release!(repo)
+        latest_release!(repo, opts[:pre] == true)
     end
   end
 
@@ -278,7 +324,10 @@ defmodule Mix.Tasks.Kiln.Update do
     end
   end
 
-  defp latest_release!(repo) do
+  # A pre-release is excluded unless `--pre` asks for it. `Version` orders
+  # `1.0.0-rc.1` below `1.0.0` but above `0.12.0`, so without the filter the
+  # first RC tag pushed would become every downstream's default target (#1541).
+  defp latest_release!(repo, include_pre?) do
     tags =
       repo.root
       |> git!(["tag", "--list", @tag_pattern])
@@ -295,10 +344,24 @@ defmodule Mix.Tasks.Kiln.Update do
       """)
     end
 
-    {tag, version} = Enum.max_by(tags, fn {_tag, version} -> version end, Version)
+    candidates = if include_pre?, do: tags, else: Enum.filter(tags, &final_release?/1)
+
+    if candidates == [] do
+      Mix.raise("""
+      No final release tags found upstream, only pre-releases:
+      #{tags |> Enum.map(&elem(&1, 0)) |> Enum.join(", ")}
+
+      A plain update never lands on a pre-release. Pass --pre to take the
+      newest one, or --to to name it.
+      """)
+    end
+
+    {tag, version} = Enum.max_by(candidates, fn {_tag, version} -> version end, Version)
 
     %{sha: rev_parse!(repo, tag, "unresolvable tag"), tag: tag, version: version}
   end
+
+  defp final_release?({_tag, %Version{pre: pre}}), do: pre == []
 
   defp normalize_tag("v" <> _ = tag), do: tag
   defp normalize_tag(version), do: "v" <> version
@@ -444,7 +507,7 @@ defmodule Mix.Tasks.Kiln.Update do
     |> String.split(~r/^## /m, trim: true)
     |> Enum.flat_map(fn section ->
       with [heading | _] <- String.split(section, "\n", parts: 2),
-           %Version{} = version <- section_version(heading),
+           %Version{} = version <- section_version(heading, to),
            true <- in_range?(version, from, to),
            [_ | _] = blocks <- operator_blocks(section) do
         [{version, blocks}]
@@ -498,8 +561,16 @@ defmodule Mix.Tasks.Kiln.Update do
     |> String.trim()
   end
 
-  defp section_version(heading) do
-    case Regex.run(~r/\[?v?(\d+\.\d+\.\d+)\]?/, heading) do
+  # A release candidate is tagged with its changes still under `[Unreleased]`
+  # (docs/releasing.md), so at a pre-release target that section *is* the
+  # target's notes. At a final target it is someone's work in progress and is
+  # never printed.
+  defp section_version(heading, %Version{pre: [_ | _]} = to) do
+    if heading =~ ~r/^\[?Unreleased\]?/i, do: to, else: section_version(heading, nil)
+  end
+
+  defp section_version(heading, _to) do
+    case Regex.run(~r/\[?v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\]?/, heading) do
       [_, version] -> parse_version(version)
       _ -> nil
     end

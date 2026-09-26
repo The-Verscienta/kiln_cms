@@ -5,6 +5,26 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Added
+
+<a id="release-candidates-are-opt-in-everywhere-mix-kilnupdate-pre"></a>
+
+- **Release candidates are opt-in everywhere: `mix kiln.update --pre`.** A
+  `vX.Y.Z-rc.N` tag sorts above every earlier final release, so before the
+  first one is pushed, each place that picks "the newest release" now skips
+  pre-releases (#1541). `mix kiln.update` defaults to the highest *final*
+  release; `--pre` lets a candidate count, and `--to v1.0.0-rc.1` names one.
+  A pin already on a candidate is not downgraded by a plain update, and moves
+  on once the final release ships. At a pre-release target the task prints
+  the `[Unreleased]` changelog section's Breaking and Upgrade notes, since a
+  candidate is tagged with its changes still there. `release.yml` pushes the
+  exact image tag for a candidate but moves `latest` only for a final release,
+  and a pre-release `client-js-v*` tag publishes to npm under `next`, not
+  `latest`. `Kiln.Updates` already asked `releases/latest`, which excludes
+  releases marked as pre-releases; a candidate published *without* the flag is
+  now refused as `{:error, :prerelease}` instead of being offered as an
+  update. `docs/releasing.md` gains "Cutting a release candidate".
+
 ## Fixed
 
 <a id="a-429s-retry-after-is-rounded-up-never-0"></a>

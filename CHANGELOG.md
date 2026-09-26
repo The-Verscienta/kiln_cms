@@ -54,6 +54,11 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Added
+
+- **Release candidates are opt-in everywhere: `mix kiln.update --pre`.**
+  ([long form](docs/changelog/unreleased.md#release-candidates-are-opt-in-everywhere-mix-kilnupdate-pre))
+
 ### Fixed
 
 - **A 429's `retry-after` is rounded up, never 0.**
