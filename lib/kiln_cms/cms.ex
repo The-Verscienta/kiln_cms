@@ -441,6 +441,24 @@ defmodule KilnCMS.CMS do
       define :reset_site_code_injection, action: :destroy
     end
 
+    # A site's own object storage (#1559). Read through
+    # `KilnCMS.Storage.SiteProfiles`, which owns the precedence rule and the
+    # fail direction — never directly. A profile is where a file lives and is
+    # never destroyed: media rows name it for as long as they exist.
+    resource KilnCMS.CMS.SiteStorage do
+      define :list_site_storage, action: :read
+      define :save_site_storage, action: :save
+      define :update_site_storage, action: :update
+      define :reset_site_storage, action: :destroy
+    end
+
+    resource KilnCMS.CMS.StorageProfile do
+      define :list_storage_profiles, action: :read
+      define :get_storage_profile, action: :read, get_by: [:id]
+      define :create_storage_profile, action: :create
+      define :update_storage_profile_credentials, action: :update_credentials
+    end
+
     # A site's own SMTP relay (#1322). Read through `KilnCMS.Mail.SiteRelay`,
     # which owns the precedence rule and the fail direction — never directly.
     resource KilnCMS.CMS.SiteMailRelay do
@@ -468,6 +486,16 @@ defmodule KilnCMS.CMS do
       define :save_site_meilisearch, action: :save
       define :update_site_meilisearch, action: :update
       define :reset_site_meilisearch, action: :destroy
+    end
+
+    # A site's own AI provider, key and models (#1557). Read through
+    # `KilnCMS.LLM.SiteProvider`, which owns the precedence rule and the fail
+    # direction — never directly.
+    resource KilnCMS.CMS.SiteAiProvider do
+      define :list_site_ai_provider, action: :read
+      define :save_site_ai_provider, action: :save
+      define :update_site_ai_provider, action: :update
+      define :reset_site_ai_provider, action: :destroy
     end
 
     # The version twin: "who added that script, and when". Registered because

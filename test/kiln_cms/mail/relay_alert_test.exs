@@ -124,6 +124,33 @@ defmodule KilnCMS.Mail.RelayAlertTest do
   end
 
   @tag :capture_log
+  test "a site's own relay refusing us neither alerts nor spends the operator's cooldown",
+       %{ref: ref} do
+    org = KilnCMS.OrgFixtures.org("relay-alert-site")
+
+    KilnCMS.CMS.save_site_mail_relay!(
+      %{host: "smtp.example.com", from_email: "news@site.example"},
+      tenant: org,
+      authorize?: false
+    )
+
+    # The site's relay refusing the site's password is the site's to fix.
+    assert_raise Mail.TransientDeliveryError, fn ->
+      Mail.deliver_for_worker(email(), org_id: org.id, adapter: AuthFailedAdapter)
+    end
+
+    refute_receive {^ref, _kind, _measurements, _metadata}
+
+    # And the operator's relay failing right after still alerts: the site's
+    # refusal didn't take the one alert the cooldown allows.
+    assert_raise Mail.TransientDeliveryError, fn ->
+      Mail.deliver_for_worker(email(), adapter: AuthFailedAdapter)
+    end
+
+    assert_receive {^ref, :relay_refused, %{count: 1}, _metadata}
+  end
+
+  @tag :capture_log
   test "refused and unreachable keep separate cooldowns", %{ref: ref} do
     assert :ok = RelayAlert.notify_refused("example.com", "auth_failed")
     assert_receive {^ref, :relay_refused, _measurements, _metadata}

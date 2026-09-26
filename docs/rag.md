@@ -230,8 +230,14 @@ ASK_MODEL=anthropic:claude-sonnet-5
 ANTHROPIC_API_KEY=...
 ```
 
-Kiln never reads or stores provider API keys; `req_llm` resolves them from its
-own environment. A hosted provider logs a warning at boot.
+Kiln never reads or stores the operator's provider API keys; `req_llm`
+resolves them from its own environment. A hosted provider logs a warning at
+boot.
+
+A site admin can give the site its own provider, key and answer model at
+`/editor/site-ai`. A site whose own provider is set but unusable gets
+`"generation": "failed"`, never an answer from the operator's provider. See
+[Per-site provider](ai-assist.md#per-site-provider).
 
 `ASK_GENERATOR` overrides the adapter module if you have written your own.
 

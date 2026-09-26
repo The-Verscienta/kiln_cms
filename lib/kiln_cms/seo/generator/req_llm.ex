@@ -29,43 +29,43 @@ defmodule KilnCMS.Seo.Generator.ReqLLM do
 
   require Logger
 
+  alias KilnCMS.LLM.Client
   alias KilnCMS.Seo.Draft
   alias KilnCMS.Seo.Prompt
 
   @impl KilnCMS.Seo.Generator
   def draft(document, opts \\ []) do
-    {system, user} = Prompt.build(document, opts)
-    model = KilnCMS.Seo.model()
+    # `:llm` is a site's own route (#1557), put there by `KilnCMS.Seo.draft/2`;
+    # without one this is the operator's configuration, as it always was.
+    route = Keyword.get(opts, :llm) || KilnCMS.Seo.operator_route()
+    {system, user} = Prompt.build(document, Keyword.delete(opts, :llm))
 
     request =
-      KilnCMS.Seo.request_opts()
+      route
+      |> KilnCMS.Seo.request_opts()
       |> Keyword.merge(Keyword.take(opts, [:temperature, :max_tokens, :receive_timeout]))
       |> Keyword.put(:system_prompt, system)
 
-    case structured(model, user, request) do
+    case structured(route, user, request) do
       {:ok, draft} ->
         {:ok, draft}
 
       {:error, reason} ->
         Logger.debug("SEO structured drafting failed (#{inspect(reason)}); trying free text")
-        freeform(model, user, request)
+        freeform(route, user, request)
     end
   end
 
   # Tier 1 — provider-native structured output.
-  defp structured(model, user, request) do
-    with {:ok, response} <- ReqLLM.generate_object(model, user, Draft.schema(), request),
-         object when is_map(object) <- ReqLLM.Response.object(response),
+  defp structured(route, user, request) do
+    with {:ok, object, usage} <- Client.object(route, user, Draft.schema(), request),
          {:ok, draft} <- Draft.from_map(object) do
-      {:ok, %{draft | model: model, usage: usage(response)}}
-    else
-      {:error, reason} -> {:error, reason}
-      other -> {:error, {:unusable_object, other}}
+      {:ok, %{draft | model: route.model, usage: present_usage(usage)}}
     end
   end
 
   # Tier 2 — ask for JSON in plain text and recover the object ourselves.
-  defp freeform(model, user, request) do
+  defp freeform(route, user, request) do
     request =
       Keyword.update!(
         request,
@@ -73,22 +73,17 @@ defmodule KilnCMS.Seo.Generator.ReqLLM do
         &(&1 <> "\n\nRespond with a single JSON object and nothing else.")
       )
 
-    with {:ok, response} <- ReqLLM.generate_text(model, user, request),
-         text when is_binary(text) <- ReqLLM.Response.text(response),
+    with {:ok, text, usage} <- Client.text(route, user, request),
          {:ok, object} <- Draft.parse_text(text),
          {:ok, draft} <- Draft.from_map(object) do
-      {:ok, %{draft | model: model, usage: usage(response)}}
+      {:ok, %{draft | model: route.model, usage: present_usage(usage)}}
     else
       {:error, %{__exception__: true} = exception} -> {:error, Exception.message(exception)}
       {:error, reason} -> {:error, reason}
-      _other -> {:error, :unparsable}
     end
   end
 
-  defp usage(response) do
-    case ReqLLM.Response.usage(response) do
-      %{} = usage -> usage
-      _ -> nil
-    end
-  end
+  # A draft's `usage` stays `nil` when the provider reported none, as before.
+  defp present_usage(usage) when map_size(usage) == 0, do: nil
+  defp present_usage(usage), do: usage
 end

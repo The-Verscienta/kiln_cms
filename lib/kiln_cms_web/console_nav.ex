@@ -512,6 +512,16 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("This site as an ActivityPub actor, and its followers."),
             keywords: ["activitypub", "fediverse", "mastodon", "followers", "actor"]
           },
+          # A site's own object storage (#1559), with the site's other accounts
+          # at outside services.
+          %{
+            key: :site_storage,
+            label: gettext("Object storage"),
+            path: ~p"/editor/site-storage",
+            icon: "hero-circle-stack",
+            description: gettext("The bucket this site's new uploads are stored in."),
+            keywords: ["s3", "bucket", "r2", "b2", "minio", "media", "uploads", "cdn"]
+          },
           # A site's own SMTP relay (#1322). Not beside Mail below: that is the
           # operator's transport for the whole deployment, platform-gated; this
           # is one site's provider and From address, and a site admin's to set.
@@ -541,6 +551,17 @@ defmodule KilnCMSWeb.ConsoleNav do
             icon: "hero-magnifying-glass-circle",
             description: gettext("Index this site's content into your own Meilisearch."),
             keywords: ["meilisearch", "index", "typo tolerance", "instant search", "reindex"]
+          },
+          # A site's own AI provider (#1557), beside its own mail relay: both
+          # are this site's account at an outside service instead of the
+          # deployment's.
+          %{
+            key: :site_ai,
+            label: gettext("AI provider"),
+            path: ~p"/editor/site-ai",
+            icon: "hero-sparkles",
+            description: gettext("The AI account and models this site's AI features use."),
+            keywords: ["llm", "model", "api key", "openai", "anthropic", "assist", "ask"]
           },
           %{
             key: :automation,

@@ -174,7 +174,7 @@ model as a whole is in [multi-tenancy.md](multi-tenancy.md)). The request's
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
 | `TENANT_BASE_HOST` | `PHX_HOST` | The apex tenant subdomains are carved from. Set it only when tenant subdomains live under a different apex than the canonical URL host. | [`config/runtime/prod/web.exs:91`](../config/runtime/prod/web.exs#L91) |
-| `TENANT_STRICT_HOST` | `false` | Reject a request whose `Host` matches no org (404) instead of serving it the **default org**. **Recommended for every multi-tenant deployment** (#563) — without it a bare hostname, an IP literal, `localhost` or an attacker-supplied `Host` is served the default site's content, branding and analytics. Leave it off for a single-host install, where the bare host and an IP legitimately arrive unmatched and would start 404ing. Kiln tells you three ways if it is off on a deployment with more than one org (#660): a warning at boot, a warning when the *second* organization is created — the create that makes the Host header start deciding which site a request gets — and a standing notice on `/editor/system` for every org after that. | [`config/runtime/prod/web.exs:104`](../config/runtime/prod/web.exs#L104) |
+| `TENANT_STRICT_HOST` | unset (auto) | Reject a request whose `Host` matches no org (404) instead of serving it the **default org**. **Unset, it is automatic (#1547): off while the deployment has one organization, on as soon as a second exists** — with no restart, and on every node. `true` forces it on; `false` forces it off, which is what every release before 0.11 did. With one org the fallback is harmless, and a single-host install is served through it — a bare hostname, an IP literal, `localhost`, the load balancer's health-check host. With two or more, a bare hostname, an IP literal or an attacker-supplied `Host` would be served the default site's content, branding and analytics, which is why auto turns it on. If Kiln cannot count its organizations yet (it booted while the database was unreachable), auto treats the deployment as multi-org and refuses unknown hosts until the count succeeds — see [`KilnCMSWeb.Tenant.OrgCount`](../lib/kiln_cms_web/tenant/org_count.ex) for why. Kiln tells you three ways if `TENANT_STRICT_HOST=false` is keeping a deployment with more than one org on the fallback (#660): a warning at boot, a warning when the *second* organization is created — the create that makes the Host header start deciding which site a request gets — and a standing notice on `/editor/system`. | [`config/runtime/prod/web.exs:104`](../config/runtime/prod/web.exs#L104) |
 
 **What it covers.** Everything the router serves, plus LiveView mounts and all
 three sockets — GraphQL (`/ws/gql`), visual editing (`/ws/bridge`) and
@@ -201,17 +201,18 @@ deliberately host-independent and neither reads the ambient tenant:
 The exemption keys on the controller, not on a path list, so it tracks the
 router.
 
-> **Before turning it on**, confirm every host that must reach the app is
-> accounted for: each org's subdomain or `custom_domain`, and the `PHX_HOST`
-> apex itself (it resolves to the default org, and is never refused even if the
-> database is briefly unreachable). Anything else now gets a 404.
+> **Before creating a second organization** (or setting `TENANT_STRICT_HOST=true`),
+> confirm every host that must reach the app is accounted for: each org's
+> subdomain or `custom_domain`, and the `PHX_HOST` apex itself (it resolves to
+> the default org, and is never refused even if the database is briefly
+> unreachable). Once strict matching is on, anything else gets a 404.
 
 **404 means "no such host"; a database outage gets a 503** (#341). A host that
 could not be *looked up* is a different answer from one that matches no org, and
 Kiln keeps them apart:
 
-- With `TENANT_STRICT_HOST` **off** — the default, and the whole single-host
-  install — a failed lookup falls back to the default org exactly as an
+- With strict matching **off** — a single-host install under the default, or
+  `TENANT_STRICT_HOST=false` — a failed lookup falls back to the default org exactly as an
   unmatched host does. Nothing is refused in this mode, including during an
   outage, which is what lets warm content keep being served from cache without a
   database (#341): tenant resolution runs in the endpoint, *above* the cache.
@@ -283,7 +284,9 @@ Opt into the S3 storage adapter by setting `S3_BUCKET`. When it is set,
 required (the latter two raise via `System.fetch_env!`). See
 [`KilnCMS.Storage.S3`](../lib/kiln_cms/storage/s3.ex) for per-provider hosts,
 and [`media-pipeline.md`](media-pipeline.md#production-storage-and-cdn) for the
-CDN deployment guide.
+CDN deployment guide. A site admin can give their site its own bucket at
+`/editor/site-storage` (#1559); that site's new uploads then use it and none of
+these. See [Per-site buckets](media-pipeline.md#per-site-buckets-1559).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
@@ -410,6 +413,11 @@ are read in the production branch of `runtime.exs`; for dev or test, set
 `config :kiln_cms, KilnCMS.Seo, …` in a config file. Prefer an on-prem model
 (`ollama:`/`vllm:`); a hosted provider is announced at boot and in the editor,
 and should be added to your DPA's subprocessor list. See [`docs/seo.md`](seo.md).
+
+These AI variables (this section and the two after it) are the operator's
+layer. A site admin can give their site its own provider, API key and models at
+`/editor/site-ai` (#1557); that site then uses its own and none of these. See
+[Per-site provider](ai-assist.md#per-site-provider).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
@@ -582,7 +590,7 @@ configured. See [editorial-consent.md](editorial-consent.md) and
 |----------|---------|---------|-----------------|
 | `KILN_AUDIT_ANCHORS_ENABLED` | `true` | The tamper-evident history master switch (#356). `Chain.extend/2` requires **both** this and `KILN_AUDIT_ANCHOR_EVERY_WRITE` below, so turning this off is a complete kill switch for anchoring regardless of the per-write setting. Set to `false`/`0`/`no`/`off` to disable, recoverable at runtime without a rebuild (#611 — before this variable existed, the only way back was a rebuild with `:audit_anchors_enabled` compiled to `true`). Only a recognized spelling writes config; an unrecognized value keeps the default (`true`) — the safe side, opposite of `KILN_AUDIT_ANCHOR_EVERY_WRITE`'s. Ignored under `MIX_ENV=test`. | [`config/runtime/governance.exs:24`](../config/runtime/governance.exs#L24) |
 | `KILN_AUDIT_ANCHOR_EVERY_WRITE` | `false` | Set to `true`/`1`/`yes`/`on` to anchor **every** versioned write, not just publishes — #356's "sign every version, not just published artifacts". Closes the window between two publishes, at the cost of one signature and one `history_anchors` row per save — **and** of autosave coalescing, which cannot collapse rows an anchor has committed to, so every debounced draft save keeps its own version row (#671; `docs/editorial-consent.md` has the reasoning). A regulated deployment wants this; a blog does not. Read at runtime so it can be turned off without rebuilding the image — this governs only the per-write extension; it is a no-op whenever `KILN_AUDIT_ANCHORS_ENABLED` above is off. Only a recognized spelling writes config, so an unrecognized value keeps the configured default rather than being read as "off" — silently not signing is the dangerous direction. Ignored under `MIX_ENV=test` so the suite stays deterministic. | [`config/runtime/governance.exs:51`](../config/runtime/governance.exs#L51) |
-| `KILN_PROVENANCE_PRIVATE_KEY` | unset | PKCS#1 RSA private key PEM (`BEGIN RSA PRIVATE KEY`) used to sign history anchors and C2PA-*style* content manifests (#340). Unset ⇒ anchors are stored **unsigned** — still an integrity checksum, but the anchor row itself is no longer tamper-proof, and `verify` reports `:unsigned` rather than `:verified`. The key source is configurable (`config :kiln_cms, KilnCMS.Provenance, signing_key:`); this var is only the default `{:env, …}` binding, so a deployment that set `signing_key: :dkim` or a `{:file, …}` in source ignores it. It is a multi-line PEM: write it as an escaped one line (double-quoted, each newline a literal `\n` — unescaped on read, #609) or as a double-quoted true multi-line value, or mount it via `KILN_PROVENANCE_KEY_FILE`. PKCS#8 is rejected — convert with `openssl rsa -in key.pem -traditional -out key-pkcs1.pem` (the `-out` matters — without it the private key streams to stdout instead of a file). | [`config/config.exs:805`](../config/config.exs#L805) |
+| `KILN_PROVENANCE_PRIVATE_KEY` | unset | PKCS#1 RSA private key PEM (`BEGIN RSA PRIVATE KEY`) used to sign history anchors and C2PA-*style* content manifests (#340). Unset ⇒ anchors are stored **unsigned** — still an integrity checksum, but the anchor row itself is no longer tamper-proof, and `verify` reports `:unsigned` rather than `:verified`. The key source is configurable (`config :kiln_cms, KilnCMS.Provenance, signing_key:`); this var is only the default `{:env, …}` binding, so a deployment that set `signing_key: :dkim` or a `{:file, …}` in source ignores it. It is a multi-line PEM: write it as an escaped one line (double-quoted, each newline a literal `\n` — unescaped on read, #609) or as a double-quoted true multi-line value, or mount it via `KILN_PROVENANCE_KEY_FILE`. PKCS#8 is rejected — convert with `openssl rsa -in key.pem -traditional -out key-pkcs1.pem` (the `-out` matters — without it the private key streams to stdout instead of a file). | [`config/config.exs:807`](../config/config.exs#L807) |
 | `KILN_PROVENANCE_KEY_FILE` | unset | Path to the same PEM, mounted as a file (Docker/K8s secret). Sets `signing_key: {:file, …}` at runtime — before #608 this shape existed only in `config/config.exs`, i.e. only with a rebuild. It replaces `signing_key` **wholesale**, so it wins over `KILN_PROVENANCE_PRIVATE_KEY` (mount the file first, unset the var after) but equally over a source-configured `:dkim` or `{:file, …}` — setting it switches the signing key, and every new anchor gets a new `key_id`. | [`config/runtime/feature_gates.exs:84`](../config/runtime/feature_gates.exs#L84) |
 | `KILN_PROVENANCE_RETIRED_KEY_FILES` | unset | Comma-separated **paths** to the public halves of keys that no longer sign but must still verify. Sets `:retired_key_files`, which `KeyRegistry.retired/0` **unions** with any `:retired_keys` configured in source — so the env route can only add verification keys, never drop one. (That holds because this var is the sole writer of `:retired_key_files`; put source config in `:retired_keys`.) Blank entries are ignored, so a trailing comma is harmless, and a value with no paths at all warns and changes nothing rather than clearing the list. An unreadable path is logged and skipped rather than blinding the keys that do resolve. Paths only — a public key is multi-line too — and since `,` separates and each entry is trimmed, a path containing a comma or significant leading/trailing whitespace can't be expressed here; use `retired_keys` in source for those. | [`config/runtime/feature_gates.exs:110`](../config/runtime/feature_gates.exs#L110) |
 | `KILN_PROVENANCE_ENABLED` | `false` | Set to `true`/`1`/`yes`/`on` to produce signed manifests for fired artifacts and serve `/api/provenance/*`. **A signing key alone is not enough**: with this unset, the key signs history anchors and every provenance endpoint still returns `404`. Parsed by the shared [on/off rules](#boolean-variables), so an unrecognized value keeps the default and warns rather than turning signing off. Ignored under `MIX_ENV=test`. See [provenance.md](provenance.md). | [`config/runtime/feature_gates.exs:34`](../config/runtime/feature_gates.exs#L34) |

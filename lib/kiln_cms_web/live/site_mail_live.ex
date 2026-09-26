@@ -34,6 +34,15 @@ defmodule KilnCMSWeb.SiteMailLive do
   to send mail from this deployment to anyone. `Mail.deliver_now/2` takes no
   actor, so the handler re-asks the resource's update policy before sending
   instead of trusting the mount guard alone (#1166).
+
+  ## Delivery health
+
+  The site's slice of `/editor/mail`'s panel (#1562): this site's recent hard
+  bounces and give-ups, by recipient domain, and the addresses **this site's
+  relay** rejected (`KilnCMS.Mail.SiteSuppressedRecipient`), each removable.
+  The instance-wide list is not shown here — it is the operator's, and it lists
+  addresses from every site. *Remove* goes through the resource's destroy
+  policy with the admin as actor, under this site as tenant.
   """
   use KilnCMSWeb, :live_view
 
@@ -50,7 +59,8 @@ defmodule KilnCMSWeb.SiteMailLive do
      |> assign(:page_title, gettext("Outgoing mail"))
      |> assign(:sending_test?, false)
      |> assign(:test_result, nil)
-     |> load_relay()}
+     |> load_relay()
+     |> load_delivery_health()}
   end
 
   @impl true
@@ -134,6 +144,24 @@ defmodule KilnCMSWeb.SiteMailLive do
     end
   end
 
+  def handle_event("unsuppress", %{"id" => id}, socket) when is_binary(id) do
+    opts = [actor: socket.assigns.current_user, tenant: socket.assigns.current_org]
+
+    # Found among what this admin may read on this site, then destroyed under
+    # the resource's policy: an id from another site is simply not found.
+    socket =
+      with %{} = entry <- Enum.find(socket.assigns.suppressed, &(&1.id == id)),
+           :ok <- Mail.unsuppress_site_recipient(entry, opts) do
+        socket
+        |> load_delivery_health()
+        |> put_flash(:info, gettext("Address removed. This site can mail it again."))
+      else
+        _error -> put_flash(socket, :error, gettext("Couldn't remove that address."))
+      end
+
+    {:noreply, socket}
+  end
+
   @impl true
   def handle_async(:send_test, {:ok, {:ok, _receipt}}, socket) do
     {:noreply,
@@ -202,6 +230,26 @@ defmodule KilnCMSWeb.SiteMailLive do
     |> assign(:password_stored?, row && not is_nil(row.password_encrypted))
     |> assign(:password_readable?, is_nil(row) or SiteRelay.password_readable?(row))
     |> assign(:form, to_form(params, as: :relay))
+  end
+
+  defp load_delivery_health(socket) do
+    %{current_user: user, current_org: org} = socket.assigns
+
+    # A read the admin isn't allowed filters to nothing rather than erroring,
+    # like the relay row above.
+    suppressed =
+      case Mail.list_site_suppressed_recipients(
+             actor: user,
+             tenant: org,
+             query: [sort: [last_failure_at: :desc]]
+           ) do
+        {:ok, entries} -> entries
+        _error -> []
+      end
+
+    socket
+    |> assign(:failures, Mail.recent_site_delivery_failures(KilnCMS.Accounts.org_id(org)))
+    |> assign(:suppressed, suppressed)
   end
 
   defp current_row(socket) do
@@ -400,6 +448,86 @@ defmodule KilnCMSWeb.SiteMailLive do
             </p>
         <% end %>
       </div>
+
+      <section id="site-mail-delivery-health" class="mt-12 space-y-6">
+        <div>
+          <h2 class="text-lg font-medium">{gettext("Delivery health")}</h2>
+          <p class="text-sm text-base-content/70">
+            {gettext(
+              "This site's recent permanent failures, and the addresses its relay rejected that this site has stopped mailing as a result."
+            )}
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          <h3 class="text-sm font-medium text-base-content/80">{gettext("Recent failures")}</h3>
+          <p :if={@failures == []} class="text-sm text-base-content/60">
+            {gettext("No recent delivery failures.")}
+          </p>
+          <ul :if={@failures != []} id="site-mail-failures" class="space-y-2">
+            <li
+              :for={failure <- @failures}
+              class="rounded border border-base-content/10 p-3 text-sm"
+            >
+              <div class="flex flex-wrap items-center gap-2">
+                <span class={[
+                  "rounded px-1.5 py-0.5 text-xs font-medium",
+                  if(failure.state == "cancelled",
+                    do: "bg-error/20 text-error",
+                    else: "bg-warning/20 text-warning"
+                  )
+                ]}>
+                  {if failure.state == "cancelled",
+                    do: gettext("hard bounce"),
+                    else: gettext("gave up")}
+                </span>
+                <code class="font-medium">{failure.domain}</code>
+                <span :if={failure.at} class="ml-auto text-xs text-base-content/50">
+                  {Calendar.strftime(failure.at, "%Y-%m-%d %H:%M UTC")}
+                </span>
+              </div>
+              <code :if={failure.reason} class="mt-1 block break-all text-xs text-base-content/60">
+                {failure.reason}
+              </code>
+            </li>
+          </ul>
+        </div>
+
+        <div class="space-y-2">
+          <h3 class="text-sm font-medium text-base-content/80">
+            {gettext("Suppressed addresses")}
+          </h3>
+          <p class="text-xs text-base-content/50">
+            {gettext(
+              "This site's relay said these addresses don't exist, so this site's mail skips them. It stops only this site's mail: other sites, and sign-in and password-reset mail, still reach them. Remove one to let this site mail it again."
+            )}
+          </p>
+          <p :if={@suppressed == []} class="text-sm text-base-content/60">
+            {gettext("No suppressed addresses.")}
+          </p>
+          <ul :if={@suppressed != []} id="site-mail-suppressed" class="space-y-2">
+            <li
+              :for={entry <- @suppressed}
+              id={"site-suppressed-#{entry.id}"}
+              class="flex flex-wrap items-center gap-2 rounded border border-base-content/10 p-3 text-sm"
+            >
+              <code class="font-medium">{entry.email}</code>
+              <span :if={entry.last_failure_at} class="text-xs text-base-content/50">
+                {gettext("since")} {Calendar.strftime(entry.last_failure_at, "%Y-%m-%d")}
+              </span>
+              <.button
+                type="button"
+                variant="ghost"
+                phx-click="unsuppress"
+                phx-value-id={entry.id}
+                class="ml-auto"
+              >
+                {gettext("Remove")}
+              </.button>
+            </li>
+          </ul>
+        </div>
+      </section>
     </Layouts.console>
     """
   end

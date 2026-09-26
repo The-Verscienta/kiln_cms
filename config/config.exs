@@ -487,8 +487,10 @@ config :kiln_cms, :strict_tenancy, true
 # RUNTIME (`TENANT_STRICT_HOST`) and about which tenant an unrecognized request
 # `Host` resolves to. Off ⇒ the default org, which is right for a single-host
 # install and wrong for a multi-tenant one, where it serves the default site's
-# content to anyone with an unmatched Host. See `KilnCMSWeb.Tenant`.
-config :kiln_cms, :tenant_strict_host, false
+# content to anyone with an unmatched Host. `:auto` (#1547) is on exactly when
+# more than one organization exists; `true`/`false` override it. See
+# `KilnCMSWeb.Tenant.strict_host?/0` and `KilnCMSWeb.Tenant.OrgCount`.
+config :kiln_cms, :tenant_strict_host, :auto
 
 # Tamper-evident history anchors (#356): at every publish, the document's full
 # PaperTrail version chain is folded into a canonical hash and recorded

@@ -272,7 +272,8 @@ defmodule KilnCMS.Mail.SiteRelayTest do
       assert_received {:site_relay_email, %{from: {_name, "news@site.example"}}, _config}
     end
 
-    test "a site relay's hard reject cancels without suppressing the address", %{org: org} do
+    test "a site relay's hard reject cancels without suppressing the address instance-wide",
+         %{org: org} do
       relay!(org)
 
       assert {:cancel, _reason} =
@@ -282,10 +283,11 @@ defmodule KilnCMS.Mail.SiteRelayTest do
                )
 
       # The reject names the recipient, so on the operator's relay this would
-      # suppress the address (#1575). The suppression list is instance-wide,
-      # and a relay the site chose must not be able to write to it — so the
-      # site's word cancels this message and nothing more.
+      # suppress the address (#1575). The instance-wide list stops account mail
+      # too, and a relay the site chose must not be able to write to it — the
+      # site's word goes on the site's own list (#1562, `SiteSuppressionTest`).
       refute Mail.suppressed?("reader@example.com")
+      assert Mail.suppressed?("reader@example.com", org_id: org.id)
     end
 
     test "a site relay that's down retries without the operator's outage alert", %{org: org} do

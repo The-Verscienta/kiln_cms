@@ -57,6 +57,12 @@ defmodule KilnCMS.Ask do
   code. `egress?/0` reports which choice the operator actually made, resolved
   from the endpoint host rather than the provider name (`KilnCMS.LLM`).
 
+  A site can bring its own provider, key and answer model (#1557, `route/1`,
+  `KilnCMS.LLM.SiteProvider`). It then uses those and nothing of the
+  operator's; a blank answer model is `generation: :disabled` for the site;
+  and a provider that is set but unusable is `generation: :failed` — never an
+  answer from the operator's provider.
+
   ## Why this one is budgeted harder than the other AI features
 
   `KilnCMS.Seo` and `KilnCMS.Assist` are reached by an authenticated editor
@@ -104,6 +110,8 @@ defmodule KilnCMS.Ask do
   alias KilnCMS.I18n
   alias KilnCMS.LLM
   alias KilnCMS.LLM.Budget
+  alias KilnCMS.LLM.Route
+  alias KilnCMS.LLM.SiteProvider
   alias KilnCMS.Search
 
   @default_limit 6
@@ -218,15 +226,23 @@ defmodule KilnCMS.Ask do
 
   @doc "Request options for the shipped `req_llm` adapter."
   @spec request_opts() :: keyword()
-  def request_opts do
-    [
+  def request_opts, do: request_opts(Route.operator(model()))
+
+  @doc """
+  Request options for `route`. The operator's `base_url` is added only to the
+  operator's route: a site's route (#1557) carries its own endpoint.
+  """
+  @spec request_opts(Route.t()) :: keyword()
+  def request_opts(%Route{source: source}) do
+    opts = [
       # Cooler than block assist's 0.6: this path restates retrieved facts, and
       # every degree of creativity here is a degree of confabulation.
       temperature: cfg(:temperature, 0.2),
       max_tokens: cfg(:max_tokens, 800),
       receive_timeout: cfg(:timeout_ms, 30_000)
     ]
-    |> put_base_url(cfg(:base_url, nil))
+
+    if source == :operator, do: put_base_url(opts, cfg(:base_url, nil)), else: opts
   end
 
   # `base_url` has to reach the request, not just `egress?/0`. Read only by the
@@ -282,9 +298,8 @@ defmodule KilnCMS.Ask do
       ]
 
       sources = retrieve(question, read_opts)
-      generator = Keyword.get(opts, :generator, generator())
 
-      case generate(generator, question, sources, locale, opts) do
+      case generate(pick_route(opts), question, sources, locale, opts) do
         {:ok, answer} ->
           result(question, answer, sources, nil, nil)
 
@@ -403,12 +418,58 @@ defmodule KilnCMS.Ask do
 
   # --- generation seam -------------------------------------------------------
 
-  defp generate(nil, _question, _sources, _locale, _opts), do: :disabled
+  @doc """
+  Where generation goes for the site `org_id` — the same contract as
+  `KilnCMS.Seo.route/1`, except that a module-only operator configuration
+  (a bespoke generator with no `model:`) counts as on, as `enabled?/0` says.
+  """
+  @spec route(term()) ::
+          {:ok, module(), Route.t()} | {:error, :disabled | {:site_provider, term()}}
+  def route(org_id) do
+    case SiteProvider.resolve(org_id, :ask) do
+      :operator ->
+        if enabled?(),
+          do: {:ok, generator(), Route.operator(model())},
+          else: {:error, :disabled}
 
-  defp generate(module, question, sources, locale, opts) when is_atom(module) do
+      :off ->
+        {:error, :disabled}
+
+      {:site, route} ->
+        {:ok, KilnCMS.Ask.Generator.ReqLLM, route}
+
+      {:error, reason} ->
+        {:error, {:site_provider, reason}}
+    end
+  end
+
+  # `:generator` in `opts` is a test override of the operator's module, and
+  # takes the operator's path whatever the site has.
+  defp pick_route(opts) when is_list(opts) do
+    case Keyword.fetch(opts, :generator) do
+      {:ok, nil} -> {:error, :disabled}
+      {:ok, module} -> {:ok, module, Route.operator(model())}
+      :error -> route(opts[:tenant])
+    end
+  end
+
+  defp generate({:error, :disabled}, _question, _sources, _locale, _opts), do: :disabled
+
+  # The site's own provider is set but unusable (#1557): no answer, reported
+  # as `:failed` like any other transient generation failure — and never sent
+  # to the operator's provider instead. See `KilnCMS.LLM.SiteProvider`.
+  defp generate({:error, {:site_provider, reason}}, _question, _sources, _locale, _opts) do
+    Logger.warning(
+      "Ask generation refused: this site's AI provider is set but #{SiteProvider.describe_error(reason)}"
+    )
+
+    {:error, {:site_provider, reason}}
+  end
+
+  defp generate({:ok, module, route}, question, sources, locale, opts) when is_atom(module) do
     with :ok <- check_budget(opts) do
       module
-      |> invoke(question, sources, locale)
+      |> invoke(question, sources, locale, route)
       |> normalize()
     end
   end
@@ -416,9 +477,12 @@ defmodule KilnCMS.Ask do
   # `generate/3` is the preferred arity — it carries the content locale — but
   # the behaviour's required callback is still `generate/2` (#361's contract),
   # so a generator written before this existed must keep working untouched.
-  defp invoke(module, question, sources, locale) do
+  #
+  # A site's route (#1557) always runs the shipped adapter, which has
+  # `generate/3`; an operator's bespoke generator is handed what it was before.
+  defp invoke(module, question, sources, locale, route) do
     if Code.ensure_loaded?(module) and function_exported?(module, :generate, 3) do
-      module.generate(question, sources, locale: locale)
+      module.generate(question, sources, generator_opts(route, locale: locale))
     else
       module.generate(question, sources)
     end
@@ -432,6 +496,9 @@ defmodule KilnCMS.Ask do
       Logger.error("Ask generator #{inspect(module)} exited: #{inspect(reason)}")
       {:error, reason}
   end
+
+  defp generator_opts(%Route{source: :site} = route, opts), do: Keyword.put(opts, :llm, route)
+  defp generator_opts(_route, opts), do: opts
 
   # No generator can hand a caller text it hasn't been through here: an answer
   # is echoed to an anonymous HTTP client, and a model that ignores the length

@@ -28,10 +28,11 @@ defmodule KilnCMS.Media.Transform do
   def apply(item, op, opts \\ []) do
     ext = Path.extname(item.storage_key || "")
 
-    with {:ok, binary} <- Storage.fetch(item.storage_key),
+    with {:ok, site} <- Storage.locate(item),
+         {:ok, binary} <- Storage.fetch(item.storage_key, site),
          tmp = write_temp(binary, ext),
          {:ok, edited} <- transform_temp(tmp, ext, op),
-         {:ok, key} <- store_edited(edited.path, ext) do
+         {:ok, key} <- store_edited(edited.path, ext, site) do
       {focal_x, focal_y} = transform_focal(item.focal_x || 0.5, item.focal_y || 0.5, op)
 
       result =
@@ -39,7 +40,7 @@ defmodule KilnCMS.Media.Transform do
           item,
           %{
             storage_key: key,
-            url: Storage.url(key),
+            url: Storage.url(key, site),
             width: edited.width,
             height: edited.height,
             focal_x: focal_x,
@@ -90,10 +91,10 @@ defmodule KilnCMS.Media.Transform do
     rm(tmp)
   end
 
-  defp store_edited(path, ext) do
+  defp store_edited(path, ext, site) do
     key = Storage.generate_key("edited#{ext}")
 
-    case Storage.store(key, path) do
+    case Storage.store(key, path, site) do
       {:ok, ^key} -> {:ok, key}
       error -> error
     end

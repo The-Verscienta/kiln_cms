@@ -48,6 +48,7 @@ defmodule KilnCMSWeb.SystemLive do
        |> assign(:page_title, gettext("System"))
        |> assign(:build, Build.current())
        |> assign(:strict_host_gap, KilnCMSWeb.Tenant.strict_host_gap?())
+       |> assign(:strict_host_setting, KilnCMSWeb.Tenant.strict_host_setting())
        |> assign(:plugins, Plugins.manifests())
        |> assign(:update, :loading)
        |> assign(:flushed, nil)
@@ -165,9 +166,15 @@ defmodule KilnCMSWeb.SystemLive do
             )}
           </p>
 
-          <p class="mt-2 text-sm text-warning-ink">
+          <p :if={@strict_host_setting == false} class="mt-2 text-sm text-warning-ink">
             {gettext(
-              "Set TENANT_STRICT_HOST=true to reject unrecognized hosts instead, then restart. Leave it off only if an unmatched host reaching the default organization is what you want."
+              "TENANT_STRICT_HOST=false is overriding the default, which rejects unrecognized hosts once a second organization exists. Remove the setting or set TENANT_STRICT_HOST=true, then restart. Keep it only if an unmatched host reaching the default organization is what you want."
+            )}
+          </p>
+
+          <p :if={@strict_host_setting != false} class="mt-2 text-sm text-warning-ink">
+            {gettext(
+              "TENANT_STRICT_HOST is unset, so host matching turns on by itself once a second organization exists, but this server has not noticed the new organization yet. It will within five minutes, or on restart."
             )}
           </p>
         </section>

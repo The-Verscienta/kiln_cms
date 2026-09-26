@@ -214,7 +214,9 @@ is neither that type nor explained, so the list cannot fall behind the code.
 | `password_encrypted` | `KilnCMS.CMS.SiteMailRelay` (one per site that set its own relay) | That site's mail is **held**: the delivery jobs retry for ~16 hours and then give up. It is never sent through the operator's relay instead | `/editor/site-mail` on each such site: enter the relay password again |
 | `private_key_encrypted` | `KilnCMS.CMS.SiteVapidKey` (one per site that generated its own push key) | That site's push notifications are **held**, and its settings page stops offering a key to new devices. They are never signed with the deployment's `KILN_VAPID_*` key instead | `/editor/site-push` on each such site: *Rotate key*. Every device subscribed with the old key has to turn notifications on again |
 | `api_key_encrypted` | `KilnCMS.CMS.SiteMeilisearch` (one per site that set its own search instance) | That site's indexing is **held**: the jobs retry for ~16 hours and then give up, and its search falls back to the built-in Postgres search. Its content is never sent to the operator's instance instead | `/editor/site-search` on each such site: enter the API key again (the save reindexes the site) |
+| `api_key_encrypted` | `KilnCMS.CMS.SiteAiProvider` (one per site that set its own AI provider) | That site's SEO suggestions, block assist and `/api/ask` answers are **refused**: the editor says the key can't be read, and `/api/ask` answers retrieval-only with `"generation": "failed"`. They are never sent to the operator's AI provider instead | `/editor/site-ai` on each such site: enter the API key again |
 | `secret_encrypted` | `KilnCMS.CMS.WebhookEndpoint` (one per endpoint) | Outbound webhook deliveries are refused — the ledger says `"delivery failed: signing secret unreadable"` and the endpoint row reports the secret unreadable | `/editor/webhooks`: delete and re-create each endpoint, then give its receiver the new secret |
+| `secret_access_key_encrypted` | `KilnCMS.CMS.StorageProfile` (one per bucket a site has stored files in) | That site's uploads are **refused**, and its files in that bucket can't be read, derived or deleted (downloads 404, variant jobs retry). Nothing is written to, or read from, the operator's storage instead | `/editor/site-storage` on each such site: enter the secret access key again. A profile the site has since moved away from has no form; move the site back to that bucket, re-enter the key, then move it forward again |
 | `private_key_encrypted` | `KilnCMS.Federation.SiteFederation` | The site can no longer sign ActivityPub deliveries | `/editor/federation` → *Re-key*, or `mix kiln.federation rekey`. See [Re-keying the ActivityPub actor](#re-keying-the-activitypub-actor) |
 
 **You should never need the last column.** Two pieces make the rotation
@@ -262,6 +264,12 @@ fails at boot and nothing sends an alert:
   *"this site's signing key is unreadable"*. Before #1487 it failed with
   *"federation is not enabled"*.
 - **Billing**: the provider call fails at the point of use.
+- **A site's own object storage** (#1559): `/editor/site-storage` shows *"The
+  saved secret access key can't be read"*, an upload is refused with
+  `site_storage_unavailable` (API) or an error in the media library, and each
+  refusal logs `"Refusing uploads for site …: … its storage secret could not
+  be decrypted"`. The files are never written to the operator's bucket
+  instead.
 - **A site's own mail relay** (#1322): the one that does announce itself.
   `/editor/site-mail` shows *"The saved password can't be read"*, and every
   held delivery logs `"Holding mail for site …: … its password could not be
@@ -278,6 +286,11 @@ fails at boot and nothing sends an alert:
   decrypted"`. Indexing is held and search falls back to the built-in
   search; nothing goes to the operator's instance. As with the relay, only a
   site admin who opens the page sees the banner.
+- **A site's own AI provider** (#1557): `/editor/site-ai` shows *"The saved
+  API key can't be read"*, an editor clicking *Suggest* or an assist action is
+  told the same, and each refused request logs `"Refusing AI requests for
+  site …: … its API key could not be decrypted"`. Nothing is sent through the
+  operator's provider instead.
 
 `mix kiln.vault.reencrypt --dry-run` with no old secret is the one check that
 covers all of them at once. It should report `0 unreadable` for every column.

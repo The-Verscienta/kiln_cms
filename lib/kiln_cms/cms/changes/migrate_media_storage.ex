@@ -135,7 +135,7 @@ defmodule KilnCMS.CMS.Changes.MigrateMediaStorage do
       not gateable?(changeset.data.content_type) ->
         {:error, "an image may not be gated to a non-public audience"}
 
-      from == :public and not Storage.private_available?() ->
+      from == :public and not Storage.private_available?(changeset.data) ->
         {:error,
          "gating requires private storage to be configured — see KilnCMS.Storage.S3's " <>
            "moduledoc for the :private_bucket setting"}
@@ -155,11 +155,11 @@ defmodule KilnCMS.CMS.Changes.MigrateMediaStorage do
         # public poster frame either (see the moduledoc).
         changeset
         |> Ash.Changeset.force_change_attribute(:variants, %{})
-        |> relocate(false, &Storage.store_private/2, nil)
+        |> relocate(false, &Storage.store_private/3, nil)
 
       to == :public ->
         # gated -> public: restore the ordinary public URL.
-        relocate(changeset, true, &Storage.store/2, &Storage.url/1)
+        relocate(changeset, true, &Storage.store/3, &Storage.url/2)
 
       true ->
         # gated -> a different gated audience: already in private storage.
@@ -188,12 +188,16 @@ defmodule KilnCMS.CMS.Changes.MigrateMediaStorage do
       # media item can be a 500 MB video, and gating one is an ordinary editor
       # action on the request path — reading the blob whole would put that
       # much on the LiveView process's heap.
-      with :ok <- Storage.copy_to_file(old_key, tmp, private?: private_source?),
+      #
+      # Both ends are the item's own store (#1559): moving between its public
+      # and private buckets never moves it to another site's or the operator's.
+      with {:ok, site} <- Storage.locate(changeset.data),
+           :ok <- Storage.copy_to_file(old_key, tmp, private?: private_source?, at: site),
            new_key = Storage.generate_key(changeset.data.filename || old_key),
-           {:ok, ^new_key} <- store.(new_key, tmp) do
+           {:ok, ^new_key} <- store.(new_key, tmp, site) do
         changeset
         |> Ash.Changeset.force_change_attribute(:storage_key, new_key)
-        |> Ash.Changeset.force_change_attribute(:url, url_fn && url_fn.(new_key))
+        |> Ash.Changeset.force_change_attribute(:url, url_fn && url_fn.(new_key, site))
       else
         {:error, reason} -> gate_error(changeset, "couldn't relocate storage: #{inspect(reason)}")
       end
@@ -218,14 +222,14 @@ defmodule KilnCMS.CMS.Changes.MigrateMediaStorage do
       # The blob's OLD location is public exactly when its NEW audience is
       # gated (it came FROM public); otherwise it came from private storage.
       if record.audience == :public do
-        Storage.delete_private(old_key)
+        Storage.delete_private(old_key, changeset.data)
       else
-        Storage.delete(old_key)
+        Storage.delete(old_key, changeset.data)
         # The row's `variants` were cleared on the way in (#494); the blobs
         # they named are public objects that outlive the map unless something
         # deletes them, and this is the same post-commit point the original
         # is deleted at.
-        delete_variant_blobs(changeset.data.variants)
+        delete_variant_blobs(changeset.data.variants, changeset.data)
       end
     end
 
@@ -237,10 +241,10 @@ defmodule KilnCMS.CMS.Changes.MigrateMediaStorage do
   # Tolerant of a malformed/absent map: `variants` is a plain `:map`
   # attribute, so a hand-edited row could hold anything, and a cleanup pass
   # is the wrong place to raise.
-  defp delete_variant_blobs(variants) when is_map(variants) do
-    for {_label, %{"key" => key}} <- variants, is_binary(key), do: Storage.delete(key)
+  defp delete_variant_blobs(variants, item) when is_map(variants) do
+    for {_label, %{"key" => key}} <- variants, is_binary(key), do: Storage.delete(key, item)
     :ok
   end
 
-  defp delete_variant_blobs(_variants), do: :ok
+  defp delete_variant_blobs(_variants, _item), do: :ok
 end

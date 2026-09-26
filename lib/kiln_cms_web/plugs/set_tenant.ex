@@ -14,7 +14,9 @@ defmodule KilnCMSWeb.Plugs.SetTenant do
   yields an org, so a bare-host / `localhost` request transparently serves the
   default org — the non-breaking single-host behavior.
 
-  Under `TENANT_STRICT_HOST=true` (#563) that last fallback is gone and a host
+  Under strict host matching — `TENANT_STRICT_HOST=true` (#563), or unset on a
+  deployment with more than one organization (#1547) — that last fallback is
+  gone and a host
   that names no org gets a bare `404` here, in the endpoint: no tenant assigned,
   the router never reached, the pipeline halted.
 
