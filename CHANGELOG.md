@@ -54,6 +54,11 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Changed
+
+- **Every surface carries one label: covered, internal or experimental.**
+  ([long form](docs/changelog/unreleased.md#every-surface-carries-one-label-covered-internal-or-experimental))
+
 ### Fixed
 
 - **A 429's `retry-after` is rounded up, never 0.**
