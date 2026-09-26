@@ -82,6 +82,4 @@ defmodule KilnCMS.Accounts.SiteSso.HttpAdapter do
       _other -> []
     end)
   end
-
-  defp flatten_headers(headers) when is_list(headers), do: headers
 end
