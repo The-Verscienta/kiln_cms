@@ -47,11 +47,11 @@ defmodule KilnCMSWeb.SettingsLive do
      # challenge (parked in LV state between the JS create() round-trip).
      |> assign(:passkeys, WebAuthn.list(user))
      |> assign(:passkey_challenge, nil)
-     # Web Push (#628). `push_available?` is the *server* half — VAPID keys are
-     # configured; `push_supported?` is the browser half, which only the hook
-     # can answer, so it starts optimistic and is corrected on mount.
-     |> assign(:push_available?, Push.enabled?())
-     |> assign(:push_key, Push.public_key())
+     # Web Push (#628). `push_available?` is the *server* half — this site has
+     # a VAPID key, its own (#1560) or the deployment's; `push_supported?` is
+     # the browser half, which only the hook can answer, so it starts
+     # optimistic and is corrected on mount.
+     |> assign_push_key()
      |> assign(:push_supported?, true)
      |> assign(:push_subscribed?, false)
      |> assign(:push_note, nil)
@@ -59,6 +59,16 @@ defmodule KilnCMSWeb.SettingsLive do
   end
 
   defp push_devices(user), do: Push.list(user)
+
+  # The key the toggle hands the browser, and the one `Push.subscribe/4` is
+  # told the browser used — one assign, so the two cannot differ.
+  defp assign_push_key(socket) do
+    key = Push.public_key(socket.assigns.current_org)
+
+    socket
+    |> assign(:push_key, key)
+    |> assign(:push_available?, not is_nil(key))
+  end
 
   # --- passkeys (#331) -------------------------------------------------------
 
@@ -393,13 +403,28 @@ defmodule KilnCMSWeb.SettingsLive do
       when is_binary(endpoint) and is_binary(p256dh) and is_binary(auth) do
     user = socket.assigns.current_user
 
-    case Push.subscribe(params, user, socket.assigns.current_org) do
+    case Push.subscribe(params, user, socket.assigns.current_org,
+           public_key: socket.assigns.push_key
+         ) do
       {:ok, _subscription} ->
         {:noreply,
          socket
          |> assign(push_subscribed?: true, push_note: nil)
          |> assign(:push_devices, push_devices(user))
          |> put_flash(:info, gettext("Notifications are on for this device."))}
+
+      # The site's key was rotated while this page was open (#1560): the
+      # browser subscribed with a key nothing signs with any more. Hand it the
+      # current one; the next click re-subscribes against it.
+      {:error, :stale_key} ->
+        {:noreply,
+         socket
+         |> assign_push_key()
+         |> assign(
+           push_subscribed?: false,
+           push_note:
+             gettext("This site's notification key has changed. Turn notifications on again.")
+         )}
 
       {:error, _reason} ->
         {:noreply,

@@ -450,6 +450,16 @@ defmodule KilnCMS.CMS do
       define :reset_site_mail_relay, action: :destroy
     end
 
+    # A site's own Web Push key pair (#1560). Read through `KilnCMS.Push.Keys`,
+    # which owns the precedence rule and the fail direction — never directly.
+    resource KilnCMS.CMS.SiteVapidKey do
+      define :list_site_vapid_key, action: :read
+      define :generate_site_vapid_key, action: :save
+      define :update_site_vapid_key, action: :update
+      define :rotate_site_vapid_key, action: :rotate
+      define :reset_site_vapid_key, action: :destroy
+    end
+
     # The version twin: "who added that script, and when". Registered because
     # AshPaperTrail generates it into this domain.
     resource KilnCMS.CMS.SiteCodeInjection.Version do

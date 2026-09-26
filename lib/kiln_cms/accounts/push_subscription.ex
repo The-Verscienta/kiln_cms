@@ -26,6 +26,15 @@ defmodule KilnCMS.Accounts.PushSubscription do
   — the first account's notifications must stop going to a device that now
   belongs to another session. The upsert moves the row rather than adding one.
 
+  ## Which key it was made against
+
+  A push service accepts a message only if it is signed by the key the browser
+  was given when it subscribed. `vapid_public_key` records that key when it was
+  a site's own (`KilnCMS.CMS.SiteVapidKey`, #1560), and `KilnCMS.Push.Keys`
+  signs with it and nothing else. `nil` means the deployment's key
+  (`KILN_VAPID_*`) — every subscription from before #1560, and every one made
+  on a site with no key of its own — so those keep working exactly as before.
+
   ## Why `org_id` is here but does not scope the policy
 
   Rows carry the org the subscription was created under so an operator can see
@@ -52,6 +61,8 @@ defmodule KilnCMS.Accounts.PushSubscription do
     custom_indexes do
       # The settings page and the sender both list by user.
       index [:user_id]
+      # A site-key rotation's sweep (#1560).
+      index [:org_id, :vapid_public_key]
     end
   end
 
@@ -71,15 +82,25 @@ defmodule KilnCMS.Accounts.PushSubscription do
       filter expr(user_id in ^arg(:user_ids))
     end
 
+    read :bound_to_key do
+      description "A site's subscriptions made against one of its own VAPID keys (#1560)."
+      argument :org_id, :uuid, allow_nil?: false
+      argument :vapid_public_key, :string, allow_nil?: false
+      filter expr(org_id == ^arg(:org_id) and vapid_public_key == ^arg(:vapid_public_key))
+    end
+
     # A browser re-subscribing produces the same endpoint, so this is an upsert
     # rather than a create: a reviewer toggling the setting off and on, or a
     # service worker refreshing its subscription, must not accumulate rows that
     # all resolve to one device and send it three copies of every notification.
     create :subscribe do
-      accept [:user_id, :org_id, :endpoint, :p256dh, :auth, :label]
+      accept [:user_id, :org_id, :endpoint, :p256dh, :auth, :label, :vapid_public_key]
       upsert? true
       upsert_identity :unique_endpoint
-      upsert_fields [:user_id, :org_id, :p256dh, :auth, :label]
+      # `vapid_public_key` moves with the row: a browser that re-subscribes
+      # under a new key is bound to the new key, and a stale binding would sign
+      # every notification with a key the push service rejects.
+      upsert_fields [:user_id, :org_id, :p256dh, :auth, :label, :vapid_public_key]
 
       # `allow_nil? false` does not reject `""`, and the browser hands back an
       # empty string whenever `getKey/1` returned null. Without these the row
@@ -119,10 +140,11 @@ defmodule KilnCMS.Accounts.PushSubscription do
       authorize_if expr(user_id == ^actor(:id))
     end
 
-    # System calls, all three: `subscribe` writes the endpoint keys after the
-    # LiveView has established the actor, `for_users` is the sender's read, and
-    # `touch_delivered` is the worker's bookkeeping.
-    policy action([:subscribe, :for_users, :touch_delivered]) do
+    # System calls, all four: `subscribe` writes the endpoint keys after the
+    # LiveView has established the actor, `for_users` is the sender's read,
+    # `touch_delivered` is the worker's bookkeeping, and `bound_to_key` is the
+    # site-key rotation's sweep (#1560).
+    policy action([:subscribe, :for_users, :touch_delivered, :bound_to_key]) do
       forbid_if always()
     end
   end
@@ -165,6 +187,14 @@ defmodule KilnCMS.Accounts.PushSubscription do
       default "Browser"
       public? true
       constraints max_length: 60
+    end
+
+    # The site's own VAPID public key this subscription was made against, or
+    # nil for the deployment's key. See the moduledoc.
+    attribute :vapid_public_key, :string do
+      allow_nil? true
+      public? false
+      constraints max_length: 100
     end
 
     # Set when a push service last accepted a message. Nil means "registered but

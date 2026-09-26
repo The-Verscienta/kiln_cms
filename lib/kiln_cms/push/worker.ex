@@ -48,6 +48,7 @@ defmodule KilnCMS.Push.Worker do
   alias KilnCMS.Accounts
   alias KilnCMS.Push
   alias KilnCMS.Push.Encryption
+  alias KilnCMS.Push.Keys
   alias KilnCMS.Push.Vapid
   alias KilnCMS.SafeFetch
 
@@ -71,7 +72,8 @@ defmodule KilnCMS.Push.Worker do
   defp deliver(subscription, payload) do
     with {:ok, keys} <- decode_keys(subscription),
          {:ok, body} <- Encryption.encrypt(Jason.encode!(payload), keys),
-         {:ok, authorization} <- Vapid.authorization(subscription.endpoint) do
+         {:ok, vapid_keys} <- Keys.for_subscription(subscription),
+         {:ok, authorization} <- Vapid.authorization(subscription.endpoint, vapid_keys) do
       subscription
       |> post(body, authorization)
       |> handle(subscription)
@@ -100,14 +102,26 @@ defmodule KilnCMS.Push.Worker do
   defp failed_before_sending(subscription, :undecodable_keys = reason),
     do: prune_malformed(subscription, reason)
 
+  # The site's own key was rotated or removed since this device subscribed
+  # (#1560). The rotation deletes these rows itself; this is one that raced it.
+  # Nothing can sign for it any more, so it goes the way a 403 would.
+  defp failed_before_sending(subscription, :stale_key) do
+    Logger.info(
+      "Push subscription #{subscription.id} was made against a site key that has since been replaced."
+    )
+
+    Push.prune(subscription, :stale_key)
+  end
+
   defp failed_before_sending(_subscription, {:payload_too_large, size, max}) do
     Logger.error("Push payload is #{size} bytes, over the #{max}-byte limit — sender bug.")
     {:cancel, :payload_too_large}
   end
 
   defp failed_before_sending(_subscription, reason) do
-    # Deployment-level: leave the row alone and let Oban retry, so the
-    # subscriptions survive an operator fixing the config.
+    # Deployment-level, or the site's key unreadable (#1560): leave the row
+    # alone and let Oban retry, so the subscriptions survive an operator fixing
+    # the config. Never signed with another key instead — see `Push.Keys`.
     Logger.error("Cannot send push notifications: #{inspect(reason)}")
     {:error, reason}
   end

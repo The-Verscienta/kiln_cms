@@ -5,6 +5,39 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Added
+
+<a id="a-site-can-sign-its-push-notifications-with-its-own-key-generated-in-the-console"></a>
+
+- **A site can sign its push notifications with its own key, generated in the
+  console.** `/editor/site-push` (Configure → Integrations) gives a site its own
+  Web Push (VAPID) key pair with one *Generate* click (#1560), the way the DKIM
+  key is generated on `/editor/mail`. Nothing is pasted, and the private half is
+  encrypted with `KilnCMS.Keys.Vault` (`SiteVapidKey.private_key_encrypted`,
+  typed `Vault.Ciphertext`, so `mix kiln.vault.reencrypt` walks it). The
+  subject defaults to `mailto:` the generating admin and can be edited. Push no
+  longer needs the operator to set `KILN_VAPID_*` and redeploy before a site
+  can use it. Those variables are unchanged and remain the default for every
+  site without its own pair.
+
+  - **One resolver.** `KilnCMS.Push.Keys` answers both the subscribe side
+    (which public key the browser is handed) and the sending side (which pair
+    signs), so the two cannot disagree.
+  - **Subscriptions are bound to their key.** `PushSubscription` records the
+    site key it was made against (`vapid_public_key`; `nil` means the
+    deployment's). Existing subscriptions keep the deployment's key after a site
+    generates its own, so nobody's notifications stop. New subscriptions use the
+    site's key, and a device moves over when it next turns notifications on.
+  - **Rotation is deliberate.** *Rotate key* confirms first and names how many
+    devices it cuts off. It deletes the subscriptions bound to the old key in
+    the same transaction, rather than leaving rows that would be signed with a
+    key the push service rejects. A subscription that raced a rotation is
+    pruned by the worker without a request.
+  - **Fails closed.** A site key that can't be decrypted (after a
+    `SECRET_KEY_BASE` rotation) or read holds that site's pushes, keeps the
+    subscriptions and says so on the page. It never signs with the deployment's
+    key instead.
+
 ## Security
 
 <a id="two-hex-advisories-closed-and-the-working-copy-survives-the-ash-fix"></a>

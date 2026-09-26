@@ -562,6 +562,22 @@ every connection. A site relay's hard rejects cancel the message but don't add
 the address to the instance-wide suppression list, because a relay the site
 chose could otherwise block any address for every site.
 
+## Push notification key — `SiteVapidKey` (#1560)
+
+| Resource | read | writes |
+|---|---|---|
+| `SiteVapidKey` (`read`) | admin only | admin only (`save`, `update`, `rotate`, `destroy`) |
+
+A site's own Web Push (VAPID) key pair, at `/editor/site-push`. Org-admin on
+both sides, like every per-site settings row. No action accepts a key: `save`
+mints the pair on first use and `rotate` replaces it, so a site admin can
+never set a key, only generate one. The private half is encrypted and never
+rendered. `rotate` and `destroy` delete the site's push subscriptions made
+against the old key as a system write, since those rows belong to the
+reviewers and not to the admin. `KilnCMS.Push.Keys` reads the row as the
+system, for the push worker (which has no actor) and for a reviewer
+subscribing on `/editor/settings`, who is not the site's admin.
+
 ## Content types — `TypeDefinition`
 
 | Action | admin | editor | viewer | anonymous | system |
