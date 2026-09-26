@@ -2724,15 +2724,15 @@ msgstr "Cambios solicitados"
 msgid "Changes requested — content I authored was returned to draft"
 msgstr "Cambios solicitados — contenido de mi autoría volvió a borrador"
 
-#: lib/kiln_cms_web/live/site_sso_live.ex
-#, elixir-autogen, elixir-format
-msgid "Check again"
-msgstr "Comprobar de nuevo"
-
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Changing this moves nothing. Files already uploaded stay where they were stored and are still read from there, so keep an old bucket and its key working until you have moved its files yourself."
 msgstr "Cambiar esto no mueve nada. Los archivos ya subidos se quedan donde se guardaron y se siguen leyendo desde allí, así que mantén el bucket anterior y su clave funcionando hasta que hayas movido sus archivos tú mismo."
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Check again"
+msgstr "Comprobar de nuevo"
 
 #: lib/kiln_cms_web/live/link_report_live.ex
 #: lib/kiln_cms_web/live/system_live.ex
@@ -9322,8 +9322,8 @@ msgid "Protected"
 msgstr "Protegida"
 
 #: lib/kiln_cms_web/live/billing_live.ex
-#: lib/kiln_cms_web/live/site_sso_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
+#: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Provider"
 msgstr "Proveedor"
@@ -9740,15 +9740,15 @@ msgstr "Regenerar variantes"
 msgid "Regeneration queued — renames apply in the background."
 msgstr "Regeneración puesta en cola: los cambios de nombre se aplican en segundo plano."
 
-#: lib/kiln_cms_web/live/site_sso_live.ex
-#, elixir-autogen, elixir-format
-msgid "Register this callback URL with your provider:"
-msgstr "Registra esta URL de retorno en tu proveedor:"
-
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Region"
 msgstr "Región"
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "Register this callback URL with your provider:"
+msgstr "Registra esta URL de retorno en tu proveedor:"
 
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
@@ -9885,8 +9885,8 @@ msgstr "Se recargó la última versión."
 #: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
-#: lib/kiln_cms_web/live/site_sso_live.ex
 #: lib/kiln_cms_web/live/site_search_live.ex
+#: lib/kiln_cms_web/live/site_sso_live.ex
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
@@ -10629,9 +10629,9 @@ msgstr "sáb"
 #: lib/kiln_cms_web/live/presentation_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
-#: lib/kiln_cms_web/live/site_sso_live.ex
 #: lib/kiln_cms_web/live/site_push_live.ex
 #: lib/kiln_cms_web/live/site_search_live.ex
+#: lib/kiln_cms_web/live/site_sso_live.ex
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
@@ -10753,8 +10753,8 @@ msgstr "Guardado."
 
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
-#: lib/kiln_cms_web/live/site_sso_live.ex
 #: lib/kiln_cms_web/live/site_search_live.ex
+#: lib/kiln_cms_web/live/site_sso_live.ex
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saved. Leave blank to keep it."
@@ -10774,9 +10774,9 @@ msgstr "Al guardar esto, el contenido de este sitio se envía a la URL de abajo.
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
-#: lib/kiln_cms_web/live/site_sso_live.ex
 #: lib/kiln_cms_web/live/site_push_live.ex
 #: lib/kiln_cms_web/live/site_search_live.ex
+#: lib/kiln_cms_web/live/site_sso_live.ex
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saving…"
@@ -11802,11 +11802,6 @@ msgstr "¿Dejar de enviar boletines a %{email}?"
 msgid "Stop sending notifications to this device?"
 msgstr "¿Dejar de enviar notificaciones a este dispositivo?"
 
-#: lib/kiln_cms_web/live/site_sso_live.ex
-#, elixir-autogen, elixir-format
-msgid "Stored encrypted and never shown again."
-msgstr "Se guarda cifrado y no se vuelve a mostrar."
-
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Stop using this bucket for new uploads? Files already in it stay there and are still read from it."
@@ -11817,6 +11812,7 @@ msgstr "¿Dejar de usar este bucket para nuevas subidas? Los archivos que ya con
 msgid "Store this site's new uploads in this bucket"
 msgstr "Guardar las nuevas subidas de este sitio en este bucket"
 
+#: lib/kiln_cms_web/live/site_sso_live.ex
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Stored encrypted and never shown again."
@@ -12591,11 +12587,6 @@ msgstr "El valor por defecto para todos los formularios de este sitio que no hay
 msgid "The demo is being reset. Sign in again in a moment."
 msgstr "La demostración se está reiniciando. Vuelva a iniciar sesión en un momento."
 
-#: lib/kiln_cms_web/live/site_sso_live.ex
-#, elixir-autogen, elixir-format
-msgid "The deployment's secret key has changed since it was saved. Until you enter it again, the sign-in page says single sign-on is unavailable."
-msgstr "La clave secreta de la instalación ha cambiado desde que se guardó. Hasta que lo vuelvas a introducir, la página de inicio de sesión indica que el inicio de sesión único no está disponible."
-
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #, elixir-autogen, elixir-format
 msgid "The deployment's provider"
@@ -12610,6 +12601,11 @@ msgstr "El proveedor de la instalación (%{provider})"
 #, elixir-autogen, elixir-format
 msgid "The deployment's secret key has changed since it was generated. Until you rotate it, this site's notifications are held, not sent."
 msgstr "La clave secreta del despliegue ha cambiado desde que se generó. Hasta que la rote, las notificaciones de este sitio quedan retenidas, no se envían."
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "The deployment's secret key has changed since it was saved. Until you enter it again, the sign-in page says single sign-on is unavailable."
+msgstr "La clave secreta de la instalación ha cambiado desde que se guardó. Hasta que lo vuelvas a introducir, la página de inicio de sesión indica que el inicio de sesión único no está disponible."
 
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #, elixir-autogen, elixir-format
@@ -12840,16 +12836,16 @@ msgstr "Falta el aviso legal obligatorio. Añádalo literalmente: «%{disclaimer
 msgid "The same list is available on the server as %{list}, and %{doctor} verifies an install."
 msgstr "La misma lista está disponible en el servidor con %{list}, y %{doctor} verifica una instalación."
 
-#: lib/kiln_cms_web/live/site_sso_live.ex
-#, elixir-autogen, elixir-format
-msgid "The saved client secret can't be read. Re-enter it."
-msgstr "No se puede leer el secreto de cliente guardado. Vuelve a introducirlo."
-
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "The saved API key can't be read. Re-enter it."
 msgstr "La clave de API guardada no se puede leer. Vuelve a introducirla."
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "The saved client secret can't be read. Re-enter it."
+msgstr "No se puede leer el secreto de cliente guardado. Vuelve a introducirlo."
 
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -13341,21 +13337,6 @@ msgstr "La clave de notificaciones de este sitio ha cambiado. Vuelva a activar l
 msgid "This site's phrases"
 msgstr "Las expresiones de este sitio"
 
-#: lib/kiln_cms_web/live/site_sso_live.ex
-#, elixir-autogen, elixir-format
-msgid "This site's sign-in page doesn't offer its own single sign-on."
-msgstr "La página de inicio de sesión de este sitio no ofrece su propio inicio de sesión único."
-
-#: lib/kiln_cms_web/live/site_sso_live.ex
-#, elixir-autogen, elixir-format
-msgid "This site's sign-in page offers single sign-on through %{issuer}."
-msgstr "La página de inicio de sesión de este sitio ofrece inicio de sesión único a través de %{issuer}."
-
-#: lib/kiln_cms_web/live/sign_in_live.ex
-#, elixir-autogen, elixir-format
-msgid "This site's single sign-on is unavailable right now. Sign in another way."
-msgstr "El inicio de sesión único de este sitio no está disponible ahora. Entra de otra forma."
-
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site's provider (%{provider})"
@@ -13370,6 +13351,21 @@ msgstr "Los fallos de envío permanentes recientes de este sitio, y las direccio
 #, elixir-autogen, elixir-format
 msgid "This site's relay said these addresses don't exist, so this site's mail skips them. It stops only this site's mail: other sites, and sign-in and password-reset mail, still reach them. Remove one to let this site mail it again."
 msgstr "El relé de este sitio indicó que estas direcciones no existen, así que el correo de este sitio las omite. Solo afecta al correo de este sitio: los demás sitios, y los correos de inicio de sesión y de restablecimiento de contraseña, siguen llegándoles. Quita una para que este sitio vuelva a escribirle."
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's sign-in page doesn't offer its own single sign-on."
+msgstr "La página de inicio de sesión de este sitio no ofrece su propio inicio de sesión único."
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's sign-in page offers single sign-on through %{issuer}."
+msgstr "La página de inicio de sesión de este sitio ofrece inicio de sesión único a través de %{issuer}."
+
+#: lib/kiln_cms_web/live/sign_in_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's single sign-on is unavailable right now. Sign in another way."
+msgstr "El inicio de sesión único de este sitio no está disponible ahora. Entra de otra forma."
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
@@ -14612,11 +14608,6 @@ msgstr "No tienes permiso para cambiar el almacenamiento de objetos de este siti
 msgid "You don't have permission to change this site's outgoing mail."
 msgstr "No tienes permiso para cambiar el correo saliente de este sitio."
 
-#: lib/kiln_cms_web/live/site_sso_live.ex
-#, elixir-autogen, elixir-format
-msgid "You don't have permission to change this site's single sign-on."
-msgstr "No tienes permiso para cambiar el inicio de sesión único de este sitio."
-
 #: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's push key."
@@ -14626,6 +14617,11 @@ msgstr "No tiene permiso para cambiar la clave push de este sitio."
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's search instance."
 msgstr "No tienes permiso para cambiar la instancia de búsqueda de este sitio."
+
+#: lib/kiln_cms_web/live/site_sso_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's single sign-on."
+msgstr "No tienes permiso para cambiar el inicio de sesión único de este sitio."
 
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
