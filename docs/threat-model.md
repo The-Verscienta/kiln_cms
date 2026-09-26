@@ -1022,10 +1022,11 @@ because other files cite them by number.
 
    Two things about `:auth` specifically, both worse for addresses many people
    share (an office NAT, or any deployment in the trap above). **One successful
-   browser sign-in now spends three of its twenty:** the page GET, the submit
+   browser sign-in now spends three of its forty:** the page GET, the submit
    (#715), and the token-exchange GET the LiveView redirects to on success. A
    failed guess spends one, so the budget bites a legitimate user harder than
-   the attacker it is aimed at — roughly six sign-ins per minute per address.
+   the attacker it is aimed at — roughly thirteen sign-ins per minute per
+   address (`:auth` is 40/min since #747, `lib/kiln_cms_web/rate_limit.ex`).
    And **the refusal reads as a wrong password**, deliberately: it is the same
    generic `AuthenticationFailed` a bad credential produces, with no 429 and no
    `Retry-After`, because distinguishing it would tell an attacker exactly when
@@ -1039,16 +1040,19 @@ because other files cite them by number.
    arithmetic).** Detection is in `KilnCMSWeb.Plugs.ClientIp`
    (`lib/kiln_cms_web/plugs/client_ip.ex:164-170`, a once-per-node warning that
    names the fix). Honouring forwarding headers without a trusted list would be
-   the worse bug. The arithmetic here has drifted, though. #747 doubled `:auth`
-   to 40/min (`lib/kiln_cms_web/rate_limit.ex:28`), so a successful browser
-   sign-in spends three of forty, not three of twenty: about thirteen sign-ins
-   per minute per address, not six. The 1.0 action is to correct that sentence.
-   The trade itself stays.
-6. **Preview tokens bypass authorization and tenancy.** `PreviewController`
-   loads with `authorize?: false` and no tenant. Token validity and expiry are
-   the whole control. (`live_session :token_preview` does now carry
-   `:assign_current_org`, added in #563, so the preview LiveView resolves the
-   host it is served from — but the token lookup itself is still tenant-less.)
+   the worse bug. The arithmetic had drifted: #747 doubled `:auth` to 40/min
+   (`lib/kiln_cms_web/rate_limit.ex:28`), so a successful browser sign-in
+   spends three of forty, not three of twenty — about thirteen sign-ins per
+   minute per address, not six. The paragraph above now says so (#1614). The
+   trade itself stays.
+6. **Preview tokens bypass authorization — the signed token is the grant.**
+   A preview link reads its one record with `authorize?: false`: the caller is
+   anonymous, and the `Phoenix.Token` signature `PreviewToken.verify/1` checks
+   is the whole authorization. It is **not** tenant-less (#1309): the token
+   carries the minting org's `org_id`, every redeemer refuses it on any other
+   org's host and reads with that `tenant:`, and a token that names no org is
+   refused outright. Validity and expiry are the control; what remains is that
+   an issued link cannot be revoked before it lapses.
 
    **1.0 verdict (decided, #1535): still accepted at 1.0 (rewrite the item).**
    The item is out of date. #1309 closed the tenant half. Every redeemer pins
@@ -1065,8 +1069,8 @@ because other files cite them by number.
    grant. The token is bound to one record, lives 15 minutes
    (`preview_token.ex:42`) and is metered by `:preview` at 30/min. It cannot be
    revoked short of rotating `SECRET_KEY_BASE`. That is an acceptable 1.0 shape
-   for a short-lived bearer link, and the item should say so instead of "no
-   tenant".
+   for a short-lived bearer link; the item's first paragraph was rewritten to
+   say so instead of "no tenant" (#1614).
 7. ~~**Four resources are world-readable by policy.**~~ **Closed in #565.**
    `Firing.PublishedArtifact`, `Firing.ReferenceEdge`, `CMS.FormField` and
    `Search.BlockEmbedding` no longer declare `authorize_if always()` on reads:
@@ -1096,23 +1100,44 @@ because other files cite them by number.
    (`lib/kiln_cms/firing/published_artifact.ex:103`), and the only `authorize_if
    always()` left among the four resources is `FormField`'s org-admin bypass. It
    keeps its place in the list because later items are cited by number.
-8. **Unauthenticated GraphQL runs with `actor: nil` *and* `tenant: nil`.**
-   Policies still run, so the audience and published filters hold, but the
-   tenant boundary does not for that request.
+8. ~~**Unauthenticated GraphQL runs with `actor: nil` *and* `tenant: nil`.**~~
+   **Closed in #1614** — the premise had been stale for a while; #1614 is the
+   proof. An anonymous query runs with `actor: nil`, so the read policies decide
+   what is visible (published, public-audience rows only), but it does **not**
+   run with `tenant: nil`. `KilnCMSWeb.Plugs.SetTenant` resolves the org from
+   the `Host` in the endpoint (`lib/kiln_cms_web/endpoint.ex:187`) and sets it
+   as the Ash tenant on every HTTP request
+   (`lib/kiln_cms_web/plugs/set_tenant.ex:223`); `AshGraphql.Plug` copies it
+   into the Absinthe context for `/gql` (`lib/kiln_cms_web/router.ex:78`), and
+   the hand-written `menu` and `contentAsOf` resolvers read it from there.
+   `/ws/gql` resolves its own from the connect URI
+   (`lib/kiln_cms_web/graphql_socket.ex:46`), and `:strict_tenancy`
+   (`config/config.exs:483`) makes a tenant-less read fail closed rather than
+   span orgs.
 
-   **1.0 verdict (decided, #1535 → #1614): fix before 1.0 (a test and a
-   rewrite, not new code).** The item is stale. `KilnCMSWeb.Plugs.SetTenant` runs in the
-   endpoint (`lib/kiln_cms_web/endpoint.ex:187`) and sets the Ash tenant on
-   every HTTP request (`lib/kiln_cms_web/plugs/set_tenant.ex:221`).
-   `AshGraphql.Plug` copies that tenant into the Absinthe context for `/gql`
-   (`lib/kiln_cms_web/router.ex:78`), `/ws/gql` resolves its own from the
-   connect URI (`lib/kiln_cms_web/graphql_socket.ex:46`), and `:strict_tenancy`
-   (`config/config.exs:483`) makes a tenant-less read fail closed instead of
-   spanning orgs. So an anonymous query is already scoped to the host's org.
-   What is missing is proof. No test sends an anonymous HTTP `/gql` query on one
-   org's host and asserts that another org's published content is absent; the
-   strict-host suite covers only the socket. Pin that before 1.0 makes the
-   promise, then close the item.
+   `test/kiln_cms_web/graphql_cross_org_test.exs` pins it over HTTP. With two
+   orgs publishing under the same slugs, every anonymous-readable root field —
+   the `published*` lists, the `*BySlug` and `*Translations` lookups, a lookup
+   by id through `filter`, the `search*` and `autocomplete*` fields,
+   `categories`/`tags`/`tagGroups` and their `*BySlug`, `menu` and
+   `contentAsOf` — finds each org's content on its own host (the positive
+   control) and none of org A's on org B's host; a shared slug on B's host
+   answers with B's record. The anonymous GET cache (#1571) cannot carry an
+   answer across: A's ETag presented on B's host gets B's full body and B's
+   surrogate keys, never a `304`. And a `Host` that names no org is refused
+   with a `404` once a second org exists (#1547), or served the default org's
+   site — none of A's — where strict matching is forced off (residual 3).
+   Mutation-checked: dropping the tenant `SetTenant` hands to Ash fails 28 of
+   the 31 root-field cases on B's host — 23 show org A's content, and the five
+   single lookups on a slug both orgs use find two rows and error — and
+   making the `menu` and `contentAsOf` resolvers ignore the context's tenant
+   fails their positive controls. The `semanticSearch*` fields are not
+   covered: they need the opt-in ML build, and read through the same
+   tenant-scoped actions.
+
+   **1.0 verdict (decided, #1535 → #1614): fix before 1.0 — done (closed).**
+   No code changed; the tests are the fix. It keeps its place in the list
+   because later items are cited by number.
 9. **A block field policy could be cleared by omission** — *closed for the
    reported case (#566).* `EnforceBlockFieldPolicy` stopped an editor *setting*
    an admin-only block field, but a headless client that submitted a block tree
