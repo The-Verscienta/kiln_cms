@@ -233,7 +233,9 @@ defmodule KilnCMS.Storage.SiteProfiles do
        &KilnCMS.Storage.S3.delete_private/2}
 
   defp probe_step(step, :public), do: step
-  defp probe_step(step, :private), do: :"private_#{step}"
+  defp probe_step(:write, :private), do: :private_write
+  defp probe_step(:read, :private), do: :private_read
+  defp probe_step(:delete, :private), do: :private_delete
 
   # The status, never the body: an error body from a store a tenant chose is
   # not something to render back into a page.

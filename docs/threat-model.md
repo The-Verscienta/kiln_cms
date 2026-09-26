@@ -655,7 +655,7 @@ choosing a host this server sends signed requests and file bodies to:
   SSRF-checked at save (`Validations.StorageEndpoint`), and is re-checked and
   pinned every time a profile is resolved: `KilnCMS.Storage.S3.ReqClient`
   connects to the checked address (SNI and certificate verification on the
-  name, via `KilnCMS.SafeFetch.connect_target/3`) and follows no redirect.
+  name, via `KilnCMS.SafeFetch`'s connect target) and follows no redirect.
 - **Exfiltrating the operator's credentials** — the site's ExAws config is
   built from the site's settings alone and passed to
   `ExAws.Operation.perform/2`; `ExAws.request/2` would merge the operator's
