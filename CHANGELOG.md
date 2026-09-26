@@ -54,6 +54,16 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Added
+
+- **A site on its own SMTP relay keeps its own bounce list.**
+  ([#1562](https://github.com/The-Verscienta/kiln_cms/issues/1562) · [long form](docs/changelog/unreleased.md#a-site-on-its-own-smtp-relay-keeps-its-own-bounce-list))
+
+### Fixed
+
+- **A site's relay refusing its password no longer pages the operator.**
+  ([#1562](https://github.com/The-Verscienta/kiln_cms/issues/1562) · [long form](docs/changelog/unreleased.md#a-sites-relay-refusing-its-password-no-longer-pages-the-operator))
+
 ## [0.10.0] - 2026-09-19
 
 Long form: [docs/changelog/v0.10.0.md](docs/changelog/v0.10.0.md) —

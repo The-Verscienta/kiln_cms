@@ -1577,6 +1577,11 @@ msgstr "Añadido al lanzamiento."
 msgid "Address removed — it can receive mail again."
 msgstr "Dirección eliminada: puede volver a recibir correo."
 
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "Address removed. This site can mail it again."
+msgstr "Dirección eliminada. Este sitio puede volver a escribirle."
+
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
 #, elixir-autogen, elixir-format
 msgid "Adds detail drawn from this block and the rest of the page."
@@ -3508,6 +3513,7 @@ msgid "Couldn't remove that account."
 msgstr "No se ha podido eliminar esa cuenta."
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
+#: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't remove that address."
 msgstr "No se pudo eliminar esa dirección."
@@ -4262,6 +4268,7 @@ msgid "Delivery cache flushed."
 msgstr "Caché de entrega vaciada."
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
+#: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delivery health"
 msgstr "Estado de las entregas"
@@ -7761,6 +7768,7 @@ msgid "No published, public posts available to send."
 msgstr "No hay entradas publicadas y públicas disponibles para enviar."
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
+#: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "No recent delivery failures."
 msgstr "No hay fallos de entrega recientes."
@@ -7823,6 +7831,7 @@ msgid "No such content to edit."
 msgstr "No existe ese contenido para editar."
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
+#: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "No suppressed addresses."
 msgstr "No hay direcciones bloqueadas."
@@ -9284,6 +9293,7 @@ msgid "Recent deliveries"
 msgstr "Entregas recientes"
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
+#: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "Recent failures"
 msgstr "Fallos recientes"
@@ -11441,6 +11451,7 @@ msgid "Support this site and unlock members-only writing."
 msgstr "Apoya este sitio y accede a los textos exclusivos para miembros."
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
+#: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "Suppressed addresses"
 msgstr "Direcciones bloqueadas"
@@ -12601,6 +12612,16 @@ msgstr "El correo de este sitio sale a través del relé del despliegue."
 #, elixir-autogen, elixir-format
 msgid "This site's phrases"
 msgstr "Las expresiones de este sitio"
+
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's recent permanent failures, and the addresses its relay rejected that this site has stopped mailing as a result."
+msgstr "Los fallos de envío permanentes recientes de este sitio, y las direcciones rechazadas por su relé a las que este sitio ha dejado de escribir."
+
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's relay said these addresses don't exist, so this site's mail skips them. It stops only this site's mail: other sites, and sign-in and password-reset mail, still reach them. Remove one to let this site mail it again."
+msgstr "El relé de este sitio indicó que estas direcciones no existen, así que el correo de este sitio las omite. Solo afecta al correo de este sitio: los demás sitios, y los correos de inicio de sesión y de restablecimiento de contraseña, siguen llegándoles. Quita una para que este sitio vuelva a escribirle."
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
@@ -14347,11 +14368,13 @@ msgid "flag_duplicates, suggest_tags, suggest_links, suggest_metadata: deliver_a
 msgstr "flag_duplicates, suggest_tags, suggest_links, suggest_metadata: deliver_as determina dónde llega un hallazgo — email (por defecto, necesita to), comment, o task (necesita assignee). suggest_metadata además necesita allow_egress: true cuando el proveedor de modelo configurado está fuera del sitio."
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
+#: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "gave up"
 msgstr "abandonado"
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
+#: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "hard bounce"
 msgstr "rebote permanente"
@@ -14759,6 +14782,7 @@ msgid "signed by a key we no longer hold"
 msgstr "firmado con una clave que ya no conservamos"
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
+#: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "since"
 msgstr "desde el"

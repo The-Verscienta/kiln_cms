@@ -168,7 +168,7 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
     "lib/kiln_cms/links/report.ex" => 2,
     "lib/kiln_cms/links/settings.ex" => 2,
     "lib/kiln_cms/links/sweep.ex" => 5,
-    "lib/kiln_cms/mail.ex" => 4,
+    "lib/kiln_cms/mail.ex" => 2,
     "lib/kiln_cms/media/av_strip_worker.ex" => 3,
     "lib/kiln_cms/media/av_worker.ex" => 3,
     "lib/kiln_cms/media/quarantine_reaper.ex" => 2,
