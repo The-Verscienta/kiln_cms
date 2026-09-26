@@ -59,10 +59,10 @@ defmodule KilnCMS.CMS.Changes.DeleteArtifacts do
     attempt("search de-index", record, fn -> deindex(record, type) end)
   end
 
-  # Drop it from the optional Meilisearch index (Phase 6). No-op when the
-  # backend is disabled.
+  # Drop it from the optional Meilisearch index (Phase 6) — the site's own
+  # instance or the operator's (#1558). No-op when the site uses neither.
   defp deindex(record, type) do
-    if KilnCMS.Search.Meilisearch.enabled?() do
+    if KilnCMS.Search.Meilisearch.enabled_for?(record.org_id) do
       %{
         "org_id" => record.org_id,
         "op" => "delete",

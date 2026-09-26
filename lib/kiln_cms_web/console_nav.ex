@@ -532,6 +532,16 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("The key this site's review notifications are signed with."),
             keywords: ["vapid", "web push", "notifications", "key", "rotate"]
           },
+          # A site's own Meilisearch instance (#1558) — beside Outgoing mail:
+          # both are a service of the site's own that its data is sent to.
+          %{
+            key: :site_search,
+            label: gettext("Search instance"),
+            path: ~p"/editor/site-search",
+            icon: "hero-magnifying-glass-circle",
+            description: gettext("Index this site's content into your own Meilisearch."),
+            keywords: ["meilisearch", "index", "typo tolerance", "instant search", "reindex"]
+          },
           %{
             key: :automation,
             label: gettext("Automation"),

@@ -389,6 +389,12 @@ Opt into the typo-tolerant search backend by setting `MEILI_URL`; otherwise
 Postgres full-text search is the only backend. Run `mix kiln.meili.reindex` once
 after enabling. See [`docs/meilisearch.md`](meilisearch.md).
 
+These variables set the **deployment's** instance. A site admin can index their
+site into their own Meilisearch instead, from `/editor/site-search` (#1558),
+with no redeploy; the instance set here stays in use for every site that hasn't
+set one. A site's instance must be HTTPS and may not be a private address. An
+internal instance belongs here, where the operator sets it.
+
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
 | `MEILI_URL` | unset | Meilisearch server URL. Enables the backend when set. | [`config/runtime/prod/search.exs:13`](../config/runtime/prod/search.exs#L13) |

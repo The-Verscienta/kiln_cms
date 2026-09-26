@@ -189,6 +189,13 @@ msgid_plural "%{count} in review"
 msgstr[0] "%{count} en revisión"
 msgstr[1] "%{count} en revisión"
 
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} indexing job is waiting to retry: the instance didn't answer, or refused it."
+msgid_plural "%{count} indexing jobs are waiting to retry: the instance didn't answer, or refused them."
+msgstr[0] "%{count} trabajo de indexación espera un reintento: la instancia no respondió o lo rechazó."
+msgstr[1] "%{count} trabajos de indexación esperan un reintento: la instancia no respondió o los rechazó."
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} item needs your approval"
@@ -981,6 +988,11 @@ msgstr "Un nivel superior en este sitio que caduca por sí solo. El nivel del si
 msgid "A key pair for this site alone. The private half is stored encrypted and never shown. Nothing to copy or paste."
 msgstr "Un par de claves solo para este sitio. La mitad privada se guarda cifrada y nunca se muestra. No hay nada que copiar ni pegar."
 
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "A key that can write documents and settings to this index. Stored encrypted and never shown again."
+msgstr "Una clave que pueda escribir documentos y ajustes en este índice. Se guarda cifrada y no se vuelve a mostrar."
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "A link is labelled with its own URL — a descriptive phrase carries more signal."
@@ -1159,6 +1171,11 @@ msgstr "Las sugerencias con IA no están configuradas."
 #, elixir-autogen, elixir-format
 msgid "API"
 msgstr "API"
+
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "API key"
+msgstr "Clave de API"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
@@ -5148,6 +5165,11 @@ msgstr "El testigo ha recibido todos los puntos de control."
 msgid "Every delivery attempt is recorded; failures retry with backoff, and %{count} exhausted deliveries in a row disable an endpoint. History is kept for %{days} days."
 msgstr "Se registra cada intento de entrega; los fallos se reintentan con espera progresiva y %{count} entregas agotadas seguidas desactivan un endpoint. El historial se conserva %{days} días."
 
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every published page, post and entry that anyone can read without signing in is copied to that Meilisearch instance: its title, excerpt and full text. It is kept up to date as you publish, edit and unpublish. Members-only and passphrase-protected content is never sent. Whoever runs that instance can read everything in it."
+msgstr "Cada página, entrada y elemento publicados que cualquiera puede leer sin iniciar sesión se copia a esa instancia de Meilisearch: su título, su extracto y su texto completo. Se mantiene al día cuando publicas, editas y despublicas. El contenido solo para miembros o protegido con frase de acceso nunca se envía. Quien gestione esa instancia puede leer todo lo que contiene."
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Every request re-reads the database until the cache warms again, so on a busy site this is a deliberate load spike. This clears the cache for every organization on this deployment, not just the one you are viewing. On a multi-node deployment it reaches every node; the count shown is from the node that served you."
@@ -5987,6 +6009,11 @@ msgstr "HTTP"
 msgid "HTTP %{status}"
 msgstr "HTTP %{status}"
 
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "HTTPS only. Private and internal addresses are refused."
+msgstr "Solo HTTPS. Se rechazan las direcciones privadas e internas."
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Half"
@@ -6338,6 +6365,28 @@ msgstr "Correo electrónico o contraseña incorrectos"
 msgid "Indent"
 msgstr "Aumentar sangría"
 
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "Index"
+msgstr "Índice"
+
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "Index this site into this instance"
+msgstr "Indexar este sitio en esta instancia"
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Index this site's content into your own Meilisearch."
+msgstr "Indexa el contenido de este sitio en tu propio Meilisearch."
+
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "Indexing: %{count} job left."
+msgid_plural "Indexing: %{count} jobs left."
+msgstr[0] "Indexando: queda %{count} trabajo."
+msgstr[1] "Indexando: quedan %{count} trabajos."
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Info"
@@ -6388,6 +6437,7 @@ msgstr "Insertar bloque aquí"
 msgid "Inspector"
 msgstr "Inspector"
 
+#: lib/kiln_cms_web/live/site_search_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Instance URL"
@@ -6715,6 +6765,11 @@ msgstr "Deje este campo vacío"
 #, elixir-autogen, elixir-format
 msgid "Let editors publish"
 msgstr "Permitir que los editores publiquen"
+
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "Letters, digits, hyphens and underscores."
+msgstr "Letras, dígitos, guiones y guiones bajos."
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/media_live.ex
@@ -9467,6 +9522,16 @@ msgstr "Regenerar variantes"
 msgid "Regeneration queued — renames apply in the background."
 msgstr "Regeneración puesta en cola: los cambios de nombre se aplican en segundo plano."
 
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reindex now"
+msgstr "Reindexar ahora"
+
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reindexing this site."
+msgstr "Reindexando este sitio."
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Related %{kind}s"
@@ -9591,6 +9656,7 @@ msgstr "Se recargó la última versión."
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
+#: lib/kiln_cms_web/live/site_search_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -9714,6 +9780,11 @@ msgstr "¿Eliminar por completo el código personalizado de este sitio?"
 msgid "Remove this site's feed settings and follow the deployment defaults again?"
 msgstr "¿Eliminar la configuración de feeds de este sitio y volver a seguir los valores del despliegue?"
 
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove this site's instance? Nothing more is sent to it, and what is already there stays until you delete it."
+msgstr "¿Quitar la instancia de este sitio? No se le enviará nada más, y lo que ya contiene se queda hasta que lo borres."
+
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove this site's locale fallbacks and follow the deployment defaults again?"
@@ -9762,6 +9833,11 @@ msgid "Removed the tag from %{count} item."
 msgid_plural "Removed the tag from %{count} items."
 msgstr[0] "Se quitó la etiqueta de %{count} elemento."
 msgstr[1] "Se quitó la etiqueta de %{count} elementos."
+
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "Removed. This site no longer uses its own instance."
+msgstr "Quitada. Este sitio ya no usa su propia instancia."
 
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -10287,6 +10363,7 @@ msgstr "sáb"
 #: lib/kiln_cms_web/live/presentation_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #: lib/kiln_cms_web/live/site_push_live.ex
+#: lib/kiln_cms_web/live/site_search_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
@@ -10401,9 +10478,15 @@ msgid "Saved."
 msgstr "Guardado."
 
 #: lib/kiln_cms_web/live/site_mail_live.ex
+#: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saved. Leave blank to keep it."
 msgstr "Guardada. Déjala en blanco para conservarla."
+
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "Saving this sends this site's content to the URL below."
+msgstr "Al guardar esto, el contenido de este sitio se envía a la URL de abajo."
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/code_injection_live.ex
@@ -10414,6 +10497,7 @@ msgstr "Guardada. Déjala en blanco para conservarla."
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #: lib/kiln_cms_web/live/site_push_live.ex
+#: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saving…"
 msgstr "Guardando…"
@@ -10545,6 +10629,17 @@ msgstr "Buscar contenido y configuración…"
 #, elixir-autogen, elixir-format
 msgid "Search for a WebVTT (.vtt) track you've uploaded to the"
 msgstr "Busca una pista WebVTT (.vtt) que hayas subido a la"
+
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "Search instance"
+msgstr "Instancia de búsqueda"
+
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "Search instance saved. Reindexing this site."
+msgstr "Instancia de búsqueda guardada. Reindexando este sitio."
 
 #: lib/kiln_cms_web/controllers/content_html/search.html.heex
 #, elixir-autogen, elixir-format
@@ -11983,6 +12078,11 @@ msgstr "La biblioteca de medios de KilnCMS con una cuadrícula de imágenes."
 msgid "The KilnCMS publishing calendar with scheduled posts."
 msgstr "El calendario de publicación de KilnCMS con entradas programadas."
 
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "The Meilisearch instance this site's published content is indexed into."
+msgstr "La instancia de Meilisearch en la que se indexa el contenido publicado de este sitio."
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "The SEO title just repeats the page title — a distinct one usually reads better."
@@ -12078,6 +12178,11 @@ msgstr "La demostración se está reiniciando. Vuelva a iniciar sesión en un mo
 #, elixir-autogen, elixir-format
 msgid "The deployment's secret key has changed since it was generated. Until you rotate it, this site's notifications are held, not sent."
 msgstr "La clave secreta del despliegue ha cambiado desde que se generó. Hasta que la rote, las notificaciones de este sitio quedan retenidas, no se envían."
+
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "The deployment's secret key has changed since it was saved. Until you enter it again, this site's indexing is held and retried, and search uses the built-in search."
+msgstr "La clave secreta del despliegue ha cambiado desde que se guardó. Hasta que la vuelvas a introducir, la indexación de este sitio queda retenida y se reintenta, y la búsqueda usa la búsqueda integrada."
 
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -12283,6 +12388,11 @@ msgstr "Falta el aviso legal obligatorio. Añádalo literalmente: «%{disclaimer
 msgid "The same list is available on the server as %{list}, and %{doctor} verifies an install."
 msgstr "La misma lista está disponible en el servidor con %{list}, y %{doctor} verifica una instalación."
 
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "The saved API key can't be read. Re-enter it."
+msgstr "No se puede leer la clave de API guardada. Vuelve a introducirla."
+
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "The saved password can't be read. Re-enter it."
@@ -12292,6 +12402,11 @@ msgstr "No se puede leer la contraseña guardada. Vuelve a introducirla."
 #, elixir-autogen, elixir-format
 msgid "The saved private key can't be read. Rotate it."
 msgstr "No se puede leer la clave privada guardada. Rótela."
+
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "The search instance could not be saved."
+msgstr "No se pudo guardar la instancia de búsqueda."
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
@@ -12660,6 +12775,11 @@ msgstr "Este sitio como actor de ActivityPub, y quiénes lo siguen."
 msgid "This site as an ActivityPub actor: who follows it, how deliveries are going, and who is refused."
 msgstr "Este sitio como actor de ActivityPub: quién lo sigue, cómo van las entregas y a quién se rechaza."
 
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site doesn't use Meilisearch. Search uses the built-in search, which needs no setup."
+msgstr "Este sitio no usa Meilisearch. La búsqueda usa la búsqueda integrada, que no necesita configuración."
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site follows the operator defaults again."
@@ -12692,6 +12812,16 @@ msgstr "Este sitio usa la clave push del despliegue."
 #, elixir-autogen, elixir-format
 msgid "This site's Content-Security-Policy blocks scripts, connections and images from hosts it doesn't know. List the origins your snippet needs — one per line, e.g. https://plausible.io — or the browser will silently refuse them. Inline <script> blocks are allowed automatically once you save."
 msgstr "La Content-Security-Policy de este sitio bloquea scripts, conexiones e imágenes de servidores que no conoce. Indica los orígenes que necesita tu fragmento, uno por línea (por ejemplo, https://plausible.io), o el navegador los rechazará en silencio. Los bloques <script> en línea se permiten automáticamente al guardar."
+
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's content is indexed into %{url}, index %{index}."
+msgstr "El contenido de este sitio se indexa en %{url}, índice %{index}."
+
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's content is indexed into the deployment's Meilisearch instance."
+msgstr "El contenido de este sitio se indexa en la instancia de Meilisearch del despliegue."
 
 #: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
@@ -13192,6 +13322,11 @@ msgstr "Sin usar"
 #, elixir-autogen, elixir-format
 msgid "Up to date"
 msgstr "Actualizado"
+
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "Up to date."
+msgstr "Al día."
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -13936,6 +14071,11 @@ msgstr "No tienes permiso para cambiar el correo saliente de este sitio."
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's push key."
 msgstr "No tiene permiso para cambiar la clave push de este sitio."
+
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's search instance."
+msgstr "No tienes permiso para cambiar la instancia de búsqueda de este sitio."
 
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format

@@ -460,6 +460,16 @@ defmodule KilnCMS.CMS do
       define :reset_site_vapid_key, action: :destroy
     end
 
+    # A site's own Meilisearch instance (#1558). Read through
+    # `KilnCMS.Search.Meilisearch.SiteInstance`, which owns the precedence rule
+    # and both fail directions — never directly.
+    resource KilnCMS.CMS.SiteMeilisearch do
+      define :list_site_meilisearch, action: :read
+      define :save_site_meilisearch, action: :save
+      define :update_site_meilisearch, action: :update
+      define :reset_site_meilisearch, action: :destroy
+    end
+
     # The version twin: "who added that script, and when". Registered because
     # AshPaperTrail generates it into this domain.
     resource KilnCMS.CMS.SiteCodeInjection.Version do
