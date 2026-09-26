@@ -58,6 +58,8 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A 429's `retry-after` is rounded up, never 0.**
   ([long form](docs/changelog/unreleased.md#a-429s-retry-after-is-rounded-up-never-0))
+- **The audience checkboxes on `/editor/accounts` edit the site membership, not the deprecated global column.**
+  ([long form](docs/changelog/unreleased.md#the-audience-checkboxes-on-editor-accounts-edit-the-site-membership))
 
 ## [0.11.0] - 2026-09-26
 
