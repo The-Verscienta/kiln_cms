@@ -110,8 +110,11 @@ build if a resource is ever registered without that authorizer.
   default org unless strict host matching is on — `TENANT_STRICT_HOST=true`, or
   unset on a deployment with more than one org (#1547) — which 404s it instead;
   see residual risk 3.
-- **Rate limiting** — `Plugs.RateLimit` (Hammer/ETS, per-IP) across nine
-  buckets; limits in `lib/kiln_cms_web/rate_limit.ex`. **The credential forms
+- **Rate limiting** — `Plugs.RateLimit` (per-IP) across nine
+  buckets; limits in `lib/kiln_cms_web/rate_limit.ex`. The credential buckets
+  (`:auth`, `:register`, `:unlock`) and every `AccountThrottle` budget count in
+  Postgres (`KilnCMS.Accounts.ThrottleStore`, #1619), so they hold across nodes
+  and restarts; the rest are flood ceilings counted per node in ETS. **The credential forms
   submit where no plug can reach them:** each is an AshAuthentication
   LiveComponent calling `AshPhoenix.Form.submit/2` in-process, so the
   credentials arrive as a `/live` event and pass no pipeline. (`auth_routes`
@@ -457,15 +460,17 @@ build if a resource is ever registered without that authorizer.
     when both requests resolved before either recorded. Nothing rejects a reused
     TOTP code, so the two only had to arrive together.
 
-    `WebAuthn.take_challenge/1` and `AccountThrottle` still make the node-local
-    trade for their own state; residual risk #10 below covers the throttle.
+    `WebAuthn.take_challenge/1` still makes the node-local trade for its own
+    state. `AccountThrottle` no longer does: since #1619 its budgets live in
+    Postgres (residual risk #10 below, closed).
   - Codes are charged `AccountThrottle.consume_second_factor/1` on the **same
     per-account bucket** the browser prompt charges. Per-surface budgets would
     let an attacker double their guesses by alternating endpoints, and the
     five-minute pending lifetime bounds nothing on its own — re-running the
     password step mints a fresh token. Since #742 each of those costs a unit of
-    the sign-in budget, so the renewal is bounded rather than free. That bucket is per node too (residual risk #10 below), so the real
-    ceiling is 5 × nodes per window.
+    the sign-in budget, so the renewal is bounded rather than free. The bucket
+    is shared by every node (#1619, residual risk #10 below), so the ceiling
+    is 5 per window however many nodes serve the endpoint.
     *Residual:* reaching that bucket used to require a browser session and a
     CSRF token. It now takes five `curl` calls from anyone holding the password,
     and because the bucket is shared it locks the owner out of *both* surfaces
@@ -532,8 +537,8 @@ build if a resource is ever registered without that authorizer.
   minutes, the **same** bucket `/sign-in/verify` uses, so they cannot be spent
   independently. The charge lives on the Ash action rather than in the
   `handle_event` clauses, so a future caller inherits it.
-  *Watch:* the bound is per node (residual risk 10), and it bounds *guessing*
-  only. It hands a stolen session a small denial-of-service it did not have:
+  *Watch:* the bound holds across nodes since #1619 (residual risk 10), and it
+  bounds *guessing* only. It hands a stolen session a small denial-of-service it did not have:
   five wrong codes here deny the real owner `/sign-in/verify` for the rest of
   the window. That is strictly less than what the session already grants, so
   the trade is accepted.
@@ -1213,27 +1218,67 @@ because other files cite them by number.
    server-verified block identity on the write path. That is a design change to
    the block tree, too large for the contract-freeze window, and better done
    after the legacy block shape is retired (#1537).
-10. **Per-account throttling is per node, in memory, and keyed on
-   attacker-chosen strings.** `AccountThrottle` (#478) holds its budgets in ETS,
-   so a restart forgives every accumulated attempt and a second node would carry
-   its own counters — the same trade `KilnCMSWeb.RateLimit` makes, and deliberate:
-   counters on the user row would turn every guess into a write to a row the
-   attacker chooses, and would leave an unknown address with nowhere to count,
-   which is what reopens account enumeration. Two consequences to watch: unlike
-   the per-IP buckets the key space is unbounded (one row per distinct address
-   *submitted*, for the window's length), and an attacker who spends a victim's
-   mail budget delays that victim's own reset mail until the window rolls — the
-   suppression is logged for exactly that reason. Revisit if Kiln is ever
-   deployed multi-node.
+10. ~~**Per-account throttling is per node, in memory, and keyed on
+   attacker-chosen strings.**~~ **Closed in #1619.** `AccountThrottle` (#478)
+   used to hold its budgets in ETS, as `KilnCMSWeb.RateLimit` held `:auth`, so a
+   restart forgave every accumulated attempt and N nodes gave an attacker N
+   budgets. Every `AccountThrottle` budget (sign-in, second factor, the mail and
+   alert budgets) and the credential buckets of `KilnCMSWeb.RateLimit`
+   (`:auth`, `:register`, `:unlock`) now count in one Postgres table,
+   `throttle_counters`, through `KilnCMS.Accounts.ThrottleStore`. The item's own
+   constraints still hold:
+   - **Nothing on the user row.** A counter row is keyed on a SHA-256 of the
+     budget's key and names no account, so a guess is not a write to a row the
+     attacker chooses, and an address with no account counts exactly like one
+     with an account.
+   - **Bounded and expiring.** Whatever was submitted, a key is stored as 32
+     bytes. A row lives for its window (one minute to six hours) plus at most
+     five minutes, when an Oban cron job deletes closed windows in bounded
+     batches. The table therefore holds about *(distinct keys charged per
+     window) × (windows alive)*. Each sign-in attempt also costs the server a
+     bcrypt verification (a refusal burns a simulated one), so sign-in rows
+     appear no faster than the cluster can hash. Mail-budget rows are bounded
+     per source address by the `:auth` bucket in front of them. A row costs about
+     160 bytes with its indexes (measured: 100,000 rows in 16 MB), so a million
+     live keys is roughly 160 MB, and each one is gone within its window.
+   - **Atomic.** One `INSERT … ON CONFLICT DO UPDATE … RETURNING count` per
+     charge, so a simultaneous burst from every node admits exactly the budget
+     (`test/kiln_cms/accounts/throttle_store_test.exs` proves it with two `:peer`
+     nodes). Windows are aligned to the database clock, so node clock skew does
+     not split a window across rows.
 
-    **1.0 verdict (decided, #1535 → #1619): fix before 1.0.** `AccountThrottle`
-    counts with `:ets.update_counter`, and `KilnCMSWeb.RateLimit` is Hammer with
-    `backend: :ets` (`lib/kiln_cms_web/rate_limit.ex:5`). The app is multi-node
-    *capable*: `DNSCluster` is supervised and PubSub is distributed. So on N
-    nodes every budget is multiplied by N, and 1.0 will not declare
-    single-node-only support. The budgets need a shared counter that keeps this
-    item's own constraints: nothing on the user row (that reopens enumeration
-    and turns every guess into a write), and a bounded, expiring key space.
+   *Cost, measured* (Postgres 17 on Apple silicon, local socket): one upsert is
+   p50 0.34 ms / p99 1.1 ms sequentially, and p50 1.1 ms / p99 5.4 ms with
+   sixteen concurrent writers on a single key (the one-account attack shape),
+   against 208 ms for the bcrypt verification the same attempt already pays.
+   An `UNLOGGED` table measured p99 1.45 ms on that hot key and was **not**
+   adopted: it is truncated after a Postgres crash and empty after a failover,
+   which would bring back the "restart forgives everything" half of this item.
+   A cluster-replicated in-memory counter (`:pg`/PubSub, or a Hammer backend)
+   was rejected because a partition would still grant each side a full budget,
+   and a full-cluster restart would still forgive everything. A local fast path
+   with a shared check near the limit was rejected because the measured cost
+   left nothing to optimise. Redis and Dragonfly stay out, per D1/D2.
+
+   *Fail direction.* When the database cannot answer (the table missing during
+   a rolling deploy, a lock or pool timeout), a budget is counted on the node
+   in ETS instead. That is the pre-#1619 bound, never a weaker one. Failing
+   open would allow unbounded guessing while only the counter is broken.
+   Failing closed would let anyone who can slow one query lock every account
+   out of sign-in. The fallback is logged at `:error`, at most once a minute
+   per node.
+
+   *What remains:* an attacker who spends a victim's mail budget still delays
+   that victim's own reset mail until the window rolls, and every such
+   suppression is still logged. That residual is unchanged, and it now holds
+   cluster-wide rather than per node.
+
+    **1.0 verdict (decided, #1535 → #1619): fix before 1.0. Fixed in #1619.**
+    `AccountThrottle` and the credential `KilnCMSWeb.RateLimit` buckets now
+    charge `KilnCMS.Accounts.ThrottleStore`
+    (`lib/kiln_cms/accounts/throttle_store.ex`). The flood-ceiling buckets
+    (`:api`, `:delivery`, `:gql`, …) stay per node on purpose: over-admitting a
+    flood ceiling by the node count costs capacity, not a secret.
 11. **The `:browser` pipeline is not rate-limited**, so `/`, `/developers`, all
     `/editor/**` LiveView mounts, and the account/governance export endpoints
     are unthrottled. They are session-gated (except the first two), so this is

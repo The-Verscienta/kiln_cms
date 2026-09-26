@@ -54,10 +54,20 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **A new `throttle_counters` table holds the auth budgets; run migrations as usual.**
+  ([#1619](https://github.com/The-Verscienta/kiln_cms/issues/1619) · [long form](docs/changelog/unreleased.md#a-new-throttlecounters-table-holds-the-auth-budgets-run-migrations-as))
+
 ### Fixed
 
 - **A 429's `retry-after` is rounded up, never 0.**
   ([long form](docs/changelog/unreleased.md#a-429s-retry-after-is-rounded-up-never-0))
+
+### Security
+
+- **Auth budgets now hold across nodes and restarts.**
+  ([#1619](https://github.com/The-Verscienta/kiln_cms/issues/1619) · [long form](docs/changelog/unreleased.md#auth-budgets-now-hold-across-nodes-and-restarts))
 
 ## [0.11.0] - 2026-09-26
 
