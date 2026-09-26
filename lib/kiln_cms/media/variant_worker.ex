@@ -53,19 +53,25 @@ defmodule KilnCMS.Media.VariantWorker do
     end
   end
 
+  # Every read and write here goes to the item's own store (#1559) — the one
+  # its row names — resolved once. One that can't be resolved is retried: the
+  # original is there, the way to it is not.
   defp process(item, key, tenant) do
-    case Storage.fetch(key) do
-      {:ok, binary} ->
-        tmp = write_temp(binary, Path.extname(key))
+    with {:ok, site} <- Storage.locate(item),
+         {:ok, binary} <- Storage.fetch(key, site) do
+      tmp = write_temp(binary, Path.extname(key))
 
-        try do
-          generate(item, tmp, Path.extname(key), tenant)
-        after
-          rm(tmp)
-        end
+      try do
+        generate(item, tmp, Path.extname(key), tenant, site)
+      after
+        rm(tmp)
+      end
 
-        broadcast(item.id)
-        :ok
+      broadcast(item.id)
+      :ok
+    else
+      {:error, {:site_storage, _reason}} = error ->
+        error
 
       # Original isn't readable (e.g. removed) — nothing to do; keep the original.
       {:error, _} ->
@@ -73,12 +79,12 @@ defmodule KilnCMS.Media.VariantWorker do
     end
   end
 
-  defp generate(item, path, ext, tenant) do
+  defp generate(item, path, ext, tenant, site) do
     focal = %{x: item.focal_x || 0.5, y: item.focal_y || 0.5}
 
     with {:ok, %{width: width, height: height, variants: files} = result} <-
            ImageProcessor.process(path, ext, focal),
-         variants = store_variants(files),
+         variants = store_variants(files, site),
          :ok <- refuse_empty(variants, item) do
       previous = item.variants || %{}
 
@@ -100,7 +106,7 @@ defmodule KilnCMS.Media.VariantWorker do
           tenant: tenant
         )
 
-      reclaim(previous, variants)
+      reclaim(previous, variants, site)
     else
       # Not a processable raster image, or a run that produced nothing — keep
       # what is already stored.
@@ -129,13 +135,13 @@ defmodule KilnCMS.Media.VariantWorker do
   # anything not in the new map is unreachable — orphaned storage that nothing
   # else in the system can find, since every other deletion path reads the
   # *current* map.
-  defp reclaim(previous, current) do
+  defp reclaim(previous, current, site) do
     kept = current |> Map.values() |> MapSet.new(& &1["key"])
 
     for %{"key" => key} <- Map.values(previous),
         is_binary(key),
         not MapSet.member?(kept, key) do
-      Storage.delete(key)
+      Storage.delete(key, site)
     end
 
     :ok
@@ -158,16 +164,16 @@ defmodule KilnCMS.Media.VariantWorker do
   # remaining temp files: one item now writes up to nine of them, and a bulk
   # regeneration during an S3 outage would otherwise fill the disk.
   # sobelow_skip ["Traversal.FileModule"]
-  defp store_variants(files) do
+  defp store_variants(files, site) do
     Map.new(files, fn variant ->
       %{label: label, path: tmp, width: w, height: h} = variant
       key = Storage.generate_key("#{label}#{variant.ext}")
-      {:ok, ^key} = Storage.store(key, tmp)
+      {:ok, ^key} = Storage.store(key, tmp, site)
 
       {label,
        %{
          "key" => key,
-         "url" => Storage.url(key),
+         "url" => Storage.url(key, site),
          "width" => w,
          "height" => h,
          "content_type" => variant.content_type

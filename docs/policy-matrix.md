@@ -541,6 +541,30 @@ second half of that model is not a policy: `KilnCMSWeb.Plugs.CodeInjection` runs
 only in the `:delivery` pipeline, so the snippet can never render in the editor
 console. See [code-injection.md](code-injection.md).
 
+## Object storage — `SiteStorage`, `StorageProfile` (#1559)
+
+| Resource | read | writes |
+|---|---|---|
+| `SiteStorage` (`read`) | admin only | admin only (`save`, `update`, `destroy`) |
+| `StorageProfile` (`read`) | admin only | admin only (`create`, `update_credentials`); no destroy |
+
+A site's own S3-compatible bucket, at `/editor/site-storage`. Org-admin on both
+sides, like every per-site integration; the rows name the site's storage
+provider and account. Profiles are written only through `SiteStorage`'s saves,
+and uploads, downloads and media jobs read them as the system
+(`KilnCMS.Storage.SiteProfiles`), tenant-scoped to the item's own site — a
+media row can name only a profile of its own site.
+
+There is no destroy on `StorageProfile` on purpose: media rows record the
+profile their file is in, and deleting one would strand every file in it.
+Moving the site to another bucket makes a new profile and leaves the old one.
+
+As for the mail relay below, the stricter parts are not policies: the secret
+is encrypted, write-only and database-only; the endpoint must be `https://` and
+is refused if it resolves to a private, loopback, link-local or metadata
+address, at save and on every connection; and a request to it carries nothing
+from the operator's ExAws config.
+
 ## Outgoing mail — `SiteMailRelay` (#1322)
 
 | Resource | read | writes |

@@ -646,6 +646,38 @@ amplification surface.
 - **Credential exposure** — S3 keys come from env, never committed.
 - **Bucket scope** — keep the bucket public-read for delivered variants only.
 
+#### A site's own bucket (`/editor/site-storage`, #1559)
+A site admin — a tenant, on a hosted deployment — can point the site's new
+uploads at their own S3-compatible bucket. That makes the site admin the one
+choosing a host this server sends signed requests and file bodies to:
+
+- **The destination** — the endpoint must be `https://host[:port]`, is
+  SSRF-checked at save (`Validations.StorageEndpoint`), and is re-checked and
+  pinned every time a profile is resolved: `KilnCMS.Storage.S3.ReqClient`
+  connects to the checked address (SNI and certificate verification on the
+  name, via `KilnCMS.SafeFetch.connect_target/3`) and follows no redirect.
+- **Exfiltrating the operator's credentials** — the site's ExAws config is
+  built from the site's settings alone and passed to
+  `ExAws.Operation.perform/2`; `ExAws.request/2` would merge the operator's
+  `:ex_aws` config (session token, endpoint, instance-role lookup) underneath.
+  `SiteStorageIsolationTest` plants operator credentials and checks no request
+  or presigned URL carries them. The secret is database-only (no env-var or
+  file source), so it cannot be pointed at `SECRET_KEY_BASE`.
+- **The site's own secret** — write-only in the form and vault-encrypted. A
+  blank secret is carried to a new bucket only on the same endpoint, region
+  and access key, so a co-admin cannot aim the stored key at a host of their
+  choosing. (SigV4 never sends the secret anyway; only signatures, scoped to
+  the host they were made for.)
+- **Falling back** — a site whose bucket is set but unusable (unreadable
+  settings or secret, refused endpoint) has its uploads refused. Nothing is
+  written to, or read from, the operator's bucket in its place.
+- **Cross-site reads** — every media row records its profile, and a profile is
+  resolved tenant-scoped to the row's own site, so a row cannot name another
+  site's bucket.
+- **CSP** — the site's public base URL origin (a plain host name, validated)
+  is added to that site's own `img-src` and `media-src`
+  (`KilnCMSWeb.Plugs.SiteStorageCsp`); never `script-src`, never another site.
+
 ## Residual risks
 
 Known and accepted, in rough order of how much they should worry an operator.

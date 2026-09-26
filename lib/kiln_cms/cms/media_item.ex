@@ -168,7 +168,11 @@ defmodule KilnCMS.CMS.MediaItem do
   # it stages an A/V upload to private storage ahead of the deferred metadata
   # strip — and released only by the system `:release_quarantine` action below,
   # never through the editor's `:update`.
-  @create_accept @writable_fields ++ [:quarantined]
+  #
+  # `:storage_profile_id` (#1559) likewise: which store the file went to is
+  # decided once, by `Ingest` at upload, and never changes after — every later
+  # write keeps its files in the same store.
+  @create_accept @writable_fields ++ [:quarantined, :storage_profile_id]
 
   actions do
     # Not atomic: the `BustMediaCache` after-action runs an in-BEAM side effect.
@@ -679,6 +683,15 @@ defmodule KilnCMS.CMS.MediaItem do
     # (upload, `Media.Transform`, `Changes.MigrateMediaStorage`).
     attribute :storage_key, :string, public?: false
     attribute :url, :string, public?: true, constraints: [max_length: KilnCMS.Limits.url()]
+
+    # Which store `storage_key` (and every variant key) is in (#1559): `nil` for
+    # the operator's (`S3_*` / the Local adapter), else the site's own
+    # `StorageProfile`. Read through `KilnCMS.Storage.SiteProfiles.for_item/1`;
+    # a row keeps its store when the site's setting changes, so nothing is
+    # stranded. Nullable with no default, so adding it rewrote no existing row
+    # — they are all the operator's, which is what `nil` says. No foreign key
+    # for the same reason: validating one scans the whole table under a lock.
+    attribute :storage_profile_id, :uuid, public?: false
 
     # #1122. `true` while a deferred A/V metadata strip is pending: the blob is
     # in PRIVATE storage under `storage_key`, `url` points at nothing yet, and

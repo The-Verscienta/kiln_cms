@@ -81,13 +81,22 @@ defmodule KilnCMS.Media.AVStripWorker do
   defp strip(item, key, args, tenant) do
     ext = args["ext"] || Path.extname(key)
 
-    case download(key, ext) do
+    case download(item, key, ext) do
       {:ok, original} ->
         try do
           strip_downloaded(item, key, original, ext, args["max_bytes"], tenant)
         after
           rm(original)
         end
+
+      # The site's store (#1559) could not be resolved: the blob is there, the
+      # way to it is not. Retry rather than leave the row to the reaper.
+      {:error, {:site_storage, _reason} = reason} ->
+        Logger.warning(
+          "Deferred metadata strip for media #{item.id}: its store is unavailable (#{inspect(reason)}); will retry."
+        )
+
+        {:error, reason}
 
       # The private blob is not there to strip. Nothing this job can do; the
       # reaper takes the row.
@@ -123,9 +132,9 @@ defmodule KilnCMS.Media.AVStripWorker do
 
   defp promote_stripped(item, key, stripped, max_bytes, tenant) do
     with :ok <- check_size(stripped, max_bytes),
-         {:ok, ^key} <- Storage.store(key, stripped),
+         {:ok, ^key} <- Storage.store(key, stripped, item),
          {:ok, released} <- release(item, stripped_size(stripped), tenant) do
-      Storage.delete_private(key)
+      Storage.delete_private(key, item)
       Ingest.enqueue_processing(released)
       broadcast(item.id)
       :ok
@@ -166,9 +175,9 @@ defmodule KilnCMS.Media.AVStripWorker do
           "Set require_av_metadata_strip: true to refuse such uploads instead."
       )
 
-      with {:ok, ^key} <- Storage.store(key, original),
+      with {:ok, ^key} <- Storage.store(key, original, item),
            {:ok, released} <- release(item, nil, tenant) do
-        Storage.delete_private(key)
+        Storage.delete_private(key, item)
         Ingest.enqueue_processing(released)
         broadcast(item.id)
         :ok
@@ -187,7 +196,7 @@ defmodule KilnCMS.Media.AVStripWorker do
       "Media #{item.id} (#{item.filename}) refused: #{why}. Re-export and upload again."
     )
 
-    Storage.delete_private(key)
+    Storage.delete_private(key, item)
     CMS.purge_media_item(item, authorize?: false, tenant: tenant)
     broadcast(item.id)
     :ok
@@ -201,10 +210,10 @@ defmodule KilnCMS.Media.AVStripWorker do
     |> Ash.update()
   end
 
-  defp download(key, ext) do
+  defp download(item, key, ext) do
     tmp = Path.join(System.tmp_dir!(), "kiln-avstrip-#{Ecto.UUID.generate()}#{ext}")
 
-    case Storage.copy_to_file(key, tmp, private?: true) do
+    case Storage.copy_to_file(key, tmp, private?: true, at: item) do
       :ok ->
         {:ok, tmp}
 

@@ -917,3 +917,43 @@ The practical consequence: pasting a media URL straight into the address bar
 downloads the file instead of displaying it — on both adapters. That is the
 intended behavior, not a misconfiguration. To eyeball a stored image, view it
 in the media library at `/media`, which renders it as an `<img>`.
+
+### Per-site buckets (#1559)
+
+Everything above is the operator's storage, set once for the deployment. A
+site admin can instead keep their site's files in their own S3-compatible
+bucket, at **Configure → Integrations → Object storage**
+(`/editor/site-storage`): an endpoint (blank for AWS), region, bucket, an
+optional private bucket for gated documents and direct uploads, the public URL
+the bucket is served from, and a key pair. The secret is stored encrypted and
+never shown again. **Test the saved bucket** writes, reads back and deletes a
+small file, so a wrong bucket name or a read-only key shows up before the first
+upload does.
+
+**Only new uploads move.** Each media item records the store its file went to
+(`storage_profile_id`; empty means the operator's storage, which is every item
+uploaded before the site had its own). Everything that happens to an item
+later — its variants, poster frame, on-the-fly transforms, gating and
+un-gating, downloads, streaming, deletion — goes to that store, whatever the
+site has set since. So switching the setting off, or moving to another bucket,
+strands nothing, and needs no migration. It also moves nothing: files stay
+where they were stored. Keep an old bucket and its key working until you have
+copied its files yourself; there is no background copy job yet.
+
+**An unusable bucket refuses uploads.** If the site's settings can't be read,
+its secret can't be decrypted (`SECRET_KEY_BASE` was rotated — see
+[secrets-rotation.md](secrets-rotation.md)) or its endpoint now resolves to a
+private address, the upload fails with a message saying so. It is never
+written to the operator's bucket instead.
+
+**The site's bucket is set up like the operator's** — public read at the
+bucket level, a CDN if you want one (see [Putting a CDN in
+front](#putting-a-cdn-in-front)), a lifecycle rule on the private bucket's
+`direct-uploads/` prefix. The site's public URL origin is added to that site's
+`img-src` and `media-src` automatically, so it needs no `CSP_IMG_SRC` entry.
+
+What a site admin cannot do: point the endpoint at a private, loopback,
+link-local or metadata address (checked at save and on every connection, and
+the connection goes to the address that was checked), use plain `http://`, or
+have the operator's credentials used for their bucket — a request to a site's
+bucket is built from the site's settings alone.

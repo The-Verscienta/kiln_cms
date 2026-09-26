@@ -86,6 +86,10 @@ defmodule KilnCMSWeb.Router do
     plug :protect_from_forgery
     plug :put_secure_browser_headers, @browser_csp_headers
     plug :put_browser_csp
+    # A site's own object storage (#1559): its bucket's origin in img-src and
+    # media-src, for this site's pages only. After `put_browser_csp`, whose
+    # header it widens.
+    plug KilnCMSWeb.Plugs.SiteStorageCsp
     plug :load_from_session
   end
 
@@ -495,6 +499,9 @@ defmodule KilnCMSWeb.Router do
       # to take on it. Restore stays a documented ops procedure.
       live "/editor/backups", BackupLive, :index
       live "/editor/mail", MailSettingsLive, :index
+      # A site's own object storage (#1559). Org-scoped; the operator's `S3_*`
+      # storage stays underneath for every site without one.
+      live "/editor/site-storage", SiteStorageLive, :index
       # A site's own SMTP relay and From address (#1322). Org-scoped, unlike
       # `/editor/mail` above: that is the operator's relay for every site.
       live "/editor/site-mail", SiteMailLive, :index

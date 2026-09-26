@@ -481,6 +481,25 @@ defmodule KilnCMS.Cache do
   end
 
   @doc """
+  Cache key for the origins a site's own object storage serves files from
+  (#1559) — added to its pages' `img-src`/`media-src` on every request, so it
+  is cached rather than read per page.
+  """
+  @spec site_storage_hosts_key(Ash.UUID.t()) :: String.t()
+  def site_storage_hosts_key(org_id), do: "site_storage_hosts:#{org_id}"
+
+  @doc """
+  Drop a site's cached storage origins after a storage profile is saved.
+  Cluster-wide, like the other per-site settings: a node that kept the old list
+  would block the site's new images until the TTL ran out.
+  """
+  @spec bust_site_storage_hosts(Ash.UUID.t()) :: :ok
+  def bust_site_storage_hosts(org_id) do
+    if enabled?(), do: ClusterBust.broadcast([site_storage_hosts_key(org_id)])
+    :ok
+  end
+
+  @doc """
   Cache key for a site's generated sitemap XML (shared with the sitemap
   controller). Per-org (epic #336): each organization serves its own sitemap of
   its own published URLs.

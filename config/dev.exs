@@ -74,6 +74,10 @@ config :kiln_cms, KilnCMSWeb.Endpoint,
 # admin and must not reach the private network — see `KilnCMS.Mail.SiteRelay`.
 config :kiln_cms, KilnCMS.Mail.SiteRelay, allow_private_hosts: true
 
+# Likewise a site's own object storage (#1559) may be a MinIO on localhost in
+# development — see `KilnCMS.Storage.SiteProfiles`.
+config :kiln_cms, KilnCMS.Storage.SiteProfiles, allow_private_hosts: true
+
 # Enable dev routes for dashboard and mailbox
 config :kiln_cms, dev_routes: true, token_signing_secret: "DYgVqiH9UCH9+tNBUTSxpjj9sjIclKww"
 

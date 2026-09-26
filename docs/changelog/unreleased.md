@@ -38,6 +38,38 @@ carries the reasoning.
     subscriptions and says so on the page. It never signs with the deployment's
     key instead.
 
+<a id="a-site-can-keep-its-uploads-in-its-own-object-storage-bucket-set-from-the-console"></a>
+
+- **A site can keep its uploads in its own object storage bucket, set from the
+  console.** Configure → Integrations → **Object storage**
+  (`/editor/site-storage`, #1559) takes an S3-compatible endpoint (blank for
+  AWS), region, bucket, an optional private bucket, the bucket's public URL and
+  a key pair; the site's new uploads then go there instead of to the
+  operator's `S3_*` storage. Storage holds data, which is what made this
+  harder than the other per-site integrations: every media item now records
+  the store its file went to (`storage_profile_id`, a nullable column with no
+  default, so the migration rewrites nothing and every existing row reads as
+  "the operator's store"). Reads, downloads, streaming, variants, posters,
+  transforms, gating and deletes follow the row, never the site's current
+  setting, and a store's location never changes in place — moving the site to
+  another bucket makes a new `StorageProfile` and leaves the old one, so
+  nothing is stranded and nothing needs a backfill. There is no background
+  copy job: files stay where they were stored. `KilnCMS.Storage.S3` and its
+  `ReqClient` now take a site's credentials, endpoint and buckets per call, and
+  that config is built from the site's settings alone and handed to
+  `ExAws.Operation.perform/2` — `ExAws.request/2` would have merged the
+  operator's session token, endpoint and instance-role credentials underneath
+  it (`SiteStorageIsolationTest` plants them and checks). The private bucket
+  (gated documents) and presigned direct uploads get the same treatment. The
+  secret is vault-encrypted, write-only and database-only; the endpoint must be
+  `https://` and is refused if it resolves to a private or metadata address, at
+  save and on every connection, which is pinned to the checked address. A site
+  whose bucket can't be used — unreadable settings, an undecryptable secret,
+  a refused endpoint — has its uploads **refused**, never written to the
+  operator's bucket. A **Test** button writes, reads back and deletes a probe
+  object, and the site's bucket origin is added to that site's `img-src` and
+  `media-src`.
+
 ## Fixed
 
 <a id="an-open-calendar-no-longer-re-queries-once-per-write-during-a-bulk-import"></a>
