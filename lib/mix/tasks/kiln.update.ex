@@ -349,7 +349,7 @@ defmodule Mix.Tasks.Kiln.Update do
     if candidates == [] do
       Mix.raise("""
       No final release tags found upstream, only pre-releases:
-      #{tags |> Enum.map(&elem(&1, 0)) |> Enum.join(", ")}
+      #{Enum.map_join(tags, ", ", &elem(&1, 0))}
 
       A plain update never lands on a pre-release. Pass --pre to take the
       newest one, or --to to name it.
