@@ -358,3 +358,9 @@ Code.require_file("strict_test_flag.exs", __DIR__)
 config :kiln_cms,
        :strict_tenancy,
        KilnCMS.Config.StrictTestFlag.strict?(System.get_env("KILN_STRICT_TEST"))
+
+# A site's own single sign-on (#1561): every request to a site's identity
+# provider — discovery, token endpoint, signing keys — goes to a `Req.Test`
+# stub, so the suite runs the real OIDC flow without a network.
+config :kiln_cms, KilnCMS.Accounts.SiteSso,
+  req_options: [plug: {Req.Test, KilnCMS.Accounts.SiteSso}]

@@ -54,6 +54,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Added
+
+- **A site can offer its own single sign-on provider, honoured only for email
+  domains it has verified by DNS.**
+  ([#1561](https://github.com/The-Verscienta/kiln_cms/issues/1561) · [long form](docs/changelog/unreleased.md#a-site-can-offer-its-own-single-sign-on-provider))
+
 ### Security
 
 - **Two Hex advisories closed (`ash` 3.33.11, `lazy_html` 0.1.13); the working

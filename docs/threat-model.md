@@ -646,6 +646,52 @@ amplification surface.
 - **Credential exposure** — S3 keys come from env, never committed.
 - **Bucket scope** — keep the bucket public-read for delivered variants only.
 
+### A site's own sign-in provider (`/editor/site-sso`, #1561)
+A site admin can point their site's sign-in page at an OpenID Connect provider
+they choose. On a hosted deployment that admin is a tenant, the provider is
+theirs, and accounts belong to the whole deployment — so the provider is treated
+as able to assert *anything*, and what it may achieve is bounded by Kiln, not by
+the provider. See [sso.md](sso.md#per-site-providers).
+
+- **Asserting someone else's address** — a provider is honoured only for email
+  addresses in a domain the site verified by DNS (a `_kiln-sso.<domain>` TXT
+  record carrying a per-site random token), re-checked on every sign-in, exact
+  domains only, and only with `email_verified` true. DNS control implies control
+  of the domain's mail, so this concedes nothing beyond what a password-reset
+  email to that domain already would.
+- **Reaching another site** — a site's provider never signs in an account with
+  access anywhere else: a platform admin (standing or temporary), a member of
+  any other organization at any tier, or a membership-less account whose global
+  role or legacy audiences reach beyond the site. Checked at every sign-in, in
+  `KilnCMS.Accounts.SiteSso.Admission`. Kiln has no site-scoped session, so the
+  guarantee is made at admission. **Accepted:** a session such a provider
+  minted before the account later gained access elsewhere keeps working until
+  it ends — no wider than the mail-control concession above.
+- **Pre-registered accounts** — an unconfirmed account is never handed to a
+  provider's user (it may have been registered in advance by someone else).
+- **Identity collisions with the operator's provider** — none possible: the
+  site flow is not an AshAuthentication strategy, writes no `UserIdentity` row,
+  and matches only by verified email. The operator's `OIDC_*` provider is
+  unchanged.
+- **Token forgery** — Assent's OIDC callback with state, nonce and PKCE, the ID
+  token checked for `iss`/`aud`/`azp`/`exp`, and `RS256` only: `alg: none` and
+  `HS*` (verifiable with the client secret, which this server also holds) are
+  refused. The flow's parked parameters are bound to the org that started it,
+  single-use, and expire after ten minutes.
+- **SSRF** — the issuer must be `https://` and pass `SafeUrl` at save; every
+  request the flow makes — discovery, the token endpoint (which is sent the
+  client secret), the signing keys — goes through `KilnCMS.SafeFetch`, pinned,
+  no redirects, 256 KB cap. The discovery document must name the same issuer,
+  and `https://` endpoints.
+- **Secret disclosure** — the client secret is vault-encrypted, write-only, and
+  database-only (no env-var or file indirection a tenant could aim at
+  `SECRET_KEY_BASE`). A rotation that orphans it makes the site's SSO
+  unavailable; it never falls back to the operator's provider
+  ([secrets-rotation.md](secrets-rotation.md)).
+- **Second factor** — a site-provider sign-in completes through
+  `AuthController.success/4`, so a TOTP-enrolled account is still asked for its
+  code.
+
 ## Residual risks
 
 Known and accepted, in rough order of how much they should worry an operator.

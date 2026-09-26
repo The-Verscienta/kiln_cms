@@ -144,6 +144,11 @@ defmodule KilnCMS.Accounts do
       # Passkey sign-in completion (#331) — system-only (`authorize?: false`
       # from the ceremony after Wax verification; see the action + preparation).
       define :complete_passkey_sign_in, action: :sign_in_with_passkey, args: [:user_id]
+      # A site's own identity provider (#1561) — both system-only
+      # (`authorize?: false` from `KilnCMS.Accounts.SiteSso.Admission`, after
+      # the ID token, the verified domain and the cross-site rule all passed).
+      define :complete_site_sso_sign_in, action: :sign_in_with_site_sso, args: [:user_id]
+      define :register_with_site_sso, action: :register_with_site_sso
       # Admin-only: assign role + consumer audiences; pass `actor: admin`.
       define :manage_user_access, action: :manage_access
       # Time-boxed elevation above the standing role (KilnCMS.Accounts.RoleGrant).

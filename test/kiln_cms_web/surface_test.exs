@@ -28,7 +28,8 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor/links /editor/locales /editor/mail /editor/menus /editor/menus/:id /editor/newsletter
     /editor/overview /editor/pages/:id /editor/posts/:id /editor/presentation/:type/:slug
     /editor/preview/:kind/:id /editor/redirects /editor/releases /editor/releases/:id
-    /editor/search /editor/settings /editor/site-mail /editor/site/:type/:slug /editor/slugs
+    /editor/search /editor/settings /editor/site-mail /editor/site-sso /editor/site/:type/:slug
+    /editor/slugs
     /editor/social
     /editor/system /editor/tasks /editor/taxonomy /editor/team /editor/translations
     /editor/translations/export.xlf /editor/trash /editor/types /editor/webhooks /media
@@ -45,6 +46,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /api/menus/:key /api/provenance/:type/:slug /api/provenance/:type/:slug/verify
     /api/provenance/public-key /api/resolve /api/schema /api/search /api/sync
     /api/visual-editing/:type/:slug /auth /auth/passkey/options /auth/passkey/verify
+    /auth/site-sso /auth/site-sso/callback
     /confirm_new_user/:token /gql /locale/:locale /magic_link/:token /manifest.webmanifest /mcp
     /media/:id/download /media/:id/stream /offline.html /password-reset/:token /preview/:token
     /preview/:token/live /preview/release/:token /ready /register /reset /sign-in /sign-in/verify

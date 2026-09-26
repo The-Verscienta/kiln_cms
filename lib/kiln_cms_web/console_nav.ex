@@ -523,6 +523,17 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("The mail provider and From address this site sends from."),
             keywords: ["smtp", "email", "relay", "sender", "from address", "postmark", "ses"]
           },
+          # A site's own identity provider (#1561). Not with the operator's
+          # `OIDC_*` provider, which has no screen: this one is a site admin's
+          # to set, and is honoured only for the domains the site verified.
+          %{
+            key: :site_sso,
+            label: gettext("Single sign-on"),
+            path: ~p"/editor/site-sso",
+            icon: "hero-finger-print",
+            description: gettext("Your own identity provider on this site's sign-in page."),
+            keywords: ["sso", "oidc", "openid connect", "okta", "entra", "identity provider"]
+          },
           %{
             key: :automation,
             label: gettext("Automation"),
