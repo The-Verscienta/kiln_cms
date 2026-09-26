@@ -432,9 +432,43 @@ defmodule PublishDocs do
         {"accept", @jsonapi},
         {"content-type", @jsonapi}
       ],
-      retry: :transient
+      retry: &retry/2,
+      max_retries: 5
     )
   end
+
+  # A full sync is ~3 requests a guide, more than the site's 120/min `:api`
+  # bucket, so a 429 mid-run is expected and must be waited out. `:transient`
+  # honours `retry-after`, but a site whose rate limiter predates rounding it
+  # up answers 0 in the window's last second, and three instant retries then
+  # all land before the reopen (the v0.11.0 sync failed that way). Hence a 1s
+  # floor.
+  #
+  # A 429 is refused before the action runs, so retrying one is safe for any
+  # method; a 5xx is not for a POST, which may have created the entry.
+  defp retry(_request, %Req.Response{status: 429} = response) do
+    seconds =
+      case Req.Response.get_header(response, "retry-after") do
+        [value | _] ->
+          case Integer.parse(String.trim(value)) do
+            {seconds, ""} -> seconds
+            _http_date_or_junk -> 1
+          end
+
+        [] ->
+          1
+      end
+
+    {:delay, max(seconds, 1) * 1000}
+  end
+
+  defp retry(request, %Req.Response{status: status}),
+    do: request.method != :post and status in [408, 500, 502, 503, 504]
+
+  defp retry(request, %Req.TransportError{reason: reason}),
+    do: request.method != :post and reason in [:timeout, :econnrefused, :closed]
+
+  defp retry(_request, _response_or_exception), do: false
 
   @doc "Creates or updates one record by slug, then publishes it if it isn't."
   def upsert(req, kind, slug, title, html, create_attrs) do

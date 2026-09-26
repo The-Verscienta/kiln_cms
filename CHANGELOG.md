@@ -54,6 +54,11 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Fixed
+
+- **A 429's `retry-after` is rounded up, never 0.**
+  ([long form](docs/changelog/unreleased.md#a-429s-retry-after-is-rounded-up-never-0))
+
 ## [0.11.0] - 2026-09-26
 
 Long form: [docs/changelog/v0.11.0.md](docs/changelog/v0.11.0.md) —

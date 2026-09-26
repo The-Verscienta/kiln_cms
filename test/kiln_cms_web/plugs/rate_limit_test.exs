@@ -54,6 +54,19 @@ defmodule KilnCMSWeb.Plugs.RateLimitTest do
     |> assert_denies_eventually(:docs)
   end
 
+  # A refusal in the last second of a fixed window used to answer
+  # `retry-after: 0` (`div/2` truncated), so a client honouring it retried
+  # straight back into the closed window — the docs publisher burned all its
+  # retries that way and failed a release sync.
+  test "retry-after rounds a sub-second wait up, never down to 0", %{conn: conn} do
+    for {ms, seconds} <- [{350, "1"}, {1_000, "1"}, {1_001, "2"}, {39_400, "40"}] do
+      denied = RateLimit.deny(conn, ms)
+
+      assert denied.status == 429
+      assert get_resp_header(denied, "retry-after") == [seconds], "for #{ms}ms"
+    end
+  end
+
   # The generalization of the `:auth` test above, and for the same reason
   # (#697): these are FIXED windows, so "exactly `limit` allowed, then one
   # denied" has zero margin — a rollover anywhere in the run resets the counter
