@@ -89,6 +89,9 @@ Every summary line below that was shortened links to its own entry there.
 - **An open calendar no longer re-queries once per write during a bulk import.**
   ([#1336](https://github.com/The-Verscienta/kiln_cms/issues/1336) · [long form](docs/changelog/unreleased.md#an-open-calendar-no-longer-re-queries-once-per-write-during-a-bulk-import))
 
+- **Sign-in and the other account pages show the site's own name and logo.**
+  ([#1613](https://github.com/The-Verscienta/kiln_cms/pull/1613) · [long form](docs/changelog/unreleased.md#sign-in-and-the-other-account-pages-show-the-sites-own-name-and-logo))
+
 - **A site's relay refusing its password no longer pages the operator.**
   ([#1562](https://github.com/The-Verscienta/kiln_cms/issues/1562) · [long form](docs/changelog/unreleased.md#a-sites-relay-refusing-its-password-no-longer-pages-the-operator))
 

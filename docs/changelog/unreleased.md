@@ -249,6 +249,31 @@ carries the reasoning.
   keep their meaning: messages answered per re-query.
   ([#1336](https://github.com/The-Verscienta/kiln_cms/issues/1336))
 
+<a id="sign-in-and-the-other-account-pages-show-the-sites-own-name-and-logo"></a>
+
+- **Sign-in and the other account pages show the site's own name and logo.**
+  `/sign-in`, `/register`, `/reset`, `/sign-out` and the password-reset,
+  confirmation and magic-link pages never assigned `:current_org`, so
+  `Layouts.auth/1` failed closed to the stock KilnCMS name and logo on every
+  host, a tenant's included. The document title was right, because the root
+  layout reads the org from the request, which is why no title test caught it.
+  The router did list `{KilnCMSWeb.LiveUserAuth, :assign_current_org}` for these
+  pages, but AshAuthentication's route macros de-duplicate a live session's
+  `on_mount` list by module, so of the two or three `LiveUserAuth` entries only
+  the first, `:restore_locale`, ran. The sign-in page also lost
+  `:live_no_user`, which sets its `:current_scope`. The same skipped hook is
+  what refuses a socket that claims a different org's host, and what vouches
+  the socket's host before `KilnCMSWeb.SignInLive` passes a patch URL to the
+  library (#687). Neither ran on these pages until now.
+  Each route now lists `LiveUserAuth` once, with its steps in order:
+  `{KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}`. The new
+  list form runs the named clauses in sequence and stops at the first that
+  halts. Kiln's own live sessions keep their separate entries, since
+  `live_session` does not de-duplicate. On a multi-org install with
+  `TENANT_STRICT_HOST` on, a connected mount of these pages from an unknown host
+  is now refused with the same 404 the HTTP request already got.
+  ([#1613](https://github.com/The-Verscienta/kiln_cms/pull/1613))
+
 <a id="a-sites-relay-refusing-its-password-no-longer-pages-the-operator"></a>
 
 - **A site's relay refusing its password no longer pages the operator.** A
