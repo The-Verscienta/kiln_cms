@@ -5,30 +5,61 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
-## Added
+## Upgrade notes
 
-<a id="a-site-can-offer-its-own-single-sign-on-provider"></a>
+<a id="on-a-multi-org-deployment-with-embedorigins-unset-every-cross-site-form-embed"></a>
 
-- **A site can offer its own single sign-on provider.** A site admin sets an
-  OpenID Connect issuer, client ID and client secret at `/editor/site-sso`, and
-  the site's sign-in page offers "Sign in with …" beside the password form. The
-  operator's `OIDC_*` provider is unchanged. Accounts belong to the whole
-  deployment, so the site's provider is honoured only for addresses in email
-  domains the site verified with a DNS TXT record (`_kiln-sso.<domain>`), looked
-  up again on every sign-in, and never for an account with access on another
-  site or across the deployment — a platform admin, another site's member, or a
-  membership-less global editor. Those people sign in the other ways. The flow is
-  deliberately not an AshAuthentication strategy: a per-site strategy would
-  share the operator's identity namespace, so a site's provider asserting a
-  `sub` the operator's had already linked would sign in as that account. It is
-  Assent's OIDC callback (state, nonce, PKCE, `RS256` only) behind two routes,
-  with every provider request through `SafeFetch`. The client secret is
-  vault-encrypted and write-only; if it can't be decrypted, the site's SSO says
-  it is unavailable rather than falling back to the operator's provider. Turning
-  password sign-in off per site, SAML, and several providers per site are not
-  in this change.
+- **On a multi-org deployment with `EMBED_ORIGINS` unset, every cross-site form
+  embed stops working on upgrade — set `EMBED_ORIGINS` first.** Since #1618 an
+  unset `EMBED_ORIGINS_LOCKED` caps form framing at `EMBED_ORIGINS` once a
+  second organization exists, and an unset `EMBED_ORIGINS` is a ceiling of
+  same-origin only. So if your deployment has two or more organizations and
+  relied on per-form or per-site embed allowlists (the Embed tab, or
+  `/editor/forms/settings`) without setting `EMBED_ORIGINS`, every partner site
+  framing a form gets a blank iframe from the moment the upgraded release
+  boots. Before upgrading, either set `EMBED_ORIGINS` to every site any
+  organization embeds forms on (each org's own list then narrows it), or set
+  `EMBED_ORIGINS_LOCKED=false` to keep the pre-0.11 behaviour. Nothing stored
+  is rewritten — the lists are clamped when served — so either fix restores
+  them as they were, after a restart. A deployment with `EMBED_ORIGINS` set is
+  affected only for list entries outside it. Kiln names the count of clamped
+  lists at boot and on `/editor/system`
+  ([#1618](https://github.com/The-Verscienta/kiln_cms/issues/1618)).
 
 ## Breaking
+
+<a id="multi-org-installs-now-cap-form-embeds-at-embedorigins-unless"></a>
+
+- **Multi-org installs now cap form embeds at `EMBED_ORIGINS` unless
+  `EMBED_ORIGINS_LOCKED=false`.** `EMBED_ORIGINS_LOCKED` has a third state, and
+  it is the new default: **unset means auto** — the operator's ceiling over
+  form framing (#1133) is on if and only if more than one organization exists.
+  A single-org install behaves exactly as before. On a deployment with two or
+  more organizations, where `EMBED_ORIGINS_LOCKED` was never set, a form's or
+  site's own embed allowlist may now only narrow `EMBED_ORIGINS`: saving an
+  entry outside it is refused (naming the entry, never the ceiling), and a list
+  saved earlier that names a site outside it is clamped when the embed page is
+  served, so that site's iframe goes blank. **With `EMBED_ORIGINS` unset, that
+  is every cross-site embed on the deployment** — see the upgrade note above.
+
+  **To keep the old behaviour**, set `EMBED_ORIGINS_LOCKED=false`. An explicit
+  `EMBED_ORIGINS_LOCKED=true` is unchanged: it caps a single-org install too.
+
+  Auto reads the organization-count verdict `TENANT_STRICT_HOST` uses since
+  #1547 (`KilnCMSWeb.Tenant.OrgCount`), not a second count, so creating the
+  second organization turns the cap on immediately, on every node, with no
+  restart. If the count cannot be read — a node that booted while Postgres was
+  unreachable — auto counts as capped until it can: a tenant list served wider
+  than the operator allows is the overlay-and-harvest exposure #562 closed,
+  while a briefly narrowed embed is not. Stored lists are never rewritten, and
+  Kiln reports how many are being cut down (counts only, never an origin or
+  an org) at boot, when the second organization is created, and on
+  `/editor/system`. Every reader of the setting — both write validations, the
+  served header, the builder's Embed tab and `/editor/forms/settings`, which
+  used to read the variable itself — now goes through
+  `KilnCMS.Forms.EmbedCeiling.locked?/0`. See `docs/forms.md`,
+  `docs/multi-tenancy.md` and `docs/environment-variables.md`
+  ([#1618](https://github.com/The-Verscienta/kiln_cms/issues/1618)).
 
 <a id="multi-org-installs-now-refuse-unknown-hosts-unless-tenantstricthostfalse"></a>
 
@@ -62,6 +93,27 @@ carries the reasoning.
   ([#1547](https://github.com/The-Verscienta/kiln_cms/issues/1547)).
 
 ## Added
+
+<a id="a-site-can-offer-its-own-single-sign-on-provider"></a>
+
+- **A site can offer its own single sign-on provider.** A site admin sets an
+  OpenID Connect issuer, client ID and client secret at `/editor/site-sso`, and
+  the site's sign-in page offers "Sign in with …" beside the password form. The
+  operator's `OIDC_*` provider is unchanged. Accounts belong to the whole
+  deployment, so the site's provider is honoured only for addresses in email
+  domains the site verified with a DNS TXT record (`_kiln-sso.<domain>`), looked
+  up again on every sign-in, and never for an account with access on another
+  site or across the deployment — a platform admin, another site's member, or a
+  membership-less global editor. Those people sign in the other ways. The flow is
+  deliberately not an AshAuthentication strategy: a per-site strategy would
+  share the operator's identity namespace, so a site's provider asserting a
+  `sub` the operator's had already linked would sign in as that account. It is
+  Assent's OIDC callback (state, nonce, PKCE, `RS256` only) behind two routes,
+  with every provider request through `SafeFetch`. The client secret is
+  vault-encrypted and write-only; if it can't be decrypted, the site's SSO says
+  it is unavailable rather than falling back to the operator's provider. Turning
+  password sign-in off per site, SAML, and several providers per site are not
+  in this change.
 
 <a id="a-site-can-sign-its-push-notifications-with-its-own-key-generated-in-the-console"></a>
 
@@ -312,3 +364,4 @@ carries the reasoning.
   column already says what the save means to say. Worth recording that
   `force_change_attribute/3` is **not** a way out of this — it bypasses the
   acceptance checks, not the equal-to-data elision.
+

@@ -11,9 +11,11 @@ defmodule KilnCMS.Forms.EmbedCeiling do
   to express — closed by default, or open by default — and no way to say
   **"this list is the most a tenant may open."**
 
-  `EMBED_ORIGINS_LOCKED=true` says exactly that, and nothing else:
+  `EMBED_ORIGINS_LOCKED` says exactly that, and nothing else. Unset, it is
+  **auto** (#1618): on once a second organization exists, off before — see
+  `locked?/0`.
 
-    * **Off (the default)** — #1130/#1131 behaviour is unchanged. `EMBED_ORIGINS`
+    * **Off** — #1130/#1131 behaviour is unchanged. `EMBED_ORIGINS`
       is the default for forms and orgs that set no list of their own, and a
       tenant's own list replaces it outright.
     * **On** — `EMBED_ORIGINS` is also the ceiling. A tenant's list may
@@ -62,9 +64,150 @@ defmodule KilnCMS.Forms.EmbedCeiling do
       served header and what the admin is shown move together.
   """
 
-  @doc "Whether the operator has locked framing to `EMBED_ORIGINS` (#1133)."
+  import Ecto.Query, only: [from: 2]
+
+  @doc """
+  Whether framing is capped at `EMBED_ORIGINS` (#1133) — the one reader of
+  `EMBED_ORIGINS_LOCKED`. Both write validations, the served header
+  (`KilnCMS.Forms.EmbedPolicy`), the builder's Embed tab and
+  `/editor/forms/settings` all ask this, so they cannot disagree.
+
+  Three settings (#1618), from `setting/0`:
+
+    * `true` — always capped.
+    * `false` — never capped: the pre-0.11 default, and the way back to it.
+    * `:auto` (unset — the default) — capped if and only if more than one
+      organization exists. With one org the operator and the org admin are the
+      same party, so an org admin's list is the operator's choice. With two, an
+      org admin decides who may frame that org's forms, and the operator's
+      `EMBED_ORIGINS` should be the most any tenant may open.
+
+  Auto reads `KilnCMSWeb.Tenant.OrgCount`'s cached verdict — the same one
+  `TENANT_STRICT_HOST` reads (#1547), never a second count — so the create that
+  makes a deployment multi-org caps it at once, on every node, with no restart.
+
+  ## Fail direction: `:unknown` counts as locked
+
+  `:unknown` is a node that has not managed to count its organizations yet
+  (booted with Postgres unreachable; it recounts every 30 seconds). Treating
+  it as locked matches `TENANT_STRICT_HOST`, and for the same asymmetry:
+  unlocked-but-actually-multi serves a tenant's list *wider* than the operator
+  allows, which is the overlay-and-harvest surface #562 closed and cannot be
+  taken back from a visitor who already submitted into it; locked-but-actually
+  -single narrows a single-org install's embeds to `EMBED_ORIGINS` until the
+  count lands — the database it needs is the one the embed page needs too, so
+  the window is the recount interval after an outage — and refuses a save
+  the admin can simply retry.
+  """
   @spec locked?() :: boolean()
-  def locked?, do: Application.get_env(:kiln_cms, :embed_origins_locked, false) == true
+  def locked? do
+    case setting() do
+      :auto -> KilnCMSWeb.Tenant.OrgCount.verdict() != :single
+      explicit -> explicit
+    end
+  end
+
+  @doc """
+  The configured `EMBED_ORIGINS_LOCKED`: `true`, `false`, or `:auto` when unset.
+
+  Anything that is not a boolean is `:auto`. `KilnCMS.Config.Env.fetch/1`
+  already leaves an unrecognized spelling unset, so this only matters for an
+  overlay's own `config :kiln_cms, :embed_origins_locked`, and auto is the
+  default that value would otherwise have replaced.
+  """
+  @spec setting() :: boolean() | :auto
+  def setting do
+    case Application.get_env(:kiln_cms, :embed_origins_locked, :auto) do
+      explicit when is_boolean(explicit) -> explicit
+      _auto -> :auto
+    end
+  end
+
+  @doc """
+  How many stored allowlists the cap is cutting down right now: forms whose own
+  `embed_origins`, and orgs whose `SiteEmbedSettings.embed_origins`, name at
+  least one origin outside the ceiling — `%{forms: n, sites: m}`, or `:unknown`
+  when the database cannot answer.
+
+  Zero for both whenever the cap is off or the ceiling is `:all`. When it is
+  on, those rows are not rewritten: `KilnCMS.Forms.EmbedPolicy` drops the
+  uncovered entries from the served `frame-ancestors` (all of them, with
+  `EMBED_ORIGINS` unset), so a partner site that used to frame the form gets
+  a blank iframe. That is what the boot warning and `/editor/system` report
+  (#1618) — the cap turning on by itself is exactly when nobody decided it.
+
+  Deployment-wide by design, so it reads the two tables directly rather than
+  through a tenant-scoped action, and only the one column; the answer is two
+  counts, never an origin or an org. Total, like `KilnCMSWeb.Tenant.org_count/0`:
+  a boot check or a page render must not fail because Postgres did.
+  """
+  @spec stored_overreach() :: %{forms: non_neg_integer(), sites: non_neg_integer()} | :unknown
+  def stored_overreach do
+    with true <- locked?(),
+         ceiling when is_list(ceiling) <- ceiling() do
+      KilnCMS.Config.Report.probe(:unknown, fn ->
+        %{
+          forms: count_overreaching("forms", ceiling),
+          sites: count_overreaching("site_embed_settings", ceiling)
+        }
+      end)
+    else
+      _off_or_all -> %{forms: 0, sites: 0}
+    end
+  end
+
+  @doc """
+  The operator-facing warning for `stored_overreach/0`, or `nil` when there is
+  nothing to say (cap off, ceiling `:all`, every stored list covered, or the
+  database could not answer — not evidence of anything). Logged at boot by
+  `KilnCMS.Application` and when the organization that turns an unset cap on
+  is created (`KilnCMS.Accounts.Changes.WarnEmbedOverreach`); `/editor/system`
+  renders the same counts.
+  """
+  @spec overreach_warning() :: String.t() | nil
+  def overreach_warning do
+    case stored_overreach() do
+      %{forms: forms, sites: sites} when forms + sites > 0 ->
+        "EMBED_ORIGINS caps which sites may frame forms on this deployment " <>
+          "(#{cause()}), and #{forms} form allowlist(s) and #{sites} site-wide " <>
+          "embed default(s) name sites outside it. Those entries are dropped from " <>
+          "the served frame-ancestors, so those sites now get a blank iframe" <>
+          closed_suffix() <>
+          ". Add the sites to EMBED_ORIGINS, or set EMBED_ORIGINS_LOCKED=false to " <>
+          "let each site's own list stand; see docs/forms.md."
+
+      _nothing_or_unknown ->
+        nil
+    end
+  end
+
+  defp cause do
+    case setting() do
+      :auto -> "EMBED_ORIGINS_LOCKED is unset, which caps once a second organization exists"
+      _true -> "EMBED_ORIGINS_LOCKED=true"
+    end
+  end
+
+  defp closed_suffix do
+    case ceiling() do
+      [] ->
+        ". EMBED_ORIGINS is unset, so the cap is same-origin only and no other site may frame any form"
+
+      _listed ->
+        ""
+    end
+  end
+
+  # Only non-empty lists can reach outside anything; `nil` inherits the
+  # ceiling itself and `[]` is same-origin.
+  defp count_overreaching(table, ceiling) do
+    from(r in table,
+      where: not is_nil(r.embed_origins) and fragment("cardinality(?) > 0", r.embed_origins),
+      select: r.embed_origins
+    )
+    |> KilnCMS.Repo.all()
+    |> Enum.count(&(outside(&1, ceiling) != []))
+  end
 
   @doc """
   The ceiling itself: `:all`, or the operator's `EMBED_ORIGINS` list — the same

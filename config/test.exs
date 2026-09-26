@@ -374,3 +374,10 @@ config :kiln_cms, KilnCMS.Accounts.SiteSso,
 # `:auto` and the verdict themselves.
 config :kiln_cms, :tenant_strict_host, false
 config :kiln_cms, :tenant_org_recount, false
+
+# The embed ceiling (#1618): pinned OFF for the same reason. Auto locks on the
+# same VM-global verdict, so one test creating an org through the action would
+# cap every other test's form and org embed lists at `:embed_origins` above —
+# refusing their writes and clamping their served `frame-ancestors` depending
+# on test order. Tests of auto set `:auto` and the verdict themselves.
+config :kiln_cms, :embed_origins_locked, false

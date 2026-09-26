@@ -49,6 +49,7 @@ defmodule KilnCMSWeb.SystemLive do
        |> assign(:build, Build.current())
        |> assign(:strict_host_gap, KilnCMSWeb.Tenant.strict_host_gap?())
        |> assign(:strict_host_setting, KilnCMSWeb.Tenant.strict_host_setting())
+       |> assign_embed_overreach()
        |> assign(:plugins, Plugins.manifests())
        |> assign(:update, :loading)
        |> assign(:flushed, nil)
@@ -59,6 +60,22 @@ defmodule KilnCMSWeb.SystemLive do
        |> put_flash(:error, gettext("You need admin access to view that page."))
        |> push_navigate(to: ~p"/")}
     end
+  end
+
+  # Stored form / site-wide embed allowlists the operator's ceiling is cutting
+  # down (#1618) — counts only, never an origin or an org. `nil` when there is
+  # nothing to show, including when the database could not answer.
+  defp assign_embed_overreach(socket) do
+    overreach =
+      case KilnCMS.Forms.EmbedCeiling.stored_overreach() do
+        %{forms: forms, sites: sites} = counts when forms + sites > 0 -> counts
+        _none_or_unknown -> nil
+      end
+
+    socket
+    |> assign(:embed_overreach, overreach)
+    |> assign(:embed_lock_setting, KilnCMS.Forms.EmbedCeiling.setting())
+    |> assign(:embed_ceiling_closed?, KilnCMS.Forms.EmbedCeiling.ceiling() == [])
   end
 
   defp check_for_updates(socket, opts \\ []) do
@@ -175,6 +192,42 @@ defmodule KilnCMSWeb.SystemLive do
           <p :if={@strict_host_setting != false} class="mt-2 text-sm text-warning-ink">
             {gettext(
               "TENANT_STRICT_HOST is unset, so host matching turns on by itself once a second organization exists, but this server has not noticed the new organization yet. It will within five minutes, or on restart."
+            )}
+          </p>
+        </section>
+
+        <section
+          :if={@embed_overreach}
+          id="embed-overreach"
+          class="card card-pad max-w-2xl border border-warning/40 bg-warning/10"
+        >
+          <h2 class="text-lg font-semibold text-warning-ink">
+            {gettext("Some sites can no longer embed forms")}
+          </h2>
+
+          <p class="mt-2 text-sm text-warning-ink">
+            {gettext(
+              "%{forms} form allowlist(s) and %{sites} site-wide embed default(s) name sites outside EMBED_ORIGINS, which caps which sites may frame forms on this deployment. Those sites are dropped from what is served, so an iframe of the form on them is blank. The saved lists are unchanged.",
+              forms: @embed_overreach.forms,
+              sites: @embed_overreach.sites
+            )}
+          </p>
+
+          <p :if={@embed_ceiling_closed?} class="mt-2 text-sm text-warning-ink">
+            {gettext(
+              "EMBED_ORIGINS is unset, so the cap is same-origin only: no other site may frame any form on this deployment."
+            )}
+          </p>
+
+          <p :if={@embed_lock_setting == :auto} class="mt-2 text-sm text-warning-ink">
+            {gettext(
+              "EMBED_ORIGINS_LOCKED is unset, which turns the cap on once a second organization exists. Add the sites to EMBED_ORIGINS, or set EMBED_ORIGINS_LOCKED=false to let each site's own list stand, then restart."
+            )}
+          </p>
+
+          <p :if={@embed_lock_setting == true} class="mt-2 text-sm text-warning-ink">
+            {gettext(
+              "EMBED_ORIGINS_LOCKED=true is set. Add the sites to EMBED_ORIGINS, or remove them from those lists, to make this go away."
             )}
           </p>
         </section>

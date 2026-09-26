@@ -54,18 +54,26 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
-### Added
+### Upgrade notes
 
-- **A site can offer its own single sign-on provider, honoured only for email
-  domains it has verified by DNS.**
-  ([#1561](https://github.com/The-Verscienta/kiln_cms/issues/1561) · [long form](docs/changelog/unreleased.md#a-site-can-offer-its-own-single-sign-on-provider))
+- **On a multi-org deployment with `EMBED_ORIGINS` unset, every cross-site form
+  embed stops working on upgrade — set `EMBED_ORIGINS` first.**
+  ([#1618](https://github.com/The-Verscienta/kiln_cms/issues/1618) · [long form](docs/changelog/unreleased.md#on-a-multi-org-deployment-with-embedorigins-unset-every-cross-site-form-embed))
 
 ### Breaking
+
+- **Multi-org installs now cap form embeds at `EMBED_ORIGINS` unless
+  `EMBED_ORIGINS_LOCKED=false`.**
+  ([#1618](https://github.com/The-Verscienta/kiln_cms/issues/1618) · [long form](docs/changelog/unreleased.md#multi-org-installs-now-cap-form-embeds-at-embedorigins-unless))
 
 - **Multi-org installs now refuse unknown hosts unless `TENANT_STRICT_HOST=false`.**
   ([#1547](https://github.com/The-Verscienta/kiln_cms/issues/1547) · [long form](docs/changelog/unreleased.md#multi-org-installs-now-refuse-unknown-hosts-unless-tenantstricthostfalse))
 
 ### Added
+
+- **A site can offer its own single sign-on provider, honoured only for email
+  domains it has verified by DNS.**
+  ([#1561](https://github.com/The-Verscienta/kiln_cms/issues/1561) · [long form](docs/changelog/unreleased.md#a-site-can-offer-its-own-single-sign-on-provider))
 
 - **A site can sign its push notifications with its own key, generated in the
   console.**

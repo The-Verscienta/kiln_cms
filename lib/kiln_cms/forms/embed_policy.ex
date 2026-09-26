@@ -97,10 +97,11 @@ defmodule KilnCMS.Forms.EmbedPolicy do
 
   # The operator's ceiling (#1133), applied to whichever tenant rung answered —
   # the form's own list or its org's — and never to `nil`, which is already the
-  # ceiling itself (`EMBED_ORIGINS`). Identity when `EMBED_ORIGINS_LOCKED` is
-  # off. Applied on the read as well as refused on the write, so a list saved
-  # before the cap was turned on cannot keep the page wider than the operator
-  # now allows.
+  # ceiling itself (`EMBED_ORIGINS`). Identity when the cap is off
+  # (`EmbedCeiling.locked?/0` — which, unset, turns on once a second
+  # organization exists, #1618). Applied on the read as well as refused on the
+  # write, so a list saved before the cap was turned on cannot keep the page
+  # wider than the operator now allows.
   defp clamp(%{embed_origins: origins} = form) when is_list(origins),
     do: %{form | embed_origins: EmbedCeiling.clamp(origins)}
 end

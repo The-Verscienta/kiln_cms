@@ -7,7 +7,7 @@ defmodule KilnCMS.Forms.EmbedCeilingTest do
 
   `async: false` because the cap and the ceiling are application env, which is
   VM-global; `config/test.exs` pins `:embed_origins` to `["https://embedder.test"]`
-  and leaves the cap unset (off).
+  and pins the cap to `false` (unset would be auto, #1618).
   """
   use ExUnit.Case, async: false
 
@@ -127,9 +127,19 @@ defmodule KilnCMS.Forms.EmbedCeilingTest do
       assert EmbedCeiling.clamp(["https://anywhere.test"]) == ["https://anywhere.test"]
     end
 
-    test "cap unset at all reads as off — the default a deployment ships with" do
+    # Unset is auto (#1618): off with one organization, which is what a fresh
+    # deployment has. The two-org and no-restart cases are in
+    # `embed_ceiling_auto_test.exs`.
+    test "cap unset at all is auto — off while there is one organization" do
+      previous = KilnCMSWeb.Tenant.OrgCount.verdict()
+      on_exit(fn -> KilnCMSWeb.Tenant.OrgCount.put(previous) end)
       Application.delete_env(:kiln_cms, :embed_origins_locked)
+
+      KilnCMSWeb.Tenant.OrgCount.put(:single)
       refute EmbedCeiling.locked?()
+
+      KilnCMSWeb.Tenant.OrgCount.put(:multi)
+      assert EmbedCeiling.locked?()
     end
 
     test "cap on: outside/1 and clamp/1 read the deployment ceiling" do

@@ -36,6 +36,7 @@ defmodule KilnCMS.Config.ReportUsageTest do
     expected = ~w(
       warn_if_no_mailer_in_prod
       warn_if_multi_tenant_without_strict_host
+      warn_if_embed_lists_over_ceiling
       warn_if_chain_unsigned
       warn_if_seo_drafting_egresses
       warn_if_assist_egresses

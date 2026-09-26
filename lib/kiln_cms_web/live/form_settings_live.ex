@@ -50,6 +50,7 @@ defmodule KilnCMSWeb.FormSettingsLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.CMS
+  alias KilnCMS.Forms.EmbedCeiling
 
   @impl true
   def mount(_params, _session, socket) do
@@ -179,13 +180,10 @@ defmodule KilnCMSWeb.FormSettingsLive do
     |> assign(:embed_row, embed_row)
     |> assign(:embed_mode, embed_mode(embed_row))
     |> assign(:spam_row, spam_row)
-    # `EMBED_ORIGINS_LOCKED` (#1133) — read off the env directly rather than
-    # through `KilnCMS.Forms.EmbedCeiling` so this page does not depend on that
-    # PR's merge order; unset reads as off.
-    |> assign(
-      :ceiling_locked?,
-      Application.get_env(:kiln_cms, :embed_origins_locked, false) == true
-    )
+    # `EMBED_ORIGINS_LOCKED` (#1133) through the one function that resolves
+    # it, so an unset setting on a multi-org deployment (auto, #1618) shows
+    # the cap here exactly when the save below would enforce it.
+    |> assign(:ceiling_locked?, EmbedCeiling.locked?())
     # Empty forms only to give `<.form>` a source; the inputs are named by hand.
     |> assign(:embed_form, to_form(%{}, as: :embed))
     |> assign(:spam_form, to_form(%{}, as: :spam))

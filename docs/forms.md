@@ -75,20 +75,39 @@ own:
 | `https://acme.com,https://blog.acme.com` | `'self' https://acme.com https://blog.acme.com` | The intended production setting for a single-org deployment. |
 | `*` | `*` | Any site may frame the form. |
 
-**The operator can make it a ceiling** (#1133). Set `EMBED_ORIGINS_LOCKED=true`
-and `EMBED_ORIGINS` is the *most* any form or org in the deployment may open
-as well as the default: a form's or org's own list may narrow it (a subset,
-or "This site only") but every entry must be covered by it — same scheme,
-same port, the same host or a subdomain of a `*.`-wildcarded one. An admin
-who saves an entry outside it is refused, with the message naming the
-refused entry and *not* the ceiling (which on a shared deployment would list
-every other org's partners), and told to ask the operator. Lists saved
-before the cap was turned on are clamped to it when served, so turning it
-on takes effect immediately without a data fix. The Embed tab says a cap
-exists when one does. With the cap off — the default — nothing above
-changes; `EMBED_ORIGINS=*` under the cap is a ceiling of everything, and an
-unset `EMBED_ORIGINS` under the cap closes framing deployment-wide whatever
-a tenant writes.
+**The operator's list is a ceiling on a multi-org deployment** (#1133, #1618).
+While `EMBED_ORIGINS_LOCKED` is on, `EMBED_ORIGINS` is the *most* any form or
+org in the deployment may open as well as the default: a form's or org's own
+list may narrow it (a subset, or "This site only") but every entry must be
+covered by it — same scheme, same port, the same host or a subdomain of a
+`*.`-wildcarded one. An admin who saves an entry outside it is refused, with
+the message naming the refused entry and *not* the ceiling (which on a shared
+deployment would list every other org's partners), and told to ask the
+operator. The Embed tab and the site-wide embed settings say a cap exists when
+one does. With the cap off nothing above changes; `EMBED_ORIGINS=*` under the
+cap is a ceiling of everything, and an unset `EMBED_ORIGINS` under the cap
+closes framing deployment-wide whatever a tenant writes.
+
+**Unset, `EMBED_ORIGINS_LOCKED` turns itself on once a second organization
+exists** (#1618). With one organization the operator and the org admin are the
+same party, so the org's own lists stand; the create that makes the deployment
+multi-org turns the cap on immediately, with no restart. `EMBED_ORIGINS_LOCKED=true`
+caps a single-org install too, and `EMBED_ORIGINS_LOCKED=false` keeps every
+org's list uncapped however many there are — the behaviour of every release
+before 0.11.
+
+**What that does to lists already saved.** Nothing is rewritten. A form's or
+org's list that names a site outside `EMBED_ORIGINS` is clamped when the embed
+page is served: the uncovered entries are dropped from `frame-ancestors`
+(within a minute, the embed page's cache window), so those sites get a blank
+iframe, and saving that list again — or any list naming them — is refused.
+Other edits to the form still save. **If `EMBED_ORIGINS` is unset, the ceiling
+is same-origin only, so every cross-site embed on the deployment stops** until
+the operator lists the sites in `EMBED_ORIGINS` or sets
+`EMBED_ORIGINS_LOCKED=false`. Kiln warns about clamped lists — by count, never
+by origin or org — at boot, when the second organization is created, and on
+`/editor/system`. Turning the cap off again restores the saved lists as they
+were.
 
 **The default is closed** (#562). Copying the snippet onto an external site
 before allowing that site renders a blank iframe and a CSP violation in that

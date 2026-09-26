@@ -492,6 +492,15 @@ config :kiln_cms, :strict_tenancy, true
 # `KilnCMSWeb.Tenant.strict_host?/0` and `KilnCMSWeb.Tenant.OrgCount`.
 config :kiln_cms, :tenant_strict_host, :auto
 
+# The operator's ceiling over form framing (#1133, `EMBED_ORIGINS_LOCKED`):
+# locked, `EMBED_ORIGINS` is the most any form's or org's own embed allowlist
+# may open, not only the default. `:auto` (#1618) locks exactly when more than
+# one organization exists — the same verdict `:tenant_strict_host` reads — so
+# on a single-org install the operator and the org admin stay one party, and on
+# a shared one the operator's list caps every tenant. `true`/`false` override
+# it. See `KilnCMS.Forms.EmbedCeiling.locked?/0`.
+config :kiln_cms, :embed_origins_locked, :auto
+
 # Tamper-evident history anchors (#356): at every publish, the document's full
 # PaperTrail version chain is folded into a canonical hash and recorded
 # (RSA-signed when a provenance signing key is configured — see
