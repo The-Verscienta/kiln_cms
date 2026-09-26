@@ -171,7 +171,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
          |> assign(:current_pick, @current_pick)
          |> assign(:compare_pick, [])
          |> assign(:compare, nil)
-         # Right inspector rail (Theme A): which panel is showing. All panels stay
+         # Right inspector rail: which panel is showing. All panels stay
          # mounted (form fields must survive submit) — the tab only toggles CSS
          # visibility, never `:if`. Always mounts as `:preview` here (even for
          # the `?assign=1` deep link, switched to `:settings` further below,
@@ -180,7 +180,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
          # defaulting straight to `:settings` left it unassigned and crashed
          # the Preview panel, which stays rendered (CSS-hidden) either way.
          |> assign(:inspector_tab, :preview)
-         # Theme A: inspector rail vs side-by-side wide preview.
+         # `:rail` (inspector) or `:wide` (side-by-side preview).
          |> assign(:preview_layout, :rail)
          # Preview render is only refreshed while the Preview tab is showing;
          # this tracks whether an off-tab edit left it needing a re-render.
@@ -1659,7 +1659,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
      |> mark_dirty()}
   end
 
-  # Right inspector rail (Theme A): switch the visible panel. Pure view state —
+  # Right inspector rail: switch the visible panel. Pure view state —
   # every panel stays mounted, so no form data is touched.
   def handle_event("switch_inspector_tab", %{"tab" => tab}, socket)
       when tab in ~w(settings preview history) do
@@ -2665,8 +2665,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("remove_block", _params, socket), do: {:noreply, socket}
 
-  # Theme B: nest a top-level nestable block into the first column of a columns
-  # block (keyboard/button alternative to cross-list drag under LiveView).
+  # Nest a top-level nestable block into the first column of a columns block
+  # (keyboard/button alternative to cross-list drag under LiveView).
   def handle_event("nest_into_columns", %{"bid" => bid, "cols" => cols_id}, socket)
       when is_binary(bid) and is_binary(cols_id) do
     with index when not is_nil(index) <- block_index_by_id(socket.assigns.form, bid),
@@ -2693,7 +2693,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("nest_into_columns", _params, socket), do: {:noreply, socket}
 
-  # Theme B: promote a nested column child back onto the top-level canvas.
+  # Promote a nested column child back onto the top-level canvas.
   def handle_event("promote_child", %{"id" => cols_id, "child" => child_id}, socket)
       when is_binary(cols_id) and is_binary(child_id) do
     cols = socket.assigns.block_children[cols_id] || []
@@ -6680,7 +6680,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   attr :unsplash_searching?, :boolean, required: true
   attr :unsplash_importing, :any, required: true
 
-  # Media-library browser as a right-side drawer (Theme D). It slides in beside the
+  # Media-library browser as a right-side drawer. It slides in beside the
   # editor rather than a full-screen modal that blanks the whole surface, so you
   # keep your place while choosing. Reachable from the editor chrome (insert a new
   # image block, `index = :new`), the featured-image field (`:featured`), or an
@@ -7204,7 +7204,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # save-time `SanitizeBlocks` change), so the rendered output is safe.
   # sobelow_skip ["XSS.Raw"]
   # A `{block_id, safe_html}` per block, so the Preview tab can wrap each block
-  # individually and offer a per-block "edit on the page" jump (Theme C). The id is
+  # individually and offer a per-block "edit on the page" jump. The id is
   # the block's stable uuid (B1) — the same one the in-context editor focuses via
   # `?focus=`.
   #
@@ -7227,7 +7227,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # for the inline typed preview. Rich-text HTML is sanitized (unsaved edits
   # aren't sanitized until save).
   # Carries the stable id through (via block_field_map) so the preview can offer a
-  # per-block "edit on the page" jump (Theme C), then sanitizes unsaved rich text.
+  # per-block "edit on the page" jump, then sanitizes unsaved rich text.
   defp block_full_map(%AshPhoenix.Form{} = subform) do
     subform
     |> block_field_map("_type")
@@ -8222,7 +8222,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               {gettext("Preview")} &nearr;
               <span class="sr-only">{gettext("(opens in a new tab)")}</span>
             </.link>
-            <%!-- Theme C: visual / in-context editing is a primary mode, not a detour. --%>
+            <%!-- Visual / in-context editing is a primary mode, not a detour. --%>
             <.link
               navigate={~p"/editor/site/#{@kind}/#{@record.slug}"}
               class="btn btn-sm btn-primary"
@@ -8678,7 +8678,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 </.inputs_for>
               </div>
 
-              <%!-- Inviting empty state when a page has no blocks yet (Theme A). --%>
+              <%!-- Inviting empty state when a page has no blocks yet. --%>
               <div
                 :if={blocks_count(@form) == 0}
                 class="rounded-lg border border-dashed border-base-content/20 px-6 py-10 text-center"
@@ -8694,7 +8694,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             </div>
           </div>
 
-          <%!-- Right inspector rail (Theme A): Settings / Preview / History.
+          <%!-- Right inspector rail: Settings / Preview / History.
                 EVERY panel stays mounted so its form fields survive submit — the
                 tab toggles CSS visibility only, never `:if`. On mobile the rail
                 stacks below the content column; on desktop it's a sticky sidebar
@@ -9453,7 +9453,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
-  # Sticky editor action bar (Theme A). Sits just under the console shell header
+  # Sticky editor action bar. Sits just under the console shell header
   # (`sticky top-14`, below the shell's `top-0` z-20 bar) so Save, workflow, and
   # the live save state are always reachable no matter how long the content runs.
   attr :kind, :atom, required: true
@@ -9621,7 +9621,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp reading_minutes(0, _wpm), do: 0
   defp reading_minutes(words, wpm), do: ceil(words / wpm)
 
-  # Tab strip for the right inspector rail (Theme A). Switching is pure view
+  # Tab strip for the right inspector rail. Switching is pure view
   # state; the panels themselves stay mounted (toggled by CSS in render/1).
   # `settings_alert` raises a dot on the Settings tab so validation errors in a
   # hidden panel still get noticed.
@@ -9666,7 +9666,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     """
   end
 
-  # A titled card inside an inspector panel (Theme A). Replaces the old buried
+  # A titled card inside an inspector panel. Replaces the old buried
   # `<details>` accordions with an always-expanded, clearly-labelled section —
   # the panel's tab already gates visibility, so no per-section collapsing.
   attr :title, :string, required: true
@@ -9765,7 +9765,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # h2 so the editor keeps a single logical h1 (#174). Each block is a `{id, html}`
   # pair: it renders inside a `.kiln-block` (so it picks up the delivered typography)
   # wrapped in a hover target that reveals an "Edit" jump into the in-context editor
-  # focused on that block (Theme C — the preview is a launch point for visual
+  # focused on that block (the preview is a launch point for visual
   # editing). `@html` blocks with a nil id (legacy) render without the jump.
   attr :form, :any, required: true
   attr :html, :any, required: true

@@ -379,12 +379,10 @@ defmodule KilnCMSWeb.CalendarLive do
   defp calendar_path(month, _view),
     do: ~p"/editor/calendar?#{[month: Calendar.strftime(month, "%Y-%m")]}"
 
-  defp flat_events(events) when is_map(events) do
+  defp flat_events(events) do
     events
     |> Map.values()
     |> List.flatten()
     |> Enum.sort_by(& &1.at, DateTime)
   end
-
-  defp flat_events(_), do: []
 end

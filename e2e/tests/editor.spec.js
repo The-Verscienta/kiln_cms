@@ -240,7 +240,7 @@ test.describe("editor journey", () => {
   test("the inspector Settings tab and its fields survive per-keystroke validate patches", async ({ page }) => {
     await newDraftPage(page);
 
-    // Theme A retired the buried SEO/Organization <details> accordions in favour
+    // The buried SEO/Organization <details> accordions were retired in favour
     // of a tabbed inspector rail: the SEO & scheduling and Organization sections
     // are now always-expanded <section>s inside the "Settings" panel, and which
     // panel is visible is *server* view state (@inspector_tab), toggled by CSS.

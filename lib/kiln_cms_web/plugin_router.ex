@@ -39,7 +39,7 @@ defmodule KilnCMSWeb.PluginRouter do
     end
   end
 
-  # Paths were validated by the doctor; normalize just in case.
+  # Paths were validated by the doctor; normalize before matching.
   defp live_view_path("/" <> _ = path), do: path
   defp live_view_path(path), do: "/" <> path
 end

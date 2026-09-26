@@ -382,7 +382,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
 
-      # The editor heading now shows the entry's own title (Theme A).
+      # The editor heading now shows the entry's own title.
       assert html =~ "Old post"
       # Excerpt is a post-only field.
       assert html =~ "Excerpt"
@@ -533,8 +533,8 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert invalid =~ ~s(id="custom-field-level-errors")
       assert invalid =~ ~s(aria-invalid="true")
       # The custom-field panel now lives in the Settings inspector tab; when it
-      # holds errors, the tab raises an alert dot so a hidden panel gets noticed
-      # (Theme A). The field itself is always mounted, so the inline error shows
+      # holds errors, the tab raises an alert dot so a hidden panel gets noticed.
+      # The field itself is always mounted, so the inline error shows
       # regardless of the active tab.
       assert invalid =~ "This panel has validation errors"
     end
@@ -802,11 +802,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
-  # Modernization Theme A: the metadata that used to live in buried <details>
-  # accordions now sits in a persistent tabbed right inspector (Settings /
-  # Preview / History). The critical invariant: every panel stays mounted so
-  # form fields survive submit even when their tab isn't the active one.
-  describe "inspector rail (modernization theme A)" do
+  # Metadata that used to live in buried <details> accordions now sits in a
+  # persistent tabbed right inspector (Settings / Preview / History). The
+  # critical invariant: every panel stays mounted so form fields survive submit
+  # even when their tab isn't the active one.
+  describe "inspector rail" do
     test "renders the tab strip with Preview active by default", %{conn: conn} do
       page = draft_page(%{title: "Tabbed"})
 
@@ -870,7 +870,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
-  # Theme D field chrome: required fields carry a marker, and key fields carry
+  # Required fields carry a marker, and key fields carry
   # help text under them (Contentful-style).
   describe "field chrome (modernization D)" do
     test "title and slug are marked required, and SEO fields have help text",
@@ -1073,7 +1073,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert picker =~ ~s(phx-hook="FocusTrap")
     end
 
-    test "opens as a right-side drawer with a mode-aware title (Theme D)", %{conn: conn} do
+    test "opens as a right-side drawer with a mode-aware title", %{conn: conn} do
       page = draft_page(%{blocks: [%{type: :image, content: "", order: 0}]})
 
       {:ok, lv, _html} =
@@ -2629,7 +2629,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
-      # The editor heading shows the entry's own title now (Theme A).
+      # The editor heading shows the entry's own title now.
       assert html =~ "Generic old"
 
       lv |> form("#page-editor", form: %{title: "Generic new"}) |> render_submit()
@@ -2642,7 +2642,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, _lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/post/#{post.id}")
 
-      # The editor heading shows the entry's own title now (Theme A).
+      # The editor heading shows the entry's own title now.
       assert html =~ "A post"
       assert html =~ "Excerpt"
     end
@@ -2819,7 +2819,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
 
     # The live preview now lives in the right inspector's Preview tab, which is
-    # the default panel (Theme A supersedes the #138 mobile-disclosure layout).
+    # the default panel (supersedes the #138 mobile-disclosure layout).
     test "the preview renders in the default Preview inspector tab", %{conn: conn} do
       page =
         draft_page(%{

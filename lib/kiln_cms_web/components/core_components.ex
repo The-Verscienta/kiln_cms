@@ -670,7 +670,7 @@ defmodule KilnCMSWeb.CoreComponents do
     """
   end
 
-  # A field label with an optional required marker (Theme D field chrome).
+  # A field label with an optional required marker.
   attr :label, :string, default: nil
   attr :required, :boolean, default: false
 
@@ -687,7 +687,7 @@ defmodule KilnCMSWeb.CoreComponents do
     """
   end
 
-  # Help text under a field (Theme D field chrome).
+  # Help text under a field.
   attr :hint, :string, default: nil
 
   defp field_hint(assigns) do

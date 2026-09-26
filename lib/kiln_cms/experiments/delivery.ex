@@ -255,15 +255,10 @@ defmodule KilnCMS.Experiments.Delivery do
   # cookie that lists two would be trusting the attacker to pick.
   defp first_converted_variant(experiments, exposed) do
     experiments
-    |> Enum.sort_by(& &1.id)
+    |> Assignment.sort_by_id()
     |> Enum.find_value(fn experiment ->
-      experiment.variants
-      |> Enum.sort_by(& &1.id)
-      |> Enum.find(&(&1.id in exposed))
-      |> case do
-        nil -> nil
-        variant -> variant.id
-      end
+      variant = experiment.variants |> Assignment.sort_by_id() |> Enum.find(&(&1.id in exposed))
+      variant && variant.id
     end)
   end
 

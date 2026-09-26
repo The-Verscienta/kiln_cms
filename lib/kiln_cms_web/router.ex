@@ -605,7 +605,7 @@ defmodule KilnCMSWeb.Router do
     # Signed / provenance-verified content (#340). C2PA-*style* detached
     # manifests over fired artifacts; all 404 unless provenance is enabled.
     # `public-key` is registered before the `:type/:slug` pattern (different
-    # arity — no shadowing, but kept first for clarity).
+    # arity — no shadowing).
     get "/provenance/public-key", ProvenanceController, :public_key
     get "/provenance/:type/:slug", ProvenanceController, :manifest
     get "/provenance/:type/:slug/verify", ProvenanceController, :verify

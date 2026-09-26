@@ -149,9 +149,8 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         for mod <- plugin.field_types(), do: {plugin, mod}
       end)
 
-    # `field_type_module?/1` (below) is the one place this contract check
-    # lives — it also carries the `rescue` a non-atom `field_types()` entry
-    # needs, so this can't safely duplicate the check inline without losing it.
+    # Via `field_type_module?/1` — that helper carries the `rescue` a non-atom
+    # `field_types()` entry needs.
     contract =
       for {plugin, mod} <- declared, not field_type_module?(mod) do
         "#{plugin.name()}: field type #{inspect(mod)} does not implement Kiln.FieldType"
@@ -386,10 +385,6 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
     end)
   end
 
-  # Shared by `scalar_divergence/4` and `part_divergence/4`: both ask "does
-  # what cast/2 returned match what the widget implies", and both end with
-  # the same escape hatch — keeping that one place means a future reword
-  # can't land in one and not the other the way it already had.
   defp divergence_message(_plugin, _mod, expected, actual, _describe) when actual == expected,
     do: []
 
@@ -401,8 +396,6 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
     ]
   end
 
-  # Shared by every `rescue` in this section: same "X raised while checking Y"
-  # shape, one place to reword.
   defp raised_message(plugin, subject, action, exception) do
     "#{plugin.name()}: #{inspect(subject)} raised while checking #{action} " <>
       "(#{Exception.message(exception)})"
