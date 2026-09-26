@@ -201,8 +201,9 @@ The authoring app frame (`lib/kiln_cms_web/components/layouts.ex`):
   one the actor may not open is absent from all three. The **author** items
   (Content, Media, Taxonomy, Calendar, Translations, Analytics, …) run
   ungrouped at the top; below them an admin gets the **Configure** hub link,
-  then collapsible sections — Content model, Capture, Delivery, Integrations,
-  Organization, Account (**Your settings**, the per-user screen) — and
+  then collapsible sections — Content model, Capture, Delivery, Outbound,
+  Integrations, Organization, Account (**Your settings**, the per-user screen)
+  — and
   **Operations**, ruled off below them for the instance-wide, platform-admin
   screens (Team, Accounts, Billing, Mail, API keys, Backups, System). Every item in that
   band is `platform: true`, so for anyone else the band empties and is dropped:

@@ -490,9 +490,12 @@ defmodule KilnCMSWeb.ConsoleNav do
           }
         ]
       },
+      # What this site does elsewhere when its content changes (#1558 split
+      # these out of Integrations, which is now the site's own accounts at
+      # outside services and would otherwise run past seven items).
       %{
-        key: :integrations,
-        label: gettext("Integrations"),
+        key: :outbound,
+        label: gettext("Outbound"),
         items: [
           %{
             key: :webhooks,
@@ -512,6 +515,20 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("This site as an ActivityPub actor, and its followers."),
             keywords: ["activitypub", "fediverse", "mastodon", "followers", "actor"]
           },
+          %{
+            key: :automation,
+            label: gettext("Automation"),
+            path: ~p"/editor/automation",
+            icon: "hero-cpu-chip",
+            description: gettext("When something is published, do this."),
+            keywords: ["rules", "trigger", "reaction", "workflow", "if this then that"]
+          }
+        ]
+      },
+      %{
+        key: :integrations,
+        label: gettext("Integrations"),
+        items: [
           # A site's own object storage (#1559), with the site's other accounts
           # at outside services.
           %{
@@ -562,14 +579,6 @@ defmodule KilnCMSWeb.ConsoleNav do
             icon: "hero-sparkles",
             description: gettext("The AI account and models this site's AI features use."),
             keywords: ["llm", "model", "api key", "openai", "anthropic", "assist", "ask"]
-          },
-          %{
-            key: :automation,
-            label: gettext("Automation"),
-            path: ~p"/editor/automation",
-            icon: "hero-cpu-chip",
-            description: gettext("When something is published, do this."),
-            keywords: ["rules", "trigger", "reaction", "workflow", "if this then that"]
           }
         ]
       },

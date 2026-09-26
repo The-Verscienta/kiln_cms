@@ -503,6 +503,7 @@
   [data-nav-collapsed~="content_model"] .side-group[data-nav-group="content_model"],
   [data-nav-collapsed~="capture"] .side-group[data-nav-group="capture"],
   [data-nav-collapsed~="delivery"] .side-group[data-nav-group="delivery"],
+  [data-nav-collapsed~="outbound"] .side-group[data-nav-group="outbound"],
   [data-nav-collapsed~="integrations"] .side-group[data-nav-group="integrations"],
   [data-nav-collapsed~="organization"] .side-group[data-nav-group="organization"],
   [data-nav-collapsed~="account"] .side-group[data-nav-group="account"],
