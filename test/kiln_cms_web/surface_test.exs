@@ -29,7 +29,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor/overview /editor/pages/:id /editor/posts/:id /editor/presentation/:type/:slug
     /editor/preview/:kind/:id /editor/redirects /editor/releases /editor/releases/:id
     /editor/search /editor/settings /editor/site-ai /editor/site-mail /editor/site-push
-    /editor/site/:type/:slug /editor/slugs
+    /editor/site-search /editor/site/:type/:slug /editor/slugs
     /editor/social
     /editor/site-storage /editor/system /editor/tasks /editor/taxonomy /editor/team
     /editor/translations

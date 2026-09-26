@@ -71,6 +71,45 @@ carries the reasoning.
     subscriptions and says so on the page. It never signs with the deployment's
     key instead.
 
+<a id="a-site-can-index-its-content-into-its-own-meilisearch-set-from-the-console"></a>
+
+- **A site can index its content into its own Meilisearch, set from the console.**
+  `/editor/site-search` (Configure → Integrations → Search instance) lets a
+  site admin set the URL, API key and index their site's published content is
+  indexed into. No `MEILI_*` variables and no redeploy (#1558). The `MEILI_*`
+  variables are unchanged: they are the instance for every site that hasn't
+  set its own. The third integration #1322 moves out of the environment,
+  built the way the site SMTP relay was:
+
+  - **Says what leaves.** The page states, above the form, that every
+    published document an anonymous visitor could read — full text included —
+    is sent to that URL.
+  - **One resolver.** `KilnCMS.Search.Meilisearch.SiteInstance` is asked by
+    the indexing jobs, by `Meilisearch.search/2` and by the publish path's
+    enqueue gate, so indexing and search can't disagree about a site's
+    instance. The site's requests are built from its row alone; nothing of the
+    operator's URL, key or index goes with them.
+  - **Key encrypted.** Stored with `KilnCMS.Keys.Vault` (a
+    `Vault.Ciphertext` column, so `mix kiln.vault.reencrypt` rotates it),
+    never shown again, kept on a blank save, and with no env-var or file
+    source.
+  - **Fails closed, one direction per axis.** If the row can't be read or the
+    key can't be decrypted, *indexing* is held and retried for ~16 hours
+    (never written into the operator's instance), and *search* returns an
+    error without a request so the caller uses the built-in Postgres search
+    (never the operator's index, which holds other sites' content).
+  - **SSRF-checked.** HTTPS only, and refused if it resolves to a private,
+    loopback, link-local or metadata address — at save, and on every request,
+    which goes through `KilnCMS.SafeFetch` (pinned, no redirects).
+    `SafeFetch.request/3` is new, for PUT/PATCH/DELETE.
+  - **Reindexes on change.** Every save, switch-off or removal enqueues a full
+    reindex of the site into the instance it now uses, and the page counts the
+    jobs left. A reindex that succeeds releases jobs held behind a broken
+    instance instead of leaving them to their backoff.
+
+  `MeilisearchWorker` now retries up to 9 times over ~16 hours (was 3), for
+  the operator's instance too.
+
 <a id="a-site-can-keep-its-uploads-in-its-own-object-storage-bucket-set-from-the-console"></a>
 
 - **A site can keep its uploads in its own object storage bucket, set from the

@@ -621,6 +621,25 @@ reviewers and not to the admin. `KilnCMS.Push.Keys` reads the row as the
 system, for the push worker (which has no actor) and for a reviewer
 subscribing on `/editor/settings`, who is not the site's admin.
 
+## Search instance — `SiteMeilisearch` (#1558)
+
+| Resource | read | writes |
+|---|---|---|
+| `SiteMeilisearch` (`read`) | admin only | admin only (`save`, `update`, `destroy`) |
+
+A site's own Meilisearch instance — URL, API key and index — at
+`/editor/site-search`. Org-admin on both sides, like every per-site settings
+row; a read by anyone else is filtered to nothing. The indexing jobs and
+`Meilisearch.search/2` read it as the system
+(`KilnCMS.Search.Meilisearch.SiteInstance`), tenant-scoped to the one site.
+
+As with the site relay, the stricter parts are not policies: the key is
+encrypted, never read back into the form, and has no env-var or file source;
+the URL must be HTTPS and is refused if it resolves to a private, loopback,
+link-local or metadata address, at save and on every request (through
+`KilnCMS.SafeFetch`). "Reindex now" re-asks the update policy before
+enqueueing (#1166).
+
 ## AI provider — `SiteAiProvider` (#1557)
 
 | Resource | read | writes |

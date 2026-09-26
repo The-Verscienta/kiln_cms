@@ -65,6 +65,9 @@ Every summary line below that was shortened links to its own entry there.
   console.**
   ([#1560](https://github.com/The-Verscienta/kiln_cms/issues/1560) · [long form](docs/changelog/unreleased.md#a-site-can-sign-its-push-notifications-with-its-own-key-generated-in-the-console))
 
+- **A site can index its content into its own Meilisearch, set from the console.**
+  ([#1558](https://github.com/The-Verscienta/kiln_cms/issues/1558) · [long form](docs/changelog/unreleased.md#a-site-can-index-its-content-into-its-own-meilisearch-set-from-the-console))
+
 - **A site can keep its uploads in its own object storage bucket, set from the
   console.**
   ([#1559](https://github.com/The-Verscienta/kiln_cms/issues/1559) · [long form](docs/changelog/unreleased.md#a-site-can-keep-its-uploads-in-its-own-object-storage-bucket-set-from-the-console))

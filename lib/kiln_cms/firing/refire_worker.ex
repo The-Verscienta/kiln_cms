@@ -90,7 +90,7 @@ defmodule KilnCMS.Firing.RefireWorker do
       |> Oban.insert()
     end
 
-    if KilnCMS.Search.Meilisearch.enabled?() do
+    if KilnCMS.Search.Meilisearch.enabled_for?(org_id) do
       %{"org_id" => org_id, "op" => meili_op(document), "type" => to_string(type), "id" => id}
       |> KilnCMS.Search.MeilisearchWorker.new()
       |> Oban.insert()
