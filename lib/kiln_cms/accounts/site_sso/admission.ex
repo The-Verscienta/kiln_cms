@@ -227,13 +227,14 @@ defmodule KilnCMS.Accounts.SiteSso.Admission do
   defp create_member(org_id, email, claims) do
     name = if is_binary(claims["name"]), do: claims["name"]
 
-    # `authorize?: false` on both: the system-only provisioning action,
-    # reachable no other way (see `User`'s policies), for an address that
-    # passed rules 1-2 and has no account yet; and the membership create, an
-    # admin action, granting that new account `:viewer` on the one site whose
-    # provider vouched for it, and nothing more.
+    # `authorize?: false`: the system-only provisioning action, reachable no
+    # other way (see `User`'s policies), for an address that passed rules 1-2
+    # and has no account yet.
     with {:ok, user} <-
            Accounts.register_with_site_sso(%{email: email, name: name}, authorize?: false),
+         # `authorize?: false`: membership creation is an admin action; this is
+         # the system granting the new account `:viewer` on the one site whose
+         # provider vouched for it, and nothing more.
          {:ok, _membership} <-
            Accounts.create_org_membership(
              %{user_id: user.id, organization_id: org_id, role: :viewer},

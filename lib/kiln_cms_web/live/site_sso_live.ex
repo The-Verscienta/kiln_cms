@@ -360,12 +360,12 @@ defmodule KilnCMSWeb.SiteSsoLive do
             <div class="flex flex-wrap items-center justify-between gap-3">
               <div class="flex items-center gap-2">
                 <span class="font-medium">{domain.domain}</span>
-                <span :if={domain.verified_at} class="badge badge-success">
+                <.badge :if={domain.verified_at} variant="success">
                   {gettext("Verified")}
-                </span>
-                <span :if={is_nil(domain.verified_at)} class="badge">
+                </.badge>
+                <.badge :if={is_nil(domain.verified_at)}>
                   {gettext("Not verified")}
-                </span>
+                </.badge>
               </div>
               <div class="flex gap-2">
                 <.button
