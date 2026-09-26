@@ -732,7 +732,7 @@ because other files cite them by number.
    the default is same-origin (#562), a form's list resolves form -> org ->
    deployment in `KilnCMS.Forms.EmbedPolicy` (#1131), and the operator ceiling
    is `KilnCMS.Forms.EmbedCeiling` behind `EMBED_ORIGINS_LOCKED`
-   (`config/runtime/cross_origin.exs:37`, #1133). What remains is a stated
+   (`config/runtime/cross_origin.exs`, #1133). What remains is a stated
    choice: an org admin decides who may frame that org's own forms, which grants
    nothing across the tenant boundary, and an operator who disagrees has a
    switch. Decided alongside #1547: `EMBED_ORIGINS_LOCKED` also defaults on
