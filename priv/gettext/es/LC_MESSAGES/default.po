@@ -1188,12 +1188,8 @@ msgstr "Las sugerencias con IA no están configuradas."
 msgid "API"
 msgstr "API"
 
-#: lib/kiln_cms_web/live/site_search_live.ex
-#, elixir-autogen, elixir-format
-msgid "API key"
-msgstr "Clave de API"
-
 #: lib/kiln_cms_web/live/site_ai_live.ex
+#: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "API key"
 msgstr "Clave de API"
@@ -9667,6 +9663,11 @@ msgstr "Regenerar variantes"
 msgid "Regeneration queued — renames apply in the background."
 msgstr "Regeneración puesta en cola: los cambios de nombre se aplican en segundo plano."
 
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Region"
+msgstr "Región"
+
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reindex now"
@@ -9676,11 +9677,6 @@ msgstr "Reindexar ahora"
 #, elixir-autogen, elixir-format
 msgid "Reindexing this site."
 msgstr "Reindexando este sitio."
-
-#: lib/kiln_cms_web/live/site_storage_live.ex
-#, elixir-autogen, elixir-format
-msgid "Region"
-msgstr "Región"
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -9991,15 +9987,15 @@ msgid_plural "Removed the tag from %{count} items."
 msgstr[0] "Se quitó la etiqueta de %{count} elemento."
 msgstr[1] "Se quitó la etiqueta de %{count} elementos."
 
-#: lib/kiln_cms_web/live/site_search_live.ex
-#, elixir-autogen, elixir-format
-msgid "Removed. This site no longer uses its own instance."
-msgstr "Quitada. Este sitio ya no usa su propia instancia."
-
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Removed. New uploads go to the deployment's storage again; files already in your bucket are still read from it."
 msgstr "Eliminado. Las nuevas subidas vuelven al almacenamiento del despliegue; los archivos que ya están en tu bucket se siguen leyendo desde él."
+
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "Removed. This site no longer uses its own instance."
+msgstr "Quitada. Este sitio ya no usa su propia instancia."
 
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #, elixir-autogen, elixir-format
@@ -12443,15 +12439,15 @@ msgstr "El proveedor de la instalación (%{provider})"
 msgid "The deployment's secret key has changed since it was generated. Until you rotate it, this site's notifications are held, not sent."
 msgstr "La clave secreta del despliegue ha cambiado desde que se generó. Hasta que la rote, las notificaciones de este sitio quedan retenidas, no se envían."
 
-#: lib/kiln_cms_web/live/site_search_live.ex
-#, elixir-autogen, elixir-format
-msgid "The deployment's secret key has changed since it was saved. Until you enter it again, this site's indexing is held and retried, and search uses the built-in search."
-msgstr "La clave secreta del despliegue ha cambiado desde que se guardó. Hasta que la vuelvas a introducir, la indexación de este sitio queda retenida y se reintenta, y la búsqueda usa la búsqueda integrada."
-
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #, elixir-autogen, elixir-format
 msgid "The deployment's secret key has changed since it was saved. Until you enter it again, this site's AI requests are refused, not sent anywhere else."
 msgstr "La clave secreta de la instalación ha cambiado desde que se guardó. Hasta que la vuelvas a introducir, las solicitudes de IA de este sitio se rechazan y no se envían a ningún otro lugar."
+
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "The deployment's secret key has changed since it was saved. Until you enter it again, this site's indexing is held and retried, and search uses the built-in search."
+msgstr "La clave secreta del despliegue ha cambiado desde que se guardó. Hasta que la vuelvas a introducir, la indexación de este sitio queda retenida y se reintenta, y la búsqueda usa la búsqueda integrada."
 
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -12662,12 +12658,8 @@ msgstr "Falta el aviso legal obligatorio. Añádalo literalmente: «%{disclaimer
 msgid "The same list is available on the server as %{list}, and %{doctor} verifies an install."
 msgstr "La misma lista está disponible en el servidor con %{list}, y %{doctor} verifica una instalación."
 
-#: lib/kiln_cms_web/live/site_search_live.ex
-#, elixir-autogen, elixir-format
-msgid "The saved API key can't be read. Re-enter it."
-msgstr "No se puede leer la clave de API guardada. Vuelve a introducirla."
-
 #: lib/kiln_cms_web/live/site_ai_live.ex
+#: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "The saved API key can't be read. Re-enter it."
 msgstr "La clave de API guardada no se puede leer. Vuelve a introducirla."
@@ -12682,15 +12674,15 @@ msgstr "No se puede leer la contraseña guardada. Vuelve a introducirla."
 msgid "The saved private key can't be read. Rotate it."
 msgstr "No se puede leer la clave privada guardada. Rótela."
 
-#: lib/kiln_cms_web/live/site_search_live.ex
-#, elixir-autogen, elixir-format
-msgid "The search instance could not be saved."
-msgstr "No se pudo guardar la instancia de búsqueda."
-
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "The saved secret access key can't be read. Re-enter it."
 msgstr "No se puede leer la clave de acceso secreta guardada. Vuelve a introducirla."
+
+#: lib/kiln_cms_web/live/site_search_live.ex
+#, elixir-autogen, elixir-format
+msgid "The search instance could not be saved."
+msgstr "No se pudo guardar la instancia de búsqueda."
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
