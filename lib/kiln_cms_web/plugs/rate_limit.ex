@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
 
   use Gettext, backend: KilnCMSWeb.Gettext
 
+  alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.RateLimit
 
@@ -28,7 +29,11 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
   """
   @spec deny(Plug.Conn.t(), non_neg_integer()) :: Plug.Conn.t()
   def deny(conn, retry_after_ms) do
-    retry_after_s = div(retry_after_ms, 1000)
+    # Rounded up: `div/2` told a client refused in the last second of
+    # a fixed window to retry in 0 seconds — back into the closed window. The
+    # docs publisher, which honours the header, spent all its retries in a few
+    # milliseconds and failed the v0.11.0 sync a moment before the reopen.
+    retry_after_s = AccountThrottle.retry_after_seconds(retry_after_ms)
 
     conn
     |> put_resp_header("retry-after", Integer.to_string(retry_after_s))
