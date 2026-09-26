@@ -12876,6 +12876,11 @@ msgstr "La clave de notificaciones de este sitio ha cambiado. Vuelva a activar l
 msgid "This site's phrases"
 msgstr "Las expresiones de este sitio"
 
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's provider (%{provider})"
+msgstr "El proveedor de este sitio (%{provider})"
+
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site's recent permanent failures, and the addresses its relay rejected that this site has stopped mailing as a result."
@@ -12885,11 +12890,6 @@ msgstr "Los fallos de envío permanentes recientes de este sitio, y las direccio
 #, elixir-autogen, elixir-format
 msgid "This site's relay said these addresses don't exist, so this site's mail skips them. It stops only this site's mail: other sites, and sign-in and password-reset mail, still reach them. Remove one to let this site mail it again."
 msgstr "El relé de este sitio indicó que estas direcciones no existen, así que el correo de este sitio las omite. Solo afecta al correo de este sitio: los demás sitios, y los correos de inicio de sesión y de restablecimiento de contraseña, siguen llegándoles. Quita una para que este sitio vuelva a escribirle."
-
-#: lib/kiln_cms_web/live/site_ai_live.ex
-#, elixir-autogen, elixir-format
-msgid "This site's provider (%{provider})"
-msgstr "El proveedor de este sitio (%{provider})"
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format

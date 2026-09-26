@@ -12876,6 +12876,11 @@ msgstr ""
 msgid "This site's phrases"
 msgstr ""
 
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's provider (%{provider})"
+msgstr ""
+
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site's recent permanent failures, and the addresses its relay rejected that this site has stopped mailing as a result."
@@ -12884,11 +12889,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site's relay said these addresses don't exist, so this site's mail skips them. It stops only this site's mail: other sites, and sign-in and password-reset mail, still reach them. Remove one to let this site mail it again."
-msgstr ""
-
-#: lib/kiln_cms_web/live/site_ai_live.ex
-#, elixir-autogen, elixir-format
-msgid "This site's provider (%{provider})"
 msgstr ""
 
 #: lib/kiln_cms_web/live/compliance_live.ex
