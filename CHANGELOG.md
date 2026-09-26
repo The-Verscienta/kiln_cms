@@ -74,7 +74,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#1336](https://github.com/The-Verscienta/kiln_cms/issues/1336) · [long form](docs/changelog/unreleased.md#an-open-calendar-no-longer-re-queries-once-per-write-during-a-bulk-import))
 
 - **Sign-in and the other account pages show the site's own name and logo.**
-  ([long form](docs/changelog/unreleased.md#sign-in-and-the-other-account-pages-show-the-sites-own-name-and-logo))
+  ([#1613](https://github.com/The-Verscienta/kiln_cms/pull/1613) · [long form](docs/changelog/unreleased.md#sign-in-and-the-other-account-pages-show-the-sites-own-name-and-logo))
 
 ### Security
 

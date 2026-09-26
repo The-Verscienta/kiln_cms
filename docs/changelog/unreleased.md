@@ -150,6 +150,7 @@ carries the reasoning.
   `live_session` does not de-duplicate. On a multi-org install with
   `TENANT_STRICT_HOST` on, a connected mount of these pages from an unknown host
   is now refused with the same 404 the HTTP request already got.
+  ([#1613](https://github.com/The-Verscienta/kiln_cms/pull/1613))
 
 ## Security
 
