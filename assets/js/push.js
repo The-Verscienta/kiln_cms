@@ -65,11 +65,26 @@ function deviceLabel() {
   return browser ? `${platform} · ${browser}` : platform
 }
 
-export const PushToggle = {
-  mounted() {
-    this.applicationServerKey = this.el.dataset.vapidKey
+// Was `subscription` made with `key` (base64url)? A browser subscription is
+// bound to the `applicationServerKey` it was created with, and a site that
+// generated or rotated its own key (#1560) hands out a different one: the old
+// subscription is either signed with the deployment's key or already dropped by
+// the rotation, so this device is not on the key this page offers. Browsers
+// that do not expose `options.applicationServerKey` get the benefit of the doubt.
+function madeWith(subscription, key) {
+  const used = subscription.options && subscription.options.applicationServerKey
+  return !used || bufToB64u(used) === key
+}
 
-    if (!supported() || !this.applicationServerKey) {
+export const PushToggle = {
+  // Read on use, not cached at mount: the server replaces it when the site's
+  // key changed under an open page.
+  key() {
+    return this.el.dataset.vapidKey
+  },
+
+  mounted() {
+    if (!supported() || !this.key()) {
       // Tell the server so it can explain *why* rather than showing a toggle
       // that silently does nothing.
       this.pushEvent("push_unsupported", {})
@@ -91,7 +106,7 @@ export const PushToggle = {
     try {
       const subscription = await this.current()
       this.pushEvent("push_state", {
-        subscribed: !!subscription,
+        subscribed: !!subscription && madeWith(subscription, this.key()),
         permission: Notification.permission
       })
     } catch (_error) {
@@ -119,11 +134,18 @@ export const PushToggle = {
 
     try {
       const ready = await registration()
+      const key = this.key()
+
+      // `subscribe` rejects outright when the browser already holds a
+      // subscription made with a different key, so drop that one first.
+      const existing = await ready.pushManager.getSubscription()
+      if (existing && !madeWith(existing, key)) await existing.unsubscribe()
+
       const subscription = await ready.pushManager.subscribe({
         // Required by every browser for a payload-bearing push, and true: every
         // push this app sends results in a visible notification.
         userVisibleOnly: true,
-        applicationServerKey: new Uint8Array(b64uToBuf(this.applicationServerKey))
+        applicationServerKey: new Uint8Array(b64uToBuf(key))
       })
 
       const keys = subscription.toJSON().keys || {}
