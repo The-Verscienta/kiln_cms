@@ -54,10 +54,22 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **A site whose code-injection snippet opens a websocket to its vendor must
+  now list that `wss://` origin under Connections.**
+  ([long form](docs/changelog/unreleased.md#a-site-whose-code-injection-snippet-opens-a-websocket-to-its-vendor-must))
+
 ### Fixed
 
 - **A 429's `retry-after` is rounded up, never 0.**
   ([long form](docs/changelog/unreleased.md#a-429s-retry-after-is-rounded-up-never-0))
+
+### Security
+
+- **The browser CSP's `connect-src` is `'self'` alone — no websocket to any
+  other host.**
+  ([long form](docs/changelog/unreleased.md#the-browser-csps-connect-src-is-self-alone-no-websocket-to-any))
 
 ## [0.11.0] - 2026-09-26
 

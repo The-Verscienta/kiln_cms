@@ -77,11 +77,14 @@ needs to run:
 | Field | Adds to | Use for |
 |-------|---------|---------|
 | Scripts | `script-src` | the host your `<script src>` loads from |
-| Connections | `connect-src` | where the script `fetch`es / beacons to |
+| Connections | `connect-src` | where the script `fetch`es / beacons to, and any websocket it opens (`wss://…`) |
 | Images | `img-src` | tracking pixels, remote badges |
 
 One origin per line, e.g. `https://plausible.io`. A leading `*.` and a port are
-allowed. Keyword sources (`'unsafe-inline'`, `'unsafe-eval'`, a bare `*`,
+allowed. Connections alone also takes a `wss://` origin: the stock policy's
+`connect-src` is `'self'` only, and an `https://` source does not cover a
+websocket to the same host, so a chat widget that talks to
+`wss://relay.widget.example` needs that exact origin listed. Keyword sources (`'unsafe-inline'`, `'unsafe-eval'`, a bare `*`,
 `data:`) are **refused** — each of them would switch off the policy the list
 exists to extend. Plain `http://` is refused except for `localhost` /
 `127.0.0.1`, so a local Matomo works in development without a published site

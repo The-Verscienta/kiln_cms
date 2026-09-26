@@ -23,6 +23,14 @@ defmodule KilnCMS.CMS.Validations.CspOrigins do
   mixed-content error at best and a tap on every reader at worst — but a
   developer pointing at a local Matomo needs it to work.
 
+  `connect-src` alone also takes `wss://host` (and `ws://` for the same two
+  local hosts). The stock policy's `connect-src` is `'self'` only (#1615), and
+  an `https://` source does not admit a `wss://` URL — CSP3's scheme matching
+  upgrades `http` to `https` and `ws` to `wss`, never `https` to `wss` — so
+  without this a snippet that opens a websocket to its vendor (a chat widget,
+  say) would have no way to be allowed. A websocket origin in any other
+  directive grants nothing a page can use, so it is refused there.
+
   ## A wildcard needs something to be a wildcard *of*
 
   `https://*.com` parses as "leftmost label wildcarded" and is syntactically a
@@ -67,9 +75,12 @@ defmodule KilnCMS.CMS.Validations.CspOrigins do
 
   # Two alternatives rather than an optional `*.` prefix, so the wildcard branch
   # can carry its own "at least two labels" rule — see above.
-  @origin ~r"\Ahttps?://(?:#{@label}(?:\.#{@label})*|\*(?:\.#{@label}){2,})(?::\d{1,5})?\z"i
+  @origin ~r"\A(?:https?|wss?)://(?:#{@label}(?:\.#{@label})*|\*(?:\.#{@label}){2,})(?::\d{1,5})?\z"i
 
   @plaintext_ok ~w(localhost 127.0.0.1)
+
+  # The one directive a websocket URL is fetched under.
+  @socket_field :connect_src
 
   @impl true
   def validate(changeset, opts, _context) do
@@ -102,7 +113,7 @@ defmodule KilnCMS.CMS.Validations.CspOrigins do
   def describe(_opts), do: [message: "must be an https origin", vars: []]
 
   defp check(field, origins) do
-    case Enum.find(origins, &(not valid?(&1))) do
+    case Enum.find(origins, &(not valid_origin?(&1, field))) do
       nil -> {:cont, :ok}
       bad -> {:halt, error(field, bad)}
     end
@@ -117,21 +128,27 @@ defmodule KilnCMS.CMS.Validations.CspOrigins do
   predicate rather than only the action is what keeps the two independent.
   """
   @spec valid_origin?(term()) :: boolean()
-  def valid_origin?(origin) when is_binary(origin) do
-    Regex.match?(@origin, origin) and scheme_ok?(origin)
+  def valid_origin?(origin), do: valid_origin?(origin, nil)
+
+  @doc """
+  Whether one string is an acceptable CSP source for `field`. Only
+  `:connect_src` admits a `wss://` (or local `ws://`) origin — see the
+  moduledoc.
+  """
+  @spec valid_origin?(term(), atom() | nil) :: boolean()
+  def valid_origin?(origin, field) when is_binary(origin) do
+    Regex.match?(@origin, origin) and scheme_ok?(origin, field == @socket_field)
   end
 
-  def valid_origin?(_origin), do: false
+  def valid_origin?(_origin, _field), do: false
 
-  defp valid?(origin), do: valid_origin?(origin)
+  defp scheme_ok?("https://" <> _rest, _socket?), do: true
+  defp scheme_ok?("http://" <> rest, _socket?), do: local?(rest)
+  defp scheme_ok?("wss://" <> _rest, socket?), do: socket?
+  defp scheme_ok?("ws://" <> rest, socket?), do: socket? and local?(rest)
+  defp scheme_ok?(_origin, _socket?), do: false
 
-  defp scheme_ok?("https://" <> _rest), do: true
-
-  defp scheme_ok?("http://" <> rest) do
-    rest |> String.split(":") |> List.first() |> Kernel.in(@plaintext_ok)
-  end
-
-  defp scheme_ok?(_origin), do: false
+  defp local?(rest), do: rest |> String.split(":") |> List.first() |> Kernel.in(@plaintext_ok)
 
   defp error(field, bad) do
     {:error,
