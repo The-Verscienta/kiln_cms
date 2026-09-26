@@ -120,8 +120,12 @@ defmodule KilnCMSWeb.GraphqlCrossOrgTest do
     %{a: a, b: b, slugs: slugs}
   end
 
-  defp gql(conn, host, query, variables) do
-    %{conn | host: host}
+  # A fresh conn — so a fresh peer address (`ConnCase.build_conn/0`) — per
+  # request: the positive control alone sends 62, past the shipped `:gql`
+  # budget of 60 a minute per address, and the suite's raised test limit is
+  # application env another module may be holding at a different value.
+  defp gql(host, query, variables) do
+    %{build_conn() | host: host}
     |> put_req_header("content-type", "application/json")
     |> post("/gql", Jason.encode!(%{query: query, variables: variables}))
   end
@@ -209,13 +213,13 @@ defmodule KilnCMSWeb.GraphqlCrossOrgTest do
 
   describe "an anonymous /gql query on org B's host" do
     test "finds each org's own content on its own host (the positive control)",
-         %{conn: conn, a: a, b: b, slugs: slugs} do
+         %{a: a, b: b, slugs: slugs} do
       # Collected rather than asserted one by one, so a failure names every
       # field that broke, not just the first.
       misses =
         for site <- [a, b],
             {name, query, vars, expected} <- cases(site, slugs),
-            conn = gql(conn, host(site.org), query, vars),
+            conn = gql(host(site.org), query, vars),
             conn.status != 200 or conn.resp_body =~ ~s("errors") or
               not Enum.all?(expected, &String.contains?(conn.resp_body, &1)),
             do: "#{name} on #{site.marker}'s host: #{conn.status} #{conn.resp_body}"
@@ -224,11 +228,11 @@ defmodule KilnCMSWeb.GraphqlCrossOrgTest do
     end
 
     test "returns none of org A's published content, from any root field",
-         %{conn: conn, a: a, b: b, slugs: slugs} do
+         %{a: a, b: b, slugs: slugs} do
       # A's queries (A's ids, A's type definition, A's search term) sent to B.
       failures =
         for {name, query, vars, _} <- cases(a, slugs),
-            conn = gql(conn, host(b.org), query, vars),
+            conn = gql(host(b.org), query, vars),
             conn.status != 200 or conn.resp_body =~ ~s("errors") or
               leaks(conn.resp_body, a) != [],
             do: "#{name}: #{conn.status} #{conn.resp_body}"
@@ -238,13 +242,13 @@ defmodule KilnCMSWeb.GraphqlCrossOrgTest do
     end
 
     test "a single lookup by a slug both orgs use answers with B's record, not A's",
-         %{conn: conn, a: a, b: b, slugs: slugs} do
+         %{a: a, b: b, slugs: slugs} do
       for {field, slug, record} <- [
             {"postBySlug", slugs.post, :post},
             {"pageBySlug", slugs.page, :page}
           ] do
         query = ~s|query($s: String!) { #{field}(slug: $s, locale: "en") { id title } }|
-        body = conn |> gql(host(b.org), query, %{"s" => slug}) |> json_response(200)
+        body = gql(host(b.org), query, %{"s" => slug}) |> json_response(200)
 
         assert %{"data" => %{^field => %{"id" => id}}} = body
         assert id == Map.fetch!(b, record).id
@@ -252,7 +256,7 @@ defmodule KilnCMSWeb.GraphqlCrossOrgTest do
       end
     end
 
-    test "cannot reach an A-only record by naming its id or slug", %{conn: conn, a: a, b: b} do
+    test "cannot reach an A-only record by naming its id or slug", %{a: a, b: b} do
       only_a =
         %{title: "#{a.marker} solo", slug: "solo-#{System.unique_integer([:positive])}"}
         |> CMS.create_post!(actor: admin(), tenant: a.org)
@@ -261,13 +265,13 @@ defmodule KilnCMSWeb.GraphqlCrossOrgTest do
       by_slug = ~s|query($s: String!) { postBySlug(slug: $s, locale: "en") { id } }|
 
       assert %{"data" => %{"postBySlug" => nil}} =
-               conn |> gql(host(b.org), by_slug, %{"s" => only_a.slug}) |> json_response(200)
+               gql(host(b.org), by_slug, %{"s" => only_a.slug}) |> json_response(200)
 
       by_id =
         "query($id: ID!) { publishedPosts(filter: {id: {eq: $id}}) { results { id } } }"
 
       assert %{"data" => %{"publishedPosts" => %{"results" => []}}} =
-               conn |> gql(host(b.org), by_id, %{"id" => only_a.id}) |> json_response(200)
+               gql(host(b.org), by_id, %{"id" => only_a.id}) |> json_response(200)
     end
   end
 
@@ -329,21 +333,21 @@ defmodule KilnCMSWeb.GraphqlCrossOrgTest do
     @list "{ publishedPosts { results { id title } } }"
 
     test "is refused once a second org exists and TENANT_STRICT_HOST is unset (#1606)",
-         %{conn: conn, a: a, unknown: unknown} do
+         %{a: a, unknown: unknown} do
       Application.put_env(:kiln_cms, :tenant_strict_host, :auto)
       OrgCount.put(:multi)
 
-      conn = gql(conn, unknown, @list, %{})
+      conn = gql(unknown, @list, %{})
 
       assert conn.status == 404
       assert leaks(conn.resp_body, a) == []
     end
 
     test "with strict matching forced off, is the default org's site — still none of A's",
-         %{conn: conn, a: a, b: b, unknown: unknown} do
+         %{a: a, b: b, unknown: unknown} do
       Application.put_env(:kiln_cms, :tenant_strict_host, false)
 
-      body = conn |> gql(unknown, @list, %{}) |> json_response(200)
+      body = gql(unknown, @list, %{}) |> json_response(200)
       encoded = Jason.encode!(body)
 
       assert %{"data" => %{"publishedPosts" => %{"results" => _}}} = body
