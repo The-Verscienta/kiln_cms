@@ -23,15 +23,28 @@ defmodule KilnCMS.Seo do
   operator actually made; `KilnCMS.Application` logs a warning at boot when a
   third-party provider is configured, and the editor shows a standing notice.
 
-  API keys are never read or stored by Kiln: `req_llm` resolves them itself
-  from its own config and environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-  …), so no new secret enters Kiln's config, database or release env.
+  The operator's API keys are never read or stored by Kiln: `req_llm`
+  resolves them itself from its own config and environment
+  (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …).
+
+  ## A site's own provider (#1557)
+
+  A site can bring its own provider, key and model at `/editor/site-ai`. Every
+  call resolves the site's route first (`route/1`, through
+  `KilnCMS.LLM.SiteProvider`): a site with its own provider switched on uses it
+  and nothing of the operator's, a site without one uses the configuration
+  above, and a site whose provider is set but unusable is refused with
+  `{:error, {:site_provider, reason}}` rather than sent to the operator's.
+  The zero-arity `enabled?/0`, `egress?/0` and friends describe the operator's
+  configuration only; per-site screens use `summary/1`.
   """
 
   require Logger
 
   alias KilnCMS.LLM
   alias KilnCMS.LLM.Budget
+  alias KilnCMS.LLM.Route
+  alias KilnCMS.LLM.SiteProvider
   alias KilnCMS.Seo.Document
   alias KilnCMS.Seo.Draft
 
@@ -81,14 +94,56 @@ defmodule KilnCMS.Seo do
   @spec max_input_chars() :: pos_integer()
   def max_input_chars, do: cfg(:max_input_chars, 12_000)
 
+  @doc """
+  Where drafting goes for the site `org_id`: `{:ok, generator, route}`,
+  `{:error, :disabled}` when neither the site nor the operator has it on, or
+  `{:error, {:site_provider, reason}}` when the site's own provider is set but
+  unusable — refused, never sent to the operator's (see
+  `KilnCMS.LLM.SiteProvider`).
+  """
+  @spec route(term()) ::
+          {:ok, module(), Route.t()} | {:error, :disabled | {:site_provider, term()}}
+  def route(org_id) do
+    case SiteProvider.resolve(org_id, :seo) do
+      :operator -> if enabled?(), do: {:ok, generator(), operator_route()}, else: disabled()
+      :off -> disabled()
+      {:site, route} -> {:ok, KilnCMS.Seo.Generator.ReqLLM, route}
+      {:error, reason} -> {:error, {:site_provider, reason}}
+    end
+  end
+
+  defp disabled, do: {:error, :disabled}
+
+  @doc false
+  @spec operator_route() :: Route.t()
+  def operator_route, do: Route.operator(model())
+
+  @doc """
+  What the editor needs to know about drafting on the site `org_id`, from one
+  resolve: whether to offer it, whether it leaves the deployment, and where to.
+
+  A site whose own provider is set but unusable reports `enabled?: true`, so
+  the control is there to click and the refusal can say what to fix.
+  """
+  @spec summary(Ash.UUID.t() | nil) :: LLM.summary()
+  def summary(org_id), do: LLM.summary(route(org_id), cfg(:base_url, nil))
+
   @spec request_opts() :: keyword()
-  def request_opts do
-    [
+  def request_opts, do: request_opts(operator_route())
+
+  @doc """
+  Request options for `route`. The operator's `base_url` is added only to the
+  operator's route: a site's route carries its own endpoint.
+  """
+  @spec request_opts(Route.t()) :: keyword()
+  def request_opts(%Route{source: source}) do
+    opts = [
       temperature: cfg(:temperature, 0.3),
       max_tokens: cfg(:max_tokens, 700),
       receive_timeout: cfg(:timeout_ms, 20_000)
     ]
-    |> put_base_url(cfg(:base_url, nil))
+
+    if source == :operator, do: put_base_url(opts, cfg(:base_url, nil)), else: opts
   end
 
   # `base_url` has to reach the request, not just `egress?/0`. Read only by the
@@ -115,7 +170,9 @@ defmodule KilnCMS.Seo do
   rather than taking the caller down — the same posture `KilnCMS.Ask` takes.
 
   `opts` accepts `:org_id` and `:user_id` for rate limiting; each bucket is
-  skipped when its id isn't supplied (a mix task or a test).
+  skipped when its id isn't supplied (a mix task or a test). `:org_id` also
+  picks the site's own provider when it has one (`route/1`), and a site whose
+  provider is set but unusable gets `{:error, {:site_provider, reason}}`.
 
   `unattended?: true` marks a call nobody is waiting on — an automation
   reaction rather than an editor's click. Those stop once the org has spent
@@ -126,15 +183,13 @@ defmodule KilnCMS.Seo do
   """
   @spec draft(Document.t(), keyword()) :: {:ok, Draft.t()} | {:error, term()}
   def draft(%Document{} = document, opts \\ []) do
-    with :ok <- check_enabled(),
+    with {:ok, generator, route} <- route(opts[:org_id]),
          :ok <- check_length(document) do
       Budget.charge("seo", opts[:org_id], opts[:user_id], budget_limits(opts), fn ->
-        run(document, opts)
+        run(generator, route, document, opts)
       end)
     end
   end
-
-  defp check_enabled, do: if(enabled?(), do: :ok, else: {:error, :disabled})
 
   defp budget_limits(opts) do
     [
@@ -161,17 +216,18 @@ defmodule KilnCMS.Seo do
     if words >= min_words(), do: :ok, else: {:error, :too_short}
   end
 
-  defp run(document, opts) do
+  defp run(generator, route, document, opts) do
     started = System.monotonic_time()
-    result = safe_draft(document, opts)
+    result = safe_draft(generator, route, document, opts)
 
     :telemetry.execute(
       [:kiln_cms, :seo, :draft, :stop],
       %{duration: System.monotonic_time() - started} |> Map.merge(usage_measurements(result)),
       %{
         org_id: opts[:org_id],
-        model: model(),
-        provider: provider(),
+        model: route.model,
+        provider: LLM.route_provider(route),
+        source: route.source,
         outcome: outcome(result)
       }
     )
@@ -179,9 +235,9 @@ defmodule KilnCMS.Seo do
     result
   end
 
-  defp safe_draft(document, opts) do
-    case generator().draft(document, opts) do
-      {:ok, %Draft{} = draft} -> {:ok, draft |> Draft.normalize() |> stamp()}
+  defp safe_draft(generator, route, document, opts) do
+    case generator.draft(document, generator_opts(route, opts)) do
+      {:ok, %Draft{} = draft} -> {:ok, draft |> Draft.normalize() |> stamp(route)}
       {:error, reason} -> {:error, reason}
       other -> {:error, {:unexpected, other}}
     end
@@ -195,8 +251,13 @@ defmodule KilnCMS.Seo do
       {:error, :crashed}
   end
 
-  defp stamp(%Draft{model: nil} = draft), do: %{draft | model: model()}
-  defp stamp(draft), do: draft
+  # Only a site's route is handed over: it always runs the shipped adapter,
+  # and an operator's bespoke generator is given exactly what it was before.
+  defp generator_opts(%Route{source: :site} = route, opts), do: Keyword.put(opts, :llm, route)
+  defp generator_opts(_route, opts), do: opts
+
+  defp stamp(%Draft{model: nil} = draft, route), do: %{draft | model: route.model}
+  defp stamp(draft, _route), do: draft
 
   defp usage_measurements({:ok, %Draft{usage: %{} = usage}}) do
     Map.take(usage, [:input_tokens, :output_tokens])

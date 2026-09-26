@@ -60,6 +60,9 @@ Every summary line below that was shortened links to its own entry there.
   console.**
   ([#1560](https://github.com/The-Verscienta/kiln_cms/issues/1560) · [long form](docs/changelog/unreleased.md#a-site-can-sign-its-push-notifications-with-its-own-key-generated-in-the-console))
 
+- **A site can use its own AI provider key and models, set from the console.**
+  ([#1557](https://github.com/The-Verscienta/kiln_cms/issues/1557) · [long form](docs/changelog/unreleased.md#a-site-can-use-its-own-ai-provider-key-and-models-set-from-the-console))
+
 ### Fixed
 
 - **An open calendar no longer re-queries once per write during a bulk import.**

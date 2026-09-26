@@ -25,8 +25,78 @@ defmodule KilnCMS.LLM do
   quietly promising an operator their content stayed home is not.
   """
 
+  alias KilnCMS.LLM.Route
+
   # Providers that run inside the deployment. Anything else is egress.
   @local_providers ~w(ollama vllm)
+
+  @typedoc """
+  What a per-site screen needs to know about one feature on one site, from one
+  resolve (#1557). `source` is whose provider it is; `error` is set when the
+  site's own provider is on but unusable.
+  """
+  @type summary :: %{
+          enabled?: boolean(),
+          egress?: boolean(),
+          provider: String.t() | nil,
+          endpoint_host: String.t() | nil,
+          source: :operator | :site | nil,
+          error: term()
+        }
+
+  @doc """
+  A `t:summary/0` from a feature's `route/1` answer. `operator_base_url` is the
+  feature's own `base_url` setting, used only for the operator's route.
+
+  A site's own provider always counts as egress: a hosted provider is a
+  vendor's API, and an OpenAI-compatible endpoint had to pass the SSRF check,
+  which refuses every private and loopback address.
+  """
+  @spec summary(term(), String.t() | nil) :: summary()
+  def summary({:ok, _generator, %Route{source: :operator, model: model}}, operator_base_url) do
+    %{
+      enabled?: true,
+      egress?: egress?(model, operator_base_url),
+      provider: provider(model),
+      endpoint_host: endpoint_host(model, operator_base_url),
+      source: :operator,
+      error: nil
+    }
+  end
+
+  def summary({:ok, _generator, %Route{source: :site} = route}, _operator_base_url) do
+    %{
+      enabled?: true,
+      egress?: true,
+      provider: route_provider(route),
+      endpoint_host: KilnCMS.LLM.SiteProvider.endpoint_host(route),
+      source: :site,
+      error: nil
+    }
+  end
+
+  def summary({:error, {:site_provider, reason}}, _operator_base_url) do
+    %{
+      enabled?: true,
+      egress?: true,
+      provider: nil,
+      endpoint_host: nil,
+      source: :site,
+      error: reason
+    }
+  end
+
+  def summary(_disabled, _operator_base_url) do
+    %{enabled?: false, egress?: false, provider: nil, endpoint_host: nil, source: nil, error: nil}
+  end
+
+  @doc """
+  The provider name a route sends to — the site's chosen provider, or the
+  `provider:` prefix of the operator's model spec.
+  """
+  @spec route_provider(Route.t()) :: String.t() | nil
+  def route_provider(%Route{source: :site, provider: provider}), do: to_string(provider)
+  def route_provider(%Route{model: model}), do: provider(model)
 
   @doc ~S"""
   The provider name from a `"provider:model"` spec.

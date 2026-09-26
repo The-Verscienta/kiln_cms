@@ -24,13 +24,19 @@ defmodule KilnCMS.Ask.Generator.ReqLLM do
 
   alias KilnCMS.Ask
   alias KilnCMS.Ask.Prompt
+  alias KilnCMS.LLM.Client
+  alias KilnCMS.LLM.Route
 
   @impl KilnCMS.Ask.Generator
   def generate(question, sources), do: generate(question, sources, [])
 
   @impl KilnCMS.Ask.Generator
   def generate(question, sources, opts) do
-    case Ask.model() do
+    # `:llm` is a site's own route (#1557), put there by `KilnCMS.Ask`;
+    # without one this is the operator's configuration, as it always was.
+    route = Keyword.get(opts, :llm) || Route.operator(Ask.model())
+
+    case route.model do
       nil ->
         # Configured as the generator with no model spec: nothing to call.
         # `KilnCMS.Ask.enabled?/0` already reports this combination as off, so
@@ -38,21 +44,18 @@ defmodule KilnCMS.Ask.Generator.ReqLLM do
         # `generator:` override in a test or a direct call.
         {:error, :no_model}
 
-      model ->
-        {system, user} = Prompt.build(question, sources, opts)
-        request = Keyword.put(Ask.request_opts(), :system_prompt, system)
-        run(model, user, request)
+      _model ->
+        {system, user} = Prompt.build(question, sources, Keyword.delete(opts, :llm))
+        request = Keyword.put(Ask.request_opts(route), :system_prompt, system)
+        run(route, user, request)
     end
   end
 
-  defp run(model, user, request) do
-    with {:ok, response} <- ReqLLM.generate_text(model, user, request),
-         text when is_binary(text) <- ReqLLM.Response.text(response) do
-      {:ok, text}
-    else
+  defp run(route, user, request) do
+    case Client.text(route, user, request) do
+      {:ok, text, _usage} -> {:ok, text}
       {:error, %{__exception__: true} = exception} -> {:error, Exception.message(exception)}
       {:error, reason} -> {:error, reason}
-      _other -> {:error, :unparsable}
     end
   end
 end

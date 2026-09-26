@@ -1150,6 +1150,17 @@ msgstr "Assistant IA"
 msgid "AI assist isn't configured."
 msgstr "L'assistant IA n'est pas configuré."
 
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "AI provider"
+msgstr "Fournisseur d'IA"
+
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "AI provider saved."
+msgstr "Fournisseur d'IA enregistré."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "AI suggestions aren't configured."
@@ -1159,6 +1170,11 @@ msgstr "Les suggestions par IA ne sont pas configurées."
 #, elixir-autogen, elixir-format
 msgid "API"
 msgstr "API"
+
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "API key"
+msgstr "Clé d'API"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
@@ -1911,6 +1927,16 @@ msgstr "Un autre éditeur travaille sur ce bloc en ce moment."
 msgid "Answer"
 msgstr "Réponse"
 
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "Answers"
+msgstr "Réponses"
+
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "Answers on /api/ask"
+msgstr "Réponses sur /api/ask"
+
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Any content type"
@@ -2071,6 +2097,11 @@ msgstr "Types archivés"
 #, elixir-autogen, elixir-format
 msgid "Artifacts"
 msgstr "Fichiers produits"
+
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "As the provider names them. Leave one blank to switch that feature off for this site; the deployment's provider does not take it over."
+msgstr "Tels que le fournisseur les nomme. Laissez-en un vide pour désactiver cette fonction sur ce site ; le fournisseur du déploiement ne la reprend pas."
 
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
@@ -2283,6 +2314,11 @@ msgstr "Bloc"
 #, elixir-autogen, elixir-format
 msgid "Block actor"
 msgstr "Bloquer l'acteur"
+
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "Block assist"
+msgstr "Assistant de blocs"
 
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
@@ -4697,6 +4733,11 @@ msgstr "Les champs texte de chaque bloc, adressés par l'identifiant stable du b
 msgid "Each code signs you in once if you lose your authenticator."
 msgstr "Chaque code vous connecte une seule fois si vous perdez votre application d'authentification."
 
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "Each feature sends content to the provider: a page's text for suggestions, a block and the editor's instruction for assist, and published passages plus a visitor's question for answers. Answers are requested by anonymous visitors."
+msgstr "Chaque fonction envoie du contenu au fournisseur : le texte d'une page pour les suggestions, un bloc et la consigne du rédacteur pour l'assistant, et des passages publiés avec la question d'un visiteur pour les réponses. Les réponses sont demandées par des visiteurs anonymes."
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Each submission is mailed here. Leave blank for no notification."
@@ -4996,6 +5037,7 @@ msgstr "Mettre fin à ce niveau temporaire maintenant ?"
 msgid "Endpoint"
 msgstr "Point de terminaison"
 
+#: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Endpoint URL"
@@ -7116,6 +7158,11 @@ msgstr "Traductions manquantes"
 msgid "Model content once. Publish everywhere."
 msgstr "Modélisez le contenu une fois. Publiez partout."
 
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "Models"
+msgstr "Modèles"
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Mon"
@@ -8195,6 +8242,11 @@ msgstr "Le stockage d'objets, l'e-mail sortant et la recherche se configurent pa
 msgid "October"
 msgstr "octobre"
 
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "Off"
+msgstr "Désactivé"
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Off-site"
@@ -8432,6 +8484,11 @@ msgstr "Ouvrir le panneau Conformité de l’éditeur"
 #, elixir-autogen, elixir-format
 msgid "Open the full editor"
 msgstr "Ouvrir l'éditeur complet"
+
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "OpenAI-compatible endpoint"
+msgstr "Point de terminaison compatible OpenAI"
 
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
@@ -9067,6 +9124,7 @@ msgid "Protected"
 msgstr "Protégée"
 
 #: lib/kiln_cms_web/live/billing_live.ex
+#: lib/kiln_cms_web/live/site_ai_live.ex
 #, elixir-autogen, elixir-format
 msgid "Provider"
 msgstr "Prestataire"
@@ -9447,6 +9505,11 @@ msgstr "Actualiser"
 msgid "Refuse to publish a document containing a blocking claim"
 msgstr "Refuser la publication d'un document contenant une allégation bloquante"
 
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "Refused: this site's provider is set but can't be used"
+msgstr "Refusé : le fournisseur de ce site est configuré mais inutilisable"
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Regenerate"
@@ -9590,6 +9653,7 @@ msgstr "Dernière version rechargée."
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
@@ -9699,6 +9763,11 @@ msgstr "Supprimer cette clé d'accès ? Vous ne pourrez plus l'utiliser pour vou
 msgid "Remove this path from the list? It returns if it's hit again."
 msgstr "Retirer ce chemin de la liste ? Il réapparaîtra s'il est redemandé."
 
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove this site's AI provider? Its AI features will use the deployment's configuration again."
+msgstr "Retirer le fournisseur d'IA de ce site ? Ses fonctions d'IA utiliseront de nouveau la configuration du déploiement."
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove this site's claim checking settings and follow the deployment defaults again?"
@@ -9762,6 +9831,11 @@ msgid "Removed the tag from %{count} item."
 msgid_plural "Removed the tag from %{count} items."
 msgstr[0] "Étiquette retirée de %{count} élément."
 msgstr[1] "Étiquette retirée de %{count} éléments."
+
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "Removed. This site's AI features use the deployment's configuration again."
+msgstr "Retiré. Les fonctions d'IA de ce site utilisent de nouveau la configuration du déploiement."
 
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -10225,6 +10299,11 @@ msgstr "Image SEO"
 msgid "SEO keywords"
 msgstr "Mots-clés SEO"
 
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "SEO suggestions"
+msgstr "Suggestions SEO"
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor/shared.ex
@@ -10285,6 +10364,7 @@ msgstr "sam."
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
+#: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #: lib/kiln_cms_web/live/site_push_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
@@ -10400,6 +10480,7 @@ msgstr "Enregistré dans la copie de travail"
 msgid "Saved."
 msgstr "Enregistré."
 
+#: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saved. Leave blank to keep it."
@@ -10412,6 +10493,7 @@ msgstr "Enregistré. Laissez vide pour le conserver."
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/locale_settings_live.ex
+#: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
@@ -11386,6 +11468,11 @@ msgstr "Cesser d'envoyer des newsletters à %{email} ?"
 msgid "Stop sending notifications to this device?"
 msgstr "Arrêter d'envoyer des notifications à cet appareil ?"
 
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "Stored encrypted and never shown again. Changing the provider or endpoint removes it."
+msgstr "Stockée chiffrée et jamais réaffichée. Changer de fournisseur ou de point de terminaison la supprime."
+
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "Stored encrypted and never shown again. Clearing the username removes it."
@@ -11958,6 +12045,26 @@ msgstr "Ce segment n'existe plus."
 msgid "That tier no longer exists."
 msgstr "Ce niveau n'existe plus."
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "The AI account and models this site's AI features use."
+msgstr "Le compte d'IA et les modèles qu'utilisent les fonctions d'IA de ce site."
+
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "The AI account and models this site's suggestions, block assist and answers use."
+msgstr "Le compte d'IA et les modèles qu'utilisent les suggestions, l'assistant de blocs et les réponses de ce site."
+
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "The AI provider could not be saved."
+msgstr "Le fournisseur d'IA n'a pas pu être enregistré."
+
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "The API root of a server that speaks OpenAI's chat completions. Must be https:// and publicly reachable."
+msgstr "La racine d'API d'un serveur compatible avec les chat completions d'OpenAI. Doit être en https:// et joignable publiquement."
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "The DNS check failed unexpectedly."
@@ -12074,10 +12181,25 @@ msgstr "La valeur par défaut pour tous les formulaires de ce site qui n'ont pas
 msgid "The demo is being reset. Sign in again in a moment."
 msgstr "La démo est en cours de réinitialisation. Reconnectez-vous dans un instant."
 
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "The deployment's provider"
+msgstr "Le fournisseur du déploiement"
+
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "The deployment's provider (%{provider})"
+msgstr "Le fournisseur du déploiement (%{provider})"
+
 #: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
 msgid "The deployment's secret key has changed since it was generated. Until you rotate it, this site's notifications are held, not sent."
 msgstr "La clé secrète du déploiement a changé depuis sa génération. Tant que vous ne la renouvelez pas, les notifications de ce site sont retenues, pas envoyées."
+
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "The deployment's secret key has changed since it was saved. Until you enter it again, this site's AI requests are refused, not sent anywhere else."
+msgstr "La clé secrète du déploiement a changé depuis son enregistrement. Tant que vous ne la saisissez pas à nouveau, les requêtes d'IA de ce site sont refusées et ne sont envoyées nulle part ailleurs."
 
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -12282,6 +12404,11 @@ msgstr "L’avertissement obligatoire est absent. Ajoutez-le mot pour mot : « %
 #, elixir-autogen, elixir-format
 msgid "The same list is available on the server as %{list}, and %{doctor} verifies an install."
 msgstr "La même liste est disponible sur le serveur via %{list}, et %{doctor} vérifie une installation."
+
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "The saved API key can't be read. Re-enter it."
+msgstr "La clé d'API enregistrée est illisible. Saisissez-la à nouveau."
 
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -12688,6 +12815,16 @@ msgstr "Ce site publie son contenu via deux surfaces d'API headless — GraphQL 
 msgid "This site uses the deployment's push key."
 msgstr "Ce site utilise la clé push du déploiement."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's AI provider key can't be read, so nothing was sent. A site admin needs to enter it again under Configure → AI provider."
+msgstr "La clé du fournisseur d'IA de ce site est illisible, rien n'a donc été envoyé. Un administrateur du site doit la saisir à nouveau dans Configurer → Fournisseur d'IA."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's AI provider settings couldn't be read, so nothing was sent. Try again in a moment."
+msgstr "Les réglages du fournisseur d'IA de ce site n'ont pas pu être lus, rien n'a donc été envoyé. Réessayez dans un instant."
+
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site's Content-Security-Policy blocks scripts, connections and images from hosts it doesn't know. List the origins your snippet needs — one per line, e.g. https://plausible.io — or the browser will silently refuse them. Inline <script> blocks are allowed automatically once you save."
@@ -12722,6 +12859,11 @@ msgstr "La clé de notification de ce site a changé. Réactivez les notificatio
 #, elixir-autogen, elixir-format
 msgid "This site's phrases"
 msgstr "Les expressions de ce site"
+
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's provider (%{provider})"
+msgstr "Le fournisseur de ce site (%{provider})"
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
@@ -13354,6 +13496,11 @@ msgstr "Utilisez ceci dans le contenu. Le coller dans la barre d'adresse téléc
 msgid "Use this site's default"
 msgstr "Utiliser la valeur par défaut de ce site"
 
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "Use this site's own AI provider"
+msgstr "Utiliser le fournisseur d'IA propre à ce site"
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Used by"
@@ -13891,6 +14038,11 @@ msgstr "Vous n'avez pas la permission d'ajouter des images ici."
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change experiments on this site."
 msgstr "Vous n'avez pas la permission de modifier les expériences de ce site."
+
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's AI provider."
+msgstr "Vous n'avez pas l'autorisation de modifier le fournisseur d'IA de ce site."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format

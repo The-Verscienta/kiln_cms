@@ -500,6 +500,9 @@ defmodule KilnCMSWeb.Router do
       live "/editor/site-mail", SiteMailLive, :index
       # A site's own Web Push (VAPID) key pair (#1560), generated here.
       live "/editor/site-push", SitePushLive, :index
+      # A site's own AI provider, key and models (#1557). Org-scoped; the
+      # operator's AI config (`SEO_MODEL` and friends) stays underneath.
+      live "/editor/site-ai", SiteAiLive, :index
       live "/editor/newsletter", NewsletterLive, :index
       # Paid memberships (#337 Phase 2). Instance-wide provider credentials plus
       # per-site tiers, so the page itself gates on `platform_admin?` — see the

@@ -824,12 +824,18 @@ defmodule KilnCMS.Automation.RuleWorker do
 
   # Off on a default install (`generator: nil`), so a rule created against a
   # deployment that never configured drafting is inert rather than broken.
+  #
+  # Per site (#1557): a site with its own AI provider is judged by that, not by
+  # the operator's config — and its provider counts as egress, so the rule's
+  # `allow_egress` opt-in applies to it too.
   defp metadata_findings(record, context) do
+    seo = KilnCMS.Seo.summary(context.org_id)
+
     cond do
-      not KilnCMS.Seo.enabled?() ->
+      not seo.enabled? ->
         {:skip, "SEO drafting is not configured (config :kiln_cms, KilnCMS.Seo, generator:)"}
 
-      KilnCMS.Seo.egress?() and not egress_allowed?(context.config) ->
+      seo.egress? and not egress_allowed?(context.config) ->
         # The panel is one editor deciding to spend one request. A rule is every
         # matching document, forever, with nobody watching — a materially
         # different egress posture than the one the operator agreed to when they
@@ -837,7 +843,7 @@ defmodule KilnCMS.Automation.RuleWorker do
         # keeps a provider switch from silently turning the whole publish
         # pipeline into an outbound feed.
         {:skip,
-         "refusing to send content to #{KilnCMS.Seo.endpoint_host() || KilnCMS.Seo.provider()} " <>
+         "refusing to send content to #{seo.endpoint_host || seo.provider || "this site's AI provider"} " <>
            "unattended: set the rule's config `allow_egress` to true to permit it"}
 
       true ->
