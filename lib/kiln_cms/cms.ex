@@ -468,6 +468,23 @@ defmodule KilnCMS.CMS do
       define :reset_site_mail_relay, action: :destroy
     end
 
+    # A site's own single sign-on provider (#1561), and the email domains it may
+    # vouch for. Read through `KilnCMS.Accounts.SiteSso`, which owns the fail
+    # direction and the admission rule — never directly for a sign-in decision.
+    resource KilnCMS.CMS.SiteSsoProvider do
+      define :list_site_sso_provider, action: :read
+      define :save_site_sso_provider, action: :save
+      define :update_site_sso_provider, action: :update
+      define :reset_site_sso_provider, action: :destroy
+    end
+
+    resource KilnCMS.CMS.SiteSsoDomain do
+      define :list_site_sso_domains, action: :read
+      define :add_site_sso_domain, action: :add, args: [:domain]
+      define :verify_site_sso_domain, action: :verify
+      define :remove_site_sso_domain, action: :remove
+    end
+
     # A site's own Web Push key pair (#1560). Read through `KilnCMS.Push.Keys`,
     # which owns the precedence rule and the fail direction — never directly.
     resource KilnCMS.CMS.SiteVapidKey do
@@ -476,6 +493,16 @@ defmodule KilnCMS.CMS do
       define :update_site_vapid_key, action: :update
       define :rotate_site_vapid_key, action: :rotate
       define :reset_site_vapid_key, action: :destroy
+    end
+
+    # A site's own Meilisearch instance (#1558). Read through
+    # `KilnCMS.Search.Meilisearch.SiteInstance`, which owns the precedence rule
+    # and both fail directions — never directly.
+    resource KilnCMS.CMS.SiteMeilisearch do
+      define :list_site_meilisearch, action: :read
+      define :save_site_meilisearch, action: :save
+      define :update_site_meilisearch, action: :update
+      define :reset_site_meilisearch, action: :destroy
     end
 
     # A site's own AI provider, key and models (#1557). Read through

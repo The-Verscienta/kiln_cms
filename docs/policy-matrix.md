@@ -621,6 +621,25 @@ reviewers and not to the admin. `KilnCMS.Push.Keys` reads the row as the
 system, for the push worker (which has no actor) and for a reviewer
 subscribing on `/editor/settings`, who is not the site's admin.
 
+## Search instance — `SiteMeilisearch` (#1558)
+
+| Resource | read | writes |
+|---|---|---|
+| `SiteMeilisearch` (`read`) | admin only | admin only (`save`, `update`, `destroy`) |
+
+A site's own Meilisearch instance — URL, API key and index — at
+`/editor/site-search`. Org-admin on both sides, like every per-site settings
+row; a read by anyone else is filtered to nothing. The indexing jobs and
+`Meilisearch.search/2` read it as the system
+(`KilnCMS.Search.Meilisearch.SiteInstance`), tenant-scoped to the one site.
+
+As with the site relay, the stricter parts are not policies: the key is
+encrypted, never read back into the form, and has no env-var or file source;
+the URL must be HTTPS and is refused if it resolves to a private, loopback,
+link-local or metadata address, at save and on every request (through
+`KilnCMS.SafeFetch`). "Reindex now" re-asks the update policy before
+enqueueing (#1166).
+
 ## AI provider — `SiteAiProvider` (#1557)
 
 | Resource | read | writes |
@@ -639,6 +658,26 @@ an OpenAI-compatible endpoint must be `https://` and is refused if it resolves
 to a private, loopback, link-local or metadata address, at save and on every
 request. Changing the provider or endpoint drops the stored key, so a co-admin
 cannot send a key they were never shown to a host of their choosing.
+
+## Single sign-on — `SiteSsoProvider`, `SiteSsoDomain` (#1561)
+
+| Resource | read | writes |
+|---|---|---|
+| `SiteSsoProvider` (`read`) | admin only | admin only (`save`, `update`, `destroy`) |
+| `SiteSsoDomain` (`read`) | admin only | admin only (`add`, `verify`, `remove`) |
+
+A site's own OpenID Connect provider and the email domains it may vouch for, at
+`/editor/site-sso`. Org-admin on both sides; the sign-in path reads them as the
+system (`KilnCMS.Accounts.SiteSso`). `verified_at` is not writable: only
+`:verify`, after a DNS lookup that found the record, sets it.
+
+The two `User` actions the sign-in uses — `:sign_in_with_site_sso` (mints the
+session token) and `:register_with_site_sso` (provisions a new account) — are
+`forbid_if always()` to every authorized caller. The platform-admin bypass would
+still pass that, so both also refuse any actor-carrying call in their own
+preparation/change: only `SiteSso.Admission`, with `authorize?: false`, reaches
+them, after the ID token, the verified domain and the cross-site rule have all
+passed.
 
 ## Content types — `TypeDefinition`
 

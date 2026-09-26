@@ -26,6 +26,29 @@ carries the reasoning.
   lists at boot and on `/editor/system`
   ([#1618](https://github.com/The-Verscienta/kiln_cms/issues/1618)).
 
+## Added
+
+<a id="a-site-can-offer-its-own-single-sign-on-provider"></a>
+
+- **A site can offer its own single sign-on provider.** A site admin sets an
+  OpenID Connect issuer, client ID and client secret at `/editor/site-sso`, and
+  the site's sign-in page offers "Sign in with …" beside the password form. The
+  operator's `OIDC_*` provider is unchanged. Accounts belong to the whole
+  deployment, so the site's provider is honoured only for addresses in email
+  domains the site verified with a DNS TXT record (`_kiln-sso.<domain>`), looked
+  up again on every sign-in, and never for an account with access on another
+  site or across the deployment — a platform admin, another site's member, or a
+  membership-less global editor. Those people sign in the other ways. The flow is
+  deliberately not an AshAuthentication strategy: a per-site strategy would
+  share the operator's identity namespace, so a site's provider asserting a
+  `sub` the operator's had already linked would sign in as that account. It is
+  Assent's OIDC callback (state, nonce, PKCE, `RS256` only) behind two routes,
+  with every provider request through `SafeFetch`. The client secret is
+  vault-encrypted and write-only; if it can't be decrypted, the site's SSO says
+  it is unavailable rather than falling back to the operator's provider. Turning
+  password sign-in off per site, SAML, and several providers per site are not
+  in this change.
+
 ## Breaking
 
 <a id="multi-org-installs-now-cap-form-embeds-at-embedorigins-unless"></a>
@@ -124,6 +147,45 @@ carries the reasoning.
     `SECRET_KEY_BASE` rotation) or read holds that site's pushes, keeps the
     subscriptions and says so on the page. It never signs with the deployment's
     key instead.
+
+<a id="a-site-can-index-its-content-into-its-own-meilisearch-set-from-the-console"></a>
+
+- **A site can index its content into its own Meilisearch, set from the console.**
+  `/editor/site-search` (Configure → Integrations → Search instance) lets a
+  site admin set the URL, API key and index their site's published content is
+  indexed into. No `MEILI_*` variables and no redeploy (#1558). The `MEILI_*`
+  variables are unchanged: they are the instance for every site that hasn't
+  set its own. The third integration #1322 moves out of the environment,
+  built the way the site SMTP relay was:
+
+  - **Says what leaves.** The page states, above the form, that every
+    published document an anonymous visitor could read — full text included —
+    is sent to that URL.
+  - **One resolver.** `KilnCMS.Search.Meilisearch.SiteInstance` is asked by
+    the indexing jobs, by `Meilisearch.search/2` and by the publish path's
+    enqueue gate, so indexing and search can't disagree about a site's
+    instance. The site's requests are built from its row alone; nothing of the
+    operator's URL, key or index goes with them.
+  - **Key encrypted.** Stored with `KilnCMS.Keys.Vault` (a
+    `Vault.Ciphertext` column, so `mix kiln.vault.reencrypt` rotates it),
+    never shown again, kept on a blank save, and with no env-var or file
+    source.
+  - **Fails closed, one direction per axis.** If the row can't be read or the
+    key can't be decrypted, *indexing* is held and retried for ~16 hours
+    (never written into the operator's instance), and *search* returns an
+    error without a request so the caller uses the built-in Postgres search
+    (never the operator's index, which holds other sites' content).
+  - **SSRF-checked.** HTTPS only, and refused if it resolves to a private,
+    loopback, link-local or metadata address — at save, and on every request,
+    which goes through `KilnCMS.SafeFetch` (pinned, no redirects).
+    `SafeFetch.request/3` is new, for PUT/PATCH/DELETE.
+  - **Reindexes on change.** Every save, switch-off or removal enqueues a full
+    reindex of the site into the instance it now uses, and the page counts the
+    jobs left. A reindex that succeeds releases jobs held behind a broken
+    instance instead of leaving them to their backoff.
+
+  `MeilisearchWorker` now retries up to 9 times over ~16 hours (was 3), for
+  the operator's instance too.
 
 <a id="a-site-can-keep-its-uploads-in-its-own-object-storage-bucket-set-from-the-console"></a>
 
@@ -240,6 +302,31 @@ carries the reasoning.
   `kiln_cms.calendar.requery` telemetry and `CalendarRequeryMonitor` log line
   keep their meaning: messages answered per re-query.
   ([#1336](https://github.com/The-Verscienta/kiln_cms/issues/1336))
+
+<a id="sign-in-and-the-other-account-pages-show-the-sites-own-name-and-logo"></a>
+
+- **Sign-in and the other account pages show the site's own name and logo.**
+  `/sign-in`, `/register`, `/reset`, `/sign-out` and the password-reset,
+  confirmation and magic-link pages never assigned `:current_org`, so
+  `Layouts.auth/1` failed closed to the stock KilnCMS name and logo on every
+  host, a tenant's included. The document title was right, because the root
+  layout reads the org from the request, which is why no title test caught it.
+  The router did list `{KilnCMSWeb.LiveUserAuth, :assign_current_org}` for these
+  pages, but AshAuthentication's route macros de-duplicate a live session's
+  `on_mount` list by module, so of the two or three `LiveUserAuth` entries only
+  the first, `:restore_locale`, ran. The sign-in page also lost
+  `:live_no_user`, which sets its `:current_scope`. The same skipped hook is
+  what refuses a socket that claims a different org's host, and what vouches
+  the socket's host before `KilnCMSWeb.SignInLive` passes a patch URL to the
+  library (#687). Neither ran on these pages until now.
+  Each route now lists `LiveUserAuth` once, with its steps in order:
+  `{KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}`. The new
+  list form runs the named clauses in sequence and stops at the first that
+  halts. Kiln's own live sessions keep their separate entries, since
+  `live_session` does not de-duplicate. On a multi-org install with
+  `TENANT_STRICT_HOST` on, a connected mount of these pages from an unknown host
+  is now refused with the same 404 the HTTP request already got.
+  ([#1613](https://github.com/The-Verscienta/kiln_cms/pull/1613))
 
 <a id="a-sites-relay-refusing-its-password-no-longer-pages-the-operator"></a>
 

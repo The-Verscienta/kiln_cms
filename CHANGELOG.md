@@ -60,6 +60,12 @@ Every summary line below that was shortened links to its own entry there.
   embed stops working on upgrade — set `EMBED_ORIGINS` first.**
   ([#1618](https://github.com/The-Verscienta/kiln_cms/issues/1618) · [long form](docs/changelog/unreleased.md#on-a-multi-org-deployment-with-embedorigins-unset-every-cross-site-form-embed))
 
+### Added
+
+- **A site can offer its own single sign-on provider, honoured only for email
+  domains it has verified by DNS.**
+  ([#1561](https://github.com/The-Verscienta/kiln_cms/issues/1561) · [long form](docs/changelog/unreleased.md#a-site-can-offer-its-own-single-sign-on-provider))
+
 ### Breaking
 
 - **Multi-org installs now cap form embeds at `EMBED_ORIGINS` unless
@@ -75,6 +81,9 @@ Every summary line below that was shortened links to its own entry there.
   console.**
   ([#1560](https://github.com/The-Verscienta/kiln_cms/issues/1560) · [long form](docs/changelog/unreleased.md#a-site-can-sign-its-push-notifications-with-its-own-key-generated-in-the-console))
 
+- **A site can index its content into its own Meilisearch, set from the console.**
+  ([#1558](https://github.com/The-Verscienta/kiln_cms/issues/1558) · [long form](docs/changelog/unreleased.md#a-site-can-index-its-content-into-its-own-meilisearch-set-from-the-console))
+
 - **A site can keep its uploads in its own object storage bucket, set from the
   console.**
   ([#1559](https://github.com/The-Verscienta/kiln_cms/issues/1559) · [long form](docs/changelog/unreleased.md#a-site-can-keep-its-uploads-in-its-own-object-storage-bucket-set-from-the-console))
@@ -89,6 +98,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **An open calendar no longer re-queries once per write during a bulk import.**
   ([#1336](https://github.com/The-Verscienta/kiln_cms/issues/1336) · [long form](docs/changelog/unreleased.md#an-open-calendar-no-longer-re-queries-once-per-write-during-a-bulk-import))
+
+- **Sign-in and the other account pages show the site's own name and logo.**
+  ([#1613](https://github.com/The-Verscienta/kiln_cms/pull/1613) · [long form](docs/changelog/unreleased.md#sign-in-and-the-other-account-pages-show-the-sites-own-name-and-logo))
 
 - **A site's relay refusing its password no longer pages the operator.**
   ([#1562](https://github.com/The-Verscienta/kiln_cms/issues/1562) · [long form](docs/changelog/unreleased.md#a-sites-relay-refusing-its-password-no-longer-pages-the-operator))

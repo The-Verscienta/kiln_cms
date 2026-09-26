@@ -490,9 +490,12 @@ defmodule KilnCMSWeb.ConsoleNav do
           }
         ]
       },
+      # What this site does elsewhere when its content changes (#1558 split
+      # these out of Integrations, which is now the site's own accounts at
+      # outside services and would otherwise run past seven items).
       %{
-        key: :integrations,
-        label: gettext("Integrations"),
+        key: :outbound,
+        label: gettext("Outbound"),
         items: [
           %{
             key: :webhooks,
@@ -512,6 +515,20 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("This site as an ActivityPub actor, and its followers."),
             keywords: ["activitypub", "fediverse", "mastodon", "followers", "actor"]
           },
+          %{
+            key: :automation,
+            label: gettext("Automation"),
+            path: ~p"/editor/automation",
+            icon: "hero-cpu-chip",
+            description: gettext("When something is published, do this."),
+            keywords: ["rules", "trigger", "reaction", "workflow", "if this then that"]
+          }
+        ]
+      },
+      %{
+        key: :integrations,
+        label: gettext("Integrations"),
+        items: [
           # A site's own object storage (#1559), with the site's other accounts
           # at outside services.
           %{
@@ -533,6 +550,17 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("The mail provider and From address this site sends from."),
             keywords: ["smtp", "email", "relay", "sender", "from address", "postmark", "ses"]
           },
+          # A site's own identity provider (#1561). Not with the operator's
+          # `OIDC_*` provider, which has no screen: this one is a site admin's
+          # to set, and is honoured only for the domains the site verified.
+          %{
+            key: :site_sso,
+            label: gettext("Single sign-on"),
+            path: ~p"/editor/site-sso",
+            icon: "hero-finger-print",
+            description: gettext("Your own identity provider on this site's sign-in page."),
+            keywords: ["sso", "oidc", "openid connect", "okta", "entra", "identity provider"]
+          },
           # A site's own Web Push key (#1560), generated rather than entered.
           %{
             key: :site_push,
@@ -541,6 +569,16 @@ defmodule KilnCMSWeb.ConsoleNav do
             icon: "hero-bell-alert",
             description: gettext("The key this site's review notifications are signed with."),
             keywords: ["vapid", "web push", "notifications", "key", "rotate"]
+          },
+          # A site's own Meilisearch instance (#1558) — beside Outgoing mail:
+          # both are a service of the site's own that its data is sent to.
+          %{
+            key: :site_search,
+            label: gettext("Search instance"),
+            path: ~p"/editor/site-search",
+            icon: "hero-magnifying-glass-circle",
+            description: gettext("Index this site's content into your own Meilisearch."),
+            keywords: ["meilisearch", "index", "typo tolerance", "instant search", "reindex"]
           },
           # A site's own AI provider (#1557), beside its own mail relay: both
           # are this site's account at an outside service instead of the
@@ -552,14 +590,6 @@ defmodule KilnCMSWeb.ConsoleNav do
             icon: "hero-sparkles",
             description: gettext("The AI account and models this site's AI features use."),
             keywords: ["llm", "model", "api key", "openai", "anthropic", "assist", "ask"]
-          },
-          %{
-            key: :automation,
-            label: gettext("Automation"),
-            path: ~p"/editor/automation",
-            icon: "hero-cpu-chip",
-            description: gettext("When something is published, do this."),
-            keywords: ["rules", "trigger", "reaction", "workflow", "if this then that"]
           }
         ]
       },

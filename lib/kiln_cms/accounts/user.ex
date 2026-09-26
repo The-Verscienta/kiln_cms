@@ -44,6 +44,10 @@ defmodule KilnCMS.Accounts.User do
           :sign_in_with_magic_link,
           :reset_password_with_token,
           :register_with_sso,
+          # A site's own identity provider (#1561) vouched for the address, and
+          # the site proved by DNS that it controls the address's domain
+          # (`KilnCMS.Accounts.SiteSso.Admission`).
+          :register_with_site_sso,
           # First-run bootstrap (#1317): the operator creating the instance's
           # first admin cannot receive a confirmation mail — SMTP is one of the
           # things they have not configured yet — and the account is created
@@ -639,6 +643,38 @@ defmodule KilnCMS.Accounts.User do
       prepare KilnCMS.Accounts.Preparations.PasskeySessionToken
     end
 
+    # A site's own identity provider (#1561): the session-token read, and the
+    # provisioning create for an address with no account yet. Both system-only,
+    # like `:sign_in_with_passkey` above — only
+    # `KilnCMS.Accounts.SiteSso.Admission` calls them (`authorize?: false`),
+    # after the ID token verified AND the address passed the site's
+    # verified-domain and cross-site isolation rules. Neither authenticates
+    # anything itself.
+    read :sign_in_with_site_sso do
+      description "Completes a site single sign-on that SiteSso.Admission admitted (system-only)."
+      argument :user_id, :uuid, allow_nil?: false
+      get? true
+      filter expr(id == ^arg(:user_id))
+      # An identity provider a site chose is not a stronger proof than the
+      # password the per-account budget protects, so unlike a passkey it does
+      # not forgive that budget.
+      prepare {KilnCMS.Accounts.Preparations.PasskeySessionToken, forgive_throttle?: false}
+    end
+
+    create :register_with_site_sso do
+      description "Provision an account a site's identity provider vouched for (system-only)."
+      accept []
+
+      argument :email, :ci_string, allow_nil?: false
+      argument :name, :string, constraints: [max_length: KilnCMS.Limits.line()]
+
+      # Invite-only mode applies here exactly as on every other registration.
+      validate KilnCMS.Accounts.Validations.RegistrationEnabled
+
+      change set_attribute(:email, arg(:email))
+      change KilnCMS.Accounts.Changes.RegisterWithSiteSso
+    end
+
     update :reset_password_with_token do
       # `ForgiveSignInThrottle` runs an `after_action` hook (it needs the saved
       # record's email), which an atomic update has no place to put.
@@ -897,6 +933,14 @@ defmodule KilnCMS.Accounts.User do
     # preparation ALSO refuses any actor-carrying call — no authorized path
     # (admin included) can mint a token for another account.
     policy action(:sign_in_with_passkey) do
+      forbid_if always()
+    end
+
+    # Same shape for a site's identity provider (#1561): forbidden to every
+    # authorized caller, and — because the admin bypass above would still pass —
+    # the token preparation and `Changes.RegisterWithSiteSso` refuse any
+    # actor-carrying call themselves.
+    policy action([:sign_in_with_site_sso, :register_with_site_sso]) do
       forbid_if always()
     end
 
