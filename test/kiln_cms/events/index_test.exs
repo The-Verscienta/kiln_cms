@@ -107,15 +107,30 @@ defmodule KilnCMS.Events.IndexTest do
       # The anchor is the start of the local day, not `now()` — a gig whose
       # doors opened this morning is still what's on today. Anchoring at the
       # current instant is the bug this guards.
-      this_morning = Index.anchor() |> DateTime.add(60, :second)
+      #
+      # The start has to fall between the anchor and now, and it has to be
+      # derived from BOTH: a fixed offset from the anchor ("anchor + 60s") is
+      # still in the future for the first minute of every day (#1602). Halfway
+      # between the two always qualifies, whatever the time of day. Truncated
+      # to the second because the field stores wall time at that precision; in
+      # the day's first second that lands on the anchor itself, which still
+      # proves the point — it is before `now`, so a `now()` anchor answers nil.
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+      anchor = Index.anchor(now)
+      this_morning = DateTime.add(anchor, div(DateTime.diff(now, anchor, :second), 2), :second)
+
+      assert DateTime.compare(this_morning, anchor) in [:gt, :eq]
+      assert DateTime.compare(this_morning, now) in [:lt, :eq]
 
       record =
         event!(ctx, %{
           "when" => %{"start" => local(this_morning, @london), "time_zone" => @london}
         })
 
+      # Its own start, not nil and not some later instant: a one-off that began
+      # this morning is materialized as exactly when it began.
       assert record.next_occurrence_at
-      assert DateTime.compare(record.next_occurrence_at, DateTime.utc_now()) in [:lt, :eq]
+      assert DateTime.compare(record.next_occurrence_at, this_morning) == :eq
     end
 
     test "a recurring event whose series started in the past points at its NEXT date", ctx do

@@ -23,6 +23,11 @@ defmodule KilnCMS.Push.Vapid do
         vapid_private_key: "yfW…",  # base64url, the 32-byte scalar
         vapid_subject: "mailto:ops@example.com"
 
+  That pair is the deployment's, and the default for every site. A site can
+  instead generate its own at `/editor/site-push` (#1560), and
+  `KilnCMS.Push.Keys` decides which pair signs a given subscription. This
+  module only loads, checks and signs.
+
   Generate a pair with `mix kiln.vapid.gen`. The format is the one
   `web-push generate-vapid-keys` emits, so an existing pair carries over.
 
@@ -60,9 +65,17 @@ defmodule KilnCMS.Push.Vapid do
   # reuses the same token rather than re-signing per attempt.
   @token_ttl_seconds 12 * 60 * 60
 
-  @doc "Is a usable VAPID key pair configured?"
+  @typedoc "A decoded, checked key pair and the subject to sign with."
+  @type keys :: %{
+          public: binary(),
+          public_b64: String.t(),
+          private: binary(),
+          subject: String.t()
+        }
+
+  @doc "Is a usable VAPID key pair configured in the deployment's environment?"
   @spec configured?() :: boolean()
-  def configured?, do: match?({:ok, _keys}, keys())
+  def configured?, do: match?({:ok, _keys}, env_keys())
 
   @doc """
   The public key browsers need for `pushManager.subscribe/1`, base64url.
@@ -72,14 +85,15 @@ defmodule KilnCMS.Push.Vapid do
   """
   @spec public_key() :: String.t() | nil
   def public_key do
-    case keys() do
+    case env_keys() do
       {:ok, %{public_b64: public}} -> public
       _absent -> nil
     end
   end
 
   @doc """
-  The `Authorization` header value for a request to `endpoint`.
+  The `Authorization` header value for a request to `endpoint`, signed with
+  the deployment's keys (`KILN_VAPID_*`).
 
   The audience is the endpoint's **origin**, not the full URL — a token scoped
   to one endpoint path would have to be re-signed per subscription, and the
@@ -87,15 +101,62 @@ defmodule KilnCMS.Push.Vapid do
   """
   @spec authorization(String.t()) :: {:ok, String.t()} | {:error, term()}
   def authorization(endpoint) when is_binary(endpoint) do
-    with {:ok, keys} <- keys(),
-         {:ok, audience} <- origin(endpoint) do
+    with {:ok, keys} <- env_keys() do
+      authorization(endpoint, keys)
+    end
+  end
+
+  @doc """
+  The `Authorization` header value for `endpoint`, signed with `keys` — a map
+  from `env_keys/0` or `load/3`. `KilnCMS.Push.Keys` decides which keys a
+  subscription is signed with (#1560); this only signs.
+  """
+  @spec authorization(String.t(), keys()) :: {:ok, String.t()} | {:error, term()}
+  def authorization(endpoint, %{public_b64: _, private: _, subject: subject} = keys)
+      when is_binary(endpoint) do
+    with {:ok, audience} <- origin(endpoint) do
       claims = %{
         "aud" => audience,
         "exp" => System.system_time(:second) + @token_ttl_seconds,
-        "sub" => subject()
+        "sub" => subject
       }
 
       {:ok, "vapid t=#{sign(claims, keys)}, k=#{keys.public_b64}"}
+    end
+  end
+
+  @doc """
+  The deployment's key pair from `KILN_VAPID_*`, decoded and checked, or why
+  there is none. The default for every site without its own pair (#1560).
+  """
+  @spec env_keys() :: {:ok, keys()} | {:error, term()}
+  def env_keys do
+    with {:ok, public_b64} <- fetch(:vapid_public_key),
+         {:ok, private_b64} <- fetch(:vapid_private_key),
+         {:ok, keys} <- load(public_b64, private_b64, subject()) do
+      {:ok, keys}
+    else
+      {:error, :mismatched_keys} = error ->
+        warn_once()
+        error
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Decode and check a key pair: both halves base64url and the right length, and
+  the public point derived from the private scalar. Used for the deployment's
+  pair and for a site's own (`KilnCMS.CMS.SiteVapidKey`) alike.
+  """
+  @spec load(String.t(), String.t(), String.t()) :: {:ok, keys()} | {:error, term()}
+  def load(public_b64, private_b64, subject)
+      when is_binary(public_b64) and is_binary(private_b64) and is_binary(subject) do
+    with {:ok, public} <- decode(public_b64, @public_key_bytes, :vapid_public_key),
+         {:ok, private} <- decode(private_b64, @private_key_bytes, :vapid_private_key),
+         :ok <- check_pair(public, private) do
+      {:ok, %{public: public, public_b64: public_b64, private: private, subject: subject}}
     end
   end
 
@@ -151,19 +212,6 @@ defmodule KilnCMS.Push.Vapid do
 
   defp pad_scalar(scalar), do: scalar
 
-  # Decoded and validated on every call rather than cached: this runs once per
-  # push job, the work is a single point multiplication, and a cache would mean
-  # a key rotation needed a restart to take effect.
-  defp keys do
-    with {:ok, public_b64} <- fetch(:vapid_public_key),
-         {:ok, private_b64} <- fetch(:vapid_private_key),
-         {:ok, public} <- decode(public_b64, @public_key_bytes, :vapid_public_key),
-         {:ok, private} <- decode(private_b64, @private_key_bytes, :vapid_private_key),
-         :ok <- check_pair(public, private) do
-      {:ok, %{public: public, public_b64: public_b64, private: private}}
-    end
-  end
-
   defp fetch(key) do
     case :kiln_cms |> Application.get_env(KilnCMS.Push, []) |> Keyword.get(key) do
       value when is_binary(value) and value != "" -> {:ok, value}
@@ -181,15 +229,10 @@ defmodule KilnCMS.Push.Vapid do
   defp check_pair(public, private) do
     {derived, _private} = :crypto.generate_key(:ecdh, :prime256v1, private)
 
-    if derived == public do
-      :ok
-    else
-      warn_once()
-      {:error, :mismatched_keys}
-    end
+    if derived == public, do: :ok, else: {:error, :mismatched_keys}
   end
 
-  # `keys/0` runs on every settings render and every workflow event, so an
+  # `env_keys/0` runs on every settings render and every workflow event, so an
   # unconditional `Logger.error` here floods the log with the same paragraph
   # rather than saying it once. Latched in the process dictionary — good enough
   # for "stop repeating yourself in this worker/LiveView", and it deliberately
@@ -209,7 +252,9 @@ defmodule KilnCMS.Push.Vapid do
   # RFC 8292 §2.1 requires a contactable `mailto:` or `https:` so a push service
   # operator can reach whoever is sending. The fallback is the deployment's own
   # base URL, which is at least true.
-  defp subject do
+  @doc "The deployment's VAPID subject: `KILN_VAPID_SUBJECT`, or its public base URL."
+  @spec subject() :: String.t()
+  def subject do
     :kiln_cms
     |> Application.get_env(KilnCMS.Push, [])
     |> Keyword.get(:vapid_subject)

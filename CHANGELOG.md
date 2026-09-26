@@ -56,13 +56,26 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A site can sign its push notifications with its own key, generated in the
+  console.**
+  ([#1560](https://github.com/The-Verscienta/kiln_cms/issues/1560) · [long form](docs/changelog/unreleased.md#a-site-can-sign-its-push-notifications-with-its-own-key-generated-in-the-console))
+
 - **A site on its own SMTP relay keeps its own bounce list.**
   ([#1562](https://github.com/The-Verscienta/kiln_cms/issues/1562) · [long form](docs/changelog/unreleased.md#a-site-on-its-own-smtp-relay-keeps-its-own-bounce-list))
 
 ### Fixed
 
+- **An open calendar no longer re-queries once per write during a bulk import.**
+  ([#1336](https://github.com/The-Verscienta/kiln_cms/issues/1336) · [long form](docs/changelog/unreleased.md#an-open-calendar-no-longer-re-queries-once-per-write-during-a-bulk-import))
+
 - **A site's relay refusing its password no longer pages the operator.**
   ([#1562](https://github.com/The-Verscienta/kiln_cms/issues/1562) · [long form](docs/changelog/unreleased.md#a-sites-relay-refusing-its-password-no-longer-pages-the-operator))
+
+### Security
+
+- **Two Hex advisories closed (`ash` 3.33.11, `lazy_html` 0.1.13); the working
+  copy keeps its body through the `ash` union-comparison fix.**
+  ([#1600](https://github.com/The-Verscienta/kiln_cms/issues/1600) · [long form](docs/changelog/unreleased.md#two-hex-advisories-closed-and-the-working-copy-survives-the-ash-fix))
 
 ## [0.10.0] - 2026-09-19
 

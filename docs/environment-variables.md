@@ -494,8 +494,12 @@ digest sweep enqueues nothing.
 
 ### Web Push notifications (#628)
 
-Unset ⇒ push is **off**: `/editor/settings` never offers the toggle and nothing
-is sent. Generate a pair with `mix kiln.vapid.gen` (the same format
+Unset ⇒ push is **off** for every site that hasn't generated its own key:
+`/editor/settings` never offers the toggle there and nothing is sent. A site
+admin can instead generate a key pair for their site at `/editor/site-push`
+(#1560), with no variables and no redeploy. These variables stay the default
+for every site without its own pair, and a device subscribed with them keeps
+them after its site generates one. Generate a pair with `mix kiln.vapid.gen` (the same format
 `npx web-push generate-vapid-keys` emits, so an existing pair carries over).
 
 Rotating the pair invalidates every live subscription — the push service answers

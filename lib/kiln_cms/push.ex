@@ -7,15 +7,18 @@ defmodule KilnCMS.Push do
   `docs/mobile-admin-spike.md` §5.1 named as a real reason to prefer a native
   app. This closes that without a native toolchain.
 
-  Three parts: `KilnCMS.Push.Vapid` identifies this deployment to the push
+  Four parts: `KilnCMS.Push.Keys` decides which key pair a site and each of
+  its subscriptions use (the site's own, #1560, or the deployment's),
+  `KilnCMS.Push.Vapid` signs with it to identify the sender to the push
   service, `KilnCMS.Push.Encryption` encrypts the payload so the push service
   cannot read it, and `KilnCMS.Push.Worker` does one delivery per subscription
   with Oban's retries.
 
   ## Off unless configured
 
-  No VAPID keys ⇒ `enabled?/0` is false, the settings page never offers the
-  toggle, and `notify/2` returns `:ok` having done nothing. Same posture as
+  No VAPID keys for a site — neither its own nor the deployment's — ⇒
+  `enabled?/1` is false for it, the settings page never offers the toggle, and
+  with no subscriptions `notify/2` has nothing to send. Same posture as
   service-worker registration: degrade silently where the capability is absent,
   because a deployment that has not opted into a third-party push service
   should not be nagged about it.
@@ -52,46 +55,65 @@ defmodule KilnCMS.Push do
   will ever work again and a stale row is a delivery attempt per notification
   forever. `403` is treated the same way — it means the VAPID key no longer
   matches the one the subscription was created with, which happens when a
-  deployment rotates its pair.
+  deployment rotates its pair. A subscription made against a site's own key
+  that the site has since rotated is pruned without a request at all
+  (`KilnCMS.Push.Keys`).
   """
 
   require Logger
 
   alias KilnCMS.Accounts
   alias KilnCMS.Branding
+  alias KilnCMS.Push.Keys
   alias KilnCMS.Push.Vapid
 
   # Matches the resource's `max_length` — one number, so the constraint can
   # actually fire rather than being unreachable behind this truncation.
   @label_bytes 60
 
-  @doc "Is web push configured on this deployment?"
-  @spec enabled?() :: boolean()
-  def enabled?, do: Vapid.configured?()
+  @doc "Can a browser on the site `org` subscribe to push?"
+  @spec enabled?(term()) :: boolean()
+  def enabled?(org), do: not is_nil(public_key(org))
 
-  @doc "The VAPID public key the browser needs to subscribe, or nil when off."
-  @spec public_key() :: String.t() | nil
-  defdelegate public_key, to: Vapid
+  @doc """
+  The VAPID public key a browser on the site `org` subscribes with, or nil when
+  push is off there (see `KilnCMS.Push.Keys.for_org/1`).
+  """
+  @spec public_key(term()) :: String.t() | nil
+  def public_key(org), do: org |> org_id() |> Keys.public_key()
 
   @doc """
   Register (or refresh) a browser's subscription for `actor`.
 
   An upsert on the endpoint — a browser re-subscribing must move its row, not
   add one, or a device receives a copy of every notification per stale row.
+
+  `:public_key` is the key the page handed the browser. The row records which
+  key that was (#1560), so every notification is signed with it. It defaults to
+  the key the site hands out now, and one that is no longer that key — the
+  site's pair was rotated while the page was open — is refused with
+  `{:error, :stale_key}` rather than stored against a key nothing will sign
+  with.
   """
-  @spec subscribe(map(), struct(), term()) :: {:ok, struct()} | {:error, term()}
-  def subscribe(%{} = params, actor, org) do
-    Accounts.subscribe_to_push(
-      %{
-        user_id: actor.id,
-        org_id: org_id(org),
-        endpoint: params["endpoint"],
-        p256dh: params["p256dh"],
-        auth: params["auth"],
-        label: label(params["label"])
-      },
-      authorize?: false
-    )
+  @spec subscribe(map(), struct(), term(), keyword()) :: {:ok, struct()} | {:error, term()}
+  def subscribe(%{} = params, actor, org, opts \\ []) do
+    org_id = org_id(org)
+    public_key = Keyword.get_lazy(opts, :public_key, fn -> Keys.public_key(org_id) end)
+
+    with {:ok, bound_key} <- Keys.binding(org_id, public_key) do
+      Accounts.subscribe_to_push(
+        %{
+          user_id: actor.id,
+          org_id: org_id,
+          endpoint: params["endpoint"],
+          p256dh: params["p256dh"],
+          auth: params["auth"],
+          label: label(params["label"]),
+          vapid_public_key: bound_key
+        },
+        authorize?: false
+      )
+    end
   end
 
   @doc """
@@ -129,12 +151,18 @@ defmodule KilnCMS.Push do
   """
   @spec notify([struct()], map()) :: :ok
   def notify(users, payload) when is_list(users) and is_map(payload) do
-    if enabled?() do
-      users
-      |> Enum.map(& &1.id)
-      |> subscriptions_for()
-      |> Enum.each(&enqueue(&1, payload))
-    end
+    # Whether a subscription can be signed is per subscription now (#1560): one
+    # made against a site's own key is enqueued and the worker asks
+    # `KilnCMS.Push.Keys` for that key; one made against the deployment's key
+    # is skipped when the deployment has none, as every subscription was
+    # before a site could have its own.
+    deployment_keys? = Vapid.configured?()
+
+    users
+    |> Enum.map(& &1.id)
+    |> subscriptions_for()
+    |> Enum.filter(&(is_binary(&1.vapid_public_key) or deployment_keys?))
+    |> Enum.each(&enqueue(&1, payload))
 
     :ok
   end
