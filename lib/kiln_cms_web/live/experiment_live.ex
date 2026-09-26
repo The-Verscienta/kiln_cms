@@ -86,7 +86,9 @@ defmodule KilnCMSWeb.ExperimentLive do
   end
 
   def handle_event("conclude", params, socket) do
-    winner = blank_to_nil(Map.get(params, "winner_variant_id"))
+    # "no winner — just stop" submits "", which the `:uuid` argument casts
+    # to nil — the same nil the domain tests pass directly.
+    winner = Map.get(params, "winner_variant_id")
 
     case Experiments.conclude_experiment(socket.assigns.experiment, winner, actor_opts(socket)) do
       {:ok, _} ->
@@ -415,9 +417,6 @@ defmodule KilnCMSWeb.ExperimentLive do
   end
 
   defp parse_weight(_), do: 1
-
-  defp blank_to_nil(""), do: nil
-  defp blank_to_nil(value), do: value
 
   defp actor_opts(socket),
     do: [actor: socket.assigns.current_user, tenant: socket.assigns.current_org]
