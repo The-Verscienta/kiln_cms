@@ -441,6 +441,11 @@ msgstr "%{covered} de %{total} totalmente traducidos"
 msgid "%{failed} failed in 24h · %{disabled} auto-disabled"
 msgstr "%{failed} fallidos en 24 h · %{disabled} desactivados automáticamente"
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{forms} form allowlist(s) and %{sites} site-wide embed default(s) name sites outside EMBED_ORIGINS, which caps which sites may frame forms on this deployment. Those sites are dropped from what is served, so an iframe of the form on them is blank. The saved lists are unchanged."
+msgstr "%{forms} lista(s) de sitios permitidos de formularios y %{sites} valor(es) predeterminado(s) de inserción de sitio nombran sitios fuera de EMBED_ORIGINS, que limita qué sitios pueden enmarcar formularios en este despliegue. Esos sitios se omiten de lo que se sirve, así que un iframe del formulario en ellos aparece en blanco. Las listas guardadas no cambian."
+
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{locale} is not a configured locale"
@@ -4749,6 +4754,21 @@ msgstr "Duplicado como nuevo borrador. No se copiaron, porque tu rol no puede es
 #, elixir-autogen, elixir-format
 msgid "Duration"
 msgstr "Duración"
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "EMBED_ORIGINS is unset, so the cap is same-origin only: no other site may frame any form on this deployment."
+msgstr "EMBED_ORIGINS no está definido, así que el límite es solo el mismo origen: ningún otro sitio puede enmarcar ningún formulario en este despliegue."
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "EMBED_ORIGINS_LOCKED is unset, which turns the cap on once a second organization exists. Add the sites to EMBED_ORIGINS, or set EMBED_ORIGINS_LOCKED=false to let each site's own list stand, then restart."
+msgstr "EMBED_ORIGINS_LOCKED no está definido, lo que activa el límite en cuanto existe una segunda organización. Añade los sitios a EMBED_ORIGINS, o establece EMBED_ORIGINS_LOCKED=false para que se respete la lista propia de cada sitio, y reinicia."
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "EMBED_ORIGINS_LOCKED=true is set. Add the sites to EMBED_ORIGINS, or remove them from those lists, to make this go away."
+msgstr "EMBED_ORIGINS_LOCKED=true está establecido. Añade los sitios a EMBED_ORIGINS, o quítalos de esas listas, para que este aviso desaparezca."
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
@@ -11357,6 +11377,11 @@ msgstr "Parte del contenido no se pudo leer y no se procesó: %{types}."
 #, elixir-autogen, elixir-format
 msgid "Some notifications could not be marked read."
 msgstr "No se pudieron marcar como leídas algunas notificaciones."
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Some sites can no longer embed forms"
+msgstr "Algunos sitios ya no pueden insertar formularios"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format

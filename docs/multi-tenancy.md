@@ -119,6 +119,16 @@ Creating the **second** org turns strict host matching on unless
 `TENANT_STRICT_HOST` is set (see above), so before you create it, make sure
 every host the deployment answers on is either `PHX_HOST` or belongs to an org.
 
+It also caps form embedding at `EMBED_ORIGINS` unless `EMBED_ORIGINS_LOCKED`
+is set (#1618): from then on an org admin's per-form or per-site embed
+allowlist may only narrow the operator's list, and a saved list naming a site
+outside it stops being served to that site. **With `EMBED_ORIGINS` unset, that
+means no other site can frame any form** — so before you create the second
+org, put every site any org embeds forms on into `EMBED_ORIGINS`, or set
+`EMBED_ORIGINS_LOCKED=false` to keep each org's own list uncapped. Kiln warns at
+boot, on that create, and on `/editor/system` while saved lists are being cut
+down. Details: [forms.md](forms.md#embedding-on-another-site).
+
 Orgs cannot be deleted: paper-trail version rows outlive the content they
 describe, and deleting an org would strand them. A single-tenant install that
 wants a hard guarantee can set `config :kiln_cms, :multitenancy_enabled, false`,

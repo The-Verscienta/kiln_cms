@@ -164,6 +164,7 @@ defmodule KilnCMS.Application do
       # Needs the Repo, so it runs after the tree is up rather than alongside
       # the config-only warnings at the top of start/2.
       warn_if_multi_tenant_without_strict_host()
+      warn_if_embed_lists_over_ceiling()
       warn_if_chain_unsigned()
       enqueue_occurrence_backfill()
       {:ok, pid}
@@ -418,6 +419,19 @@ defmodule KilnCMS.Application do
           "reject those instead; see " <>
           "docs/environment-variables.md."
       )
+    end
+  end
+
+  # An unset `EMBED_ORIGINS_LOCKED` caps form framing at `EMBED_ORIGINS` once a
+  # second organization exists (#1618). A form or site-wide allowlist saved
+  # before that, naming a site outside `EMBED_ORIGINS`, is clamped when served
+  # rather than rewritten — so a partner site's iframe goes blank and nothing
+  # else says why. Needs the Repo and the org-count verdict, hence here. The
+  # org create that turns the cap on logs the same thing, and `/editor/system`
+  # shows it for as long as it lasts.
+  defp warn_if_embed_lists_over_ceiling do
+    if message = KilnCMS.Forms.EmbedCeiling.overreach_warning() do
+      KilnCMS.Config.Report.warn("embed_ceiling", message)
     end
   end
 

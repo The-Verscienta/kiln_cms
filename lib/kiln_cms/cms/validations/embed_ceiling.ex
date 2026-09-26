@@ -4,11 +4,13 @@ defmodule KilnCMS.CMS.Validations.EmbedCeiling do
   operator's ceiling (#1133) — on `Form.embed_origins` and
   `SiteEmbedSettings.embed_origins`, the two rungs a tenant can write.
 
-  Only bites when `EMBED_ORIGINS_LOCKED` is on; with the cap off this is a
-  no-op and #1130/#1131 behaviour is unchanged. Only looks at the attribute
-  when the changeset is *changing* it: a row written before the cap was turned
-  on can still be renamed or deactivated without first being brought under the
-  ceiling — the served header is clamped by `KilnCMS.Forms.EmbedPolicy` either
+  Only bites when the cap is on — `KilnCMS.Forms.EmbedCeiling.locked?/0`:
+  `EMBED_ORIGINS_LOCKED=true`, or unset on a deployment with more than one
+  organization (#1618). With the cap off this is a no-op and #1130/#1131
+  behaviour is unchanged. Only looks at the attribute when the changeset is
+  *changing* it: a row written before the cap was turned on can still be
+  renamed or deactivated without first being brought under the ceiling — the
+  served header is clamped by `KilnCMS.Forms.EmbedPolicy` either
   way, so the stale list is not a live widening in the meantime.
 
   The message names the refused entries and never the ceiling — see

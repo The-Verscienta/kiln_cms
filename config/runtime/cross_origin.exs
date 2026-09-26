@@ -29,10 +29,17 @@ if config_env() != :test do
     config :kiln_cms, :embed_origins, KilnCMSWeb.Embed.parse_env(embed_origins)
   end
 
-  # EMBED_ORIGINS_LOCKED=true makes EMBED_ORIGINS a *ceiling* as well as the
+  # EMBED_ORIGINS_LOCKED makes EMBED_ORIGINS a *ceiling* as well as the
   # default (#1133): an org admin's per-form or per-site allowlist (#648, #1131)
   # may narrow it but not reach outside it — writes are refused and the served
-  # frame-ancestors is clamped. Off by default, so nothing changes for a
-  # deployment that never sets it. See KilnCMS.Forms.EmbedCeiling.
-  config :kiln_cms, :embed_origins_locked, Env.flag("EMBED_ORIGINS_LOCKED", false)
+  # frame-ancestors is clamped. Unset, it is AUTO (#1618): off while there is
+  # one organization, on as soon as a second exists. `true` or `false`
+  # overrides auto either way. See KilnCMS.Forms.EmbedCeiling.
+  #
+  # `fetch/1`, not `flag/2`: `flag/2` writes unconditionally, so an unset
+  # variable would replace config.exs's `:auto` — and a project overlay's own
+  # setting — with a hard `false`.
+  with {:ok, locked?} <- Env.fetch("EMBED_ORIGINS_LOCKED") do
+    config :kiln_cms, :embed_origins_locked, locked?
+  end
 end

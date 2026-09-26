@@ -83,6 +83,11 @@ defmodule KilnCMS.Accounts.Organization do
       # served another tenant's site. Boot checks the same thing, but boot
       # already happened — see the change's moduledoc (#660).
       change KilnCMS.Accounts.Changes.WarnStrictHostGap
+
+      # The same verdict caps form framing at EMBED_ORIGINS when
+      # EMBED_ORIGINS_LOCKED is unset (#1618); say so if stored allowlists are
+      # now being cut down. After RecordOrgCount, whose verdict it reads.
+      change KilnCMS.Accounts.Changes.WarnEmbedOverreach
     end
 
     update :update, primary?: true

@@ -743,14 +743,17 @@ number.
    the deployment — `form.embed_origins -> SiteEmbedSettings.embed_origins ->
    EMBED_ORIGINS` — so an org decides once and every untouched form in that
    org inherits it, rather than the deployment-wide union. **The operator
-   ceiling, closed in #1133 — as an opt-in.** By default an org admin can
-   still open framing — on a form, or on the org default — that the operator
-   had left closed; that stays deliberate (the allowlist governs who may
-   overlay *that org's* forms and harvest *that org's* submissions, and grants
-   nothing across the tenant boundary). But an operator who wants the other
-   reading sets `EMBED_ORIGINS_LOCKED=true`, and `EMBED_ORIGINS` becomes the
-   *most* a tenant may open as well as the default: a per-form or per-org
-   list may narrow it but every entry must be covered by it, writes outside
+   ceiling, closed in #1133, and on by default for multi-org since #1618.**
+   On a single-org deployment an org admin can still open framing — on a
+   form, or on the org default — that the operator had left closed; that
+   stays deliberate (the operator and the org admin are the same party, and
+   the allowlist grants nothing across the tenant boundary). Once a second
+   organization exists an unset `EMBED_ORIGINS_LOCKED` turns the cap on by
+   itself (the organization-count verdict `TENANT_STRICT_HOST` uses, failing
+   closed when the count is unknown); `EMBED_ORIGINS_LOCKED=true` forces it on
+   everywhere and `false` keeps it off. With the cap on, `EMBED_ORIGINS`
+   becomes the *most* a tenant may open as well as the default: a per-form or
+   per-org list may narrow it but every entry must be covered by it, writes outside
    it are refused (naming the entry, never the ceiling), and the served
    header is clamped to it too, so a list saved before the cap cannot keep a
    page wider than the operator now allows (`KilnCMS.Forms.EmbedCeiling`).

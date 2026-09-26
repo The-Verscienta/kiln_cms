@@ -441,6 +441,11 @@ msgstr ""
 msgid "%{failed} failed in 24h · %{disabled} auto-disabled"
 msgstr ""
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{forms} form allowlist(s) and %{sites} site-wide embed default(s) name sites outside EMBED_ORIGINS, which caps which sites may frame forms on this deployment. Those sites are dropped from what is served, so an iframe of the form on them is blank. The saved lists are unchanged."
+msgstr ""
+
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{locale} is not a configured locale"
@@ -4748,6 +4753,21 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Duration"
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "EMBED_ORIGINS is unset, so the cap is same-origin only: no other site may frame any form on this deployment."
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "EMBED_ORIGINS_LOCKED is unset, which turns the cap on once a second organization exists. Add the sites to EMBED_ORIGINS, or set EMBED_ORIGINS_LOCKED=false to let each site's own list stand, then restart."
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "EMBED_ORIGINS_LOCKED=true is set. Add the sites to EMBED_ORIGINS, or remove them from those lists, to make this go away."
 msgstr ""
 
 #: lib/kiln_cms_web/live/experiment_live.ex
@@ -11356,6 +11376,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/inbox_live.ex
 #, elixir-autogen, elixir-format
 msgid "Some notifications could not be marked read."
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Some sites can no longer embed forms"
 msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex

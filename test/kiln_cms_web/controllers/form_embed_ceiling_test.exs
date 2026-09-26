@@ -6,8 +6,9 @@ defmodule KilnCMSWeb.FormEmbedCeilingTest do
   `config/test.exs` pins `:embed_origins` (the deployment default, and under
   the cap the ceiling) to `["https://embedder.test"]`. The cap itself is
   application env, so this file is `async: false` and restores it after every
-  test — with the cap OFF, which is what a deployment ships with, every test
-  here must reproduce #1130/#1131 behaviour unchanged.
+  test — with the cap OFF, which is what `config/test.exs` pins and what a
+  single-org deployment ships with (auto, #1618), every test here must
+  reproduce #1130/#1131 behaviour unchanged.
   """
   use KilnCMSWeb.ConnCase, async: false
 

@@ -1174,6 +1174,12 @@ Per form because forms are org-scoped (#648): a deployment-wide allowlist has to
 be the union of every org's embedders, and that union is what every org's forms
 would become framable by.
 
+**On a multi-org deployment `EMBED_ORIGINS` is also a ceiling** (#1133, #1618):
+unless the operator sets `EMBED_ORIGINS_LOCKED=false`, a form's own list (and
+its org's default) may only narrow it, and a site it does not cover is dropped
+from the served `frame-ancestors`. With `EMBED_ORIGINS` unset there, no other
+site may frame any form. See [forms.md](forms.md#embedding-on-another-site).
+
 **The default is closed** (#562) — paste the snippet on an external site before
 allowing that site and you get a blank iframe plus a CSP violation in that
 site's console. The embed page carries no ambient credentials (an anonymous
