@@ -781,6 +781,13 @@ msgid_plural "+%{count} more"
 msgstr[0] "+%{count} más"
 msgstr[1] "+%{count} más"
 
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 device is subscribed with it."
+msgid_plural "%{count} devices are subscribed with it."
+msgstr[0] "1 dispositivo está suscrito con ella."
+msgstr[1] "%{count} dispositivos están suscritos con ella."
+
 #: lib/kiln_cms_web/components/accessibility_components.ex
 #, elixir-autogen, elixir-format
 msgid "1 heading has no text — it structures the page while saying nothing."
@@ -969,6 +976,11 @@ msgstr "Un rol superior que caduca por sí solo. El rol permanente de arriba no 
 msgid "A higher tier on this site that expires on its own. The site tier above is untouched, so the elevation ends whether or not anything runs on time."
 msgstr "Un nivel superior en este sitio que caduca por sí solo. El nivel del sitio de arriba no se toca, así que la elevación termina se ejecute algo a tiempo o no."
 
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "A key pair for this site alone. The private half is stored encrypted and never shown. Nothing to copy or paste."
+msgstr "Un par de claves solo para este sitio. La mitad privada se guarda cifrada y nunca se muestra. No hay nada que copiar ni pegar."
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "A link is labelled with its own URL — a descriptive phrase carries more signal."
@@ -992,6 +1004,11 @@ msgstr "Un enlace solo aparece aquí tras fallar %{count} comprobaciones seguida
 #, elixir-autogen, elixir-format
 msgid "A link to another piece of content, of the type you pick below. For a related article, an author or a parent product."
 msgstr "Un enlace a otro contenido, del tipo que elija más abajo. Para un artículo relacionado, un autor o un producto principal."
+
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "A mailto: address or https:// URL the push services can reach you at. Leave blank to use your own address."
+msgstr "Una dirección mailto: o una URL https:// en la que los servicios push puedan contactarle. Déjelo en blanco para usar su propia dirección."
 
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
@@ -3075,6 +3092,16 @@ msgstr "Consentimiento registrado."
 #, elixir-autogen, elixir-format
 msgid "Consent records"
 msgstr "Registros de consentimiento"
+
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "Contact for push services"
+msgstr "Contacto para los servicios push"
+
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "Contact saved."
+msgstr "Contacto guardado."
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/analytics_live.ex
@@ -5790,7 +5817,13 @@ msgstr "General"
 msgid "Generate"
 msgstr "Generar"
 
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "Generate a key"
+msgstr "Generar una clave"
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
+#: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
 msgid "Generate key"
 msgstr "Generar clave"
@@ -6451,6 +6484,11 @@ msgstr "Clave"
 msgid "Key %{key} · locale %{locale} · served at %{path}"
 msgstr "Clave %{key} · idioma %{locale} · servido en %{path}"
 
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "Key generated. New devices on this site use it."
+msgstr "Clave generada. Los dispositivos nuevos de este sitio la usan."
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Key present. The private key is never displayed."
@@ -6460,6 +6498,11 @@ msgstr "Hay una clave presente. La clave privada nunca se muestra."
 #, elixir-autogen, elixir-format
 msgid "Key revoked."
 msgstr "Clave revocada."
+
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "Key rotated. Devices that used the old key have to turn notifications on again."
+msgstr "Clave rotada. Los dispositivos que usaban la clave anterior tienen que volver a activar las notificaciones."
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -7329,6 +7372,11 @@ msgstr "Nuevo comentario"
 #, elixir-autogen, elixir-format
 msgid "New content type"
 msgstr "Nuevo tipo de contenido"
+
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "New devices on this site subscribe with this site's own key."
+msgstr "Los dispositivos nuevos de este sitio se suscriben con la clave propia del sitio."
 
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
@@ -9162,10 +9210,17 @@ msgstr "Publicando el lanzamiento…"
 msgid "Publishing…"
 msgstr "Publicando…"
 
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
 msgid "Push notifications"
 msgstr "Notificaciones push"
+
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "Push notifications are off on this site: it has no key yet."
+msgstr "Las notificaciones push están desactivadas en este sitio: todavía no tiene clave."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -9788,6 +9843,11 @@ msgstr "Reemplaza o amplía los bloques de este documento con un archivo Markdow
 msgid "Replace passphrase"
 msgstr "Sustituir la frase de contraseña"
 
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "Replaces the key pair. Every device subscribed with the current key is removed, and has to turn notifications on again."
+msgstr "Sustituye el par de claves. Se elimina cada dispositivo suscrito con la clave actual, que tendrá que volver a activar las notificaciones."
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reprocess every image in the library? Originals are untouched — this rebuilds the responsive and modern-format variants in the background."
@@ -9967,6 +10027,11 @@ msgstr "Revise, apruebe y publique el contenido de %{site}."
 msgid "Reviewed"
 msgstr "Revisado"
 
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reviewers turn notifications on for each device in Your settings. A device stays on the key it subscribed with, so devices that subscribed with the deployment's key keep receiving notifications after this site generates its own."
+msgstr "Los revisores activan las notificaciones para cada dispositivo en Su configuración. Un dispositivo conserva la clave con la que se suscribió, así que los que se suscribieron con la clave del despliegue siguen recibiendo notificaciones después de que este sitio genere la suya."
+
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
 msgid "Revoke"
@@ -10048,6 +10113,7 @@ msgid "Rolling the release back…"
 msgstr "Revirtiendo el lanzamiento…"
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
+#: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
 msgid "Rotate key"
 msgstr "Rotar clave"
@@ -10066,6 +10132,23 @@ msgstr "Girar a la derecha"
 #, elixir-autogen, elixir-format
 msgid "Rotate the DKIM key? You must publish the new DNS record before signed mail verifies again."
 msgstr "¿Rotar la clave DKIM? Debe publicar el nuevo registro DNS antes de que el correo firmado vuelva a verificarse."
+
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rotate the key"
+msgstr "Rotar la clave"
+
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rotate this site's push key? 1 device stops receiving notifications until it turns them on again in Your settings."
+msgid_plural "Rotate this site's push key? %{count} devices stop receiving notifications until each turns them on again in Your settings."
+msgstr[0] "¿Rotar la clave push de este sitio? 1 dispositivo dejará de recibir notificaciones hasta que las vuelva a activar en Su configuración."
+msgstr[1] "¿Rotar la clave push de este sitio? %{count} dispositivos dejarán de recibir notificaciones hasta que cada uno las vuelva a activar en Su configuración."
+
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "Rotate this site's push key? No devices use the current one, so nothing stops working."
+msgstr "¿Rotar la clave push de este sitio? Ningún dispositivo usa la actual, así que nada deja de funcionar."
 
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
@@ -10203,6 +10286,7 @@ msgstr "sáb"
 #: lib/kiln_cms_web/live/menu_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
+#: lib/kiln_cms_web/live/site_push_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
@@ -10329,6 +10413,7 @@ msgstr "Guardada. Déjala en blanco para conservarla."
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
+#: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saving…"
 msgstr "Guardando…"
@@ -11994,6 +12079,11 @@ msgstr "El valor por defecto para todos los formularios de este sitio que no hay
 msgid "The demo is being reset. Sign in again in a moment."
 msgstr "La demostración se está reiniciando. Vuelva a iniciar sesión en un momento."
 
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "The deployment's secret key has changed since it was generated. Until you rotate it, this site's notifications are held, not sent."
+msgstr "La clave secreta del despliegue ha cambiado desde que se generó. Hasta que la rote, las notificaciones de este sitio quedan retenidas, no se envían."
+
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "The deployment's secret key has changed since it was saved. Until you enter it again, this site's mail is held and retried, not sent."
@@ -12075,6 +12165,12 @@ msgstr "El iframe se ajusta al tamaño del formulario."
 #, elixir-autogen, elixir-format
 msgid "The interactive Swagger UI and the OpenAPI spec are switched off on this deployment. An operator can turn them on with API_DOCS_ENABLED=true."
 msgstr "El Swagger UI interactivo y la especificación OpenAPI están desactivados en este despliegue. Un operador puede activarlos con API_DOCS_ENABLED=true."
+
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "The key this site's review notifications are signed with."
+msgstr "La clave con la que se firman las notificaciones de revisión de este sitio."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -12177,6 +12273,11 @@ msgstr "La comprobación previa falló inesperadamente."
 msgid "The publish gate acts only on rules marked as blocking. Authors editing a document that already carried a flagged phrase are not stopped for words they did not add."
 msgstr "El bloqueo de publicación solo actúa sobre las reglas marcadas como bloqueantes. A quien edita un documento que ya contenía una expresión señalada no se le bloquea por palabras que no ha añadido."
 
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "The push key could not be saved."
+msgstr "No se pudo guardar la clave push."
+
 #: lib/kiln_cms_web/components/compliance_components.ex
 #, elixir-autogen, elixir-format
 msgid "The required disclaimer is missing. Add it verbatim: “%{disclaimer}”"
@@ -12191,6 +12292,11 @@ msgstr "La misma lista está disponible en el servidor con %{list}, y %{doctor} 
 #, elixir-autogen, elixir-format
 msgid "The saved password can't be read. Re-enter it."
 msgstr "No se puede leer la contraseña guardada. Vuelve a introducirla."
+
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "The saved private key can't be read. Rotate it."
+msgstr "No se puede leer la clave privada guardada. Rótela."
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
@@ -12582,10 +12688,20 @@ msgstr "Solo este sitio"
 msgid "This site publishes its content over two headless API surfaces — GraphQL and JSON:API — plus a rendered-artifact endpoint for full page bodies. Anonymous requests read published content; a bearer token unlocks drafts."
 msgstr "Este sitio publica su contenido a través de dos superficies de API headless —GraphQL y JSON:API— más un endpoint de artefactos renderizados para los cuerpos de página completos. Las peticiones anónimas leen contenido publicado; un token bearer da acceso a los borradores."
 
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site uses the deployment's push key."
+msgstr "Este sitio usa la clave push del despliegue."
+
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site's Content-Security-Policy blocks scripts, connections and images from hosts it doesn't know. List the origins your snippet needs — one per line, e.g. https://plausible.io — or the browser will silently refuse them. Inline <script> blocks are allowed automatically once you save."
 msgstr "La Content-Security-Policy de este sitio bloquea scripts, conexiones e imágenes de servidores que no conoce. Indica los orígenes que necesita tu fragmento, uno por línea (por ejemplo, https://plausible.io), o el navegador los rechazará en silencio. Los bloques <script> en línea se permiten automáticamente al guardar."
+
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's key"
+msgstr "Clave de este sitio"
 
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -12601,6 +12717,11 @@ msgstr "El correo de este sitio sale a través del relé del despliegue, desde %
 #, elixir-autogen, elixir-format
 msgid "This site's mail goes out through the deployment's relay."
 msgstr "El correo de este sitio sale a través del relé del despliegue."
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's notification key has changed. Turn notifications on again."
+msgstr "La clave de notificaciones de este sitio ha cambiado. Vuelva a activar las notificaciones."
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
@@ -13815,6 +13936,11 @@ msgstr "No tienes permiso para cambiar la configuración de idiomas de este siti
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's outgoing mail."
 msgstr "No tienes permiso para cambiar el correo saliente de este sitio."
+
+#: lib/kiln_cms_web/live/site_push_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's push key."
+msgstr "No tiene permiso para cambiar la clave push de este sitio."
 
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format

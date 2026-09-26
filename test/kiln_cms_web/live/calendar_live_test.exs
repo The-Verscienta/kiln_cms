@@ -435,35 +435,29 @@ defmodule KilnCMSWeb.CalendarLiveTest do
         actor: admin
       )
 
-      assert render(lv) =~ title
+      # The refresh lands one coalescing window after the broadcast, not
+      # inline — so poll the render rather than asserting on the next one.
+      eventually(lv, title)
     end
 
     # A burst of writes elsewhere (a bulk import, a release going out, a
-    # scheduler sweep) queues one `:calendar_changed` per write. Re-running the
-    # window query once per message rather than once per burst is what turns a
-    # busy org into a mailbox this LiveView can never catch up on: every later
-    # `render`/`render_click` is just another message, handled strictly after
-    # whatever backlog of stale, already-superseded re-queries arrived first.
-    # `handle_info/2` drains the mailbox before it re-queries, so N messages
-    # cost the one re-query they actually need — proven here by the
-    # `[:kiln_cms, :calendar, :requery]` event `handle_info/2` emits once per
-    # re-query, carrying how many messages that re-query answered. Not by
-    # timing, which would be exactly the kind of load-sensitive assertion this
-    # bug already hid behind — and, since #1336's follow-up, not by repo query
-    # telemetry either: a repo event is one *physical* query, and one logical
-    # re-query runs several (one per content type, plus the dynamic-type
-    # registry, tasks and releases), so a raw event count measures the
-    # projection's fan-out, not the coalescing.
-    test "a burst of change notifications is coalesced into one re-query", %{conn: conn} do
+    # scheduler sweep) queues one `:calendar_changed` per write, and every one
+    # asks for the same re-query. The first arms a fixed window; the rest are
+    # absorbed by it (#1336). Proven by the `[:kiln_cms, :calendar, :requery]`
+    # event `handle_info/2` emits once per re-query, carrying how many
+    # messages that re-query answered — not by repo query telemetry, which
+    # counts the projection's fan-out (one logical re-query is several
+    # physical ones: per content type, plus the type registry, tasks and
+    # releases), and not by timing.
+    defp burst_calendar(conn) do
       admin = authed_admin()
 
       # The calendar's broadcast topic is per-org, and most of this suite
       # writes to the shared default org — mounted there, every concurrent
       # async test's lifecycle write would land another `:calendar_changed`
-      # in this LiveView's mailbox mid-measurement, each a *legitimate*,
-      # uncoalescible extra re-query (the flake #1336's fix still left
-      # behind). A freshly-seeded org has a topic nothing else publishes on,
-      # so the only messages in play are the twenty sent below.
+      # in this LiveView's mailbox mid-measurement. A freshly-seeded org has a
+      # topic nothing else publishes on, so the only messages in play are the
+      # ones each test sends.
       org =
         Ash.Seed.seed!(Organization, %{
           name: "Calendar Burst",
@@ -477,11 +471,9 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       handler_id = "calendar-coalesce-#{System.unique_integer([:positive])}"
 
       # `:telemetry.execute/3` runs each handler synchronously, IN THE PROCESS
-      # THAT EMITTED THE EVENT — no message passing involved. So `self()`
-      # inside this handler is whatever CalendarLive just re-queried, and this
-      # attachment (a VM-wide hook, since `:telemetry` has no per-test scope)
-      # only reports re-queries `lv.pid` itself ran, ignoring every other
-      # concurrently-mounted calendar.
+      # THAT EMITTED THE EVENT. So `self()` inside this handler is whatever
+      # CalendarLive just re-queried, and this attachment (VM-wide, since
+      # `:telemetry` has no per-test scope) only reports `lv.pid`'s own.
       :telemetry.attach(
         handler_id,
         [:kiln_cms, :calendar, :requery],
@@ -493,41 +485,81 @@ defmodule KilnCMSWeb.CalendarLiveTest do
 
       on_exit(fn -> :telemetry.detach(handler_id) end)
 
-      # `:sys.suspend/1` pauses lv.pid's message loop without blocking `send/2`
-      # (delivery to a mailbox is independent of whether the owner is running),
-      # so every one of the 20 sends below is guaranteed to land before the
-      # process handles the first of them — a real, atomic burst regardless of
-      # scheduler contention. Without this, the burst's atomicity depended on
-      # this loop finishing before lv.pid was next scheduled, which a busy
-      # test suite cannot promise: kiln_cms#1336 caught CalendarLive draining
-      # (and re-querying for) several partial bursts instead of one whole one
-      # under load, which this suspend/resume closes off at the test level.
+      lv
+    end
+
+    # Collects re-query events until they account for `total` messages. Each
+    # wait is for an event that must arrive (a window always closes), so the
+    # timeout is a failure budget, not a measurement.
+    defp requeries_answering(total, acc \\ []) do
+      if Enum.sum(acc) >= total do
+        Enum.reverse(acc)
+      else
+        assert_receive {:calendar_requery, messages},
+                       2_000,
+                       "a coalescing window opened but never re-queried"
+
+        requeries_answering(total, [messages | acc])
+      end
+    end
+
+    test "a queued burst of change notifications is coalesced into one re-query",
+         %{conn: conn} do
+      lv = burst_calendar(conn)
+
+      # `:sys.suspend/1` pauses lv.pid's message loop without blocking
+      # `send/2`, so all 20 land before the first is handled — and therefore
+      # ahead of the window's timer, which the first one arms.
       :sys.suspend(lv.pid)
-
       for _ <- 1..20, do: send(lv.pid, {:calendar_changed, Ash.UUID.generate()})
-
       :sys.resume(lv.pid)
 
-      # Forces the LiveView to actually process its mailbox before we assert:
-      # `render/1` is itself a message, so it cannot return before every
-      # `:calendar_changed` already queued ahead of it has been handled — by
-      # which point the requery events those handlers emitted are already in
-      # this test's mailbox. Hence `assert_received`, not `assert_receive`:
-      # nothing here waits on timing.
+      assert requeries_answering(20) == [20],
+             "20 queued :calendar_changed messages were not answered by exactly " <>
+               "one re-query"
+
+      # `render/1` is itself a message: once it returns, anything the burst
+      # could still have scheduled has run.
       render(lv)
+      refute_received {:calendar_requery, _}
+    end
 
-      assert_received {:calendar_requery, messages},
-                      "expected the drained burst to still run its one re-query"
+    # The case the old `receive ... after 0` drain could not coalesce (#1336),
+    # made deterministic: `render/1` between sends means every message is
+    # handled before the next is sent — a sequential import whose writes
+    # arrive faster than a human notices but slower than a mailbox scan. The
+    # drain saw an empty mailbox each time and re-queried per message, 10 for
+    # 10 (mutation-verified). A fixed window from the first message bounds
+    # the re-queries by elapsed time instead, whatever the scheduler does.
+    test "change notifications spread over time still share a window", %{conn: conn} do
+      lv = burst_calendar(conn)
 
-      assert messages == 20,
-             "the burst's first re-query answered only #{messages} of 20 " <>
-               ":calendar_changed messages — handle_info/2 is re-querying per " <>
-               "partial drain instead of coalescing the whole burst"
+      started = System.monotonic_time(:millisecond)
 
-      refute_received {:calendar_requery, _},
-                      "20 :calendar_changed messages ran more than one re-query — " <>
-                        "handle_info/2 is re-querying per message instead of " <>
-                        "coalescing the burst"
+      for _ <- 1..10 do
+        send(lv.pid, {:calendar_changed, Ash.UUID.generate()})
+        render(lv)
+      end
+
+      elapsed = System.monotonic_time(:millisecond) - started
+      requeries = requeries_answering(10)
+
+      # Each window opens on a message at or after the previous one closed,
+      # so messages spread over `elapsed` ms can open at most this many. On a
+      # machine too loaded to send 10 messages inside one window the bound
+      # loosens rather than flakes; the regression it guards is one re-query
+      # per message.
+      bound = div(elapsed, KilnCMSWeb.CalendarLive.requery_window_ms()) + 1
+
+      assert length(requeries) <= bound,
+             "10 :calendar_changed messages over #{elapsed}ms ran " <>
+               "#{length(requeries)} re-queries (#{inspect(requeries)}), more than " <>
+               "the #{bound} window(s) that span allows — handle_info/2 is " <>
+               "re-querying per message instead of coalescing"
+
+      assert Enum.sum(requeries) == 10
+      render(lv)
+      refute_received {:calendar_requery, _}
     end
   end
 

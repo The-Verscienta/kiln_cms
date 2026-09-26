@@ -652,6 +652,13 @@ amplification surface.
 Known and accepted, in rough order of how much they should worry an operator.
 Each is a deliberate trade-off, not an oversight — but each is worth revisiting.
 
+**1.0 review (#1535).** Each item below ends with a **proposed** 1.0 verdict:
+*still accepted at 1.0*, *fix before 1.0*, or *fix after 1.0*, with the reason
+and the code it was checked against on `main` (v0.10.0). They are proposals for
+the maintainer to confirm or overturn, except item 3, which roadmap decision 4
+already settled. Items keep their numbers because other files cite them by
+number.
+
 1. ~~**Form embeds default to `frame-ancestors *`.**~~ **Closed in #562.**
    `EMBED_ORIGINS` unset now means same-origin only, so cross-site embedding is
    opt-in, and a malformed value closes the policy rather than widening it.
@@ -684,6 +691,18 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    nothing. It also gives the operator the switch an org-admin compromise
    used to lack: under the cap, a taken-over admin account cannot re-open the
    overlay-and-harvest surface #562 closed beyond what the operator listed.
+
+   **1.0 verdict (proposed, #1535): still accepted at 1.0.** Verified on main:
+   the default is same-origin (#562), a form's list resolves form -> org ->
+   deployment in `KilnCMS.Forms.EmbedPolicy` (#1131), and the operator ceiling
+   is `KilnCMS.Forms.EmbedCeiling` behind `EMBED_ORIGINS_LOCKED`
+   (`config/runtime/cross_origin.exs:37`, #1133). What remains is a stated
+   choice: an org admin decides who may frame that org's own forms, which grants
+   nothing across the tenant boundary, and an operator who disagrees has a
+   switch. One question for the maintainer to take alongside #1547, not proposed
+   here: should `EMBED_ORIGINS_LOCKED` also default on once a second
+   organization exists? The case is weaker than for an unknown `Host`, because
+   the uncapped default leaks nothing to another tenant.
 2. **Passphrase-locked content is weak by construction (#496).** A shared secret
    typed into a public form is not access control in the sense the rest of this
    document uses the phrase: there is no per-reader identity, so no audit trail
@@ -706,6 +725,15 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    a locked document in a gated audience needs both. Point operators at
    [api.md](api.md#password-protected-content) before they use this for anything
    that would matter if it leaked.
+
+   **1.0 verdict (proposed, #1535): still accepted at 1.0.** Nothing here is a
+   bug to fix. A shared passphrase is weak by construction, and the item says
+   so. The bounds it lists still hold on main: the `:unlock` bucket is 10/min
+   per address (`lib/kiln_cms_web/rate_limit.ex:53`), and grants live 12 hours
+   (`lib/kiln_cms/cms/content_password.ex:54`) and name a fingerprint of the
+   bcrypt hash, so rotating the passphrase kills them. The 1.0 obligation is
+   documentation. The pointer to `api.md` already meets it: audiences are the
+   access-control axis.
 
 3. **Unknown `Host` headers resolve to the default organization — on a
    single-org deployment, or where `TENANT_STRICT_HOST=false`.** #563 added
@@ -806,6 +834,14 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    default org, so a forgotten `SetTenant` plug or `:assign_current_org`
    on_mount fails loudly in test instead of serving the wrong tenant in
    production.
+
+   **1.0 verdict (decided, #1547): fixed.**
+   Roadmap decision 4 (2026-09-18) settled this, and #1547 implements it: an
+   unset `TENANT_STRICT_HOST` turns on once a second organization exists, and
+   an explicit setting still wins (see the top of this item). The
+   sub-residuals stay accepted: the plain-text refusal lets a sweep enumerate
+   org slugs, and nothing router-reachable can meter `/live` longpoll. Both are
+   documented with a proxy-level remedy.
 4. **The OpenAPI spec and Swagger explorer describe the write surface** —
    *closed (#567).* Both were unauthenticated in every environment, production
    included, while GraphQL introspection was already disabled there for the
@@ -819,6 +855,15 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    hang a pipeline on — so a future rename of either path has to be made in
    `KilnCMSWeb.Plugs.ApiDocs` too. A test pins that the content routes it sits
    in front of are unaffected.
+
+   **1.0 verdict (proposed, #1535): still accepted at 1.0.** The residual is a
+   maintenance hazard, not an exposure, and it is pinned.
+   `KilnCMSWeb.Plugs.ApiDocs` hard-codes both paths
+   (`lib/kiln_cms_web/plugs/api_docs.ex:78-79`), and
+   `test/kiln_cms_web/api_docs_test.exs` and `api_explorer_routes_test.exs`
+   cover the gate and the routes behind it. The spec is also committed as
+   `docs/api/openapi.json`, so a disabled explorer hides nothing an attacker
+   could not read in the repository.
 5. **Rate limiting keys on `remote_ip`.** Behind a proxy with `TRUSTED_PROXIES`
    unset, every request shares one bucket — which throttles all clients together
    and makes per-IP limits meaningless. Set `TRUSTED_PROXIES`. **No longer
@@ -842,11 +887,39 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    is generous enough never to inconvenience a shared egress is not a limit.
    `TRUSTED_PROXIES` is what makes the buckets per-*client* and is the real
    remedy on any deployment behind a proxy.
+
+   **1.0 verdict (proposed, #1535): still accepted at 1.0 (correct the
+   arithmetic).** Detection is in `KilnCMSWeb.Plugs.ClientIp`
+   (`lib/kiln_cms_web/plugs/client_ip.ex:164-170`, a once-per-node warning that
+   names the fix). Honouring forwarding headers without a trusted list would be
+   the worse bug. The arithmetic here has drifted, though. #747 doubled `:auth`
+   to 40/min (`lib/kiln_cms_web/rate_limit.ex:28`), so a successful browser
+   sign-in spends three of forty, not three of twenty: about thirteen sign-ins
+   per minute per address, not six. The 1.0 action is to correct that sentence.
+   The trade itself stays.
 6. **Preview tokens bypass authorization and tenancy.** `PreviewController`
    loads with `authorize?: false` and no tenant. Token validity and expiry are
    the whole control. (`live_session :token_preview` does now carry
    `:assign_current_org`, added in #563, so the preview LiveView resolves the
    host it is served from — but the token lookup itself is still tenant-less.)
+
+   **1.0 verdict (proposed, #1535): still accepted at 1.0 (rewrite the item).**
+   The item is out of date. #1309 closed the tenant half. Every redeemer pins
+   the token's `org_id` to the serving org and then reads with `tenant: org_id`:
+   `PreviewController`
+   (`lib/kiln_cms_web/controllers/preview_controller.ex:23,45`),
+   `TokenPreviewLive` (`lib/kiln_cms_web/live/token_preview_live.ex:33`), the
+   visual-editing read
+   (`lib/kiln_cms_web/controllers/visual_editing_controller.ex:117`) and
+   `BridgeSocket` (`lib/kiln_cms_web/channels/bridge_socket.ex:250`).
+   `PreviewToken.verify/1` also refuses an older token that names no org
+   (`lib/kiln_cms/cms/preview_token.ex:159-168`). What is left is the design
+   itself. The read uses `authorize?: false` because the signed token is the
+   grant. The token is bound to one record, lives 15 minutes
+   (`preview_token.ex:42`) and is metered by `:preview` at 30/min. It cannot be
+   revoked short of rotating `SECRET_KEY_BASE`. That is an acceptable 1.0 shape
+   for a short-lived bearer link, and the item should say so instead of "no
+   tenant".
 7. ~~**Four resources are world-readable by policy.**~~ **Closed in #565.**
    `Firing.PublishedArtifact`, `Firing.ReferenceEdge`, `CMS.FormField` and
    `Search.BlockEmbedding` no longer declare `authorize_if always()` on reads:
@@ -869,9 +942,30 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    Delivery, the re-fire wave, the indexer and form rendering were unaffected
    because they read as the system (`authorize?: false`). See
    [`policy-matrix.md`](policy-matrix.md) for the resulting grants.
+
+   **1.0 verdict (proposed, #1535): nothing to decide (closed).** Closed in #565
+   and re-checked on main. `PublishedArtifact` reads through
+   `Firing.Checks.DocumentReadable`
+   (`lib/kiln_cms/firing/published_artifact.ex:103`), and the only `authorize_if
+   always()` left among the four resources is `FormField`'s org-admin bypass. It
+   keeps its place in the list because later items are cited by number.
 8. **Unauthenticated GraphQL runs with `actor: nil` *and* `tenant: nil`.**
    Policies still run, so the audience and published filters hold, but the
    tenant boundary does not for that request.
+
+   **1.0 verdict (proposed, #1535): fix before 1.0 (a test and a rewrite, not
+   new code).** The item is stale. `KilnCMSWeb.Plugs.SetTenant` runs in the
+   endpoint (`lib/kiln_cms_web/endpoint.ex:187`) and sets the Ash tenant on
+   every HTTP request (`lib/kiln_cms_web/plugs/set_tenant.ex:221`).
+   `AshGraphql.Plug` copies that tenant into the Absinthe context for `/gql`
+   (`lib/kiln_cms_web/router.ex:78`), `/ws/gql` resolves its own from the
+   connect URI (`lib/kiln_cms_web/graphql_socket.ex:46`), and `:strict_tenancy`
+   (`config/config.exs:483`) makes a tenant-less read fail closed instead of
+   spanning orgs. So an anonymous query is already scoped to the host's org.
+   What is missing is proof. No test sends an anonymous HTTP `/gql` query on one
+   org's host and asserts that another org's published content is absent; the
+   strict-host suite covers only the socket. Pin that before 1.0 makes the
+   promise, then close the item.
 9. **A block field policy could be cleared by omission** — *closed for the
    reported case (#566).* `EnforceBlockFieldPolicy` stopped an editor *setting*
    an admin-only block field, but a headless client that submitted a block tree
@@ -961,6 +1055,17 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    true of nested children: ids there are client-supplied, so relabelling which
    child an id names is believed, and only the two-children-one-id case is
    decidable without an ownership check.
+
+   **1.0 verdict (proposed, #1535): fix after 1.0.** Verified unchanged on main
+   (`lib/kiln_cms/cms/changes/enforce_block_field_policy.ex:140-153`). What
+   remains needs an editor who may already write that document in that org. Such
+   an editor can move or drop an admin-set block field by relabelling ids, or
+   re-target a value stored on an id-less child. The multiset bounds the count,
+   and nothing crosses a tenant or an audience, so this is integrity within an
+   editor's own grant, not confidentiality. Closing it needs a new primitive:
+   server-verified block identity on the write path. That is a design change to
+   the block tree, too large for the contract-freeze window, and better done
+   after the legacy block shape is retired (#1537).
 10. **Per-account throttling is per node, in memory, and keyed on
    attacker-chosen strings.** `AccountThrottle` (#478) holds its budgets in ETS,
    so a restart forgives every accumulated attempt and a second node would carry
@@ -973,6 +1078,17 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
    mail budget delays that victim's own reset mail until the window rolls — the
    suppression is logged for exactly that reason. Revisit if Kiln is ever
    deployed multi-node.
+
+    **1.0 verdict (proposed, #1535): still accepted at 1.0, if 1.0 says single
+    node.** The trade is unchanged: `AccountThrottle` counts with
+    `:ets.update_counter`, and `KilnCMSWeb.RateLimit` is Hammer with `backend:
+    :ets` (`lib/kiln_cms_web/rate_limit.ex:5`). It is still right for one node,
+    because a row-backed counter reopens enumeration and turns every guess into
+    a write. The app is multi-node *capable*, though: `DNSCluster` is supervised
+    and PubSub is distributed. So 1.0's supported-deployment statement has to
+    say plainly that budgets are per node, and that N nodes multiply every
+    budget by N. If 1.0 instead promises multi-node, this becomes a fix before
+    1.0, because the budgets need a shared counter.
 11. **The `:browser` pipeline is not rate-limited**, so `/`, `/developers`, all
     `/editor/**` LiveView mounts, and the account/governance export endpoints
     are unthrottled. They are session-gated (except the first two), so this is
@@ -1078,9 +1194,40 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     document. `/ws/collab` frames and `/ws/gql` documents are the event
     surfaces counted so far (above); `/live` events remain the harder problem
     #1305 described (no single choke point, no obvious per-event cost model).
+
+    **1.0 verdict (proposed, #1535): fix after 1.0.** Every path this item
+    called a confidentiality concern is now closed or metered.
+    `KilnCMSWeb.LiveJoinBudget` meters `/live` root joins,
+    `KilnCMSWeb.SocketJoinBudget` meters `/ws/*` connects, `SocketEventBudget`
+    meters `/ws/collab` frames, `GraphqlLimits.SocketDocumentBudget` meters
+    `/ws/gql` documents, and the sign-in submit is charged (#715). What is left
+    is volume: `/live` events after a join, and the unmetered `:browser`
+    pipeline (`lib/kiln_cms_web/router.ex:81-90`). Both sit behind a session for
+    everything except `/` and `/developers`. One correction for whoever takes
+    this on: the item says no lifecycle hook runs before every `handle_event/3`.
+    In fact `attach_hook(socket, name, :handle_event, fun)` does exactly that
+    for a LiveView's own events, and the codebase already uses it
+    (`lib/kiln_cms_web/nav_preset.ex:30`). Only LiveComponent events bypass it,
+    so a per-actor event budget is feasible, just not free. A cheap companion
+    could land at any time: the Sentry logger handler's `:rate_limiting` option
+    is still unset (`lib/kiln_cms/application.ex:333-335`).
 12. **Periodic CSP re-review** as the editor adds third-party assets. The
     runtime `img-src` is widened by `CSP_IMG_SRC` and by the Unsplash
     integration — the only externally-influenced part of the policy.
+
+    **1.0 verdict (proposed, #1535): fix before 1.0 (do the review once; it
+    finds one directive).** More sources now widen the policy than when this was
+    written. `img-src` also takes the enabled oEmbed providers' thumbnail hosts
+    (#489), and `media-src` takes the storage hosts (#494)
+    (`lib/kiln_cms_web/router.ex:1286-1304`). More important, `connect-src
+    'self' ws: wss:` (`router.ex:26`) has not changed since the skeleton commit,
+    and it allows a websocket to *any* host. Script that gets past `script-src`
+    could exfiltrate data over it, which is what `connect-src` exists to stop.
+    Every Kiln socket is same-origin, so narrowing the directive to `'self'`
+    (which CSP Level 3 applies to `ws:`/`wss:` on the same host) looks free,
+    though it needs a browser check. `style-src 'unsafe-inline'` belongs in the
+    same pass. At 1.0 the threat model should record a reviewed CSP, not a
+    standing reminder to review one.
 13. ~~**Secrets rotation runbook** (DB URL, `SECRET_KEY_BASE`,
     `TOKEN_SIGNING_SECRET`, S3 keys) is not written down.~~ **Closed by
     #1304:** [`secrets-rotation.md`](secrets-rotation.md) is the per-secret
@@ -1114,6 +1261,15 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
 
     Pairs with [`backups.md`](backups.md), where the same `SECRET_KEY_BASE` is
     part of the backup.
+
+    **1.0 verdict (proposed, #1535): still accepted at 1.0.** The two gaps this
+    item was opened for are closed: the runbook (#1304), and the vault read
+    window with `mix kiln.vault.reencrypt` and the actor `:rekey` (#1487). The
+    four remaining bullets are properties of the mechanisms, and no change in
+    Kiln removes them. Sessions and JWTs are each signed with one secret,
+    backups outlive a re-encrypt, and peers cache an actor key. Rotating without
+    signing everyone out would need dual-key session verification. That is a
+    feature for after 1.0, not a fix.
 14. ~~**The collaborative-editing socket is scoped by topic, not by
     tenancy.**~~ **Closed by #655.** The socket token still names only a user,
     so it establishes *who* and nothing more; `CollabChannel.join/3` now
@@ -1189,8 +1345,8 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     ~1,900x a single update apply, because Yjs runs in a NIF and the check is
     three database round trips. One room's CPU was never the constraint though.
     The binding cost is queries per second across the deployment, and the number
-    to reason about is the open-document ceiling (`Collab.Crdt.max_documents/0`,
-    500) at ~5 peers each: 2,500 channels checking every 30s is **+250
+    to reason about is the open-document ceiling
+    (`Collab.Crdt.max_documents/0`, 500) at ~5 peers each: 2,500 channels checking every 30s is **+250
     queries/s, or ~0.27 connection-seconds per second — under 3% of the default
     `POOL_SIZE` of 10** — at a ceiling no real deployment sits at. Ten seconds
     would be roughly three times that for a window an operator gains little
@@ -1238,6 +1394,14 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     publish's own write, and the room is told afterwards so its editors stop
     typing into a document nothing will persist. The authorization re-check is
     unchanged — collaborative editing of published content remains supported.
+
+    **1.0 verdict (proposed, #1535): still accepted at 1.0.** Closed by #655,
+    #675 and #775. The residual is that the re-check catches exactly what a
+    fresh join would refuse, and that is the intended meaning: it is an
+    authorization check. Its one data-loss consequence, publishing under an open
+    room, was closed at the publish path (#1061). The bound an operator can rely
+    on stays 30 seconds (`lib/kiln_cms_web/channels/socket_reauth.ex`), and
+    cross-node eviction stays reasoned, not exercised, as #1060 decided.
 15. ~~**Webhook deliveries have no anti-replay.**~~ **Closed for receivers
     that verify the timestamped signature.** Every delivery now carries
     `x-kilncms-webhook-signature: t=<unix>,v1=<hex>`, an HMAC of
@@ -1258,6 +1422,28 @@ Each is a deliberate trade-off, not an oversight — but each is worth revisitin
     as long as the body is harmless. An admin **redelivery** is a new delivery
     with a new id and a fresh timestamp, on purpose. See
     [webhooks.md](webhooks.md#verifying-the-signature).
+
+    **1.0 verdict (proposed, #1535): fix before 1.0 (remove the deprecated
+    header).** The timestamped scheme closes replay for receivers that verify it
+    (`lib/kiln_cms/webhooks.ex:46-65`; both headers are sent at
+    `lib/kiln_cms/webhooks/delivery_worker.ex:158-161`). The remainder exists
+    only because the body-only `x-kilncms-signature` is still sent. 0.10.0
+    deprecated it with "will be removed in a later release" and no date
+    (`lib/kiln_cms/webhooks.ex:21-24`, `docs/webhooks.md:157`). If it survives
+    into 1.0 it becomes part of the covered webhook contract and can only be
+    removed at 2.0. The removal therefore belongs in 0.12, where the roadmap
+    puts deprecations, with an upgrade note telling receivers to switch.
+
+**Not on this list, but named by the 1.0 roadmap: `/api/ask` lets an anonymous
+caller drive LLM cost** (see *Other outbound calls* above). **1.0 verdict
+(proposed, #1535): still accepted at 1.0.** Generation is off by default
+(`generator: nil`, `KilnCMS.Ask`). When an operator turns it on, `/api/ask` has
+its own `KilnCMS.LLM.Budget` buckets on top of the `:api` limiter. One is per
+caller and falls back to the client address; the other is per org and is the
+actual spend ceiling. Exhausting either degrades the answer to retrieval-only
+instead of failing (`lib/kiln_cms/ask.ex:60-69`). An operator who enables
+generation chooses the ceiling. This paragraph is deliberately not a numbered
+item, so no reference elsewhere shifts.
 
 ## Operating the dependency audit
 

@@ -2,7 +2,7 @@ defmodule KilnCMS.CMS.CalendarRequeryMonitorTest do
   @moduledoc """
   The monitor is the only thing that carries `kiln_cms.calendar.requery` to an
   operator in production (#1336), so what matters is that it attaches a real
-  handler and that its arithmetic distinguishes a coalescing drain from a
+  handler and that its arithmetic distinguishes working coalescing from a
   defeated one.
   """
   # Not async: attaches a VM-wide `:telemetry` handler and owns a named process.
@@ -36,7 +36,7 @@ defmodule KilnCMS.CMS.CalendarRequeryMonitorTest do
              "production, which is the #678 failure this module exists to avoid"
   end
 
-  test "a coalescing drain shows a mean well above 1" do
+  test "working coalescing shows a mean well above 1" do
     org = Ash.UUID.generate()
 
     # One re-query answering 20 messages, twice: a burst absorbed whole.
@@ -51,7 +51,7 @@ defmodule KilnCMS.CMS.CalendarRequeryMonitorTest do
     assert row.max == 20
   end
 
-  test "a defeated drain shows many re-queries pinned at mean 1.0" do
+  test "defeated coalescing shows many re-queries pinned at mean 1.0" do
     org = Ash.UUID.generate()
 
     # The #1336 signature: every re-query answered exactly one message.
@@ -62,7 +62,7 @@ defmodule KilnCMS.CMS.CalendarRequeryMonitorTest do
     assert row.mean == 1.0
 
     # The pair is what makes it evidence: a lone editorial change is also
-    # mean 1.0, and must not read the same as a defeated drain.
+    # mean 1.0, and must not read the same as defeated coalescing.
     assert row.requeries > 1
   end
 

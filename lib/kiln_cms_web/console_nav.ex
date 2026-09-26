@@ -523,6 +523,15 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("The mail provider and From address this site sends from."),
             keywords: ["smtp", "email", "relay", "sender", "from address", "postmark", "ses"]
           },
+          # A site's own Web Push key (#1560), generated rather than entered.
+          %{
+            key: :site_push,
+            label: gettext("Push notifications"),
+            path: ~p"/editor/site-push",
+            icon: "hero-bell-alert",
+            description: gettext("The key this site's review notifications are signed with."),
+            keywords: ["vapid", "web push", "notifications", "key", "rotate"]
+          },
           %{
             key: :automation,
             label: gettext("Automation"),
