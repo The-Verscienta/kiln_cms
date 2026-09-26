@@ -185,10 +185,12 @@ no change to the exporter.
 ## Calendar re-query coalescing (#1336)
 
 `KilnCMSWeb.CalendarLive` collapses a burst of `:calendar_changed` broadcasts
-into one window re-query, and emits `[:kiln_cms, :calendar, :requery]` carrying
-how many messages each re-query answered. Whether that coalescing actually
-holds under production write bursts is [#1336][], and it is a question about a
-live deployment rather than about a test.
+into one window re-query — the first message arms a fixed 100ms window, the
+re-query runs when it closes — and emits `[:kiln_cms, :calendar, :requery]`
+carrying how many messages each re-query answered. That window replaced a
+`receive ... after 0` mailbox drain, which only coalesced messages already
+queued and so re-queried once per write through a sequential bulk import
+([#1336][]).
 
 [`KilnCMS.CMS.CalendarRequeryMonitor`](../lib/kiln_cms/cms/calendar_requery_monitor.ex)
 is what makes it readable without a metrics stack: it attaches a real handler
@@ -202,7 +204,7 @@ and it is the one that reaches an operator who doesn't run Prometheus.
 
 ```
 calendar re-query coalescing, last 60s (#1336 — a high re-queries count with
-mean near 1 is the drain failing to coalesce):
+mean near 1 is coalescing being defeated):
   org=0000…0001 re-queries=412 messages=498 mean=1.21 max=4
 ```
 
@@ -210,18 +212,18 @@ Reading it, during a bulk import or a release go-live with a calendar open:
 
 | What you see | What it means |
 |---|---|
-| `mean` comfortably above 1 | The drain is working — each re-query answered several writes. |
-| `mean` near 1 **with a high `re-queries`** | The coalescing is being defeated: it re-queries for one message, and the next write lands immediately after. #1336's failure mode. |
+| `mean` comfortably above 1 | Coalescing is working — each re-query answered several writes. |
+| `mean` near 1 **with a high `re-queries`** | Coalescing is being defeated: one re-query per write. #1336's failure mode; with the window in place `re-queries` cannot exceed ten a second per open calendar, so seeing this means it regressed. |
 | `mean` 1.0 with `re-queries` of 1–2 | Nothing. A lone editorial change looks exactly like this. |
 
 The pairing matters: the mean alone is not evidence, because a quiet
-deployment and a defeated drain both sit at 1.0. It is the *volume* alongside
+deployment and defeated coalescing both sit at 1.0. It is the *volume* alongside
 it that separates them.
 
 Deliberately **no threshold alert**. Choosing "mean below X over Y re-queries
 is broken" would bake in a constant picked from argument rather than
-measurement — the objection that closed the first attempt at #1336. Read a real
-burst first; a threshold belongs in a follow-up informed by those numbers.
+measurement. Read a real burst first; a threshold belongs in a follow-up
+informed by those numbers.
 
 Disable with:
 

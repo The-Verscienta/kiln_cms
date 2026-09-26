@@ -54,6 +54,11 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Fixed
+
+- **An open calendar no longer re-queries once per write during a bulk import.**
+  ([#1336](https://github.com/The-Verscienta/kiln_cms/issues/1336) · [long form](docs/changelog/unreleased.md#an-open-calendar-no-longer-re-queries-once-per-write-during-a-bulk-import))
+
 ## [0.10.0] - 2026-09-19
 
 Long form: [docs/changelog/v0.10.0.md](docs/changelog/v0.10.0.md) —
