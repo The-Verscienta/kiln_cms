@@ -1,8 +1,8 @@
 defmodule KilnCMS.CMS.CalendarRequeryMonitor do
   @moduledoc """
   Periodic, aggregated log of how well `KilnCMSWeb.CalendarLive` is coalescing
-  `:calendar_changed` bursts (#1336) — the one signal that answers whether the
-  mailbox drain holds under real production write bursts.
+  `:calendar_changed` bursts (#1336) — the one signal that shows, on a live
+  deployment, how many writes each calendar re-query is answering.
 
   ## Why this exists as well as a metric
 
@@ -29,16 +29,18 @@ defmodule KilnCMS.CMS.CalendarRequeryMonitor do
       calendar re-query coalescing, last 60s: org=<uuid> re-queries=412
         messages=498 mean=1.21 max=4
 
-  `mean` is the number the question turns on. `handle_info/2` drains every
-  `:calendar_changed` already waiting before it re-queries, so:
+  `mean` is the number the question turns on. The first `:calendar_changed` of
+  a burst arms a fixed coalescing window and the re-query runs when it closes,
+  answering every message the window absorbed, so:
 
-    * **mean well above 1** under a burst — the drain is doing its job; each
+    * **mean well above 1** under a burst — coalescing is doing its job; each
       re-query answered several writes.
-    * **mean pinned near 1 while `re-queries` is large** — the drain is being
-      defeated: it sees a mailbox holding one message, re-queries, and the next
-      write arrives immediately after. That is #1336's failure mode, and it is
-      what a bulk import would produce if the coalescing is racing the sender
-      rather than waiting it out.
+    * **mean pinned near 1 while `re-queries` is large** — coalescing is being
+      defeated: one re-query per write. That is #1336's failure mode — what the
+      `receive ... after 0` drain this replaced produced for a sequential bulk
+      import, whose writes arrive one at a time. With the window, `re-queries`
+      is bounded by elapsed time (at most ten a second per open calendar), so
+      seeing it again means the window has regressed.
 
   A lone editorial change also produces `mean = 1.0`, so the mean alone means
   nothing — it is only evidence when `re-queries` is high at the same time.
@@ -47,8 +49,7 @@ defmodule KilnCMS.CMS.CalendarRequeryMonitor do
 
   It does not alert on a threshold. Picking "mean below X over Y re-queries
   means broken" would bake in a tuning constant chosen from argument rather
-  than data, which is the objection that closed the first attempt at #1336
-  (PR #1344). Read the numbers from a real burst first; a threshold, if one is
+  than data. Read the numbers from a real burst first; a threshold, if one is
   wanted, belongs in a follow-up informed by them.
 
   ## Cost
@@ -188,7 +189,7 @@ defmodule KilnCMS.CMS.CalendarRequeryMonitor do
 
     Logger.info(
       "calendar re-query coalescing, last #{seconds}s (#1336 — a high " <>
-        "re-queries count with mean near 1 is the drain failing to coalesce):\n" <>
+        "re-queries count with mean near 1 is coalescing being defeated):\n" <>
         lines <> tail
     )
   end
