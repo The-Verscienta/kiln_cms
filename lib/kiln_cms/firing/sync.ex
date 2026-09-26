@@ -76,6 +76,7 @@ defmodule KilnCMS.Firing.Sync do
   alias KilnCMS.Firing
   alias KilnCMS.Firing.Delivery
   alias KilnCMS.Firing.Engine
+  alias KilnCMS.Firing.FireWorker
   alias KilnCMS.SystemActor
 
   @default_commit_lag_seconds 10
@@ -133,8 +134,10 @@ defmodule KilnCMS.Firing.Sync do
   and delta of one sync — the positions assume it.
 
   `:backfilling` means a document on this page has no fired artifact yet (a
-  just-published document, while the async fire runs): a firing job is queued,
-  and the same position will succeed on a retry. `:unavailable` is a database
+  just-published document while its async fire runs, or one published before
+  firing existed and never fired): a firing job is queued for **every** such
+  document on the page, and the same position succeeds on a retry once they
+  have run. The position never moves past a document that was not served. `:unavailable` is a database
   outage.
 
   Options: `:limit` (items per page), `:surface` (the artifact surface to
@@ -411,18 +414,38 @@ defmodule KilnCMS.Firing.Sync do
 
   # Current state decides: visible now → upsert; otherwise a tombstone, if and
   # only if the sync API disclosed it before.
+  #
+  # Two passes: first what each scope's ids are, then every upsert's artifact
+  # for the whole page at once — so a page spanning several types queues every
+  # missing artifact in one go (#1621), not those of the first type only.
   defp classify(ids_by_scope, ctx) do
-    ids_by_scope
-    |> Enum.chunk_by(fn {scope, _id} -> scope.name end)
-    |> Enum.reduce_while({:ok, []}, fn chunk, {:ok, acc} ->
-      [{scope, _} | _] = chunk
-      ids = Enum.map(chunk, fn {_scope, id} -> id end)
+    chunks =
+      ids_by_scope
+      |> Enum.chunk_by(fn {scope, _id} -> scope.name end)
+      |> Enum.map(fn [{scope, _} | _] = chunk ->
+        classify_scope(scope, Enum.map(chunk, fn {_scope, id} -> id end), ctx)
+      end)
 
-      case classify_scope(scope, ids, ctx) do
-        {:ok, items} -> {:cont, {:ok, acc ++ items}}
-        other -> {:halt, other}
-      end
-    end)
+    records = Enum.flat_map(chunks, & &1.records)
+
+    with {:ok, upserts} <- upserts(records, ctx) do
+      record_exposures(records, ctx)
+      upserts_by_id = Map.new(upserts, &{&1.id, &1})
+
+      # Back in id order, so a page reads the way the keyset walked it.
+      items =
+        Enum.flat_map(chunks, fn %{ids: ids, exposures: exposures} ->
+          Enum.flat_map(ids, fn id ->
+            cond do
+              item = upserts_by_id[id] -> [item]
+              exposure = exposures[id] -> [tombstone(exposure)]
+              true -> []
+            end
+          end)
+        end)
+
+      {:ok, items}
+    end
   end
 
   defp classify_scope(scope, ids, ctx) do
@@ -438,60 +461,57 @@ defmodule KilnCMS.Firing.Sync do
           |> Firing.sync_exposures_for!(actor: SystemActor.new(:sync), tenant: ctx.org_id)
           |> Map.new(&{&1.document_id, &1})
 
-    with {:ok, upserts} <- upserts(records, ctx) do
-      record_exposures(records, ctx)
-      upserts_by_id = Map.new(upserts, &{&1.id, &1})
-
-      # Back in id order, so a page reads the way the keyset walked it.
-      items =
-        Enum.flat_map(ids, fn id ->
-          cond do
-            item = upserts_by_id[id] -> [item]
-            exposure = exposures[id] -> [tombstone(exposure)]
-            true -> []
-          end
-        end)
-
-      {:ok, items}
-    end
+    %{ids: ids, records: records, exposures: exposures}
   end
 
   # ── Items ────────────────────────────────────────────────────────────────
 
+  # Every record's artifact — or, if any is missing, a fire queued for EVERY
+  # missing one on the page and `:backfilling` for the page (#1621).
+  #
+  # All or nothing, deliberately. Serving the hits and leaving the misses out
+  # would hand back a cursor past documents the client never received; nothing
+  # would send them again until they next changed — a hole in the mirror no
+  # later delta repairs. Answering with only the hits *before* the first miss
+  # would keep the cursor honest, but then a page of k never-fired documents
+  # costs up to k round trips again, which is the bug. So the page is refused
+  # whole, the cursor does not move, and one retry after the fires land serves
+  # all of it.
+  #
+  # Only an outage stops the pass early: every further read would wait on the
+  # same dead database, and there is no queue to write to either.
   defp upserts(records, ctx) do
-    Enum.reduce_while(records, {:ok, []}, fn record, {:ok, acc} ->
+    records
+    |> Enum.reduce_while({[], []}, fn record, {hits, misses} ->
       case artifact(record, ctx) do
-        {:ok, body} -> {:cont, {:ok, [upsert(record, body, ctx) | acc]}}
-        other -> {:halt, other}
+        {:ok, body} -> {:cont, {[upsert(record, body, ctx) | hits], misses}}
+        :miss -> {:cont, {hits, [record | misses]}}
+        :unavailable -> {:halt, :unavailable}
       end
     end)
     |> case do
-      {:ok, items} -> {:ok, Enum.reverse(items)}
-      other -> other
+      :unavailable ->
+        :unavailable
+
+      {hits, []} ->
+        {:ok, Enum.reverse(hits)}
+
+      {_hits, misses} ->
+        misses
+        |> Enum.map(&{&1.org_id, Engine.document_type(&1), &1.id})
+        |> FireWorker.enqueue_backfill()
+
+        :backfilling
     end
   end
 
   # The same cache-first artifact read delivery makes. A published document
-  # with no artifact yet is queued for firing and the whole page retried — the
-  # alternative, an upsert without a body, is a copy the client can't use and
-  # won't be told about again until the document next changes.
+  # with no artifact yet is queued for firing (by `upserts/2`, with the rest of
+  # the page's misses) and the whole page retried — the alternative, an upsert
+  # without a body, is a copy the client can't use and won't be told about
+  # again until the document next changes.
   defp artifact(record, ctx) do
-    type = Engine.document_type(record)
-
-    case Delivery.read_artifact(record.org_id, type, record.id, ctx.surface) do
-      {:ok, body} ->
-        {:ok, body}
-
-      :unavailable ->
-        :unavailable
-
-      :miss ->
-        %{"org_id" => record.org_id, "type" => to_string(type), "id" => record.id}
-        |> KilnCMS.Firing.FireWorker.new()
-        |> Oban.insert()
-
-        :backfilling
-    end
+    Delivery.read_artifact(record.org_id, Engine.document_type(record), record.id, ctx.surface)
   end
 
   defp upsert(record, body, ctx) do

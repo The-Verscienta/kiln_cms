@@ -721,9 +721,21 @@ public never appears in a delta at all, not even as an id.
 **Errors.** `400 invalid_cursor` — the cursor was tampered with, belongs to
 another site, or was signed before a `SECRET_KEY_BASE` rotation: start again
 with `initial=true`. `404` — unknown `type`. `503 artifact_compiling` (with
-`Retry-After`) — a document on this page was published a moment ago and its
-artifact is still being fired; retry the **same** request. Responses are
-`Cache-Control: no-store`, and sync fetches are not counted as views.
+`Retry-After`) — a document on this page has no fired artifact yet (published
+a moment ago, or imported and never fired); retry the **same** request, with
+the same cursor. Responses are `Cache-Control: no-store`, and sync fetches are
+not counted as views.
+
+**`artifact_compiling` is all-or-nothing per page.** One request queues a fire
+for *every* document on the page that lacks an artifact, then answers `503`;
+the cursor you hold does not move, so no document is skipped, and a retry once
+those fires have run serves the whole page. On a site with a large backlog of
+never-fired content, an initial sync can still meet one `503` per page — so
+keep the last good cursor and retry that page with backoff, rather than
+restarting from `initial=true` or giving up after a few seconds. An operator
+can clear such a backlog before the first sync with `mix kiln.refire_all`
+(on a release: `bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"`), which fires
+every published document.
 
 Both official clients wrap the loop: `kiln.sync({ cursor })` in
 `@kiln-cms/client`, `KilnClient.sync(cursor: …)` in `kiln_client`.

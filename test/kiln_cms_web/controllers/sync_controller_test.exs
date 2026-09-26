@@ -10,6 +10,8 @@ defmodule KilnCMSWeb.SyncControllerTest do
   # shared content cache and dynamic-type registry.
   use KilnCMSWeb.ConnCase, async: false
 
+  import Ecto.Query, only: [from: 2]
+
   alias KilnCMS.Accounts
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Audiences
@@ -347,6 +349,91 @@ defmodule KilnCMSWeb.SyncControllerTest do
       assert {[%{"op" => "upsert", "id" => id}], _} = drain(conn, ctx, %{"initial" => "true"})
       assert id == post.id
     end
+
+    # #1621: a page halted at its first miss and queued that one document, so
+    # k never-fired documents took k 503 -> retry rounds, more than a client's
+    # retries allow.
+    test "one request queues every never-fired document on the page, across types",
+         %{conn: conn} = ctx do
+      published = [page!(ctx) | for(_ <- 1..4, do: published_post!(ctx))]
+      forget_fires()
+
+      conn_503 = sync(conn, ctx, %{"initial" => "true"}, false)
+      assert %{"errors" => [%{"code" => "artifact_compiling"}]} = json_response(conn_503, 503)
+      assert get_resp_header(conn_503, "retry-after") == ["2"]
+      assert Enum.sort(queued_fires()) == Enum.sort(Enum.map(published, & &1.id))
+
+      # A retry before they have run queues nothing twice.
+      assert conn |> sync(ctx, %{"initial" => "true"}, false) |> json_response(503)
+      assert length(queued_fires()) == length(published)
+
+      # One retry after they have run serves the whole page.
+      {items, _cursor} = drain(conn, ctx, %{"initial" => "true"})
+      assert Enum.sort(ids(items, "upsert")) == Enum.sort(Enum.map(published, & &1.id))
+    end
+
+    test "a delta page queues every never-fired document too", %{conn: conn} = ctx do
+      {_items, cursor} = drain(conn, ctx, %{"initial" => "true"})
+
+      published = [page!(ctx) | for(_ <- 1..3, do: published_post!(ctx))]
+      forget_fires()
+
+      assert conn |> sync(ctx, %{"cursor" => cursor}, false) |> json_response(503)
+      assert Enum.sort(queued_fires()) == Enum.sort(Enum.map(published, & &1.id))
+
+      {items, _} = drain(conn, ctx, %{"cursor" => cursor})
+      assert Enum.sort(ids(items, "upsert")) == Enum.sort(Enum.map(published, & &1.id))
+    end
+
+    test "the cursor never moves past a document it did not serve", %{conn: conn} = ctx do
+      fired = for _ <- 1..3, do: published_post!(ctx)
+      KilnCMS.DataCase.drain_oban()
+      unfired = for _ <- 1..4, do: published_post!(ctx)
+      forget_fires()
+
+      {items, rounds_503} = walk(conn, ctx, %{"initial" => "true", "limit" => "2"})
+
+      assert rounds_503 > 0
+      all = Enum.map(fired ++ unfired, & &1.id)
+      # Every document exactly once: none skipped, none repeated.
+      assert Enum.sort(ids(items, "upsert")) == Enum.sort(all)
+    end
+  end
+
+  # A client that keeps its cursor: on a 503 it lets the queue run and retries
+  # the same page. Returns every item and how many 503s it took.
+  defp walk(conn, ctx, params, acc \\ {[], 0}) do
+    {items, rounds} = acc
+    response = sync(conn, ctx, params, false)
+
+    case response.status do
+      503 ->
+        KilnCMS.DataCase.drain_oban()
+        walk(conn, ctx, params, {items, rounds + 1})
+
+      200 ->
+        body = json_response(response, 200)
+        acc = {items ++ body["items"], rounds}
+
+        if body["has_more"],
+          do: walk(conn, ctx, %{"cursor" => body["cursor"], "limit" => params["limit"]}, acc),
+          else: acc
+    end
+  end
+
+  # Documents published before firing existed, or whose fire was lost: no
+  # artifact and no job coming.
+  defp forget_fires do
+    KilnCMS.Repo.delete_all(from(j in Oban.Job, where: j.worker == "KilnCMS.Firing.FireWorker"))
+  end
+
+  defp queued_fires do
+    KilnCMS.Repo.all(
+      from(j in Oban.Job,
+        where: j.worker == "KilnCMS.Firing.FireWorker" and j.state == "available",
+        select: fragment("?->>'id'", j.args)
+      )
+    )
   end
 
   describe "requests it refuses" do

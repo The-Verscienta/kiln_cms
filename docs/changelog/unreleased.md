@@ -336,6 +336,25 @@ carries the reasoning.
   alerts only for the operator's relay, as the relay-unreachable alert already
   did (#1562).
 
+<a id="a-first-sync-of-a-site-with-never-fired-content-no-longer-fails"></a>
+
+- **A first sync of a site with never-fired content no longer fails.**
+  `GET /api/sync` answers `503 artifact_compiling` for a page holding a
+  published document with no fired artifact, and used to stop at the first
+  such document and queue a fire for it alone. A page with k never-fired
+  documents (bulk-imported content, say) then took k 503-and-retry rounds, more
+  than `KilnClient.sync/1` or `@kiln-cms/client` retry, so an initial sync of
+  such a site failed outright. One request now reads every artifact on the
+  page, queues a fire for every document missing one in a single insert
+  (skipping any whose fire is already pending), and answers one 503; a retry
+  once they have run serves the whole page. The page is still refused whole
+  rather than served without its misses: the cursor never moves past a
+  document it did not send, since nothing would send it again until it next
+  changed. `docs/api.md` now tells clients to keep the last cursor and retry
+  that page, and points operators at `mix kiln.refire_all` to fire a backlog
+  before the first sync.
+  ([#1621](https://github.com/The-Verscienta/kiln_cms/issues/1621))
+
 ## Security
 
 <a id="two-hex-advisories-closed-and-the-working-copy-survives-the-ash-fix"></a>
