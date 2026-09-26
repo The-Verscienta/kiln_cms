@@ -320,6 +320,49 @@ defmodule KilnCMSWeb.ExperimentsLiveTest do
       assert CMS.get_post!(post.id, actor: admin).title == "Winning title"
     end
 
+    # The winner select's first option is "no winner — just stop", value "".
+    # That is a real choice, not a missing one: it concludes the experiment and
+    # leaves the document alone. It reaches `conclude_experiment/3` as "", and
+    # the `:uuid` argument casts that to the same nil the domain tests pass
+    # directly — so nothing in the LiveView has to filter it. Asserts the
+    # outcome, not the mechanism.
+    test "concluding with no winner stores nothing, not an empty string", %{
+      conn: conn,
+      experiment: experiment,
+      post: post,
+      admin: admin
+    } do
+      title_before = CMS.get_post!(post.id, actor: admin).title
+
+      ExperimentFixtures.variant!(
+        experiment,
+        "B",
+        %{"fields" => %{"title" => "Winning title"}},
+        org_id(),
+        []
+      )
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/experiments/#{experiment.id}")
+      assert lv |> element("button", "Start") |> render_click() =~ "Experiment started."
+
+      html =
+        lv
+        |> form("form[phx-submit=conclude]", %{"winner_variant_id" => ""})
+        |> render_submit()
+
+      assert html =~ "Experiment concluded"
+
+      concluded =
+        Experiments.get_experiment!(experiment.id, authorize?: false, tenant: org_id())
+
+      assert concluded.state == :concluded
+      assert is_nil(concluded.winner_variant_id)
+
+      # No winner means nothing to promote, and the document is untouched.
+      refute has_element?(lv, "button", "Promote winner into document")
+      assert CMS.get_post!(post.id, actor: admin).title == title_before
+    end
+
     test "delete removes a draft and returns to the list", %{conn: conn, experiment: experiment} do
       {:ok, lv, _html} = live(conn, ~p"/editor/experiments/#{experiment.id}")
 
