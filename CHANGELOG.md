@@ -103,6 +103,9 @@ Every summary line below that was shortened links to its own entry there.
 - **A site's relay refusing its password no longer pages the operator.**
   ([#1562](https://github.com/The-Verscienta/kiln_cms/issues/1562) · [long form](docs/changelog/unreleased.md#a-sites-relay-refusing-its-password-no-longer-pages-the-operator))
 
+- **A first sync of a site with never-fired content no longer fails.**
+  ([#1621](https://github.com/The-Verscienta/kiln_cms/issues/1621) · [long form](docs/changelog/unreleased.md#a-first-sync-of-a-site-with-never-fired-content-no-longer-fails))
+
 ### Security
 
 - **Two Hex advisories closed (`ash` 3.33.11, `lazy_html` 0.1.13); the working

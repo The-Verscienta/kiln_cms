@@ -13,6 +13,12 @@ defmodule KilnCMS.Firing.FireWorker do
   referrers (which fans out `RefireWorker`), and enqueue per-block embedding +
   Meilisearch indexing.
   """
+
+  # The states in which a job for a document means "a fire is coming". Named
+  # once, because `enqueue_backfill/1` must dedupe by exactly the same rule the
+  # `unique` option below applies to a single insert.
+  @pending_states [:scheduled, :available, :executing, :retryable, :suspended]
+
   use Oban.Worker,
     queue: :firing,
     max_attempts: 3,
@@ -36,12 +42,64 @@ defmodule KilnCMS.Firing.FireWorker do
       #
       # The thundering herd it guarded against is bounded anyway: `purge_orphan/3`
       # deletes the artifacts, so the cache misses that drove the drip stop.
-      states: [:scheduled, :available, :executing, :retryable, :suspended]
+      states: @pending_states
     ]
+
+  import Ecto.Query, only: [from: 2]
 
   require Logger
 
   alias KilnCMS.Firing.{Engine, References}
+
+  @doc """
+  Queue a fire for every document in `targets` — `{org_id, type, id}` — that
+  has no fire pending already, in one insert. Returns how many were queued.
+
+  For a caller that found several documents without artifacts at once (a
+  `/api/sync` page, #1621): one job per document, not one per request.
+
+  `Oban.insert_all/1` skips the `unique` check, so the dedup is done here
+  instead, by the same key and states: one read of the pending jobs for these
+  ids, then an insert of the rest. Two requests racing between the read and
+  the insert can each queue the same document; that costs a redundant fire,
+  which is idempotent (artifacts upsert), never a missed one.
+  """
+  @spec enqueue_backfill([{Ash.UUID.t(), atom() | String.t(), Ash.UUID.t()}]) ::
+          non_neg_integer()
+  def enqueue_backfill([]), do: 0
+
+  def enqueue_backfill(targets) do
+    wanted =
+      targets
+      |> Enum.map(fn {org_id, type, id} ->
+        {to_string(org_id), to_string(type), to_string(id)}
+      end)
+      |> Enum.uniq()
+
+    ids = Enum.map(wanted, &elem(&1, 2))
+    states = Enum.map(@pending_states, &to_string/1)
+    worker = inspect(__MODULE__)
+
+    pending =
+      from(j in Oban.Job,
+        where:
+          j.worker == ^worker and j.state in ^states and
+            fragment("?->>'id'", j.args) in ^ids,
+        select:
+          {fragment("?->>'org_id'", j.args), fragment("?->>'type'", j.args),
+           fragment("?->>'id'", j.args)}
+      )
+      |> KilnCMS.Repo.all()
+      |> MapSet.new()
+
+    jobs =
+      for {org_id, type, id} = target <- wanted, not MapSet.member?(pending, target) do
+        new(%{"org_id" => org_id, "type" => type, "id" => id})
+      end
+
+    if jobs != [], do: Oban.insert_all(jobs)
+    length(jobs)
+  end
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"org_id" => org_id, "type" => type_str, "id" => id}}) do
