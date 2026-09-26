@@ -8765,6 +8765,11 @@ msgstr "Origen"
 msgid "Other"
 msgstr "Otro"
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Outbound"
+msgstr "Salida"
+
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "Outbound checking is off"
