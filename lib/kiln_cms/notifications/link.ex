@@ -60,7 +60,7 @@ defmodule KilnCMS.Notifications.Link do
   The console path for a notification's subject.
 
       iex> KilnCMS.Notifications.Link.editor_path(%{content_type: "post", content_id: "abc"})
-      "/editor/posts/abc"
+      "/editor/content/post/abc"
 
       iex> KilnCMS.Notifications.Link.editor_path("recipe", "r1", "b2")
       "/editor/content/recipe/r1?comment=b2"
@@ -89,18 +89,15 @@ defmodule KilnCMS.Notifications.Link do
   def editor_url(content_type, content_id, block_id \\ nil),
     do: KilnCMSWeb.Endpoint.url() <> editor_path(content_type, content_id, block_id)
 
-  # Pages and posts have their own routes as well as the generic one; both
-  # resolve to `ContentEditorLive`, so this is cosmetic — but it is the URL an
-  # editor recognizes, and it was already what the workflow mail used.
-  # Everything else, compiled or dynamic `:entry`, goes through `/content/`.
+  # Every type, pages and posts included, compiled or dynamic `:entry`, goes
+  # through `/content/`. The `/editor/pages|posts/:id` aliases this used to
+  # build for pages and posts are deprecated (#1538) and 1.0 removes them; mail
+  # already sent keeps working through them until then.
   #
   # `to_string/1` first: callers hand over both the string `content_type` a
   # notification stores and the `kind` atom the editor works in, and
   # `Phoenix.Param` has no atom implementation — an atom would raise here
   # rather than build a path.
-  defp document_path(content_type, id), do: do_document_path(to_string(content_type), id)
-
-  defp do_document_path("page", id), do: ~p"/editor/pages/#{id}"
-  defp do_document_path("post", id), do: ~p"/editor/posts/#{id}"
-  defp do_document_path(content_type, id), do: ~p"/editor/content/#{content_type}/#{id}"
+  defp document_path(content_type, id),
+    do: ~p"/editor/content/#{to_string(content_type)}/#{id}"
 end

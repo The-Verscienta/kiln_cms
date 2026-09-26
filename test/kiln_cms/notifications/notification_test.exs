@@ -291,14 +291,15 @@ defmodule KilnCMS.Notifications.NotificationTest do
       block_id = Ecto.UUID.generate()
       mine = record(me, %{content_type: "post", block_id: block_id})
 
-      assert Link.editor_path(mine) == "/editor/posts/#{mine.content_id}?comment=#{block_id}"
+      assert Link.editor_path(mine) ==
+               "/editor/content/post/#{mine.content_id}?comment=#{block_id}"
     end
 
     test "a document-level notification links to the document" do
       me = user()
       mine = record(me, %{content_type: "page", event: :published})
 
-      assert Link.editor_path(mine) == "/editor/pages/#{mine.content_id}"
+      assert Link.editor_path(mine) == "/editor/content/page/#{mine.content_id}"
     end
 
     test "a dynamic entry type goes through the generic content route" do

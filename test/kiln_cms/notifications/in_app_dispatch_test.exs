@@ -153,7 +153,7 @@ defmodule KilnCMS.Notifications.InAppDispatchTest do
       # rather than into the document — the console has no heading-anchor
       # fragment to aim at (see `KilnCMS.Notifications.Link`).
       assert Notifications.Link.editor_path(notification) ==
-               "/editor/pages/#{page.id}?comment=#{block_id}"
+               "/editor/content/page/#{page.id}?comment=#{block_id}"
     end
 
     test "an author who muted comments gets NO inbox row" do

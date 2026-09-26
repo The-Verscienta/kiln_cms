@@ -338,8 +338,17 @@ The audience a reader holds is resolved **per organization**, from their
 |---|---|
 | member of this org | that membership's audiences |
 | member elsewhere, none here | `[]` — **fail-closed** |
-| no memberships at all (legacy / single-org) | the global `User.audiences` column |
+| no memberships at all (legacy / single-org) | the global `User.audiences` column — **deprecated**, removed at 1.0 (see below) |
 | anonymous | `[]`, with no database lookup |
+
+The last row is deprecated in 0.12 and removed at 1.0 (#1538). Each account
+it grants something logs a warning once per boot. `mix kiln.deprecations`
+lists those accounts, and `mix kiln.deprecations --migrate-audiences` gives
+each one a membership on the default organization carrying its audiences and
+standing role, which is what the fallback grants there today. One thing to
+know first: the audience checkboxes on `/editor/accounts` still write the
+global column, which a member's access no longer reads, so after migrating an
+account change its audiences on the membership, or comp it a tier.
 
 Fail-closed matters because the organization is resolved from a
 **client-controlled host**. Falling back to the global column for a foreign org

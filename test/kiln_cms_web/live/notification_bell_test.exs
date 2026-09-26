@@ -177,7 +177,7 @@ defmodule KilnCMSWeb.NotificationBellTest do
                |> element(".bell-item[phx-value-id='#{notification.id}']")
                |> render_click()
 
-      assert to == "/editor/posts/#{notification.content_id}?comment=#{block_id}"
+      assert to == "/editor/content/post/#{notification.content_id}?comment=#{block_id}"
 
       assert [read] = Notifications.notifications_for_user!(me.id, actor: me)
       assert read.read_at

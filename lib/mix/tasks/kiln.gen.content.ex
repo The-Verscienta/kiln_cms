@@ -27,7 +27,8 @@ if Code.ensure_loaded?(Igniter) do
     ## Options
 
     * `--excerpt` / `-e` - add an `excerpt` field (for listings/feeds).
-    * `--published` / `-p` - add a `:published` read + `list_published_*` interface.
+    * `--published` / `-p` - add a `list_published_*` interface for the
+      `:published` read every type has.
     * `--plural` - override the plural used in interface names (default `<type>s`).
     * `--from <name>` - **promote an admin-defined dynamic type** (decision
       D17): derives the module, flags and plural from its `TypeDefinition`.
@@ -211,8 +212,10 @@ if Code.ensure_loaded?(Igniter) do
     # The body injected into the new resource module. Public for unit testing.
     @doc false
     def resource_body(module, type, opts) do
+      # Only `excerpt?`: `--published` adds an interface on the domain, and the
+      # `published?:` option it used to write here is deprecated (#1538).
       flags =
-        [{:excerpt?, opts[:excerpt]}, {:published?, opts[:published]}]
+        [{:excerpt?, opts[:excerpt]}]
         |> Enum.filter(&elem(&1, 1))
         |> Enum.map_join("", fn {k, _} -> ", #{k}: true" end)
 

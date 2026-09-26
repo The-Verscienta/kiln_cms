@@ -215,6 +215,16 @@ defmodule KilnCMS.Accounts.User do
       prepare AshAuthentication.Preparations.FilterBySubject
     end
 
+    # The accounts still reading gated content through the legacy
+    # `User.audiences` fallback (`KilnCMS.Accounts.Scoping.audiences/2`), which
+    # 1.0 removes (#1538): audiences held, and no membership anywhere. Backs
+    # `mix kiln.deprecations` — see `KilnCMS.Deprecations`.
+    read :legacy_audience_accounts do
+      description "Accounts on the deprecated User.audiences fallback (operator report)."
+      filter expr(fragment("cardinality(?) > 0", audiences) and not exists(org_memberships, true))
+      prepare build(sort: [email: :asc])
+    end
+
     # Sign in via an API key (`api_key` strategy). Resolves the presented key to
     # its owning user and stamps `using_api_key?` metadata, which the content
     # policy reads to keep API-key actors read-only.
@@ -963,6 +973,12 @@ defmodule KilnCMS.Accounts.User do
     # `forbid_if`, so the SyncBillingAudiences change ALSO refuses any
     # actor-carrying call — no authorized path grants an entitlement by hand.
     policy action(:sync_billing_audiences) do
+      forbid_if always()
+    end
+
+    # An operator report over every account's access columns. The admin bypass
+    # above admits a platform admin; the task runs it `authorize?: false`.
+    policy action(:legacy_audience_accounts) do
       forbid_if always()
     end
   end

@@ -389,6 +389,30 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
+  # Deprecated in 0.12, removed at 1.0 (#1538). They must keep working until
+  # then — mail already sent links here — and say so in the log on each visit.
+  describe "the deprecated /editor/pages|posts/:id aliases" do
+    test "still open the editor, and log the replacement route", %{conn: conn} do
+      page = draft_page(%{title: "Aliased page"})
+      post = draft_post(%{title: "Aliased post"})
+      conn = log_in(conn, authed_user(:editor))
+
+      for {path, kind, title} <- [
+            {~p"/editor/pages/#{page.id}", "page", "Aliased page"},
+            {~p"/editor/posts/#{post.id}", "post", "Aliased post"}
+          ] do
+        log =
+          ExUnit.CaptureLog.capture_log(fn ->
+            assert {:ok, _lv, html} = live(conn, path)
+            assert html =~ title
+          end)
+
+        assert log =~ "The /editor/#{kind}s/:id editor route is deprecated and 1.0 removes it"
+        assert log =~ "use /editor/content/#{kind}/:id"
+      end
+    end
+  end
+
   describe "/editor/posts/:id (post editor)" do
     test "saves an edited title and excerpt", %{conn: conn} do
       post = draft_post(%{title: "Old post"})

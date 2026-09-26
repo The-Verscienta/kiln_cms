@@ -18,8 +18,8 @@ defmodule KilnCMS.Newsletter.SendWorker do
   def perform(%Oban.Job{args: %{"newsletter_send_id" => send_id} = args}) do
     # The enqueuer carries the campaign's org (newsletter.ex); under strict
     # tenancy (#419) the send lookup itself needs it (default-org fallback for
-    # any legacy job that predates the arg).
-    tenant = args["org_id"] || KilnCMS.Accounts.default_org_id()
+    # any legacy job that predates the arg; deprecated, #1538, and logged).
+    tenant = KilnCMS.Deprecations.job_org_id(args, __MODULE__)
 
     case Newsletter.get_send!(send_id,
            authorize?: false,
