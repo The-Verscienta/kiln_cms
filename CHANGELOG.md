@@ -136,6 +136,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Every surface carries one label: covered, internal or experimental.**
   ([long form](docs/changelog/unreleased.md#every-surface-carries-one-label-covered-internal-or-experimental))
 
+- **The content editor says Save draft and Publish now, and Visual is a
+  secondary button.**
+  ([#1671](https://github.com/The-Verscienta/kiln_cms/issues/1671) · [long form](docs/changelog/unreleased.md#the-content-editor-says-save-draft-and-publish-now))
+
 ### Fixed
 
 - **A hard line break in a paragraph, heading, quote or list item is delivered
@@ -161,6 +165,22 @@ Every summary line below that was shortened links to its own entry there.
   stamping the block current.**
   ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642) · [long form](docs/changelog/unreleased.md#the-block-upcaster-refuses-a-gap-in-the-migrate-chain))
 
+- **After signing in with a recovery code, you can set up a new
+  authenticator.**
+  ([#1675](https://github.com/The-Verscienta/kiln_cms/issues/1675) · [long form](docs/changelog/unreleased.md#after-signing-in-with-a-recovery-code-you-can-set-up-a-new-authenticator))
+
+- **Public form labels are tied to their inputs, and a refused embedded
+  submission offers Try again.**
+  ([#1673](https://github.com/The-Verscienta/kiln_cms/issues/1673) · [long form](docs/changelog/unreleased.md#public-form-labels-are-tied-to-their-inputs-and-a-refused-embedded-submission))
+
+- **Console pages show their title, and an empty calendar or task list says
+  so.**
+  ([#1670](https://github.com/The-Verscienta/kiln_cms/issues/1670) · [#1672](https://github.com/The-Verscienta/kiln_cms/issues/1672) · [long form](docs/changelog/unreleased.md#console-pages-show-their-title-and-an-empty-calendar-or-task-list-says-so))
+
+- **The account and membership pages show who is signed in; the sign-in
+  pages have a skip target.**
+  ([#1674](https://github.com/The-Verscienta/kiln_cms/issues/1674) · [long form](docs/changelog/unreleased.md#the-account-and-membership-pages-show-who-is-signed-in))
+
 - **The example overlay's migrations run beside the core's.**
   ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/unreleased.md#the-example-overlays-migrations-run-beside-the-cores))
 
@@ -172,6 +192,15 @@ Every summary line below that was shortened links to its own entry there.
 - **The browser CSP's `connect-src` is `'self'` alone — no websocket to any
   other host.**
   ([long form](docs/changelog/unreleased.md#the-browser-csps-connect-src-is-self-alone-no-websocket-to-any))
+
+- **The seed script refuses a production database.**
+  ([#1651](https://github.com/The-Verscienta/kiln_cms/issues/1651) · [long form](docs/changelog/unreleased.md#the-seed-script-refuses-a-production-database))
+
+- **Changing your password signs out your open console tabs.**
+  ([#1652](https://github.com/The-Verscienta/kiln_cms/issues/1652) · [long form](docs/changelog/unreleased.md#changing-your-password-signs-out-your-open-console-tabs))
+
+- **Unsplash imports go through `SafeFetch`.**
+  ([#1653](https://github.com/The-Verscienta/kiln_cms/issues/1653) · [long form](docs/changelog/unreleased.md#unsplash-imports-go-through-safefetch))
 
 - **A node that missed the second organization's broadcast turns strict
   within 30 seconds, not five minutes.**

@@ -70,7 +70,9 @@ defmodule KilnCMSWeb.FormController do
 
     case form do
       nil ->
-        conn |> put_status(404) |> html(page(gettext("Form not found."), nil, embed: true))
+        conn
+        |> put_status(404)
+        |> html(page(gettext("Form not found."), nil, embed: true, kind: :error))
 
       form ->
         conn
@@ -164,7 +166,7 @@ defmodule KilnCMSWeb.FormController do
       :not_found ->
         conn
         |> put_status(404)
-        |> html(page(gettext("Form not found."), nil, embed: embedded?))
+        |> html(page(gettext("Form not found."), nil, embed: embedded?, kind: :error))
 
       {:ok, form} ->
         html(
@@ -172,14 +174,26 @@ defmodule KilnCMSWeb.FormController do
           page(
             form.success_message || gettext("Thanks — we got your message."),
             back_href,
-            embed: embedded?
+            embed: embedded?,
+            kind: :ok
           )
         )
 
       {:error, form, errors} ->
+        # Embeds omit the referer Back link (it would reload an empty thank-you
+        # cycle); give them an explicit "Try again" that reopens the live form.
+        try_again =
+          if embedded?, do: ~p"/forms/#{slug}/embed", else: nil
+
         conn
         |> put_status(422)
-        |> html(page(error_text(form, errors), back_href, embed: embedded?))
+        |> html(
+          page(error_text(form, errors), back_href,
+            embed: embedded?,
+            kind: :error,
+            try_again_href: try_again
+          )
+        )
     end
   end
 
@@ -221,38 +235,60 @@ defmodule KilnCMSWeb.FormController do
     end
   end
 
-  # A dependency-free thank-you/error page (public pages may be fired
-  # artifacts, so there's no LiveView context to return into).
-  #
-  # `embed: true` loads the height reporter and drops the wide margins, so the
-  # iframe shrinks to the (much shorter) message instead of keeping the form's
-  # height. Both are safe under the embed CSP: an external script from 'self'.
+  # Thank-you / error page. Loads `app.css` so success/error share the site kit
+  # (ember tokens, `.btn`) with the embed form — previously a bare system-font
+  # `<p>` that abandoned brand after submit. `embed: true` keeps the height
+  # reporter and tight padding so the iframe shrinks to the message.
   defp page(message, back_href, opts) do
     embed? = Keyword.get(opts, :embed, false)
-
-    back =
-      if back_href,
-        do:
-          ~s(<p><a href="#{Phoenix.HTML.html_escape(back_href) |> Phoenix.HTML.safe_to_string()}">&larr; #{h(gettext("Back"))}</a></p>),
-        else: ""
-
+    kind = Keyword.get(opts, :kind, :ok)
+    try_again_href = Keyword.get(opts, :try_again_href)
+    {tone_class, heading} = page_tone(kind)
+    back = page_nav_html(try_again_href, back_href)
     resizer = if embed?, do: ~s(<script defer src="/embed-frame.js"></script>), else: ""
 
-    body_style =
+    body_class =
       if embed?,
-        do: "font-family: system-ui, sans-serif; margin: 0; padding: 1rem",
-        else:
-          "font-family: system-ui, sans-serif; max-width: 36rem; margin: 4rem auto; padding: 0 1rem"
+        do: "kiln-embed-body bg-transparent p-4",
+        else: "mx-auto max-w-xl px-4 py-16"
 
     """
     <!DOCTYPE html>
-    <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>#{h(message)}</title>#{resizer}</head>
-    <body style="#{body_style}">
-    <p>#{h(message)}</p>
-    #{back}
-    </body></html>
+    <html lang="#{h(Gettext.get_locale(KilnCMSWeb.Gettext))}">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>#{h(message)}</title>
+      <link rel="stylesheet" href="/assets/css/app.css">
+      #{resizer}
+    </head>
+    <body class="#{body_class}">
+      <div class="card card-pad">
+        <h1 class="text-lg font-semibold tracking-tight #{tone_class}">#{h(heading)}</h1>
+        <p class="mt-2 text-sm text-base-content/80">#{h(message)}</p>
+        #{back}
+      </div>
+    </body>
+    </html>
     """
   end
+
+  defp page_tone(:error), do: {"text-error", gettext("Something needs fixing")}
+  defp page_tone(_), do: {"text-base-content", gettext("Thank you")}
+
+  defp page_nav_html(try_again_href, _back_href) when is_binary(try_again_href) do
+    href = Phoenix.HTML.html_escape(try_again_href) |> Phoenix.HTML.safe_to_string()
+
+    ~s(<p class="mt-4"><a href="#{href}" class="btn btn-primary btn-sm">#{h(gettext("Try again"))}</a></p>)
+  end
+
+  defp page_nav_html(_try_again, back_href) when is_binary(back_href) do
+    href = Phoenix.HTML.html_escape(back_href) |> Phoenix.HTML.safe_to_string()
+
+    ~s(<p class="mt-4"><a href="#{href}" class="btn btn-default btn-sm">&larr; #{h(gettext("Back"))}</a></p>)
+  end
+
+  defp page_nav_html(_, _), do: ""
 
   defp error_text(_form, errors) do
     detail = Enum.map_join(errors, "; ", fn {field, message} -> "#{field} #{message}" end)

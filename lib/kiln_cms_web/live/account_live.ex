@@ -258,7 +258,7 @@ defmodule KilnCMSWeb.AccountLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.public current_org={@current_org} locale={@locale}>
+    <Layouts.public current_org={@current_org} locale={@locale} current_user={@current_user}>
       <Layouts.flash_group flash={@flash} />
 
       <div class="space-y-8">
@@ -294,10 +294,12 @@ defmodule KilnCMSWeb.AccountLive do
             <% @memberships == [] -> %>
               <.empty_state icon="hero-credit-card" title={gettext("No membership yet")}>
                 {gettext("Join to read members-only writing.")}
+                <:action>
+                  <.link navigate={~p"/membership"} class="btn btn-primary">
+                    {gettext("See plans")}
+                  </.link>
+                </:action>
               </.empty_state>
-              <.link navigate={~p"/membership"} class="btn btn-primary">
-                {gettext("See plans")}
-              </.link>
             <% true -> %>
               <ul class="divide-y divide-base-300">
                 <li

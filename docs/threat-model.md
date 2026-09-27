@@ -50,21 +50,27 @@ the router so preflights are answered before route matching).
 | Surface | Route(s) | Auth | Rate bucket |
 |---|---|---|---|
 | Public HTML delivery | `/`, `/:slug`, `/:type/:slug`, `/blog`, `/blog/:slug`, `/search`, `/*path` | none | `:delivery` |
-| Probes & SEO | `/up`, `/sitemap.xml`, `/robots.txt`, `/llms.txt` | none | `:probe` |
+| Probes & SEO | `/up`, `/ready`, `/sitemap.xml`, `/robots.txt`, `/llms.txt`, `/manifest.webmanifest`, `/offline.html` | none | `:probe` |
+| First-run bootstrap | `/setup` | none — the `:bootstrap_admin` policy (`Checks.NoAdminExists`) + advisory lock in `KilnCMS.Accounts.Bootstrap` are the gate | none |
 | GraphQL | `/gql` (GET + POST), `/ws/gql` | optional JWT / API key | `:gql` (per operation, on both transports), `:gql_join` (socket connects) |
 | JSON:API | `/api/json/**` (GET/POST/PATCH/DELETE) | optional JWT / API key | `:api` |
-| Headless REST | `/api/content/**`, `/api/resolve`, `/api/locales`, `/api/search`, `/api/ask`, `/api/provenance/**`, `/api/visual-editing/:type/:slug` | optional JWT / API key | `:api` |
+| Headless REST | `/api/content/**`, `/api/resolve`, `/api/locales`, `/api/search`, `/api/ask`, `/api/provenance/**`, `/api/visual-editing/:type/:slug`, `/api/sync`, `/api/schema`, `/api/menus/**`, `/api/content/:type/:id/revisions/**` | optional JWT / API key | `:api` |
 | OpenAPI & explorer | `/api/json/open_api`, `/api/json/swaggerui` | none — and **not served in prod** unless `API_DOCS_ENABLED` (#567); the document (never the explorer) also answers any valid API key | `:docs` |
 | GraphQL SDL | `GET /api/graphql/schema.graphql` | none where introspection is on; **API key required** in prod unless `GRAPHQL_INTROSPECTION_ENABLED` | `:docs` |
 | Headless sign-in | `POST /api/auth/sign_in` | credentials → JWT, or a pending token for a 2FA account | `:auth` + per-account (#478) |
 | Headless second factor | `POST /api/auth/sign_in/verify` | encrypted pending token + TOTP or recovery code | `:auth`; the same per-account second-factor budget as the browser prompt (#714, #726) |
+| Content unlock | `POST /api/content/:type/:slug/unlock`, `POST /_unlock` (CSRF) | passphrase | `:unlock` (`POST /_unlock` also `:delivery`) |
 | Media upload | `POST /api/media`, `/api/media/import-url`, `/api/media/uploads[/complete]` | JWT / API key; `:read_write` + editor, checked **before** `POST /api/media`'s body is parsed (the endpoint leaves it unread) | `:api` + `:media_upload` |
 | MCP (LLM authoring) | `/mcp` | **API key required** | `:api` |
 | Public forms | `GET /api/forms/:slug`, `POST /forms/:slug`, `POST /api/forms/:slug` | none (no CSRF by design) | `:form` |
-| Form embed | `GET /forms/:slug/embed` | none | `:delivery` |
-| Preview | `/preview/:token`, `/preview/:token/live` | signed token *is* the credential | `:preview` |
-| Newsletter | `/newsletter/confirm/:token`, `/newsletter/unsubscribe/:token` | signed token; the GETs only render a page, the POST changes the subscription (#1664) — confirm's POST is also CSRF-checked | `:form` |
-| Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/auth/passkey/*` | varies | `:auth`, except `POST /auth/*/password/register`, which takes `:register` **instead** so the two registration doors agree (#724) |
+| Form embed | `GET /forms/:slug/embed` | none | `:delivery` (framing CSP) |
+| Preview | `/preview/:token`, `/preview/:token/live`, `/preview/release/:token` | signed token *is* the credential | `:preview` |
+| Newsletter | `POST /newsletter/subscribe`, `/newsletter/confirm/:token`, `/newsletter/unsubscribe/:token` | honeypot / opaque token; the confirm and unsubscribe GETs only render a page, the POST changes the subscription (#1664) — confirm's POST is also CSRF-checked | `:form` |
+| Billing webhook | `POST /billing/webhooks/stripe` | HMAC over raw body | `:billing_webhook` |
+| ActivityPub | `GET /.well-known/webfinger`, `/actor`, `/actor/outbox`, `/actor/followers`, `/ap/object/:id`; `POST /actor/inbox` | none (GET) / HTTP Signature over the raw body (inbox) | `:probe` (GET) / `:api` (inbox) |
+| Calendars / feeds | `/calendar.ics`, `/:plural/calendar.ics`, `/:plural/:slug/calendar.ics`, `/:plural/index.json`, `/feed.xml`, `/feed.json`, `/:plural/feed.{xml,json}` (and the category/tag variants) | none (published only) | `:probe` |
+| Membership (paid audiences) | `/membership` | optional session | `:delivery` |
+| Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/auth/passkey/*`, `/auth/site-sso[/callback]` | varies | `:auth`, except `POST /auth/*/password/register`, which takes `:register` **instead** so the two registration doors agree (#724) |
 | Second factor | `GET`/`POST /sign-in/verify` | signed `:pending_2fa` token + TOTP or recovery code | `:auth`; the `POST` also per-account, tighter than sign-in (#714) |
 | Credential submits over `/live` | LiveView `"submit"` on the sign-in, register, reset-request and magic-link forms — **all four render on all three auth pages** | credentials → session / account / mail | charged on the *action*, since no plug can reach them: sign-in `:auth` (#715) + per-account (#478); registration `:register` (#724); reset and magic-link `:auth` (#724) + the per-address mail budget |
 | Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none, except the three TOTP actions on `/editor/settings`: per-account, the second factor's own bucket (#727) |
@@ -314,7 +320,8 @@ build if a resource is ever registered without that authorizer.
   an attacker-influenced response has an attacker-influenced *length* too.
   Since #753 there is exactly one implementation: every caller that fetches a
   URL the *content* chose — webhook delivery, oEmbed, link checking, federation,
-  social posting, portability import — goes through `SafeFetch`. A new caller
+  social posting, portability import, Unsplash import (#1653) — goes through
+  `SafeFetch`. A new caller
   reaching for `Req` directly, or copying its `connect_options`, is the bug that
   invariant exists to catch.
 - **Upload handling** — uploads validated from bytes rather than declared type,
@@ -675,13 +682,17 @@ a credential, so the operator's trust assumptions do not carry over:
   an anonymous visitor's question. It is the site's choice and the page says so.
 
 ### Other outbound calls
-`Kiln.Updates` (GitHub releases, admin-triggered), `KilnCMS.Unsplash`,
+`Kiln.Updates` (GitHub releases, admin-triggered),
 Meilisearch (the operator's instance — a site's own is below), S3/MinIO, the
 mailer, and the LLM providers behind `/api/ask` and
 SEO drafting all make outbound requests to *operator-configured or fixed*
 endpoints, not user-supplied ones — so they are not SSRF vectors in the way
 webhooks are. The exceptions are a site's own SMTP relay (#1322) and AI
-endpoint (above), which are tenant-chosen and SSRF-checked. Note that `/api/ask` lets an anonymous caller drive an outbound
+endpoint (above), which are tenant-chosen and SSRF-checked, and
+`KilnCMS.Unsplash`: its API host is fixed, but the image URL an import downloads
+comes from Unsplash's response, so every Unsplash request goes through
+`SafeFetch` — pinned, each redirect hop re-validated, and capped at the image
+upload ceiling (#1653). Note that `/api/ask` lets an anonymous caller drive an outbound
 LLM request; it is config-gated and rate-limited under `:api`, but it is a cost
 amplification surface.
 

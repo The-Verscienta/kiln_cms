@@ -345,6 +345,15 @@ carries the reasoning.
   `mix kiln.*` task is labelled internal too; a release that needs you to run
   one names it in its upgrade notes. (#1542)
 
+<a id="the-content-editor-says-save-draft-and-publish-now"></a>
+
+- **The content editor says Save draft and Publish now, and Visual is a
+  secondary button.** Visual was a primary button beside Save, so the header
+  had two competing primary actions; it is now a default button. The save and
+  publish buttons name what they do. A test or script that finds the editor's
+  buttons by their text needs the new labels.
+  ([#1671](https://github.com/The-Verscienta/kiln_cms/issues/1671))
+
 ## Fixed
 
 <a id="a-hard-line-break-in-a-paragraph-heading-quote-or-list-item-is-delivered-as-br"></a>
@@ -411,6 +420,48 @@ carries the reasoning.
   `upcast/2` and `upcast_block_map/1` keep their map-returning contract for
   read and delivery paths, which render the stored shape and log a warning
   rather than crash.
+
+<a id="after-signing-in-with-a-recovery-code-you-can-set-up-a-new-authenticator"></a>
+
+- **After signing in with a recovery code, you can set up a new
+  authenticator.** Someone who signs in with a recovery code has usually lost
+  the device, and every two-factor form on `/editor/settings` asked for a code
+  from it. The backend already waived the outgoing factor for a recovery-code
+  session (#786); `/editor/settings` now offers "Set up a new authenticator"
+  in that session.
+  ([#1675](https://github.com/The-Verscienta/kiln_cms/issues/1675))
+
+<a id="public-form-labels-are-tied-to-their-inputs-and-a-refused-embedded-submission"></a>
+
+- **Public form labels are tied to their inputs, and a refused embedded
+  submission offers Try again.** A public form's labels had no `for`, so a
+  screen reader announced an unnamed field and clicking a label focused
+  nothing; each input now has an id scoped by the form's slug, and the required
+  marker is spoken as well as drawn. The thank-you and error pages wear the
+  site kit instead of bare system-font HTML, and an embedded form's error page,
+  which has no Back link, links back into the form.
+  ([#1673](https://github.com/The-Verscienta/kiln_cms/issues/1673))
+
+<a id="console-pages-show-their-title-and-an-empty-calendar-or-task-list-says-so"></a>
+
+- **Console pages show their title, and an empty calendar or task list says
+  so.** Eight console pages (backups, code injection and the per-site AI, mail,
+  push, search, SSO and storage settings) assigned a page title but never
+  passed it to the layout, so the top bar was blank. A month or week with no
+  events drew an empty grid rather than the list view's empty card, and the
+  task list said "No open tasks" under a block or document filter, as though
+  there were none at all.
+  ([#1670](https://github.com/The-Verscienta/kiln_cms/issues/1670) [#1672](https://github.com/The-Verscienta/kiln_cms/issues/1672))
+
+<a id="the-account-and-membership-pages-show-who-is-signed-in"></a>
+
+- **The account and membership pages show who is signed in; the sign-in
+  pages have a skip target.** `/account` and `/membership` rendered the public
+  header without the reader, so it offered no account link or sign-out. The
+  auth pages were the one shell without `<main id="main">`, so "Skip to
+  content" went nowhere. The public search field and button, which removed the
+  focus outline and drew no ring, now use the kit's field and button.
+  ([#1674](https://github.com/The-Verscienta/kiln_cms/issues/1674))
 
 <a id="the-example-overlays-migrations-run-beside-the-cores"></a>
 
@@ -540,6 +591,38 @@ carries the reasoning.
   longer collide on the unique index.
   See [Paid memberships](../memberships.md#the-first-paid-membership).
   (#1649)
+
+<a id="the-seed-script-refuses-a-production-database"></a>
+
+- **The seed script refuses a production database.** `priv/repo/seeds.exs`
+  runs from `mix setup` and `mix ecto.setup`, and against a production
+  `DATABASE_URL` it created `admin@kiln.test` with the password the README
+  publishes. Under `MIX_ENV=prod` it now stops before touching the database
+  unless `ALLOW_PROD_SEEDS=confirm` is set **and** `ADMIN_PASSWORD` and
+  `EDITOR_PASSWORD` are both overridden. A production site's first admin comes
+  from `/setup`.
+  ([#1651](https://github.com/The-Verscienta/kiln_cms/issues/1651))
+
+<a id="changing-your-password-signs-out-your-open-console-tabs"></a>
+
+- **Changing your password signs out your open console tabs.** The
+  password change already revoked every stored session token, but a mounted
+  LiveView authorized once, at connect, and kept working until it reconnected —
+  so a tab left open by whoever you changed the password to lock out stayed
+  signed in. `:change_password` now evicts the account's live sockets, the same
+  pairing an admin's "sign out everywhere" uses (#675).
+  ([#1652](https://github.com/The-Verscienta/kiln_cms/issues/1652))
+
+<a id="unsplash-imports-go-through-safefetch"></a>
+
+- **Unsplash imports go through `SafeFetch`.** The image URL an Unsplash
+  import downloads comes from Unsplash's response, and it was fetched with a
+  bare `Req`: redirects followed inside the client, past any address check, and
+  no bound on the body. Every Unsplash request is now pinned and re-validated
+  hop by hop by `KilnCMS.SafeFetch`, so a redirect into private or metadata
+  address space is refused, and the download is capped at the image upload
+  ceiling rather than buffered whole.
+  ([#1653](https://github.com/The-Verscienta/kiln_cms/issues/1653))
 
 <a id="org-count-recount-30-seconds"></a>
 

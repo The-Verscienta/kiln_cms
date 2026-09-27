@@ -202,6 +202,55 @@ defmodule KilnCMSWeb.SettingsLiveTest do
                })
     end
 
+    # #1652. `log_out_everywhere` revokes the stored tokens, but a mounted
+    # LiveView authorized once, at connect, and kept working until reconnect.
+    # A socket is dropped by a "disconnect" broadcast on its session's
+    # `live_socket_id` (Phoenix closes the transport on it), so this asserts on
+    # the id sign-in writes into THIS session (`put_live_socket_id/2`, as
+    # `complete_sign_in/3` does), not on a topic name recomputed from the user.
+    test "changing the password drops the session's live sockets", %{conn: conn} do
+      user = authed_user(:editor)
+      conn = conn |> log_in(user) |> KilnCMSWeb.AuthController.put_live_socket_id(user)
+      socket_id = get_session(conn, :live_socket_id)
+      assert is_binary(socket_id)
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/settings")
+      KilnCMSWeb.Endpoint.subscribe(socket_id)
+
+      lv
+      |> form("#password-form",
+        user: %{
+          "current_password" => @password,
+          "password" => "newpassword789",
+          "password_confirmation" => "newpassword789"
+        }
+      )
+      |> render_submit()
+
+      assert_receive %Phoenix.Socket.Broadcast{topic: ^socket_id, event: "disconnect"}, 2_000
+    end
+
+    test "a refused password change drops nothing", %{conn: conn} do
+      user = authed_user(:editor)
+      conn = conn |> log_in(user) |> KilnCMSWeb.AuthController.put_live_socket_id(user)
+      socket_id = get_session(conn, :live_socket_id)
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/settings")
+      KilnCMSWeb.Endpoint.subscribe(socket_id)
+
+      lv
+      |> form("#password-form",
+        user: %{
+          "current_password" => "wrongpassword",
+          "password" => "newpassword789",
+          "password_confirmation" => "newpassword789"
+        }
+      )
+      |> render_submit()
+
+      refute_receive %Phoenix.Socket.Broadcast{topic: ^socket_id, event: "disconnect"}, 200
+    end
+
     test "rejects a wrong current password", %{conn: conn} do
       user = authed_user(:editor)
       {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor/settings")
@@ -269,6 +318,51 @@ defmodule KilnCMSWeb.SettingsLiveTest do
       lv |> form("#disable-totp-form", %{"code" => current_code(user)}) |> render_submit()
       assert reload(user).totp_recovery_hashes == []
       assert is_nil(reload(user).totp_secret)
+    end
+
+    # #1675. Someone who signed in with a recovery code has usually lost the
+    # authenticator, so the disable/regenerate forms (both ask for a live code)
+    # are a dead end. The backend already waives the outgoing factor for a
+    # recovery-code session (#786); this is the UI that reaches it.
+    test "after a recovery-code sign-in, a new authenticator can be enrolled", %{conn: conn} do
+      user = authed_user(:editor)
+      {:ok, user} = Accounts.setup_totp(user, %{}, actor: user)
+      code = TwoFactorFixtures.current_code(user.totp_pending_secret)
+      {:ok, user} = Accounts.confirm_totp(user, %{code: code}, actor: user)
+      old_secret = reload(user).totp_secret
+
+      conn =
+        conn
+        |> Phoenix.ConnTest.init_test_session(%{"totp_recovery_login" => true})
+        |> AshAuthentication.Plug.Helpers.store_in_session(user)
+
+      {:ok, lv, html} = live(conn, ~p"/editor/settings")
+      assert html =~ "You signed in with a recovery code."
+
+      lv |> element("button", "Set up a new authenticator") |> render_click()
+      html = render(lv)
+      assert html =~ "totp-qr"
+      # The enabled-state forms step aside while the new factor is enrolled.
+      refute has_element?(lv, "#disable-totp-form")
+
+      # No current code: the one thing this user cannot produce.
+      lv |> form("#confirm-totp-form", %{"code" => current_code(user)}) |> render_submit()
+
+      assert render(lv) =~ "Two-factor authentication is now on."
+      new_secret = reload(user).totp_secret
+      refute is_nil(new_secret)
+      refute new_secret == old_secret
+    end
+
+    test "an ordinary sign-in is not offered re-enrolment", %{conn: conn} do
+      user = authed_user(:editor)
+      {:ok, user} = Accounts.setup_totp(user, %{}, actor: user)
+      code = TwoFactorFixtures.current_code(user.totp_pending_secret)
+      {:ok, user} = Accounts.confirm_totp(user, %{code: code}, actor: user)
+
+      {:ok, lv, html} = live(log_in(conn, user), ~p"/editor/settings")
+      refute html =~ "You signed in with a recovery code."
+      refute has_element?(lv, "button", "Set up a new authenticator")
     end
 
     # #727. The budget is only half the fix: a spent budget that reports "that

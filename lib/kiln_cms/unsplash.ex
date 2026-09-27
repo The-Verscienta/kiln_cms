@@ -12,11 +12,15 @@ defmodule KilnCMS.Unsplash do
   to Unsplash (required by the API guidelines) and then fetches the bytes from
   the URL that report returns.
 
-  Tests stub the HTTP layer through `:req_options` in the same config entry
+  All outbound HTTP goes through `KilnCMS.SafeFetch` — the download URL comes
+  from an upstream response and must not be dialled with a bare `Req` (SSRF
+  pin, redirect re-validation, byte cap). Tests stub the HTTP layer through
+  `:req_options` in the same config entry
   (`req_options: [plug: {Req.Test, KilnCMS.Unsplash}]`).
   """
 
   alias KilnCMS.Media.Ingest
+  alias KilnCMS.SafeFetch
 
   @api_base "https://api.unsplash.com"
   # Search-result thumbnails hotlink from here; the router adds it to the CSP
@@ -25,6 +29,7 @@ defmodule KilnCMS.Unsplash do
   @per_page 24
   # Unsplash attribution links must carry these referral parameters.
   @utm "utm_source=kiln_cms&utm_medium=referral"
+  @api_receive_timeout 30_000
 
   @type photo :: %{
           id: String.t(),
@@ -54,10 +59,12 @@ defmodule KilnCMS.Unsplash do
   @spec search(String.t(), pos_integer()) ::
           {:ok, %{photos: [photo()], more?: boolean()}} | {:error, term()}
   def search(query, page \\ 1) do
-    with {:ok, body} <-
-           get_json(@api_base <> "/search/photos",
-             params: [query: query, page: page, per_page: @per_page]
-           ) do
+    url =
+      @api_base <>
+        "/search/photos?" <>
+        URI.encode_query(%{query: query, page: page, per_page: @per_page})
+
+    with {:ok, body} <- get_json(url) do
       {:ok,
        %{
          photos: body |> Map.get("results", []) |> Enum.map(&photo/1),
@@ -141,27 +148,20 @@ defmodule KilnCMS.Unsplash do
   defp with_utm(nil), do: nil
   defp with_utm(url), do: url <> if(String.contains?(url, "?"), do: "&", else: "?") <> @utm
 
-  defp get_json(url, extra \\ []) do
-    case request(url, extra) do
-      {:ok, %Req.Response{status: status, body: body}} when status in 200..299 -> {:ok, body}
-      {:ok, %Req.Response{status: status}} -> {:error, {:http_status, status}}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  # sobelow_skip ["Traversal.FileModule"] — dest is a server-generated UUID path.
-  defp fetch_to_tmp(url) do
-    dest = Path.join(System.tmp_dir!(), "unsplash-#{Ecto.UUID.generate()}")
-
-    case request(url, []) do
-      {:ok, %Req.Response{status: status, body: body}}
-      when status in 200..299 and is_binary(body) ->
-        case File.write(dest, body) do
-          :ok -> {:ok, dest}
+  defp get_json(url) do
+    case SafeFetch.get(url,
+           headers: api_headers(),
+           receive_timeout: @api_receive_timeout,
+           # JSON envelopes are small; keep the default SafeFetch cap.
+           req_options: req_options()
+         ) do
+      {:ok, %{status: status, body: body}} when status in 200..299 ->
+        case Jason.decode(body) do
+          {:ok, decoded} -> {:ok, decoded}
           {:error, reason} -> {:error, reason}
         end
 
-      {:ok, %Req.Response{status: status}} ->
+      {:ok, %{status: status}} ->
         {:error, {:http_status, status}}
 
       {:error, reason} ->
@@ -169,26 +169,49 @@ defmodule KilnCMS.Unsplash do
     end
   end
 
-  defp request(url, extra) do
+  # sobelow_skip ["Traversal.FileModule"] — dest is a server-generated UUID path.
+  defp fetch_to_tmp(url) do
+    dest = Path.join(System.tmp_dir!(), "unsplash-#{Ecto.UUID.generate()}")
+
+    case SafeFetch.get(url,
+           max_bytes: max_download_bytes(),
+           receive_timeout: @api_receive_timeout,
+           # Image CDNs may 302 once; each hop is re-validated and re-pinned.
+           max_redirects: 3,
+           req_options: req_options()
+         ) do
+      {:ok, %{status: status, body: body}}
+      when status in 200..299 and is_binary(body) ->
+        case File.write(dest, body) do
+          :ok -> {:ok, dest}
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:ok, %{status: status}} ->
+        {:error, {:http_status, status}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp api_headers do
     [
-      url: url,
-      headers: [
-        {"authorization", "Client-ID " <> access_key()},
-        {"accept-version", "v1"}
-      ],
-      receive_timeout: 30_000,
-      # Search and import are interactive (LiveView-triggered) — fail fast and
-      # let the editor retry rather than stalling the UI on backoff retries.
-      retry: false
+      {"authorization", "Client-ID " <> access_key()},
+      {"accept-version", "v1"},
+      {"accept", "application/json"}
     ]
-    |> Keyword.merge(extra)
-    |> Keyword.merge(req_options())
-    |> Req.request()
   end
 
   defp access_key, do: config()[:access_key]
 
   defp req_options, do: Keyword.get(config(), :req_options, [])
+
+  # The body is buffered in memory, and `Ingest.store_file/3` refuses an image
+  # over `max_image_size/0` anyway, so that is the cap — not the 500MB video
+  # ceiling `max_upload_size/0` reports. Overridable for the test that proves
+  # the cap is enforced without streaming 10MB through a stub.
+  defp max_download_bytes, do: Keyword.get(config(), :max_bytes, Ingest.max_image_size())
 
   defp config, do: Application.get_env(:kiln_cms, :unsplash, [])
 end

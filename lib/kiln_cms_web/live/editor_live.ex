@@ -260,6 +260,10 @@ defmodule KilnCMSWeb.EditorLive do
     {:noreply, push_patch(socket, to: path, replace: true)}
   end
 
+  def handle_event("clear_filters", _params, socket) do
+    {:noreply, push_patch(socket, to: list_path("all", "", "all"), replace: true)}
+  end
+
   def handle_event("toggle_select", %{"key" => key}, socket) when is_binary(key) do
     selected = socket.assigns.selected
 
@@ -830,6 +834,14 @@ defmodule KilnCMSWeb.EditorLive do
               class="field-input max-w-xs"
             />
           </form>
+          <button
+            :if={@filtering?}
+            type="button"
+            phx-click="clear_filters"
+            class="btn btn-sm btn-ghost text-base-content/70"
+          >
+            {gettext("Clear filters")}
+          </button>
         </div>
 
         <div
@@ -951,6 +963,13 @@ defmodule KilnCMSWeb.EditorLive do
         </.empty_state>
         <p :if={@items == [] and @filtering?} class="text-sm text-base-content/60" role="status">
           {gettext("Nothing matches the current filter.")}
+          <button
+            type="button"
+            phx-click="clear_filters"
+            class="btn btn-sm btn-ghost ml-2 text-base-content/70"
+          >
+            {gettext("Clear filters")}
+          </button>
         </p>
 
         <ul

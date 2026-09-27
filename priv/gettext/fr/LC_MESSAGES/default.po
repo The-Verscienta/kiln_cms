@@ -2964,6 +2964,7 @@ msgstr "Réservation libérée ; le lancement peut être relancé."
 msgid "Clear"
 msgstr "Effacer"
 
+#: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Clear filters"
@@ -8020,10 +8021,30 @@ msgstr "Aucun abonnement pour l'instant"
 msgid "No menus yet"
 msgstr "Aucun menu pour l'instant"
 
+#: lib/kiln_cms_web/live/task_live.ex
+#, elixir-autogen, elixir-format
+msgid "No open block tasks assigned to you."
+msgstr "Aucune tâche de bloc ouverte ne vous est assignée."
+
+#: lib/kiln_cms_web/live/task_live.ex
+#, elixir-autogen, elixir-format
+msgid "No open document tasks assigned to you."
+msgstr "Aucune tâche de document ouverte ne vous est assignée."
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "No open releases."
 msgstr "Aucun lancement ouvert."
+
+#: lib/kiln_cms_web/live/task_live.ex
+#, elixir-autogen, elixir-format
+msgid "No open tasks anchored to a block."
+msgstr "Aucune tâche ouverte rattachée à un bloc."
+
+#: lib/kiln_cms_web/live/task_live.ex
+#, elixir-autogen, elixir-format
+msgid "No open tasks anchored to a document."
+msgstr "Aucune tâche ouverte rattachée à un document."
 
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
@@ -9430,7 +9451,6 @@ msgstr "Routes publiques"
 msgid "Public site"
 msgstr "Site public"
 
-#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -9452,6 +9472,7 @@ msgstr "Publier les modifications"
 msgid "Publish it"
 msgstr "Publiez-la"
 
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Publish now"
@@ -10681,7 +10702,6 @@ msgstr "Mêmes jetons. Utilisé uniquement lorsqu'une entrée laisse sa propre m
 msgid "Sat"
 msgstr "sam."
 
-#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #: lib/kiln_cms_web/live/compliance_live.ex
@@ -10739,6 +10759,7 @@ msgstr "Enregistrer la personnalisation de marque"
 msgid "Save details"
 msgstr "Enregistrer les détails"
 
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save draft"
@@ -11125,6 +11146,11 @@ msgstr "Sélectionner cette soumission"
 msgid "Select two to see what changed between them."
 msgstr "Sélectionnez-en deux pour voir ce qui a changé entre elles."
 
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "Select…"
+msgstr "Sélectionner…"
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Semantic search is off, so there is nothing to compare against."
@@ -11250,6 +11276,16 @@ msgstr "Définies par l'opérateur dans la configuration, et utilisées par tout
 #, elixir-autogen, elixir-format
 msgid "Set name"
 msgstr "Définir le nom"
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Set up a new authenticator"
+msgstr "Configurer un nouvel authentificateur"
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Set up a new authenticator app so you can keep signing in without using another recovery code."
+msgstr "Configurez une nouvelle application d'authentification pour continuer à vous connecter sans utiliser un autre code de récupération."
 
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -11707,6 +11743,11 @@ msgstr "Quelqu'un d'autre a enregistré des modifications sur ce contenu. L'enre
 #, elixir-autogen, elixir-format
 msgid "Someone else saved this page. Duplicating copies their version, not what you see. Continue?"
 msgstr "Quelqu'un d'autre a enregistré cette page. La duplication copiera sa version, pas ce que vous voyez. Continuer ?"
+
+#: lib/kiln_cms_web/controllers/form_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Something needs fixing"
+msgstr "Quelque chose est à corriger"
 
 #: lib/kiln_cms_web/controllers/error_html/500.html.heex
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
@@ -12297,6 +12338,11 @@ msgstr "Le texte est généré par %{provider}. Le contenu de ce bloc, le titre 
 #, elixir-autogen, elixir-format
 msgid "Text set in capitals (“%{example}”) — some screen readers spell it out letter by letter, and capitals are harder to read. Use styling instead."
 msgstr "Texte en capitales (« %{example} ») — certains lecteurs d'écran l'épellent lettre par lettre, et les capitales sont plus difficiles à lire. Utilisez plutôt un style."
+
+#: lib/kiln_cms_web/controllers/form_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Thank you"
+msgstr "Merci"
 
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
@@ -13663,6 +13709,7 @@ msgstr "Trigrammes"
 msgid "Trigram glyphs: three lines per item — published at the bottom, translated in the middle, scheduled on top; solid means yes. Hover one for its reading."
 msgstr "Trigrammes : trois lignes par élément — publié en bas, traduit au milieu, planifié en haut ; une ligne pleine signifie oui. Survolez-en un pour sa lecture."
 
+#: lib/kiln_cms_web/controllers/form_controller.ex
 #: lib/kiln_cms_web/controllers/offline_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Try again"
@@ -14822,6 +14869,11 @@ msgstr "Vous avez besoin d'un accès administrateur pour voir cette page."
 msgid "You need editor access to view that page."
 msgstr "Vous avez besoin d'un accès éditeur pour voir cette page."
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "You signed in with a recovery code."
+msgstr "Vous vous êtes connecté avec un code de récupération."
+
 #: lib/kiln_cms_web/notification_text.ex
 #, elixir-autogen, elixir-format
 msgid "You were mentioned"
@@ -15670,6 +15722,7 @@ msgstr "publiée le"
 msgid "removed block"
 msgstr "bloc supprimé"
 
+#: lib/kiln_cms_web/components/block_components.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
