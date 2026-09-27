@@ -7,6 +7,17 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="a-new-throttlecounters-table-holds-the-auth-budgets-run-migrations-as"></a>
+
+- **A new `throttle_counters` table holds the auth budgets; run migrations as
+  usual.** `bin/migrate` (or the release's own migrate step) creates it. No
+  configuration changes. The order does not matter on a rolling deploy: until
+  the table exists, each node counts its budgets locally, as every release
+  before this one did, and logs that it is doing so at most once a minute.
+  Counts are not carried over from the old in-memory tables, so every budget
+  starts empty on upgrade, exactly as it did after any restart. An Oban cron
+  job in the `default` queue prunes closed windows every five minutes. (#1619)
+
 <a id="a-site-whose-code-injection-snippet-opens-a-websocket-to-its-vendor-must"></a>
 
 - **A site whose code-injection snippet opens a websocket to its vendor must
@@ -116,6 +127,28 @@ carries the reasoning.
   sites that haven't picked this fix up.
 
 ## Security
+
+<a id="auth-budgets-now-hold-across-nodes-and-restarts"></a>
+
+- **Auth budgets now hold across nodes and restarts.** Every
+  `AccountThrottle` budget (password sign-in, the TOTP and recovery-code
+  budget, the reset and magic-link mail budgets, the owner alerts) and the
+  credential rate-limit buckets (`:auth`, `:register`, `:unlock`) used to count
+  in each node's ETS. On N nodes an attacker got N budgets, and a deploy forgave
+  every attempt. They now count in one Postgres table through
+  `KilnCMS.Accounts.ThrottleStore`: one `INSERT … ON CONFLICT DO UPDATE …
+  RETURNING` per charge, keyed on a SHA-256 of the key, windowed on the
+  database clock, and pruned by an Oban cron job. Measured locally, a charge
+  costs 0.34 ms at p50 (1.1 ms at p50 with sixteen writers on one key), against
+  the ~208 ms bcrypt verification the same sign-in already pays. Nothing is
+  written to the user row, so an unknown address still throttles exactly like a
+  known one. If the database cannot answer, a budget falls back to counting on
+  the node, which is the old bound and never a weaker one. The fallback is
+  logged. A charge made inside a transaction now raises instead of being
+  silently refunded by a rollback. The registration budget is therefore charged
+  in `before_transaction`, so a registration that fails on a taken address
+  still pays. Flood-ceiling buckets (`:api`, `:delivery`, `:gql`, …) stay per
+  node on purpose. This closes threat-model residual 10. (#1619)
 
 <a id="the-browser-csps-connect-src-is-self-alone-no-websocket-to-any"></a>
 

@@ -1,8 +1,29 @@
 defmodule KilnCMSWeb.RateLimit do
   @moduledoc """
-  ETS-backed rate limiter for API and auth endpoints (Hammer fixed window).
+  Per-client rate limits for API and auth endpoints (fixed windows).
+
+  Two stores, chosen per bucket:
+
+    * the **credential** buckets — `:auth`, `:register` and `:unlock`, the ones
+      that bound guessing at a password, an account's creation or a shared
+      passphrase — are counted in `KilnCMS.Accounts.ThrottleStore`, a Postgres
+      table, so they hold across every node and survive a restart (#1619,
+      threat-model residual 10). N nodes used to mean N budgets.
+    * every other bucket is a **flood ceiling**, not a guessing bound, and stays
+      in this node's ETS (Hammer). Over-admitting a flood ceiling by the node
+      count costs capacity, not a secret, and these buckets sit in front of
+      public delivery where a database round trip per request would be the
+      flood's own amplifier.
+
+  Both answer the same way: `check/3` returns `:allow` or `{:deny, ms}`.
   """
   use Hammer, backend: :ets
+
+  alias KilnCMS.Accounts.ThrottleStore
+
+  # Counted cluster-wide in `ThrottleStore` rather than in this node's ETS. See
+  # the moduledoc; stored under `"ip:<bucket>"`.
+  @shared_buckets [:auth, :register, :unlock]
 
   @default_limits %{
     # GraphQL documents per client address, over both transports: each `/gql`
@@ -188,11 +209,30 @@ defmodule KilnCMSWeb.RateLimit do
       when is_atom(bucket) and is_binary(key) and is_integer(cost) and cost > 0 do
     {limit, scale} = Map.fetch!(limits(), bucket)
 
-    case hit(bucket_key(bucket, key), scale, limit, cost) do
+    case charge(bucket, key, scale, limit, cost) do
       {:allow, _count} -> :allow
       {:deny, retry_after} -> {:deny, retry_after}
     end
   end
+
+  @doc """
+  Whether `bucket` is counted cluster-wide (`KilnCMS.Accounts.ThrottleStore`)
+  rather than per node.
+  """
+  @spec shared?(atom()) :: boolean()
+  def shared?(bucket), do: bucket in @shared_buckets
+
+  @doc """
+  The `KilnCMS.Accounts.ThrottleStore` bucket a shared `bucket` is stored under.
+  """
+  @spec store_bucket(atom()) :: String.t()
+  def store_bucket(bucket) when bucket in @shared_buckets, do: "ip:#{bucket}"
+
+  defp charge(bucket, key, scale, limit, cost) when bucket in @shared_buckets,
+    do: ThrottleStore.hit(store_bucket(bucket), key, scale, limit, cost)
+
+  defp charge(bucket, key, scale, limit, cost),
+    do: hit(bucket_key(bucket, key), scale, limit, cost)
 
   defp bucket_key(bucket, key), do: "#{bucket}:#{key}"
 end
