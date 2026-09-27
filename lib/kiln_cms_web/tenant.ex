@@ -18,7 +18,8 @@ defmodule KilnCMSWeb.Tenant do
   that fallback — an unresolvable host is refused instead. Unset, it is on
   exactly when more than one organization exists (#1547), so a single-host
   install keeps its fallback and a multi-tenant one loses it without being told
-  to; `true`/`false` still win. See `strict_host?/0`.
+  to. `true` forces it on everywhere; `false` keeps the fallback only while
+  there is one organization (#1662). See `strict_host?/0`.
 
   `fetch_org/1` is the single resolver — `{:ok, org}`, `:error` under strict
   matching, or `:unavailable` when the lookup itself failed on a host strict
@@ -286,18 +287,31 @@ defmodule KilnCMSWeb.Tenant do
   Three settings (#1547), from `strict_host_setting/0`:
 
     * `true` — always strict.
-    * `false` — never strict. The pre-0.11 default; an operator who wants the
-      default-org fallback on a multi-org deployment says so explicitly.
     * `:auto` (unset — the default) — strict if and only if more than one
       organization exists. With one org, "an unknown Host is served the
       default org" describes the only org there is, which is what a
       single-host install is served through (bare `localhost`, an IP, the load
       balancer's health-check host). With two, it serves an unrecognized Host
       another tenant's site.
+    * `false` — lenient while there is one organization, and **still strict
+      once there are two** (#1662). Until 0.12 this was "never strict", which
+      left an explicit `false` on a multi-org deployment serving an
+      attacker-chosen `Host` another tenant's site. That is no longer
+      honoured: the only thing `false` still changes is that a count nobody
+      could read (`:unknown`, boot with the database down) stays lenient
+      rather than failing closed, as it did before. Kiln says loudly that the
+      setting is being ignored — at boot, on the second org's create, and on
+      `/editor/system` (`strict_host_false_ignored?/0`). There is deliberately
+      no escape hatch: a host a multi-org deployment should answer on can be
+      given to an organization (a subdomain or a `custom_domain`, the default
+      org included) or redirected to one at the proxy, the apex and the
+      console host are never refused, and the health probes and payment
+      webhook are exempt.
 
-  Runs on every request, so auto reads a cached verdict rather than counting —
-  see `KilnCMSWeb.Tenant.OrgCount` for how it is kept current across nodes, and
-  for why a count nobody has managed to read yet (`:unknown`) counts as strict.
+  Runs on every request, so auto and `false` read a cached verdict rather than
+  counting — see `KilnCMSWeb.Tenant.OrgCount` for how it is kept current across
+  nodes, and for why a count nobody has managed to read yet (`:unknown`) counts
+  as strict under auto.
 
   Read at request time, not compile time, so a release changes it with a
   restart and no rebuild.
@@ -305,8 +319,9 @@ defmodule KilnCMSWeb.Tenant do
   @spec strict_host?() :: boolean()
   def strict_host? do
     case strict_host_setting() do
+      true -> true
       :auto -> KilnCMSWeb.Tenant.OrgCount.verdict() != :single
-      explicit -> explicit
+      false -> KilnCMSWeb.Tenant.OrgCount.verdict() == :multi
     end
   end
 
@@ -336,18 +351,14 @@ defmodule KilnCMSWeb.Tenant do
   unrecognized Host, an IP, or an attacker-supplied header is served *another
   tenant's* content, branding and analytics.
 
-  Since #1547 an unset `TENANT_STRICT_HOST` closes this gap by itself, so it is
-  open only where an operator set `TENANT_STRICT_HOST=false` — or, briefly, on a
-  node that has not yet heard about the second org (`KilnCMSWeb.Tenant.OrgCount`
-  recounts to catch that). The predicate asks the *effective* `strict_host?/0`
-  rather than the setting for exactly that second case.
-
-  Nothing about an explicit `false` meeting a second org is loud.
-  `KilnCMS.Application` checks it at boot, but
-  boot happened before the second org existed and may not happen again for
-  months; #563 shipped a CHANGELOG note, which helps only an operator reading it
-  at the right time. So the same predicate also runs where the decision is made
-  (creating the org) and where an operator goes to look (`/editor/system`).
+  Since #1547 an unset `TENANT_STRICT_HOST` closes this gap by itself, and
+  since #1662 an explicit `false` no longer holds it open either: a `:multi`
+  verdict refuses unknown hosts whatever the setting. What is left is a node
+  that has not yet heard about the second org (`KilnCMSWeb.Tenant.OrgCount`
+  recounts every 30 seconds to catch that, #1654) — which is why the predicate
+  asks the *effective* `strict_host?/0` rather than the setting.
+  `/editor/system` shows it; the operator-facing message for an explicit
+  `false` is `strict_host_false_ignored?/0`'s.
 
   Deliberately **not** gated on `:multitenancy_enabled`. That flag is a create
   kill switch and nothing in the routing path reads it — an operator with three
@@ -369,6 +380,87 @@ defmodule KilnCMSWeb.Tenant do
   @spec gap?(non_neg_integer() | :unknown) :: boolean()
   def gap?(count) do
     strict_host?() != true and is_integer(count) and count > 1
+  end
+
+  @doc """
+  Whether `TENANT_STRICT_HOST=false` is set on a deployment with more than one
+  organization — a setting Kiln no longer honours there (#1662).
+
+  Not a gap: routing refuses unknown hosts anyway (`strict_host?/0`). It is an
+  operator who believes an unmatched host still reaches the default org, and
+  whose load balancer, bare-IP check or forgotten alias is now getting `404`s.
+  So the same three places that reported the #660 gap say this instead, as an
+  error: boot, the second org's create, and `/editor/system`.
+  """
+  @spec strict_host_false_ignored?() :: boolean()
+  def strict_host_false_ignored?, do: false_ignored?(org_count())
+
+  @doc """
+  The pure half of `strict_host_false_ignored?/0`, for the reason `gap?/1` gives.
+  """
+  @spec false_ignored?(non_neg_integer() | :unknown) :: boolean()
+  def false_ignored?(count) do
+    strict_host_setting() == false and is_integer(count) and count > 1
+  end
+
+  @doc """
+  Whether the editor console shares an origin with more than one organization's
+  public site (#1661): `KILN_CONSOLE_HOST` unset, and a second organization
+  exists.
+
+  An org admin's code injection (`head_html` / `footer_html`, #490) runs on
+  that org's delivery pages. With the console on the same host, the snippet is
+  same-origin with it and can `fetch("/editor/…", {credentials: "same-origin"})`
+  as any editor who loads the site while signed in — a platform admin
+  included, who is an admin on every org. On a single-org install the org admin
+  and the operator are one party, so this only warns once a second exists.
+  Accepted at 1.0 with this warning rather than forced (threat model, residual
+  risk 16): see `docs/code-injection.md`.
+  """
+  @spec console_shares_origin?() :: boolean()
+  def console_shares_origin?, do: console_shares_origin?(org_count())
+
+  @doc """
+  The pure half of `console_shares_origin?/0`, for the reason `gap?/1` gives.
+  """
+  @spec console_shares_origin?(non_neg_integer() | :unknown) :: boolean()
+  def console_shares_origin?(count) do
+    is_nil(KilnCMSWeb.Plugs.ConsoleHost.console_host()) and is_integer(count) and count > 1
+  end
+
+  @doc """
+  The operator message for `strict_host_false_ignored?/0` — one wording for the
+  boot report and the org-create log, so the two cannot drift.
+  """
+  @spec strict_host_false_ignored_message() :: String.t()
+  def strict_host_false_ignored_message do
+    "TENANT_STRICT_HOST=false is set, but this deployment has more than one " <>
+      "organization, and Kiln no longer honours false there (#1662): a request " <>
+      "whose Host matches no organization is REFUSED (404, or 503 while the " <>
+      "database is unreachable) instead of being served the default org's site. " <>
+      "Give every host that should reach a site to an organization (a subdomain " <>
+      "of TENANT_BASE_HOST or a custom_domain — the default org included), or " <>
+      "redirect it to one at your proxy; the " <>
+      "PHX_HOST apex, KILN_CONSOLE_HOST, the health probes and the payment " <>
+      "webhook are never refused. Then remove TENANT_STRICT_HOST=false; see " <>
+      "docs/multi-tenancy.md."
+  end
+
+  @doc """
+  The operator message for `console_shares_origin?/0`, shared by the boot report
+  and the org-create log.
+  """
+  @spec console_shares_origin_message() :: String.t()
+  def console_shares_origin_message do
+    "KILN_CONSOLE_HOST is unset on a deployment with more than one organization, " <>
+      "so the editor console is served on every organization's own host. An org " <>
+      "admin's code injection (head/footer HTML) is then same-origin with the " <>
+      "console and can act with the session of any editor who opens that site " <>
+      "while signed in — a platform admin included (#1661). Set " <>
+      "KILN_CONSOLE_HOST to a host no organization controls and add it to " <>
+      "CHECK_ORIGINS (it serves the default organization's console only, for " <>
+      "now), or grant org admin only to people you would trust with the " <>
+      "console. See docs/code-injection.md."
   end
 
   @doc """

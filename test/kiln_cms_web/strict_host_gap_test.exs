@@ -1,22 +1,24 @@
 defmodule KilnCMSWeb.StrictHostGapTest do
   @moduledoc """
-  The three places a deployment is told that it went multi-tenant while
-  `TENANT_STRICT_HOST` was still off (#660).
+  The three places a deployment is told about host matching on a multi-org
+  install: boot, the second org's create, and `/editor/system` (#660).
 
-  With the flag off, a request whose `Host` matches no organization falls back
-  to the default org — a bare hostname, an IP, a `Host` a caller made up. On a
-  single-org install that is the same site either way, so the fallback is a
-  convenience. The moment a second org exists it is another tenant's content,
-  branding and analytics, and nothing about the request looks wrong.
+  Two different things to say since #1662:
 
-  #563 shipped the flag with a CHANGELOG `### Upgrading` note. Boot logs a
-  warning. Both help someone who is reading at the right moment; neither fires at
-  the moment the condition becomes true, which is the create. So the predicate
-  lives in one place and three callers ask it: boot, org creation, and the
-  `/editor/system` panel that is still there tomorrow.
+    * **The gap** (`gap?/1`) — routing is lenient while more than one org
+      exists, so an unrecognized `Host` is served the default org. Since #1662
+      that only happens on a node whose verdict has not caught up with the
+      second org yet (`KilnCMSWeb.Tenant.OrgCount` recounts within 30 seconds,
+      #1654); `/editor/system` shows it.
+    * **`false` is ignored** (`false_ignored?/1`) — `TENANT_STRICT_HOST=false`
+      with two or more orgs. Until 0.12 that *was* the gap; now routing refuses
+      those hosts anyway, and the operator is told, as an error, that their
+      setting is being overridden.
 
-  `async: false` — every test here writes `:multitenancy_enabled` or
-  `:tenant_strict_host`, which are application-global.
+  The predicates live in one place and three callers ask them.
+
+  `async: false` — every test here writes `:multitenancy_enabled`,
+  `:tenant_strict_host` or the org-count verdict, which are VM-global.
   """
   use KilnCMSWeb.ConnCase, async: false
 
@@ -28,16 +30,23 @@ defmodule KilnCMSWeb.StrictHostGapTest do
 
   alias KilnCMS.Accounts.Organization
   alias KilnCMSWeb.Tenant
+  alias KilnCMSWeb.Tenant.OrgCount
 
   setup do
     strict = Application.get_env(:kiln_cms, :tenant_strict_host)
     multi = Application.get_env(:kiln_cms, :multitenancy_enabled)
+    tracking = Application.get_env(:kiln_cms, :tenant_org_tracking)
+    verdict = OrgCount.verdict()
 
     on_exit(fn ->
       restore(:tenant_strict_host, strict)
       restore(:multitenancy_enabled, multi)
+      restore(:tenant_org_tracking, tracking)
+      OrgCount.put(verdict)
     end)
 
+    # Every test says which verdict it is on, rather than inheriting one.
+    OrgCount.put(:single)
     :ok
   end
 
@@ -68,6 +77,16 @@ defmodule KilnCMSWeb.StrictHostGapTest do
       refute Tenant.gap?(:unknown)
     end
 
+    # #1662: a `:multi` verdict refuses unknown hosts under `false` too, so the
+    # leak this predicate describes is closed there — `false_ignored?/1` is what
+    # that deployment hears instead.
+    test "false on a :multi verdict is not a gap" do
+      OrgCount.put(:multi)
+
+      refute Tenant.gap?(2)
+      refute Tenant.gap?(50)
+    end
+
     test "strict host on beats any count" do
       Application.put_env(:kiln_cms, :tenant_strict_host, true)
 
@@ -80,15 +99,53 @@ defmodule KilnCMSWeb.StrictHostGapTest do
     # while the verdict still says `:single` (a node that has not heard about
     # the second org yet) routing is lenient and the gap is real.
     test "a non-boolean flag counts as auto, because that is what routing does" do
-      previous = KilnCMSWeb.Tenant.OrgCount.verdict()
-      on_exit(fn -> KilnCMSWeb.Tenant.OrgCount.put(previous) end)
       Application.put_env(:kiln_cms, :tenant_strict_host, :yes)
 
-      KilnCMSWeb.Tenant.OrgCount.put(:multi)
+      OrgCount.put(:multi)
       refute Tenant.gap?(2)
 
-      KilnCMSWeb.Tenant.OrgCount.put(:single)
+      OrgCount.put(:single)
       assert Tenant.gap?(2)
+    end
+  end
+
+  # Same unit-level reason as `gap?/1`: the `0`/`1` side is unreachable through
+  # the database, so the threshold is pinned here.
+  describe "false_ignored?/1" do
+    setup do
+      Application.put_env(:kiln_cms, :tenant_strict_host, false)
+      :ok
+    end
+
+    test "an empty or single-org install keeps its false" do
+      refute Tenant.false_ignored?(0)
+      refute Tenant.false_ignored?(1)
+    end
+
+    test "two or more overrides it" do
+      assert Tenant.false_ignored?(2)
+      assert Tenant.false_ignored?(50)
+    end
+
+    test "a count that could not be read is not evidence of anything" do
+      refute Tenant.false_ignored?(:unknown)
+    end
+
+    # Asks the SETTING, not the verdict: the operator set false, and it is
+    # being overridden whether or not this node's verdict has caught up.
+    test "whatever the verdict says" do
+      for verdict <- [:single, :multi, :unknown] do
+        OrgCount.put(verdict)
+        assert Tenant.false_ignored?(2), "verdict #{verdict}"
+      end
+    end
+
+    test "is only about an explicit false" do
+      Application.put_env(:kiln_cms, :tenant_strict_host, true)
+      refute Tenant.false_ignored?(2)
+
+      Application.delete_env(:kiln_cms, :tenant_strict_host)
+      refute Tenant.false_ignored?(2)
     end
   end
 
@@ -128,6 +185,26 @@ defmodule KilnCMSWeb.StrictHostGapTest do
     end
   end
 
+  describe "strict_host_false_ignored?/0" do
+    test "reads the live count" do
+      Application.put_env(:kiln_cms, :tenant_strict_host, false)
+      refute Tenant.strict_host_false_ignored?()
+
+      org("ignored-second")
+
+      assert Tenant.strict_host_false_ignored?()
+    end
+
+    # Not gated on `:multitenancy_enabled`, for the reason the gap is not.
+    test "the create kill switch does not silence it" do
+      Application.put_env(:kiln_cms, :multitenancy_enabled, false)
+      Application.put_env(:kiln_cms, :tenant_strict_host, false)
+      org("ignored-killswitch")
+
+      assert Tenant.strict_host_false_ignored?()
+    end
+  end
+
   describe "creating the organization that crosses the line" do
     setup do
       Application.put_env(:kiln_cms, :multitenancy_enabled, true)
@@ -147,20 +224,24 @@ defmodule KilnCMSWeb.StrictHostGapTest do
       |> Ash.create(authorize?: false)
     end
 
-    test "warns, naming the flag and what an unmatched host gets" do
+    test "logs an error: the flag is no longer honoured, and what an unmatched host gets" do
       Application.put_env(:kiln_cms, :tenant_strict_host, false)
+      Application.put_env(:kiln_cms, :tenant_org_tracking, true)
       assert Tenant.org_count() == 1, "another test leaked an org through the action"
 
       log = capture_log(fn -> assert {:ok, _org} = create_org("gap-create") end)
 
-      assert log =~ "TENANT_STRICT_HOST"
-      assert log =~ "DEFAULT org"
+      assert log =~ "[error]"
+      assert log =~ "the second on this deployment"
+      assert log =~ "TENANT_STRICT_HOST=false"
+      assert log =~ "no longer honours"
+      assert log =~ "REFUSED"
+      # And it is true: the create moved the verdict, so routing is strict.
+      assert Tenant.strict_host?()
     end
 
-    # The crossing only. Saying it again on every create would give a SaaS that
-    # has deliberately left the flag off a permanent warning per provisioning
-    # event — and the message would be false from the third on, since that create
-    # did not make anything multi-tenant. The standing state is what
+    # The crossing only. Saying it again on every create would give a SaaS a
+    # permanent error per provisioning event. The standing state is what
     # `/editor/system` is for.
     test "says nothing on the third organization and after" do
       Application.put_env(:kiln_cms, :tenant_strict_host, false)
@@ -179,6 +260,14 @@ defmodule KilnCMSWeb.StrictHostGapTest do
       Application.put_env(:kiln_cms, :tenant_strict_host, true)
 
       log = capture_log(fn -> assert {:ok, _org} = create_org("gap-create-strict") end)
+
+      refute log =~ "TENANT_STRICT_HOST"
+    end
+
+    test "says nothing when the flag is unset" do
+      Application.delete_env(:kiln_cms, :tenant_strict_host)
+
+      log = capture_log(fn -> assert {:ok, _org} = create_org("gap-create-auto") end)
 
       refute log =~ "TENANT_STRICT_HOST"
     end
@@ -246,14 +335,30 @@ defmodule KilnCMSWeb.StrictHostGapTest do
       %{conn | host: "#{org.slug}.#{Tenant.base_host()}"}
     end
 
-    test "shows the notice while the gap is open", %{conn: conn} do
+    test "says TENANT_STRICT_HOST=false is being ignored", %{conn: conn} do
       Application.put_env(:kiln_cms, :tenant_strict_host, false)
+      org = org("gap-panel-ignored")
+      OrgCount.put(:multi)
 
-      {:ok, _lv, html} = live(on_host(conn, org("gap-panel")), ~p"/editor/system")
+      {:ok, _lv, html} = live(on_host(conn, org), ~p"/editor/system")
+
+      assert html =~ "TENANT_STRICT_HOST=false is being ignored"
+      assert html =~ "no longer honours TENANT_STRICT_HOST=false"
+      # Routing is strict, so there is no gap to report alongside it.
+      refute html =~ "Host matching is off"
+    end
+
+    # A node whose verdict has not caught up with the second org (#1654).
+    test "shows the gap while this node has not noticed the second org", %{conn: conn} do
+      Application.delete_env(:kiln_cms, :tenant_strict_host)
+      org = org("gap-panel-lag")
+      OrgCount.put(:single)
+
+      {:ok, _lv, html} = live(on_host(conn, org), ~p"/editor/system")
 
       assert html =~ "Host matching is off"
-      assert html =~ "TENANT_STRICT_HOST=false is overriding the default"
-      assert html =~ "TENANT_STRICT_HOST=true"
+      assert html =~ "within 30 seconds"
+      refute html =~ "is being ignored"
     end
 
     test "stays quiet once the flag is on", %{conn: conn} do
@@ -265,6 +370,7 @@ defmodule KilnCMSWeb.StrictHostGapTest do
       # the notice and not about an empty body.
       assert html =~ "This instance"
       refute html =~ "Host matching is off"
+      refute html =~ "is being ignored"
     end
   end
 end

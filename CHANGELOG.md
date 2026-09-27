@@ -81,10 +81,18 @@ Every summary line below that was shortened links to its own entry there.
   `x-kilncms-webhook-signature`.**
   ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616) · [long form](docs/changelog/unreleased.md#before-upgrading-make-every-webhook-receiver-verify-x-kilncms-webhook-signature))
 
+- **If you set `TENANT_STRICT_HOST=false` on a multi-org deployment, give every
+  host that must keep working an organization first.**
+  ([#1662](https://github.com/The-Verscienta/kiln_cms/issues/1662) · [long form](docs/changelog/unreleased.md#tenant-strict-host-false-multi-org-upgrade))
+
 ### Breaking
 
 - **Webhook deliveries no longer send `x-kilncms-signature`.**
   ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616) · [long form](docs/changelog/unreleased.md#webhook-deliveries-no-longer-send-x-kilncms-signature))
+
+- **`TENANT_STRICT_HOST=false` is no longer honoured once a second
+  organization exists.**
+  ([#1662](https://github.com/The-Verscienta/kiln_cms/issues/1662) · [long form](docs/changelog/unreleased.md#tenant-strict-host-false-no-longer-honoured))
 
 ### Added
 
@@ -145,6 +153,13 @@ Every summary line below that was shortened links to its own entry there.
 - **The browser CSP's `connect-src` is `'self'` alone — no websocket to any
   other host.**
   ([long form](docs/changelog/unreleased.md#the-browser-csps-connect-src-is-self-alone-no-websocket-to-any))
+
+- **A node that missed the second organization's broadcast turns strict
+  within 30 seconds, not five minutes.**
+  ([#1654](https://github.com/The-Verscienta/kiln_cms/issues/1654) · [long form](docs/changelog/unreleased.md#org-count-recount-30-seconds))
+
+- **Kiln warns when a multi-org deployment has no `KILN_CONSOLE_HOST`.**
+  ([#1661](https://github.com/The-Verscienta/kiln_cms/issues/1661) · [long form](docs/changelog/unreleased.md#multi-org-without-console-host-warns))
 
 ### Deprecated
 
