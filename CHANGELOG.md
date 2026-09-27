@@ -81,6 +81,14 @@ Every summary line below that was shortened links to its own entry there.
   `x-kilncms-webhook-signature`.**
   ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616) · [long form](docs/changelog/unreleased.md#before-upgrading-make-every-webhook-receiver-verify-x-kilncms-webhook-signature))
 
+- **If your `config/project.exs` restates `:ash_domains`, add
+  `KilnCMS.Notifications`.**
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/unreleased.md#if-your-configprojectexs-restates-ash_domains-add-kilncmsnotifications))
+
+- **On 0.8.0 or older, `mix kiln.update` shows you none of these notes.
+  Read them here before moving the pin.**
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/unreleased.md#on-080-or-older-mix-kilnupdate-shows-you-none-of-these-notes))
+
 - **If you set `TENANT_STRICT_HOST=false` on a multi-org deployment, give every
   host that must keep working an organization first.**
   ([#1662](https://github.com/The-Verscienta/kiln_cms/issues/1662) · [long form](docs/changelog/unreleased.md#tenant-strict-host-false-multi-org-upgrade))
@@ -102,6 +110,14 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Release candidates are opt-in everywhere: `mix kiln.update --pre`.**
   ([long form](docs/changelog/unreleased.md#release-candidates-are-opt-in-everywhere-mix-kilnupdate-pre))
+
+- **An upgrade rehearsal runs a past release's `mix kiln.update` against the
+  candidate, with a seeded database.**
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/unreleased.md#an-upgrade-rehearsal-runs-every-past-releases-mix-kilnupdate-against-the))
+
+- **`mix kiln.plugins.doctor` flags a core domain missing from
+  `:ash_domains`.**
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/unreleased.md#mix-kilnpluginsdoctor-flags-a-core-domain-missing-from-ash_domains))
 
 ### Changed
 
@@ -144,6 +160,9 @@ Every summary line below that was shortened links to its own entry there.
 - **The block upcaster refuses a gap in the `migrate` chain instead of
   stamping the block current.**
   ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642) · [long form](docs/changelog/unreleased.md#the-block-upcaster-refuses-a-gap-in-the-migrate-chain))
+
+- **The example overlay's migrations run beside the core's.**
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/unreleased.md#the-example-overlays-migrations-run-beside-the-cores))
 
 ### Security
 
