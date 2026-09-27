@@ -47,8 +47,22 @@ defmodule KilnCMS.WebhooksTest do
     assert_received {:delivered, "example.test", "/hook", headers, body}
     assert headers["x-kilncms-event"] == "page.published"
 
-    assert headers["x-kilncms-signature"] ==
-             Webhooks.signature(WebhookEndpoint.secret(endpoint), body)
+    # The body-only `x-kilncms-signature` is gone (#1616): the timestamped
+    # header is the only signature, and it is what a receiver verifies.
+    refute Map.has_key?(headers, "x-kilncms-signature")
+    secret = WebhookEndpoint.secret(endpoint)
+    header = headers["x-kilncms-webhook-signature"]
+    assert Webhooks.verify(secret, body, header) == :ok
+
+    # The same captured request, replayed once the window has passed, is
+    # refused by the documented procedure — the property the old header lacked.
+    ["t=" <> t | _] = String.split(header, ",")
+    sent_at = String.to_integer(t)
+
+    assert Webhooks.verify(secret, body, header,
+             now: sent_at + Webhooks.signature_tolerance() + 1
+           ) ==
+             {:error, :expired}
 
     assert %{
              "event" => "page.published",
