@@ -6,7 +6,7 @@ defmodule KilnCMSWeb.LiveJoinBudget do
   A connected LiveView root mount costs a session verify, the route's
   `on_mount` hooks, a `mount/3` (typically several database reads) and a
   render. Until this hook, none of that was counted: `docs/threat-model.md`
-  item 10 records that "joins are uncounted, so a caller replaying a scraped
+  item 11 records that "joins are uncounted, so a caller replaying a scraped
   session token pays nothing per attempt". #715 bounded the one join-borne
   *confidentiality* concern (the sign-in submit charges `:auth` on the action);
   what was left is volume — availability, not confidentiality — and this is
@@ -72,7 +72,7 @@ defmodule KilnCMSWeb.LiveJoinBudget do
   `KilnCMSWeb.SocketJoinBudget` charges the three `/ws/*` connects per address,
   and `KilnCMSWeb.SocketEventBudget` (#1305) counts `/ws/collab`'s frames per
   account, and `KilnCMSWeb.GraphqlLimits.SocketDocumentBudget` counts `/ws/gql`
-  documents per address. `/live` events remain in threat-model item 10.
+  documents per address. `/live` events remain in threat-model item 11.
   """
 
   import Phoenix.LiveView, only: [connected?: 1, get_connect_info: 2]

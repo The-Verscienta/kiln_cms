@@ -50,7 +50,7 @@ defmodule KilnCMSWeb.Endpoint do
   # `connect_info: [:uri]` so the socket can resolve its tenant from the
   # connecting host (epic #336) — a raw transport bypasses the SetTenant plug, so
   # without this GraphQL subscriptions/queries over the socket would span orgs.
-  # `:peer_data`/`:x_headers` (threat-model item 10, the `/ws/*` half of the
+  # `:peer_data`/`:x_headers` (threat-model item 11, the `/ws/*` half of the
   # #1183 follow-up) are what `KilnCMSWeb.SocketJoinBudget` keys the join
   # budget's client address off — the same pair `/live` already carries, and
   # for the same reason: a socket has no `conn.remote_ip` to read.

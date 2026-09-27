@@ -1,7 +1,7 @@
 defmodule KilnCMSWeb.SocketJoinBudgetTest do
   @moduledoc """
   The per-address budget on `/ws/gql`, `/ws/bridge` and `/ws/collab` connects
-  — the `/ws/*` half of threat-model item 10's remaining gap after #1183
+  — the `/ws/*` half of threat-model item 11's remaining gap after #1183
   narrowed it to `/live` root joins first.
 
   `config/test.exs` raises all three buckets to a million so the rest of the

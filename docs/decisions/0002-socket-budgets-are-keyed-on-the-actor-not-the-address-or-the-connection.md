@@ -34,4 +34,4 @@ most once per ten seconds per channel, since each relay makes every peer
 send a frame of their own. Override like any bucket via
 `config :kiln_cms, KilnCMSWeb.RateLimit, limits: %{collab_event: …}`.
 Events on `/live` and subscription documents on `/ws/gql` remain uncounted
-(threat model item 10).
+(threat model item 11).

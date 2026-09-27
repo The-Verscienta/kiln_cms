@@ -95,7 +95,7 @@ defmodule KilnCMSWeb.BridgeSocket do
 
   @impl true
   def connect(%{params: params} = info) do
-    # Charged first, ahead of every other check (threat-model item 10's
+    # Charged first, ahead of every other check (threat-model item 11's
     # `/ws/*` gap — see `KilnCMSWeb.SocketJoinBudget`): a connect this
     # deployment is about to refuse anyway still cost a handshake, so it
     # still has to count.

@@ -36,7 +36,7 @@ defmodule KilnCMSWeb.CollabSocket do
 
   @impl true
   def connect(%{"token" => token}, socket, connect_info) when is_binary(token) do
-    # Charged first, ahead of token verification (threat-model item 10's
+    # Charged first, ahead of token verification (threat-model item 11's
     # `/ws/*` gap — see `KilnCMSWeb.SocketJoinBudget`): a connect this
     # deployment is about to refuse anyway still cost a handshake, so it
     # still has to count.

@@ -3,7 +3,7 @@ defmodule KilnCMSWeb.SocketEventBudget do
   A per-**account** budget on the frames a client sends over an established
   socket (#1305) — the residual `KilnCMSWeb.LiveJoinBudget` (#1183) and
   `KilnCMSWeb.SocketJoinBudget` (the `/ws/*` connects) left open in
-  `docs/threat-model.md` item 10.
+  `docs/threat-model.md` item 11.
 
   Those count *handshakes*: a `/live` root join, a `/ws/gql`, `/ws/bridge` or
   `/ws/collab` connect. Once a connection is up, nothing counted what a client
@@ -105,7 +105,7 @@ defmodule KilnCMSWeb.SocketEventBudget do
   `/gql` uses (`KilnCMSWeb.GraphqlLimits.SocketDocumentBudget` says why not per
   account). `/live` events (`handle_event/3` on every LiveView; no single hook
   intercepts them before the handler body) are still uncounted, and remain in
-  threat-model item 10.
+  threat-model item 11.
   """
 
   alias KilnCMSWeb.RateLimit
