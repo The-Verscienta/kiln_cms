@@ -165,7 +165,7 @@ defmodule KilnCMSWeb.ConsoleSharesOriginTest do
 
     test "shows the notice on a multi-org deployment with no console host", %{conn: conn} do
       {:ok, lv, html} = live(on_host(conn, org("cso-panel")), ~p"/editor/system")
-      _ = render_async(lv)
+      _ = render_async(lv, 2_000)
 
       assert html =~ "The console shares an origin with every organization"
       assert html =~ "KILN_CONSOLE_HOST is unset"
@@ -173,7 +173,7 @@ defmodule KilnCMSWeb.ConsoleSharesOriginTest do
 
     test "stays quiet with one organization", %{conn: conn} do
       {:ok, lv, html} = live(%{conn | host: Tenant.base_host()}, ~p"/editor/system")
-      _ = render_async(lv)
+      _ = render_async(lv, 2_000)
 
       # The page rendered, so the refute is about the notice.
       assert html =~ "This instance"
