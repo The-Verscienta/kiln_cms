@@ -41,11 +41,6 @@ msgstr ""
 msgid "%B %-d, %Y"
 msgstr ""
 
-#: lib/kiln_cms_web/live/automation_live.ex
-#, elixir-autogen, elixir-format
-msgid "%{action} accepts: %{keys}"
-msgstr ""
-
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{action}: %{count} updated"
@@ -1343,16 +1338,6 @@ msgstr ""
 msgid "Action"
 msgstr ""
 
-#: lib/kiln_cms_web/live/automation_live.ex
-#, elixir-autogen, elixir-format
-msgid "Action config (JSON)"
-msgstr ""
-
-#: lib/kiln_cms_web/live/automation_live.ex
-#, elixir-autogen, elixir-format
-msgid "Action config must be valid JSON."
-msgstr ""
-
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/federation_live.ex
@@ -1733,6 +1718,7 @@ msgstr ""
 msgid "All changes saved"
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
 msgid "All confirmed subscribers"
@@ -1815,6 +1801,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "All your content in one list"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Allow sending page text to an external AI provider"
 msgstr ""
 
 #: lib/kiln_cms_web/live/code_injection_live.ex
@@ -2173,6 +2164,16 @@ msgstr ""
 msgid "Assign"
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Assign follow-up to a person"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Assign to"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Assign to…"
@@ -2210,6 +2211,7 @@ msgid "Attested only to version %{attested} — versions %{next}-%{head} are anc
 msgstr ""
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -2501,6 +2503,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "Branding saved."
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Broadcast channel"
 msgstr ""
 
 #: lib/kiln_cms_web/live/link_report_live.ex
@@ -2822,6 +2829,16 @@ msgstr ""
 msgid "Choose a file"
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Choose a network"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Choose a person"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
 msgid "Choose a poster image"
@@ -3061,6 +3078,7 @@ msgid "Comma-separated; the first keyphrase drives the auto-derived slug."
 msgstr ""
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #, elixir-autogen, elixir-format
 msgid "Comment"
 msgstr ""
@@ -3315,6 +3333,7 @@ msgid "Content no longer exists"
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live.ex
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #: lib/kiln_cms_web/live/experiments_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
@@ -4144,6 +4163,11 @@ msgstr ""
 msgid "Decorative — no alt text needed"
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Default"
+msgstr ""
+
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Default SEO description (optional)"
@@ -4791,6 +4815,11 @@ msgstr ""
 msgid "Due %{date}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Due after (days)"
+msgstr ""
+
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "Due soon"
@@ -5031,6 +5060,7 @@ msgstr ""
 msgid "Either way, you can change it later on the Team page."
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
@@ -5302,6 +5332,7 @@ msgstr ""
 msgid "Essentials: Home, Content, Media, Calendar, Tasks and Inbox, then Configure and Your settings."
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Event"
@@ -5531,6 +5562,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Fall back to"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Fallback assignee"
 msgstr ""
 
 #: lib/kiln_cms_web/live/locale_settings_live.ex
@@ -6365,6 +6401,11 @@ msgstr ""
 msgid "I've saved them"
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "ID"
+msgstr ""
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "Identity"
@@ -6587,6 +6628,16 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "Insert block here"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Insert the %{name} placeholder"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Insert:"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
@@ -6888,6 +6939,11 @@ msgstr ""
 msgid "Layout"
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Leave a note on the content"
+msgstr ""
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Leave all unchecked to offer this group on every content type."
@@ -6898,9 +6954,24 @@ msgstr ""
 msgid "Leave blank for AWS S3."
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Leave blank for the default"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Leave blank for the default message"
+msgstr ""
+
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Leave blank to keep the current one."
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Leave blank to post the title, summary and link"
 msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
@@ -6964,6 +7035,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Light"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Link"
 msgstr ""
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
@@ -7323,6 +7399,11 @@ msgstr ""
 msgid "Menus"
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Message"
+msgstr ""
+
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
 msgid "Mint a key above to grant headless or MCP access."
@@ -7554,6 +7635,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "Need more than a preset? Custom CSS for the public site lives in"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Needed when the configured model runs off-site. Leave off to keep content on this server — the rule then does nothing with an off-site model."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
@@ -7905,6 +7991,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "No external witness is configured. Checkpoints are minted and stored in this database only, so they attest history against edits — but not against someone who can write to the database itself."
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "No fallback"
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -8364,6 +8455,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing to rename"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing to set up — this action runs as soon as its trigger fires."
 msgstr ""
 
 #: lib/kiln_cms_web/live/inbox_live.ex
@@ -9203,6 +9299,16 @@ msgstr ""
 msgid "Position"
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Post text"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Post to"
+msgstr ""
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "PostgreSQL client tools aren't installed in this image, so a backup can't run here. Cron backups on the host are unaffected."
@@ -9217,6 +9323,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
 msgid "Posts"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Posts from every enabled account on that network (see Social accounts)."
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex
@@ -11123,6 +11234,11 @@ msgstr ""
 msgid "Send a published post to your subscribers."
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Send a summary to an address"
+msgstr ""
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Send a test email to"
@@ -11136,6 +11252,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Send content out as XLIFF 2.0 and apply the file that comes back. Tick rows below, pick the target locale, then export."
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Send findings as"
 msgstr ""
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
@@ -11156,6 +11277,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "Send this site's mail through this relay"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Send to"
 msgstr ""
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
@@ -11226,6 +11352,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Settings"
@@ -11563,6 +11690,7 @@ msgid "Skipped"
 msgstr ""
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor/markdown_import.ex
@@ -11900,6 +12028,11 @@ msgstr ""
 msgid "Subject (optional — defaults to the post title)"
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Subject line"
+msgstr ""
+
 #: lib/kiln_cms_web/components/block_components.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -11992,6 +12125,7 @@ msgstr ""
 msgid "Summarize"
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Summary"
@@ -12139,6 +12273,11 @@ msgstr ""
 msgid "Target type"
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Task"
+msgstr ""
+
 #: lib/kiln_cms_web/notification_text.ex
 #, elixir-autogen, elixir-format
 msgid "Task assigned"
@@ -12159,11 +12298,21 @@ msgstr ""
 msgid "Task moved to this block."
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Task note"
+msgstr ""
+
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "Tasks"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Tasks go to the content's author. This person gets them when the author can't take one."
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
@@ -12764,6 +12913,11 @@ msgstr ""
 msgid "The interactive Swagger UI and the OpenAPI spec are switched off on this deployment. An operator can turn them on with API_DOCS_ENABLED=true."
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "The internal channel listeners subscribe to. Defaults to “automation”."
+msgstr ""
+
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
@@ -13218,6 +13372,11 @@ msgstr ""
 msgid "This is a test email from your site's outgoing mail settings."
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "This is required."
+msgstr ""
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "This is the newest released version of Kiln."
@@ -13499,6 +13658,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #: lib/kiln_cms_web/live/content_editor/markdown_import.ex
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -13775,6 +13935,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Unassigned"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#, elixir-autogen, elixir-format
+msgid "Unavailable (%{value})"
 msgstr ""
 
 #: lib/kiln_cms_web/live/federation_live.ex
@@ -15023,11 +15188,6 @@ msgstr ""
 msgid "arrow keys move it"
 msgstr ""
 
-#: lib/kiln_cms_web/live/automation_live.ex
-#, elixir-autogen, elixir-format
-msgid "assignee (required when deliver_as is \"task\")"
-msgstr ""
-
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "block %{index}"
@@ -15268,11 +15428,6 @@ msgstr ""
 msgid "file is too large for its type"
 msgstr ""
 
-#: lib/kiln_cms_web/live/automation_live.ex
-#, elixir-autogen, elixir-format
-msgid "flag_duplicates, suggest_tags, suggest_links, suggest_metadata: deliver_as picks where a finding lands — email (default, needs to), comment, or task (needs assignee). suggest_metadata additionally needs allow_egress: true when the configured model provider is off-site."
-msgstr ""
-
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -15446,11 +15601,6 @@ msgstr ""
 msgid "never enabled"
 msgstr ""
 
-#: lib/kiln_cms_web/live/automation_live.ex
-#, elixir-autogen, elixir-format
-msgid "no config"
-msgstr ""
-
 #: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
 msgid "no goal document is set"
@@ -15529,11 +15679,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "not yet"
-msgstr ""
-
-#: lib/kiln_cms_web/live/automation_live.ex
-#, elixir-autogen, elixir-format
-msgid "nothing"
 msgstr ""
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
@@ -15622,7 +15767,6 @@ msgstr ""
 msgid "removed block"
 msgstr ""
 
-#: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "required"
@@ -15675,11 +15819,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "score %{score}"
-msgstr ""
-
-#: lib/kiln_cms_web/live/automation_live.ex
-#, elixir-autogen, elixir-format
-msgid "send_email: to, subject, body. broadcast: topic. Templates support {{title}}, {{slug}}, {{type}}, {{event}}."
 msgstr ""
 
 #: lib/kiln_cms_web/live/governance_live.ex
@@ -15786,11 +15925,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "this is you"
-msgstr ""
-
-#: lib/kiln_cms_web/live/automation_live.ex
-#, elixir-autogen, elixir-format
-msgid "to (required unless deliver_as is \"comment\" or \"task\")"
 msgstr ""
 
 #: lib/kiln_cms_web/live/in_context_edit_live.ex

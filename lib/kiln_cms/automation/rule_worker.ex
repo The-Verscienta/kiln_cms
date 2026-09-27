@@ -1030,17 +1030,22 @@ defmodule KilnCMS.Automation.RuleWorker do
     "<p>The content <strong>{{title}}</strong> ({{type}}) emitted <em>{{event}}</em>.</p>"
   end
 
+  @template_tokens ~w(title slug id type event)
+
+  @doc """
+  The `{{placeholder}}` names a rule's subject, body and task note interpolate.
+
+  Public so the admin form offers exactly these as insert chips; `render/4`
+  builds its values from the same list.
+  """
+  @spec template_tokens() :: [String.t()]
+  def template_tokens, do: @template_tokens
+
   # Minimal, safe templating: substitute a fixed set of payload fields. `:html`
   # escapes markup (email body); `:text` strips CR/LF so a value can't inject a
   # header when the result is used as a Subject.
   defp render(template, event, payload, mode) do
-    vars = %{
-      "title" => payload["title"],
-      "slug" => payload["slug"],
-      "id" => payload["id"],
-      "type" => event_type(event),
-      "event" => event
-    }
+    vars = Map.new(@template_tokens, &{&1, template_value(&1, event, payload)})
 
     Regex.replace(~r/\{\{(\w+)\}\}/, template, fn whole, key ->
       case Map.fetch(vars, key) do
@@ -1049,6 +1054,10 @@ defmodule KilnCMS.Automation.RuleWorker do
       end
     end)
   end
+
+  defp template_value("type", event, _payload), do: event_type(event)
+  defp template_value("event", event, _payload), do: event
+  defp template_value(field, _event, payload), do: payload[field]
 
   defp escape(value, :html) do
     value |> to_string() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()

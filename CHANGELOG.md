@@ -97,6 +97,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Automation rules are set up with ordinary fields instead of a JSON box.**
+  ([long form](docs/changelog/unreleased.md#automation-rules-are-set-up-with-ordinary-fields-instead-of-a-json-box))
+
 - **An unknown option to `use KilnCMS.CMS.Content` now warns at compile time
   instead of being silently ignored.**
   ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/unreleased.md#an-unknown-option-to-use-kilncmscmscontent-now-warns-at-compile-time-instead-of))

@@ -102,6 +102,24 @@ defmodule KilnCMSWeb.ContentEditor.Shared do
   def user_label(%{name: name}) when is_binary(name) and name != "", do: name
   def user_label(%{email: email}), do: to_string(email)
 
+  @doc """
+  This org's editors/admins as `{label, id}` options — the roster a task can
+  be assigned to (viewers can't act on content, so they're excluded).
+
+  By EFFECTIVE tier on the org the task will be written under (#419), not
+  global `User.role`: that is what `AssigneeIsEditor` checks at the write, so
+  a picker built from this offers exactly the people the submit accepts. The
+  content editor's task picker and the automation form's assignee pickers
+  both read it. `users_with_tier/2` is a system read — `User`'s and
+  `OrgMembership`'s read policies are self-only.
+  """
+  def assignable_users(org) do
+    org
+    |> KilnCMS.Accounts.Scoping.users_with_tier([:editor, :admin])
+    |> Enum.sort_by(&user_label/1)
+    |> Enum.map(&{user_label(&1), &1.id})
+  end
+
   def changeset_errors(%Phoenix.HTML.Form{source: source}), do: changeset_errors(source)
   def changeset_errors(%AshPhoenix.Form{source: source}), do: changeset_errors(source)
   def changeset_errors(%Ash.Changeset{errors: errors}), do: errors

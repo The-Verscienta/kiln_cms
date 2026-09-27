@@ -3,14 +3,18 @@ defmodule KilnCMSWeb.AutomationLive do
   Editorial automation (`/editor/automation`) — a no-code "when X happens, do Y"
   builder over Kiln's Oban + state machine + PubSub/MTA (#342). Admin-only,
   mirroring the `Automation.Rule` policy. Each rule pairs a lifecycle trigger
-  (optionally scoped to one content type) with a reaction.
+  (optionally scoped to one content type) with a reaction, configured through
+  generated inputs rather than JSON (`KilnCMSWeb.AutomationLive.ConfigFields`).
   """
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Automation
   alias KilnCMS.Automation.Rule
-  alias KilnCMS.Automation.Validations.ActionConfig
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Newsletter
+  alias KilnCMS.Social.Account
+  alias KilnCMSWeb.AutomationLive.ConfigFields
+  alias KilnCMSWeb.ContentEditor.Shared
 
   @impl true
   def mount(_params, _session, socket) do
@@ -23,6 +27,7 @@ defmodule KilnCMSWeb.AutomationLive do
        |> assign(:actor, actor)
        |> assign(:page_title, gettext("Automation"))
        |> assign(:type_options, type_options(org))
+       |> assign(:config_options, config_options(socket, actor, org))
        |> assign(:edit, nil)
        |> assign(:form, create_form(actor, org))
        |> load_rules()}
@@ -36,6 +41,7 @@ defmodule KilnCMSWeb.AutomationLive do
 
   @impl true
   def handle_event("validate", %{"rule" => params}, socket) when is_map(params) do
+    params = prepare_params(params)
     {:noreply, assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))}
   end
 
@@ -50,12 +56,6 @@ defmodule KilnCMSWeb.AutomationLive do
 
       {:error, form} ->
         {:noreply, assign(socket, :form, form)}
-
-      {:invalid_json, form} ->
-        {:noreply,
-         socket
-         |> assign(:form, form)
-         |> put_flash(:error, gettext("Action config must be valid JSON."))}
     end
   end
 
@@ -72,7 +72,7 @@ defmodule KilnCMSWeb.AutomationLive do
   def handle_event("validate_edit", %{"rule" => params}, socket) when is_map(params) do
     edit = %{
       socket.assigns.edit
-      | form: AshPhoenix.Form.validate(socket.assigns.edit.form, params)
+      | form: AshPhoenix.Form.validate(socket.assigns.edit.form, prepare_params(params))
     }
 
     {:noreply, assign(socket, :edit, edit)}
@@ -86,12 +86,6 @@ defmodule KilnCMSWeb.AutomationLive do
 
       {:error, form} ->
         {:noreply, assign(socket, :edit, %{socket.assigns.edit | form: form})}
-
-      {:invalid_json, form} ->
-        {:noreply,
-         socket
-         |> assign(:edit, %{socket.assigns.edit | form: form})
-         |> put_flash(:error, gettext("Action config must be valid JSON."))}
     end
   end
 
@@ -149,36 +143,44 @@ defmodule KilnCMSWeb.AutomationLive do
 
   defp edit_form(id, actor, org) do
     Automation.get_rule!(id, actor: actor, tenant: org)
-    |> AshPhoenix.Form.for_update(:update, actor: actor, tenant: org, as: "rule")
+    # Its own `id` (inputs keep the shared `rule[...]` names): the add-rule
+    # form is on the page at the same time, and both defaulting to "rule"
+    # gave every field in the two forms the same DOM id.
+    |> AshPhoenix.Form.for_update(:update,
+      actor: actor,
+      tenant: org,
+      as: "rule",
+      id: "rule_#{id}"
+    )
     |> to_form()
   end
 
-  # `config` is entered as JSON in a textarea; decode it to a map before submit
-  # (a :map attribute can't take the raw string). Invalid JSON surfaces its own
-  # outcome so the caller can flash a friendly message.
-  defp submit(form, params) do
-    case decode_config(params) do
-      {:ok, params} -> AshPhoenix.Form.submit(form, params: params)
-      :error -> {:invalid_json, AshPhoenix.Form.validate(form, params)}
-    end
+  defp submit(form, params), do: AshPhoenix.Form.submit(form, params: prepare_params(params))
+
+  # The settings inputs post strings under `rule[config]`; `ConfigFields.coerce/2`
+  # makes them the typed map the selected action accepts. An action with no
+  # settings (`reindex`, say) posts no config at all, which becomes `%{}`.
+  defp prepare_params(params) do
+    action = parse_action(params["action"])
+    Map.put(params, "config", ConfigFields.coerce(action, params["config"] || %{}))
   end
 
-  defp decode_config(%{"config" => raw} = params) when is_binary(raw) do
-    trimmed = String.trim(raw)
-
-    cond do
-      trimmed == "" ->
-        {:ok, Map.put(params, "config", %{})}
-
-      match?({:ok, %{}}, Jason.decode(trimmed)) ->
-        {:ok, Map.put(params, "config", Jason.decode!(trimmed))}
-
-      true ->
-        :error
-    end
+  # Option lists for the settings form's pickers — the same assignee roster the
+  # content editor's task picker offers (`Shared.assignable_users/1`). Loaded on
+  # the connected mount only: the static render is replaced as soon as the
+  # socket joins, and a picker's options are not worth two more queries per
+  # page load. Until then the pickers show their prompt alone.
+  defp config_options(socket, actor, org) do
+    if connected?(socket), do: load_config_options(actor, org), else: %{}
   end
 
-  defp decode_config(params), do: {:ok, params}
+  defp load_config_options(actor, org) do
+    %{
+      users: Shared.assignable_users(org),
+      segments: Enum.map(Newsletter.list_segments!(actor: actor, tenant: org), &{&1.name, &1.id}),
+      providers: Enum.map(Account.providers(), &{Phoenix.Naming.humanize(&1), to_string(&1)})
+    }
+  end
 
   # Editorial tasks (#501) aren't a content type — `task.assigned` /
   # `task.overdue` are task-domain events dispatched through the same
@@ -196,74 +198,16 @@ defmodule KilnCMSWeb.AutomationLive do
   defp trigger_options, do: Enum.map(Rule.triggers(), &{Phoenix.Naming.humanize(&1), &1})
   defp action_options, do: Enum.map(Rule.action_kinds(), &{Phoenix.Naming.humanize(&1), &1})
 
-  defp config_json(form) do
-    case form[:config].value do
-      map when is_map(map) and map_size(map) > 0 -> Jason.encode!(map, pretty: true)
-      raw when is_binary(raw) -> raw
-      _ -> ""
-    end
-  end
-
-  # The config textarea is hand-rolled rather than a `<.input>` — it holds JSON,
-  # not the attribute's own value — so it renders no errors of its own. Without
-  # this the #944 validation would refuse the save and the admin would see a
-  # form that simply did not submit.
-  defp config_errors(form) do
-    Enum.map(form[:config].errors, &KilnCMSWeb.CoreComponents.translate_error/1)
-  end
-
-  # Derived from `ActionConfig.shapes/0`, not restated beside it: that table is
-  # what refuses a save, and a hand-maintained list of the same keys is a doc
-  # that drifts from its own enforcement — which is the failure #944 is about.
-  defp config_keys(form) do
-    case ActionConfig.shape(selected_action(form)) do
-      nil ->
-        gettext("nothing")
-
-      %{required: [], optional: []} ->
-        gettext("no config")
-
-      # The four intelligence reactions (#946): `to`/`assignee` move here
-      # because whether they're required depends on `deliver_as`, which
-      # `ActionConfig.check/2` resolves via `:required_when` at save time —
-      # a resolver this rendering function has no config value to call (it
-      # describes the reaction in general, not one particular draft). Spell
-      # out the condition instead of just dropping the "(required)" marker
-      # the unconditional case below still shows (#1252 review: silently
-      # dropping it reintroduced the doc/enforcement drift #944 was about,
-      # for the still-mandatory default email case).
-      %{required_when: :deliver_as} = shape ->
-        deliver_as_config_keys(shape)
-
-      shape ->
-        [
-          Enum.map(shape.required, fn {key, _type} -> "#{key} (#{gettext("required")})" end),
-          Enum.map(shape.optional, fn {key, _type} -> key end)
-        ]
-        |> List.flatten()
-        |> Enum.join(", ")
-    end
-  end
-
-  defp deliver_as_config_keys(shape) do
-    Enum.map_join(shape.optional, ", ", fn
-      {"to", _type} -> gettext(~s(to \(required unless deliver_as is "comment" or "task"\)))
-      {"assignee", _type} -> gettext(~s(assignee \(required when deliver_as is "task"\)))
-      {key, _type} -> key
-    end)
-  end
-
   # An untouched form has no `action` value yet, while the select already shows
   # its first option — so fall back to that rather than describing a reaction
   # the admin isn't looking at.
-  defp selected_action(form) do
-    case form[:action].value do
-      nil -> List.first(Rule.action_kinds())
-      "" -> List.first(Rule.action_kinds())
-      value when is_atom(value) -> value
-      value -> Enum.find(Rule.action_kinds(), &(to_string(&1) == to_string(value)))
-    end
-  end
+  defp selected_action(form),
+    do: parse_action(form[:action].value) || List.first(Rule.action_kinds())
+
+  defp parse_action(nil), do: nil
+
+  defp parse_action(value),
+    do: Enum.find(Rule.action_kinds(), &(to_string(&1) == to_string(value)))
 
   defp editing?(nil, _id), do: false
   defp editing?(%{id: id}, id), do: true
@@ -303,7 +247,7 @@ defmodule KilnCMSWeb.AutomationLive do
             phx-submit="create"
             class="card card-pad space-y-4"
           >
-            <.rule_fields form={@form} type_options={@type_options} />
+            <.rule_fields form={@form} type_options={@type_options} config_options={@config_options} />
             <.button type="submit" variant="primary">{gettext("Add rule")}</.button>
           </.form>
         </section>
@@ -378,7 +322,11 @@ defmodule KilnCMSWeb.AutomationLive do
                 phx-submit="save_edit"
                 class="space-y-4"
               >
-                <.rule_fields form={@edit.form} type_options={@type_options} />
+                <.rule_fields
+                  form={@edit.form}
+                  type_options={@type_options}
+                  config_options={@config_options}
+                />
                 <label class="flex items-center gap-2 text-sm">
                   <input type="hidden" name="rule[enabled]" value="false" />
                   <input
@@ -407,16 +355,14 @@ defmodule KilnCMSWeb.AutomationLive do
 
   attr :form, :any, required: true
   attr :type_options, :list, required: true
+  attr :config_options, :map, required: true
 
   defp rule_fields(assigns) do
     assigns =
       assigns
       |> assign(:trigger_options, trigger_options())
       |> assign(:action_options, action_options())
-      |> assign(:config_json, config_json(assigns.form))
-      |> assign(:config_errors, config_errors(assigns.form))
-      |> assign(:config_action, to_string(selected_action(assigns.form)))
-      |> assign(:config_keys, config_keys(assigns.form))
+      |> assign(:selected_action, selected_action(assigns.form))
 
     ~H"""
     <.input field={@form[:name]} label={gettext("Name")} placeholder="Notify on publish" />
@@ -445,35 +391,7 @@ defmodule KilnCMSWeb.AutomationLive do
       label={gettext("Description")}
       placeholder={gettext("Optional")}
     />
-    <div>
-      <label class="text-sm font-medium" for={@form[:config].id}>
-        {gettext("Action config (JSON)")}
-      </label>
-      <textarea
-        id={@form[:config].id}
-        name={@form[:config].name}
-        rows="3"
-        class="mt-1 w-full rounded border border-base-content/20 bg-base-100 p-2 font-mono text-xs"
-        placeholder={~s({"to": "team@example.com", "subject": "Live: {{title}}"})}
-      >{@config_json}</textarea>
-      <p :for={msg <- @config_errors} class="mt-1.5 flex items-center gap-2 text-sm text-error">
-        <.icon name="hero-exclamation-circle" class="size-5" />
-        {msg}
-      </p>
-      <p class="mt-1 text-xs text-base-content/60">
-        {gettext(
-          "send_email: to, subject, body. broadcast: topic. Templates support {{title}}, {{slug}}, {{type}}, {{event}}."
-        )}
-      </p>
-      <p class="mt-1 text-xs text-base-content/60">
-        {gettext(
-          "flag_duplicates, suggest_tags, suggest_links, suggest_metadata: deliver_as picks where a finding lands — email (default, needs to), comment, or task (needs assignee). suggest_metadata additionally needs allow_egress: true when the configured model provider is off-site."
-        )}
-      </p>
-      <p class="mt-1 text-xs font-medium text-base-content/70">
-        {gettext("%{action} accepts: %{keys}", action: @config_action, keys: @config_keys)}
-      </p>
-    </div>
+    <ConfigFields.config_fields form={@form} action={@selected_action} options={@config_options} />
     """
   end
 end
