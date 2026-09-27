@@ -494,7 +494,7 @@ defmodule KilnCMSWeb.BridgeSocketTest do
     end
   end
 
-  describe "the join budget (threat-model item 10's /ws/* gap)" do
+  describe "the join budget (threat-model item 11's /ws/* gap)" do
     test "connect/1 charges the bridge_join budget first, refusing an over-budget address before authorization runs" do
       KilnCMS.RateLimitHelpers.restore_limits_on_exit()
       KilnCMS.RateLimitHelpers.put_limit(:bridge_join, 1)

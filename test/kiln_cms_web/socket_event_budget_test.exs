@@ -98,7 +98,7 @@ defmodule KilnCMSWeb.SocketEventBudgetTest do
   end
 
   test "the shipped ceiling is a per-account flood ceiling, not a usage cap" do
-    # The number `docs/threat-model.md` item 10 states. Sized against one human
+    # The number `docs/threat-model.md` item 11 states. Sized against one human
     # given what the client emits — a Yjs update per keystroke and awareness
     # coalesced to ~10/s (`assets/js/collab.js`), so a furious minute is well
     # under 2,000 frames — and reached by a script in seconds. Pinned to a

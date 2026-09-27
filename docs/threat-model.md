@@ -375,7 +375,7 @@ build if a resource is ever registered without that authorizer.
   a price, not a row count: a relationship list without `limit` is priced at
   five rows and can return more, so the cap limits how deeply lists nest rather
   than how many rows one document returns. Each document on `/ws/gql` is
-  charged to `:gql` like a `/gql` request (residual item 10). Introspection is
+  charged to `:gql` like a `/gql` request (residual item 11). Introspection is
   off in production.
 - **Error verbosity** — keep `:logger` at `:info` in prod (already set).
 

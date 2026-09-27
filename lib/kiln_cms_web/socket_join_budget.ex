@@ -1,7 +1,7 @@
 defmodule KilnCMSWeb.SocketJoinBudget do
   @moduledoc """
   A per-address budget on `/ws/gql`, `/ws/bridge` and `/ws/collab` connects —
-  the `/ws/*` half of `docs/threat-model.md` item 10's remaining gap, left
+  the `/ws/*` half of `docs/threat-model.md` item 11's remaining gap, left
   open on purpose when #1183 narrowed the same item to `/live` root joins
   first (`KilnCMSWeb.LiveJoinBudget`'s own moduledoc names this half as out
   of scope there).

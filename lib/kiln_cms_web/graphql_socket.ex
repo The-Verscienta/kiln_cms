@@ -17,7 +17,7 @@ defmodule KilnCMSWeb.GraphqlSocket do
 
   @impl true
   def connect(params, socket, connect_info) do
-    # Charged first, ahead of tenant resolution (threat-model item 10's
+    # Charged first, ahead of tenant resolution (threat-model item 11's
     # `/ws/*` gap — see `KilnCMSWeb.SocketJoinBudget`): a connect this
     # deployment is about to refuse anyway still cost a handshake, so it still
     # has to count.

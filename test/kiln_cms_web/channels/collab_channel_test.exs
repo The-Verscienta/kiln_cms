@@ -92,7 +92,7 @@ defmodule KilnCMSWeb.CollabChannelTest do
     end
   end
 
-  describe "the join budget (threat-model item 10's /ws/* gap)" do
+  describe "the join budget (threat-model item 11's /ws/* gap)" do
     test "connect/3 charges the collab_join budget first, refusing an over-budget address before token verification runs",
          %{actor: actor} do
       KilnCMS.RateLimitHelpers.restore_limits_on_exit()
