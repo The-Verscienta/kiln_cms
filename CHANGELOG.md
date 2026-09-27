@@ -59,6 +59,10 @@ Every summary line below that was shortened links to its own entry there.
 - **A new `throttle_counters` table holds the auth budgets; run migrations as usual.**
   ([#1619](https://github.com/The-Verscienta/kiln_cms/issues/1619) · [long form](docs/changelog/unreleased.md#a-new-throttlecounters-table-holds-the-auth-budgets-run-migrations-as))
 
+- **A site whose code-injection snippet opens a websocket to its vendor must
+  now list that `wss://` origin under Connections.**
+  ([long form](docs/changelog/unreleased.md#a-site-whose-code-injection-snippet-opens-a-websocket-to-its-vendor-must))
+
 - **Before upgrading, make every webhook receiver verify
   `x-kilncms-webhook-signature`.**
   ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616) · [long form](docs/changelog/unreleased.md#before-upgrading-make-every-webhook-receiver-verify-x-kilncms-webhook-signature))
@@ -67,6 +71,11 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Webhook deliveries no longer send `x-kilncms-signature`.**
   ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616) · [long form](docs/changelog/unreleased.md#webhook-deliveries-no-longer-send-x-kilncms-signature))
+
+### Added
+
+- **Release candidates are opt-in everywhere: `mix kiln.update --pre`.**
+  ([long form](docs/changelog/unreleased.md#release-candidates-are-opt-in-everywhere-mix-kilnupdate-pre))
 
 ### Fixed
 
@@ -81,6 +90,10 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Auth budgets now hold across nodes and restarts.**
   ([#1619](https://github.com/The-Verscienta/kiln_cms/issues/1619) · [long form](docs/changelog/unreleased.md#auth-budgets-now-hold-across-nodes-and-restarts))
+
+- **The browser CSP's `connect-src` is `'self'` alone — no websocket to any
+  other host.**
+  ([long form](docs/changelog/unreleased.md#the-browser-csps-connect-src-is-self-alone-no-websocket-to-any))
 
 ## [0.11.0] - 2026-09-26
 
