@@ -95,6 +95,9 @@ defmodule KilnCMSWeb.Router do
     plug :accepts, ["html"]
     plug :fetch_session
     plug :fetch_live_flash
+    # `/es/editor` → session locale + `/editor`: a LiveView cannot join under
+    # a locale prefix (#1699).
+    plug KilnCMSWeb.Plugs.LiveLocalePrefix
     plug :put_root_layout, html: {KilnCMSWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers, @browser_csp_headers
@@ -217,6 +220,8 @@ defmodule KilnCMSWeb.Router do
     plug :accepts, ["html"]
     plug :fetch_session
     plug :fetch_live_flash
+    # `/es/sign-in` → session locale + `/sign-in` (#1699), as on `:browser`.
+    plug KilnCMSWeb.Plugs.LiveLocalePrefix
     plug :put_root_layout, html: {KilnCMSWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers, @browser_csp_headers

@@ -44,6 +44,11 @@ defmodule KilnCMSWeb.LiveUserAuth do
   # Restore the UI locale from the session into the LiveView process. LiveViews
   # mount in their own process, so the request-time `SetLocale` plug doesn't
   # carry over — set the Gettext locale here (and expose it as an assign).
+  #
+  # The session is the only source, and it can be: a LiveView never mounts under
+  # a locale prefix. `Plugs.LiveLocalePrefix` turns `/es/sign-in` into session
+  # locale `es` plus a redirect to `/sign-in` first, because a prefixed URL
+  # cannot join its LiveView at all (#1699).
   def on_mount(:restore_locale, _params, session, socket) do
     locale = I18n.normalize(session["locale"])
     Gettext.put_locale(KilnCMSWeb.Gettext, locale)
