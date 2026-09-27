@@ -180,7 +180,7 @@ defmodule KilnCMS.Billing.MembershipWebhooksTest do
 
       assert_received {:raw, headers, raw}
       secret = WebhookEndpoint.secret(hook)
-      assert headers["x-kilncms-signature"] == Webhooks.signature(secret, raw)
+      refute Map.has_key?(headers, "x-kilncms-signature")
       assert Webhooks.verify(secret, raw, headers["x-kilncms-webhook-signature"]) == :ok
     end
 

@@ -59,10 +59,23 @@ Every summary line below that was shortened links to its own entry there.
 - **A new `throttle_counters` table holds the auth budgets; run migrations as usual.**
   ([#1619](https://github.com/The-Verscienta/kiln_cms/issues/1619) · [long form](docs/changelog/unreleased.md#a-new-throttlecounters-table-holds-the-auth-budgets-run-migrations-as))
 
+- **Before upgrading, make every webhook receiver verify
+  `x-kilncms-webhook-signature`.**
+  ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616) · [long form](docs/changelog/unreleased.md#before-upgrading-make-every-webhook-receiver-verify-x-kilncms-webhook-signature))
+
+### Breaking
+
+- **Webhook deliveries no longer send `x-kilncms-signature`.**
+  ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616) · [long form](docs/changelog/unreleased.md#webhook-deliveries-no-longer-send-x-kilncms-signature))
+
 ### Fixed
 
 - **A 429's `retry-after` is rounded up, never 0.**
   ([long form](docs/changelog/unreleased.md#a-429s-retry-after-is-rounded-up-never-0))
+- **The audience checkboxes on `/editor/accounts` edit the site membership, not the deprecated global column.**
+  ([long form](docs/changelog/unreleased.md#the-audience-checkboxes-on-editor-accounts-edit-the-site-membership))
+- **Paying for a membership no longer demotes a legacy editor.**
+  ([#1649](https://github.com/The-Verscienta/kiln_cms/issues/1649) · [long form](docs/changelog/unreleased.md#paying-for-a-membership-no-longer-demotes-a-legacy-editor))
 
 ### Security
 
