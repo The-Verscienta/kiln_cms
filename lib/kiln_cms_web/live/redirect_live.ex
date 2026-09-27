@@ -362,7 +362,7 @@ defmodule KilnCMSWeb.RedirectLive do
           aria-selected={to_string(@tab == tab)}
           class={[
             "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
-            (@tab == tab && "border-primary text-primary") ||
+            (@tab == tab && "border-primary text-primary-ink") ||
               "border-transparent text-base-content/60 hover:text-base-content"
           ]}
         >

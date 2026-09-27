@@ -587,7 +587,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
             phx-value-tab={tab}
             class={[
               "rounded-t px-3 py-2 text-sm",
-              @tab == tab && "border-b-2 border-primary font-medium text-primary",
+              @tab == tab && "border-b-2 border-primary font-medium text-primary-ink",
               @tab != tab && "text-base-content/70 hover:text-base-content"
             ]}
           >

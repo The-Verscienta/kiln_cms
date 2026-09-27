@@ -54,6 +54,15 @@ defmodule KilnCMSWeb.TokenPreviewLiveTest do
     assert html =~ "Shared draft preview"
   end
 
+  test "the shared preview wears the delivery templates' public-* hooks (#1682)", %{conn: conn} do
+    token = PreviewToken.sign(draft_page())
+
+    {:ok, lv, _html} = live(conn, "/preview/#{token}/live")
+
+    assert has_element?(lv, "article.public-article h1.public-title", "Guest Draft")
+    assert has_element?(lv, "article.public-article > #preview-blocks.public-body")
+  end
+
   test "the preview chrome carries the requesting site's brand, not the default org's",
        %{conn: conn} do
     o = KilnCMS.OrgFixtures.org("tpbrand")

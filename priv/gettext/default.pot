@@ -11564,6 +11564,7 @@ msgstr ""
 msgid "Single sign-on saved."
 msgstr ""
 
+#: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Site"

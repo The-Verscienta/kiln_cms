@@ -509,7 +509,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
                     href={row.public}
                     target="_blank"
                     rel="noopener noreferrer"
-                    class="ml-2 text-xs text-primary hover:underline"
+                    class="ml-2 text-xs text-primary-ink hover:underline"
                   >
                     view &nearr; <span class="sr-only">{gettext("(opens in a new tab)")}</span>
                   </a>

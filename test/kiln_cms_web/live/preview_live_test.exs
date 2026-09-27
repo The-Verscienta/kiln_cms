@@ -74,6 +74,22 @@ defmodule KilnCMSWeb.PreviewLiveTest do
     assert eventually(bob, "Alice")
   end
 
+  test "the preview wears the delivery templates' public-* theme hooks (#1682)" do
+    page = a_page()
+
+    {:ok, lv, _} = live(conn_for("Hooks"), ~p"/editor/preview/page/#{page.id}")
+
+    # The same hooks show*.html.heex carries, so a preset (monograph) or a
+    # site's custom CSS styles the preview as it styles the live page.
+    assert has_element?(
+             lv,
+             ".public-shell article.public-article h1.public-title",
+             "Shared Draft"
+           )
+
+    assert has_element?(lv, "article.public-article > #preview-blocks.public-body")
+  end
+
   test "a viewer's cursor moves appear on a co-viewer's screen" do
     page = a_page()
     path = ~p"/editor/preview/page/#{page.id}"

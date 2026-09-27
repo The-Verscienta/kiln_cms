@@ -292,13 +292,16 @@ defmodule KilnCMSWeb.PreviewLive do
       </div>
 
       <Layouts.public current_org={@current_org}>
-        <article class="prose max-w-none">
-          <header :if={@excerpt?} class="mb-6">
-            <h1 class="text-3xl font-bold tracking-tight">{@title}</h1>
-            <p :if={@excerpt} class="mt-3 text-lg text-base-content/70">{@excerpt}</p>
+        <%!-- The same `public-*` hooks as the delivery templates (show*.html.heex),
+              so a theme preset or a site's custom CSS styles the preview the way
+              it styles the live page (#1682). --%>
+        <article class="public-article prose max-w-none">
+          <header :if={@excerpt?} class="public-masthead mb-6">
+            <h1 class="public-title text-3xl font-bold tracking-tight">{@title}</h1>
+            <p :if={@excerpt} class="public-lede mt-3 text-lg text-base-content/70">{@excerpt}</p>
           </header>
-          <h1 :if={!@excerpt?} class="text-3xl font-bold tracking-tight">{@title}</h1>
-          <div class="space-y-4" id="preview-blocks">
+          <h1 :if={!@excerpt?} class="public-title text-3xl font-bold tracking-tight">{@title}</h1>
+          <div class="public-body space-y-4" id="preview-blocks">
             <%!-- `relative` on the wrapper, so the pin can sit in the margin
                   without `render_block/1` knowing anything about comments —
                   this surface mirrors public HTML, and the shared renderer has
