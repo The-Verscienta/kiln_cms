@@ -37,3 +37,20 @@ carries the reasoning.
   first carried onto the default org, so a legacy editor keeps its tier there.
   See [Paid memberships](../memberships.md#editing-audiences-from-the-console).
   (#1646)
+
+<a id="paying-for-a-membership-no-longer-demotes-a-legacy-editor"></a>
+
+- **Paying for a membership no longer demotes a legacy editor.** Billing gives
+  a buyer a `:viewer` membership on each org they paid on. For an account with
+  no memberships at all, whose tier comes from `User.role`, that first
+  membership ended the no-membership fallback: buying on the default org made a
+  legacy editor a viewer there, and buying on another org left it with no tier
+  and no audiences on the default org. The recompute now first gives such an
+  account a default-org membership carrying its standing role, any live
+  temporary role with its expiry, and its `User.audiences`, then adds the paid
+  membership. The console's audience checkboxes already took this step (#1646);
+  both now share `KilnCMS.Accounts.LegacyAffiliation`. Billing's membership
+  writes are also upserts now, so two recomputes racing for one account no
+  longer collide on the unique index.
+  See [Paid memberships](../memberships.md#the-first-paid-membership).
+  (#1649)

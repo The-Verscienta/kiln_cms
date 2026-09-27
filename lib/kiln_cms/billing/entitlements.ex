@@ -39,12 +39,27 @@ defmodule KilnCMS.Billing.Entitlements do
   data migration. Until that lands, a membership in one org does widen the global
   union — see `docs/memberships.md`.
 
+  ## A legacy account's first membership
+
+  A paid membership is a `:viewer` membership, but paying must never cost an
+  account the tier it already holds (#1649). An account with **no memberships at
+  all** reads its standing `User.role` on the default org and `User.audiences`
+  everywhere; its first membership would make it *affiliated* and take both away
+  wherever it is not a member. So before creating the first one, the recompute
+  gives it a default-org membership carrying its standing role, any live
+  temporary role and its audiences —
+  `KilnCMS.Accounts.LegacyAffiliation.ensure_default_membership/2`, the same step
+  the console takes. Every membership write here is an upsert on
+  `(user_id, organization_id)`, so two recomputes racing for one user cannot
+  duplicate a row or abort each other's transaction.
+
   Every call runs `authorize?: false`: this is a system operation with no actor,
   and the actions it drives forbid actor-carrying callers outright.
   """
   require Logger
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.LegacyAffiliation
   alias KilnCMS.Billing
   alias KilnCMS.Billing.Membership
   alias KilnCMS.CMS.Audiences
@@ -76,7 +91,7 @@ defmodule KilnCMS.Billing.Entitlements do
       desired = normalize(preserved ++ granted)
 
       with {:ok, _user} <- write_user(user, before, desired),
-           :ok <- write_org_memberships(user_id, managed, by_org) do
+           :ok <- write_org_memberships(user, managed, by_org) do
         {:ok,
          %{
            before: before,
@@ -178,15 +193,34 @@ defmodule KilnCMS.Billing.Entitlements do
   # Mirror each org's exact entitlement onto its `OrgMembership`, so the read axis
   # can move per-org later. Rows are created when missing: a reader who pays on a
   # site they have no membership row for still needs one to carry the audience.
-  defp write_org_memberships(user_id, managed, by_org) do
-    case Accounts.list_memberships_for_user(user_id, authorize?: false) do
-      {:ok, memberships} ->
-        Enum.each(memberships, &sync_existing(&1, managed, by_org))
-        create_missing(user_id, memberships, by_org)
-        :ok
+  defp write_org_memberships(user, managed, by_org) do
+    with {:ok, memberships} <- Accounts.list_memberships_for_user(user.id, authorize?: false),
+         {:ok, memberships} <- affiliate_legacy(user, memberships, by_org) do
+      Enum.each(memberships, &sync_existing(&1, managed, by_org))
+      create_missing(user.id, memberships, managed, by_org)
+      :ok
+    end
+  end
 
-      {:error, reason} ->
-        {:error, reason}
+  # A paying reader must never lose authoring access by paying (#1649). An
+  # account with no memberships at all holds its standing role on the default org
+  # and its legacy audiences everywhere; its first membership would make it
+  # affiliated — a `:viewer` on the default org, or `:foreign_org` there with no
+  # tier and no audiences. So before creating one, carry it onto the default org
+  # first, with its `User.audiences`; `sync_existing/3` then settles the
+  # billing-managed part of that set like any other membership's, so what
+  # survives there is its admin-owned audiences plus what it bought on the
+  # default org.
+  defp affiliate_legacy(user, memberships, by_org) do
+    if LegacyAffiliation.unaffiliated?(memberships) and map_size(by_org) > 0 do
+      # `authorize?: false`: the same system write as every other one in this
+      # module (see the moduledoc), and it grants on the default org exactly what
+      # the unaffiliated fallback already grants there.
+      with {:ok, membership} <-
+             LegacyAffiliation.ensure_default_membership(user, authorize?: false),
+           do: {:ok, [membership]}
+    else
+      {:ok, memberships}
     end
   end
 
@@ -200,22 +234,32 @@ defmodule KilnCMS.Billing.Entitlements do
     end
   end
 
-  defp create_missing(user_id, memberships, by_org) do
+  # An upsert that changes nothing on conflict: a concurrent recompute for the
+  # same user may have created the row since `memberships` was read, and the
+  # unique violation a plain insert would hit aborts the whole transition's
+  # transaction. The row comes back either way and is synced like an existing one.
+  defp create_missing(user_id, memberships, managed, by_org) do
     existing = MapSet.new(memberships, & &1.organization_id)
 
     by_org
     |> Enum.reject(fn {org_id, _audiences} -> MapSet.member?(existing, org_id) end)
     |> Enum.each(fn {org_id, audiences} ->
-      Accounts.create_org_membership(
-        %{
-          organization_id: org_id,
-          user_id: user_id,
-          # A paying reader is a reader, not an author.
-          role: :viewer,
-          audiences: audiences
-        },
-        authorize?: false
-      )
+      case Accounts.create_org_membership(
+             %{
+               organization_id: org_id,
+               user_id: user_id,
+               # A paying reader is a reader, not an author.
+               role: :viewer,
+               audiences: audiences
+             },
+             authorize?: false,
+             upsert?: true,
+             upsert_identity: :unique_membership,
+             upsert_fields: []
+           ) do
+        {:ok, membership} -> sync_existing(membership, managed, by_org)
+        {:error, _reason} -> :ok
+      end
     end)
   end
 

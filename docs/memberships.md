@@ -346,6 +346,27 @@ Fail-closed matters because the organization is resolved from a
 would let a member of one site read another's gated content by switching hosts —
 the same reasoning the editorial scope axes already use.
 
+### The first paid membership
+
+The recompute gives a buyer a `:viewer` membership on each org they have paid on
+and hold none for. A reader is not an author, so the paid membership never
+raises a tier. It must not lower one either, and for an account with **no
+memberships at all** it would: that account's first membership makes it
+affiliated, which ends the no-membership fallback. A legacy editor buying on the
+default org would become a `:viewer` there; buying on another org would leave it
+with no tier and no audiences on the default org.
+
+So before an account's first membership, the recompute gives it a default-org
+membership carrying its standing `User.role`, any live temporary role with its
+expiry, and its `User.audiences`. That is what the fallback grants it on the
+default org, so nothing it holds there changes, apart from the billing rule
+above: a tier-claimed audience on that membership still lasts only as long as
+something entitles it. The paid `:viewer` membership follows. The console's
+audience checkboxes take the same step (below); both call
+`KilnCMS.Accounts.LegacyAffiliation`. Each membership write is an upsert that
+leaves an existing row alone, so two recomputes racing for one account write one
+row per org (#1649).
+
 ### Editing audiences from the console
 
 The audience checkboxes on `/editor/accounts/:id` edit the account's
@@ -361,7 +382,7 @@ gaining a membership changes what it reads and nothing else:
 | Account | Membership created |
 |---|---|
 | no memberships at all, edited on the default org | its standing `User.role`, plus any live temporary role with its expiry |
-| no memberships at all, edited on another org | first a default-org membership carrying its standing role and `User.audiences` (what `mix kiln.deprecations --migrate-audiences` writes), then a `:viewer` membership here |
+| no memberships at all, edited on another org | first a default-org membership carrying its standing role, any live temporary role and `User.audiences` (the same step billing takes, above), then a `:viewer` membership here |
 | member of other orgs, none here | a `:viewer` membership here |
 
 The extra default-org write in the middle row is there because an account's

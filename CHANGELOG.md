@@ -60,6 +60,8 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#a-429s-retry-after-is-rounded-up-never-0))
 - **The audience checkboxes on `/editor/accounts` edit the site membership, not the deprecated global column.**
   ([long form](docs/changelog/unreleased.md#the-audience-checkboxes-on-editor-accounts-edit-the-site-membership))
+- **Paying for a membership no longer demotes a legacy editor.**
+  ([#1649](https://github.com/The-Verscienta/kiln_cms/issues/1649) · [long form](docs/changelog/unreleased.md#paying-for-a-membership-no-longer-demotes-a-legacy-editor))
 
 ## [0.11.0] - 2026-09-26
 
