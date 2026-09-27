@@ -496,13 +496,8 @@ defmodule KilnCMSWeb.BridgeSocketTest do
 
   describe "the join budget (threat-model item 10's /ws/* gap)" do
     test "connect/1 charges the bridge_join budget first, refusing an over-budget address before authorization runs" do
-      previous = Application.get_env(:kiln_cms, KilnCMSWeb.RateLimit, [])
-      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMSWeb.RateLimit, previous) end)
-
-      limits =
-        previous |> Keyword.get(:limits, %{}) |> Map.put(:bridge_join, {1, :timer.minutes(1)})
-
-      Application.put_env(:kiln_cms, KilnCMSWeb.RateLimit, Keyword.put(previous, :limits, limits))
+      KilnCMS.RateLimitHelpers.restore_limits_on_exit()
+      KilnCMS.RateLimitHelpers.put_limit(:bridge_join, 1)
 
       admin = user(:admin)
       post = draft(admin)

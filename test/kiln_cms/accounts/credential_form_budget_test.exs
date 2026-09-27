@@ -28,13 +28,13 @@ defmodule KilnCMS.Accounts.CredentialFormBudgetTest do
   @password "password123456"
 
   setup do
-    previous = Application.get_env(:kiln_cms, RateLimit, [])
+    restore_limits_on_exit()
 
     Application.put_env(
       :kiln_cms,
       RateLimit,
       Keyword.put(
-        previous,
+        Application.get_env(:kiln_cms, RateLimit, []),
         :limits,
         # MERGED, not replaced: replacing drops `:api`, `:gql`, `:delivery` and
         # `:probe` from the suite's effective-infinity back to production values
@@ -49,7 +49,6 @@ defmodule KilnCMS.Accounts.CredentialFormBudgetTest do
       )
     )
 
-    on_exit(fn -> Application.put_env(:kiln_cms, RateLimit, previous) end)
     :ok
   end
 
