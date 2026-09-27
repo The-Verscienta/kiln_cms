@@ -685,6 +685,25 @@ endpoint (above), which are tenant-chosen and SSRF-checked. Note that `/api/ask`
 LLM request; it is config-gated and rate-limited under `:api`, but it is a cost
 amplification surface.
 
+### ActivityPub inbox (`POST /actor/inbox`, #491)
+Off unless both the deployment (`KILN_FEDERATION_ENABLED`) and the site turn it
+on. Every activity the inbox acts on must carry an HTTP Signature, and the key
+that verifies it lives in the sender's actor document — so authenticating costs
+an outbound GET to a URL the unauthenticated caller named. That fetch is kept
+behind everything that can be decided without it (#1665): only a `Follow` or
+`Undo{Follow}` addressed to this site's actor needs one at all, and even that
+one is refused with no request made unless the `Signature` header parses,
+covers `(request-target) host date digest`, carries a `Date` inside the
+five-minute window and a `Digest` matching the raw body, and names a `keyId`
+belonging to the activity's own `actor`. What remains is the irreducible part —
+a well-formed request for an actor URL the caller chose still costs one fetch,
+because telling a forged signature from a real one needs the key. That fetch
+goes through `SafeFetch` (pinned address, no redirects, 128 KB cap), is cached
+per actor for ten minutes in a capped table, and sits under the route's per-IP
+`:api` bucket. A verified signature is then recorded in the replay store, and
+the fetched document must have been served from the URL it claims as its `id`.
+See [Federation](federation.md#security).
+
 ### A site's own Meilisearch instance (#1558)
 The one outbound integration above whose endpoint a **site admin** chooses
 rather than the operator — on a hosted deployment, a tenant. It carries two
