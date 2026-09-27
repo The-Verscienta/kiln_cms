@@ -38,6 +38,9 @@ defmodule KilnCMSWeb.ConnCase do
   end
 
   setup tags do
+    # See `KilnCMS.DataCase`'s setup — a leaked RateLimit env (#1614) fails
+    # here by name instead of as a 429 from the shipped limits.
+    KilnCMS.RateLimitHelpers.assert_test_limits!()
     KilnCMS.DataCase.setup_sandbox(tags)
     # Every ConnCase test gets its own peer + `remote_ip` by default (#936).
     # Without this, a loopback address makes every file charge the same

@@ -95,13 +95,8 @@ defmodule KilnCMSWeb.CollabChannelTest do
   describe "the join budget (threat-model item 10's /ws/* gap)" do
     test "connect/3 charges the collab_join budget first, refusing an over-budget address before token verification runs",
          %{actor: actor} do
-      previous = Application.get_env(:kiln_cms, KilnCMSWeb.RateLimit, [])
-      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMSWeb.RateLimit, previous) end)
-
-      limits =
-        previous |> Keyword.get(:limits, %{}) |> Map.put(:collab_join, {1, :timer.minutes(1)})
-
-      Application.put_env(:kiln_cms, KilnCMSWeb.RateLimit, Keyword.put(previous, :limits, limits))
+      KilnCMS.RateLimitHelpers.restore_limits_on_exit()
+      KilnCMS.RateLimitHelpers.put_limit(:collab_join, 1)
 
       address = KilnCMS.RateLimitHelpers.client_address()
       connect_info = %{peer_data: %{address: address, port: 111, ssl_cert: nil}, x_headers: []}
