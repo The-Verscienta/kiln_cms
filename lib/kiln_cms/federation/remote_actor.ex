@@ -197,11 +197,23 @@ defmodule KilnCMS.Federation.RemoteActor do
   if the id ever gains a normalized form.
   """
   @spec owns_key?(t(), String.t()) :: boolean()
-  def owns_key?(%{id: id}, key_id) when is_binary(key_id) do
-    strip_fragment(key_id) == strip_fragment(id) and same_host?(key_id, id)
-  end
+  def owns_key?(%{id: id}, key_id) when is_binary(key_id), do: key_of?(key_id, id)
 
   def owns_key?(_actor, _key_id), do: false
+
+  @doc """
+  Whether `key_id` names a key of the actor at `actor_uri`, from the two strings
+  alone. The test `owns_key?/2` applies to a fetched document, asked before
+  anything is fetched — the inbox refuses a request on it without an outbound
+  request (#1665). Equivalent because `fetch/1` refuses a document whose `id` is
+  not the URL it was served from.
+  """
+  @spec key_of?(String.t(), String.t()) :: boolean()
+  def key_of?(key_id, actor_uri) when is_binary(key_id) and is_binary(actor_uri) do
+    strip_fragment(key_id) == strip_fragment(actor_uri) and same_host?(key_id, actor_uri)
+  end
+
+  def key_of?(_key_id, _actor_uri), do: false
 
   @doc "Whether two URLs share a scheme, host and port."
   @spec same_host?(String.t(), String.t()) :: boolean()

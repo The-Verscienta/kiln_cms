@@ -63,7 +63,7 @@ the router so preflights are answered before route matching).
 | Public forms | `GET /api/forms/:slug`, `POST /forms/:slug`, `POST /api/forms/:slug` | none (no CSRF by design) | `:form` |
 | Form embed | `GET /forms/:slug/embed` | none | `:delivery` |
 | Preview | `/preview/:token`, `/preview/:token/live` | signed token *is* the credential | `:preview` |
-| Newsletter | `/newsletter/confirm/:token`, `/newsletter/unsubscribe/:token` | signed token | `:form` |
+| Newsletter | `/newsletter/confirm/:token`, `/newsletter/unsubscribe/:token` | signed token; the GETs only render a page, the POST changes the subscription (#1664) — confirm's POST is also CSRF-checked | `:form` |
 | Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/auth/passkey/*` | varies | `:auth`, except `POST /auth/*/password/register`, which takes `:register` **instead** so the two registration doors agree (#724) |
 | Second factor | `GET`/`POST /sign-in/verify` | signed `:pending_2fa` token + TOTP or recovery code | `:auth`; the `POST` also per-account, tighter than sign-in (#714) |
 | Credential submits over `/live` | LiveView `"submit"` on the sign-in, register, reset-request and magic-link forms — **all four render on all three auth pages** | credentials → session / account / mail | charged on the *action*, since no plug can reach them: sign-in `:auth` (#715) + per-account (#478); registration `:register` (#724); reset and magic-link `:auth` (#724) + the per-address mail budget |
@@ -684,6 +684,25 @@ webhooks are. The exceptions are a site's own SMTP relay (#1322) and AI
 endpoint (above), which are tenant-chosen and SSRF-checked. Note that `/api/ask` lets an anonymous caller drive an outbound
 LLM request; it is config-gated and rate-limited under `:api`, but it is a cost
 amplification surface.
+
+### ActivityPub inbox (`POST /actor/inbox`, #491)
+Off unless both the deployment (`KILN_FEDERATION_ENABLED`) and the site turn it
+on. Every activity the inbox acts on must carry an HTTP Signature, and the key
+that verifies it lives in the sender's actor document — so authenticating costs
+an outbound GET to a URL the unauthenticated caller named. That fetch is kept
+behind everything that can be decided without it (#1665): only a `Follow` or
+`Undo{Follow}` addressed to this site's actor needs one at all, and even that
+one is refused with no request made unless the `Signature` header parses,
+covers `(request-target) host date digest`, carries a `Date` inside the
+five-minute window and a `Digest` matching the raw body, and names a `keyId`
+belonging to the activity's own `actor`. What remains is the irreducible part —
+a well-formed request for an actor URL the caller chose still costs one fetch,
+because telling a forged signature from a real one needs the key. That fetch
+goes through `SafeFetch` (pinned address, no redirects, 128 KB cap), is cached
+per actor for ten minutes in a capped table, and sits under the route's per-IP
+`:api` bucket. A verified signature is then recorded in the replay store, and
+the fetched document must have been served from the URL it claims as its `id`.
+See [Federation](federation.md#security).
 
 ### A site's own Meilisearch instance (#1558)
 The one outbound integration above whose endpoint a **site admin** chooses

@@ -155,6 +155,7 @@ ever be authorized by an explicit clause below.
 | `Billing.MembershipEvent` | `read`, `append`, `anonymize_actor` | The append-only entitlement trail. No person may write one and there is no `destroy` action at all; the billing pipeline appends and GDPR erasure redacts the acting admin. |
 | `Newsletter.Segment` | `read`, `for_tier`, `sync_managed` **only** | The tier-backed lifecycle is driven by billing, not by a human: both write actions are `forbid_if always()` for everyone including admins. Managing a segment by hand stays an admin act, so the grant is narrowed inside the blanket admin policy as well — Ash ANDs policies, so both halves are needed. |
 | `Newsletter.Subscriber` | `read`, `link_member` **only** | `link_member` is the one write that may set `user_id`, and it is `forbid_if always()` for everyone. Narrowed the same way, so admin-only list management is untouched. |
+| `Newsletter.NewsletterSend` | `create` **only** | The "on publish → send the newsletter" automation (`Automation.RuleWorker`) records the campaign it queues (#1655). Before this the create ran `authorize?: false` for every caller, the console included, so the console's tier check was the only gate. Narrowed inside the blanket admin policy; reading the ledger and the fan-out's `mark_*`/`record_*` bookkeeping are unchanged. |
 | `Newsletter.SegmentMembership` | all | The join row between a subscriber and a tier segment. The sync genuinely reads, creates and destroys them as entitlements change, and the row carries nothing beyond the two ids. |
 | `CMS.Page`, `CMS.Post`, `CMS.Entry` (content) | `reindex_search_text` and `set_embedding` **only**, named inside the `action_type([:create, :update])` policy | Two system-only actions on denormalized columns: the fragment-expanded search text (`Firing.Engine.fire/2`) and the document-level search vector (`Search.EmbeddingWorker`). Both accept no `:blocks` and both are ignored by PaperTrail. The grant sits inside the policy written for people, narrowed to those two actions by `forbid_unless action(...)` — see above for why that rather than a bypass. Keep the list short and every member system-only. Nothing else on the content resources admits the system actor: it holds no tier, so `EditableContentType` / `ReadableContentType` / `InAudience` all refuse it, and a system actor reads no content at all. |
 
@@ -729,7 +730,9 @@ through the History API as the system, and has no destroy action at all.
 `Automation.Rule`, `Newsletter.Subscriber`, `Newsletter.Segment`,
 `Newsletter.SegmentMembership`, `Newsletter.NewsletterSend` all carry the same
 single policy: `authorize_if OrgAdmin` on every action. Admin-only across the
-board; editors, viewers and anonymous callers get nothing.
+board; editors, viewers and anonymous callers get nothing. Creating a
+campaign (`Newsletter.send_as_newsletter/2`) runs under that policy as the
+sender (#1655) — the console's tier check is UX, not the gate.
 
 The public newsletter flows (`subscribe`, `confirm`, `unsubscribe`) and the send
 pipeline run as the **system** behind signed-token checks. The two token reads

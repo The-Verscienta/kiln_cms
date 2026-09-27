@@ -395,6 +395,36 @@ carries the reasoning.
   threat-model residual 12 now records the reviewed policy
   ([#1615](https://github.com/The-Verscienta/kiln_cms/issues/1615)).
 
+<a id="a-newsletter-campaign-is-created-under-the-senders-own-authorization"></a>
+
+- **A newsletter campaign is created under the sender's own authorization.**
+  `Newsletter.send_as_newsletter/2` wrote the campaign row with
+  `authorize?: false`, so the console's tier check was the only thing between
+  a click and an email that cannot be unsent — and that check read the user
+  struct the LiveView mounted with, so a global admin demoted mid-session could
+  still send. The create now runs as the caller under `NewsletterSend`'s
+  existing `OrgAdmin` policy, and the console re-reads the account before each
+  send, so both the tier check and the policy decide on the role as it is now.
+  The "on publish → send the newsletter" automation sends as
+  `%KilnCMS.SystemActor{subsystem: :automation}`, admitted for `:create` only
+  inside the admin policy (no bypass); reading the ledger stays admin-only. A
+  caller of `send_as_newsletter/2` without an admin actor now gets
+  `{:error, %Ash.Error.Forbidden{}}`
+  ([#1655](https://github.com/The-Verscienta/kiln_cms/issues/1655)).
+
+<a id="the-newsletter-confirmation-link-no-longer-confirms-on-a-get"></a>
+
+- **The newsletter confirmation link no longer confirms on a GET.**
+  `GET /newsletter/confirm/:token` flipped a subscriber to `:confirmed`, so a
+  mail security scanner or link prefetcher following the link completed the
+  double opt-in with no person involved — the one thing double opt-in exists
+  to prove. The GET now renders a one-button page in the site's own chrome and
+  changes nothing; `POST /newsletter/confirm/:token` (that button, CSRF-checked)
+  confirms. This mirrors how unsubscribe already worked. Confirmation emails
+  already in inboxes keep working: their link opens the page, one click from
+  done. An unknown token gets the same "link not recognized" page as before
+  ([#1664](https://github.com/The-Verscienta/kiln_cms/issues/1664)).
+
 <a id="the-audience-checkboxes-on-editor-accounts-edit-the-site-membership"></a>
 
 - **The audience checkboxes on `/editor/accounts` edit the site membership, not
@@ -461,6 +491,26 @@ carries the reasoning.
   threat-model residual risk 16: accepted with a warning; set
   `KILN_CONSOLE_HOST` on multi-org installs
   ([#1661](https://github.com/The-Verscienta/kiln_cms/issues/1661)).
+
+<a id="the-activitypub-inbox-checks-a-signature-offline-before-it-fetches"></a>
+
+- **The ActivityPub inbox checks a signature offline before it fetches the
+  sender's key.** The key that verifies an inbound activity lives in the
+  sender's actor document, and the inbox fetched that document before looking
+  at the signature at all — so any caller could send an unsigned `Follow`
+  naming this site and make the server issue one outbound GET to an actor URL
+  of their choosing. The inbox now refuses, with no request made, anything that
+  fails a check needing no key: a missing or malformed `Signature` header, a
+  signed set not covering `(request-target) host date digest`, a `Date` outside
+  the five-minute window, a `Digest` that is not the body's, or a `keyId` that
+  does not belong to the activity's own `actor`. The last one is the same
+  binding the inbox already applied to the fetched document, asked earlier, so
+  no genuine request is refused that was accepted before. Only a request past
+  all of them fetches the key (through `SafeFetch`, cached per actor for ten
+  minutes, as before) and is verified. A well-formed request still costs one
+  fetch per new actor URL, since only the key can tell a forged signature from a
+  real one. See [Federation](../federation.md#the-fetch-comes-after-every-check-that-needs-no-network).
+  (#1665)
 
 ## Deprecated
 

@@ -237,6 +237,35 @@ defmodule KilnCMS.Federation.HttpSignatureTest do
     end
   end
 
+  # #1665: what the inbox runs before it fetches the key.
+  describe "precheck/2" do
+    test "passes a well-formed request and returns its keyId", ctx do
+      body = follow_body()
+      assert {:ok, @key_id} = HttpSignature.precheck(signed(body, ctx), body)
+    end
+
+    test "refuses what verify/6 would refuse without a key", ctx do
+      body = follow_body()
+      stale = HttpSignature.http_date(DateTime.add(DateTime.utc_now(), -3_600, :second))
+
+      assert {:error, "missing signature header"} = HttpSignature.precheck([], body)
+
+      assert {:error, "digest does not match body"} =
+               HttpSignature.precheck(signed(body, ctx), body <> " ")
+
+      assert {:error, "date outside the accepted window"} =
+               HttpSignature.precheck(signed(body, ctx, date: stale), body)
+
+      narrow = [
+        {"signature", signature_header("date")},
+        {"date", HttpSignature.http_date()},
+        {"digest", "SHA-256=" <> Base.encode64(:crypto.hash(:sha256, body))}
+      ]
+
+      assert {:error, "signature does not cover " <> _} = HttpSignature.precheck(narrow, body)
+    end
+  end
+
   describe "key_id/1" do
     test "reads the claimed key without verifying anything", ctx do
       assert {:ok, @key_id} = HttpSignature.key_id(signed("{}", ctx))

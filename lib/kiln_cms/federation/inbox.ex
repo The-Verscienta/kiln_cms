@@ -51,6 +51,24 @@ defmodule KilnCMS.Federation.Inbox do
   What survives is the case that has to: a `Follow` naming us. `RemoteActor`
   caches what it fetches, so a repeat from the same actor is answered from
   memory rather than re-fetched.
+
+  ## Even then, everything offline is checked first
+
+  A `Follow` naming us still does not buy a fetch on its own (#1665). Before
+  any outbound request, the inbox makes every check that needs no network
+  (`HttpSignature.precheck/2`): the `Signature` header parses, its algorithm is
+  one we accept, it covers `(request-target) host date digest`, the `Date` is
+  inside the window, and the `Digest` is the body's. Then the `keyId` must name
+  the activity's own `actor` — the same binding `RemoteActor.owns_key?/2`
+  applies to the fetched document afterwards, asked of the two strings before
+  either is fetched. Only a request past all of that costs the one GET (or the
+  cache hit) that fetches the key, and the signature is verified against it.
+
+  What that leaves is irreducible: a stranger who builds a well-formed request
+  for an actor URL of their choosing still makes this server fetch that URL
+  once, since telling a forged signature from a real one needs the key. That
+  fetch goes through `KilnCMS.SafeFetch`, is cached per actor, and is bounded
+  per client address by the inbox route's `:api` rate bucket.
   """
 
   alias KilnCMS.Federation
@@ -76,7 +94,13 @@ defmodule KilnCMS.Federation.Inbox do
     identity = Actor.identity(settings)
 
     if needs_actor?(activity, identity) do
+      # Everything that can fail without the network fails first (#1665). The
+      # fetch is the only step here a stranger can make cost a request, so it
+      # is reached only by a request that is well-formed, fresh, bound to its
+      # body, and names a key belonging to the actor it claims to be.
       with {:ok, actor_uri} <- actor_uri(activity),
+           {:ok, key_id} <- HttpSignature.precheck(headers, raw_body),
+           :ok <- check_key_names_actor(key_id, actor_uri),
            {:ok, remote} <- RemoteActor.fetch(actor_uri),
            :ok <- verify(settings, remote, headers, raw_body) do
         act(settings, activity, remote, org_id)
@@ -105,6 +129,20 @@ defmodule KilnCMS.Federation.Inbox do
   defp needs_actor?(_activity, _identity), do: false
 
   # ── authentication ──────────────────────────────────────────────────────────
+
+  # The `keyId` must name the activity's own actor, decided from the two strings
+  # alone, before either is fetched (#1665). This is the same test
+  # `RemoteActor.owns_key?/2` applies to the fetched document in `verify/4` —
+  # `RemoteActor.fetch/1` refuses a document whose `id` is not the URL it was
+  # fetched from, so the document's `id` IS `actor_uri` by then, and asking the
+  # question early refuses nothing the late check would have let through. What
+  # it removes is the fetch: without it, a request signed "by" any `keyId` made
+  # this server GET whatever `actor` it named, only to refuse it afterwards.
+  defp check_key_names_actor(key_id, actor_uri) do
+    if RemoteActor.key_of?(key_id, actor_uri),
+      do: :ok,
+      else: {:error, "signature key does not belong to the sending actor"}
+  end
 
   # `host` comes from the site's **pinned origin**, never from the request.
   # `conn.host` is the client's own `Host` header (or HTTP/2 `:authority`), so

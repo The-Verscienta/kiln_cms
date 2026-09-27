@@ -8,7 +8,9 @@ defmodule KilnCMS.Newsletter.NewsletterSend do
   the fan-out worker sets `:sending` (stamping `total_recipients`) and, once
   every per-recipient job is enqueued, `:sent` (i.e. fully dispatched — actual
   delivery outcomes accrue in `sent_count`/`failed_count` as the mail jobs run).
-  Written by the send pipeline as the system; admin-only to read.
+  Created under the sender's own authorization — an admin of the document's
+  org, or the automation system actor (#1655); the fan-out bookkeeping is
+  written by the send pipeline as the system. Admin-only to read.
   """
   use Ash.Resource,
     domain: KilnCMS.Newsletter,
@@ -84,6 +86,13 @@ defmodule KilnCMS.Newsletter.NewsletterSend do
   policies do
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+
+      # "On publish → send the newsletter" automation (#376) creates the
+      # campaign as `%KilnCMS.SystemActor{subsystem: :automation}` (#1655) —
+      # `:create` only, narrowed inside the admin policy rather than a bypass
+      # (#1402). Reading or rewriting the ledger stays an admin act.
+      forbid_unless action(:create)
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 
