@@ -569,11 +569,15 @@ defmodule KilnCMS.Search.RelatedTest do
   # test already spent against the shared default org.
   describe "embedding budget (#1076)" do
     setup do
-      org =
-        Accounts.create_organization!(
-          %{name: "Budget org", slug: "budget-#{System.unique_integer([:positive])}"},
-          authorize?: false
-        )
+      # Creating the second org logs the multi-org advisories (#1661, #1662);
+      # nothing here is about them.
+      {org, _log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          Accounts.create_organization!(
+            %{name: "Budget org", slug: "budget-#{System.unique_integer([:positive])}"},
+            authorize?: false
+          )
+        end)
 
       %{org: org, actor: admin()}
     end

@@ -907,22 +907,29 @@ because other files cite them by number.
    access-control axis.
 
 3. **Unknown `Host` headers resolve to the default organization — on a
-   single-org deployment, or where `TENANT_STRICT_HOST=false`.** #563 added
-   the control; since #1547 an unset `TENANT_STRICT_HOST` turns it on by
-   itself once a second organization exists, on every node and with no
-   restart, so a multi-tenant deployment is no longer exposed by default. With
-   it on, an unresolvable `Host` is refused with a bare 404 rather than served
-   the default org, across everything the router serves plus LiveView mounts
-   and the GraphQL and visual-editing sockets. What remains:
-   - An operator can still set `TENANT_STRICT_HOST=false` on a multi-org
-     deployment. The app warns about that at boot, when the second org is
-     created, and on `/editor/system`.
+   single-org deployment.** #563 added the control; since #1547 an unset
+   `TENANT_STRICT_HOST` turns it on by itself once a second organization
+   exists, on every node and with no restart, so a multi-tenant deployment is
+   no longer exposed by default. Since #1662 an explicit
+   `TENANT_STRICT_HOST=false` no longer switches it off there either: once a
+   second organization exists, unknown hosts are refused whatever the setting
+   says, and Kiln logs an **error** — at boot, when the second org is created,
+   and on `/editor/system` — that the setting is being ignored. There is no
+   escape hatch; a host a multi-org deployment should answer on can be given
+   to an organization or redirected to one at the proxy. With the control on, an unresolvable `Host` is
+   refused with a bare 404 rather than served the default org, across
+   everything the router serves plus LiveView mounts and the GraphQL and
+   visual-editing sockets. What remains:
    - A node that misses the create's `Phoenix.PubSub` broadcast (partitioned,
-     or mid-boot) stays lenient until its periodic recount, at most five
-     minutes later.
+     or mid-boot) stays lenient until its periodic recount, at most **30
+     seconds** later (#1654; it was five minutes). The recount is one
+     `count(*)` on `organizations` per node every 30 seconds, and stops once
+     the node has seen a second organization. `/editor/system` shows the
+     window while it is open.
    - If the organizations cannot be counted at all (boot with Postgres down),
      an unset setting fails **closed**: unknown hosts are refused until a
-     count succeeds.
+     count succeeds. An explicit `false` stays lenient in that state — #1662
+     overrides it only on a count that actually found a second organization.
 
    Terminating unknown hosts at the proxy is still worth doing as well.
 
@@ -1008,8 +1015,11 @@ because other files cite them by number.
 
    **1.0 verdict (decided, #1547): fixed.**
    Roadmap decision 4 (2026-09-18) settled this, and #1547 implements it: an
-   unset `TENANT_STRICT_HOST` turns on once a second organization exists, and
-   an explicit setting still wins (see the top of this item). The
+   unset `TENANT_STRICT_HOST` turns on once a second organization exists. The
+   2026-09-27 audit closed the two gaps that were left: an explicit `false`
+   is no longer honoured on a multi-org deployment (#1662, a `### Breaking`
+   change in 0.12.0), and a node that missed the broadcast catches up within
+   30 seconds rather than five minutes (#1654). The
    sub-residuals stay accepted: the plain-text refusal lets a sweep enumerate
    org slugs, and nothing router-reachable can meter `/live` longpoll. Both are
    documented with a proxy-level remedy.
@@ -1671,6 +1681,36 @@ because other files cite them by number.
     has no freshness-free signature in it. What remains is the receiver's side
     of the bargain: a receiver that skips the `t` check, or verifies nothing,
     is replayable by construction, and no sender change can fix that.
+
+16. **An org admin's code injection is same-origin with the console when
+    `KILN_CONSOLE_HOST` is unset (#1661).** Site code injection (`head_html` /
+    `footer_html`, #490) runs on an org's delivery pages. By default the
+    editor console answers on that same host, so an injected script can
+    `fetch("/editor/…", {credentials: "same-origin"})` in the browser of any
+    editor who opens the public site while signed in, and act with their
+    session — including a platform admin, who is an admin on every org. On a
+    single-org deployment the org admin and the operator are one party and
+    this is the operator's own script. On a multi-org deployment it is one
+    tenant's admin reaching other tenants' editors, and the operator's.
+
+    The mitigation is `KILN_CONSOLE_HOST` (#740): the console is then served
+    only on a host no tenant controls, and delivery script is cross-origin to
+    it. It stays **opt-in**, because a console host is a deployment change
+    (DNS, TLS, `CHECK_ORIGINS`) Kiln cannot make for an operator on upgrade,
+    and because org resolution is still host-derived, so that host reaches
+    the default organization's console only. What Kiln does instead is say
+    so: once a second organization exists and `KILN_CONSOLE_HOST` is unset,
+    it warns at boot (a `KilnCMS.Config.Report` warning, which reaches
+    Sentry), when the second org is created, and on `/editor/system`
+    (`KilnCMSWeb.Tenant.console_shares_origin?/0`). See
+    [code-injection.md](code-injection.md#read-this-before-granting-the-role).
+
+    **1.0 verdict (decided, #1661): accepted at 1.0 with a warning; set
+    `KILN_CONSOLE_HOST` on multi-org installs.** The alternative an operator
+    has without a console host is to treat "org admin" as equivalent to
+    console access and staff it accordingly. Per-tenant console hosts —
+    session-derived org resolution on the console host — are the follow-up
+    that would let a multi-org console host serve every tenant.
 
 **Not on this list, but named by the 1.0 roadmap: `/api/ask` lets an anonymous
 caller drive LLM cost** (see *Other outbound calls* above). **1.0 verdict
