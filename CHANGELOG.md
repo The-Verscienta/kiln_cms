@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **If your overlay compiles with `--warnings-as-errors`, check its blocks'
+  `migrate` chains first.**
+  ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642) · [long form](docs/changelog/unreleased.md#if-your-overlay-compiles-with-warnings-as-errors-check-its-block-migrate-chains-first))
+
 - **A new `throttle_counters` table holds the auth budgets; run migrations as usual.**
   ([#1619](https://github.com/The-Verscienta/kiln_cms/issues/1619) · [long form](docs/changelog/unreleased.md#a-new-throttlecounters-table-holds-the-auth-budgets-run-migrations-as))
 
@@ -79,6 +83,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **A block whose `migrate` steps skip a version now warns at compile time;
+  from Kiln 2.0 it is an error.**
+  ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642) · [long form](docs/changelog/unreleased.md#a-block-whose-migrate-steps-skip-a-version-now-warns-at-compile-time))
+
 - **Every surface carries one label: covered, internal or experimental.**
   ([long form](docs/changelog/unreleased.md#every-surface-carries-one-label-covered-internal-or-experimental))
 
@@ -90,6 +98,10 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#the-audience-checkboxes-on-editor-accounts-edit-the-site-membership))
 - **Paying for a membership no longer demotes a legacy editor.**
   ([#1649](https://github.com/The-Verscienta/kiln_cms/issues/1649) · [long form](docs/changelog/unreleased.md#paying-for-a-membership-no-longer-demotes-a-legacy-editor))
+
+- **The block upcaster refuses a gap in the `migrate` chain instead of
+  stamping the block current.**
+  ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642) · [long form](docs/changelog/unreleased.md#the-block-upcaster-refuses-a-gap-in-the-migrate-chain))
 
 ### Security
 
