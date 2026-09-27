@@ -199,6 +199,14 @@ defmodule KilnCMS.Accounts.ThrottleStoreFallbackTest do
   defp without_database(fun), do: fun.()
 
   setup do
+    # The sync DataCase test before this one ran the sandbox as
+    # `{:shared, owner}`. The ownership manager drops that mode when it sees the
+    # owner go down, but asynchronously: a query sent first reaches the dying
+    # owner's connection and exits with "owner exited" rather than raising
+    # `OwnershipError` (failed CI on #1686). Setting manual mode is a call to
+    # the manager, so "no checkout" means "unreachable" before the first hit.
+    Ecto.Adapters.SQL.Sandbox.mode(KilnCMS.Repo, :manual)
+
     # Re-arm the once-a-minute log so this test sees its own line.
     :ets.match_delete(Local, {{:fallback_logged, :_}, :_, :_})
     :ok
@@ -237,6 +245,10 @@ defmodule KilnCMS.Accounts.ThrottleStoreFallbackTest do
   test "the fallback log is throttled to once a minute per node" do
     b = "test:fallback:#{System.unique_integer([:positive])}"
 
+    # The log throttle is Hammer's epoch-aligned minute: four hits either side
+    # of a minute boundary would rightly log twice.
+    wait_clear_of_minute_boundary()
+
     log =
       capture_log(fn ->
         without_database(fn ->
@@ -245,6 +257,11 @@ defmodule KilnCMS.Accounts.ThrottleStoreFallbackTest do
       end)
 
     assert length(String.split(log, "Auth throttle store unavailable")) == 2
+  end
+
+  defp wait_clear_of_minute_boundary do
+    left = :timer.minutes(1) - rem(System.system_time(:millisecond), :timer.minutes(1))
+    if left < 1_000, do: Process.sleep(left + 5)
   end
 end
 
