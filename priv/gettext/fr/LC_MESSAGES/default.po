@@ -6020,7 +6020,7 @@ msgstr "Mettez votre site en ligne"
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Give every host that should reach a site to an organization, as a subdomain or a custom domain (the default organization can have one too), or redirect it to one at your proxy. The main host, the console host, the health checks and the payment webhook are never refused. Then remove TENANT_STRICT_HOST=false and restart."
-msgstr ""
+msgstr "Attribuez chaque hôte qui doit atteindre un site à une organisation, sous forme de sous-domaine ou de domaine personnalisé (l'organisation par défaut peut aussi en avoir un), ou redirigez-le vers l'un d'eux depuis votre proxy. L'hôte principal, l'hôte de la console, les contrôles de santé et le webhook de paiement ne sont jamais refusés. Supprimez ensuite TENANT_STRICT_HOST=false et redémarrez."
 
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -6328,7 +6328,7 @@ msgstr "La correspondance d'hôte est désactivée et ce déploiement comporte p
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Host matching turns on by itself once a second organization exists, but this server has not noticed the new organization yet. It will within 30 seconds, or on restart."
-msgstr ""
+msgstr "La vérification de l'hôte s'active d'elle-même dès qu'une deuxième organisation existe, mais ce serveur n'a pas encore remarqué la nouvelle organisation. Il le fera d'ici 30 secondes, ou au redémarrage."
 
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
@@ -6699,7 +6699,7 @@ msgstr "Moi seul — publier directement"
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "KILN_CONSOLE_HOST is unset, so the editor console answers on each organization's own host. Code an organization's admin adds to their site's head or footer runs on the same origin as the console, and can act as any editor who opens that site while signed in — a platform admin included."
-msgstr ""
+msgstr "KILN_CONSOLE_HOST n'est pas défini : la console d'édition répond donc sur l'hôte propre à chaque organisation. Le code qu'un administrateur d'organisation ajoute à l'en-tête ou au pied de page de son site s'exécute sur la même origine que la console, et peut agir au nom de tout éditeur qui ouvre ce site en étant connecté — y compris un administrateur de la plateforme."
 
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
@@ -11217,7 +11217,7 @@ msgstr "IP publique du serveur (pour les vérifications SPF et DNS inverse)"
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set KILN_CONSOLE_HOST to a host no organization controls, add it to CHECK_ORIGINS, and restart. For now that host serves the default organization's console only. Otherwise, grant organization admin only to people you would trust with the console."
-msgstr ""
+msgstr "Définissez KILN_CONSOLE_HOST sur un hôte qu'aucune organisation ne contrôle, ajoutez-le à CHECK_ORIGINS, puis redémarrez. Pour l'instant, cet hôte ne sert que la console de l'organisation par défaut. Sinon, n'accordez le rôle d'administrateur d'organisation qu'à des personnes à qui vous confieriez la console."
 
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
@@ -12063,7 +12063,7 @@ msgstr "Système"
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "TENANT_STRICT_HOST=false is being ignored"
-msgstr ""
+msgstr "TENANT_STRICT_HOST=false est ignoré"
 
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -12630,7 +12630,7 @@ msgstr "La vérification de la connexion a échoué. Consultez les journaux du s
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "The console shares an origin with every organization's site"
-msgstr ""
+msgstr "La console partage une origine avec le site de chaque organisation"
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
@@ -13169,7 +13169,7 @@ msgstr "Cela couvre les newsletters, les notifications et réponses automatiques
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "This deployment has more than one organization, and Kiln no longer honours TENANT_STRICT_HOST=false there. A request whose Host header matches no organization is refused, not served the default organization's site — a bare hostname or IP address included."
-msgstr ""
+msgstr "Ce déploiement comporte plusieurs organisations, et Kiln n'y respecte plus TENANT_STRICT_HOST=false. Une requête dont l'en-tête Host ne correspond à aucune organisation est refusée au lieu de recevoir le site de l'organisation par défaut — y compris un nom d'hôte nu ou une adresse IP."
 
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
