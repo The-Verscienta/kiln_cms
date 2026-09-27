@@ -168,8 +168,11 @@ defmodule KilnCMSWeb.SignInLive do
   #
   # `phx-update="ignore"` on the hook's element, and the `hidden` on a CHILD of
   # it: LiveView patches an ignored container's own attributes but never its
-  # children, so a later render of this page cannot put back the `hidden` the
-  # hook removed, or wipe the failure line it wrote.
+  # children, so a render that reaches this block cannot put back the `hidden`
+  # the hook removed, or wipe the failure line it wrote. Defensive today — the
+  # form's own events patch only the library's LiveComponent, so nothing
+  # re-renders this block now (a mutant without it passes the e2e spec) — but a
+  # root re-render, such as a flash on this view, would.
   defp passkey_sign_in(assigns) do
     ~H"""
     <div

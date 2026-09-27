@@ -142,6 +142,14 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **The two-factor prompt has a labelled code field, the page's language and
+  light and dark themes.**
+  ([#1676](https://github.com/The-Verscienta/kiln_cms/issues/1676) · [long form](docs/changelog/unreleased.md#the-two-factor-prompt-has-a-labelled-code-field-the-pages-language-and-light-and))
+
+- **The sign-in pages use the design kit, the setup wizard carries the brand,
+  and the passkey button is in the page's markup.**
+  ([#1681](https://github.com/The-Verscienta/kiln_cms/issues/1681) · [long form](docs/changelog/unreleased.md#the-sign-in-pages-use-the-design-kit-the-setup-wizard-carries-the-brand-and-the))
+
 - **A hard line break in a paragraph, heading, quote or list item is delivered
   as `<br/>`.**
   ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/unreleased.md#a-hard-line-break-in-a-paragraph-heading-quote-or-list-item-is-delivered-as-br))
