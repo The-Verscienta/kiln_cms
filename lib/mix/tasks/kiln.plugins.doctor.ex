@@ -2,8 +2,12 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
   @shortdoc "Verify installed Kiln plugins against the host configuration"
 
   @moduledoc """
-  Sanity-checks every plugin in `config :kiln_cms, :plugins` (decision D18):
+  Sanity-checks every plugin in `config :kiln_cms, :plugins` (decision D18),
+  and the domain list a project's `config/project.exs` restates:
 
+    * every core domain is still registered in `:ash_domains` — a project's
+      list replaces the core's, so a domain a later release adds is missing
+      until the project adds it (#1540);
     * the module implements `Kiln.Plugin`;
     * every declared domain is registered in **both** `:ash_domains` and
       `:content_domains` (plugins can't auto-wire those — Ash's own mix tasks
@@ -45,7 +49,8 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
     field_types_by_plugin = Map.new(plugins, &{&1, &1.field_types()})
 
     problems =
-      Enum.flat_map(plugins, &plugin_problems/1) ++
+      core_domain_problems(Application.get_env(:kiln_cms, :ash_domains, [])) ++
+        Enum.flat_map(plugins, &plugin_problems/1) ++
         block_collisions(plugins, blocks_by_plugin) ++
         field_type_problems(plugins, field_types_by_plugin) ++
         queue_collisions(plugins) ++
@@ -98,6 +103,41 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         &(&1 == false)
       )
     end)
+  end
+
+  @doc false
+  # A project's `config/project.exs` REPLACES the core's `:ash_domains` list
+  # rather than appending to it, so a core domain added in a later release is
+  # missing from every overlay that restated the list before it existed —
+  # `KilnCMS.Notifications` (0.9) was missing even from the in-tree example
+  # until the upgrade rehearsal (#1540) ran codegen against it. Such a domain's
+  # tables then look orphaned to `mix ash.codegen`, which offers to DROP them
+  # with "yes" as the default answer.
+  #
+  # The core's domains are found rather than listed, so this cannot drift from
+  # `config/config.exs`: every `Ash.Domain` compiled from the core's own `lib/`.
+  # Public, taking the list, so it can be tested without `put_env` on a key
+  # every other test reads.
+  def core_domain_problems(ash_domains) do
+    for domain <- core_domains(), domain not in ash_domains do
+      "core domain #{inspect(domain)} is missing from :ash_domains. A project's " <>
+        "config/project.exs replaces the core list, so restate every domain in " <>
+        "config/config.exs; otherwise mix ash.codegen offers to DROP its tables"
+    end
+  end
+
+  @doc false
+  def core_domains do
+    {:ok, modules} = :application.get_key(:kiln_cms, :modules)
+
+    modules
+    |> Enum.filter(&(core_source?(&1) and Spark.Dsl.is?(&1, Ash.Domain)))
+    |> Enum.sort()
+  end
+
+  defp core_source?(module) do
+    source = module.module_info(:compile) |> Keyword.get(:source, ~c"") |> to_string()
+    String.contains?(source, "/lib/kiln_cms/")
   end
 
   defp path_problems(plugin) do

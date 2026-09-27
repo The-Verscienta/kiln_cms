@@ -15,13 +15,64 @@ defmodule KilnCMSWeb.NewsletterControllerTest do
 
   defp reload(sub), do: Newsletter.get_subscriber!(sub.id, authorize?: false)
 
-  test "GET confirm with a valid token confirms the subscriber", %{conn: conn} do
-    sub = subscriber()
-    assert sub.status == :pending
+  describe "confirm (#1664)" do
+    # The emailed link is a GET, and mail scanners / link prefetchers follow it
+    # before (or without) the reader. It must render a button and change nothing.
+    test "GET renders a one-button page WITHOUT confirming", %{conn: conn} do
+      sub = subscriber()
+      assert sub.status == :pending
 
-    conn = get(conn, ~p"/newsletter/confirm/#{sub.confirm_token}")
-    assert html_response(conn, 200) =~ "confirmed"
-    assert reload(sub).status == :confirmed
+      html = conn |> get(~p"/newsletter/confirm/#{sub.confirm_token}") |> html_response(200)
+
+      assert html =~ "Confirm your subscription"
+      assert html =~ to_string(sub.email)
+      # The button posts back to the same token, with the session's CSRF token.
+      assert html =~ ~s(action="/newsletter/confirm/#{sub.confirm_token}")
+      assert html =~ ~s(method="post")
+      assert html =~ ~s(name="_csrf_token")
+      refute html =~ "Subscription confirmed"
+
+      assert reload(sub).status == :pending
+    end
+
+    test "repeated GETs (a scanner re-fetching) never confirm", %{conn: conn} do
+      sub = subscriber()
+
+      for _ <- 1..3, do: get(conn, ~p"/newsletter/confirm/#{sub.confirm_token}")
+
+      assert reload(sub).status == :pending
+    end
+
+    test "POST confirms the subscriber", %{conn: conn} do
+      sub = subscriber()
+
+      conn = post(conn, ~p"/newsletter/confirm/#{sub.confirm_token}")
+
+      assert html_response(conn, 200) =~ "Subscription confirmed"
+      assert reload(sub).status == :confirmed
+    end
+
+    test "a GET of an already-confirmed link says so, with no button", %{conn: conn} do
+      sub = subscriber()
+      {:ok, _} = Newsletter.confirm_subscriber(sub, authorize?: false)
+
+      html = conn |> get(~p"/newsletter/confirm/#{sub.confirm_token}") |> html_response(200)
+
+      assert html =~ "Subscription confirmed"
+      refute html =~ ~s(action="/newsletter/confirm/)
+    end
+
+    test "an unrecognized token is refused on both verbs, changing nothing", %{conn: conn} do
+      get_html = conn |> get(~p"/newsletter/confirm/nope-not-a-real-token") |> html_response(200)
+      assert get_html =~ "not recognized"
+      assert get_html =~ "invalid or expired"
+      refute get_html =~ ~s(method="post")
+
+      post_html =
+        conn |> post(~p"/newsletter/confirm/nope-not-a-real-token") |> html_response(200)
+
+      assert post_html =~ "not recognized"
+    end
   end
 
   test "GET unsubscribe renders a confirmation page WITHOUT unsubscribing", %{conn: conn} do

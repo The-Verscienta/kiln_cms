@@ -1,0 +1,136 @@
+name: Upgrade rehearsal
+
+# Rehearses `mix kiln.update` from the last few releases to the checked-out
+# commit, the way a downstream overlay project really upgrades (#1540): a
+# scratch project pins the core as a submodule at the old tag, builds and
+# seeds it (its own seeds, the example overlay's, and a page per shape a stored
+# block tree can hold), runs THAT release's `mix kiln.update` to the candidate,
+# rebuilds with its unchanged overlay, migrates, runs `mix kiln.blocks.backfill`
+# and reads everything back. It also checks the Upgrade notes each old release's
+# task prints for the range against the candidate's own `upgrade_notes/3`.
+#
+# The overlay_drift job in ci.yml proves the overlay COMPILES against the
+# core; this proves the upgrade PATH, with a database. It takes ~15 minutes a
+# tag, so it is weekly and on demand rather than on every PR. Run it by hand
+# before cutting a release (docs/releasing.md).
+#
+# The candidate is tagged `vX.(Y+1).0-rc.0` in a local mirror inside the
+# runner. Nothing is pushed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: "Releases to upgrade from, space-separated (default: the newest `last` final tags)"
+        required: false
+        default: ""
+      last:
+        description: "How many of the newest final releases to rehearse when `tags` is empty"
+        required: false
+        default: "3"
+  schedule:
+    # Mondays 05:17 UTC.
+    - cron: "17 5 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Pick releases
+    runs-on: ubuntu-latest
+    outputs:
+      tags: ${{ steps.pick.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Pick releases
+        id: pick
+        env:
+          TAGS: ${{ github.event.inputs.tags }}
+          LAST: ${{ github.event.inputs.last || '3' }}
+        run: |
+          if [ -z "$TAGS" ]; then
+            TAGS=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n "$LAST" | xargs)
+          fi
+          echo "tags=$(printf '%s\n' $TAGS | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+
+  rehearse:
+    name: Upgrade from ${{ matrix.tag }}
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: ${{ fromJSON(needs.plan.outputs.tags) }}
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      REHEARSAL_WORK: ${{ github.workspace }}/../rehearsal
+      STEP_TIMEOUT: "1800"
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Every tag, and history back to the oldest: kiln.update counts and
+          # diffs commits between the pin and the target.
+          fetch-depth: 0
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          # Every release since 0.5.0 pins the same toolchain here; if an old
+          # tag ever needs another, this job is where that shows.
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Cache Hex packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.hex/packages
+          key: rehearsal-hex-${{ runner.os }}-${{ matrix.tag }}-${{ hashFiles('mix.lock') }}
+          restore-keys: rehearsal-hex-${{ runner.os }}-
+
+      - name: Install Hex and rebar
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+
+      - name: Rehearse the upgrade
+        run: scripts/upgrade_rehearsal/rehearse.sh "${{ matrix.tag }}"
+
+      - name: Report
+        if: always()
+        run: scripts/upgrade_rehearsal/summarize.sh "$REHEARSAL_WORK" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upgrade-rehearsal-${{ matrix.tag }}
+          path: |
+            ${{ env.REHEARSAL_WORK }}/rehearse_*/*.log
+            ${{ env.REHEARSAL_WORK }}/rehearse_*/*.txt
+            ${{ env.REHEARSAL_WORK }}/rehearse_*/*.json
+          if-no-files-found: warn

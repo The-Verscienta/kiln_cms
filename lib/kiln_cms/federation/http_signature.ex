@@ -100,11 +100,8 @@ defmodule KilnCMS.Federation.HttpSignature do
         ) ::
           :ok | {:error, String.t()}
   def verify(method, request_path, headers, body, public_key_pem, opts \\ []) do
-    with {:ok, params} <- parse_signature(header(headers, "signature")),
-         :ok <- check_algorithm(params),
+    with {:ok, params} <- offline_checks(headers, body),
          {:ok, signature} <- decode_signature(params),
-         :ok <- check_date(header(headers, "date")),
-         :ok <- check_digest(header(headers, "digest"), body),
          {:ok, public_key} <- public_key(public_key_pem),
          {:ok, signing_string} <- rebuild(params, method, request_path, headers, opts) do
       if :public_key.verify(signing_string, :sha256, signature, public_key) do
@@ -112,6 +109,47 @@ defmodule KilnCMS.Federation.HttpSignature do
       else
         {:error, "signature does not verify"}
       end
+    end
+  end
+
+  @doc """
+  Every check `verify/6` makes that needs no key, run **before** the key is
+  fetched (#1665).
+
+  The key that verifies a signature lives in the sender's actor document, so
+  the inbox cannot verify without an outbound GET to a host the caller named.
+  What it can do first is refuse everything that would fail anyway without the
+  key: a missing or malformed `Signature` header, an unaccepted algorithm, a
+  signature that is not base64, a signed set below the coverage floor, a `Date`
+  outside the window, and a `Digest` that is not the body's. None of those
+  needs a byte of network, so none of them may cost one.
+
+  Returns the claimed `keyId`, which the caller must still bind to the
+  activity's actor before fetching anything. `verify/6` repeats every one of
+  these checks, so a caller that skips the precheck loses the saving, not the
+  property.
+  """
+  @spec precheck([{String.t(), String.t()}], binary()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def precheck(headers, body) do
+    with {:ok, params} <- offline_checks(headers, body),
+         {:ok, _signature} <- decode_signature(params) do
+      case Map.fetch(params, "keyid") do
+        {:ok, key_id} -> {:ok, key_id}
+        :error -> {:error, "signature header has no keyId"}
+      end
+    end
+  end
+
+  # The key-free half of verification, shared by `verify/6` and `precheck/2` so
+  # the two cannot disagree about what "would fail anyway" means.
+  defp offline_checks(headers, body) do
+    with {:ok, params} <- parse_signature(header(headers, "signature")),
+         :ok <- check_algorithm(params),
+         :ok <- check_coverage(params),
+         :ok <- check_date(header(headers, "date")),
+         :ok <- check_digest(header(headers, "digest"), body) do
+      {:ok, params}
     end
   end
 
@@ -209,11 +247,11 @@ defmodule KilnCMS.Federation.HttpSignature do
   # the signing string is unchanged, the signature verifies, and the substituted
   # activity executes as that actor. Mastodon requires the same four for POSTs.
   defp rebuild(params, method, request_path, headers, opts) do
-    names = params |> Map.get("headers", "date") |> String.split(" ", trim: true)
-
-    if Enum.all?(@required_coverage, &(&1 in names)) do
+    with :ok <- check_coverage(params) do
       lines =
-        Enum.map(names, fn
+        params
+        |> signed_names()
+        |> Enum.map(fn
           "(request-target)" ->
             "(request-target): #{String.downcase(method)} #{request_path}"
 
@@ -230,9 +268,18 @@ defmodule KilnCMS.Federation.HttpSignature do
         end)
 
       {:ok, Enum.join(lines, "\n")}
-    else
-      missing = Enum.reject(@required_coverage, &(&1 in names))
-      {:error, "signature does not cover #{Enum.join(missing, ", ")}"}
+    end
+  end
+
+  defp signed_names(params),
+    do: params |> Map.get("headers", "date") |> String.split(" ", trim: true)
+
+  defp check_coverage(params) do
+    names = signed_names(params)
+
+    case Enum.reject(@required_coverage, &(&1 in names)) do
+      [] -> :ok
+      missing -> {:error, "signature does not cover #{Enum.join(missing, ", ")}"}
     end
   end
 

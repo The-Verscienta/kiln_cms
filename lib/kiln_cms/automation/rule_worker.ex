@@ -81,7 +81,7 @@ defmodule KilnCMS.Automation.RuleWorker do
   `%KilnCMS.SystemActor{subsystem: :automation}`. The resources a reaction
   actually touches admit that actor by name — `Automation.Rule` (read only),
   `CMS.Comment` and `CMS.Task` (create and read, never update),
-  `Social.Account` (read only) — so those calls now run *under* the policies.
+  `Social.Account` (read only), `Newsletter.NewsletterSend` (create only) — so those calls now run *under* the policies.
 
   What still runs `authorize?: false`, and why it is safe rather than an
   escalation:
@@ -200,7 +200,10 @@ defmodule KilnCMS.Automation.RuleWorker do
       KilnCMS.Newsletter.send_as_newsletter(record,
         segment_id: config["segment_id"],
         subject: config["subject"],
-        automation: %{rule_id: rule_id, published_at: record.published_at}
+        automation: %{rule_id: rule_id, published_at: record.published_at},
+        # The campaign is created under `NewsletterSend`'s policy (#1655),
+        # which admits the system actor for `:create` only.
+        actor: system_actor()
       )
       |> settle_newsletter(record, event)
     else

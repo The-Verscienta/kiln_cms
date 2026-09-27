@@ -83,6 +83,21 @@ defmodule KilnCMS.Config.ReportTest do
     assert event.extra == %{}
   end
 
+  # #1662: a setting Kiln has stopped honouring is louder than advice.
+  test "error/3 logs at error and reports to Sentry at error, same fingerprint scheme" do
+    log =
+      capturing_sentry(fn ->
+        capture_log(fn -> Report.error("strict_host", "TENANT_STRICT_HOST=false ignored") end)
+      end)
+
+    assert log =~ "[error]"
+    assert log =~ "TENANT_STRICT_HOST=false ignored"
+
+    assert_receive {:sentry_event, event}
+    assert event.level == :error
+    assert event.fingerprint == ["kiln-config-warning", "strict_host"]
+  end
+
   test "two different sources produce two different fingerprints" do
     capturing_sentry(fn ->
       capture_log(fn ->

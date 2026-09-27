@@ -1,4 +1,4 @@
-defmodule KilnCMS.Repo.Migrations.AddContentLifecycles do
+defmodule KilnCMS.Repo.Migrations.AddExampleContentLifecycles do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 
@@ -40,19 +40,19 @@ defmodule KilnCMS.Repo.Migrations.AddContentLifecycles do
              where: "unpublish_at IS NOT NULL AND state = 'published'"
            )
 
-    alter table(:conditions) do
+    alter table(:products) do
       add :expiry_action, :text, null: false, default: "unpublish"
       add :review_after_days, :bigint
       add :last_reviewed_at, :utc_datetime_usec
     end
 
-    create index(:conditions, [:org_id, :last_reviewed_at],
-             name: "conditions_last_reviewed_at_index",
+    create index(:products, [:org_id, :last_reviewed_at],
+             name: "products_last_reviewed_at_index",
              where: "review_after_days IS NOT NULL AND state = 'published'"
            )
 
-    create index(:conditions, [:org_id, :unpublish_at],
-             name: "conditions_unpublish_at_index",
+    create index(:products, [:org_id, :unpublish_at],
+             name: "products_unpublish_at_index",
              where: "unpublish_at IS NOT NULL AND state = 'published'"
            )
 
@@ -84,15 +84,13 @@ defmodule KilnCMS.Repo.Migrations.AddContentLifecycles do
       remove :expiry_action
     end
 
-    drop_if_exists index(:conditions, [:org_id, :unpublish_at],
-                     name: "conditions_unpublish_at_index"
+    drop_if_exists index(:products, [:org_id, :unpublish_at], name: "products_unpublish_at_index")
+
+    drop_if_exists index(:products, [:org_id, :last_reviewed_at],
+                     name: "products_last_reviewed_at_index"
                    )
 
-    drop_if_exists index(:conditions, [:org_id, :last_reviewed_at],
-                     name: "conditions_last_reviewed_at_index"
-                   )
-
-    alter table(:conditions) do
+    alter table(:products) do
       remove :last_reviewed_at
       remove :review_after_days
       remove :expiry_action

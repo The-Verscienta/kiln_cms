@@ -174,7 +174,7 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
     "lib/kiln_cms/media/quarantine_reaper.ex" => 2,
     "lib/kiln_cms/media/regeneration.ex" => 1,
     "lib/kiln_cms/media/variant_worker.ex" => 2,
-    "lib/kiln_cms/newsletter.ex" => 2,
+    "lib/kiln_cms/newsletter.ex" => 1,
     "lib/kiln_cms/newsletter/mail_worker.ex" => 4,
     "lib/kiln_cms/newsletter/send_worker.ex" => 4,
     "lib/kiln_cms/notifications.ex" => 7,

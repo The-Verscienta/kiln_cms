@@ -9,12 +9,14 @@ defmodule KilnCMSWeb.NewsletterController do
   only ever create a `:pending` row, which receives nothing until the address
   owner clicks the link mailed to them.
 
-  Unsubscribe is split by verb so a *GET never mutates state* — an email link
-  scanner/prefetcher following the footer link must not silently unsubscribe the
-  reader. GET renders a one-button confirmation page; POST performs the
-  unsubscribe, which is also where the RFC 8058 `List-Unsubscribe-Post` one-click
-  lands. The CSRF-free `:public_form` pipeline lets that one-click POST work from
-  mail clients.
+  Confirm and unsubscribe are both split by verb so a *GET never mutates
+  state* — an email link scanner/prefetcher following a link must not silently
+  unsubscribe the reader, nor complete a double opt-in nobody clicked (#1664).
+  Each GET renders a one-button page; the POST performs the change.
+  Unsubscribe's POST is also where the RFC 8058 `List-Unsubscribe-Post`
+  one-click lands, which is why it sits on the CSRF-free `:public_form`
+  pipeline; confirm has no such caller, so it runs under `:browser` (session,
+  CSRF, the site's `Layouts.public` chrome).
   """
   use KilnCMSWeb, :controller
 
@@ -171,20 +173,36 @@ defmodule KilnCMSWeb.NewsletterController do
         not_found_error?: false
       )
 
-  # GET /newsletter/confirm/:token
+  @doc """
+  `GET /newsletter/confirm/:token` — the link in the confirmation email. Renders
+  a one-button page and **changes nothing** (#1664).
+
+  It used to confirm on the GET, so a mail scanner or link prefetcher that
+  followed the link completed the double opt-in with no human involved — the
+  one thing double opt-in exists to prove. Now the human's click on the page's
+  button is the POST below. Links already sitting in inboxes still work: they
+  land here, one click from done.
+
+  An already-confirmed subscriber gets the confirmed page straight away rather
+  than a button that would do nothing.
+  """
+  def confirm_form(conn, %{"token" => token}) do
+    case confirm_lookup(token) do
+      nil -> render_confirm(conn, :invalid, nil, token)
+      %{status: :confirmed} = subscriber -> render_confirm(conn, :confirmed, subscriber, token)
+      subscriber -> render_confirm(conn, :form, subscriber, token)
+    end
+  end
+
+  @doc """
+  `POST /newsletter/confirm/:token` — performs the confirmation. Reached from
+  the page `confirm_form/2` renders, under the `:browser` pipeline's CSRF
+  protection (unlike unsubscribe, there is no mail-client one-click to admit).
+  """
   def confirm(conn, %{"token" => token}) do
-    # Same `authorize?: false` posture as `lookup/1`: `:by_confirm_token`
-    # filters on the secret token across orgs; no actor exists.
-    case Newsletter.subscriber_by_confirm_token!(token,
-           authorize?: false,
-           not_found_error?: false
-         ) do
+    case confirm_lookup(token) do
       nil ->
-        page(
-          conn,
-          gettext("Link not recognized"),
-          gettext("This confirmation link is invalid or expired.")
-        )
+        render_confirm(conn, :invalid, nil, token)
 
       subscriber ->
         # No actor (`:confirm` is admin-only by policy); the verified token is
@@ -193,15 +211,33 @@ defmodule KilnCMSWeb.NewsletterController do
         {:ok, _} =
           Newsletter.confirm_subscriber(subscriber, authorize?: false, tenant: subscriber.org_id)
 
-        page(
-          conn,
-          gettext("Subscription confirmed"),
-          gettext("Thanks — your subscription to %{email} is confirmed.",
-            email: to_string(subscriber.email)
-          )
-        )
+        render_confirm(conn, :confirmed, subscriber, token)
     end
   end
+
+  # Same `authorize?: false` posture as `lookup/1`: `:by_confirm_token` filters
+  # on the secret token across orgs; no actor exists.
+  defp confirm_lookup(token),
+    do:
+      Newsletter.subscriber_by_confirm_token!(token,
+        authorize?: false,
+        not_found_error?: false
+      )
+
+  defp render_confirm(conn, state, subscriber, token) do
+    conn
+    |> put_view(html: KilnCMSWeb.NewsletterHTML)
+    |> assign(:page_title, confirm_title(state))
+    |> render(:confirm,
+      state: state,
+      token: token,
+      email: subscriber && to_string(subscriber.email)
+    )
+  end
+
+  defp confirm_title(:form), do: gettext("Confirm your subscription")
+  defp confirm_title(:confirmed), do: gettext("Subscription confirmed")
+  defp confirm_title(:invalid), do: gettext("Link not recognized")
 
   # The one-button "confirm unsubscribe" page the GET link renders. No CSRF token
   # is needed (the :public_form pipeline is CSRF-free and the per-subscriber token
