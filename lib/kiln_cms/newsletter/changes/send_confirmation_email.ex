@@ -3,8 +3,10 @@ defmodule KilnCMS.Newsletter.Changes.SendConfirmationEmail do
   Mails the double-opt-in confirmation link after a `:subscribe` (issue #586).
 
   Without this the whole opt-in flow was inert: `:subscribe` minted a
-  `confirm_token` and `GET /newsletter/confirm/:token` consumed one, but nothing
-  ever put a token in front of a human.
+  `confirm_token` and `/newsletter/confirm/:token` consumed one, but nothing
+  ever put a token in front of a human. The mailed link is a GET that renders a
+  one-button page; the button's POST is what confirms (#1664), so a link
+  prefetcher following it confirms nothing.
 
   ## Only a `:pending` row is mailed
 

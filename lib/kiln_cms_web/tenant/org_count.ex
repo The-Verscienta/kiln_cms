@@ -1,7 +1,8 @@
 defmodule KilnCMSWeb.Tenant.OrgCount do
   @moduledoc """
   Whether this deployment has more than one organization — the fact
-  `TENANT_STRICT_HOST`'s default hangs on (#1547).
+  `TENANT_STRICT_HOST`'s default hangs on (#1547), and, since #1662, the fact
+  that overrides an explicit `TENANT_STRICT_HOST=false`.
 
   Unset, `TENANT_STRICT_HOST` means **auto**: strict host matching is on if and
   only if a second organization exists (`KilnCMSWeb.Tenant.strict_host?/0`).
@@ -9,8 +10,10 @@ defmodule KilnCMSWeb.Tenant.OrgCount do
   be a `COUNT(*)`. This module answers it from a `:persistent_term` holding one
   of three verdicts:
 
-    * `:single` — one organization (or none). Unknown hosts get the default org.
-    * `:multi` — two or more. Unknown hosts are refused.
+    * `:single` — one organization (or none). Unknown hosts get the default
+      org, unless `TENANT_STRICT_HOST=true`.
+    * `:multi` — two or more. Unknown hosts are refused, under auto and under
+      an explicit `false` alike (#1662).
     * `:unknown` — nobody has managed to count yet.
 
   ## Where the verdict comes from
@@ -24,12 +27,25 @@ defmodule KilnCMSWeb.Tenant.OrgCount do
       (so the creating node is read-your-writes consistent) and then broadcasts
       it on `Phoenix.PubSub`, the project's native cross-node channel. Each
       node's instance of this process records what it hears.
-    * **A slow recount.** PubSub is at-most-once: a node that was partitioned or
+    * **A recount.** PubSub is at-most-once: a node that was partitioned or
       booting when the second org was created misses the message. Until the
-      verdict is `:multi`, this process recounts on an interval (every five
-      minutes while `:single`, every 30 seconds while `:unknown`), so a missed broadcast costs minutes, not "until the next
-      deploy". Once `:multi`, it stops: organizations have no destroy action,
-      so the count only ever rises and `:multi` is final.
+      verdict is `:multi`, this process recounts every 30 seconds, so a missed
+      broadcast leaves that node lenient for at most 30 seconds, not "until the
+      next deploy" (#1654 — it was five minutes while `:single`). Once
+      `:multi`, it stops: organizations have no destroy action, so the count
+      only ever rises and `:multi` is final.
+
+  ### Why 30 seconds
+
+  The window is how long an unrecognized, possibly attacker-chosen `Host` can
+  still be served the default org on a node that missed the broadcast. What
+  closing it costs is one `SELECT count(*)` on `organizations` — a table with
+  one row per tenant, never more than a few thousand — per node, every 30
+  seconds, and only while the verdict is not yet `:multi`: about 2,900 trivial
+  queries a day per node on a single-org install, and none once this node has
+  seen a second organization. Shorter buys little: the create itself and its broadcast are what normally flip the
+  verdict within milliseconds, and the recount is only the backstop for the
+  message that did not arrive. It is the interval `:unknown` already used.
 
   ## Only ever upwards
 
@@ -62,10 +78,17 @@ defmodule KilnCMSWeb.Tenant.OrgCount do
 
   ## Tests
 
-  `config/test.exs` pins `TENANT_STRICT_HOST` to `false` and switches the
-  periodic recount off: the verdict is VM-global, and a test sandbox's rows are
-  invisible to this process. Tests that exercise auto set `:auto` and the
-  verdict themselves (`put/1`).
+  `config/test.exs` switches this process's own tracking off
+  (`:tenant_org_tracking`): no count at boot, no periodic recount, and a create
+  does not record or broadcast. The verdict is VM-global and, since #1662, it
+  decides routing even under an explicit `TENANT_STRICT_HOST=false` — so a
+  test creating a second org through the action would otherwise make every
+  later test in the run refuse the suite's default `www.example.com` Host,
+  depending on test order. The recount also runs outside the SQL sandbox, whose
+  rows it cannot see. The verdict therefore stays `:unknown` for the whole run
+  (lenient under the suite's pinned `false`), and tests that exercise the
+  verdict set tracking and the verdict themselves (`put/1`, `refresh/0`) and
+  restore both.
   """
   use GenServer
 
@@ -74,8 +97,8 @@ defmodule KilnCMSWeb.Tenant.OrgCount do
   @key {__MODULE__, :verdict}
   @topic "kiln:tenant_org_count"
 
-  @single_interval :timer.minutes(5)
-  @unknown_interval :timer.seconds(30)
+  # See "Why 30 seconds" in the moduledoc (#1654).
+  @recount_interval :timer.seconds(30)
 
   @type verdict :: :single | :multi | :unknown
 
@@ -115,6 +138,10 @@ defmodule KilnCMSWeb.Tenant.OrgCount do
   """
   @spec org_created() :: non_neg_integer() | :unknown
   def org_created do
+    if tracking?(), do: record_created(), else: KilnCMSWeb.Tenant.org_count()
+  end
+
+  defp record_created do
     count = KilnCMSWeb.Tenant.org_count()
 
     verdict =
@@ -140,6 +167,17 @@ defmodule KilnCMSWeb.Tenant.OrgCount do
     :persistent_term.put(@key, verdict)
   end
 
+  @doc """
+  How long this process waits before recounting, for a verdict — `nil` once
+  there is nothing left to learn (`:multi` is final).
+  """
+  @spec recount_interval(verdict()) :: pos_integer() | nil
+  def recount_interval(:multi), do: nil
+  def recount_interval(_single_or_unknown), do: @recount_interval
+
+  # Off only in `config/test.exs` — see "Tests" in the moduledoc.
+  defp tracking?, do: Application.get_env(:kiln_cms, :tenant_org_tracking, true)
+
   @doc false
   @spec verdict_for(non_neg_integer() | :unknown) :: verdict()
   def verdict_for(count) when is_integer(count) and count > 1, do: :multi
@@ -164,8 +202,8 @@ defmodule KilnCMSWeb.Tenant.OrgCount do
 
       if next == :multi do
         Logger.info(
-          "More than one organization exists; with TENANT_STRICT_HOST unset, " <>
-            "requests whose Host matches no organization are now refused."
+          "More than one organization exists; requests whose Host matches no " <>
+            "organization are now refused, whatever TENANT_STRICT_HOST says."
         )
       end
     end
@@ -175,12 +213,13 @@ defmodule KilnCMSWeb.Tenant.OrgCount do
 
   # --- GenServer ---------------------------------------------------------------
 
+  # The state is the pending recount's timer reference, or `nil` when none is
+  # scheduled — kept so a test can read when the next recount is due.
   @impl true
   def init(_opts) do
     Phoenix.PubSub.subscribe(KilnCMS.PubSub, @topic)
-    _ = refresh()
-    schedule()
-    {:ok, nil}
+    if tracking?(), do: refresh()
+    {:ok, schedule()}
   end
 
   @impl true
@@ -193,23 +232,17 @@ defmodule KilnCMSWeb.Tenant.OrgCount do
     {:noreply, state}
   end
 
-  def handle_info(:recount, state) do
-    _ = refresh()
-    schedule()
-    {:noreply, state}
+  # Tracking can be switched off after a recount was scheduled (a test
+  # restoring `config/test.exs`); a recount that lands then records nothing.
+  def handle_info(:recount, _state) do
+    if tracking?(), do: refresh()
+    {:noreply, schedule()}
   end
 
   def handle_info(_other, state), do: {:noreply, state}
 
   defp schedule do
-    if Application.get_env(:kiln_cms, :tenant_org_recount, true) do
-      case verdict() do
-        :multi -> :ok
-        :single -> Process.send_after(self(), :recount, @single_interval)
-        :unknown -> Process.send_after(self(), :recount, @unknown_interval)
-      end
-    end
-
-    :ok
+    interval = if tracking?(), do: recount_interval(verdict())
+    if interval, do: Process.send_after(self(), :recount, interval)
   end
 end

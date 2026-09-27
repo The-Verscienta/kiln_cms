@@ -141,6 +141,22 @@ carries the reasoning.
   ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540)).
 
 
+<a id="tenant-strict-host-false-multi-org-upgrade"></a>
+
+- **If you set `TENANT_STRICT_HOST=false` on a multi-org deployment, give every
+  host that must keep working an organization first.** From 0.12 that setting
+  is ignored once a second organization exists (see Breaking), so a request
+  whose `Host` matches no organization gets a `404` instead of the default
+  org's site. Before upgrading, list the hosts your deployment actually
+  answers on and make each one a subdomain of `TENANT_BASE_HOST` or an
+  organization's `custom_domain` (the default org can have one), or redirect
+  it to one at your proxy. The `PHX_HOST` apex, `KILN_CONSOLE_HOST`, the
+  health probes (`/up`, `/ready`) and the payment webhook are never refused,
+  so a load balancer probing by IP keeps working. Then remove
+  `TENANT_STRICT_HOST=false`: left set, Kiln logs an error at every boot
+  saying it is being ignored. Single-org deployments are unaffected
+  ([#1662](https://github.com/The-Verscienta/kiln_cms/issues/1662)).
+
 ## Breaking
 
 <a id="webhook-deliveries-no-longer-send-x-kilncms-signature"></a>
@@ -155,6 +171,28 @@ carries the reasoning.
   `verify/4` are unchanged. The JS and Elixir client helpers already verified
   only the timestamped header and need no change
   ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616)).
+
+<a id="tenant-strict-host-false-no-longer-honoured"></a>
+
+- **`TENANT_STRICT_HOST=false` is no longer honoured once a second
+  organization exists.** Until now an explicit `false` kept the default-org
+  fallback on a multi-org deployment: any request whose `Host` matched no
+  organization — a bare IP, a forgotten alias, or a header an attacker chose —
+  was served the default org's content, branding and analytics. Kiln warned
+  about that at boot, on the second org's create and on `/editor/system`, but
+  served it anyway. Now the organization-count verdict that drives the unset
+  (auto) setting decides under `false` too: with two or more organizations,
+  unknown hosts are refused whatever the setting says, and the three warnings
+  become an **error** saying the setting is being ignored (at boot through
+  `KilnCMS.Config.Report.error/3`, so it reaches Sentry). `false` still keeps
+  the fallback on a single-org install, and still stays lenient while the
+  organizations cannot be counted (boot with the database down). There is no
+  escape hatch: a host that should reach a site can be given to an
+  organization or redirected at the proxy. `KilnCMSWeb.Tenant.strict_host?/0`
+  changes accordingly, and `KilnCMS.Accounts.Changes.WarnStrictHostGap` is
+  now `WarnStrictHostFalseIgnored`. This closes the explicit-`false` half of
+  threat-model residual risk 3
+  ([#1662](https://github.com/The-Verscienta/kiln_cms/issues/1662)).
 
 ## Added
 
@@ -439,6 +477,36 @@ carries the reasoning.
   threat-model residual 12 now records the reviewed policy
   ([#1615](https://github.com/The-Verscienta/kiln_cms/issues/1615)).
 
+<a id="a-newsletter-campaign-is-created-under-the-senders-own-authorization"></a>
+
+- **A newsletter campaign is created under the sender's own authorization.**
+  `Newsletter.send_as_newsletter/2` wrote the campaign row with
+  `authorize?: false`, so the console's tier check was the only thing between
+  a click and an email that cannot be unsent — and that check read the user
+  struct the LiveView mounted with, so a global admin demoted mid-session could
+  still send. The create now runs as the caller under `NewsletterSend`'s
+  existing `OrgAdmin` policy, and the console re-reads the account before each
+  send, so both the tier check and the policy decide on the role as it is now.
+  The "on publish → send the newsletter" automation sends as
+  `%KilnCMS.SystemActor{subsystem: :automation}`, admitted for `:create` only
+  inside the admin policy (no bypass); reading the ledger stays admin-only. A
+  caller of `send_as_newsletter/2` without an admin actor now gets
+  `{:error, %Ash.Error.Forbidden{}}`
+  ([#1655](https://github.com/The-Verscienta/kiln_cms/issues/1655)).
+
+<a id="the-newsletter-confirmation-link-no-longer-confirms-on-a-get"></a>
+
+- **The newsletter confirmation link no longer confirms on a GET.**
+  `GET /newsletter/confirm/:token` flipped a subscriber to `:confirmed`, so a
+  mail security scanner or link prefetcher following the link completed the
+  double opt-in with no person involved — the one thing double opt-in exists
+  to prove. The GET now renders a one-button page in the site's own chrome and
+  changes nothing; `POST /newsletter/confirm/:token` (that button, CSRF-checked)
+  confirms. This mirrors how unsubscribe already worked. Confirmation emails
+  already in inboxes keep working: their link opens the page, one click from
+  done. An unknown token gets the same "link not recognized" page as before
+  ([#1664](https://github.com/The-Verscienta/kiln_cms/issues/1664)).
+
 <a id="the-audience-checkboxes-on-editor-accounts-edit-the-site-membership"></a>
 
 - **The audience checkboxes on `/editor/accounts` edit the site membership, not
@@ -472,6 +540,59 @@ carries the reasoning.
   longer collide on the unique index.
   See [Paid memberships](../memberships.md#the-first-paid-membership).
   (#1649)
+
+<a id="org-count-recount-30-seconds"></a>
+
+- **A node that missed the second organization's broadcast turns strict
+  within 30 seconds, not five minutes.** Creating the second organization
+  flips host matching to strict on the creating node at once and tells the
+  other nodes over `Phoenix.PubSub`. PubSub is at-most-once, so a node that was
+  partitioned or mid-boot could miss it and keep serving unknown hosts the
+  default org until its periodic recount — every five minutes while it
+  believed there was one organization. `KilnCMSWeb.Tenant.OrgCount` now
+  recounts every 30 seconds until it has seen a second organization, and then
+  stops. The cost is one `count(*)` on `organizations` per node per 30 seconds
+  on a single-org install (about 2,900 trivial queries a day), and nothing on a
+  multi-org one. `/editor/system` says "within 30 seconds" while a node is
+  behind. Narrows threat-model residual risk 3
+  ([#1654](https://github.com/The-Verscienta/kiln_cms/issues/1654)).
+
+<a id="multi-org-without-console-host-warns"></a>
+
+- **Kiln warns when a multi-org deployment has no `KILN_CONSOLE_HOST`.** An
+  org admin's code injection (`head_html` / `footer_html`) runs on that org's
+  public pages, and without a console host the editor console answers on the
+  same origin. The script can then act with the session of any editor who
+  opens the site signed in, a platform admin included. On one org that is the
+  operator's own script; on two it is one tenant's admin reaching everyone
+  else. Kiln now warns once a second organization exists and
+  `KILN_CONSOLE_HOST` is unset: at boot (reaching Sentry), when the second org
+  is created, and as a standing notice on `/editor/system`. Nothing is forced.
+  A console host is a DNS/TLS/`CHECK_ORIGINS` change, and it serves the
+  default org's console only for now. The 1.0 position is recorded as
+  threat-model residual risk 16: accepted with a warning; set
+  `KILN_CONSOLE_HOST` on multi-org installs
+  ([#1661](https://github.com/The-Verscienta/kiln_cms/issues/1661)).
+
+<a id="the-activitypub-inbox-checks-a-signature-offline-before-it-fetches"></a>
+
+- **The ActivityPub inbox checks a signature offline before it fetches the
+  sender's key.** The key that verifies an inbound activity lives in the
+  sender's actor document, and the inbox fetched that document before looking
+  at the signature at all — so any caller could send an unsigned `Follow`
+  naming this site and make the server issue one outbound GET to an actor URL
+  of their choosing. The inbox now refuses, with no request made, anything that
+  fails a check needing no key: a missing or malformed `Signature` header, a
+  signed set not covering `(request-target) host date digest`, a `Date` outside
+  the five-minute window, a `Digest` that is not the body's, or a `keyId` that
+  does not belong to the activity's own `actor`. The last one is the same
+  binding the inbox already applied to the fetched document, asked earlier, so
+  no genuine request is refused that was accepted before. Only a request past
+  all of them fetches the key (through `SafeFetch`, cached per actor for ten
+  minutes, as before) and is verified. A well-formed request still costs one
+  fetch per new actor URL, since only the key can tell a forged signature from a
+  real one. See [Federation](../federation.md#the-fetch-comes-after-every-check-that-needs-no-network).
+  (#1665)
 
 ## Deprecated
 

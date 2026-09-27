@@ -290,6 +290,8 @@ defmodule KilnCMSWeb.FederationControllerTest do
         |> post("/actor/inbox", Jason.encode!(follow_activity()))
 
       assert response(conn, 401)
+      # #1665: refused on the missing header alone, before any key is fetched.
+      refute_received :actor_fetched
     end
 
     test "a signed Follow is recorded and accepted", %{
@@ -328,6 +330,8 @@ defmodule KilnCMSWeb.FederationControllerTest do
 
       assert response(conn, 401)
       assert [] = Ash.read!(Follower, authorize?: false, tenant: org_id)
+      # #1665: the keyId and the actor disagree as strings, so neither is fetched.
+      refute_received :actor_fetched
     end
 
     test "a Follow addressed to a different actor is ignored, not recorded", %{
@@ -562,6 +566,119 @@ defmodule KilnCMSWeb.FederationControllerTest do
         |> post("/actor/inbox", tampered)
 
       assert response(conn, 401)
+      # #1665: the Digest is checked against the body before the key is fetched.
+      refute_received :actor_fetched
+    end
+  end
+
+  # #1665. The key that verifies a signature lives in the sender's actor
+  # document, so verifying costs an outbound GET to a URL the caller named.
+  # Everything that can be refused WITHOUT the key must therefore be refused
+  # before that GET — each test here is a Follow naming this site (so
+  # `needs_actor?/2` says yes) that fails an offline check, and each must leave
+  # the stub untouched. The stub's `:actor_fetched` is the outbound request.
+  describe "the inbox checks everything offline before fetching a key" do
+    setup %{org_id: org_id} do
+      %{settings: enable!(org_id)}
+    end
+
+    defp post_raw(conn, headers, body) do
+      Enum.reduce(headers, conn, fn {name, value}, acc -> put_req_header(acc, name, value) end)
+      |> put_req_header("content-type", "application/activity+json")
+      |> post("/actor/inbox", body)
+    end
+
+    defp signed_headers(body, remote_pem, opts \\ []) do
+      {:ok, headers} =
+        HttpSignature.sign(
+          "#{@origin}/actor/inbox",
+          Keyword.get(opts, :key_id, @remote_actor <> "#main-key"),
+          body,
+          [private_key_pem: remote_pem] ++ Keyword.take(opts, [:date])
+        )
+
+      headers
+    end
+
+    defp put_header(headers, name, value),
+      do: List.keystore(headers, name, 0, {name, value})
+
+    test "a Digest that is not the body's", %{conn: conn, remote_pem: remote_pem} do
+      body = Jason.encode!(follow_activity())
+      bogus = "SHA-256=" <> Base.encode64(:crypto.hash(:sha256, "something else"))
+      headers = body |> signed_headers(remote_pem) |> put_header("digest", bogus)
+
+      assert conn |> post_raw(headers, body) |> response(401)
+      refute_received :actor_fetched
+    end
+
+    test "a Date outside the window", %{conn: conn, remote_pem: remote_pem} do
+      body = Jason.encode!(follow_activity())
+      stale = HttpSignature.http_date(DateTime.add(DateTime.utc_now(), -3_600, :second))
+
+      assert conn
+             |> post_raw(signed_headers(body, remote_pem, date: stale), body)
+             |> response(401)
+
+      refute_received :actor_fetched
+    end
+
+    test "a signature below the coverage floor", %{conn: conn, remote_pem: remote_pem} do
+      body = Jason.encode!(follow_activity())
+      headers = signed_headers(body, remote_pem)
+      {"signature", signature} = List.keyfind(headers, "signature", 0)
+
+      narrowed =
+        String.replace(
+          signature,
+          "headers=\"(request-target) host date digest\"",
+          "headers=\"date\""
+        )
+
+      refute narrowed == signature
+
+      assert conn |> post_raw(put_header(headers, "signature", narrowed), body) |> response(401)
+      refute_received :actor_fetched
+    end
+
+    test "a keyId on another origin than the actor", %{conn: conn, remote_pem: remote_pem} do
+      body = Jason.encode!(follow_activity())
+
+      headers =
+        signed_headers(body, remote_pem, key_id: "https://evil.example/users/alice#main-key")
+
+      assert conn |> post_raw(headers, body) |> response(401)
+      refute_received :actor_fetched
+    end
+
+    test "a Follow that names no actor", %{conn: conn, remote_pem: remote_pem} do
+      body = follow_activity() |> Map.delete("actor") |> Jason.encode!()
+
+      assert conn |> post_raw(signed_headers(body, remote_pem), body) |> response(401)
+      refute_received :actor_fetched
+    end
+
+    # The other side: the checks must not refuse the honest request, and a
+    # second honest request from the same actor is answered from the cache.
+    test "a valid delivery still fetches once, verifies, and is cached", %{
+      conn: conn,
+      org_id: org_id,
+      remote_pem: remote_pem
+    } do
+      body = Jason.encode!(follow_activity())
+
+      assert conn |> post_raw(signed_headers(body, remote_pem), body) |> response(202)
+      assert_received :actor_fetched
+      assert [_follower] = Ash.read!(Follower, authorize?: false, tenant: org_id)
+
+      later = HttpSignature.http_date(DateTime.add(DateTime.utc_now(), 1, :second))
+
+      assert build_conn()
+             |> unique_ip()
+             |> post_raw(signed_headers(body, remote_pem, date: later), body)
+             |> response(202)
+
+      refute_received :actor_fetched
     end
   end
 
@@ -594,9 +711,11 @@ defmodule KilnCMSWeb.FederationControllerTest do
 
       activity = Map.put(follow_activity(), "actor", @remote_actor)
 
-      assert conn
-             |> post_signed(activity, remote_pem, key_id: victim <> "#main-key")
-             |> response(401)
+      # Signed with the keyId the activity's actor would own, so the request
+      # passes the offline checks (#1665) and it is the fetched document's
+      # self-declared id that has to be refused.
+      assert conn |> post_signed(activity, remote_pem) |> response(401)
+      assert_received :actor_fetched
 
       assert [] = Ash.read!(Follower, authorize?: false, tenant: org_id)
     end

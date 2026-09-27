@@ -15,6 +15,10 @@ defmodule KilnCMS.MultitenancyTest do
   """
   use KilnCMS.DataCase, async: false
 
+  # Creating a second org through the action logs the multi-org advisories
+  # (#1661, #1662); no test here asserts on them.
+  @moduletag :capture_log
+
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Organization
   alias KilnCMS.CMS

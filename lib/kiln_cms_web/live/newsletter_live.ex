@@ -135,32 +135,36 @@ defmodule KilnCMSWeb.NewsletterLive do
 
   # --- send ------------------------------------------------------------------
 
-  # Re-checked here, not only in `mount/3` (#1166). Every other handler on this
-  # page carries the actor into an Ash action, so a mistake in the mount guard
-  # is still caught by a policy. `Newsletter.send_as_newsletter/2` is the one
-  # that isn't: it *accepts* `actor:` but uses it only to stamp `sent_by_id`,
-  # writes the campaign with `authorize?: false`, then hands the fan-out to
-  # Oban. There is nothing behind the guard.
+  # Re-checked here, not only in `mount/3` (#1166), and against a **freshly
+  # read** actor (#1655).
+  #
+  # `Newsletter.send_as_newsletter/2` now writes the campaign under the actor's
+  # own authorization (`NewsletterSend`'s `OrgAdmin` policy), so the policy is
+  # the gate and this check is UX: it keeps a refused click silent instead of
+  # flashing a generic failure.
+  #
+  # The reload is what makes either of them live. Both decide on the struct they
+  # are handed, and `current_user` is assigned once at mount, so a **global**
+  # admin demoted mid-session would still present `role: :admin` to the tier
+  # check *and* to the policy. `SocketReauth.reload_actor/1` re-reads the row
+  # (the mechanism the collab and bridge sockets re-authorize with), and a
+  # vanished account refuses. The per-org tier was already live on its own
+  # (`effective_tier/2` re-reads the `OrgMembership`); the global role was not.
+  # An email cannot be unsent, so this is worth one read per click.
   #
   # The tier is the per-org one — the right question, since the post and the
   # segment both resolve off `document.org_id`, and escalating to a platform
   # admin would lock a site's own admin out of their own newsletter.
-  #
-  # Two things this buys, and one it does not. It refuses a forged or replayed
-  # event on a socket that never passed `mount/3`, which is the whole point when
-  # nothing downstream will check. And because `effective_tier/2` re-reads the
-  # actor's `OrgMembership` rather than trusting the mount-time struct, a grant
-  # revoked mid-session is caught here. What it does *not* catch is a demoted
-  # **global** admin: `%{role: :admin}` short-circuits off `current_user`, which
-  # is assigned once. Don't read this as a live authorization check on that axis.
-  #
-  # The consequence is worse than the backup panel's (#1160): a backup can be
-  # deleted, an email cannot be unsent.
   def handle_event("send", %{"send" => params}, socket) when is_map(params) do
-    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
-      do_send(params, socket)
+    with {:ok, %{} = actor} <- KilnCMSWeb.SocketReauth.reload_actor(socket.assigns.actor),
+         :admin <-
+           KilnCMS.Accounts.Scoping.effective_tier(
+             actor,
+             KilnCMSWeb.Tenant.current_org_id(socket)
+           ) do
+      do_send(params, assign(socket, :actor, actor))
     else
-      {:noreply, socket}
+      _refused -> {:noreply, socket}
     end
   end
 

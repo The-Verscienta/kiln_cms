@@ -169,7 +169,8 @@ defmodule KilnCMS.Application do
            ) do
       # Needs the Repo, so it runs after the tree is up rather than alongside
       # the config-only warnings at the top of start/2.
-      warn_if_multi_tenant_without_strict_host()
+      warn_if_strict_host_false_ignored()
+      warn_if_console_shares_origin()
       warn_if_embed_lists_over_ceiling()
       warn_if_chain_unsigned()
       enqueue_occurrence_backfill()
@@ -393,14 +394,14 @@ defmodule KilnCMS.Application do
     end
   end
 
-  # A deployment that turns `TENANT_STRICT_HOST` off serves the DEFAULT org's
-  # content, branding and analytics to any request carrying an unrecognized Host
-  # (#563). That is the correct behaviour for the single-host install the
-  # fallback exists for — and since #1547 an unset flag gives exactly that: off
-  # with one org, on once a second exists. So the gap left to warn about is an
-  # explicit `TENANT_STRICT_HOST=false` on a deployment that has actually
-  # created a second org, and the operator should hear it from a log line
-  # rather than from an incident.
+  # `TENANT_STRICT_HOST=false` on a deployment with more than one organization
+  # (#1662). Until 0.12 that served the DEFAULT org's content, branding and
+  # analytics to any request carrying an unrecognized Host, and this check
+  # warned about it (#660). Kiln no longer honours `false` there — routing
+  # refuses those hosts anyway — so what the operator needs to hear is the
+  # opposite surprise: a setting they chose is being overridden, and anything
+  # that relied on the fallback (a bare IP, a forgotten alias) now gets a 404.
+  # An error, not a warning, for that reason.
   #
   # Boot is the WEAKEST of the three places this is checked, and deliberately
   # not the only one: it already happened by the time someone creates the second
@@ -408,22 +409,29 @@ defmodule KilnCMS.Application do
   # `/editor/system` ask the same predicate — and it really is the same one,
   # rather than a second copy that drifts.
   #
-  # Reported via `KilnCMS.Config.Report.warn/2` (#1126), not a bare
-  # `Logger.warning` — the stderr the config providers use is not an option
-  # here (this check needs the database), and a plain `Logger.warning` alone
-  # never reaches Sentry: the `Sentry.LoggerHandler` this app attaches sets no
-  # `capture_log_messages`.
-  defp warn_if_multi_tenant_without_strict_host do
-    if KilnCMSWeb.Tenant.strict_host_gap?() do
-      KilnCMS.Config.Report.warn(
+  # Reported via `KilnCMS.Config.Report` (#1126), not a bare `Logger` call — the
+  # stderr the config providers use is not an option here (this check needs the
+  # database), and a plain log line alone never reaches Sentry.
+  defp warn_if_strict_host_false_ignored do
+    if KilnCMSWeb.Tenant.strict_host_false_ignored?() do
+      KilnCMS.Config.Report.error(
         "strict_host",
-        "TENANT_STRICT_HOST=false on a deployment with more than one organization. " <>
-          "A request whose Host matches no org — a bare hostname, an IP, or an " <>
-          "attacker-supplied header — is served the DEFAULT org's content, branding " <>
-          "and analytics. Unset TENANT_STRICT_HOST (the default turns strict host " <>
-          "matching on once a second organization exists) or set it to true to " <>
-          "reject those instead; see " <>
-          "docs/environment-variables.md."
+        KilnCMSWeb.Tenant.strict_host_false_ignored_message()
+      )
+    end
+  end
+
+  # More than one organization and no `KILN_CONSOLE_HOST` (#1661): an org
+  # admin's code injection runs same-origin with the console, so it can act as
+  # any editor who opens that site signed in. Accepted at 1.0 with this warning
+  # rather than forced (threat model, residual risk 16) — forcing a console host
+  # needs an operator migration story. The second org's create and
+  # `/editor/system` ask the same predicate.
+  defp warn_if_console_shares_origin do
+    if KilnCMSWeb.Tenant.console_shares_origin?() do
+      KilnCMS.Config.Report.warn(
+        "console_host",
+        KilnCMSWeb.Tenant.console_shares_origin_message()
       )
     end
   end

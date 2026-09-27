@@ -365,15 +365,19 @@ config :kiln_cms,
 config :kiln_cms, KilnCMS.Accounts.SiteSso,
   req_options: [plug: {Req.Test, KilnCMS.Accounts.SiteSso}]
 
-# Host matching (#1547): pinned OFF rather than left on `:auto`. Auto reads a
-# VM-global verdict (`KilnCMSWeb.Tenant.OrgCount`) that any test creating an
-# org through the action flips to `:multi` for every other test in the run —
-# and the suite's default `www.example.com` Host matches no org, so it would
-# start refusing requests depending on test order. The periodic recount is off
-# for the same reason: it runs outside the SQL sandbox. Tests of auto set
-# `:auto` and the verdict themselves.
+# Host matching (#1547): pinned OFF rather than left on `:auto`, and the
+# VM-global verdict it reads (`KilnCMSWeb.Tenant.OrgCount`) is never moved by
+# OrgCount itself. Auto reads that verdict, and since #1662 so does an explicit
+# `false` (a `:multi` verdict refuses unknown hosts either way) — so if any test
+# creating an org through the action could flip it to `:multi`, every later
+# test's default `www.example.com` Host, which matches no org, would start being
+# refused depending on test order. Tracking off means no count at boot, no
+# periodic recount (it runs outside the SQL sandbox anyway), and no record or
+# broadcast on create: the verdict stays `:unknown` for the run, which a pinned
+# `false` treats as lenient. Tests of the verdict turn tracking on, set the
+# verdict themselves, and restore both.
 config :kiln_cms, :tenant_strict_host, false
-config :kiln_cms, :tenant_org_recount, false
+config :kiln_cms, :tenant_org_tracking, false
 
 # The embed ceiling (#1618): pinned OFF for the same reason. Auto locks on the
 # same VM-global verdict, so one test creating an org through the action would
