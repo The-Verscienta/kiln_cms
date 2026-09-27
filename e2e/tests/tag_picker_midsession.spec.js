@@ -134,7 +134,7 @@ test.describe("tag picker mid-session growth", () => {
       // same as any other tag-picker section on a fresh render (#523).
       await editorSection.locator("summary").click();
       await editorSection.getByRole("checkbox", { name: attached }).check();
-      await editorPage.getByRole("button", { name: /^save$/i }).click();
+      await editorPage.getByRole("button", { name: /^save draft$/i }).click();
       await expect(editorPage.locator('span[aria-live="polite"]')).toHaveText("Saved", {
         timeout: 10_000,
       });
@@ -146,7 +146,7 @@ test.describe("tag picker mid-session growth", () => {
       // This session's `@form` is still built from the pre-attach record, so
       // submitting it now is guaranteed to lose the optimistic-lock race the
       // editor's save already won — that's the point, see above.
-      await page.getByRole("button", { name: /^save$/i }).click();
+      await page.getByRole("button", { name: /^save draft$/i }).click();
       const conflictBanner = page.locator("#edit-conflict");
       await expect(conflictBanner).toBeVisible();
 
