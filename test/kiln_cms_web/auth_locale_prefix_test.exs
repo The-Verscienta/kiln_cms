@@ -17,6 +17,9 @@ defmodule KilnCMSWeb.AuthLocalePrefixTest do
 
   import Phoenix.LiveViewTest
 
+  alias KilnCMS.Accounts.PendingSignIn
+  alias KilnCMS.TwoFactorFixtures
+
   @skip_link %{
     "en" => "Skip to main content",
     "es" => "Saltar al contenido principal",
@@ -108,6 +111,32 @@ defmodule KilnCMSWeb.AuthLocalePrefixTest do
     assert_patch(lv, "/register")
 
     assert :sys.get_state(lv.pid).socket.assigns.locale == "es"
+  end
+
+  # The first factor sends the reader to the unprefixed `/sign-in/verify`
+  # (a controller page); the locale they arrived with comes along in the session.
+  test "the second-factor page after a prefixed sign-in speaks the same language",
+       %{conn: conn} do
+    {user, _secret} = TwoFactorFixtures.enabled_user()
+    {user, token} = TwoFactorFixtures.with_first_factor_token(user)
+
+    blob =
+      PendingSignIn.mint_and_hold(:session, KilnCMSWeb.Endpoint, %{
+        user
+        | __metadata__: Map.put(user.__metadata__, :token, token)
+      })
+
+    # What `AuthController.success/4` would add to the session `/es/sign-in` left.
+    session = conn |> get("/es/sign-in") |> get_session()
+
+    html =
+      build_conn()
+      |> init_test_session(Map.put(session, "pending_2fa", blob))
+      |> get("/sign-in/verify")
+      |> html_response(200)
+
+    assert html_lang(html) == "es"
+    assert html =~ "Autenticación de doble factor"
   end
 
   test "a controller page keeps its prefixed URL and leaves the session alone", %{conn: conn} do
