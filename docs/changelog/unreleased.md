@@ -340,6 +340,21 @@ carries the reasoning.
   which has no Back link, links back into the form.
   ([#1673](https://github.com/The-Verscienta/kiln_cms/issues/1673))
 
+<a id="a-refused-public-form-submission-shows-the-form-again"></a>
+
+- **A refused public form submission shows the form again, with your input
+  kept and each error next to its field.** A form that failed validation was
+  replaced by a one-line page naming fields by their machine names, and its
+  Back link (or, embedded, its Try again link) reloaded an empty form. The
+  422 response is now the same form, inside the site's public layout or the
+  embed's iframe document, with the submitted values filled back in. Each
+  refused field is marked `aria-invalid` and described by its message, and a
+  summary at the top, which takes focus, lists the problems by label and links
+  to each field. The messages are translated. The honeypot and anything that
+  isn't one of the form's own fields are never echoed back. The JSON
+  endpoint's `errors` map is unchanged.
+  ([#1683](https://github.com/The-Verscienta/kiln_cms/issues/1683))
+
 <a id="console-pages-show-their-title-and-an-empty-calendar-or-task-list-says-so"></a>
 
 - **Console pages show their title, and an empty calendar or task list says

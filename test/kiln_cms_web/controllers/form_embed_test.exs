@@ -127,10 +127,11 @@ defmodule KilnCMSWeb.FormEmbedTest do
       refute html =~ "/embed-frame.js"
     end
 
-    # #1673. An embed omits the referer Back link (it would reload the empty
-    # thank-you cycle), so a refused submission left the visitor with no way
-    # back into the form short of reloading the host page.
-    test "a refused embedded submission offers Try again, back into the form", %{conn: conn} do
+    # #1673, then #1683. An embed omits the referer Back link (it would reload
+    # the empty thank-you cycle), so a refused submission used to leave the
+    # visitor with no way back into the form. It now IS the form again, with
+    # their values kept — the full contract is in form_invalid_rerender_test.exs.
+    test "a refused embedded submission re-renders the form inside the iframe", %{conn: conn} do
       form = form!()
 
       html =
@@ -139,14 +140,14 @@ defmodule KilnCMSWeb.FormEmbedTest do
         |> post("/forms/#{form.slug}", %{"email" => "not-an-email", "_kiln_embed" => "1"})
         |> html_response(422)
 
-      assert html =~ "Something needs fixing"
-      assert html =~ ~s(href="/forms/#{form.slug}/embed")
-      assert html =~ "Try again"
-      # The result page wears the site kit rather than bare system-font HTML.
+      assert html =~ ~s(action="/forms/#{form.slug}")
+      assert html =~ ~s(value="not-an-email")
+      assert html =~ ~s(name="_kiln_embed")
+      assert html =~ "/embed-frame.js"
       assert html =~ ~s(href="/assets/css/app.css")
     end
 
-    test "an on-site refusal keeps its Back link and gets no Try again", %{conn: conn} do
+    test "an on-site refusal re-renders the form, not a Back link", %{conn: conn} do
       form = form!()
 
       html =
@@ -156,8 +157,9 @@ defmodule KilnCMSWeb.FormEmbedTest do
         |> post("/forms/#{form.slug}", %{"email" => "not-an-email"})
         |> html_response(422)
 
-      refute html =~ "Try again"
-      assert html =~ "Back"
+      assert html =~ ~s(value="not-an-email")
+      refute html =~ ~s(name="_kiln_embed")
+      refute html =~ "/embed-frame.js"
     end
 
     test "the embed marker doesn't leak into the stored submission", %{conn: conn} do
