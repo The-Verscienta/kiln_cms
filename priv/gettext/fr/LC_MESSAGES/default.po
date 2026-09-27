@@ -2964,6 +2964,7 @@ msgstr "Réservation libérée ; le lancement peut être relancé."
 msgid "Clear"
 msgstr "Effacer"
 
+#: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Clear filters"
@@ -3177,6 +3178,12 @@ msgstr "Confirmer le nouveau mot de passe"
 #, elixir-autogen, elixir-format
 msgid "Confirm your email"
 msgstr "Confirmer votre adresse e-mail"
+
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
+#, elixir-autogen, elixir-format
+msgid "Confirm your subscription"
+msgstr "Confirmez votre abonnement"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -4522,6 +4529,11 @@ msgstr "Appareils recevant les notifications"
 #, elixir-autogen, elixir-format
 msgid "Did you mean “%{suggestion}”?"
 msgstr "Vouliez-vous dire « %{suggestion} » ?"
+
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
+#, elixir-autogen, elixir-format
+msgid "Didn't sign up? Close this page and you won't hear from us."
+msgstr "Vous ne vous êtes pas inscrit ? Fermez cette page et vous n’entendrez plus parler de nous."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -6017,6 +6029,11 @@ msgstr "Recevez une notification sur cet appareil quand quelque chose attend vot
 msgid "Get your site live"
 msgstr "Mettez votre site en ligne"
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Give every host that should reach a site to an organization, as a subdomain or a custom domain (the default organization can have one too), or redirect it to one at your proxy. The main host, the console host, the health checks and the payment webhook are never refused. Then remove TENANT_STRICT_HOST=false and restart."
+msgstr "Attribuez chaque hôte qui doit atteindre un site à une organisation, sous forme de sous-domaine ou de domaine personnalisé (l'organisation par défaut peut aussi en avoir un), ou redirigez-le vers l'un d'eux depuis votre proxy. L'hôte principal, l'hôte de la console, les contrôles de santé et le webhook de paiement ne sont jamais refusés. Supprimez ensuite TENANT_STRICT_HOST=false et redémarrez."
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Go live at"
@@ -6319,6 +6336,11 @@ msgstr "Accueil"
 #, elixir-autogen, elixir-format
 msgid "Host matching is off, and this deployment has more than one organization"
 msgstr "La correspondance d'hôte est désactivée et ce déploiement comporte plusieurs organisations"
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Host matching turns on by itself once a second organization exists, but this server has not noticed the new organization yet. It will within 30 seconds, or on restart."
+msgstr "La vérification de l'hôte s'active d'elle-même dès qu'une deuxième organisation existe, mais ce serveur n'a pas encore remarqué la nouvelle organisation. Il le fera d'ici 30 secondes, ou au redémarrage."
 
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
@@ -6686,6 +6708,11 @@ msgstr "juin"
 msgid "Just me — publish directly"
 msgstr "Moi seul — publier directement"
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "KILN_CONSOLE_HOST is unset, so the editor console answers on each organization's own host. Code an organization's admin adds to their site's head or footer runs on the same origin as the console, and can act as any editor who opens that site while signed in — a platform admin included."
+msgstr "KILN_CONSOLE_HOST n'est pas défini : la console d'édition répond donc sur l'hôte propre à chaque organisation. Le code qu'un administrateur d'organisation ajoute à l'en-tête ou au pied de page de son site s'exécute sur la même origine que la console, et peut agir au nom de tout éditeur qui ouvre ce site en étant connecté — y compris un administrateur de la plateforme."
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Key"
@@ -6972,6 +6999,7 @@ msgid "Link existing"
 msgstr "Lier une tâche existante"
 
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
 #, elixir-autogen, elixir-format
 msgid "Link not recognized"
 msgstr "Lien non reconnu"
@@ -7993,10 +8021,30 @@ msgstr "Aucun abonnement pour l'instant"
 msgid "No menus yet"
 msgstr "Aucun menu pour l'instant"
 
+#: lib/kiln_cms_web/live/task_live.ex
+#, elixir-autogen, elixir-format
+msgid "No open block tasks assigned to you."
+msgstr "Aucune tâche de bloc ouverte ne vous est assignée."
+
+#: lib/kiln_cms_web/live/task_live.ex
+#, elixir-autogen, elixir-format
+msgid "No open document tasks assigned to you."
+msgstr "Aucune tâche de document ouverte ne vous est assignée."
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "No open releases."
 msgstr "Aucun lancement ouvert."
+
+#: lib/kiln_cms_web/live/task_live.ex
+#, elixir-autogen, elixir-format
+msgid "No open tasks anchored to a block."
+msgstr "Aucune tâche ouverte rattachée à un bloc."
+
+#: lib/kiln_cms_web/live/task_live.ex
+#, elixir-autogen, elixir-format
+msgid "No open tasks anchored to a document."
+msgstr "Aucune tâche ouverte rattachée à un document."
 
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
@@ -9403,7 +9451,6 @@ msgstr "Routes publiques"
 msgid "Public site"
 msgstr "Site public"
 
-#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -9425,6 +9472,7 @@ msgstr "Publier les modifications"
 msgid "Publish it"
 msgstr "Publiez-la"
 
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Publish now"
@@ -10654,7 +10702,6 @@ msgstr "Mêmes jetons. Utilisé uniquement lorsqu'une entrée laisse sa propre m
 msgid "Sat"
 msgstr "sam."
 
-#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #: lib/kiln_cms_web/live/compliance_live.ex
@@ -10712,6 +10759,7 @@ msgstr "Enregistrer la personnalisation de marque"
 msgid "Save details"
 msgstr "Enregistrer les détails"
 
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save draft"
@@ -11098,6 +11146,11 @@ msgstr "Sélectionner cette soumission"
 msgid "Select two to see what changed between them."
 msgstr "Sélectionnez-en deux pour voir ce qui a changé entre elles."
 
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "Select…"
+msgstr "Sélectionner…"
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Semantic search is off, so there is nothing to compare against."
@@ -11199,6 +11252,11 @@ msgstr "Servir ces extraits"
 msgid "Server public IP (for the SPF and reverse-DNS checks)"
 msgstr "IP publique du serveur (pour les vérifications SPF et DNS inverse)"
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Set KILN_CONSOLE_HOST to a host no organization controls, add it to CHECK_ORIGINS, and restart. For now that host serves the default organization's console only. Otherwise, grant organization admin only to people you would trust with the console."
+msgstr "Définissez KILN_CONSOLE_HOST sur un hôte qu'aucune organisation ne contrôle, ajoutez-le à CHECK_ORIGINS, puis redémarrez. Pour l'instant, cet hôte ne sert que la console de l'organisation par défaut. Sinon, n'accordez le rôle d'administrateur d'organisation qu'à des personnes à qui vous confieriez la console."
+
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set PRESENTATION_PREVIEW_URL to your front end (e.g. https://site.example.com{path}) to enable side-by-side editing."
@@ -11218,6 +11276,16 @@ msgstr "Définies par l'opérateur dans la configuration, et utilisées par tout
 #, elixir-autogen, elixir-format
 msgid "Set name"
 msgstr "Définir le nom"
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Set up a new authenticator"
+msgstr "Configurer un nouvel authentificateur"
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Set up a new authenticator app so you can keep signing in without using another recovery code."
+msgstr "Configurez une nouvelle application d'authentification pour continuer à vous connecter sans utiliser un autre code de récupération."
 
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -11676,6 +11744,11 @@ msgstr "Quelqu'un d'autre a enregistré des modifications sur ce contenu. L'enre
 msgid "Someone else saved this page. Duplicating copies their version, not what you see. Continue?"
 msgstr "Quelqu'un d'autre a enregistré cette page. La duplication copiera sa version, pas ce que vous voyez. Continuer ?"
 
+#: lib/kiln_cms_web/controllers/form_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Something needs fixing"
+msgstr "Quelque chose est à corriger"
+
 #: lib/kiln_cms_web/controllers/error_html/500.html.heex
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
 #, elixir-autogen, elixir-format
@@ -11765,6 +11838,11 @@ msgstr "Démarrer"
 #, elixir-autogen, elixir-format
 msgid "Start a discussion on this block"
 msgstr "Démarrer une discussion sur ce bloc"
+
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
+#, elixir-autogen, elixir-format
+msgid "Start sending newsletters to %{email}?"
+msgstr "Commencer à envoyer des newsletters à %{email} ?"
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/federation_live.ex
@@ -11953,6 +12031,7 @@ msgid "Subscribers"
 msgstr "Abonnés"
 
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
 #, elixir-autogen, elixir-format
 msgid "Subscription confirmed"
 msgstr "Abonnement confirmé"
@@ -12042,13 +12121,8 @@ msgstr "Système"
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
-msgid "TENANT_STRICT_HOST is unset, so host matching turns on by itself once a second organization exists, but this server has not noticed the new organization yet. It will within five minutes, or on restart."
-msgstr "TENANT_STRICT_HOST n'est pas défini : la vérification de l'hôte s'active donc d'elle-même dès qu'une deuxième organisation existe, mais ce serveur n'a pas encore remarqué la nouvelle organisation. Il le fera d'ici cinq minutes, ou au redémarrage."
-
-#: lib/kiln_cms_web/live/system_live.ex
-#, elixir-autogen, elixir-format
-msgid "TENANT_STRICT_HOST=false is overriding the default, which rejects unrecognized hosts once a second organization exists. Remove the setting or set TENANT_STRICT_HOST=true, then restart. Keep it only if an unmatched host reaching the default organization is what you want."
-msgstr "TENANT_STRICT_HOST=false remplace le comportement par défaut, qui rejette les hôtes non reconnus dès qu'une deuxième organisation existe. Supprimez ce réglage ou définissez TENANT_STRICT_HOST=true, puis redémarrez. Ne le conservez que si vous souhaitez qu'un hôte sans correspondance atteigne l'organisation par défaut."
+msgid "TENANT_STRICT_HOST=false is being ignored"
+msgstr "TENANT_STRICT_HOST=false est ignoré"
 
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -12265,6 +12339,11 @@ msgstr "Le texte est généré par %{provider}. Le contenu de ce bloc, le titre 
 msgid "Text set in capitals (“%{example}”) — some screen readers spell it out letter by letter, and capitals are harder to read. Use styling instead."
 msgstr "Texte en capitales (« %{example} ») — certains lecteurs d'écran l'épellent lettre par lettre, et les capitales sont plus difficiles à lire. Utilisez plutôt un style."
 
+#: lib/kiln_cms_web/controllers/form_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Thank you"
+msgstr "Merci"
+
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
 msgid "Thanks for joining!"
@@ -12285,7 +12364,7 @@ msgstr "Merci de nous avoir contactés, [field:name] !"
 msgid "Thanks — we got your message."
 msgstr "Merci — nous avons bien reçu votre message."
 
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
 #, elixir-autogen, elixir-format
 msgid "Thanks — your subscription to %{email} is confirmed."
 msgstr "Merci — votre abonnement pour %{email} est confirmé."
@@ -12611,6 +12690,11 @@ msgstr "La commande signale les nouvelles migrations et les étapes de mise à n
 #, elixir-autogen, elixir-format
 msgid "The connection check crashed. Check the server logs."
 msgstr "La vérification de la connexion a échoué. Consultez les journaux du serveur."
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "The console shares an origin with every organization's site"
+msgstr "La console partage une origine avec le site de chaque organisation"
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
@@ -13110,7 +13194,7 @@ msgstr "Ce navigateur ne peut pas recevoir de notifications push. Sur iPhone et 
 msgid "This build reports no usable version, so it can't be compared against upstream."
 msgstr "Ce build ne rapporte aucune version exploitable ; il ne peut donc pas être comparé à la version en amont."
 
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
 #, elixir-autogen, elixir-format
 msgid "This confirmation link is invalid or expired."
 msgstr "Ce lien de confirmation est invalide ou expiré."
@@ -13145,6 +13229,11 @@ msgstr "Ce contenu a été enregistré ailleurs pendant que vous étiez hors lig
 #, elixir-autogen, elixir-format
 msgid "This covers newsletters, form notifications and autoresponders, workflow, task and comment notifications, and automation emails. Sign-in links, password resets and other account mail always use the deployment's relay, because accounts belong to the deployment, not to one site."
 msgstr "Cela couvre les newsletters, les notifications et réponses automatiques des formulaires, les notifications de flux de travail, de tâches et de commentaires, et les e-mails d’automatisation. Les liens de connexion, les réinitialisations de mot de passe et les autres e-mails de compte utilisent toujours le relais du déploiement, car les comptes appartiennent au déploiement, pas à un site."
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "This deployment has more than one organization, and Kiln no longer honours TENANT_STRICT_HOST=false there. A request whose Host header matches no organization is refused, not served the default organization's site — a bare hostname or IP address included."
+msgstr "Ce déploiement comporte plusieurs organisations, et Kiln n'y respecte plus TENANT_STRICT_HOST=false. Une requête dont l'en-tête Host ne correspond à aucune organisation est refusée au lieu de recevoir le site de l'organisation par défaut — y compris un nom d'hôte nu ou une adresse IP."
 
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -13620,6 +13709,7 @@ msgstr "Trigrammes"
 msgid "Trigram glyphs: three lines per item — published at the bottom, translated in the middle, scheduled on top; solid means yes. Hover one for its reading."
 msgstr "Trigrammes : trois lignes par élément — publié en bas, traduit au milieu, planifié en haut ; une ligne pleine signifie oui. Survolez-en un pour sa lecture."
 
+#: lib/kiln_cms_web/controllers/form_controller.ex
 #: lib/kiln_cms_web/controllers/offline_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Try again"
@@ -14560,6 +14650,11 @@ msgstr "Rédigez votre page d'accueil"
 msgid "Writes new prose from your instruction. Describe what this section should say."
 msgstr "Rédige un nouveau texte à partir de votre consigne. Décrivez ce que cette section doit dire."
 
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
+#, elixir-autogen, elixir-format
+msgid "Yes, subscribe me"
+msgstr "Oui, abonnez-moi"
+
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Yes, unsubscribe"
@@ -14773,6 +14868,11 @@ msgstr "Vous avez besoin d'un accès administrateur pour voir cette page."
 #, elixir-autogen, elixir-format
 msgid "You need editor access to view that page."
 msgstr "Vous avez besoin d'un accès éditeur pour voir cette page."
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "You signed in with a recovery code."
+msgstr "Vous vous êtes connecté avec un code de récupération."
 
 #: lib/kiln_cms_web/notification_text.ex
 #, elixir-autogen, elixir-format
@@ -15622,6 +15722,7 @@ msgstr "publiée le"
 msgid "removed block"
 msgstr "bloc supprimé"
 
+#: lib/kiln_cms_web/components/block_components.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format

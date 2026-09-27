@@ -689,13 +689,22 @@ defmodule KilnCMSWeb.CalendarLive do
 
         <.legend />
 
+        <%!-- Month/week grids with zero hits used to look like a blank calendar
+              (scaffold only). Same empty card the list view already shows. --%>
+        <div
+          :if={@view in ["month", "week"] and @events == []}
+          class="mb-4"
+        >
+          <.event_list events={[]} />
+        </div>
+
         <%!-- The grids are desktop-only and the list carries small screens on
               its own: seven columns on a phone is a horizontal scroll. When the
               editor has explicitly chosen List, it shows at every width. --%>
-        <div :if={@view in ["month", "week"]} class="hidden md:block">
+        <div :if={@view in ["month", "week"] and @events != []} class="hidden md:block">
           <.grid days={@days} by_day={@by_day} view={@view} at={@at} filters={@filters} />
         </div>
-        <div :if={@view in ["month", "week"]} class="md:hidden">
+        <div :if={@view in ["month", "week"] and @events != []} class="md:hidden">
           <.event_list events={@events} />
         </div>
         <div :if={@view == "list"}>

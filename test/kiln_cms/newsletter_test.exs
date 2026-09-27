@@ -151,6 +151,74 @@ defmodule KilnCMS.NewsletterTest do
     assert recipients(sent_emails(post.title)) == [to_string(staying.email)]
   end
 
+  describe "the campaign is created under the sender's authorization (#1655)" do
+    defp campaigns do
+      KilnCMS.Newsletter.NewsletterSend
+      |> Ash.read!(authorize?: false, tenant: KilnCMS.Accounts.default_org_id())
+    end
+
+    defp fan_out_jobs,
+      do: Oban.Testing.all_enqueued(repo: KilnCMS.Repo, worker: KilnCMS.Newsletter.SendWorker)
+
+    # Called on the domain directly, with no console in front of it: the policy
+    # is the gate, so nothing — no ledger row, no fan-out job — may come of it.
+    for {label, role} <- [editor: :editor, viewer: :viewer] do
+      test "an #{label} cannot create a send" do
+        post = published_post(admin(), "Refused #{slug()}")
+
+        actor =
+          Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+            email: "nl-#{unquote(role)}-#{System.unique_integer([:positive])}@example.com",
+            hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+            confirmed_at: DateTime.utc_now(),
+            role: unquote(role)
+          })
+
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 Newsletter.send_as_newsletter(post, actor: actor)
+
+        assert campaigns() == []
+        assert fan_out_jobs() == []
+      end
+    end
+
+    test "no actor at all cannot create a send" do
+      post = published_post(admin(), "Actorless #{slug()}")
+
+      assert {:error, %Ash.Error.Forbidden{}} = Newsletter.send_as_newsletter(post)
+      assert campaigns() == []
+    end
+
+    test "the system actor's grant is :create alone — it cannot read the ledger" do
+      actor = admin()
+      post = published_post(actor, "Readable #{slug()}")
+      assert {:ok, send} = Newsletter.send_as_newsletter(post, actor: actor)
+
+      # A refused read may be `{:ok, []}` (filter policy) or Forbidden; either
+      # way the row must not come back.
+      visible =
+        case Newsletter.list_sends(
+               actor: KilnCMS.SystemActor.new(:automation),
+               tenant: KilnCMS.Accounts.default_org_id()
+             ) do
+          {:ok, rows} -> rows
+          {:error, %Ash.Error.Forbidden{}} -> []
+        end
+
+      refute Enum.any?(visible, &(&1.id == send.id))
+    end
+
+    test "an admin's send records who sent it" do
+      actor = admin()
+      post = published_post(actor, "Admin #{slug()}")
+
+      assert {:ok, send} = Newsletter.send_as_newsletter(post, actor: actor)
+      assert send.sent_by_id == actor.id
+      assert [%{id: id}] = campaigns()
+      assert id == send.id
+    end
+  end
+
   describe "automation-driven sends (#376)" do
     alias KilnCMS.Automation.Rule
     alias KilnCMS.Automation.RuleWorker

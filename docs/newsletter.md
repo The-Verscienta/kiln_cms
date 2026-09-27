@@ -94,12 +94,25 @@ total worker concurrency to ~37 — size `POOL_SIZE` accordingly in production
 
 ## Public endpoints
 
-CSRF-free (`:public_form` pipeline) and rate-limited on the `:form` bucket:
+All rate-limited on the `:form` bucket. Sign-up and unsubscribe are CSRF-free
+(`:public_form` pipeline); confirmation runs under the ordinary browser pipeline
+(session + CSRF) because only a person ever posts to it.
 
 - `POST /newsletter/subscribe` — anonymous sign-up (`email`, optional `name`).
-- `GET  /newsletter/confirm/:token` — double-opt-in confirmation.
-- `GET  /newsletter/unsubscribe/:token` — unsubscribe (footer link).
-- `POST /newsletter/unsubscribe/:token` — RFC 8058 one-click unsubscribe.
+- `GET  /newsletter/confirm/:token` — the emailed link: a one-button page that
+  **changes nothing**.
+- `POST /newsletter/confirm/:token` — double-opt-in confirmation (that button).
+- `GET  /newsletter/unsubscribe/:token` — unsubscribe (footer link): a
+  one-button page that changes nothing.
+- `POST /newsletter/unsubscribe/:token` — the unsubscribe itself, and the RFC
+  8058 one-click target.
+
+**No GET changes a subscription** (#1664). Mail security scanners and link
+prefetchers follow the links in a message before — or without — the reader ever
+opening it. A GET that confirmed would let one complete a double opt-in nobody
+clicked, and a GET that unsubscribed would drop readers who never asked to go.
+Confirmation links mailed before this change still work: they open the page,
+one click from done.
 
 Everything but sign-up is authorized by an opaque per-subscriber token rather
 than a session. Sign-up needs no authorization because it can only ever produce

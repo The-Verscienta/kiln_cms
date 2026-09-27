@@ -87,7 +87,7 @@ defmodule KilnCMSWeb.EditorsCanPublishLiveTest do
       refute has_element?(lv, ~s(input[id^="scheduled-at-local-"][disabled]))
 
       lv
-      |> element(~s(button[phx-click="workflow"][phx-value-action="publish"]), "Publish")
+      |> element(~s(button[phx-click="workflow"][phx-value-action="publish"]), "Publish now")
       |> render_click()
 
       assert CMS.get_page!(page.id, actor: editor).state == :published

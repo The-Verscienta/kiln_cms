@@ -336,7 +336,7 @@ defmodule KilnCMSWeb.SetupLive do
               type="text"
               value={@site["brand_color"]}
               label={gettext("Primary colour")}
-              placeholder="#1d4ed8"
+              placeholder="#FF6200"
               hint={
                 gettext(
                   "The light and dark variants, and the text colour on buttons, are derived from this so they always meet WCAG AA."

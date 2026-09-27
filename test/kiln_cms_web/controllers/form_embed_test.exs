@@ -63,6 +63,27 @@ defmodule KilnCMSWeb.FormEmbedTest do
       assert html_response(conn, 404) =~ "Form not found"
     end
 
+    # #1673. A label that is not associated with its input is not announced
+    # when the input takes focus, and clicking it focuses nothing. The id is
+    # scoped by the form's slug so two forms on one page both asking for
+    # `email` do not share one.
+    test "every field label is associated with its input", %{conn: conn} do
+      form = form!()
+      html = conn |> unique_ip() |> get("/forms/#{form.slug}/embed") |> html_response(200)
+
+      field_id = "kiln-form-#{form.slug}-email"
+      doc = LazyHTML.from_document(html)
+
+      assert [label] = doc |> LazyHTML.query(~s(label[for="#{field_id}"])) |> Enum.to_list()
+      assert LazyHTML.text(label) =~ "Email"
+
+      assert [input] = doc |> LazyHTML.query("##{field_id}") |> Enum.to_list()
+      assert LazyHTML.attribute(input, "name") == ["email"]
+
+      # The required marker is spoken, not only drawn.
+      assert LazyHTML.text(label) =~ "required"
+    end
+
     # Regression: the 404 text used to be built through a `Gettext.gettext/2`
     # helper taking a runtime variable, so the extractor never saw the msgid, it
     # never entered the catalogs, and the page rendered English in every locale.
@@ -104,6 +125,39 @@ defmodule KilnCMSWeb.FormEmbedTest do
       assert html =~ "Merci!"
       assert csp(conn) =~ "frame-ancestors 'self'"
       refute html =~ "/embed-frame.js"
+    end
+
+    # #1673. An embed omits the referer Back link (it would reload the empty
+    # thank-you cycle), so a refused submission left the visitor with no way
+    # back into the form short of reloading the host page.
+    test "a refused embedded submission offers Try again, back into the form", %{conn: conn} do
+      form = form!()
+
+      html =
+        conn
+        |> unique_ip()
+        |> post("/forms/#{form.slug}", %{"email" => "not-an-email", "_kiln_embed" => "1"})
+        |> html_response(422)
+
+      assert html =~ "Something needs fixing"
+      assert html =~ ~s(href="/forms/#{form.slug}/embed")
+      assert html =~ "Try again"
+      # The result page wears the site kit rather than bare system-font HTML.
+      assert html =~ ~s(href="/assets/css/app.css")
+    end
+
+    test "an on-site refusal keeps its Back link and gets no Try again", %{conn: conn} do
+      form = form!()
+
+      html =
+        conn
+        |> unique_ip()
+        |> put_req_header("referer", "http://www.example.com/contact")
+        |> post("/forms/#{form.slug}", %{"email" => "not-an-email"})
+        |> html_response(422)
+
+      refute html =~ "Try again"
+      assert html =~ "Back"
     end
 
     test "the embed marker doesn't leak into the stored submission", %{conn: conn} do

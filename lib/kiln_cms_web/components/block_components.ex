@@ -312,14 +312,11 @@ defmodule KilnCMSWeb.BlockComponents do
 
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-6">
         <div :for={field <- @form.fields} class={field_width_class(field)}>
-          <.public_form_field field={field} />
+          <.public_form_field field={field} id_prefix={"kiln-form-" <> @form.slug} />
         </div>
       </div>
 
-      <button
-        type="submit"
-        class="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-content"
-      >
+      <button type="submit" class="btn btn-primary">
         {@form.submit_label || gettext("Submit")}
       </button>
     </form>
@@ -334,28 +331,44 @@ defmodule KilnCMSWeb.BlockComponents do
   """
   attr :field, :map, required: true
 
+  # Scopes the input `id` the `<label for>` points at. `public_form/1` passes
+  # the form's slug, so two forms on one page that share a field name (both
+  # asking for `email`) still get distinct ids.
+  attr :id_prefix, :string, default: "kiln-form"
+
   def public_form_field(assigns) do
+    assigns = assign(assigns, :field_id, "#{assigns.id_prefix}-#{assigns.field.name}")
+
     ~H"""
-    <label :if={@field.field_type != :boolean} class="mb-1 block text-sm font-medium">
+    <label
+      :if={@field.field_type != :boolean}
+      for={@field_id}
+      class="field-label mb-1 block text-sm font-medium"
+    >
       {@field.label}
-      <span :if={@field.required} aria-hidden="true" class="text-error">*</span>
+      <span :if={@field.required} class="text-error">
+        <span aria-hidden="true">*</span>
+        <span class="sr-only">{gettext("required")}</span>
+      </span>
     </label>
 
     <%= case @field.field_type do %>
       <% :text -> %>
         <textarea
+          id={@field_id}
           name={@field.name}
           required={@field.required}
           placeholder={@field.placeholder}
-          class="w-full rounded border border-base-300 bg-transparent px-3 py-2 text-sm"
+          class="field-input w-full"
         >{@field.default_value}</textarea>
       <% :select -> %>
         <select
+          id={@field_id}
           name={@field.name}
           required={@field.required}
-          class="w-full rounded border border-base-300 bg-transparent px-3 py-2 text-sm"
+          class="field-select w-full"
         >
-          <option value="">—</option>
+          <option value="">{gettext("Select…")}</option>
           <option :for={opt <- @field.options} value={opt} selected={opt == @field.default_value}>
             {opt}
           </option>
@@ -364,6 +377,7 @@ defmodule KilnCMSWeb.BlockComponents do
         <label class="flex items-center gap-2 text-sm">
           <input type="hidden" name={@field.name} value="false" />
           <input
+            id={@field_id}
             type="checkbox"
             name={@field.name}
             value="true"
@@ -371,17 +385,21 @@ defmodule KilnCMSWeb.BlockComponents do
           />
           <span class="font-medium">
             {@field.label}
-            <span :if={@field.required} aria-hidden="true" class="text-error">*</span>
+            <span :if={@field.required} class="text-error">
+              <span aria-hidden="true">*</span>
+              <span class="sr-only">{gettext("required")}</span>
+            </span>
           </span>
         </label>
       <% other -> %>
         <input
+          id={@field_id}
           type={form_input_type(other)}
           name={@field.name}
           required={@field.required}
           placeholder={@field.placeholder}
           value={@field.default_value}
-          class="w-full rounded border border-base-300 bg-transparent px-3 py-2 text-sm"
+          class="field-input w-full"
         />
     <% end %>
 

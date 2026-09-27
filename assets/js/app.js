@@ -37,7 +37,20 @@ import {watchLiveness} from "./liveness"
 
 const clamp01 = (n) => Math.min(Math.max(n, 0), 1)
 
+// Match the search shortcut cue to the platform: ⌘ on Apple, Ctrl elsewhere
+// (the listener below accepts `metaKey || ctrlKey`). The server renders the
+// Ctrl form; this rewrites it on the client.
+const APPLE_PLATFORM = /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || "")
+const setSearchKbdCue = el => { el.textContent = APPLE_PLATFORM ? "⌘K" : "Ctrl+K" }
+
 const Hooks = {
+  // The console's search ⌘K/Ctrl+K cue. A hook rather than a one-shot pass at
+  // page load: a live navigation mounts a fresh layout, which would render the
+  // server's Ctrl+K again. The element is `phx-update="ignore"`, so a patch of
+  // the surrounding layout cannot revert it either.
+  SearchKbd: {
+    mounted() { setSearchKbdCue(this.el) },
+  },
   SavedTicker,
   BodyImageUploader,
   FocusTrap,
@@ -1075,6 +1088,10 @@ window.addEventListener("keydown", e => {
     }
   }
 })
+
+// A page without a LiveView socket gets the platform cue here; LiveView pages
+// get it (and keep it across navigations) from the `SearchKbd` hook.
+document.querySelectorAll("[data-kiln-search-kbd]").forEach(setSearchKbdCue)
 
 // Show progress bar on live navigation and form submits
 topbar.config({barColors: {0: "#29d"}, shadowColor: "rgba(0, 0, 0, .3)"})

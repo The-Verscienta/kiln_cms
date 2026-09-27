@@ -241,6 +241,29 @@ defmodule Kiln.PluginsTest do
       assert Mix.Tasks.Kiln.Plugins.Doctor.run([]) == :ok
     end
 
+    # #1540: a project.exs written before a core domain existed restates a
+    # list without it, and `mix ash.codegen` then offers to DROP its tables.
+    test "flags a core domain a project's :ash_domains list left out" do
+      core = Mix.Tasks.Kiln.Plugins.Doctor.core_domains()
+
+      assert KilnCMS.Notifications in core
+      assert KilnCMS.CMS in core
+      refute KilnCMS.CountlessVersions.Domain in core
+
+      assert Mix.Tasks.Kiln.Plugins.Doctor.core_domain_problems(core) == []
+
+      assert [problem] =
+               Mix.Tasks.Kiln.Plugins.Doctor.core_domain_problems(core -- [KilnCMS.Notifications])
+
+      assert problem =~ "core domain KilnCMS.Notifications is missing from :ash_domains"
+    end
+
+    test "the core's configured domains are exactly the ones it compiles" do
+      assert Enum.sort(Application.get_env(:kiln_cms, :ash_domains)) --
+               [Example.Catalog] ==
+               Mix.Tasks.Kiln.Plugins.Doctor.core_domains()
+    end
+
     test "flags unregistered domains and core block collisions" do
       defmodule BadPlugin do
         use Kiln.Plugin

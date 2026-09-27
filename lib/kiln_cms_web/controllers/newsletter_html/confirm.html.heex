@@ -1,0 +1,44 @@
+<%!--
+  Double-opt-in confirmation (#1664). Three states:
+
+    * `:form` — what the emailed link (a GET) renders. It changes nothing: a
+      mail scanner or link prefetcher that follows the link sees this page and
+      goes no further. The human completes the opt-in with one click, a POST.
+    * `:confirmed` — after that POST (or a GET of an already-confirmed link).
+    * `:invalid` — an unknown token.
+
+  The form carries the session's CSRF token: it is rendered into the visitor's
+  own session by the GET, so the POST is an ordinary protected browser submit.
+--%>
+<Layouts.public current_org={@current_org}>
+  <section class="card card-pad mx-auto my-12 w-full max-w-md space-y-4 text-center">
+    <%= case @state do %>
+      <% :form -> %>
+        <h1 class="text-2xl font-semibold text-balance">
+          {gettext("Confirm your subscription")}
+        </h1>
+        <p class="text-base-content/70">
+          {gettext("Start sending newsletters to %{email}?", email: @email)}
+        </p>
+        <form action={~p"/newsletter/confirm/#{@token}"} method="post">
+          <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+          <button type="submit" class="btn btn-primary w-full">
+            {gettext("Yes, subscribe me")}
+          </button>
+        </form>
+        <p class="text-sm text-base-content/60">
+          {gettext("Didn't sign up? Close this page and you won't hear from us.")}
+        </p>
+      <% :confirmed -> %>
+        <h1 class="text-2xl font-semibold text-balance">{gettext("Subscription confirmed")}</h1>
+        <p class="text-base-content/70">
+          {gettext("Thanks — your subscription to %{email} is confirmed.", email: @email)}
+        </p>
+      <% :invalid -> %>
+        <h1 class="text-2xl font-semibold text-balance">{gettext("Link not recognized")}</h1>
+        <p class="text-base-content/70">
+          {gettext("This confirmation link is invalid or expired.")}
+        </p>
+    <% end %>
+  </section>
+</Layouts.public>
