@@ -56,6 +56,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **A new `throttle_counters` table holds the auth budgets; run migrations as usual.**
+  ([#1619](https://github.com/The-Verscienta/kiln_cms/issues/1619) · [long form](docs/changelog/unreleased.md#a-new-throttlecounters-table-holds-the-auth-budgets-run-migrations-as))
+
 - **A site whose code-injection snippet opens a websocket to its vendor must
   now list that `wss://` origin under Connections.**
   ([long form](docs/changelog/unreleased.md#a-site-whose-code-injection-snippet-opens-a-websocket-to-its-vendor-must))
@@ -84,6 +87,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#1649](https://github.com/The-Verscienta/kiln_cms/issues/1649) · [long form](docs/changelog/unreleased.md#paying-for-a-membership-no-longer-demotes-a-legacy-editor))
 
 ### Security
+
+- **Auth budgets now hold across nodes and restarts.**
+  ([#1619](https://github.com/The-Verscienta/kiln_cms/issues/1619) · [long form](docs/changelog/unreleased.md#auth-budgets-now-hold-across-nodes-and-restarts))
 
 - **The browser CSP's `connect-src` is `'self'` alone — no websocket to any
   other host.**

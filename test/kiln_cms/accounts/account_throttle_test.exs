@@ -17,6 +17,7 @@ defmodule KilnCMS.Accounts.AccountThrottleTest do
   @endpoint KilnCMSWeb.Endpoint
 
   alias KilnCMS.Accounts.AccountThrottle
+  alias KilnCMS.Accounts.ThrottleStore
   alias KilnCMS.Accounts.User
 
   @password "password123456"
@@ -168,19 +169,21 @@ defmodule KilnCMS.Accounts.AccountThrottleTest do
       assert Enum.count(results, &(&1 == :allow)) == @budget
     end
 
-    test "the ETS table holds the digest, never the address" do
+    test "the counter table holds a hash of the digest, never the address" do
       address = email()
-      on_exit(fn -> AccountThrottle.reset(address) end)
 
       AccountThrottle.consume(address)
 
-      expected = "signin:" <> AccountThrottle.digest(address)
+      %{rows: rows} = KilnCMS.Repo.query!("SELECT bucket, key_hash FROM throttle_counters")
+      expected = ThrottleStore.key_hash(AccountThrottle.digest(address))
 
-      keys =
-        AccountThrottle |> :ets.tab2list() |> Enum.map(fn {{key, _window}, _c, _e} -> key end)
+      assert ["signin", expected] in rows
 
-      assert expected in keys
-      refute Enum.any?(keys, &String.contains?(&1, address))
+      refute Enum.any?(rows, fn [bucket, key_hash] ->
+               String.contains?(bucket, address) or
+                 :binary.match(key_hash, address) != :nomatch or
+                 :binary.match(key_hash, AccountThrottle.digest(address)) != :nomatch
+             end)
     end
   end
 
