@@ -320,7 +320,8 @@ build if a resource is ever registered without that authorizer.
   an attacker-influenced response has an attacker-influenced *length* too.
   Since #753 there is exactly one implementation: every caller that fetches a
   URL the *content* chose — webhook delivery, oEmbed, link checking, federation,
-  social posting, portability import — goes through `SafeFetch`. A new caller
+  social posting, portability import, Unsplash import (#1653) — goes through
+  `SafeFetch`. A new caller
   reaching for `Req` directly, or copying its `connect_options`, is the bug that
   invariant exists to catch.
 - **Upload handling** — uploads validated from bytes rather than declared type,
@@ -681,13 +682,17 @@ a credential, so the operator's trust assumptions do not carry over:
   an anonymous visitor's question. It is the site's choice and the page says so.
 
 ### Other outbound calls
-`Kiln.Updates` (GitHub releases, admin-triggered), `KilnCMS.Unsplash`,
+`Kiln.Updates` (GitHub releases, admin-triggered),
 Meilisearch (the operator's instance — a site's own is below), S3/MinIO, the
 mailer, and the LLM providers behind `/api/ask` and
 SEO drafting all make outbound requests to *operator-configured or fixed*
 endpoints, not user-supplied ones — so they are not SSRF vectors in the way
 webhooks are. The exceptions are a site's own SMTP relay (#1322) and AI
-endpoint (above), which are tenant-chosen and SSRF-checked. Note that `/api/ask` lets an anonymous caller drive an outbound
+endpoint (above), which are tenant-chosen and SSRF-checked, and
+`KilnCMS.Unsplash`: its API host is fixed, but the image URL an import downloads
+comes from Unsplash's response, so every Unsplash request goes through
+`SafeFetch` — pinned, each redirect hop re-validated, and capped at the image
+upload ceiling (#1653). Note that `/api/ask` lets an anonymous caller drive an outbound
 LLM request; it is config-gated and rate-limited under `:api`, but it is a cost
 amplification surface.
 
