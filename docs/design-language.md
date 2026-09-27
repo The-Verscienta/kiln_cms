@@ -93,7 +93,18 @@ written as a function component or a raw `class="…"` in a template.
   `--radius-lg`) + `.card-pad` for standard interior padding.
 - **Fields** — `.field-input`, `.field-select` (full-width, token border, focus
   ring), and `.field-label` for the label above one. The `<.input>` component is the richer, label+error-aware form control;
-  these bare classes are for inline filters/toolbars.
+  these bare classes are for inline filters/toolbars and for markup Kiln does
+  not render itself (the AshAuthentication forms, through
+  `KilnCMSWeb.AuthOverrides`). `.field-input-error` — or
+  `aria-invalid="true"` on a `.field-input`, which draws the same — marks a
+  refused value; `.field-checkbox` is a checkbox in the brand accent.
+- **Auth pages** — `.auth-page` (the centred full-height page), `.auth-card`
+  (the form column), `.auth-title` and `.auth-muted` (heading and secondary
+  copy), and `.auth-brand` (the logo-and-name row drawn by
+  `Layouts.auth_brand/1`, over every sign-in page and the first-run wizard).
+  The library's sign-in pages take these through `AuthOverrides`; Kiln's own
+  `/sign-in/verify` template uses them directly, so the two steps of a sign-in
+  look like one flow.
 - **Tabs** — `.tabs` (segmented-control container) + `.tab`; drive the active
   segment with `aria-selected="true"` (accessible, no extra class). Used for the
   media Library/Trash switch.

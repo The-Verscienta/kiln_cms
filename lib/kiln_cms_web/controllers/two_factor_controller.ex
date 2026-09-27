@@ -161,53 +161,23 @@ defmodule KilnCMSWeb.TwoFactorController do
     PendingSignIn.resolve(:session, conn, get_session(conn, :pending_2fa))
   end
 
-  # Standalone styled page (no app shell) matching the sign-in aesthetic. Inline
-  # styles only — allowed by the browser CSP; no scripts.
-  # sobelow_skip ["XSS.SendResp"]
+  # `KilnCMSWeb.TwoFactorHTML` in `Layouts.auth/1` (#1676) — the same shell as
+  # `/sign-in`, so the page gets its brand row, both themes and a `lang` from
+  # the request's locale from the root layout rather than restating them. The
+  # root layout comes from `:browser_auth`, which also sets this page's CSP;
+  # nothing here adds a script, so that policy is unchanged.
+  #
+  # `factor` only chooses which of the two fields the page reopens on; the
+  # code itself is checked exactly as before, whichever form sent it.
   defp render_form(conn, status, error) do
-    token = Phoenix.Controller.get_csrf_token()
-
-    error_html =
-      case error do
-        nil -> ""
-        msg -> ~s(<p style="color:#f87171;font-size:14px;margin:0 0 12px;">#{h(msg)}</p>)
-      end
-
-    html = """
-    <!DOCTYPE html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>#{h(gettext("Two-factor authentication"))}</title>
-      </head>
-      <body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#1c1a17;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#ececec;">
-        <main style="width:100%;max-width:360px;padding:0 24px;">
-          <h1 style="font-size:20px;font-weight:600;margin:0 0 8px;">#{h(gettext("Two-factor authentication"))}</h1>
-          <p style="color:#a3a3a3;font-size:14px;margin:0 0 20px;">#{h(gettext("Enter the 6-digit code from your authenticator app, or one of your recovery codes."))}</p>
-          #{error_html}
-          <form method="post" action="#{~p"/sign-in/verify"}">
-            <input type="hidden" name="_csrf_token" value="#{h(token)}" />
-            <input
-              type="text" name="code" autocomplete="one-time-code"
-              maxlength="12" autofocus required
-              style="width:100%;box-sizing:border-box;padding:12px;font-size:18px;letter-spacing:4px;text-align:center;border-radius:10px;border:1px solid #3a352f;background:#26231f;color:#ececec;"
-            />
-            <button
-              type="submit"
-              style="width:100%;margin-top:16px;padding:12px;font-size:15px;font-weight:600;border:none;border-radius:10px;background:#c8865a;color:#1c1a17;cursor:pointer;"
-            >#{h(gettext("Verify"))}</button>
-          </form>
-        </main>
-      </body>
-    </html>
-    """
-
     conn
-    |> put_resp_content_type("text/html")
-    |> send_resp(status, html)
+    |> put_status(status)
+    |> put_layout(html: {KilnCMSWeb.Layouts, :auth})
+    |> put_view(html: KilnCMSWeb.TwoFactorHTML)
+    |> render(:new,
+      page_title: gettext("Two-factor authentication"),
+      error: error,
+      recovery?: conn.params["factor"] == "recovery"
+    )
   end
-
-  defp h(value),
-    do: value |> to_string() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
 end

@@ -151,7 +151,53 @@ defmodule KilnCMSWeb.SignInLive do
   def render(assigns) do
     ~H"""
     {Upstream.render(assigns)}
+    <.passkey_sign_in :if={@live_action == :sign_in} />
     <.site_sso :if={@live_action == :sign_in} option={@site_sso} />
+    """
+  end
+
+  # The passkey affordance (#331), server-rendered since #1681. It used to be
+  # built by app.js with `innerHTML` after the LiveView root, which meant
+  # English-only copy, a `location.pathname === "/sign-in"` test that missed a
+  # locale-prefixed URL, and markup no test could see.
+  #
+  # Progressive enhancement is kept: the block ships `hidden`, and the
+  # `PasskeySignIn` hook (assets/js/passkeys.js) reveals it only where
+  # `PublicKeyCredential` exists — a browser without WebAuthn, or with
+  # JavaScript off, never sees a button that cannot work.
+  #
+  # `phx-update="ignore"` on the hook's element, and the `hidden` on a CHILD of
+  # it: LiveView patches an ignored container's own attributes but never its
+  # children, so a render that reaches this block cannot put back the `hidden`
+  # the hook removed, or wipe the failure line it wrote. Defensive today — the
+  # form's own events patch only the library's LiveComponent, so nothing
+  # re-renders this block now (a mutant without it passes the e2e spec) — but a
+  # root re-render, such as a flash on this view, would.
+  defp passkey_sign_in(assigns) do
+    ~H"""
+    <div
+      id="passkey-sign-in"
+      phx-hook="PasskeySignIn"
+      phx-update="ignore"
+      class="auth-card -mt-8 pb-12"
+    >
+      <div data-role="passkey" hidden>
+        <%!-- Deliberately NOT worded "Sign in …": the accessible name must not
+              collide with the password form's submit for /sign in/i selectors
+              (e2e strict mode). --%>
+        <button type="button" class="btn btn-default btn-block" data-role="passkey-sign-in">
+          <.icon name="hero-key" class="size-4" />
+          {gettext("Use a passkey")}
+        </button>
+        <p
+          class="auth-muted mt-2 text-center text-xs"
+          role="status"
+          data-role="passkey-status"
+          data-error-text={gettext("Passkey sign-in failed. Use another method.")}
+        >
+        </p>
+      </div>
+    </div>
     """
   end
 

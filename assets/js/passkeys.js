@@ -7,10 +7,10 @@
 //    browser runs the platform ceremony, and the attestation goes back up as a
 //    "passkey_attestation" event for server-side Wax verification.
 //
-//  * `initPasskeySignIn` — progressive enhancement for the /sign-in page
-//    (which is rendered by ash_authentication_phoenix, so we add the button
-//    from JS rather than a template): POST /auth/passkey/options → discoverable
-//    credential get() → POST /auth/passkey/verify → follow the redirect.
+//  * `PasskeySignIn` — a LiveView hook for the /sign-in page, which renders
+//    the button hidden (`KilnCMSWeb.SignInLive`); the hook reveals it where
+//    WebAuthn exists: POST /auth/passkey/options → discoverable credential
+//    get() → POST /auth/passkey/verify → follow the redirect.
 //
 // All binary fields cross the wire as unpadded base64url.
 
@@ -98,33 +98,23 @@ const signInWithPasskey = async (statusEl) => {
   }
 }
 
-export const initPasskeySignIn = () => {
-  if (window.location.pathname !== "/sign-in" || !supported()) return
+// The passkey affordance on /sign-in. The markup is server-rendered, hidden,
+// by `KilnCMSWeb.SignInLive` (#1681); this only reveals it where WebAuthn
+// exists and wires the click. The hook's element carries
+// `phx-update="ignore"`, so a later render cannot re-hide what this unhid.
+export const PasskeySignIn = {
+  mounted() {
+    if (!supported()) return
 
-  // The sign-in form is rendered by ash_authentication_phoenix. Attach the
-  // passkey affordance AFTER the LiveView root, not inside it — LiveView's
-  // DOM patching removes unknown nodes from its own container on connect.
-  const main = document.querySelector("[data-phx-main]")
-  const wrap = document.createElement("div")
-  wrap.className = "mx-auto mt-4 max-w-sm pb-8 text-center"
-  // Deliberately NOT worded "Sign in …": the accessible name must not collide
-  // with the password form's submit for /sign in/i selectors (e2e strict mode).
-  wrap.innerHTML = `
-    <button type="button" class="btn btn-default w-full" data-role="passkey-sign-in">
-      Use a passkey
-    </button>
-    <p class="mt-2 text-xs opacity-60" data-role="passkey-status"
-       data-error-text="Passkey sign-in failed — use another method."></p>
-  `
-  if (main) {
-    main.insertAdjacentElement("afterend", wrap)
-  } else {
-    document.body.appendChild(wrap)
-  }
+    const block = this.el.querySelector("[data-role=passkey]")
+    const button = this.el.querySelector("[data-role=passkey-sign-in]")
+    const status = this.el.querySelector("[data-role=passkey-status]")
+    if (!block || !button) return
 
-  wrap
-    .querySelector("[data-role=passkey-sign-in]")
-    .addEventListener("click", () =>
-      signInWithPasskey(wrap.querySelector("[data-role=passkey-status]"))
-    )
+    block.hidden = false
+    button.addEventListener("click", () => {
+      if (status) status.textContent = ""
+      signInWithPasskey(status)
+    })
+  },
 }

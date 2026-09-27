@@ -375,6 +375,76 @@
     border-color: color-mix(in oklch, var(--color-primary) 55%, transparent);
     box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-primary) 18%, transparent);
   }
+  /* A field whose value was refused. Keyed on `aria-invalid` as well as the
+     class, so a control that tells assistive tech it is invalid also looks it —
+     the two cannot drift apart at a call site that sets only one. */
+  .field-input-error,
+  .field-input[aria-invalid="true"] {
+    border-color: color-mix(in oklch, var(--color-error) 60%, transparent);
+  }
+  .field-input-error:focus,
+  .field-input[aria-invalid="true"]:focus {
+    border-color: color-mix(in oklch, var(--color-error) 60%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-error) 18%, transparent);
+  }
+  .field-checkbox {
+    border-radius: var(--radius-sm);
+    accent-color: var(--color-primary);
+  }
+  .field-checkbox:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  /* ---- Auth pages -------------------------------------------------------
+     The sign-in family (`/sign-in`, `/register`, `/reset`, `/sign-in/verify`,
+     the magic-link and confirm pages) — AshAuthentication's components take
+     these through `KilnCMSWeb.AuthOverrides`, and Kiln's own templates use them
+     directly, so the library's pages and ours cannot drift apart. */
+  .auth-page {
+    display: grid;
+    min-height: 100vh;
+    place-items: center;
+    background: var(--color-base-100);
+    padding-inline: 1rem;
+  }
+  .auth-card {
+    width: 100%;
+    max-width: 24rem;
+    margin-inline: auto;
+  }
+  @media (min-width: 1024px) {
+    .auth-card {
+      max-width: 28rem;
+    }
+  }
+  .auth-title {
+    font-size: 1.5rem;
+    line-height: 2rem;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    color: var(--color-base-content);
+  }
+  .auth-muted {
+    font-size: 0.875rem;
+    color: color-mix(in oklch, var(--color-base-content) 72%, transparent);
+  }
+  /* The brand row over every auth page and the first-run wizard
+     (`Layouts.auth_brand/1`). */
+  .auth-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    border-radius: var(--radius-md);
+    font-size: 1.125rem;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    color: var(--color-base-content);
+  }
+  .auth-brand:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 4px;
+  }
 
   /* ---- Console shell: sidebar navigation --------------------------------
      After Untitled UI's sidebar: outlined icons, a bordered raised row for the

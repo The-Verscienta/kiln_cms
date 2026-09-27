@@ -36,6 +36,7 @@ defmodule KilnCMSWeb.SetupLive do
       {:ok,
        socket
        |> assign(:page_title, gettext("Set up your site"))
+       |> assign(:brand, Layouts.brand_or_unbranded(socket.assigns))
        |> assign(:step, 1)
        |> assign(:admin, %{
          "email" => "",
@@ -250,8 +251,14 @@ defmodule KilnCMSWeb.SetupLive do
     </div>
 
     <main id="main" class="mx-auto w-full max-w-xl px-4 py-12 sm:px-6">
+      <%!-- The same brand row as the sign-in pages this wizard hands off to
+            (#1681). Before an admin exists no site has branding, so this is the
+            stock mark — which is the point: a new install's first screen should
+            look like the product it is setting up. --%>
+      <Layouts.auth_brand brand={@brand} class="mb-8" />
+
       <div class="mb-8 text-center">
-        <h1 class="text-2xl font-semibold tracking-tight">{gettext("Set up your site")}</h1>
+        <h1 class="auth-title">{gettext("Set up your site")}</h1>
         <p class="mt-2 text-sm text-base-content/70">
           {gettext("Three quick steps: your admin account, your site's look, and you're in.")}
         </p>
