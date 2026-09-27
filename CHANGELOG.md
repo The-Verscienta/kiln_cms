@@ -146,6 +146,12 @@ Every summary line below that was shortened links to its own entry there.
   other host.**
   ([long form](docs/changelog/unreleased.md#the-browser-csps-connect-src-is-self-alone-no-websocket-to-any))
 
+- **A newsletter campaign is created under the sender's own authorization.**
+  ([#1655](https://github.com/The-Verscienta/kiln_cms/issues/1655) · [long form](docs/changelog/unreleased.md#a-newsletter-campaign-is-created-under-the-senders-own-authorization))
+
+- **The newsletter confirmation link no longer confirms on a GET.**
+  ([#1664](https://github.com/The-Verscienta/kiln_cms/issues/1664) · [long form](docs/changelog/unreleased.md#the-newsletter-confirmation-link-no-longer-confirms-on-a-get))
+
 - **The ActivityPub inbox checks a signature offline before it fetches the
   sender's key.**
   ([#1665](https://github.com/The-Verscienta/kiln_cms/issues/1665) · [long form](docs/changelog/unreleased.md#the-activitypub-inbox-checks-a-signature-offline-before-it-fetches))

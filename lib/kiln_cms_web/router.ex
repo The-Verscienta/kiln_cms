@@ -313,6 +313,13 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.RateLimit, :form
   end
 
+  # The newsletter confirmation page (#1664) rides `:browser` for its session,
+  # CSRF and root layout; this adds the `:form` bucket every other public
+  # newsletter endpoint carries.
+  pipeline :newsletter_confirm do
+    plug KilnCMSWeb.Plugs.RateLimit, :form
+  end
+
   # Inbound payment-provider webhooks (#337 Phase 2). No CSRF and no session — the
   # caller is the payment provider, not a browser; authorization is the
   # `Stripe-Signature` HMAC over the raw body (preserved by
@@ -882,12 +889,24 @@ defmodule KilnCMSWeb.Router do
     # address owner clicks that link.
     post "/subscribe", NewsletterController, :subscribe
 
-    get "/confirm/:token", NewsletterController, :confirm
     # GET renders a confirmation page (no state change); POST performs the
     # unsubscribe (the RFC 8058 one-click lands here). Separate actions per verb,
     # so a GET can never mutate.
     get "/unsubscribe/:token", NewsletterController, :unsubscribe_form
     post "/unsubscribe/:token", NewsletterController, :unsubscribe
+  end
+
+  # Double-opt-in confirmation (#1664). Split by verb like unsubscribe: the GET
+  # the email links to renders a one-button page and changes nothing, so a link
+  # prefetcher can't complete an opt-in nobody clicked; the POST confirms.
+  # Under `:browser` rather than `:public_form` — the page renders in the site's
+  # own chrome and the POST is CSRF-protected, since (unlike unsubscribe's RFC
+  # 8058 one-click) no mail client ever posts here. Same `:form` bucket.
+  scope "/newsletter", KilnCMSWeb do
+    pipe_through [:browser, :newsletter_confirm]
+
+    get "/confirm/:token", NewsletterController, :confirm_form
+    post "/confirm/:token", NewsletterController, :confirm
   end
 
   # Inbound payment-provider webhooks (#337 Phase 2). POST only — there is no GET
