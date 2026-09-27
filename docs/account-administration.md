@@ -14,7 +14,7 @@ because they are about different objects:
 |---|---|---|
 | Lists | `OrgMembership` rows for **this site** | every `User` on the **instance** |
 | Answers | who may author what *here* | who has registered at all |
-| Sets | site tier, custom role, per-member scope axes | platform role, audiences, temporary role |
+| Sets | site tier, custom role, per-member scope axes | platform role, temporary role, audiences on this site |
 | Can do | add an existing account to this site | create nothing — accounts arrive by sign-up, SSO or the first-run wizard |
 | Also | publishing policy for the site | password resets, session revocation, account removal |
 
@@ -111,6 +111,28 @@ not depend on it — see above. Both resources grant
 `AshOban.Checks.AshObanInteraction` as an **unconditional** bypass, like
 `KilnCMS.Accounts.Token`: the scheduler *reads* the rows before any worker writes,
 and a grant scoped to the write action leaves that read filtered to nothing.
+
+## Audiences
+
+The audience checkboxes set what gated content the account can read **on the
+site the page is served from**, and they write that site's `OrgMembership` —
+the value the read policy consults (see
+[Reading gated content](memberships.md#reading-gated-content)). They never
+write the global `User.audiences` column, which only the deprecated
+no-membership fallback reads. To edit another site's audiences, open the page on
+that site's host.
+
+An account with no membership on the site gets one on the first save. Its role
+is the tier the account already holds there, so the save changes what it can
+read and never what it can author: a membership-less account on the default
+site keeps its standing platform role (and a live temporary role, with its
+expiry), and anyone else joins as a `:viewer`. The note under the heading says
+which case applies before you save. The details, including the one extra write
+for a membership-less account edited from another site, are in
+[Paid memberships](memberships.md#editing-audiences-from-the-console).
+
+An audience a billing tier has ever claimed is billing's to grant: a tick there
+lasts until the next entitlement recompute. Comp a membership instead.
 
 ## Password resets
 
