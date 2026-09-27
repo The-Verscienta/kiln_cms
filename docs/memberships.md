@@ -346,6 +346,36 @@ Fail-closed matters because the organization is resolved from a
 would let a member of one site read another's gated content by switching hosts —
 the same reasoning the editorial scope axes already use.
 
+### Editing audiences from the console
+
+The audience checkboxes on `/editor/accounts/:id` edit the account's
+`OrgMembership` for the site the page is served from, which is the value the
+table above reads. They never write the global `User.audiences` column. Before
+0.12 they wrote only that column, so for any account holding a membership they
+saved and changed nothing (#1646).
+
+An account with no membership on that site gets one on the first save
+(`KilnCMS.Accounts.SiteAudiences`), with the tier it already holds there, so
+gaining a membership changes what it reads and nothing else:
+
+| Account | Membership created |
+|---|---|
+| no memberships at all, edited on the default org | its standing `User.role`, plus any live temporary role with its expiry |
+| no memberships at all, edited on another org | first a default-org membership carrying its standing role and `User.audiences` (what `mix kiln.deprecations --migrate-audiences` writes), then a `:viewer` membership here |
+| member of other orgs, none here | a `:viewer` membership here |
+
+The extra default-org write in the middle row is there because an account's
+first membership anywhere makes it *affiliated*, and an affiliated account holds
+nothing on an org it is not a member of. Without it, a legacy editor given
+audiences on a second site would lose its editor tier on the default one. What
+still changes, on purpose: once the account holds a membership, the global
+column stops granting it anything on the sites it is not a member of.
+
+Only platform admins may make these writes: they go through `OrgMembership`'s
+own actions and policies, which admit platform admins only, as `/editor/team`
+does. The billing rule above still applies to the membership: a tick on an
+audience some tier has claimed lasts until the next recompute.
+
 ## The paywall
 
 A gated document no longer 404s for a reader who isn't entitled to it. Instead the

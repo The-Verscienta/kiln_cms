@@ -23,6 +23,14 @@ defmodule KilnCMSWeb.AccountsLive do
   `role` on every record here is the **standing** role, as stored; a live
   temporary one is `granted_role` beside it (`KilnCMS.Accounts.RoleGrant`). The
   page shows both, and writes only the standing one through `:manage_access`.
+
+  ## Audiences are per site
+
+  The audience checkboxes edit the account's `OrgMembership` on the site the
+  page is served from — the value `KilnCMS.Accounts.Scoping.audiences/2` reads —
+  and never the global `User.audiences` column, which only the deprecated
+  no-membership fallback reads (#1646). An account with no membership here gets
+  one on the first save; `KilnCMS.Accounts.SiteAudiences` says with what role.
   """
   use KilnCMSWeb, :live_view
 
@@ -32,6 +40,7 @@ defmodule KilnCMSWeb.AccountsLive do
   alias KilnCMS.Accounts.AccountRemoval
   alias KilnCMS.Accounts.RoleGrant
   alias KilnCMS.Accounts.SessionEviction
+  alias KilnCMS.Accounts.SiteAudiences
   alias KilnCMSWeb.Params
   alias KilnCMSWeb.RoleGrantForm
 
@@ -48,7 +57,7 @@ defmodule KilnCMSWeb.AccountsLive do
   # The events that act on the account being viewed. On the register
   # (`live_action: :index`) there is no account, and a client can push any event
   # name — so these get one early no-op clause instead of dereferencing `nil`.
-  @account_events ~w(save_access grant_role revoke_grant send_password_reset
+  @account_events ~w(save_access save_audiences grant_role revoke_grant send_password_reset
                      sign_out_everywhere confirm_removal cancel_removal remove_account)
 
   @impl true
@@ -135,17 +144,13 @@ defmodule KilnCMSWeb.AccountsLive do
 
   # --- one account -----------------------------------------------------------
 
-  # The standing platform role plus the consumer audiences — one submit, because
-  # they are one action (`:manage_access`) and an admin editing access edits both.
+  # The standing platform role. Only the role: `:manage_access` also accepts
+  # `audiences`, but that is the global column only the deprecated no-membership
+  # fallback reads, so the console no longer writes it (#1646).
   def handle_event("save_access", %{"access" => params}, socket) when is_map(params) do
     %{actor: actor, account: account} = socket.assigns
 
-    attrs = %{
-      role: params["role"],
-      audiences: checked_audiences(params)
-    }
-
-    case Accounts.manage_user_access(account, attrs, actor: actor) do
+    case Accounts.manage_user_access(account, %{role: params["role"]}, actor: actor) do
       {:ok, _user} ->
         {:noreply, reload_account(socket, gettext("Access updated."))}
 
@@ -155,6 +160,29 @@ defmodule KilnCMSWeb.AccountsLive do
   end
 
   def handle_event("save_access", _params, socket), do: {:noreply, socket}
+
+  # The consumer audiences on THIS site, written to the account's membership here
+  # (created on the first save) — see `KilnCMS.Accounts.SiteAudiences`.
+  def handle_event("save_audiences", %{"audiences" => params}, socket) when is_map(params) do
+    %{actor: actor, account: account, current_org: org} = socket.assigns
+
+    case SiteAudiences.set(account, org.id, checked_audiences(params), actor: actor) do
+      {:ok, :updated} ->
+        {:noreply, reload_account(socket, gettext("Audiences updated."))}
+
+      {:ok, :created} ->
+        {:noreply,
+         reload_account(
+           socket,
+           gettext("Audiences updated. This account is now a member of %{site}.", site: org.name)
+         )}
+
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, ash_error_message(error))}
+    end
+  end
+
+  def handle_event("save_audiences", _params, socket), do: {:noreply, socket}
 
   def handle_event(
         "grant_role",
@@ -336,8 +364,14 @@ defmodule KilnCMSWeb.AccountsLive do
   defp load_detail(socket, user) do
     actor = socket.assigns.actor
 
+    memberships = memberships(user, actor)
+
     socket
-    |> assign(:memberships, memberships(user, actor))
+    |> assign(:memberships, memberships)
+    |> assign(
+      :site_audiences,
+      SiteAudiences.for_site(user, memberships, socket.assigns.current_org.id)
+    )
     |> assign(:passkey_count, length(Accounts.list_passkeys!(user.id, actor: actor)))
     |> assign(:api_key_count, length(Accounts.list_api_keys!(user.id, actor: actor)))
   end
@@ -628,6 +662,7 @@ defmodule KilnCMSWeb.AccountsLive do
       </section>
 
       <.access_panel {assigns} />
+      <.audiences_panel {assigns} />
       <.temporary_role_panel {assigns} />
       <.sites_panel {assigns} />
       <.danger_panel {assigns} />
@@ -654,7 +689,7 @@ defmodule KilnCMSWeb.AccountsLive do
         <h2 class="text-lg font-medium">{gettext("Platform access")}</h2>
         <p class="text-sm text-base-content/70">
           {gettext(
-            "The standing role, which applies instance-wide, plus the consumer audiences this account can read. A per-site tier overrides the role on that site."
+            "The standing role, which applies instance-wide. A per-site tier overrides it on that site."
           )}
         </p>
       </div>
@@ -667,25 +702,68 @@ defmodule KilnCMSWeb.AccountsLive do
           label={gettext("Platform role")}
           options={role_options()}
         />
+        <.button type="submit" variant="primary">{gettext("Save access")}</.button>
+      </form>
+    </section>
+    """
+  end
+
+  # The audiences on the site this page is served from — per site, because that
+  # is how `Scoping.audiences/2` reads them. The note under the heading says which
+  # branch they come from, since saving moves an account without a membership
+  # here onto one.
+  defp audiences_panel(assigns) do
+    assigns =
+      assigns
+      |> assign(:source, elem(assigns.site_audiences, 0))
+      |> assign(:checked, elem(assigns.site_audiences, 1))
+
+    ~H"""
+    <section class="card card-pad space-y-4" id="site-audiences">
+      <div>
+        <h2 class="text-lg font-medium">
+          {gettext("Audiences on %{site}", site: @current_org.name)}
+        </h2>
+        <p class="text-sm text-base-content/70">
+          {gettext(
+            "The gated content this account can read on this site. Each site keeps its own; switch site to edit another."
+          )}
+        </p>
+        <p :if={@source == :legacy} class="mt-2 text-sm text-warning-ink" id="audiences-source">
+          {gettext(
+            "This account belongs to no site yet, so these come from its account-wide audiences, which 1.0 stops reading. Saving gives it a membership here that carries them."
+          )}
+        </p>
+        <p :if={@source == :none} class="mt-2 text-sm text-base-content/70" id="audiences-source">
+          {gettext(
+            "This account belongs to other sites but not this one, so it reads nothing gated here. Saving adds it to this site as a viewer."
+          )}
+        </p>
+      </div>
+
+      <form phx-submit="save_audiences" id="audiences-form" class="space-y-4">
         <fieldset>
-          <legend class="text-sm font-medium">{gettext("Audiences")}</legend>
-          <div class="mt-2 flex flex-wrap gap-4">
+          <legend class="sr-only">{gettext("Audiences")}</legend>
+          <%!-- An empty value keeps the form non-empty when every box is clear,
+                so "untick the last one" still submits the `audiences` map. --%>
+          <input type="hidden" name="audiences[_submitted]" value="true" />
+          <div class="flex flex-wrap gap-4">
             <label
               :for={audience <- KilnCMS.CMS.Audiences.all()}
               class="flex items-center gap-2 text-sm"
             >
               <input
                 type="checkbox"
-                name={"access[audience_#{audience}]"}
+                name={"audiences[audience_#{audience}]"}
                 value="true"
-                checked={audience in @account.audiences}
+                checked={audience in @checked}
                 class="rounded border-base-content/30"
               />
               {audience}
             </label>
           </div>
         </fieldset>
-        <.button type="submit" variant="primary">{gettext("Save access")}</.button>
+        <.button type="submit" variant="primary">{gettext("Save audiences")}</.button>
       </form>
     </section>
     """
