@@ -114,7 +114,15 @@ defmodule KilnCMSWeb.Layouts do
   slot :inner_content
 
   def auth(assigns) do
-    assigns = assign(assigns, :brand, brand_or_unbranded(assigns))
+    # `put_new(:__changed__, nil)`: this is also a *controller* layout now
+    # (`/sign-in/verify`, #1676), and a controller hands a layout a plain map
+    # with no change-tracking key, which `assign/3` refuses. `nil` means "render
+    # everything" — what a dead render does anyway — and `put_new` leaves a
+    # LiveView's own tracking alone.
+    assigns =
+      assigns
+      |> Map.put_new(:__changed__, nil)
+      |> assign(:brand, brand_or_unbranded(assigns))
 
     ~H"""
     <%!-- Sign-in is where an operator forms their belief about which deployment
@@ -123,14 +131,7 @@ defmodule KilnCMSWeb.Layouts do
     <div :if={KilnCMS.Environment.label()} class="-mt-4 mb-4 flex justify-center">
       <.environment_banner />
     </div>
-    <div class="mb-6 flex w-full justify-center">
-      <a href="/" class="flex items-center">
-        <img src={@brand.logo_url} class="h-10 w-auto" alt="" referrerpolicy="no-referrer" />
-        <span class="ml-3 text-lg font-semibold tracking-tight text-base-content">
-          {@brand.site_name}
-        </span>
-      </a>
-    </div>
+    <.auth_brand brand={@brand} class="mb-6" />
     <%!-- The library's own live layout renders `Components.Flash`; replacing it
           with this layout (for the white-label banner above) dropped it, so a
           flash set on an auth page was held in the socket and never drawn (#884).
@@ -146,6 +147,30 @@ defmodule KilnCMSWeb.Layouts do
     <main id="main">
       {@inner_content}
     </main>
+    """
+  end
+
+  @doc """
+  The brand row over the sign-in family and the first-run wizard: the site's
+  logo and name, linking home.
+
+  One component rather than two copies (#1681): the wizard used to open on a
+  bare heading while every auth page it leads to carried the brand, so the very
+  first screen of a new install was the one that did not look like the product.
+  The caller resolves `brand` — `brand_or_unbranded/1` for both today — so this
+  never decides whose identity to show.
+  """
+  attr :brand, :map, required: true
+  attr :class, :string, default: nil
+
+  def auth_brand(assigns) do
+    ~H"""
+    <div class={["flex w-full justify-center", @class]}>
+      <a href="/" class="auth-brand">
+        <img src={@brand.logo_url} class="h-10 w-auto" alt="" referrerpolicy="no-referrer" />
+        <span>{@brand.site_name}</span>
+      </a>
+    </div>
     """
   end
 

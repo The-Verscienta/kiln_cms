@@ -26,7 +26,7 @@ import {hooks as colocatedHooks} from "phoenix-colocated/kiln_cms"
 import topbar from "../vendor/topbar"
 import Sortable from "../vendor/sortable"
 import {FocusTrap} from "./focus_trap"
-import {PasskeyEnroll, initPasskeySignIn} from "./passkeys"
+import {PasskeyEnroll, PasskeySignIn} from "./passkeys"
 import {PushToggle} from "./push"
 import {initAdvisoryJump} from "./advisory_jump"
 import {initRevealSection} from "./reveal_section"
@@ -59,6 +59,9 @@ const Hooks = {
   FlashAutoDismiss,
   // Passkey enrolment on /editor/settings (#331) — see assets/js/passkeys.js.
   PasskeyEnroll,
+  // Passkey sign-in on /sign-in (#331, #1681): reveals the server-rendered,
+  // hidden button where WebAuthn exists — see assets/js/passkeys.js.
+  PasskeySignIn,
   // Web Push opt-in on /editor/settings (#628) — see assets/js/push.js.
   PushToggle,
   // Presentation console (#355): relay the framed external front end's
@@ -1146,10 +1149,6 @@ liveSocket.connect()
 // A line that is cut without a goodbye looks exactly like a working one; this
 // asks for itself while the page is in front and rebuilds a quiet line.
 watchLiveness(liveSocket)
-
-// Passkey sign-in affordance on /sign-in (#331) — progressive enhancement,
-// no-op on other pages and on browsers without WebAuthn.
-initPasskeySignIn()
 
 // Installable editor PWA (#65). Gated on the manifest link, which the root
 // layout emits only for authorised editors/admins — so a public reader browsing
