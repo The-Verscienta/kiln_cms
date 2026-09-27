@@ -43,7 +43,7 @@
   <p :if={@suggestion} class="mt-4 text-base-content/60">
     <a
       href={KilnCMS.I18n.localized_path(@locale, "/search") <> "?q=" <> URI.encode_www_form(@suggestion)}
-      class="text-primary hover:underline"
+      class="text-primary-ink hover:underline"
     >
       {gettext("Did you mean “%{suggestion}”?", suggestion: @suggestion)}
     </a>

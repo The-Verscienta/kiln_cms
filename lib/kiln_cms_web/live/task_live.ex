@@ -277,7 +277,7 @@ defmodule KilnCMSWeb.TaskLive do
             patch={scope_path(@view, value)}
             class={[
               "rounded-full border px-2.5 py-0.5 text-xs",
-              @scope == value && "border-primary bg-primary/10 text-primary",
+              @scope == value && "border-primary bg-primary/10 text-primary-ink",
               @scope != value && "border-base-content/20 hover:bg-base-200"
             ]}
           >

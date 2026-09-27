@@ -49,10 +49,16 @@ for this purpose. The hooks have no styles of their own:
 | Hook | On |
 |---|---|
 | `public-header`, `public-site-name`, `public-main`, `public-footer-nav`, `public-attribution` | The public chrome (`Layouts.public/1`) |
-| `public-article`, `public-masthead`, `public-title`, `public-meta`, `public-lede`, `public-body` | The document templates (`show*`) |
+| `public-article`, `public-masthead`, `public-title`, `public-meta`, `public-lede`, `public-body` | The document templates (`show*`), the editor's live preview and the shared preview link |
+| `public-article`, `public-title` | The in-context editor, which leaves `public-body` off its drag-to-reorder list: a preset that sets it to `display: contents` would take away the box the drag needs |
 | `public-title` | Every other public page's `<h1>` (blog, events, search, lock, teaser) |
 | `public-index` | The blog index list |
 | `public-search-submit` | The search form's submit button |
+
+The editor's live preview wraps each block in its own element to anchor the
+comment pins, so a rule written against `.public-body > .kiln-block` (monograph's
+bleeding image and hero) does not reach the blocks there. The shared preview
+link has no wrapper and matches the live page.
 
 Custom CSS can target the same hooks. Rename one and you break every preset
 and every site stylesheet that uses it.

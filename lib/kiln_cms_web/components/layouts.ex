@@ -1055,26 +1055,38 @@ defmodule KilnCMSWeb.Layouts do
       <%!-- The `public-*` classes are style hooks for the theme presets in
             app.css. They carry no styles of their own. --%>
       <header class="public-header border-b border-base-content/10 px-4 py-4 sm:px-6 lg:px-8">
-        <div class="public-measure flex items-center justify-between gap-4">
-          <a href="/" class="flex items-center gap-3">
+        <%!-- Wraps rather than squeezes (#1682): on a phone the nav drops to its
+              own row under the site name instead of folding its links into a
+              narrow column beside it. --%>
+        <div class="public-measure flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+          <a href="/" class="flex min-w-0 items-center gap-3">
             <img src={@brand.logo_url} class="h-7 w-auto" alt="" referrerpolicy="no-referrer" />
             <span class="public-site-name text-sm font-semibold tracking-tight">
               {@brand.site_name}
             </span>
           </a>
-          <nav class="flex flex-wrap items-center gap-4 text-sm text-base-content/70">
+          <%!-- Named so it is not a second anonymous "navigation" landmark beside
+                the footer's. Each link carries its own padding (and the nav a matching
+                negative margin), so a wrapped row keeps a finger-sized target. --%>
+          <nav
+            aria-label={gettext("Site")}
+            class="-mx-2 flex flex-wrap items-center gap-y-1 text-sm text-base-content/70"
+          >
             <%!-- A configured header menu replaces the stock links (#1318); top
                   level only — the header has no room for a tree, and the footer
                   menu is the place a deep structure belongs. An empty tree
                   (menu deleted, or missing this locale) falls back to the stock
                   links rather than stripping the site of navigation. --%>
             <%= if @header_items == [] do %>
-              <a href={KilnCMS.I18n.localized_path(@locale, "/blog")} class="hover:text-base-content">
+              <a
+                href={KilnCMS.I18n.localized_path(@locale, "/blog")}
+                class="inline-flex items-center rounded px-2 py-1.5 hover:text-base-content"
+              >
                 {gettext("Blog")}
               </a>
               <a
                 href={KilnCMS.I18n.localized_path(@locale, "/search")}
-                class="hover:text-base-content"
+                class="inline-flex items-center rounded px-2 py-1.5 hover:text-base-content"
               >
                 {gettext("Search")}
               </a>
@@ -1084,20 +1096,29 @@ defmodule KilnCMSWeb.Layouts do
                 href={item.url}
                 target={item.open_in_new_tab && "_blank"}
                 rel={item.open_in_new_tab && "noopener"}
-                class="hover:text-base-content"
+                class="inline-flex items-center rounded px-2 py-1.5 hover:text-base-content"
               >
                 {item.label}
               </a>
             <% end %>
-            <a :if={@current_user} href={~p"/account"} class="hover:text-base-content">
+            <a
+              :if={@current_user}
+              href={~p"/account"}
+              class="inline-flex items-center rounded px-2 py-1.5 hover:text-base-content"
+            >
               {gettext("Account")}
             </a>
-            <a :if={@current_user} href={~p"/sign-out"} class="hover:text-base-content">
+            <a
+              :if={@current_user}
+              href={~p"/sign-out"}
+              class="inline-flex items-center rounded px-2 py-1.5 hover:text-base-content"
+            >
               {gettext("Sign out")}
             </a>
             <span
               :if={length(@locale_links) > 1}
               class="flex items-center gap-1"
+              role="group"
               aria-label={gettext("Language")}
             >
               <a

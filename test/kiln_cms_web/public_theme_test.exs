@@ -127,6 +127,22 @@ defmodule KilnCMSWeb.PublicThemeTest do
       assert html =~ ~s(aria-label="Footer")
     end
 
+    test "the header and footer navs are distinct, named landmarks (#1682)", ctx do
+      menu(ctx, "footer", [{"Company", "/company"}])
+      brand(ctx, %{footer_menu_key: "footer"})
+
+      html = ctx.conn |> org_conn(ctx.org) |> get(~p"/blog") |> html_response(200)
+      doc = LazyHTML.from_document(html)
+
+      assert doc |> LazyHTML.query(~s(header.public-header nav[aria-label="Site"])) |> Enum.any?()
+
+      # Two `navigation` landmarks, each with its own name — a screen reader's
+      # landmark list otherwise shows two indistinguishable "navigation" rows.
+      labels = doc |> LazyHTML.query("nav") |> LazyHTML.attribute("aria-label")
+      assert length(labels) == length(doc |> LazyHTML.query("nav") |> Enum.to_list())
+      assert Enum.sort(labels) == ["Footer", "Site"]
+    end
+
     test "no footer nav renders when the slot is unconfigured", %{conn: conn} do
       refute conn |> get(~p"/blog") |> html_response(200) =~ ~s(aria-label="Footer")
     end

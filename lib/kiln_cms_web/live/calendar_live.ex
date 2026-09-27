@@ -829,7 +829,7 @@ defmodule KilnCMSWeb.CalendarLive do
                 today?(day) && "ring-1 ring-inset ring-primary"
               ]}
             >
-              <div class={["mb-1 text-xs", today?(day) && "font-bold text-primary"]}>
+              <div class={["mb-1 text-xs", today?(day) && "font-bold text-primary-ink"]}>
                 {day.day}
               </div>
               <.day_chips
@@ -947,7 +947,7 @@ defmodule KilnCMSWeb.CalendarLive do
       >
         <p class={[
           "mb-2 text-xs font-semibold uppercase tracking-wide",
-          if(today?(date), do: "text-primary", else: "text-base-content/60")
+          if(today?(date), do: "text-primary-ink", else: "text-base-content/60")
         ]}>
           {Calendar.strftime(date, "%A %-d %B")}
           <span :if={today?(date)}>· {gettext("today")}</span>

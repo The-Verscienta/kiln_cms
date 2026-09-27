@@ -180,6 +180,18 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
       refute html =~ ~s(data-kiln-block-id="#{ids.image}")
     end
 
+    test "the page being edited wears the public-* theme hooks (#1682)", %{conn: conn} do
+      editor = authed_user(:editor)
+      {page, _ids} = page_with_blocks(editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/site/page/#{page.slug}")
+
+      assert has_element?(lv, ".public-shell #in-context-article.public-article h1.public-title")
+      # Deliberately not `public-body`: a preset may make that
+      # `display: contents`, and the Sortable list needs a box of its own.
+      refute has_element?(lv, "#in-context-blocks.public-body")
+    end
+
     test "a columns block renders its nested children in place (#335)", %{conn: conn} do
       editor = authed_user(:editor)
 

@@ -709,7 +709,7 @@ defmodule KilnCMSWeb.GovernanceLive do
                 <td>
                   <span class={[
                     "rounded px-1.5 py-0.5 text-xs font-medium",
-                    e.publish? && "bg-primary/15 text-primary",
+                    e.publish? && "bg-primary/15 text-primary-ink",
                     !e.publish? && "bg-base-200 text-base-content/70"
                   ]}>
                     {e.action}
@@ -747,7 +747,7 @@ defmodule KilnCMSWeb.GovernanceLive do
                   <a
                     :if={e.publish?}
                     href={point_in_time_url(@trail.item, e.at)}
-                    class="text-xs text-primary hover:underline"
+                    class="text-xs text-primary-ink hover:underline"
                     target="_blank"
                     rel="noopener"
                   >

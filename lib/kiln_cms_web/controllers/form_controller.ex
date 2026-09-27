@@ -180,21 +180,74 @@ defmodule KilnCMSWeb.FormController do
         )
 
       {:error, form, errors} ->
-        # Embeds omit the referer Back link (it would reload an empty thank-you
-        # cycle); give them an explicit "Try again" that reopens the live form.
-        try_again =
-          if embedded?, do: ~p"/forms/#{slug}/embed", else: nil
-
-        conn
-        |> put_status(422)
-        |> html(
-          page(error_text(form, errors), back_href,
-            embed: embedded?,
-            kind: :error,
-            try_again_href: try_again
-          )
-        )
+        render_invalid(conn, form, errors, params, embedded?)
     end
+  end
+
+  # A refused submission gets the SAME form back (#1683), not a page in its
+  # place: the visitor's values filled in, each error against its field's label,
+  # and a focused summary on top. It used to be a one-line message page whose
+  # Back link was a fresh GET — everything typed was gone, and inside an iframe
+  # there was no way back at all. Still a 422, so nothing reading the status
+  # (the tests, a monitoring probe, a headless caller that posted form-encoded)
+  # sees a change there.
+  #
+  # Embedded, it is the iframe document again, under the framing policy `submit/2`
+  # already put on the conn; on-site, it is the form inside the site's public
+  # chrome, under the strict CSP the pipeline set.
+  defp render_invalid(conn, form, errors, params, embedded?) do
+    assigns = [
+      form: form,
+      errors: errors,
+      values: submitted_values(form, params),
+      rendered_at: submitted_rendered_at(params),
+      variant: Params.string(params, Forms.variant_field())
+    ]
+
+    conn = conn |> put_status(422) |> put_view(KilnCMSWeb.FormHTML)
+
+    if embedded? do
+      render(conn, :embed, assigns)
+    else
+      conn
+      |> put_root_layout(html: {KilnCMSWeb.Layouts, :root})
+      |> put_layout(false)
+      |> render(
+        :invalid,
+        assigns ++
+          [
+            current_org: conn.assigns[:current_org],
+            locale: Gettext.get_locale(KilnCMSWeb.Gettext),
+            page_title: form.name
+          ]
+      )
+    end
+  end
+
+  # What goes back into the re-rendered inputs: the form's OWN fields only, and
+  # only as plain strings. That leaves out, by construction, every machinery
+  # field (`_kiln_*`), anything a bot added, a `%Plug.Upload{}` or a nested
+  # map/list, and — named explicitly, since an admin's field could in principle
+  # share its name — the honeypot: echoing a honeypot value back would hand the
+  # bot the one thing it must never learn it tripped.
+  defp submitted_values(form, params) do
+    honeypot = Forms.honeypot_field()
+
+    for %{name: name} <- form.fields,
+        name != honeypot,
+        value = Map.get(params, name),
+        is_binary(value),
+        into: %{},
+        do: {name, value}
+  end
+
+  # The visitor's original fill-time token (#477), when it still verifies, so a
+  # corrected re-submit is timed from when they first opened the form. Anything
+  # else — missing, forged, expired — gets a fresh one from the component, the
+  # same as a first render; the spam check itself is untouched.
+  defp submitted_rendered_at(params) do
+    token = Params.string(params, Forms.rendered_at_field())
+    if Forms.fill_time_ms(token), do: token
   end
 
   # Headless (JSON) submission.
@@ -242,9 +295,8 @@ defmodule KilnCMSWeb.FormController do
   defp page(message, back_href, opts) do
     embed? = Keyword.get(opts, :embed, false)
     kind = Keyword.get(opts, :kind, :ok)
-    try_again_href = Keyword.get(opts, :try_again_href)
     {tone_class, heading} = page_tone(kind)
-    back = page_nav_html(try_again_href, back_href)
+    back = page_nav_html(back_href)
     resizer = if embed?, do: ~s(<script defer src="/embed-frame.js"></script>), else: ""
 
     body_class =
@@ -276,26 +328,13 @@ defmodule KilnCMSWeb.FormController do
   defp page_tone(:error), do: {"text-error", gettext("Something needs fixing")}
   defp page_tone(_), do: {"text-base-content", gettext("Thank you")}
 
-  defp page_nav_html(try_again_href, _back_href) when is_binary(try_again_href) do
-    href = Phoenix.HTML.html_escape(try_again_href) |> Phoenix.HTML.safe_to_string()
-
-    ~s(<p class="mt-4"><a href="#{href}" class="btn btn-primary btn-sm">#{h(gettext("Try again"))}</a></p>)
-  end
-
-  defp page_nav_html(_try_again, back_href) when is_binary(back_href) do
+  defp page_nav_html(back_href) when is_binary(back_href) do
     href = Phoenix.HTML.html_escape(back_href) |> Phoenix.HTML.safe_to_string()
 
     ~s(<p class="mt-4"><a href="#{href}" class="btn btn-default btn-sm">&larr; #{h(gettext("Back"))}</a></p>)
   end
 
-  defp page_nav_html(_, _), do: ""
-
-  defp error_text(_form, errors) do
-    detail = Enum.map_join(errors, "; ", fn {field, message} -> "#{field} #{message}" end)
-    # Interpolated rather than concatenated: a trailing-space msgid is a trap for
-    # translators, and some locales need the detail somewhere other than the end.
-    gettext("Your submission couldn't be saved: %{detail}", detail: detail)
-  end
+  defp page_nav_html(_), do: ""
 
   # Only same-origin referers are offered as a back link (an open redirect
   # otherwise). Anything else falls back to no link.

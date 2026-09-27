@@ -207,6 +207,13 @@ couldn't carry a token). Instead:
 - **rate limit** — the tight per-IP `form` bucket (20/min);
 - server-side validation of every declared field (unknown keys dropped).
 
+A browser submission that fails validation gets a `422` carrying the same form
+again (#1683), on-site inside the public layout and embedded inside the iframe
+document: the visitor's values for the form's own fields filled back in, each
+error shown against its field (`aria-invalid`, `aria-describedby`), and a
+focused summary on top that links to each field by its label. The honeypot is
+always rendered empty. The JSON endpoint still answers `{ok: false, errors}`.
+
 ## Spam moderation (#477)
 
 Post-storage triage on top of the pre-storage defenses above: every accepted

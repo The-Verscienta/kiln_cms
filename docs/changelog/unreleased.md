@@ -140,7 +140,6 @@ carries the reasoning.
   instead; `mix kiln.plugins.doctor` names the field type
   ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540)).
 
-
 <a id="tenant-strict-host-false-multi-org-upgrade"></a>
 
 - **If you set `TENANT_STRICT_HOST=false` on a multi-org deployment, give every
@@ -477,6 +476,21 @@ carries the reasoning.
   which has no Back link, links back into the form.
   ([#1673](https://github.com/The-Verscienta/kiln_cms/issues/1673))
 
+<a id="a-refused-public-form-submission-shows-the-form-again"></a>
+
+- **A refused public form submission shows the form again, with your input
+  kept and each error next to its field.** A form that failed validation was
+  replaced by a one-line page naming fields by their machine names, and its
+  Back link (or, embedded, its Try again link) reloaded an empty form. The
+  422 response is now the same form, inside the site's public layout or the
+  embed's iframe document, with the submitted values filled back in. Each
+  refused field is marked `aria-invalid` and described by its message, and a
+  summary at the top, which takes focus, lists the problems by label and links
+  to each field. The messages are translated. The honeypot and anything that
+  isn't one of the form's own fields are never echoed back. The JSON
+  endpoint's `errors` map is unchanged.
+  ([#1683](https://github.com/The-Verscienta/kiln_cms/issues/1683))
+
 <a id="console-pages-show-their-title-and-an-empty-calendar-or-task-list-says-so"></a>
 
 - **Console pages show their title, and an empty calendar or task list says
@@ -515,6 +529,24 @@ carries the reasoning.
   `project.exs` now registers `KilnCMS.Notifications`
   ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540)).
 
+
+<a id="ember-links-and-labels-in-the-console-meet-aa-contrast-the-previews-wear-the"></a>
+
+- **Ember links and labels in the console meet AA contrast; the previews wear
+  the site's theme, and the public header nav is named and wraps on a phone.**
+  About thirty links, filter chips, tabs and labels (the overview's cards,
+  governance, analytics, the inspector, the calendar's "today", public search)
+  were set in raw `text-primary`: ember `#FF6200` is 3.0:1 on white and 2.7:1
+  on its own 10% tint, under the 4.5:1 WCAG 1.4.3 asks of text. They now use
+  the kit's `text-primary-ink` (7.3:1 on white, 6.5:1 on the tint; dark theme
+  8.2:1 and 7.0:1). Only icons and a chart bar keep raw ember, each marked
+  `contrast-ok:`, and a test fails on any new unmarked use. The editor preview,
+  the shared preview and the in-context editor carry the `public-*` hooks the
+  delivery templates do, so a theme preset or a site's custom CSS styles them
+  as it styles the live page. The public header's `<nav>` is labelled "Site",
+  distinct from the "Footer" nav, and on a narrow screen it drops to its own
+  row under the site name, with finger-sized link targets.
+  ([#1677](https://github.com/The-Verscienta/kiln_cms/issues/1677) · [#1682](https://github.com/The-Verscienta/kiln_cms/issues/1682))
 
 ## Security
 

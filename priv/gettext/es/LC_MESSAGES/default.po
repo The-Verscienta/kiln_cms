@@ -463,6 +463,11 @@ msgstr "%{failed} fallidos en 24 h · %{disabled} desactivados automáticamente"
 msgid "%{forms} form allowlist(s) and %{sites} site-wide embed default(s) name sites outside EMBED_ORIGINS, which caps which sites may frame forms on this deployment. Those sites are dropped from what is served, so an iframe of the form on them is blank. The saved lists are unchanged."
 msgstr "%{forms} lista(s) de sitios permitidos de formularios y %{sites} valor(es) predeterminado(s) de inserción de sitio nombran sitios fuera de EMBED_ORIGINS, que limita qué sitios pueden enmarcar formularios en este despliegue. Esos sitios se omiten de lo que se sirve, así que un iframe del formulario en ellos aparece en blanco. Las listas guardadas no cambian."
 
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{label}: %{message}"
+msgstr "%{label}: %{message}"
+
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{locale} is not a configured locale"
@@ -2904,6 +2909,11 @@ msgstr "Elegir archivos"
 msgid "Choose from library"
 msgstr "Elegir de la biblioteca"
 
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "Choose one of the listed options."
+msgstr "Elige una de las opciones de la lista."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Choose published content…"
@@ -5212,6 +5222,11 @@ msgstr "Introduzca un código actual para generar nuevos códigos de recuperaci�
 msgid "Enter a current code to turn it off"
 msgstr "Introduzca un código actual para desactivarla"
 
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "Enter a date in the format YYYY-MM-DD."
+msgstr "Introduce una fecha con el formato AAAA-MM-DD."
+
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Enter a path starting with /."
@@ -5222,10 +5237,20 @@ msgstr "Introduzca una ruta que empiece por /."
 msgid "Enter a valid go-live date and time."
 msgstr "Introduce una fecha y hora de publicación válidas."
 
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "Enter a whole number."
+msgstr "Introduce un número entero."
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Enter an address to send the test to."
 msgstr "Introduzca una dirección a la que enviar la prueba."
+
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "Enter an email address, like name@example.com."
+msgstr "Introduce una dirección de correo electrónico, como nombre@example.com."
 
 #: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
 #, elixir-autogen, elixir-format
@@ -5313,6 +5338,11 @@ msgstr "Error 404"
 #, elixir-autogen, elixir-format
 msgid "Error 500"
 msgstr "Error 500"
+
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "Error:"
+msgstr "Error:"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -11589,6 +11619,7 @@ msgstr "El inicio de sesión único no está disponible ahora en este sitio. Ent
 msgid "Single sign-on saved."
 msgstr "Inicio de sesión único guardado."
 
+#: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Site"
@@ -13129,6 +13160,11 @@ msgstr "La copia de trabajo va por delante del texto publicado."
 msgid "Theme"
 msgstr "Tema"
 
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "There is a problem with your submission"
+msgstr "Hay un problema con tu envío"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "There isn't enough content yet to suggest metadata from."
@@ -13292,6 +13328,11 @@ msgstr "Este experimento no puede convertir: %{reason}."
 msgid "This experiment concluded without a winner."
 msgstr "Este experimento concluyó sin ganadora."
 
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "This field is required."
+msgstr "Este campo es obligatorio."
+
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
 msgid "This field isn't inline-editable here."
@@ -13301,6 +13342,11 @@ msgstr "Este campo no se puede editar en línea aquí."
 #, elixir-autogen, elixir-format
 msgid "This form is inactive — the embed shows “Form not found” until you activate it."
 msgstr "Este formulario está inactivo: la incrustación muestra «Form not found» hasta que lo active."
+
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "This form is no longer accepting submissions."
+msgstr "Este formulario ya no acepta envíos."
 
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
@@ -13561,6 +13607,11 @@ msgstr "Este enlace para darse de baja no es válido."
 msgid "This upload's metadata is being stripped in the background. It is not visible on the site or in the API until that finishes."
 msgstr "Los metadatos de esta subida se están eliminando en segundo plano. No será visible en el sitio ni en la API hasta que termine."
 
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "This value isn't valid."
+msgstr "Este valor no es válido."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "This was published. Your collaborative edits were saved with it."
@@ -13734,7 +13785,6 @@ msgstr "Trigramas"
 msgid "Trigram glyphs: three lines per item — published at the bottom, translated in the middle, scheduled on top; solid means yes. Hover one for its reading."
 msgstr "Trigramas: tres líneas por elemento — publicado abajo, traducido en medio, programado arriba; una línea continua significa sí. Pasa el cursor sobre uno para ver su lectura."
 
-#: lib/kiln_cms_web/controllers/form_controller.ex
 #: lib/kiln_cms_web/controllers/offline_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Try again"
@@ -15088,11 +15138,6 @@ msgstr "Tu sitio todavía no tiene página de inicio."
 #, elixir-autogen, elixir-format
 msgid "Your site is ready — sign in with the account you just created. A draft home page is waiting for you."
 msgstr "Tu sitio está listo: inicia sesión con la cuenta que acabas de crear. Un borrador de página de inicio te está esperando."
-
-#: lib/kiln_cms_web/controllers/form_controller.ex
-#, elixir-autogen, elixir-format
-msgid "Your submission couldn't be saved: %{detail}"
-msgstr "No se pudo guardar su envío: %{detail}"
 
 #: lib/kiln_cms_web/live/configure_live.ex
 #, elixir-autogen, elixir-format
