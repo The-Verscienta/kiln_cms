@@ -7,7 +7,7 @@ defmodule KilnCMSWeb.AccountsLiveTest do
   import Phoenix.LiveViewTest
 
   alias KilnCMS.Accounts
-  alias KilnCMS.Accounts.{RoleGrant, User}
+  alias KilnCMS.Accounts.{Scoping, User}
 
   @password "password123456"
 
@@ -48,6 +48,72 @@ defmodule KilnCMSWeb.AccountsLiveTest do
   defp in_hours(hours), do: DateTime.add(DateTime.utc_now(), hours, :hour)
 
   defp reread(user), do: Accounts.get_user!(user.id, authorize?: false)
+
+  @gated hd(KilnCMS.CMS.Audiences.gated())
+
+  defp seed_org do
+    Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+      name: "Accounts Site #{System.unique_integer([:positive])}",
+      slug: "accountslive-#{System.unique_integer([:positive])}",
+      status: :active
+    })
+  end
+
+  defp member_of(user, org_id, role \\ :viewer) do
+    Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+      user_id: user.id,
+      organization_id: org_id,
+      role: role
+    })
+  end
+
+  defp membership_on(user, org_id) do
+    user.id
+    |> Accounts.list_memberships_for_user!(authorize?: false)
+    |> Enum.find(&(&1.organization_id == org_id))
+  end
+
+  defp gated_page(admin, org_id) do
+    {:ok, page} =
+      KilnCMS.CMS.create_page(
+        %{title: "Gated", slug: "gated-#{System.unique_integer([:positive])}", audience: @gated},
+        actor: admin,
+        tenant: org_id
+      )
+
+    {:ok, published} = KilnCMS.CMS.publish_page(page, %{}, actor: admin, tenant: org_id)
+    published
+  end
+
+  # Through the real read policy, as the account itself.
+  defp can_read?(reader, page, org_id) do
+    case KilnCMS.CMS.get_page(page.id,
+           actor: reread(reader),
+           tenant: org_id,
+           not_found_error?: false
+         ) do
+      {:ok, %{id: id}} -> id == page.id
+      _ -> false
+    end
+  end
+
+  defp checked_audiences(html) do
+    html
+    |> Floki.parse_document!()
+    |> Floki.find("#audiences-form input[type=checkbox][checked]")
+    |> Enum.map(fn input ->
+      [name] = Floki.attribute(input, "name")
+      String.replace(name, ~r/^audiences\[audience_(.*)\]$/, "\\1")
+    end)
+  end
+
+  defp flash_text(html) do
+    html
+    |> Floki.parse_document!()
+    |> Floki.find("#flash-info p")
+    |> Floki.text()
+    |> String.trim()
+  end
 
   describe "authorization" do
     test "anonymous users are redirected to sign-in", %{conn: conn} do
@@ -149,6 +215,7 @@ defmodule KilnCMSWeb.AccountsLiveTest do
 
       assert render_hook(view, "page", %{"to" => ["2"]}) =~ "Accounts"
       assert render_hook(view, "save_access", %{}) =~ "Accounts"
+      assert render_hook(view, "save_audiences", %{"audiences" => %{}}) =~ "Accounts"
     end
   end
 
@@ -314,6 +381,121 @@ defmodule KilnCMSWeb.AccountsLiveTest do
       html = view |> element("button", "Sign out everywhere") |> render_click()
 
       assert html =~ "Signed out of every session"
+    end
+  end
+
+  # The audience checkboxes write the account's membership on the site the page
+  # is served from — the value the read policy consults — and never the global
+  # `User.audiences` column (#1646). Every "can it read" below is a real
+  # `CMS.get_page` under the content read policy: the bug was a write that
+  # stored fine and changed nothing.
+  describe "audiences on this site" do
+    setup %{conn: conn} do
+      admin = authed_user(:admin)
+      %{conn: log_in(conn, admin), admin: admin}
+    end
+
+    test "ticking an audience lets a member read gated content, unticking takes it away", %{
+      conn: conn,
+      admin: admin
+    } do
+      reader = seeded(:viewer)
+      member_of(reader, Accounts.default_org_id())
+      page = gated_page(admin, Accounts.default_org_id())
+
+      refute can_read?(reader, page, Accounts.default_org_id())
+
+      {:ok, view, _html} = live(conn, ~p"/editor/accounts/#{reader.id}")
+
+      html =
+        view
+        |> form("#audiences-form", %{"audiences" => %{"audience_#{@gated}" => "true"}})
+        |> render_submit()
+
+      assert flash_text(html) == "Audiences updated."
+      assert checked_audiences(html) == [to_string(@gated)]
+      assert can_read?(reader, page, Accounts.default_org_id())
+      # The deprecated column is not what changed.
+      assert reread(reader).audiences == []
+
+      render_hook(view, "save_audiences", %{"audiences" => %{"_submitted" => "true"}})
+
+      assert membership_on(reader, Accounts.default_org_id()).audiences == []
+      refute can_read?(reader, page, Accounts.default_org_id())
+    end
+
+    test "the global column no longer decides what a member sees ticked", %{conn: conn} do
+      # What `--migrate-audiences` leaves behind: a membership, and a stale
+      # global column the member's access no longer reads.
+      reader = seeded(:viewer, %{audiences: [@gated]})
+      member_of(reader, Accounts.default_org_id())
+
+      {:ok, _view, html} = live(conn, ~p"/editor/accounts/#{reader.id}")
+
+      assert checked_audiences(html) == []
+    end
+
+    test "an account with no membership gets one on the first save, keeping its tier", %{
+      conn: conn,
+      admin: admin
+    } do
+      editor = seeded(:editor, %{audiences: [@gated]})
+      page = gated_page(admin, Accounts.default_org_id())
+
+      {:ok, view, html} = live(conn, ~p"/editor/accounts/#{editor.id}")
+
+      # Shown ticked from the fallback it reads through today, and said so.
+      assert checked_audiences(html) == [to_string(@gated)]
+      assert html =~ "belongs to no site yet"
+
+      html = view |> form("#audiences-form") |> render_submit()
+
+      assert flash_text(html) ==
+               "Audiences updated. This account is now a member of #{Accounts.default_org().name}."
+
+      membership = membership_on(editor, Accounts.default_org_id())
+      assert membership.role == :editor
+      assert membership.audiences == [@gated]
+      assert Scoping.effective_tier(editor, Accounts.default_org_id()) == :editor
+      assert can_read?(editor, page, Accounts.default_org_id())
+      refute html =~ "belongs to no site yet"
+    end
+
+    test "edits the membership of the site being served, not another", %{conn: conn, admin: admin} do
+      org = seed_org()
+      reader = seeded(:viewer)
+      member_of(reader, Accounts.default_org_id())
+      member_of(reader, org.id)
+      page = gated_page(admin, org.id)
+
+      {:ok, view, html} =
+        conn |> org_conn(org) |> live(~p"/editor/accounts/#{reader.id}")
+
+      assert html =~ "Audiences on #{org.name}"
+
+      view
+      |> form("#audiences-form", %{"audiences" => %{"audience_#{@gated}" => "true"}})
+      |> render_submit()
+
+      assert membership_on(reader, org.id).audiences == [@gated]
+      assert membership_on(reader, Accounts.default_org_id()).audiences == []
+      assert can_read?(reader, page, org.id)
+    end
+
+    test "an editor of the site cannot reach the page" do
+      editor = authed_user(:viewer)
+      member_of(editor, Accounts.default_org_id(), :editor)
+
+      conn = log_in(Phoenix.ConnTest.build_conn(), editor)
+      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/editor/accounts")
+    end
+
+    test "an admin of another site cannot reach this site's page" do
+      other_admin = authed_user(:viewer)
+      member_of(other_admin, seed_org().id, :admin)
+
+      conn = log_in(Phoenix.ConnTest.build_conn(), other_admin)
+      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/editor/accounts")
     end
   end
 
