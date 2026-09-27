@@ -31,6 +31,20 @@ carries the reasoning.
   carries its prose in `body` and no longer in `legacy_html`.
   ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537))
 
+<a id="a-site-whose-code-injection-snippet-opens-a-websocket-to-its-vendor-must"></a>
+
+- **A site whose code-injection snippet opens a websocket to its vendor must
+  now list that `wss://` origin under Connections.** The stock `connect-src`
+  no longer carries `ws: wss:` (see Security), and an `https://` source does
+  not admit a `wss://` URL, so a chat or live-analytics widget pasted into
+  Settings → Code injection that talks to its vendor over a websocket is
+  refused by the browser after the upgrade — look for a `connect-src`
+  violation naming a `wss://` URL in the public site's console. Add that
+  origin (e.g. `wss://relay.widget.example`) to the Connections list; the
+  field now accepts `wss://` origins, and only that field does. A snippet that
+  only `fetch`es or beacons needs nothing
+  ([#1615](https://github.com/The-Verscienta/kiln_cms/issues/1615)).
+
 <a id="before-upgrading-make-every-webhook-receiver-verify-x-kilncms-webhook-signature"></a>
 
 - **Before upgrading, make every webhook receiver verify
@@ -115,6 +129,24 @@ carries the reasoning.
   legacy params that stored `legacy_html`.
   ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537))
 
+<a id="release-candidates-are-opt-in-everywhere-mix-kilnupdate-pre"></a>
+
+- **Release candidates are opt-in everywhere: `mix kiln.update --pre`.** A
+  `vX.Y.Z-rc.N` tag sorts above every earlier final release, so before the
+  first one is pushed, each place that picks "the newest release" now skips
+  pre-releases (#1541). `mix kiln.update` defaults to the highest *final*
+  release; `--pre` lets a candidate count, and `--to v1.0.0-rc.1` names one.
+  A pin already on a candidate is not downgraded by a plain update, and moves
+  on once the final release ships. At a pre-release target the task prints
+  the `[Unreleased]` changelog section's Breaking and Upgrade notes, since a
+  candidate is tagged with its changes still there. `release.yml` pushes the
+  exact image tag for a candidate but moves `latest` only for a final release,
+  and a pre-release `client-js-v*` tag publishes to npm under `next`, not
+  `latest`. `Kiln.Updates` already asked `releases/latest`, which excludes
+  releases marked as pre-releases; a candidate published *without* the flag is
+  now refused as `{:error, :prerelease}` instead of being offered as an
+  update. `docs/releasing.md` gains "Cutting a release candidate".
+
 ## Fixed
 
 <a id="a-hard-line-break-in-a-paragraph-heading-quote-or-list-item-is-delivered-as-br"></a>
@@ -165,25 +197,30 @@ carries the reasoning.
   (~3 requests a guide) is larger than the `:api` bucket and keeps talking to
   sites that haven't picked this fix up.
 
-## Deprecated
+## Security
 
-<a id="the-legacy-block-bridge-is-deprecated-for-removal-at-10"></a>
+<a id="the-browser-csps-connect-src-is-self-alone-no-websocket-to-any"></a>
 
-- **The legacy block bridge is deprecated for removal at 1.0:
-  `KilnCMS.CMS.TypedBlocks.to_legacy/1`, `from_legacy/1`, `RichText.legacy_html`
-  and the legacy `KilnCMS.CMS.Block` write shape.** `to_legacy/1` and
-  `from_legacy/1` carry `@deprecated`, so a caller gets a compile warning:
-  render from typed blocks (`KilnCMSWeb.BlockComponents.view_blocks/1`), and
-  read stored blocks with `TypedBlocks.to_typed/1`, which accepts everything
-  `from_legacy/1` did. `KilnCMS.CMS.Block` carries `@moduledoc deprecated:`:
-  passing `blocks` as `%{type: :heading, content: …, data: …}` still casts
-  until 1.0 — write `%{"_type" => "heading", "text" => …}`. The rich-text
-  block's `legacy_html` is marked `deprecated` in the exported block JSON
-  Schema, so typed clients see it at codegen time; read `body`. It is still
-  rendered and round-tripped for blocks `mix kiln.blocks.backfill` could not
-  convert, and dropped at 1.0 — convert those blocks before then. Version
-  history keeps being read in whatever shape it was written.
-  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537))
+- **The browser CSP's `connect-src` is `'self'` alone — no websocket to any
+  other host.** It had been `'self' ws: wss:` since the first skeleton commit,
+  which let any script that got past `script-src` open a websocket to any host
+  — an exfiltration channel, which is what `connect-src` exists to close. Every
+  socket Kiln's own pages open is same-origin (`/live` and its longpoll
+  fallback, `/ws/collab`, `/ws/gql`), and CSP3 matches `'self'` against
+  `ws:`/`wss:` on the page's own host and port, so the scheme sources only ever
+  admitted *other* hosts. No browser code in Kiln connects cross-origin:
+  uploads ride the LiveView channel, the presigned-upload API is for API
+  clients, oEmbed and Unsplash are resolved server-side, and `bridge.js` runs
+  on the external front end under that site's own policy. A new Playwright
+  spec (`e2e/tests/csp.spec.js`) drives the console, an editor, the media
+  library, a public page and the same page on a second host name with zero
+  CSP violations, and shows a socket to another origin is now refused. The
+  same pass reviewed `style-src 'unsafe-inline'` (kept: templates use inline
+  `style=` attributes, which cannot carry a nonce) and the runtime
+  `img-src`/`media-src` widening (kept: every source is operator
+  configuration, a fixed provider list, or the site's own bucket origin);
+  threat-model residual 12 now records the reviewed policy
+  ([#1615](https://github.com/The-Verscienta/kiln_cms/issues/1615)).
 
 <a id="the-audience-checkboxes-on-editor-accounts-edit-the-site-membership"></a>
 
@@ -218,3 +255,23 @@ carries the reasoning.
   longer collide on the unique index.
   See [Paid memberships](../memberships.md#the-first-paid-membership).
   (#1649)
+
+## Deprecated
+
+<a id="the-legacy-block-bridge-is-deprecated-for-removal-at-10"></a>
+
+- **The legacy block bridge is deprecated for removal at 1.0:
+  `KilnCMS.CMS.TypedBlocks.to_legacy/1`, `from_legacy/1`, `RichText.legacy_html`
+  and the legacy `KilnCMS.CMS.Block` write shape.** `to_legacy/1` and
+  `from_legacy/1` carry `@deprecated`, so a caller gets a compile warning:
+  render from typed blocks (`KilnCMSWeb.BlockComponents.view_blocks/1`), and
+  read stored blocks with `TypedBlocks.to_typed/1`, which accepts everything
+  `from_legacy/1` did. `KilnCMS.CMS.Block` carries `@moduledoc deprecated:`:
+  passing `blocks` as `%{type: :heading, content: …, data: …}` still casts
+  until 1.0 — write `%{"_type" => "heading", "text" => …}`. The rich-text
+  block's `legacy_html` is marked `deprecated` in the exported block JSON
+  Schema, so typed clients see it at codegen time; read `body`. It is still
+  rendered and round-tripped for blocks `mix kiln.blocks.backfill` could not
+  convert, and dropped at 1.0 — convert those blocks before then. Version
+  history keeps being read in whatever shape it was written.
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537))

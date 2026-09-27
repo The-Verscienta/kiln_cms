@@ -182,6 +182,58 @@ defmodule Mix.Tasks.Kiln.UpdateTest do
              end)
     end
 
+    # A release candidate is tagged with its notes still under `[Unreleased]`
+    # (docs/releasing.md, #1541), so at a pre-release target that section is
+    # the candidate's own — the only place its Breaking/Upgrade notes live.
+    test "at a pre-release target, reads Unreleased as that release" do
+      changelog = """
+      ## [Unreleased]
+
+      ### Breaking
+
+      - The overlay contract changed.
+
+      ## [0.4.0]
+
+      ### Upgrade notes
+
+      1. Set NEWER_ENV_VAR before deploying.
+      """
+
+      assert [{found, [{"Breaking", "- The overlay contract changed."}]}] =
+               Update.upgrade_notes(changelog, version("0.4.0"), version("1.0.0-rc.1"))
+
+      assert Version.compare(found, version("1.0.0-rc.1")) == :eq
+
+      # At a final target the same section is work in progress, not notes.
+      assert Update.upgrade_notes(changelog, version("0.4.0"), version("1.0.0")) == []
+    end
+
+    test "a pre-release section of its own sorts below its final release" do
+      changelog = """
+      ## [1.0.0]
+
+      ### Upgrade notes
+
+      1. Final step.
+
+      ## [1.0.0-rc.1]
+
+      ### Upgrade notes
+
+      1. Candidate step.
+      """
+
+      assert [{rc, _}] = Update.upgrade_notes(changelog, version("0.4.0"), version("1.0.0-rc.1"))
+      assert Version.compare(rc, version("1.0.0-rc.1")) == :eq
+
+      # From the candidate to the final: the candidate's own notes were read.
+      assert [{final, [{"Upgrade notes", "1. Final step."}]}] =
+               Update.upgrade_notes(changelog, version("1.0.0-rc.1"), version("1.0.0"))
+
+      assert Version.compare(final, version("1.0.0")) == :eq
+    end
+
     test "returns nothing when the changelog has no sections at all" do
       assert Update.upgrade_notes("# Changelog\n", nil, version("9.9.9")) == []
     end

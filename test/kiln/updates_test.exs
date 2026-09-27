@@ -111,6 +111,41 @@ defmodule Kiln.UpdatesTest do
     end
   end
 
+  # #1541. A release candidate is published with `--prerelease`, and the
+  # endpoint asked is `releases/latest`, which GitHub defines as the newest
+  # release that is neither a draft nor a pre-release — so a correctly marked
+  # candidate never reaches `parse_release`. These pin both halves: the
+  # endpoint, and what happens when a candidate was published unmarked.
+  describe "pre-releases" do
+    test "asks releases/latest, the endpoint that excludes pre-releases" do
+      assert {:ok, url} = Updates.releases_url()
+      assert String.ends_with?(url, "/releases/latest")
+
+      test_pid = self()
+
+      Req.Test.stub(Updates, fn conn ->
+        send(test_pid, {:requested, conn.request_path})
+        Req.Test.json(conn, %{"tag_name" => "v#{current_version()}"})
+      end)
+
+      assert {:ok, :current} = Updates.check()
+      assert_received {:requested, "/repos/The-Verscienta/kiln_cms/releases/latest"}
+    end
+
+    test "an unmarked candidate is refused, never reported as an update" do
+      # Newer than this build by any reading — the case that would nag.
+      stub_release("v#{bump(current_version(), :major)}-rc.1")
+
+      assert {:error, :prerelease} = Updates.check()
+    end
+
+    test "an unmarked candidate is refused even when older than this build" do
+      stub_release("v0.0.1-rc.1")
+
+      assert {:error, :prerelease} = Updates.check()
+    end
+  end
+
   # A fork left on the default is told about someone else's releases, and it
   # fails silently in the worst direction: ahead of upstream, `compare/2` reads
   # `:gt` and the page says "Up to date" forever, so the fork's own security
