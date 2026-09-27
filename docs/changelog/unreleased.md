@@ -7,6 +7,20 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="if-your-overlay-compiles-with-warnings-as-errors-check-its-block-migrate-chains-first"></a>
+
+- **If your overlay compiles with `--warnings-as-errors`, check its blocks'
+  `migrate` chains first.** This release warns at compile time when a
+  `Kiln.Block`'s `migrate` steps skip a version, run backwards, overshoot the
+  declared `version`, or start two steps at the same version. Under
+  `mix compile --warnings-as-errors` that warning fails the build, so an
+  overlay's CI can go red on upgrade with no change of its own. Compile the
+  overlay against this release once; for each block the warning names,
+  declare the missing `migrate` step. A block with a gap already has stored
+  data its renderer cannot read correctly, and the upcaster now refuses to
+  mark it current
+  ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642)).
+
 <a id="before-upgrading-make-every-webhook-receiver-verify-x-kilncms-webhook-signature"></a>
 
 - **Before upgrading, make every webhook receiver verify

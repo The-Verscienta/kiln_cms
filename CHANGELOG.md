@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **If your overlay compiles with `--warnings-as-errors`, check its blocks'
+  `migrate` chains first.**
+  ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642) · [long form](docs/changelog/unreleased.md#if-your-overlay-compiles-with-warnings-as-errors-check-its-block-migrate-chains-first))
+
 - **Before upgrading, make every webhook receiver verify
   `x-kilncms-webhook-signature`.**
   ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616) · [long form](docs/changelog/unreleased.md#before-upgrading-make-every-webhook-receiver-verify-x-kilncms-webhook-signature))
