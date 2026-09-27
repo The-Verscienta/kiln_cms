@@ -56,6 +56,11 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Run `mix kiln.blocks.backfill` once after deploying. It is safe on the live
+  site, and it rewrites stored blocks — rolling the pin back does not undo
+  it.**
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/unreleased.md#run-mix-kilnblocksbackfill-once-after-deploying))
+
 - **If your overlay compiles with `--warnings-as-errors`, check its blocks'
   `migrate` chains first.**
   ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642) · [long form](docs/changelog/unreleased.md#if-your-overlay-compiles-with-warnings-as-errors-check-its-block-migrate-chains-first))
@@ -78,6 +83,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **`mix kiln.blocks.backfill` rewrites legacy-shaped stored blocks to the typed
+  shape.**
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/unreleased.md#mix-kilnblocksbackfill-rewrites-legacy-shaped-stored-blocks-to-the-typed-shape))
+
 - **Release candidates are opt-in everywhere: `mix kiln.update --pre`.**
   ([long form](docs/changelog/unreleased.md#release-candidates-are-opt-in-everywhere-mix-kilnupdate-pre))
 
@@ -91,6 +100,18 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#every-surface-carries-one-label-covered-internal-or-experimental))
 
 ### Fixed
+
+- **A hard line break in a paragraph, heading, quote or list item is delivered
+  as `<br/>`.**
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/unreleased.md#a-hard-line-break-in-a-paragraph-heading-quote-or-list-item-is-delivered-as-br))
+
+- **Paragraphs inside a quote or a list item no longer run together when saved
+  as Portable Text.**
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/unreleased.md#paragraphs-inside-a-quote-or-a-list-item-no-longer-run-together-when-saved-as))
+
+- **A legacy `columns` block reads as a typed `Columns` block, and an unmapped
+  legacy block keeps the type name it was stored under.**
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/unreleased.md#a-legacy-columns-block-reads-as-a-typed-columns-block-and-an-unmapped-legacy))
 
 - **A 429's `retry-after` is rounded up, never 0.**
   ([long form](docs/changelog/unreleased.md#a-429s-retry-after-is-rounded-up-never-0))

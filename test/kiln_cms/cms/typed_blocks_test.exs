@@ -65,8 +65,69 @@ defmodule KilnCMS.CMS.TypedBlocksTest do
                %Blocks.Quote{text: "q", citation: "me"},
                %Blocks.Embed{url: "https://x"},
                %Blocks.Divider{},
-               %Blocks.Custom{legacy_type: "columns"}
+               %Blocks.Columns{columns: []}
              ] = typed
+    end
+
+    # #1537: a legacy `columns` block became an opaque `Custom` on every typed
+    # read, rendering as columns only because delivery converted it straight
+    # back. It is a typed `Columns` now, children and all.
+    test "a legacy columns block keeps its layout and child tree" do
+      child = %{"type" => "heading", "content" => "Left", "data" => %{"level" => 3}}
+
+      assert [%Blocks.Columns{layout: "1-2", gap: "lg", columns: [%{"blocks" => [^child]}]}] =
+               TypedBlocks.from_legacy([
+                 %{
+                   "type" => "columns",
+                   "data" => %{
+                     "layout" => "1-2",
+                     "gap" => "lg",
+                     "columns" => [%{"blocks" => [child]}]
+                   }
+                 }
+               ])
+    end
+
+    # #1537: an unmapped legacy type kept only `"custom"` as its name when the
+    # stored string was never an atom in this build.
+    test "an unmapped legacy type keeps the name it was stored under" do
+      assert [%Blocks.Custom{legacy_type: "never_an_atom_pricing_table_1537"}] =
+               TypedBlocks.from_legacy([%{"type" => "never_an_atom_pricing_table_1537"}])
+    end
+
+    test "legacy_loss/1: nothing, for a block the typed mapping holds whole" do
+      assert TypedBlocks.legacy_loss(%{
+               "id" => "x",
+               "type" => "heading",
+               "content" => "T",
+               "data" => %{"level" => "3"},
+               "order" => 4
+             }) == []
+    end
+
+    test "legacy_loss/1: names every key the typed block has nowhere to keep" do
+      assert TypedBlocks.legacy_loss(%{
+               "type" => "image",
+               "content" => "https://old/pic.jpg",
+               "data" => %{"url" => "https://new/pic.jpg", "width" => 640},
+               "children" => [%{"type" => "heading"}],
+               "style" => "wide"
+             }) == ["content", "data.width", "children", "style"]
+    end
+
+    test "legacy_loss/1: a divider has nowhere to put content; custom keeps any data" do
+      assert TypedBlocks.legacy_loss(%{"type" => "divider", "content" => "text"}) == ["content"]
+
+      assert TypedBlocks.legacy_loss(%{
+               "type" => "custom",
+               "content" => "c",
+               "data" => %{"a" => %{"b" => [1, 2]}}
+             }) == []
+    end
+
+    test "legacy_loss/1: a legacy columns block loses only what is not its layout or tree" do
+      assert TypedBlocks.legacy_loss(%{"type" => "columns", "data" => %{"cols" => 2}}) ==
+               ["data.cols"]
     end
 
     test "preserves block ids and renders via the typed serializers" do

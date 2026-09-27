@@ -10,14 +10,16 @@ defmodule KilnCMS.CMS.BlockUnion do
   Storage uses the default `:type_and_value` shape (`%{"type" => ..., "value" =>
   ...}`); at runtime each element is an `%Ash.Union{type: atom, value: struct}`.
 
-  > `Page.blocks`/`Post.blocks` (and every content type's `blocks`) have been
-  > typed `{:array, BlockUnion}` since the storage flip, and any write that
-  > touches the blocks stores the typed shape. There was no backfill, so a row
-  > whose blocks have not been rewritten since the flip still holds the legacy
-  > `KilnCMS.CMS.Block` shape at rest; the tolerant cast below converts it on
-  > every read. Public delivery and the previews also still convert back to the
-  > legacy shape at the boundary (`KilnCMS.CMS.TypedBlocks.to_legacy/1`).
-  > Retiring the legacy rows and that bridge is #1537.
+  > `blocks` and `working_blocks` on every content type have been typed
+  > `{:array, BlockUnion}` since the storage flip, and any write that touches
+  > them stores the typed shape. The flip shipped without a data migration, so
+  > a row nobody has saved since can still hold the legacy `KilnCMS.CMS.Block`
+  > shape at rest; the tolerant `cast_stored` below converts it on every read.
+  > `mix kiln.blocks.backfill` (`KilnCMS.CMS.BlockBackfill`, #1537) rewrites
+  > those rows once, on disk — after it has run on a deployment, the only
+  > legacy shapes left at rest are the rows it reported and version history,
+  > which is hash-chained and never rewritten. The tolerant casts stay until
+  > 1.0 for both.
   """
   # The member list is the compile-time union of core + plugin blocks (D18) —
   # see `KilnCMS.Blocks.union_types/0`. A plugin's `blocks/0` joins storage,

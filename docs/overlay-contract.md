@@ -220,17 +220,36 @@ means opting out of every guarantee on this page.
 
 Stated rather than discovered later.
 
-- **The block upcast path has never run in anger.** No block has shipped a
-  version above 1, so the automatic upcast the major/minor rule leans on is
-  designed and tested but not exercised by a real migration. If your overlay
-  is the first to version a block, treat that path as new code. A missing
-  `migrate` step is a compile warning (`Kiln.Block.MigrationChain`; an error
-  from Kiln 2.0), and a stored block behind the gap is refused — left as
-  stored, `_version` included — rather than stamped current;
-  `KilnCMS.Blocks.Upcaster.try_upcast/2` says why.
-- **Eager backfill is not wired up.** Upcasting happens lazily on read; there
-  is no job that rewrites stored blocks, so already-fired artifacts need
-  re-firing after a block's shape changes.
+- **The block upcast path has run once, on one step.** `heading` is at
+  version 2, and `mix kiln.blocks.backfill` (#1537) rewrites stored blocks
+  through the same `migrate` chain the lazy read uses — tested against a
+  corpus of every stored shape (`test/support/legacy_block_corpus.ex`), not
+  yet against a large production archive. A missing `migrate` step is a
+  compile warning (`Kiln.Block.MigrationChain`; an error from Kiln 2.0), and a
+  stored block behind the gap is refused — left as stored, `_version`
+  included — rather than stamped current; `KilnCMS.Blocks.Upcaster.try_upcast/2`
+  says why. If your overlay versions a block, add the stored shapes it
+  replaces to a corpus like that one, and run the backfill with `--dry-run`
+  first.
+- **Upcasting is lazy until you run the backfill.** Stored blocks behind the
+  head version are upcast on every read, and rewritten on disk only by
+  `mix kiln.blocks.backfill`, which you run — nothing schedules it. Either way,
+  already-fired artifacts need re-firing (`mix kiln.refire_all`) after a
+  block's shape changes.
+- **Rows written before the typed block storage are converted on read until
+  the backfill has run.** The tolerant cast that does it is scheduled for
+  removal at 1.0; version history is the exception, and keeps being read in
+  whatever shape it was written (it is hash-chained, so it is never
+  rewritten).
+- **`to_markdown/1` on a block module is probed informally**, not declared on
+  the renderer behaviour. Treat it as unstable until it is.
+- **The hand-rolled `@behaviour` path is fragile against additions, on every
+  behaviour here.** `Kiln.Plugin` declares no optional callbacks at all, and
+  `Kiln.FieldType` marks only its three late additions optional — the rest are
+  required-but-defaulted, exactly like `Kiln.Plugin`'s. So a module that
+  declares `@behaviour` instead of using the `use` form gets missing-callback
+  warnings when a callback is added, which `--warnings-as-errors` turns into a
+  failed build. The `use` form is what makes additions safe; prefer it.
 
 ## Status of this document
 
