@@ -9,19 +9,18 @@ defmodule KilnCMS.Webhooks do
 
   ## Signatures
 
-  Every delivery carries two signatures:
+  Every delivery carries one signature,
+  `x-kilncms-webhook-signature: t=<unix seconds>,v1=<hex>` — the HMAC of
+  `"<t>.<raw body>"`. Binding the time into the MAC is what lets a receiver
+  refuse a captured request replayed later: reject anything whose `t` is more
+  than `signature_tolerance/0` seconds from its own clock. The body also
+  carries `delivery_id` (echoed in `x-kilncms-delivery-id`), stable across a
+  delivery's retries, so a receiver can drop a duplicate inside the window too.
+  `verify/4` is the reference implementation.
 
-    * `x-kilncms-webhook-signature: t=<unix seconds>,v1=<hex>` — the HMAC of
-      `"<t>.<raw body>"`. Binding the time into the MAC is what lets a receiver
-      refuse a captured request replayed later: reject anything whose `t` is
-      more than `signature_tolerance/0` seconds from its own clock. The body
-      also carries `delivery_id` (echoed in `x-kilncms-delivery-id`), stable
-      across a delivery's retries, so a receiver can drop a duplicate inside
-      the window too. `verify/4` is the reference implementation.
-    * `x-kilncms-signature: <hex>` — the HMAC of the raw body alone. The
-      original scheme, **deprecated**: it proves origin but not freshness. It
-      is still sent so existing receivers keep working, and will be removed
-      in a later release.
+  The original body-only `x-kilncms-signature` (the HMAC of the body alone,
+  proving origin but not freshness) was deprecated in 0.10.0 and is no longer
+  sent since 0.12.0 (#1616).
 
   Each attempt is signed when it is sent, so a retry carries a fresh `t`.
 
@@ -43,14 +42,11 @@ defmodule KilnCMS.Webhooks do
 
   require Ash.Query
 
-  @signature_header "x-kilncms-signature"
   @timestamped_signature_header "x-kilncms-webhook-signature"
   @delivery_id_header "x-kilncms-delivery-id"
   @event_header "x-kilncms-event"
   @signature_tolerance 300
 
-  @doc "The deprecated body-only signature header."
-  def signature_header, do: @signature_header
   @doc "The timestamped signature header (`t=…,v1=…`)."
   def timestamped_signature_header, do: @timestamped_signature_header
   def delivery_id_header, do: @delivery_id_header
@@ -63,13 +59,6 @@ defmodule KilnCMS.Webhooks do
   """
   @spec signature_tolerance() :: pos_integer()
   def signature_tolerance, do: @signature_tolerance
-
-  @doc """
-  Lowercase hex HMAC-SHA256 of `body` keyed by `secret` — the deprecated
-  `x-kilncms-signature` value.
-  """
-  @spec signature(String.t(), iodata()) :: String.t()
-  def signature(secret, body), do: hmac_hex(secret, body)
 
   @doc """
   The `x-kilncms-webhook-signature` value for `body` sent at `timestamp` (unix

@@ -93,7 +93,8 @@ The things an operator would hit in their first months of running Kiln.
   - `TENANT_STRICT_HOST` shipped off. Decided and done: it turns on
     automatically once a second organization exists (#1547)
   - `/live` events are not rate-limited
-  - webhooks have no replay protection
+  - webhooks have no replay protection. Decided and done: the body-only
+    `x-kilncms-signature` is no longer sent from 0.12 (#1616)
   - `/api/ask` lets an anonymous caller drive LLM cost
 - **External review of the authentication surface (#1536).** This is the one
   #1328 item that needs someone other than the maintainer, and it is the
