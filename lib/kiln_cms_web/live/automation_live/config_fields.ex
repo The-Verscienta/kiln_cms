@@ -429,7 +429,7 @@ defmodule KilnCMSWeb.AutomationLive.ConfigFields do
           type="button"
           data-token={"{{#{token}}}"}
           aria-label={gettext("Insert the %{name} placeholder", name: token_label(token))}
-          class="rounded-full border border-base-content/15 bg-base-100 px-2 py-0.5 text-xs text-base-content/80 transition-colors hover:border-primary hover:text-primary"
+          class="rounded-full border border-base-content/15 bg-base-100 px-2 py-0.5 text-xs text-base-content/80 transition-colors hover:border-primary hover:text-primary-ink"
         >
           {token_label(token)}
         </button>
