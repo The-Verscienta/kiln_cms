@@ -54,6 +54,17 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Before upgrading, make every webhook receiver verify
+  `x-kilncms-webhook-signature`.**
+  ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616) · [long form](docs/changelog/unreleased.md#before-upgrading-make-every-webhook-receiver-verify-x-kilncms-webhook-signature))
+
+### Breaking
+
+- **Webhook deliveries no longer send `x-kilncms-signature`.**
+  ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616) · [long form](docs/changelog/unreleased.md#webhook-deliveries-no-longer-send-x-kilncms-signature))
+
 ### Fixed
 
 - **A 429's `retry-after` is rounded up, never 0.**

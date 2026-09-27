@@ -87,7 +87,7 @@ defmodule KilnCMS.WebhookReliabilityTest do
         test_pid,
         {:received, conn.method, body,
          %{
-           signature: Plug.Conn.get_req_header(conn, Webhooks.signature_header()),
+           legacy_signature: Plug.Conn.get_req_header(conn, "x-kilncms-signature"),
            timestamped: Plug.Conn.get_req_header(conn, Webhooks.timestamped_signature_header()),
            delivery_id: Plug.Conn.get_req_header(conn, Webhooks.delivery_id_header()),
            event: Plug.Conn.get_req_header(conn, Webhooks.event_header()),
@@ -117,9 +117,42 @@ defmodule KilnCMS.WebhookReliabilityTest do
     assert headers.delivery_id == [delivery.id]
     assert headers.content_type == ["application/json"]
     secret = WebhookEndpoint.secret(endpoint)
-    assert headers.signature == [Webhooks.signature(secret, body)]
+    # Removed in 0.12 (#1616): the body-only header proved origin, not freshness.
+    assert headers.legacy_signature == []
     assert [timestamped] = headers.timestamped
     assert Webhooks.verify(secret, body, timestamped) == :ok
+  end
+
+  # #1616: a job enqueued by an older release — here the oldest, pre-ledger
+  # args shape — still sitting in the queue across the upgrade. Headers are
+  # built at send time, so it goes out signed the current way and without the
+  # removed body-only header.
+  test "a job enqueued before the upgrade delivers with the current signature" do
+    test_pid = self()
+
+    Req.Test.stub(KilnCMS.Webhooks, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      send(test_pid, {:received, body, Map.new(conn.req_headers)})
+      Plug.Conn.send_resp(conn, 200, "{}")
+    end)
+
+    endpoint = endpoint!()
+
+    %{"endpoint_id" => endpoint.id, "event" => "page.published", "payload" => %{"title" => "Old"}}
+    |> KilnCMS.Webhooks.DeliveryWorker.new()
+    |> Oban.insert!()
+
+    drain_with_retries()
+
+    assert_received {:received, body, headers}
+    assert Jason.decode!(body) == %{"event" => "page.published", "data" => %{"title" => "Old"}}
+    refute Map.has_key?(headers, "x-kilncms-signature")
+
+    assert Webhooks.verify(
+             WebhookEndpoint.secret(endpoint),
+             body,
+             headers[Webhooks.timestamped_signature_header()]
+           ) == :ok
   end
 
   test "a URL the address check refuses is recorded, not dialled" do

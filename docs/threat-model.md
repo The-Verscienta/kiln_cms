@@ -600,8 +600,8 @@ build if a resource is ever registered without that authorizer.
   from Kiln, with unmodified content, and sent within the tolerance window it
   enforces (five minutes by default), because the timestamp is inside the MAC.
   Inside the window a receiver dedupes on the signed `delivery_id`. The older
-  body-only `x-kilncms-signature` is still sent, deprecated: it proves origin
-  and integrity, not freshness. See residual risk 15 and
+  body-only `x-kilncms-signature`, which proved origin and integrity but not
+  freshness, is no longer sent (0.12.0, #1616). See residual risk 15 and
   [webhooks.md](webhooks.md#verifying-the-signature).
 - **Secret disclosure** — each endpoint's signing secret is vault-encrypted at
   rest, so a database dump, backup or replica does not hand out the ability to
@@ -1572,8 +1572,8 @@ because other files cite them by number.
     room, was closed at the publish path (#1061). The bound an operator can rely
     on stays 30 seconds (`lib/kiln_cms_web/channels/socket_reauth.ex`), and
     cross-node eviction stays reasoned, not exercised, as #1060 decided.
-15. ~~**Webhook deliveries have no anti-replay.**~~ **Closed for receivers
-    that verify the timestamped signature.** Every delivery now carries
+15. ~~**Webhook deliveries have no anti-replay.**~~ **Closed (0.12.0,
+    #1616).** Every delivery carries
     `x-kilncms-webhook-signature: t=<unix>,v1=<hex>`, an HMAC of
     `"<t>.<body>"`, and a `delivery_id` inside the signed body (echoed in
     `x-kilncms-delivery-id`) that stays the same across a delivery's retries.
@@ -1582,27 +1582,22 @@ because other files cite them by number.
     window cannot be replayed to. Re-stamping a captured request with a fresh
     `t` does not verify, because `t` is inside the MAC.
 
-    **Remainder.** The original body-only `x-kilncms-signature` is still sent
-    during a deprecation period. A receiver that verifies only that header is
-    as exposed as before: anyone who captures one signed request (TLS would
-    have to fail first) can replay it indefinitely. The replay re-announces old
-    state rather than granting new access, but the replayed body may be
-    audience-gated or passphrase-locked content (`audience`/`locked`, #1014).
-    So the exposure lasts as long as the receiver keeps that body, not merely
-    as long as the body is harmless. An admin **redelivery** is a new delivery
-    with a new id and a fresh timestamp, on purpose. See
+    ~~**Remainder.** The original body-only `x-kilncms-signature` is still sent
+    during a deprecation period.~~ **Removed in 0.12.0 (#1616).** The
+    body-only header, deprecated in 0.10.0, is no longer sent, so there is no
+    signature left on a delivery that verifies without a timestamp. A receiver
+    that verified only the old header now sees it missing and must move to the
+    timestamped one (the 0.12.0 upgrade note). An admin **redelivery** is a new
+    delivery with a new id and a fresh timestamp, on purpose. See
     [webhooks.md](webhooks.md#verifying-the-signature).
 
-    **1.0 verdict (decided, #1535 → #1616): fix before 1.0 (remove the
-    deprecated header).** The timestamped scheme closes replay for receivers that verify it
-    (`lib/kiln_cms/webhooks.ex:46-65`; both headers are sent at
-    `lib/kiln_cms/webhooks/delivery_worker.ex:158-161`). The remainder exists
-    only because the body-only `x-kilncms-signature` is still sent. 0.10.0
-    deprecated it with "will be removed in a later release" and no date
-    (`lib/kiln_cms/webhooks.ex:21-24`, `docs/webhooks.md:157`). If it survives
-    into 1.0 it becomes part of the covered webhook contract and can only be
-    removed at 2.0. The removal therefore belongs in 0.12, where the roadmap
-    puts deprecations, with an upgrade note telling receivers to switch.
+    **1.0 verdict (decided, #1535 → #1616): fix before 1.0 — done.** The
+    timestamped header is the only signature a delivery carries
+    (`KilnCMS.Webhooks.timestamped_signature/3`, sent by
+    `KilnCMS.Webhooks.DeliveryWorker`), so the covered webhook contract at 1.0
+    has no freshness-free signature in it. What remains is the receiver's side
+    of the bargain: a receiver that skips the `t` check, or verifies nothing,
+    is replayable by construction, and no sender change can fix that.
 
 **Not on this list, but named by the 1.0 roadmap: `/api/ask` lets an anonymous
 caller drive LLM cost** (see *Other outbound calls* above). **1.0 verdict
