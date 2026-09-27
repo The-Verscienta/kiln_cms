@@ -3178,6 +3178,12 @@ msgstr "Confirmar nueva contraseña"
 msgid "Confirm your email"
 msgstr "Confirmar su correo electrónico"
 
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
+#, elixir-autogen, elixir-format
+msgid "Confirm your subscription"
+msgstr "Confirma tu suscripción"
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Confirmations"
@@ -4522,6 +4528,11 @@ msgstr "Dispositivos que reciben notificaciones"
 #, elixir-autogen, elixir-format
 msgid "Did you mean “%{suggestion}”?"
 msgstr "¿Quiso decir «%{suggestion}»?"
+
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
+#, elixir-autogen, elixir-format
+msgid "Didn't sign up? Close this page and you won't hear from us."
+msgstr "¿No te suscribiste? Cierra esta página y no volverás a saber de nosotros."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -6972,6 +6983,7 @@ msgid "Link existing"
 msgstr "Vincular existente"
 
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
 #, elixir-autogen, elixir-format
 msgid "Link not recognized"
 msgstr "Enlace no reconocido"
@@ -11766,6 +11778,11 @@ msgstr "Iniciar"
 msgid "Start a discussion on this block"
 msgstr "Iniciar un debate en este bloque"
 
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
+#, elixir-autogen, elixir-format
+msgid "Start sending newsletters to %{email}?"
+msgstr "¿Empezar a enviar boletines a %{email}?"
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
@@ -11953,6 +11970,7 @@ msgid "Subscribers"
 msgstr "Suscriptores"
 
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
 #, elixir-autogen, elixir-format
 msgid "Subscription confirmed"
 msgstr "Suscripción confirmada"
@@ -12285,7 +12303,7 @@ msgstr "¡Gracias por contactarnos, [field:name]!"
 msgid "Thanks — we got your message."
 msgstr "Gracias — hemos recibido su mensaje."
 
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
 #, elixir-autogen, elixir-format
 msgid "Thanks — your subscription to %{email} is confirmed."
 msgstr "Gracias: su suscripción de %{email} está confirmada."
@@ -13110,7 +13128,7 @@ msgstr "Este navegador no puede recibir notificaciones push. En iPhone y iPad ne
 msgid "This build reports no usable version, so it can't be compared against upstream."
 msgstr "Esta compilación no informa de una versión utilizable, por lo que no puede compararse con upstream."
 
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
 #, elixir-autogen, elixir-format
 msgid "This confirmation link is invalid or expired."
 msgstr "Este enlace de confirmación no es válido o ha caducado."
@@ -14559,6 +14577,11 @@ msgstr "Escribe tu página de inicio"
 #, elixir-autogen, elixir-format
 msgid "Writes new prose from your instruction. Describe what this section should say."
 msgstr "Redacta texto nuevo a partir de tu instrucción. Describe qué debe decir esta sección."
+
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
+#, elixir-autogen, elixir-format
+msgid "Yes, subscribe me"
+msgstr "Sí, suscríbeme"
 
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
 #, elixir-autogen, elixir-format

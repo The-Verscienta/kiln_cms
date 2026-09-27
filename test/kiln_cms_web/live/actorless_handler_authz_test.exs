@@ -4,8 +4,10 @@ defmodule KilnCMSWeb.ActorlessHandlerAuthzTest do
 
   Every other privileged `handle_event/3` in the console funnels into an Ash
   action carrying the actor, so a mistake in the mount guard is still caught by
-  a policy. These five do not: `Newsletter.send_as_newsletter/2` writes with
-  `authorize?: false`, `Mail.deliver_now/1` is a bare `Mailer.deliver/1`,
+  a policy. These did not: `Newsletter.send_as_newsletter/2` wrote with
+  `authorize?: false` until #1655 (it now runs under `NewsletterSend`'s policy
+  against a freshly-read actor, so its guard here is UX backed by a policy),
+  `Mail.deliver_now/1` is a bare `Mailer.deliver/1`,
   `DnsCheck.run/1` and `check_port25/0` take no arguments about who is asking,
   `Links.SweepWorker.enqueue/1` takes an org id, and `ReleasePreview.sign/1`
   takes a struct. For them the guard *is* the authorization — and a mount guard

@@ -74,7 +74,8 @@ defmodule KilnCMSWeb.SocketReauth do
   the same answer from the same stale role, scopes, audiences and org
   memberships for as long as the tab stays open — a check that looks like it
   works and never refuses anything. A caller that skips this reload has built
-  nothing.
+  nothing. The same holds for a LiveView, which is why
+  `KilnCMSWeb.NewsletterLive` reloads through here before each send (#1655).
 
   `nil` is a real answer, not a failure: `BridgeSocket` admits anonymous
   connections, which hold no account to reload but still have their *document*

@@ -75,10 +75,17 @@ defmodule KilnCMS.Newsletter do
     * `:segment_id` — restrict to one segment; omit to send to every confirmed
       subscriber.
     * `:subject` — email subject; defaults to the document title.
-    * `:actor` — the admin triggering the send (recorded on the ledger).
+    * `:actor` — who is sending. The campaign is written **under this actor's
+      authorization** (#1655): `NewsletterSend`'s policy admits an admin of the
+      document's org, and — for the automation path only —
+      `%KilnCMS.SystemActor{}`. A person's id is recorded as `sent_by_id`.
+      Pass a freshly-read actor: the policy decides on the struct it is given,
+      so a stale one carries a revoked role with it (see
+      `KilnCMSWeb.NewsletterLive`, which reloads before sending).
 
   Returns `{:ok, %NewsletterSend{}}` once the campaign is queued, or
   `{:error, reason}` when the document isn't safe to send (`:not_published`,
+  `%Ash.Error.Forbidden{}` when the actor may not create the campaign,
   `:gated` — a non-public audience with no entitled tier segment targeted,
   `:no_such_segment`, or `:not_fired` when no `:web` artifact exists yet).
 
@@ -110,12 +117,17 @@ defmodule KilnCMS.Newsletter do
         content_id: document.id,
         subject: opts[:subject] || document.title,
         segment_id: opts[:segment_id],
-        sent_by_id: opts[:actor] && opts[:actor].id,
+        # Matched, not dereferenced: a `SystemActor` has no `:id` (#1402).
+        sent_by_id: actor_id(opts[:actor]),
         # Automation provenance + dedupe key (#376) — nil for manual sends.
         automation_rule_id: automation && automation.rule_id,
         content_published_at: automation && automation.published_at
       },
-      authorize?: false,
+      # Authorized as the caller (#1655). This used to be `authorize?: false`
+      # behind the console's tier check alone, which a demoted global admin's
+      # stale struct still passed; an email cannot be unsent, so the policy is
+      # the gate and the LiveView check is UX.
+      actor: opts[:actor],
       # The campaign lands in the document's site (epic #336).
       tenant: document.org_id,
       return_notifications?: true
@@ -135,6 +147,9 @@ defmodule KilnCMS.Newsletter do
         KilnCMS.Repo.rollback(reason)
     end
   end
+
+  defp actor_id(%{id: id}), do: id
+  defp actor_id(_actor), do: nil
 
   defp settle_transaction({:ok, {send, notifications}}) do
     Ash.Notifier.notify(notifications)
