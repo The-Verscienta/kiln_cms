@@ -44,7 +44,8 @@ A variant a reader may not open (audience-gated, passphrase-locked) is skipped
 along the chain like a missing one. The chain is resolved per *locale*, not
 per document, so the per-field localization tracked in
 [#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) will resolve
-each localized field along the same chain.
+each localized field along the same chain — see the
+[field-level localization design check](field-level-localization.md).
 
 ## Coverage & staleness
 
