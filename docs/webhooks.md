@@ -154,7 +154,6 @@ Every request carries these headers:
 | `x-kilncms-webhook-signature` | `t=<unix seconds>,v1=<hex>` where `v1` is the lowercase hex HMAC-SHA256 of `"<t>.<raw body>"`, keyed by the endpoint's secret |
 | `x-kilncms-delivery-id` | The delivery's id, the same value as the body's `delivery_id`. Stable across retries |
 | `x-kilncms-event` | The event name (redundant with the body's `event` field, for routing without a parse) |
-| `x-kilncms-signature` | **Deprecated.** Hex HMAC-SHA256 of the raw body alone, with no timestamp. Still sent so existing receivers keep working; it will be removed in a later release |
 
 To verify a delivery:
 
@@ -207,12 +206,13 @@ def verify(secret: str, raw_body: bytes, header: str, tolerance: int = 300) -> b
     return any(hmac.compare_digest(expected, v) for k, v in pairs if k == "v1")
 ```
 
-**Migrating from `x-kilncms-signature`.** The old header is the HMAC of the body
-alone. It proves a delivery came from Kiln unmodified, but not when it was sent,
-so a captured request can be replayed to a receiver that checks only that
-header, indefinitely (see the [threat model](threat-model.md#residual-risks)). Both
-headers are sent on every delivery, so a receiver can switch at any time, with
-no coordination.
+**The removed `x-kilncms-signature`.** Releases 0.10 and 0.11 also sent a
+body-only `x-kilncms-signature`: the hex HMAC of the body alone. It proved a
+delivery came from Kiln unmodified, but not when it was sent, so a captured
+request could be replayed indefinitely to a receiver that checked only that
+header. It was deprecated in 0.10.0 and is no longer sent from 0.12.0 (#1616).
+A receiver still reading it sees the header missing on every delivery; switch
+it to `x-kilncms-webhook-signature` as above.
 
 An admin **redelivery** is a new delivery: a new `delivery_id` and a fresh `t`.
 It is meant to be accepted.
