@@ -10,12 +10,18 @@ defmodule KilnCMS.Accounts.ThrottleStoreTest do
   alias KilnCMS.Accounts.ThrottleStore
   alias KilnCMS.Repo
 
+  # Windows are epoch-aligned (by the database clock, or Hammer's on the
+  # fallback), so two hits a minute-wide test makes can land either side of a
+  # boundary and see two windows — a flake that failed CI at 17:13:00.05. A
+  # century-wide window's current one runs 1970–2070: no test run straddles it.
+  @window :timer.hours(24 * 365 * 100)
+
   defp bucket, do: "test:#{System.unique_integer([:positive])}"
 
   describe "a fixed window" do
     test "admits `limit` and refuses the rest, with the time left in the window" do
       b = bucket()
-      scale = :timer.minutes(10)
+      scale = @window
 
       assert {:allow, 1} = ThrottleStore.hit(b, "k", scale, 3)
       assert {:allow, 2} = ThrottleStore.hit(b, "k", scale, 3)
@@ -28,17 +34,17 @@ defmodule KilnCMS.Accounts.ThrottleStoreTest do
     test "a cost is charged whole" do
       b = bucket()
 
-      assert {:allow, 4} = ThrottleStore.hit(b, "k", :timer.minutes(1), 5, 4)
-      assert {:deny, _} = ThrottleStore.hit(b, "k", :timer.minutes(1), 5, 2)
+      assert {:allow, 4} = ThrottleStore.hit(b, "k", @window, 5, 4)
+      assert {:deny, _} = ThrottleStore.hit(b, "k", @window, 5, 2)
     end
 
     test "keys and buckets are independent" do
       b = bucket()
 
-      assert {:allow, 1} = ThrottleStore.hit(b, "a", :timer.minutes(1), 1)
-      assert {:deny, _} = ThrottleStore.hit(b, "a", :timer.minutes(1), 1)
-      assert {:allow, 1} = ThrottleStore.hit(b, "b", :timer.minutes(1), 1)
-      assert {:allow, 1} = ThrottleStore.hit(bucket(), "a", :timer.minutes(1), 1)
+      assert {:allow, 1} = ThrottleStore.hit(b, "a", @window, 1)
+      assert {:deny, _} = ThrottleStore.hit(b, "a", @window, 1)
+      assert {:allow, 1} = ThrottleStore.hit(b, "b", @window, 1)
+      assert {:allow, 1} = ThrottleStore.hit(bucket(), "a", @window, 1)
     end
 
     test "a simultaneous burst admits exactly the budget" do
@@ -46,7 +52,7 @@ defmodule KilnCMS.Accounts.ThrottleStoreTest do
 
       allowed =
         1..30
-        |> Task.async_stream(fn _ -> ThrottleStore.hit(b, "burst", :timer.minutes(10), 7) end,
+        |> Task.async_stream(fn _ -> ThrottleStore.hit(b, "burst", @window, 7) end,
           max_concurrency: 30
         )
         |> Enum.count(&match?({:ok, {:allow, _}}, &1))
@@ -71,10 +77,10 @@ defmodule KilnCMS.Accounts.ThrottleStoreTest do
     test "forget/2 clears every window of the key" do
       b = bucket()
 
-      assert {:allow, 1} = ThrottleStore.hit(b, "k", :timer.minutes(1), 1)
-      assert {:deny, _} = ThrottleStore.hit(b, "k", :timer.minutes(1), 1)
+      assert {:allow, 1} = ThrottleStore.hit(b, "k", @window, 1)
+      assert {:deny, _} = ThrottleStore.hit(b, "k", @window, 1)
       assert :ok = ThrottleStore.forget(b, "k")
-      assert {:allow, 1} = ThrottleStore.hit(b, "k", :timer.minutes(1), 1)
+      assert {:allow, 1} = ThrottleStore.hit(b, "k", @window, 1)
     end
   end
 
@@ -148,7 +154,7 @@ defmodule KilnCMS.Accounts.ThrottleStoreTest do
       b = bucket()
 
       assert_raise ArgumentError, ~r/inside a transaction/, fn ->
-        Repo.transaction(fn -> ThrottleStore.hit(b, "k", :timer.minutes(1), 1) end)
+        Repo.transaction(fn -> ThrottleStore.hit(b, "k", @window, 1) end)
       end
 
       assert ThrottleStore.spent(b, "k") == 0
@@ -156,7 +162,7 @@ defmodule KilnCMS.Accounts.ThrottleStoreTest do
 
     test "a forgiveness inside one is fine" do
       b = bucket()
-      ThrottleStore.hit(b, "k", :timer.minutes(1), 1)
+      ThrottleStore.hit(b, "k", @window, 1)
 
       assert {:ok, :ok} = Repo.transaction(fn -> ThrottleStore.forget(b, "k") end)
       assert ThrottleStore.spent(b, "k") == 0
@@ -187,6 +193,9 @@ defmodule KilnCMS.Accounts.ThrottleStoreFallbackTest do
   alias KilnCMS.Accounts.ThrottleStore
   alias KilnCMS.Accounts.ThrottleStore.Local
 
+  # A window no test run straddles — see ThrottleStoreTest.
+  @window :timer.hours(24 * 365 * 100)
+
   defp without_database(fun), do: fun.()
 
   setup do
@@ -202,7 +211,7 @@ defmodule KilnCMS.Accounts.ThrottleStoreFallbackTest do
       capture_log(fn ->
         results =
           without_database(fn ->
-            for _ <- 1..5, do: ThrottleStore.hit(b, "k", :timer.minutes(10), 3)
+            for _ <- 1..5, do: ThrottleStore.hit(b, "k", @window, 3)
           end)
 
         # Not fail-open: the budget still holds. Not fail-closed: the first
@@ -222,7 +231,7 @@ defmodule KilnCMS.Accounts.ThrottleStoreFallbackTest do
     assert :ok = without_database(fn -> ThrottleStore.forget(b, "k") end)
 
     assert {:allow, 1} =
-             without_database(fn -> ThrottleStore.hit(b, "k", :timer.minutes(10), 3) end)
+             without_database(fn -> ThrottleStore.hit(b, "k", @window, 3) end)
   end
 
   test "the fallback log is throttled to once a minute per node" do
@@ -231,7 +240,7 @@ defmodule KilnCMS.Accounts.ThrottleStoreFallbackTest do
     log =
       capture_log(fn ->
         without_database(fn ->
-          for _ <- 1..4, do: ThrottleStore.hit(b, "k", :timer.minutes(10), 100)
+          for _ <- 1..4, do: ThrottleStore.hit(b, "k", @window, 100)
         end)
       end)
 
