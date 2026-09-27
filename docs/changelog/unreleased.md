@@ -31,6 +31,31 @@ carries the reasoning.
   carries its prose in `body` and no longer in `legacy_html`.
   ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537))
 
+<a id="if-your-overlay-compiles-with-warnings-as-errors-check-its-block-migrate-chains-first"></a>
+
+- **If your overlay compiles with `--warnings-as-errors`, check its blocks'
+  `migrate` chains first.** This release warns at compile time when a
+  `Kiln.Block`'s `migrate` steps skip a version, run backwards, overshoot the
+  declared `version`, or start two steps at the same version. Under
+  `mix compile --warnings-as-errors` that warning fails the build, so an
+  overlay's CI can go red on upgrade with no change of its own. Compile the
+  overlay against this release once; for each block the warning names,
+  declare the missing `migrate` step. A block with a gap already has stored
+  data its renderer cannot read correctly, and the upcaster now refuses to
+  mark it current
+  ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642)).
+
+<a id="a-new-throttlecounters-table-holds-the-auth-budgets-run-migrations-as"></a>
+
+- **A new `throttle_counters` table holds the auth budgets; run migrations as
+  usual.** `bin/migrate` (or the release's own migrate step) creates it. No
+  configuration changes. The order does not matter on a rolling deploy: until
+  the table exists, each node counts its budgets locally, as every release
+  before this one did, and logs that it is doing so at most once a minute.
+  Counts are not carried over from the old in-memory tables, so every budget
+  starts empty on upgrade, exactly as it did after any restart. An Oban cron
+  job in the `default` queue prunes closed windows every five minutes. (#1619)
+
 <a id="a-site-whose-code-injection-snippet-opens-a-websocket-to-its-vendor-must"></a>
 
 - **A site whose code-injection snippet opens a websocket to its vendor must
@@ -125,6 +150,47 @@ carries the reasoning.
   now refused as `{:error, :prerelease}` instead of being offered as an
   update. `docs/releasing.md` gains "Cutting a release candidate".
 
+## Changed
+
+<a id="a-block-whose-migrate-steps-skip-a-version-now-warns-at-compile-time"></a>
+
+- **A block whose `migrate` steps skip a version now warns at compile time;
+  from Kiln 2.0 it is an error.** ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642))
+  `Kiln.Block.MigrationChain`, a Spark verifier on the `Kiln.Block` DSL,
+  checks that the `migrate` steps carry every version from 1 to the block's
+  declared `version` — and names a step that runs backwards, one that
+  overshoots the declared version, and two steps starting at the same version.
+  Nothing in the DSL required this before, so it is a warning rather than an
+  error: a block module that compiled on 0.11 still compiles. Under
+  `mix compile --warnings-as-errors` it does fail the build, which is
+  intended — every core block's chain is clean, and an overlay block with a
+  gap has stored data that can never reach the shape its renderer reads.
+  Declare the missing step. The warning becomes a compile error in Kiln 2.0.
+
+<a id="every-surface-carries-one-label-covered-internal-or-experimental"></a>
+
+- **Every surface carries one label: covered, internal or experimental.**
+  The README's stability table and `docs/overlay-contract.md` now hold the
+  same table, word for word, and `test/kiln_cms/docs/surface_labels_test.exs`
+  fails when the copies differ, when a row of the contract's *Covered surfaces*
+  table or an entry of its *Not covered* list is missing from the matching
+  row, when an endpoint in the API guide's surfaces table has no label, or
+  when one surface carries two. The README had been missing five of the
+  contract's internal entries. Features that ship switched off — AI assist,
+  the SEO generator, provenance, experiments, oEmbed, demo mode, compliance,
+  referrer analytics, SSO, two-factor auth and the per-site integrations — are
+  now labelled *supported when enabled* rather than lumped in with the
+  experimental ones. Three promises move. **Newly covered:** the documented
+  environment variables, and `mix kiln.update` (with its documented flags),
+  `mix kiln.plugins.doctor` and `mix kiln.search.check`, the tasks the
+  contract tells an overlay's CI to run. **Newly internal**, closing two of the
+  contract's known soft spots: `to_markdown/1` on a block module, which is
+  probed rather than declared on `Kiln.Block.Renderer` and has no test for an
+  overlay's implementation, and a hand-rolled `@behaviour` when a callback is
+  added — the `use` form is what the additions promise covers. Every other
+  `mix kiln.*` task is labelled internal too; a release that needs you to run
+  one names it in its upgrade notes. (#1542)
+
 ## Fixed
 
 <a id="a-hard-line-break-in-a-paragraph-heading-quote-or-list-item-is-delivered-as-br"></a>
@@ -175,7 +241,46 @@ carries the reasoning.
   (~3 requests a guide) is larger than the `:api` bucket and keeps talking to
   sites that haven't picked this fix up.
 
+<a id="the-block-upcaster-refuses-a-gap-in-the-migrate-chain"></a>
+
+- **The block upcaster refuses a gap in the `migrate` chain instead of
+  stamping the block current.** ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642))
+  `KilnCMS.Blocks.Upcaster` walked every version from a stored block's
+  `_version` to head and, where no `migrate` step existed, bumped `_version`
+  anyway. The data was never transformed but was marked current, so no later
+  run — lazy or the #1537 backfill — would ever migrate it. The upcaster now
+  follows the declared steps and refuses when one is missing: the block comes
+  back exactly as stored, `_version` included, with nothing half-applied.
+  The new `try_upcast/2` and `try_upcast_block_map/1` return
+  `{:error, %{kind: :missing_migration, detail: ...}}` for callers that
+  report (the backfill's refusal report is the intended consumer);
+  `upcast/2` and `upcast_block_map/1` keep their map-returning contract for
+  read and delivery paths, which render the stored shape and log a warning
+  rather than crash.
+
 ## Security
+
+<a id="auth-budgets-now-hold-across-nodes-and-restarts"></a>
+
+- **Auth budgets now hold across nodes and restarts.** Every
+  `AccountThrottle` budget (password sign-in, the TOTP and recovery-code
+  budget, the reset and magic-link mail budgets, the owner alerts) and the
+  credential rate-limit buckets (`:auth`, `:register`, `:unlock`) used to count
+  in each node's ETS. On N nodes an attacker got N budgets, and a deploy forgave
+  every attempt. They now count in one Postgres table through
+  `KilnCMS.Accounts.ThrottleStore`: one `INSERT … ON CONFLICT DO UPDATE …
+  RETURNING` per charge, keyed on a SHA-256 of the key, windowed on the
+  database clock, and pruned by an Oban cron job. Measured locally, a charge
+  costs 0.34 ms at p50 (1.1 ms at p50 with sixteen writers on one key), against
+  the ~208 ms bcrypt verification the same sign-in already pays. Nothing is
+  written to the user row, so an unknown address still throttles exactly like a
+  known one. If the database cannot answer, a budget falls back to counting on
+  the node, which is the old bound and never a weaker one. The fallback is
+  logged. A charge made inside a transaction now raises instead of being
+  silently refunded by a rollback. The registration budget is therefore charged
+  in `before_transaction`, so a registration that fails on a taken address
+  still pays. Flood-ceiling buckets (`:api`, `:delivery`, `:gql`, …) stay per
+  node on purpose. This closes threat-model residual 10. (#1619)
 
 <a id="the-browser-csps-connect-src-is-self-alone-no-websocket-to-any"></a>
 

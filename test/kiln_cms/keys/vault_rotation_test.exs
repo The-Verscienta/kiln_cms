@@ -115,6 +115,7 @@ defmodule KilnCMS.Keys.VaultRotationTest do
     @not_vault %{
       {KilnCMS.Accounts.ApiKey, :api_key_hash} => "a SHA-256 hash, not ciphertext",
       {KilnCMS.Accounts.Passkey, :public_key} => "a public COSE key",
+      {KilnCMS.Accounts.ThrottleCounter, :key_hash} => "a SHA-256 hash of a throttle key",
       {KilnCMS.Accounts.User, :totp_secret} => "stored raw, not through the vault",
       {KilnCMS.Accounts.User, :totp_pending_secret} => "stored raw, not through the vault"
     }

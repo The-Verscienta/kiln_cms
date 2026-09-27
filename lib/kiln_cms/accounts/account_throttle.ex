@@ -32,7 +32,9 @@ defmodule KilnCMS.Accounts.AccountThrottle do
 
   ## One atomic operation, not check-then-count
 
-  `hit/3` is a single `:ets.update_counter` that increments *and* compares. A
+  Every charge is a single increment-and-compare — one Postgres upsert in
+  `KilnCMS.Accounts.ThrottleStore.hit/5`, as it was one `:ets.update_counter`
+  before #1619. A
   read followed by a later increment is not the same thing: a burst of
   simultaneous requests would all read "under budget", all proceed, and all get
   a full password verification — which is precisely the shape of the attack this
@@ -54,8 +56,10 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   keys on a resolved user id, and it can, because by the time it is reached the
   caller has already proved the first factor and the account is not in question.
 
-  The hash is not decoration: this table is a security control keyed on user
-  identifiers, and it survives into crash dumps and `:observer`.
+  The hash is not decoration: this store is a security control keyed on user
+  identifiers, and it survives into database backups, crash dumps and
+  `:observer`. (`ThrottleStore` hashes the key once more before storing it, so
+  every row's key is a fixed 32 bytes whatever was submitted.)
 
   ## The second factor gets a tighter budget of its own (#714)
 
@@ -106,21 +110,30 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   every refusal is logged so an operator can see recovery being suppressed
   rather than guess at it.
 
-  ## Scope
+  ## Scope: the cluster, not the node (#1619)
 
-  Per node, in ETS, and reset by a restart — the same trade `KilnCMSWeb.RateLimit`
-  makes. The alternative (counters on the user row) turns every guess into a
-  write to a row the attacker chooses, and leaves an unknown address with nowhere
-  to count, which is what reopens account enumeration.
+  Every budget here lives in `KilnCMS.Accounts.ThrottleStore` — a counter table
+  in Postgres — so it holds across every node and survives a restart. Until
+  #1619 they lived in each node's ETS, where N nodes meant N budgets and a
+  deploy forgave every attempt (threat-model residual 10).
+
+  Still nothing on the user row. Counters there would turn every guess into a
+  write to a row the attacker chooses, and leave an unknown address with nowhere
+  to count, which is what reopens account enumeration. A counter row is keyed on
+  a hash and names no account.
+
+  When the database cannot answer, each budget is counted on the node instead —
+  the bound Kiln shipped before #1619, never a weaker one. `ThrottleStore`'s
+  moduledoc argues that fail direction.
 
   Every limit is config-overridable so the test suite can pin them:
 
       config :kiln_cms, KilnCMS.Accounts.AccountThrottle,
         budget: 3, window: :timer.seconds(1), mail_budget: 2
   """
-  use Hammer, backend: :ets
-
   require Logger
+
+  alias KilnCMS.Accounts.ThrottleStore
 
   # Twenty, not ten (#762). Since #742 a successful password no longer clears
   # this counter for an account that owes a second factor — deliberately, because
@@ -144,7 +157,7 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   #
   # The alternatives were considered and rejected: refunding the first factor on
   # a second-factor denial reopens #742's unbounded token-minting loop, and a
-  # "hand back one unit" primitive would mean `hit/3` is no longer one atomic
+  # "hand back one unit" primitive would mean a charge is no longer one atomic
   # increment-and-compare, which is load-bearing (see below). Moving a number
   # adds no new failure mode; both of those do.
   @budget 20
@@ -152,6 +165,9 @@ defmodule KilnCMS.Accounts.AccountThrottle do
 
   @second_factor_budget 5
   @second_factor_window :timer.minutes(15)
+
+  # Every bucket this module charges, for `forget_all/0`.
+  @buckets ~w(signin 2fa signin:alert 2fa:alert 2fa:settings-alert mail:password_reset mail:magic_link)
 
   @mail_budget 5
   @mail_window :timer.hours(1)
@@ -182,7 +198,7 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   would have no remedy at all.
   """
   @spec forgive(String.t()) :: :ok
-  def forgive(identifier), do: drop(key("signin", identifier), window())
+  def forgive(identifier), do: drop("signin", identifier)
 
   @doc """
   Charges one second-factor attempt against this account (#714).
@@ -206,7 +222,7 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   exists to protect.
   """
   @spec forgive_second_factor(String.t()) :: :ok
-  def forgive_second_factor(user_id), do: drop(key("2fa", user_id), second_factor_window())
+  def forgive_second_factor(user_id), do: drop("2fa", user_id)
 
   @doc """
   Whether the owner of this identifier should be told their account is being
@@ -217,7 +233,7 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   """
   @spec alert_allowed?(String.t()) :: boolean()
   def alert_allowed?(identifier) do
-    match?({:allow, _count}, hit(key("signin:alert", identifier), @alert_window, 1))
+    charge("signin:alert", identifier, @alert_window, 1) == :allow
   end
 
   @doc """
@@ -232,14 +248,14 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   """
   @spec second_factor_alert_allowed?(String.t()) :: boolean()
   def second_factor_alert_allowed?(user_id) do
-    match?({:allow, _count}, hit(key("2fa:alert", user_id), @alert_window, 1))
+    charge("2fa:alert", user_id, @alert_window, 1) == :allow
   end
 
   @doc """
   Hands back an alert window that was claimed but never used.
 
   `second_factor_alert_allowed?/1` spends the window before the mail is built,
-  because `hit/3` is one atomic increment-and-compare and splitting it into a
+  because a charge is one atomic increment-and-compare and splitting it into a
   check plus a later increment would let two simultaneous refusals both send.
   The cost of that ordering is that anything failing afterwards — a wedged Oban
   queue, a saturated cache, a missing `:email_from` — would swallow the window
@@ -250,7 +266,7 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   alert without waiting out a real window.
   """
   @spec forget_second_factor_alert(String.t()) :: :ok
-  def forget_second_factor_alert(user_id), do: drop(key("2fa:alert", user_id), @alert_window)
+  def forget_second_factor_alert(user_id), do: drop("2fa:alert", user_id)
 
   @doc """
   Whether another *settings* second-factor alert may go to this user (#757).
@@ -267,13 +283,13 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   """
   @spec settings_second_factor_alert_allowed?(String.t()) :: boolean()
   def settings_second_factor_alert_allowed?(user_id) do
-    match?({:allow, _count}, hit(key("2fa:settings-alert", user_id), @alert_window, 1))
+    charge("2fa:settings-alert", user_id, @alert_window, 1) == :allow
   end
 
   @doc "Hands back a settings-alert window that was claimed but never used."
   @spec forget_settings_second_factor_alert(String.t()) :: :ok
   def forget_settings_second_factor_alert(user_id),
-    do: drop(key("2fa:settings-alert", user_id), @alert_window)
+    do: drop("2fa:settings-alert", user_id)
 
   @doc """
   Whether another `purpose` mail may be sent to this address.
@@ -286,8 +302,8 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   """
   @spec allow_mail?(purpose(), String.t()) :: boolean()
   def allow_mail?(purpose, identifier) when purpose in [:password_reset, :magic_link] do
-    case hit(key("mail:#{purpose}", identifier), mail_window(), mail_budget()) do
-      {:allow, _count} ->
+    case charge("mail:#{purpose}", identifier, mail_window(), mail_budget()) do
+      :allow ->
         true
 
       {:deny, retry_after_ms} ->
@@ -369,46 +385,35 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   @spec reset(String.t()) :: :ok
   def reset(identifier) do
     forgive(identifier)
-    drop(key("signin:alert", identifier), @alert_window)
-    Enum.each([:password_reset, :magic_link], &drop(key("mail:#{&1}", identifier), mail_window()))
+    drop("signin:alert", identifier)
+    Enum.each([:password_reset, :magic_link], &drop("mail:#{&1}", identifier))
   end
 
   @doc """
-  Forget every bucket on this node. Called by a demo reset (`KilnCMS.Demo`),
-  where one shared account means one shared failure budget that any visitor can
-  spend on purpose; the reset is the moment it is allowed to come back.
+  Forget every budget this module keeps, cluster-wide. Called by a demo reset
+  (`KilnCMS.Demo`), where one shared account means one shared failure budget
+  that any visitor can spend on purpose; the reset is the moment it is allowed
+  to come back.
 
-  `:ok` when the table doesn't exist yet (nothing has been throttled).
+  Only this module's buckets: the per-IP `KilnCMSWeb.RateLimit` counters that
+  share the store are left alone.
   """
   @spec forget_all() :: :ok
-  def forget_all do
-    :ets.delete_all_objects(__MODULE__)
-    :ok
-  rescue
-    ArgumentError -> :ok
-  end
+  def forget_all, do: ThrottleStore.forget_buckets(@buckets)
 
   # One atomic increment-and-compare per bucket. Shared rather than copied per
   # bucket so that "the gate *is* the counter" — see the moduledoc — holds by
   # construction for every budget here, present and future. The arity-1 public
   # functions stay, because the per-bucket `@doc` is where the reasoning lives
   # and a public `charge(prefix, …)` would let a call site pick a budget.
-  defp charge(prefix, subject, window, budget) do
-    case hit(key(prefix, subject), window, budget) do
+  defp charge(bucket, subject, window, budget) do
+    case ThrottleStore.hit(bucket, digest(subject), window, budget) do
       {:allow, _count} -> :allow
       {:deny, retry_after_ms} -> {:deny, retry_after_ms}
     end
   end
 
-  # Hammer's `set/3` is spec'd `count :: pos_integer()`, so zeroing a bucket is a
-  # type violation — drop the row instead (the same seam `Mail.RelayAlert` uses).
-  # Hammer names the ETS table after the module and keys rows `{key, window}`.
-  defp drop(key, scale) do
-    :ets.delete(__MODULE__, {key, div(System.system_time(:millisecond), scale)})
-    :ok
-  end
-
-  defp key(prefix, identifier), do: prefix <> ":" <> digest(identifier)
+  defp drop(bucket, subject), do: ThrottleStore.forget(bucket, digest(subject))
 
   defp budget, do: config(:budget, @budget)
   defp window, do: config(:window, @window)

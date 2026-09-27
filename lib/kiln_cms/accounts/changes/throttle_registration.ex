@@ -23,9 +23,17 @@ defmodule KilnCMS.Accounts.Changes.ThrottleRegistration do
   account yet: the address being registered is attacker-chosen, so keying on it
   would let anyone deny a specific address its first registration.
 
-  Charged from `before_action` for the reason in `KilnCMS.Accounts.ClientIpBudget`
-  — a `change/3` body runs per `AshPhoenix.Form.validate/2`, which is per
-  keystroke on a `phx-change` form.
+  Charged from a hook for the reason in `KilnCMS.Accounts.ClientIpBudget` — a
+  `change/3` body runs per `AshPhoenix.Form.validate/2`, which is per keystroke
+  on a `phx-change` form.
+
+  From `before_transaction`, not `before_action` (#1619). The bucket lives in
+  Postgres now, and `before_action` runs *inside* the create's transaction: a
+  registration that fails — an address already taken is the obvious one —
+  rolls back, and the charge would roll back with it. A flood of registrations
+  for taken addresses would then be charged nothing at all.
+  `KilnCMS.Accounts.ThrottleStore.hit/5` raises inside a transaction for
+  exactly that reason.
   """
   use Ash.Resource.Change
 
@@ -34,7 +42,7 @@ defmodule KilnCMS.Accounts.Changes.ThrottleRegistration do
 
   @impl true
   def change(changeset, _opts, _context) do
-    Ash.Changeset.before_action(changeset, fn changeset ->
+    Ash.Changeset.before_transaction(changeset, fn changeset ->
       case ClientIpBudget.check(changeset.context, :register) do
         :allow ->
           changeset

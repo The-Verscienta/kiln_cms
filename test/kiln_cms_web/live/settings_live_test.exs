@@ -287,9 +287,26 @@ defmodule KilnCMSWeb.SettingsLiveTest do
       {:ok, lv, _html} = live(log_in(conn, user), ~p"/editor/settings")
 
       # Spend the real budget from outside the LiveView, so this asserts on the
-      # message rather than on the number.
-      Stream.repeatedly(fn -> AccountThrottle.consume_second_factor(user.id) end)
-      |> Enum.find(&match?({:deny, _}, &1))
+      # message rather than on the number. In one charge rather than a loop of
+      # single ones: the test env raises this budget to a million, and since
+      # #1619 each charge is a database round trip.
+      budget =
+        Application.get_env(:kiln_cms, AccountThrottle, [])[:second_factor_budget] ||
+          AccountThrottle.defaults()[:second_factor_budget]
+
+      window =
+        Application.get_env(:kiln_cms, AccountThrottle, [])[:second_factor_window] ||
+          AccountThrottle.defaults()[:second_factor_window]
+
+      KilnCMS.Accounts.ThrottleStore.hit(
+        "2fa",
+        AccountThrottle.digest(user.id),
+        window,
+        budget,
+        budget
+      )
+
+      assert {:deny, _} = AccountThrottle.consume_second_factor(user.id)
 
       # Submitting a *correct* code: the throttle is what refuses it, so a
       # "check your authenticator" message would be plainly wrong.
