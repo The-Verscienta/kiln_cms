@@ -31,6 +31,9 @@ defmodule KilnCMS.DataCase do
   end
 
   setup tags do
+    # Before the sandbox: a leaked RateLimit env (#1614) fails here, naming
+    # the leak, rather than as a stray 429 somewhere later in the test.
+    KilnCMS.RateLimitHelpers.assert_test_limits!()
     KilnCMS.DataCase.setup_sandbox(tags)
     :ok
   end

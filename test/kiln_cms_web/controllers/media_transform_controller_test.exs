@@ -29,14 +29,13 @@ defmodule KilnCMSWeb.MediaTransformControllerTest do
 
     previous = Application.get_env(:kiln_cms, :image_transforms)
     Application.put_env(:kiln_cms, :image_transforms, signing_key: "controller-test-key")
-    previous_limits = Application.get_env(:kiln_cms, KilnCMSWeb.RateLimit)
+    KilnCMS.RateLimitHelpers.restore_limits_on_exit()
 
     on_exit(fn ->
       File.rm_rf!(root)
       File.rm_rf!(private_root)
       Application.delete_env(:kiln_cms, KilnCMS.Storage.Local)
       restore(:image_transforms, previous)
-      restore(KilnCMSWeb.RateLimit, previous_limits)
     end)
 
     %{root: root}
@@ -252,9 +251,10 @@ defmodule KilnCMSWeb.MediaTransformControllerTest do
     end
 
     test "cache misses past the per-client render budget are a 429; hits are not", %{conn: conn} do
-      Application.put_env(:kiln_cms, KilnCMSWeb.RateLimit,
-        limits: %{media_render: {1, :timer.minutes(1)}}
-      )
+      # Merged into the test limits, not replacing them: a bare
+      # `limits: %{media_render: …}` put every other bucket back on its
+      # shipped value for the rest of the test (#1614).
+      KilnCMS.RateLimitHelpers.put_limit(:media_render, 1)
 
       # Its own address, so no other test's renders share this budget.
       address = {10, 99, 0, rem(System.unique_integer([:positive]), 250) + 1}

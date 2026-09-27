@@ -11,6 +11,7 @@ defmodule KilnCMS.Demo.LiveStateTest do
 
   alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.Accounts.SessionEviction
+  alias KilnCMS.Accounts.ThrottleStore
   alias KilnCMS.Accounts.User
   alias KilnCMS.Collab.Crdt
   alias KilnCMS.Demo.LiveState
@@ -43,12 +44,20 @@ defmodule KilnCMS.Demo.LiveStateTest do
   end
 
   test "the per-account sign-in throttles are forgotten" do
+    address = "shared-demo@example.com"
+    digest = AccountThrottle.digest(address)
+    # A per-IP credential bucket in the same store, which a demo reset must
+    # leave alone: it is not one of `AccountThrottle`'s.
+    ip = "10.99.0.1"
+
     AccountThrottle.forget_all()
-    assert AccountThrottle.consume("shared-demo@example.com") == :allow
-    assert :ets.info(AccountThrottle, :size) == 1
+    assert AccountThrottle.consume(address) == :allow
+    assert KilnCMSWeb.RateLimit.check(:auth, ip) == :allow
+    assert ThrottleStore.spent("signin", digest) == 1
 
     assert AccountThrottle.forget_all() == :ok
-    assert :ets.info(AccountThrottle, :size) == 0
+    assert ThrottleStore.spent("signin", digest) == 0
+    assert ThrottleStore.spent("ip:auth", ip) == 1
   end
 
   test "every user's sockets are evicted before the restore and again after it" do

@@ -87,7 +87,11 @@ defmodule Kiln.Block.Dsl do
 
   @migration %Spark.Dsl.Entity{
     name: :migrate,
-    describe: "An upcast from one schema version to the next (Kiln v2 — D15).",
+    describe:
+      "An upcast from one schema version to the next (Kiln v2 — D15). The steps must " <>
+        "chain from version 1 to the block's `version` with no gap; a gap is a compile " <>
+        "warning (`Kiln.Block.MigrationChain`), and a stored block behind it is refused " <>
+        "by `KilnCMS.Blocks.Upcaster` rather than stamped current.",
     target: Kiln.Block.Migration,
     schema: [
       from: [type: :pos_integer, required: true, doc: "Source version."],
@@ -119,5 +123,8 @@ defmodule Kiln.Block.Dsl do
     entities: [@block]
   }
 
-  use Spark.Dsl.Extension, sections: [@section], transformers: [Kiln.Block.Transformer]
+  use Spark.Dsl.Extension,
+    sections: [@section],
+    transformers: [Kiln.Block.Transformer],
+    verifiers: [Kiln.Block.MigrationChain]
 end

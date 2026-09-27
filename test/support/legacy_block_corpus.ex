@@ -23,7 +23,8 @@ defmodule KilnCMS.LegacyBlockCorpus do
       the head `_version` and rich text still holding `legacy_html`;
     * **columns trees** — typed containers with legacy, typed and nested children;
     * **the ones that must be refused** — data a typed block has nowhere to put,
-      and a block type this build no longer has.
+      a block type this build no longer has, and a block its `migrate` chain
+      cannot carry to head.
   """
 
   @doc "Every corpus entry."
@@ -367,6 +368,10 @@ defmodule KilnCMS.LegacyBlockCorpus do
            "columns" => [%{"blocks" => [legacy(76, "divider", "text a divider cannot show")]}]
          })
        ]},
+      # No `migrate` step leaves heading v0, so the chain has a gap (#1642): the
+      # upcast is refused, and the backfill must not write it as current.
+      {"a block behind a gap in its migrate chain", {:refuse, :missing_migration},
+       [envelope("heading", %{"id" => id(77), "text" => "Gapped", "_version" => 0})]},
       {"not a block", {:refuse, :unrecognized}, [%{"nothing" => "here"}]}
     ]
   end
