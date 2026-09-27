@@ -33,6 +33,7 @@ defmodule KilnCMS.Deprecations do
   require Logger
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.LegacyAffiliation
 
   @table __MODULE__
 
@@ -128,7 +129,7 @@ defmodule KilnCMS.Deprecations do
       will not read. Let the queue drain (or cancel them) before upgrading.
   """
   @spec report() :: %{
-          legacy_audience_accounts: [%Accounts.User{}],
+          legacy_audience_accounts: [Ash.Resource.record()],
           legacy_jobs: [%{id: integer(), worker: String.t(), state: String.t()}]
         }
   def report do
@@ -160,34 +161,25 @@ defmodule KilnCMS.Deprecations do
 
   @doc """
   Move every account `report/0` lists off the `User.audiences` fallback: give
-  it a membership on the default organization carrying its audiences and its
-  standing role.
+  it a membership on the default organization through
+  `KilnCMS.Accounts.LegacyAffiliation.ensure_default_membership/2`, the one
+  definition of that step: its standing role, any live temporary role with its
+  expiry, and its audiences.
 
   That is exactly what the fallback grants on the default organization, so a
   single-site install sees no change. On any other site the account now reads
   as a member elsewhere, which gets no audiences there — the fail-closed rule
-  every other scope axis already follows. A live temporary role grant on the
-  account is not copied; it runs out on its own. Returns the migrated accounts.
+  every other scope axis already follows. Returns the migrated accounts.
   """
-  @spec migrate_legacy_audiences() :: {:ok, [%Accounts.User{}]} | {:error, term()}
+  @spec migrate_legacy_audiences() :: {:ok, [Ash.Resource.record()]} | {:error, term()}
   def migrate_legacy_audiences do
-    org_id = Accounts.default_org_id()
-
     # `authorize?: false` on both calls: the same operator tooling as
     # `report/0`, with no actor. The membership written grants exactly what
     # the fallback already grants on the default org, so it widens nothing.
     Accounts.list_legacy_audience_accounts!(authorize?: false)
     |> Enum.reduce_while({:ok, []}, fn user, {:ok, done} ->
-      case Accounts.create_org_membership(
-             %{
-               organization_id: org_id,
-               user_id: user.id,
-               role: user.role,
-               audiences: user.audiences
-             },
-             # `authorize?: false`: see the comment above the read.
-             authorize?: false
-           ) do
+      # `authorize?: false`: see the comment above the read.
+      case LegacyAffiliation.ensure_default_membership(user, authorize?: false) do
         {:ok, _membership} -> {:cont, {:ok, [user | done]}}
         {:error, error} -> {:halt, {:error, {user.email, error}}}
       end

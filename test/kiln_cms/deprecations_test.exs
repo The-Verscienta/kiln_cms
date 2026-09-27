@@ -218,6 +218,27 @@ defmodule KilnCMS.DeprecationsTest do
       refute log =~ "User.audiences fallback"
     end
 
+    test "migration carries a live temporary role, with its expiry" do
+      expires = DateTime.add(DateTime.utc_now(), 3600, :second)
+
+      legacy =
+        user(%{
+          audiences: [@gated],
+          role: :viewer,
+          granted_role: :editor,
+          granted_role_expires_at: expires
+        })
+
+      assert {:ok, [_]} = Deprecations.migrate_legacy_audiences()
+
+      membership =
+        Accounts.get_org_membership!(legacy.id, default_org_id(), authorize?: false)
+
+      assert membership.role == :viewer
+      assert membership.granted_role == :editor
+      assert DateTime.compare(membership.granted_role_expires_at, expires) == :eq
+    end
+
     test "the report action shows a non-admin nothing" do
       editor = user(%{role: :editor, audiences: [@gated]})
       _legacy = user(%{audiences: [@gated]})

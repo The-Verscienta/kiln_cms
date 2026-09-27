@@ -122,9 +122,9 @@ carries the reasoning.
   It still grants access, and now logs a warning once per account per boot.
   `mix kiln.deprecations` lists the affected accounts, and
   `--migrate-audiences` gives each a default-organization membership carrying
-  its audiences and standing role. After that, change a migrated account's
-  audiences on its membership (or comp it a tier): the checkboxes on
-  `/editor/accounts` still write the global column. See the Upgrade notes
+  its audiences, standing role and any live temporary role, the same step
+  (`KilnCMS.Accounts.LegacyAffiliation`) billing and the console's audience
+  checkboxes take. See the Upgrade notes
   ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538)).
 
 <a id="webhook-and-newsletter-jobs-enqueued-without-orgid-and-pre-ledger-webhook-jobs"></a>
