@@ -216,6 +216,140 @@ defmodule Mix.Tasks.Kiln.UpdateGuardsTest do
     end
   end
 
+  # #1541: `Version` orders `1.1.0-rc.1` above `1.0.0`, so a task that takes
+  # the highest tag would move every downstream pin onto the first release
+  # candidate pushed. Tags are made in the clone and read with --no-fetch, so
+  # each test controls exactly which releases exist.
+  describe "pre-releases" do
+    test "a plain update ignores a candidate newer than the latest release",
+         %{clone: clone} do
+      tag_candidate!(clone, "v1.1.0-rc.1")
+      checkout!(clone, "v0.2.0")
+
+      run(clone, ["--check", "--no-fetch"])
+      out = output()
+
+      assert out =~ "v0.2.0 (" and out =~ "-> v1.0.0 ("
+      refute out =~ "rc.1"
+    end
+
+    test "--pre takes the newest candidate", %{clone: clone} do
+      tag_candidate!(clone, "v1.1.0-rc.1")
+      checkout!(clone, "v1.0.0")
+
+      run(clone, ["--check", "--no-fetch", "--pre"])
+      out = output()
+
+      assert out =~ "-> v1.1.0-rc.1 ("
+      assert out =~ "Run without --check to move the pin."
+    end
+
+    test "--pre still prefers a final release over its own candidate", %{clone: clone} do
+      # 1.0.0-rc.1 < 1.0.0: the candidate is older than the release it led to.
+      git!(clone, ["tag", "v1.0.0-rc.1", "v0.2.0"])
+      checkout!(clone, "v0.1.0")
+
+      run(clone, ["--check", "--no-fetch", "--pre"])
+      out = output()
+
+      assert out =~ "-> v1.0.0 ("
+      refute out =~ "-> v1.0.0-rc.1"
+    end
+
+    test "--to names a candidate without --pre", %{clone: clone} do
+      tag_candidate!(clone, "v1.1.0-rc.1")
+      checkout!(clone, "v1.0.0")
+      target = git!(clone, ["rev-parse", "v1.1.0-rc.1"])
+
+      run(clone, ["--no-fetch", "--to", "1.1.0-rc.1"])
+
+      assert head(clone) == target
+      assert output() =~ "Pin moved."
+    end
+
+    test "--check --exit-code does not report a candidate as an update", %{clone: clone} do
+      tag_candidate!(clone, "v1.1.0-rc.1")
+      checkout!(clone, "v1.0.0")
+
+      # No exit: a CI "behind upstream" job must not go red because an RC
+      # exists.
+      run(clone, ["--check", "--exit-code", "--no-fetch"])
+
+      assert output() =~ "Already up to date"
+    end
+
+    test "only candidates upstream is refused, naming --pre", %{clone: clone} do
+      for tag <- ["v0.1.0", "v0.2.0", "v1.0.0"], do: git!(clone, ["tag", "-d", tag])
+      git!(clone, ["tag", "v1.0.0-rc.1", "HEAD"])
+
+      assert_raise Mix.Error, ~r/only pre-releases:\nv1.0.0-rc.1.*Pass --pre/s, fn ->
+        run(clone, ["--check", "--no-fetch"])
+      end
+    end
+
+    test "0.x -> 1.0.0-rc.1 is a major jump: --pre alone is refused, --allow-major proceeds",
+         %{clone: clone} do
+      # Upstream as it will look when the first 1.0 candidate is pushed: 0.x
+      # finals and one candidate. The candidate carries its notes under
+      # [Unreleased], as docs/releasing.md cuts it.
+      git!(clone, ["tag", "-d", "v1.0.0"])
+      checkout!(clone, "v0.2.0")
+      rc = tag_candidate!(clone, "v1.0.0-rc.1", unreleased_breaking: "Overlays must recompile.")
+      checkout!(clone, "v0.2.0")
+
+      # Without --pre there is nothing newer than the pin.
+      run(clone, ["--no-fetch"])
+      assert output() =~ "Already up to date"
+
+      assert_raise Mix.Error, ~r/0.2.0 -> 1.0.0-rc.1 is a major-version update/, fn ->
+        run(clone, ["--no-fetch", "--pre"])
+      end
+
+      assert head(clone) == git!(clone, ["rev-parse", "v0.2.0"])
+      # The refusal came after the report, which printed the candidate's notes.
+      assert output() =~ "Overlays must recompile."
+
+      run(clone, ["--no-fetch", "--pre", "--allow-major"])
+      assert head(clone) == rc
+    end
+
+    test "a pin on a candidate is not downgraded, and moves once the final ships",
+         %{clone: clone} do
+      rc = tag_candidate!(clone, "v1.1.0-rc.1")
+
+      run(clone, ["--no-fetch"])
+
+      assert output() =~ "Already ahead of the latest release"
+      assert head(clone) == rc
+
+      final = tag_candidate!(clone, "v1.1.0")
+      checkout!(clone, rc)
+
+      run(clone, ["--no-fetch"])
+
+      assert head(clone) == final
+    end
+  end
+
+  # A new commit on top of whatever is checked out, tagged `tag`, left
+  # checked out. `unreleased_breaking:` writes an `[Unreleased]` Breaking note
+  # into the changelog at that commit, the shape a candidate is tagged in.
+  defp tag_candidate!(clone, tag, opts \\ []) do
+    if note = opts[:unreleased_breaking] do
+      File.write!(
+        Path.join(clone, "CHANGELOG.md"),
+        "# Changelog\n\n## [Unreleased]\n\n### Breaking\n\n- #{note}\n\n" <> changelog_body()
+      )
+    end
+
+    File.write!(Path.join(clone, "README.md"), "#{tag}\n")
+    commit!(clone, tag)
+    git!(clone, ["tag", tag])
+    head(clone)
+  end
+
+  defp changelog_body, do: String.replace_prefix(changelog(), "# Changelog\n\n", "")
+
   describe "the guards on a real update" do
     test "a dirty tree stops the update before anything is checked out", %{clone: clone} do
       checkout!(clone, "v0.1.0")

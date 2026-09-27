@@ -1381,23 +1381,32 @@ because other files cite them by number.
     so a per-actor event budget is feasible, just not free. A cheap companion
     could land at any time: the Sentry logger handler's `:rate_limiting` option
     is still unset (`lib/kiln_cms/application.ex:333-335`).
-12. **Periodic CSP re-review** as the editor adds third-party assets. The
-    runtime `img-src` is widened by `CSP_IMG_SRC` and by the Unsplash
-    integration — the only externally-influenced part of the policy.
+12. ~~**Periodic CSP re-review** as the editor adds third-party assets.~~
+    **Closed by #1615 (the 1.0 review, from #1535's verdict): the reviewed
+    policy is recorded here, and a change to it is a change to this item.**
+    The console and public site are served, per request, with:
 
-    **1.0 verdict (decided, #1535 → #1615): fix before 1.0 (do the review
-    once; it finds one directive).** More sources now widen the policy than when this was
-    written. `img-src` also takes the enabled oEmbed providers' thumbnail hosts
-    (#489), and `media-src` takes the storage hosts (#494)
-    (`lib/kiln_cms_web/router.ex:1286-1304`). More important, `connect-src
-    'self' ws: wss:` (`router.ex:26`) has not changed since the skeleton commit,
-    and it allows a websocket to *any* host. Script that gets past `script-src`
-    could exfiltrate data over it, which is what `connect-src` exists to stop.
-    Every Kiln socket is same-origin, so narrowing the directive to `'self'`
-    (which CSP Level 3 applies to `ws:`/`wss:` on the same host) looks free,
-    though it needs a browser check. `style-src 'unsafe-inline'` belongs in the
-    same pass. At 1.0 the threat model should record a reviewed CSP, not a
-    standing reminder to review one.
+    | Directive | 1.0 value | Why |
+    |---|---|---|
+    | `script-src` | `'self' 'nonce-…'` | Per-request nonce (`put_browser_csp`). A site's code injection adds its listed origins and the `'sha256-…'` of its inline snippets, on delivery pages only. |
+    | `default-src` | `'self'` | |
+    | `connect-src` | `'self'` | Was `'self' ws: wss:`. Every socket Kiln's pages open (`/live` and its longpoll, `/ws/collab`, `/ws/gql`) is same-origin, and CSP3 matches `'self'` to `ws:`/`wss:` on the page's own host and port. No Kiln browser code connects cross-origin: uploads ride the LiveView channel, the presigned-upload API is for API clients, oEmbed and Unsplash resolve server-side, and `bridge.js` runs on the external front end under its own policy. Code injection adds a site's listed origins, `wss://` included (only this directive accepts one). |
+    | `style-src` | `'self' 'unsafe-inline'` | **Kept.** Templates and blocks use inline `style=` attributes (focal points, column widths, chart bars), which cannot carry a nonce, and the brand tokens and custom CSS are `<style>` elements. Without script, injected CSS can restyle a page but can only fetch from the origins `img-src` and `font-src` already trust. |
+    | `img-src` | `'self' data: blob:` + runtime | **Kept.** Widened by `CSP_IMG_SRC` (operator), Unsplash's thumbnail host while that integration is on, the enabled oEmbed providers' fixed thumbnail CDNs (#489), the site's own storage-profile origins (`Plugs.SiteStorageCsp`, #1559), and code injection's image list. |
+    | `media-src` | `'self' blob:` + runtime | **Kept.** `CSP_IMG_SRC` (#494) and the site's own storage origins; not the thumbnail hosts. |
+    | `font-src` | `'self' data:` | |
+    | `frame-src` | `'self'` YouTube, Vimeo players | |
+    | `object-src` / `base-uri` | `'none'` / `'self'` | |
+    | `frame-ancestors` / `form-action` | `'self'` / `'self'` | Form embeds serve their own policy (`KilnCMSWeb.Embed`). |
+
+    `test/kiln_cms_web/csp_connect_src_test.exs` asserts the served
+    `connect-src` exactly, and `e2e/tests/csp.spec.js` loads the console, an
+    editor, the media library, a public page and the same page on a second host
+    name with no CSP violation, then shows a socket to another origin is
+    refused. *Residual:* `CSP_IMG_SRC` is operator input split on whitespace
+    and trusted as written; everything a tenant supplies passes
+    `KilnCMS.CMS.Validations.CspOrigins` or `SiteProfiles.csp_origins/1`,
+    which admit only scheme, host and port.
 13. ~~**Secrets rotation runbook** (DB URL, `SECRET_KEY_BASE`,
     `TOKEN_SIGNING_SECRET`, S3 keys) is not written down.~~ **Closed by
     #1304:** [`secrets-rotation.md`](secrets-rotation.md) is the per-secret
