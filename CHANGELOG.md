@@ -61,6 +61,15 @@ Every summary line below that was shortened links to its own entry there.
   `mix kiln.deprecations` says what is left.**
   ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/unreleased.md#before-upgrading-to-10-let-queued-webhook-and-newsletter-jobs-from-before-012))
 
+- **Before upgrading, make every webhook receiver verify
+  `x-kilncms-webhook-signature`.**
+  ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616) · [long form](docs/changelog/unreleased.md#before-upgrading-make-every-webhook-receiver-verify-x-kilncms-webhook-signature))
+
+### Breaking
+
+- **Webhook deliveries no longer send `x-kilncms-signature`.**
+  ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616) · [long form](docs/changelog/unreleased.md#webhook-deliveries-no-longer-send-x-kilncms-signature))
+
 ### Changed
 
 - **An unknown option to `use KilnCMS.CMS.Content` now warns at compile time
@@ -71,6 +80,10 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A 429's `retry-after` is rounded up, never 0.**
   ([long form](docs/changelog/unreleased.md#a-429s-retry-after-is-rounded-up-never-0))
+- **The audience checkboxes on `/editor/accounts` edit the site membership, not the deprecated global column.**
+  ([long form](docs/changelog/unreleased.md#the-audience-checkboxes-on-editor-accounts-edit-the-site-membership))
+- **Paying for a membership no longer demotes a legacy editor.**
+  ([#1649](https://github.com/The-Verscienta/kiln_cms/issues/1649) · [long form](docs/changelog/unreleased.md#paying-for-a-membership-no-longer-demotes-a-legacy-editor))
 
 ### Deprecated
 

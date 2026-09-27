@@ -242,8 +242,13 @@ defmodule KilnCMSWeb.DynamicHeadlessTest do
       assert_received {:delivered, headers, body}
       assert headers["x-kilncms-event"] == "#{definition.name}.published"
 
-      assert headers["x-kilncms-signature"] ==
-               Webhooks.signature(WebhookEndpoint.secret(endpoint), body)
+      refute Map.has_key?(headers, "x-kilncms-signature")
+
+      assert Webhooks.verify(
+               WebhookEndpoint.secret(endpoint),
+               body,
+               headers["x-kilncms-webhook-signature"]
+             ) == :ok
 
       assert %{"data" => %{"title" => "Hooked"}} = Jason.decode!(body)
     end

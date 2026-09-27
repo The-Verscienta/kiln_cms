@@ -2226,6 +2226,21 @@ msgstr ""
 msgid "Audiences"
 msgstr ""
 
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Audiences on %{site}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Audiences updated."
+msgstr ""
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Audiences updated. This account is now a member of %{site}."
+msgstr ""
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Audio"
@@ -10682,6 +10697,11 @@ msgstr ""
 msgid "Save access"
 msgstr ""
 
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Save audiences"
+msgstr ""
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save branding"
@@ -12719,6 +12739,11 @@ msgstr ""
 msgid "The focus keyphrase doesn't appear in the title or SEO title."
 msgstr ""
 
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "The gated content this account can read on this site. Each site keeps its own; switch site to edit another."
+msgstr ""
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "The home page could not be created."
@@ -12935,7 +12960,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "The standing role, which applies instance-wide, plus the consumer audiences this account can read. A per-site tier overrides the role on that site."
+msgid "The standing role, which applies instance-wide. A per-site tier overrides it on that site."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -13032,7 +13057,17 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
+msgid "This account belongs to no site yet, so these come from its account-wide audiences, which 1.0 stops reading. Saving gives it a membership here that carries them."
+msgstr ""
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
 msgid "This account belongs to no site, so it authorizes from its platform role alone."
+msgstr ""
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "This account belongs to other sites but not this one, so it reads nothing gated here. Saving adds it to this site as a viewer."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/site_sso_controller.ex

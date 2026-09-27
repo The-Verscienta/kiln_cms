@@ -12,8 +12,9 @@ defmodule KilnCMS.Billing.Providers.Stripe.Signature do
   Verification happens **before** JSON decoding, so unauthenticated bytes never
   reach the decoder's allocation path.
 
-  The HMAC shape matches the repo's outbound webhook signer
-  (`KilnCMS.Webhooks.signature/2`) so inbound and outbound read identically.
+  The scheme matches the repo's outbound webhook signer
+  (`KilnCMS.Webhooks.timestamped_signature/3`, the same `t=…,v1=…` over
+  `"<t>.<body>"`) so inbound and outbound read identically.
   """
 
   # Stripe's own default tolerance. Bounds replay of a captured request; the

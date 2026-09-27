@@ -150,13 +150,17 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   end
 
   defp post(endpoint, secret, delivery_id, event, payload) do
-    # `delivery_id` rides inside the body, so both signatures cover it; the
+    # `delivery_id` rides inside the body, so the signature covers it; the
     # header copy is for routing and logging without a parse. Stable across a
     # delivery's retries — it is the ledger row's id.
     envelope = %{event: event, data: payload}
     envelope = if delivery_id, do: Map.put(envelope, :delivery_id, delivery_id), else: envelope
     body = Jason.encode!(envelope)
 
+    # Headers are built here, at send time, from nothing the job stored: a job
+    # enqueued before an upgrade (either args shape above) goes out with the
+    # headers of the release that runs it. That is how #1616 dropped the
+    # body-only `x-kilncms-signature` without a job migration.
     timestamp = System.system_time(:second)
 
     headers =
@@ -164,8 +168,6 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
         {"content-type", "application/json"},
         {Webhooks.timestamped_signature_header(),
          Webhooks.timestamped_signature(secret, timestamp, body)},
-        # Deprecated — body-only, no freshness. See `KilnCMS.Webhooks`.
-        {Webhooks.signature_header(), Webhooks.signature(secret, body)},
         {Webhooks.event_header(), event}
       ] ++ if(delivery_id, do: [{Webhooks.delivery_id_header(), delivery_id}], else: [])
 
