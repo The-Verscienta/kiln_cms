@@ -163,8 +163,32 @@ defmodule KilnCMS.Accounts.Scoping do
   def audiences(actor, subject) do
     case affiliation(actor, audience_org_id(subject)) do
       {:member, membership} -> list_of(membership, :audiences)
-      :unaffiliated -> list_of(actor, :audiences)
+      :unaffiliated -> legacy_audiences(actor)
       :foreign_org -> []
+    end
+  end
+
+  # Deprecated in 0.12, removed at 1.0 (#1538): a membership-less account's
+  # audiences come from the global column, on every org. Warns once per account
+  # per boot, and only when the fallback grants something — an account with no
+  # audiences reads the same with or without it.
+  defp legacy_audiences(actor) do
+    case list_of(actor, :audiences) do
+      [] ->
+        []
+
+      audiences ->
+        KilnCMS.Deprecations.warn_once(
+          :legacy_user_audiences,
+          Map.get(actor, :id),
+          "Account #{Map.get(actor, :id)} reads gated content through the deprecated " <>
+            "User.audiences fallback (it holds audiences but no organization membership). " <>
+            "1.0 removes the fallback; run `mix kiln.deprecations --migrate-audiences` " <>
+            "to move such accounts onto a membership.",
+          user_id: Map.get(actor, :id)
+        )
+
+        audiences
     end
   end
 

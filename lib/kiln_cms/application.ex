@@ -37,6 +37,9 @@ defmodule KilnCMS.Application do
       # `dev_routes` — so this is what actually reaches an operator. Silent
       # unless a calendar re-queried in the window.
       KilnCMS.CMS.CalendarRequeryMonitor,
+      # Owns the table that keeps a per-request deprecation warning to one line
+      # per account per boot (#1538). See `KilnCMS.Deprecations`.
+      KilnCMS.Deprecations,
       # Reclaim stale rate-limit buckets so an IP-rotating flood can't grow the
       # ETS table without bound (one row per `bucket:IP` otherwise lives forever).
       {KilnCMSWeb.RateLimit, clean_period: :timer.minutes(1), key_older_than: :timer.minutes(5)},

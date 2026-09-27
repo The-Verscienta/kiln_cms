@@ -2,7 +2,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   @moduledoc """
   Block editor for a single content record of **any** content type. The type
   comes from the `:type` param on `/editor/content/:type/:id` (or the
-  `live_action` on the legacy `/editor/pages|posts/:id` routes) and is resolved
+  `live_action` on the `/editor/pages|posts/:id` aliases, deprecated in 0.12 and
+  removed at 1.0 — see `KilnCMS.Deprecations`) and is resolved
   through `KilnCMS.CMS.ContentTypes`, so types generated with
   `mix kiln.gen.content` are editable here with no extra wiring.
 
@@ -588,8 +589,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp open_settings_if_deep_linked(socket, false), do: socket
 
   # The content type being edited: from the `:type` param on the generic
-  # `/editor/content/:type/:id` route, or the `live_action` on the legacy
-  # `/editor/pages|posts/:id` routes. Returns nil for an unknown type.
+  # `/editor/content/:type/:id` route, or the `live_action` on the deprecated
+  # `/editor/pages|posts/:id` aliases. Returns nil for an unknown type.
   defp content_kind(%{"type" => type}, socket) do
     # Resolve the type within the current site (epic #336) — a dynamic type name
     # only names a type on the org that defined it.
@@ -599,7 +600,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  defp content_kind(_params, socket), do: socket.assigns.live_action
+  defp content_kind(_params, socket) do
+    kind = socket.assigns.live_action
+    # Deprecated in 0.12, removed at 1.0 (#1538). Logged on the connected mount
+    # only: that is the one every visit makes, including a live navigation that
+    # never renders over HTTP, and it keeps one visit to one line.
+    if connected?(socket), do: warn_route_alias(kind)
+    kind
+  end
+
+  defp warn_route_alias(kind) do
+    KilnCMS.Deprecations.warn(
+      :editor_route_alias,
+      "The /editor/#{kind}s/:id editor route is deprecated and 1.0 removes it; " <>
+        "use /editor/content/#{kind}/:id. Update any bookmark or link that still points here.",
+      route: "/editor/#{kind}s/:id"
+    )
+  end
 
   # A block's thread changed — here, in another editor's window, through the
   # API, or an editorial-intelligence rule delivering a document-level

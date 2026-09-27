@@ -12,6 +12,7 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.WebhookEndpoint
+  alias KilnCMS.Deprecations
   alias KilnCMS.SafeFetch
   alias KilnCMS.Webhooks
 
@@ -20,8 +21,8 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
     # `org_id` scopes the ledger read/settlement to the delivery's site (epic
     # #336). Strict-tenancy prep (#419): a legacy job with no org resolves the
     # default org explicitly (matching the firing workers) instead of a
-    # nil-tenant global read.
-    tenant = args["org_id"] || KilnCMS.Accounts.default_org_id()
+    # nil-tenant global read. That fallback is deprecated (#1538) and logs.
+    tenant = Deprecations.job_org_id(args, __MODULE__)
 
     case CMS.get_webhook_delivery(id, authorize?: false, tenant: tenant, load: [:endpoint]) do
       {:ok, delivery} -> attempt(delivery, job)
@@ -33,7 +34,13 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   # Legacy args shape: jobs enqueued before the ledger existed may still sit
   # in the queue across a deploy. Deliver without recording; pre-ledger jobs
   # predate multi-tenancy, so the endpoint lives in the default org (#419).
+  # Deprecated in 0.12 and removed at 1.0 (#1538): drain the queue first.
   def perform(%Oban.Job{args: %{"endpoint_id" => id, "event" => event, "payload" => payload}}) do
+    Deprecations.warn_legacy_job(
+      __MODULE__,
+      "has the pre-ledger `endpoint_id` shape and was delivered without a ledger row"
+    )
+
     case CMS.get_webhook_endpoint(id,
            authorize?: false,
            tenant: KilnCMS.Accounts.default_org_id()

@@ -30,8 +30,9 @@ defmodule KilnCMS.CMS.Content do
       project-agnostic; list that domain in `:content_domains` (see
       `KilnCMS.CMS.ContentTypes`) so it is discovered everywhere.
     * `:excerpt?` — include an `excerpt` attribute (listings/feeds). Default `false`.
-    * `:published?` — add a `:published` read (published-only, newest first).
-      Default `false`.
+    * `:published?` — **deprecated** in 0.12, removed at 1.0; warns at
+      compile time. Ignored: every type has the `:published` read
+      (published-only, newest first). Remove it.
     * `:dynamic?` — this resource is the shared **generic entry** tier backing
       admin-defined content types (decision D17, used only by
       `KilnCMS.CMS.Entry`). Adds a required `type_definition` relationship,
@@ -47,6 +48,28 @@ defmodule KilnCMS.CMS.Content do
   # this module; the injected resource `quote` brings its own imports.
   require Ash.Expr
   require Ash.Query
+
+  # Every option `__using__/1` reads — kept beside it by hand, and pinned by
+  # `KilnCMS.DeprecationsTest`. Anything else warns at the caller's `use` line:
+  # an ignored key today (a typo, or one an overlay made up) would silently
+  # start meaning something the day a release adds an option by that name.
+  @use_options [
+    :type,
+    :plural,
+    :table,
+    :domain,
+    :excerpt?,
+    :dynamic?,
+    :schema_org_type,
+    :slug_pattern,
+    :alias_pattern,
+    :seo_title_pattern,
+    :seo_description_pattern,
+    :published?
+  ]
+
+  @doc false
+  def use_options, do: @use_options
 
   # Days trashed content is retained before the nightly auto-purge.
   @trash_retention_days Application.compile_env(:kiln_cms, [:trash, :retention_days], 30)
@@ -220,6 +243,19 @@ defmodule KilnCMS.CMS.Content do
   end
 
   defmacro __using__(opts) do
+    case Keyword.keys(opts) -- @use_options do
+      [] ->
+        :ok
+
+      unknown ->
+        IO.warn(
+          "unknown option(s) #{inspect(unknown)} to `use KilnCMS.CMS.Content` are ignored; " <>
+            "the options are #{inspect(@use_options)}. A later release may give an unknown " <>
+            "name a meaning, and 2.0 makes an unknown option a compile error.",
+          Macro.Env.stacktrace(__CALLER__)
+        )
+    end
+
     type = Keyword.fetch!(opts, :type)
     plural = Keyword.get(opts, :plural, "#{type}s")
     table = Keyword.get(opts, :table, "#{type}s")
@@ -252,11 +288,19 @@ defmodule KilnCMS.CMS.Content do
     seo_description_pattern =
       opts |> Keyword.get(:seo_description_pattern) |> KilnCMS.Seo.Pattern.validate!()
 
-    # `published?:` is accepted for backward compatibility but ignored: the
-    # `/published` feed (read + route + GraphQL query) is universal since the
-    # official client (#300) — every delivery consumer needs a server-side
-    # published-only index, not just the blog (#297).
-    _ = Keyword.get(opts, :published?, false)
+    # `published?:` is ignored: the `/published` feed (read + route + GraphQL
+    # query) is universal since the official client (#300) — every delivery
+    # consumer needs a server-side published-only index, not just the blog
+    # (#297). Deprecated in 0.12 and removed at 1.0 (#1538); until then it
+    # still compiles, with a warning at the overlay's own `use` line — an
+    # option has nowhere to hang `@deprecated`.
+    if Keyword.has_key?(opts, :published?) do
+      IO.warn(
+        "the `published?:` option to `use KilnCMS.CMS.Content` is deprecated and ignored " <>
+          "(every content type has the `:published` read); remove it. 1.0 removes the option.",
+        Macro.Env.stacktrace(__CALLER__)
+      )
+    end
 
     # Derive the per-type names from `type` by the project's naming convention.
     resource = __CALLER__.module

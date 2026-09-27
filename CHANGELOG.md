@@ -56,6 +56,11 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Before upgrading to 1.0, let queued webhook and newsletter jobs from before
+  0.12 drain, and move accounts off the legacy audiences fallback;
+  `mix kiln.deprecations` says what is left.**
+  ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/unreleased.md#before-upgrading-to-10-let-queued-webhook-and-newsletter-jobs-from-before-012))
+
 - **Run `mix kiln.blocks.backfill` once after deploying. It is safe on the live
   site, and it rewrites stored blocks — rolling the pin back does not undo
   it.**
@@ -91,6 +96,10 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#release-candidates-are-opt-in-everywhere-mix-kilnupdate-pre))
 
 ### Changed
+
+- **An unknown option to `use KilnCMS.CMS.Content` now warns at compile time
+  instead of being silently ignored.**
+  ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/unreleased.md#an-unknown-option-to-use-kilncmscmscontent-now-warns-at-compile-time-instead-of))
 
 - **Public delivery, the previews and the in-context editor render from the
   typed blocks, not through the legacy block shape.**
@@ -138,6 +147,23 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#the-browser-csps-connect-src-is-self-alone-no-websocket-to-any))
 
 ### Deprecated
+
+- **`published?:` on `use KilnCMS.CMS.Content` is deprecated, and removed at
+  1.0.**
+  ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/unreleased.md#published-on-use-kilncmscmscontent-is-deprecated-and-removed-at-10))
+
+- **The `/editor/pages/:id` and `/editor/posts/:id` editor routes are
+  deprecated, and removed at 1.0; use `/editor/content/page/:id` and
+  `/editor/content/post/:id`.**
+  ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/unreleased.md#the-editorpagesid-and-editorpostsid-editor-routes-are-deprecated-and-removed-at))
+
+- **The `User.audiences` fallback for an account with no organization membership
+  is deprecated, and removed at 1.0.**
+  ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/unreleased.md#the-useraudiences-fallback-for-an-account-with-no-organization-membership-is))
+
+- **Webhook and newsletter jobs enqueued without `org_id`, and pre-ledger
+  webhook jobs, are deprecated, and not run by 1.0.**
+  ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/unreleased.md#webhook-and-newsletter-jobs-enqueued-without-orgid-and-pre-ledger-webhook-jobs))
 
 - **The legacy block bridge is deprecated for removal at 1.0:
   `KilnCMS.CMS.TypedBlocks.to_legacy/1`, `from_legacy/1`, `RichText.legacy_html`

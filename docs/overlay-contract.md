@@ -46,7 +46,7 @@ you*).
 
 | Surface | What is promised |
 |---|---|
-| `KilnCMS.CMS.Content` options | `:type`, `:plural`, `:table`, `:domain`, `:excerpt?`, `:schema_org_type`, `:slug_pattern`, `:alias_pattern`, `:seo_title_pattern`, `:seo_description_pattern` keep their names, defaults and meaning. This is the covered subset, not the full option list: `:dynamic?` is core-internal and `:published?` is accepted but ignored — neither is promised |
+| `KilnCMS.CMS.Content` options | `:type`, `:plural`, `:table`, `:domain`, `:excerpt?`, `:schema_org_type`, `:slug_pattern`, `:alias_pattern`, `:seo_title_pattern`, `:seo_description_pattern` keep their names, defaults and meaning. This is the covered subset, not the full option list: `:dynamic?` is core-internal and `:published?` is ignored, deprecated in 0.12 and removed at 1.0 (see *Deprecated surfaces* below) — neither is promised. Since 0.12 an option outside this list and those two warns at compile time, at your `use` line, instead of being silently ignored: a later minor may give that name a meaning. 2.0 makes it a compile error |
 | The **two** token vocabularies the `*_pattern` options accept | `KilnCMS.Slug.Pattern` validates `:slug_pattern` and `:alias_pattern`; `KilnCMS.Seo.Pattern` validates the two SEO patterns, and they accept *different* tokens. Both run at build time, so a withdrawn token breaks *your* compile |
 | The `__kiln_*__/0` functions the macro injects | The seam between a resource and every core registry. The double underscores read private; they are contract |
 | Workflow action names on a content resource | `:read`, `:published`, `:public_by_slug`, `:trashed`, `:create`, `:update`, `:autosave`, `:submit_for_review`, `:return_to_draft`, `:publish`, `:unpublish`, `:archive`, `:unarchive`, `:restore`, `:destroy`. Note `:restore` undoes trashing and `:unarchive` undoes `:archive` — they are not the same inverse |
@@ -171,15 +171,41 @@ Additive first, always: a new option, a new optional callback, a new function
 beside the old one. Where that is impossible:
 
 1. **Keep the old surface working for at least one minor**, with the
-   replacement documented beside it and a `### Changed` entry naming both.
+   replacement documented beside it and a `### Deprecated` entry naming both
+   and the major that removes it.
 2. **Mark it deprecated** where the compiler can carry the marker, so the
-   warning reaches you at build time rather than in a changelog you skimmed.
-3. **Remove it only in a major**, with an `### Upgrading` section that names
-   the mechanical edit — what to rename, to what, and in which files.
+   warning reaches you at build time rather than in a changelog you skimmed:
+   `@deprecated` on a function, a compile-time warning at your own `use` line
+   for a macro option. Where the compiler cannot see the surface — a route, a
+   stored row, a job already in the queue — the core logs a warning each time
+   it is used (`KilnCMS.Deprecations`), and `mix kiln.deprecations` lists the
+   data that still depends on it.
+3. **Remove it only in a major**, with an `### Upgrade notes` section that
+   names the mechanical edit — what to rename, to what, and in which files.
 
 A name is never silently repurposed. Reusing an existing option or callback
 name for different behaviour is the one change that defeats every check here,
 because it compiles.
+
+## Deprecated surfaces
+
+The policy above was first used in 0.12 ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537),
+[#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538)). Everything
+here still works, warns, and is removed at 1.0
+([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543)):
+
+| Deprecated | How you are told | Instead |
+|---|---|---|
+| `published?:` on `use KilnCMS.CMS.Content` | compile-time warning at your `use` line | remove it; every content type has the `:published` read |
+| `/editor/pages/:id` and `/editor/posts/:id` | a log warning on each visit | `/editor/content/page/:id` and `/editor/content/post/:id`. Nothing in the core links to the old routes any more |
+| The `User.audiences` fallback for an account with no organization membership | a log warning, once per account per boot | an `OrgMembership` carrying the audiences: `mix kiln.deprecations --migrate-audiences` creates one on the default organization for every such account |
+| Webhook and newsletter jobs enqueued without `org_id`, and the pre-ledger webhook job shape | a log warning each time one runs | nothing to change in code; let the queue drain before upgrading to 1.0. `mix kiln.deprecations` counts what is left |
+| The legacy block bridge: `TypedBlocks.to_legacy/1`, `from_legacy/1`, `RichText.legacy_html` and the legacy `KilnCMS.CMS.Block` write shape | `@deprecated` (compile warning) and the block JSON Schema | see `KilnCMS.CMS.TypedBlocks` |
+
+`mix kiln.deprecations` (in a release,
+`bin/kiln_cms eval 'KilnCMS.Release.deprecations()'`) exits non-zero while
+anything on this instance still depends on one of these, so it can gate an
+upgrade to 1.0.
 
 ## Protecting your overlay in CI
 

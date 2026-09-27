@@ -426,13 +426,17 @@ defmodule KilnCMSWeb.Router do
       live "/editor/links", LinkReportLive, :index
       live "/editor/settings", SettingsLive, :index
       # Generic editor route — works for any content type (incl. ones generated
-      # by `mix kiln.gen.content`). The `:page`/`:post` routes are kept as
-      # backward-compatible aliases.
+      # by `mix kiln.gen.content`).
       # An unsaved new document: nothing is written until the writer's first
       # title or Save, then the same LiveView patches to the `:id` route. Must
       # precede it, or "new" would be read as an id.
       live "/editor/content/:type/new", ContentEditorLive, :new
       live "/editor/content/:type/:id", ContentEditorLive, :content
+      # DEPRECATED in 0.12, removed at 1.0 (#1538): the pre-generic aliases for
+      # `/editor/content/page/:id` and `/editor/content/post/:id`. A route can't
+      # carry `@deprecated`, so `ContentEditorLive` logs each visit through
+      # `KilnCMS.Deprecations` instead. Nothing in the core links here any more;
+      # they stay for bookmarks and links in mail already sent.
       live "/editor/pages/:id", ContentEditorLive, :page
       live "/editor/posts/:id", ContentEditorLive, :post
       live "/editor/preview/:kind/:id", PreviewLive, :show

@@ -35,7 +35,9 @@ defmodule Mix.Tasks.Kiln.Gen.ContentTest do
   describe "resource_body/3" do
     test "uses the Content base with the requested flags" do
       body = Content.resource_body(KilnCMS.CMS.Product, :product, excerpt: true, published: true)
-      assert body =~ "use KilnCMS.CMS.Content, type: :product, excerpt?: true, published?: true"
+      assert body =~ "use KilnCMS.CMS.Content, type: :product, excerpt?: true\n"
+      # Deprecated (#1538): `--published` adds the interface, not the option.
+      refute body =~ "published?"
       assert body =~ "@moduledoc"
     end
 
@@ -95,7 +97,7 @@ defmodule Mix.Tasks.Kiln.Gen.ContentTest do
           relationships) comes from `KilnCMS.CMS.Content`; add only what is unique to
           a Product below.
           \"\"\"
-          use KilnCMS.CMS.Content, type: :product, excerpt?: true, published?: true
+          use KilnCMS.CMS.Content, type: :product, excerpt?: true
         end
         """
       )

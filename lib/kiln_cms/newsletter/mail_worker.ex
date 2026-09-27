@@ -23,8 +23,9 @@ defmodule KilnCMS.Newsletter.MailWorker do
         args: %{"newsletter_send_id" => send_id, "subscriber_id" => subscriber_id} = args
       }) do
     # Strict tenancy (#419): the per-recipient job carries the campaign's org
-    # (enqueued by SendWorker); default-org fallback for any legacy job.
-    tenant = args["org_id"] || KilnCMS.Accounts.default_org_id()
+    # (enqueued by SendWorker); default-org fallback for any legacy job,
+    # deprecated (#1538) and logged.
+    tenant = KilnCMS.Deprecations.job_org_id(args, __MODULE__)
 
     send =
       Newsletter.get_send!(send_id, authorize?: false, not_found_error?: false, tenant: tenant)

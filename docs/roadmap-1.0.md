@@ -24,9 +24,9 @@ currently only intends:
 2. **Deprecation works, and has been used.** The policy exists (overlay
    contract, *Deprecation*): the old surface keeps working for at least one
    minor, carries a compiler-visible marker, and is removed only in a major.
-   It has never been exercised. No `@deprecated` exists in `lib/`, and no
-   release has had a `### Deprecated` section. The first deprecation should
-   happen before 1.0, not under 1.0's rules.
+   It was first exercised in 0.12 (#1537, #1538), before 1.0 rather than
+   under 1.0's rules: the overlay contract's *Deprecated surfaces* table lists
+   what 0.12 deprecated, and #1543 removes it at 1.0.
 3. **Every surface is labelled.** Each one is *covered*, *internal*, or
    *experimental*. The README's stability table and the overlay contract
    agree, and nothing is left unlabelled.
@@ -121,7 +121,10 @@ After 0.12, the covered list changes only by deprecation.
   - old Oban job argument shapes
 
   Mark them with `@deprecated`, and put them under the project's first
-  `### Deprecated` changelog section.
+  `### Deprecated` changelog section. Done in #1538: a route, a stored row and
+  a queued job have no compiler to warn through, so those log instead
+  (`KilnCMS.Deprecations`), and `mix kiln.deprecations` lists the data that
+  still depends on them.
 - **HTTP API versioning: decided (#1539).** 1.0 ships the current
   unprefixed paths, and `/api/v1` arrives only with the first breaking
   change. The deprecation window is at least two minor releases and at

@@ -85,6 +85,31 @@ defmodule KilnCMS.Release do
   end
 
   @doc """
+  `mix kiln.deprecations` for a release (#1538): report the accounts and queued
+  jobs that still depend on a surface 1.0 removes, and optionally move the
+  accounts onto a membership first.
+
+      bin/kiln_cms eval 'KilnCMS.Release.deprecations()'
+      bin/kiln_cms eval 'KilnCMS.Release.deprecations(migrate_audiences: true)'
+
+  Works against a running node through `bin/kiln_cms rpc` too. Returns `:ok`
+  when nothing is left, `{:error, message}` otherwise; see
+  `KilnCMS.Deprecations`.
+  """
+  @spec deprecations(keyword()) :: :ok | {:error, String.t()}
+  def deprecations(opts \\ []) do
+    load_app()
+
+    {:ok, result, _} =
+      Ecto.Migrator.with_repo(hd(repos()), fn _repo ->
+        KilnCMS.Deprecations.run_and_report(opts, &IO.puts/1)
+      end)
+
+    with {:error, message} <- result, do: IO.puts(message)
+    result
+  end
+
+  @doc """
   Rewrite every block tree still stored in a legacy shape to the typed shape
   (#1537) — `mix kiln.blocks.backfill` for a release, which has no Mix:
 

@@ -227,7 +227,7 @@ defmodule KilnCMSWeb.InboxLiveTest do
 
       {:ok, _lv, html} = conn |> log_in(me) |> live(~p"/editor/inbox")
 
-      assert html =~ "/editor/posts/#{notification.content_id}?comment=#{block_id}"
+      assert html =~ "/editor/content/post/#{notification.content_id}?comment=#{block_id}"
     end
 
     test "a document-level row links to the document", %{conn: conn} do
@@ -236,7 +236,7 @@ defmodule KilnCMSWeb.InboxLiveTest do
 
       {:ok, _lv, html} = conn |> log_in(me) |> live(~p"/editor/inbox")
 
-      assert html =~ "/editor/pages/#{notification.content_id}"
+      assert html =~ "/editor/content/page/#{notification.content_id}"
       # Scheduled publishing has no acting user, so no name is invented.
       assert html =~ "Published"
     end
