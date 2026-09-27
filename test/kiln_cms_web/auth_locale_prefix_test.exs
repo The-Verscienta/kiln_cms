@@ -108,9 +108,12 @@ defmodule KilnCMSWeb.AuthLocalePrefixTest do
     assert get_session(conn, "locale") == "fr"
   end
 
-  test "a path that is unsafe to redirect to is not redirected", %{conn: conn} do
-    conn = get(conn, "/fr/\\evil.com/live")
+  # `/preview/:token/live` is a LiveView route with a segment the requester
+  # chooses. A backslash in it makes `Phoenix.Controller.redirect/2` raise,
+  # which would turn the page into a 500.
+  test "a path with a backslash is served, not redirected", %{conn: conn} do
+    conn = get(conn, "/fr/preview/a\\b/live")
 
-    refute conn.status in [301, 302]
+    refute conn.status in [301, 302, 500]
   end
 end

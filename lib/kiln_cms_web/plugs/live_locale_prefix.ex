@@ -47,7 +47,7 @@ defmodule KilnCMSWeb.Plugs.LiveLocalePrefix do
     path = unprefixed_path(conn)
 
     # `Phoenix.Controller.redirect/2` raises on a backslash anywhere in a local
-    # path, and a path param (`/:token/live`) can carry one. Leave such a
+    # path, and a path param (`/preview/:token/live`) can carry one. Leave such a
     # request as it was rather than turn it into a 500.
     if SafeRedirect.safe_local_path?(path) and not String.contains?(path, "\\") do
       conn
