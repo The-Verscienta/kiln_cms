@@ -2964,6 +2964,7 @@ msgstr ""
 msgid "Clear"
 msgstr ""
 
+#: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Clear filters"
@@ -7993,9 +7994,29 @@ msgstr ""
 msgid "No menus yet"
 msgstr ""
 
+#: lib/kiln_cms_web/live/task_live.ex
+#, elixir-autogen, elixir-format
+msgid "No open block tasks assigned to you."
+msgstr ""
+
+#: lib/kiln_cms_web/live/task_live.ex
+#, elixir-autogen, elixir-format
+msgid "No open document tasks assigned to you."
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "No open releases."
+msgstr ""
+
+#: lib/kiln_cms_web/live/task_live.ex
+#, elixir-autogen, elixir-format
+msgid "No open tasks anchored to a block."
+msgstr ""
+
+#: lib/kiln_cms_web/live/task_live.ex
+#, elixir-autogen, elixir-format
+msgid "No open tasks anchored to a document."
 msgstr ""
 
 #: lib/kiln_cms_web/live/task_live.ex
@@ -9403,7 +9424,6 @@ msgstr ""
 msgid "Public site"
 msgstr ""
 
-#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -9425,6 +9445,7 @@ msgstr ""
 msgid "Publish it"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Publish now"
@@ -10654,7 +10675,6 @@ msgstr ""
 msgid "Sat"
 msgstr ""
 
-#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #: lib/kiln_cms_web/live/compliance_live.ex
@@ -10712,6 +10732,7 @@ msgstr ""
 msgid "Save details"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save draft"
@@ -11098,6 +11119,11 @@ msgstr ""
 msgid "Select two to see what changed between them."
 msgstr ""
 
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "Select…"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Semantic search is off, so there is nothing to compare against."
@@ -11217,6 +11243,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/token_preview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set name"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Set up a new authenticator"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Set up a new authenticator app so you can keep signing in without using another recovery code."
 msgstr ""
 
 #: lib/kiln_cms_web/live/setup_live.ex
@@ -11674,6 +11710,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Someone else saved this page. Duplicating copies their version, not what you see. Continue?"
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/form_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Something needs fixing"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/error_html/500.html.heex
@@ -12263,6 +12304,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/accessibility_components.ex
 #, elixir-autogen, elixir-format
 msgid "Text set in capitals (“%{example}”) — some screen readers spell it out letter by letter, and capitals are harder to read. Use styling instead."
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/form_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Thank you"
 msgstr ""
 
 #: lib/kiln_cms_web/live/account_live.ex
@@ -13620,6 +13666,7 @@ msgstr ""
 msgid "Trigram glyphs: three lines per item — published at the bottom, translated in the middle, scheduled on top; solid means yes. Hover one for its reading."
 msgstr ""
 
+#: lib/kiln_cms_web/controllers/form_controller.ex
 #: lib/kiln_cms_web/controllers/offline_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Try again"
@@ -14774,6 +14821,11 @@ msgstr ""
 msgid "You need editor access to view that page."
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "You signed in with a recovery code."
+msgstr ""
+
 #: lib/kiln_cms_web/notification_text.ex
 #, elixir-autogen, elixir-format
 msgid "You were mentioned"
@@ -15622,6 +15674,7 @@ msgstr ""
 msgid "removed block"
 msgstr ""
 
+#: lib/kiln_cms_web/components/block_components.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format

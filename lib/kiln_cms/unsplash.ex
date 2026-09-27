@@ -174,7 +174,7 @@ defmodule KilnCMS.Unsplash do
     dest = Path.join(System.tmp_dir!(), "unsplash-#{Ecto.UUID.generate()}")
 
     case SafeFetch.get(url,
-           max_bytes: Ingest.max_upload_size(),
+           max_bytes: max_download_bytes(),
            receive_timeout: @api_receive_timeout,
            # Image CDNs may 302 once; each hop is re-validated and re-pinned.
            max_redirects: 3,
@@ -206,6 +206,12 @@ defmodule KilnCMS.Unsplash do
   defp access_key, do: config()[:access_key]
 
   defp req_options, do: Keyword.get(config(), :req_options, [])
+
+  # The body is buffered in memory, and `Ingest.store_file/3` refuses an image
+  # over `max_image_size/0` anyway, so that is the cap — not the 500MB video
+  # ceiling `max_upload_size/0` reports. Overridable for the test that proves
+  # the cap is enforced without streaming 10MB through a stub.
+  defp max_download_bytes, do: Keyword.get(config(), :max_bytes, Ingest.max_image_size())
 
   defp config, do: Application.get_env(:kiln_cms, :unsplash, [])
 end

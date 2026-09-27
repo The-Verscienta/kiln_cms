@@ -132,6 +132,78 @@ defmodule KilnCMS.UnsplashTest do
       assert is_binary(message)
       assert message =~ "blocked"
     end
+
+    test "a redirect from the image host is re-validated, so one into private space is refused" do
+      # SafeFetch follows the CDN's hop by hand; a bare `Req` would follow it
+      # inside the client, past the pin, straight to the metadata service.
+      Req.Test.stub(KilnCMS.Unsplash, fn conn ->
+        case conn.request_path do
+          "/photos/abc123/download" ->
+            Req.Test.json(conn, %{"url" => "https://images.unsplash.com/file-abc123"})
+
+          "/file-abc123" ->
+            conn
+            |> Plug.Conn.put_resp_header("location", "http://169.254.169.254/latest/meta-data/")
+            |> Plug.Conn.send_resp(302, "")
+
+          other ->
+            flunk("the redirect target was dialled: #{other}")
+        end
+      end)
+
+      photo = %{download_location: "https://api.unsplash.com/photos/abc123/download"}
+
+      assert {:error, message} = Unsplash.download(photo)
+      assert message =~ "blocked redirect from https://images.unsplash.com/file-abc123"
+    end
+
+    test "a public CDN hop is still followed" do
+      Req.Test.stub(KilnCMS.Unsplash, fn conn ->
+        case conn.request_path do
+          "/photos/abc123/download" ->
+            Req.Test.json(conn, %{"url" => "https://images.unsplash.com/file-abc123"})
+
+          "/file-abc123" ->
+            conn
+            |> Plug.Conn.put_resp_header("location", "https://images.unsplash.com/moved-abc123")
+            |> Plug.Conn.send_resp(302, "")
+
+          "/moved-abc123" ->
+            conn
+            |> Plug.Conn.put_resp_content_type("image/png")
+            |> Plug.Conn.send_resp(200, @png)
+        end
+      end)
+
+      photo = %{download_location: "https://api.unsplash.com/photos/abc123/download"}
+
+      assert {:ok, path} = Unsplash.download(photo)
+      assert File.read!(path) == @png
+      File.rm!(path)
+    end
+
+    test "the download is byte-capped rather than buffered whole" do
+      previous = Application.get_env(:kiln_cms, :unsplash, [])
+      Application.put_env(:kiln_cms, :unsplash, Keyword.put(previous, :max_bytes, 16))
+      on_exit(fn -> Application.put_env(:kiln_cms, :unsplash, previous) end)
+
+      Req.Test.stub(KilnCMS.Unsplash, fn conn ->
+        case conn.request_path do
+          "/photos/abc123/download" ->
+            Req.Test.json(conn, %{"url" => "https://images.unsplash.com/file-abc123"})
+
+          "/file-abc123" ->
+            conn
+            |> Plug.Conn.put_resp_content_type("image/png")
+            |> Plug.Conn.send_resp(200, @png)
+        end
+      end)
+
+      photo = %{download_location: "https://api.unsplash.com/photos/abc123/download"}
+
+      assert byte_size(@png) > 16
+      assert {:error, "response exceeded 16 bytes"} = Unsplash.download(photo)
+    end
   end
 
   describe "attribution/1" do
