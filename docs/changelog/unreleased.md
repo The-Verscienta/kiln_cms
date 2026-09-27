@@ -106,6 +106,41 @@ carries the reasoning.
   the new headers only
   ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616)).
 
+<a id="if-your-configprojectexs-restates-ash_domains-add-kilncmsnotifications"></a>
+
+- **If your `config/project.exs` restates `:ash_domains`, add
+  `KilnCMS.Notifications`.** It has been a core domain since 0.9.0, but a
+  project's list replaces the core's rather than adding to it, so a
+  `project.exs` written before then — or copied from the in-tree example,
+  which lacked it too — leaves it out. Nothing fails at boot. What happens is
+  that `mix ash.codegen` reads the `notifications` table as orphaned and
+  offers to generate a migration that DROPS it, with yes as the default
+  answer. Diff your list against `config/config.exs`;
+  `mix kiln.plugins.doctor` now names any core domain missing from it. The
+  upgrade rehearsal met that prompt upgrading from 0.5.0 through 0.9.0, and
+  the doctor flags the list every release from 0.5.0 to 0.11.0 shipped
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540)).
+
+<a id="on-080-or-older-mix-kilnupdate-shows-you-none-of-these-notes"></a>
+
+- **On 0.8.0 or older, `mix kiln.update` shows you none of these notes.
+  Read them here before moving the pin.** The task that runs is the one in
+  the checkout being moved. Up to 0.8.0 it read only the old `### Upgrading`
+  heading, which 0.9.0 renamed to `### Upgrade notes`. So a pin on 0.5.0 to
+  0.8.0 prints the list of new migrations and then moves, with none of the
+  Upgrade notes or Breaking entries of 0.9.0 and later. Read those sections of
+  this file for every release after yours first. The upgrade rehearsal showed
+  it from 0.5.0, 0.6.0, 0.7.0 and 0.8.0; from 0.9.0 on, the notes print. A
+  release *candidate* is the other case: only 0.12 and later print a
+  candidate's notes, so a 0.12 candidate's must be read from its release
+  page (see `docs/releasing.md`). One thing from those notes that 0.7 and
+  0.8 overlays copied from the example trip over: a custom field type calling
+  `safe_float` from `KilnCMS.CMS.Computed` (gone since 0.9.0) compiles with a
+  warning and raises on its first cast. Call `Kiln.FieldType.parse_float/1`
+  instead; `mix kiln.plugins.doctor` names the field type
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540)).
+
+
 ## Breaking
 
 <a id="webhook-deliveries-no-longer-send-x-kilncms-signature"></a>
@@ -168,6 +203,35 @@ carries the reasoning.
   releases marked as pre-releases; a candidate published *without* the flag is
   now refused as `{:error, :prerelease}` instead of being offered as an
   update. `docs/releasing.md` gains "Cutting a release candidate".
+
+<a id="an-upgrade-rehearsal-runs-every-past-releases-mix-kilnupdate-against-the"></a>
+
+- **An upgrade rehearsal runs a past release's `mix kiln.update` against the
+  candidate, with a seeded database.** `scripts/upgrade_rehearsal/rehearse.sh
+  vX.Y.Z` does what a downstream does. It pins a scratch project's submodule
+  at the tag, next to a copy of that tag's example overlay, then builds,
+  migrates and seeds it: the release's own seeds and the overlay's, plus a
+  page for every shape in the legacy block corpus and one with every block
+  type the release knows. Then it runs *that release's* `mix kiln.update` to
+  the candidate, tagged `-rc.0` in a local mirror (nothing is pushed). It
+  rebuilds with the unchanged overlay, generates migrations for any overlay
+  drift, runs `mix kiln.plugins.doctor`, migrates and runs
+  `mix kiln.blocks.backfill`. Every row must read back, and every published
+  page must render the same text before and after the backfill. It also
+  checks the Upgrade notes each release prints against the candidate's
+  `upgrade_notes/3`. The **Upgrade rehearsal** workflow runs it for the last
+  three releases weekly and on demand. Its database is its own and is dropped
+  afterwards
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540)).
+
+<a id="mix-kilnpluginsdoctor-flags-a-core-domain-missing-from-ash_domains"></a>
+
+- **`mix kiln.plugins.doctor` flags a core domain missing from
+  `:ash_domains`.** The core's domains are found from the modules compiled out
+  of its own `lib/`, so the check cannot drift from `config/config.exs`. See
+  the Upgrade note on `KilnCMS.Notifications`
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540)).
+
 
 ## Changed
 
@@ -309,6 +373,24 @@ carries the reasoning.
   `upcast/2` and `upcast_block_map/1` keep their map-returning contract for
   read and delivery paths, which render the stored shape and log a warning
   rather than crash.
+
+<a id="the-example-overlays-migrations-run-beside-the-cores"></a>
+
+- **The example overlay's migrations run beside the core's.** From 0.7.0,
+  `projects/example/priv/repo/migrations/20260815142530_add_content_lifecycles.exs`
+  had the same name and module as the core's `add_content_lifecycles`. Ecto
+  refuses a directory holding both, so no example-activated build could run
+  its migrations. It also altered `conditions`, a table the example never
+  had, where it meant `products`. The `overlay_drift` job runs codegen but
+  never migrations, so neither showed until the upgrade rehearsal ran them.
+  The file is now `..._add_example_content_lifecycles.exs`, with the same
+  timestamp (Ecto records the version, so a database that ran it is
+  unaffected), and it alters `products`. A new test fails when any overlay's
+  migration shares a version, name or module with a core one. An overlay
+  that copied the example should take the corrected file. The example's
+  `project.exs` now registers `KilnCMS.Notifications`
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540)).
+
 
 ## Security
 
