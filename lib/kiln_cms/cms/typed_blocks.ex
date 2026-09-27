@@ -3,14 +3,26 @@ defmodule KilnCMS.CMS.TypedBlocks do
   Bridge between the legacy `KilnCMS.CMS.Block` storage and the Kiln v2 typed
   block representation (decision D11 / Phase C).
 
-  `from_legacy/1` is the canonical read-direction conversion that firing,
-  rendering, search, and embeddings (Phases D–J) use to obtain typed block structs
-  from whatever is stored. It is **total** — any legacy/unknown block maps to
-  `KilnCMS.Blocks.Custom` so downstream serializers never crash (decision A4).
+  `to_typed/1` is the canonical read-direction conversion that firing,
+  rendering, search, history and embeddings use to obtain typed block structs
+  from whatever is stored — typed or legacy. It is **total**: any legacy/unknown
+  block maps to `KilnCMS.Blocks.Custom` so downstream serializers never crash
+  (decision A4). It keeps reading the legacy shape after 1.0, because version
+  history is hash-chained and never rewritten.
 
-  `to_legacy/1` is the reverse. Public delivery and the previews still call it
-  at the boundary, so the legacy `BlockComponents` renderer is unchanged;
-  moving them off it is #1537.
+  **The bridge is deprecated and is removed at 1.0 (#1537):**
+
+    * `to_legacy/1` — nothing in the core calls it any more. Delivery, the
+      previews and the in-context editor render from
+      `KilnCMSWeb.BlockComponents.view_blocks/1`, built from the typed blocks.
+    * `from_legacy/1` — use `to_typed/1`, which accepts the same input.
+    * the legacy `KilnCMS.CMS.Block` shape as **write input**
+      (`%{type: :heading, content: …, data: …}`) — `BlockUnion`'s cast still
+      converts it, until 1.0. Write the typed shape (`%{"_type" => "heading",
+      "text" => …}`).
+
+  `mix kiln.blocks.backfill` rewrites the rows still stored in the legacy
+  shape; see `KilnCMS.CMS.BlockBackfill`.
 
   Legacy blocks arrive either as `%KilnCMS.CMS.Block{}` structs (top-level, atom
   keys) or as plain maps with string keys (nested `children` from jsonb), so the
@@ -504,6 +516,7 @@ defmodule KilnCMS.CMS.TypedBlocks do
   def input_map(%_{} = struct), do: struct |> attrs_of() |> drop_nils()
 
   @doc "Convert a stored legacy block list into typed block structs."
+  @deprecated "Use KilnCMS.CMS.TypedBlocks.to_typed/1, which reads the legacy shape too (#1537); removed at 1.0"
   @spec from_legacy([struct() | map()] | nil) :: [struct()]
   def from_legacy(blocks) do
     blocks
@@ -738,6 +751,7 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp scalar?(value), do: is_binary(value) or is_number(value) or is_boolean(value)
 
   @doc "Best-effort reverse conversion back to legacy block maps."
+  @deprecated "Render from typed blocks instead, e.g. KilnCMSWeb.BlockComponents.view_blocks/1 (#1537); removed at 1.0"
   @spec to_legacy([struct()] | nil) :: [map()]
   def to_legacy(typed_blocks) do
     typed_blocks

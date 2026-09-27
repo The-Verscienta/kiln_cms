@@ -60,7 +60,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
     assert [%{content: "Original"}] =
              restored.blocks
              |> KilnCMS.CMS.TypedBlocks.to_typed()
-             |> KilnCMS.CMS.TypedBlocks.to_legacy()
+             |> KilnCMS.LegacyBridge.to_legacy()
   end
 
   test "restoring to an intermediate version reconstructs that state" do
@@ -195,7 +195,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
       assert [%{content: "Original"}] =
                restored.blocks
                |> KilnCMS.CMS.TypedBlocks.to_typed()
-               |> KilnCMS.CMS.TypedBlocks.to_legacy()
+               |> KilnCMS.LegacyBridge.to_legacy()
 
       # The drift guard the issue asks for: a new restorable attribute has to
       # fail here rather than quietly ship a restore that skips it. The two

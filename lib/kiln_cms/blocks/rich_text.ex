@@ -5,6 +5,12 @@ defmodule KilnCMS.Blocks.RichText do
   migrated off stored TipTap HTML. `mix kiln.blocks.backfill` (#1537) is that
   migration: it converts `legacy_html` to `body` wherever the conversion is
   faithful, and reports the blocks where it is not.
+
+  **`legacy_html` is deprecated and is removed at 1.0.** Nothing in the core
+  writes new prose to it when Portable Text can hold the prose; it is still
+  read — rendered, round-tripped by the editor — for blocks the backfill could
+  not convert. Read `body`. The exported block schema marks the property
+  `deprecated`.
   """
   use Kiln.Block
 
@@ -55,11 +61,26 @@ defmodule KilnCMS.Blocks.RichText do
 
   # Both render branches emit `body` as a real array (the fallback emits `[]`
   # alongside the sanitized HTML), so it is required and never null.
+  #
+  # `legacy_html` carries the JSON Schema `deprecated` keyword (#1537), which is
+  # how the marker reaches a typed client's generated code rather than only this
+  # changelog: it is removed at 1.0.
   @impl Kiln.Block.Renderer
   def json_schema do
     %{
       "required" => ["_type", "body"],
-      "properties" => %{"body" => Kiln.Block.JsonSchema.type_schema(:rich_text, false)}
+      "properties" => %{
+        "body" => Kiln.Block.JsonSchema.type_schema(:rich_text, false),
+        "legacy_html" =>
+          :string
+          |> Kiln.Block.JsonSchema.type_schema()
+          |> Map.merge(%{
+            "deprecated" => true,
+            "description" =>
+              "Deprecated: stored HTML not yet converted to Portable Text. " <>
+                "Read `body`; removed at 1.0."
+          })
+      }
     }
   end
 

@@ -83,7 +83,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
   defp blocks_legacy(record) do
     record.blocks
     |> KilnCMS.CMS.TypedBlocks.to_typed()
-    |> KilnCMS.CMS.TypedBlocks.to_legacy()
+    |> KilnCMS.LegacyBridge.to_legacy()
   end
 
   defp page_versions(page_id) do

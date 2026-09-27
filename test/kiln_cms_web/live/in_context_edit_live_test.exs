@@ -284,7 +284,26 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
       send(lv.pid, :autosave)
       render(lv)
 
-      assert block_value(page.id, ids.rich, :legacy_html) =~ "Rewritten prose."
+      # As Portable Text, not in the deprecated `legacy_html` (#1537).
+      assert KilnCMS.Blocks.PortableText.to_plain_text(block_value(page.id, ids.rich, :body)) =~
+               "Rewritten prose."
+
+      assert block_value(page.id, ids.rich, :legacy_html) in [nil, ""]
+    end
+
+    test "HTML the shim cannot carry into Portable Text faithfully still lands, as legacy_html",
+         %{conn: conn} do
+      editor = authed_user(:editor)
+      {page, ids} = page_with_blocks(editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/site/page/#{page.slug}")
+
+      html = "<pre><code>keep <strong>this</strong></code></pre>"
+      render_hook(lv, "update_block", %{"id" => ids.rich, "value" => html})
+      send(lv.pid, :autosave)
+      render(lv)
+
+      assert block_value(page.id, ids.rich, :legacy_html) =~ "<strong>this</strong>"
     end
 
     test "an edit id that isn't an inline block is ignored", %{conn: conn} do

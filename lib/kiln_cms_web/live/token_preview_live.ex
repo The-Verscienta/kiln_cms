@@ -101,10 +101,7 @@ defmodule KilnCMSWeb.TokenPreviewLive do
   defp same_site(_org_id, _org), do: :error
 
   defp content_blocks(record) do
-    record.blocks
-    |> KilnCMS.CMS.TypedBlocks.to_typed()
-    |> KilnCMS.CMS.TypedBlocks.to_legacy()
-    |> BlockComponents.thin_blocks()
+    BlockComponents.view_blocks(record.blocks)
   end
 
   # The editor saved/typed — live-update the guest's view (same payload the

@@ -278,20 +278,15 @@ defmodule KilnCMSWeb.ContentEditor.Preview do
     socket
   end
 
-  # Effective blocks (data + unsaved edits) from the form, for the live preview.
-  # Thin `%{type, content}` maps — used by the decoupled (pop-out) preview window.
-  # Thin `%{type, content}` block maps for the decoupled (pop-out) preview, which
-  # renders them through the shared `BlockComponents`. Routed through the SAME
-  # sanitized typed→legacy pipeline as the inline preview (`preview_block_maps`)
-  # and `PreviewLive.content_blocks/1`, so rich-text edits surface as rendered
-  # `legacy_html` rather than the empty Portable Text `body` field that a
-  # primary-field lookup would pick (#134).
+  # Effective blocks (data + unsaved edits) from the form, as the view maps the
+  # decoupled (pop-out) preview renders through the shared `BlockComponents` —
+  # the same builder `PreviewLive.content_blocks/1` and delivery use, so rich
+  # text surfaces as the block's rendered prose rather than a primary-field
+  # lookup's empty `body` (#134).
   defp preview_blocks(form) do
     form
     |> preview_block_maps()
-    |> KilnCMS.CMS.TypedBlocks.to_typed()
-    |> KilnCMS.CMS.TypedBlocks.to_legacy()
-    |> KilnCMSWeb.BlockComponents.thin_blocks()
+    |> KilnCMSWeb.BlockComponents.view_blocks()
   end
 
   # Inline preview rendered through the **same typed serializers that firing

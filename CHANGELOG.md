@@ -92,6 +92,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Public delivery, the previews and the in-context editor render from the
+  typed blocks, not through the legacy block shape.**
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/unreleased.md#public-delivery-the-previews-and-the-in-context-editor-render-from-the-typed))
+
 - **A block whose `migrate` steps skip a version now warns at compile time;
   from Kiln 2.0 it is an error.**
   ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642) · [long form](docs/changelog/unreleased.md#a-block-whose-migrate-steps-skip-a-version-now-warns-at-compile-time))
@@ -132,6 +136,13 @@ Every summary line below that was shortened links to its own entry there.
 - **The browser CSP's `connect-src` is `'self'` alone — no websocket to any
   other host.**
   ([long form](docs/changelog/unreleased.md#the-browser-csps-connect-src-is-self-alone-no-websocket-to-any))
+
+### Deprecated
+
+- **The legacy block bridge is deprecated for removal at 1.0:
+  `KilnCMS.CMS.TypedBlocks.to_legacy/1`, `from_legacy/1`, `RichText.legacy_html`
+  and the legacy `KilnCMS.CMS.Block` write shape.**
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/unreleased.md#the-legacy-block-bridge-is-deprecated-for-removal-at-10))
 
 ## [0.11.0] - 2026-09-26
 

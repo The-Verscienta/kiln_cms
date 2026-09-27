@@ -1,8 +1,8 @@
 defmodule KilnCMSWeb.BlockComponents do
   @moduledoc """
-  Renders content blocks to HTML. Shared by the editor's live preview and
-  (later) public delivery. Each block is a plain map with `:type` (string) and
-  `:content`.
+  Renders content blocks to HTML. Shared by public delivery, the previews and
+  the in-context editor. Each block is a map `view_blocks/1` builds from the
+  typed blocks, with `:type` (string) and `:content`.
 
   Rich-text HTML and image URLs are sanitized via `KilnCMS.HTMLSanitizer`
   before rendering.
@@ -10,6 +10,8 @@ defmodule KilnCMSWeb.BlockComponents do
   use Phoenix.Component
   use Gettext, backend: KilnCMSWeb.Gettext
 
+  alias KilnCMS.Blocks
+  alias KilnCMS.CMS.TypedBlocks
   alias KilnCMS.HTMLSanitizer
 
   # The rendered width of an image block in the stock reading column.
@@ -53,8 +55,9 @@ defmodule KilnCMSWeb.BlockComponents do
           <h2 id={@block[:anchor]} class="text-xl font-bold">{@block.content}</h2>
         <% @type == "rich_text" -> %>
           <%!-- `content` is sanitized-or-trusted at build time (the single
-                boundary in TypedBlocks.one_to_legacy); rendering it raw avoids
-                re-parsing span-dense highlighted HTML on every request. --%>
+                boundary is the block's own `:web` serializer, see `view/1`);
+                rendering it raw avoids re-parsing span-dense highlighted HTML
+                on every request. --%>
           <div class="space-y-2">{Phoenix.HTML.raw(@block.content)}</div>
         <% @type == "quote" -> %>
           <blockquote class="border-l-4 border-base-300 pl-3 italic">{@block.content}</blockquote>
@@ -401,115 +404,134 @@ defmodule KilnCMSWeb.BlockComponents do
   defp form_input_type(_), do: "text"
 
   @doc """
-  Thin `%{type, content}` preview maps from legacy block maps (the shape the
-  decoupled preview windows push over PubSub). A `columns` block recurses,
-  carrying its child tree + grid `style` so the pop-out preview lays nested
-  blocks out too — without the media/form enrichment the live delivery path adds.
-  Shared by `PreviewLive` and the editor's decoupled preview so both agree.
+  The maps `render_block/1` takes, built straight from typed blocks (anything
+  `KilnCMS.CMS.TypedBlocks.to_typed/1` accepts: structs, `%Ash.Union{}`s,
+  stored or input maps).
+
+  One map per block, with a string `:type`, `:content` (the block's primary
+  text, sanitized HTML for rich text), its `:id`, and the data-side fields the
+  renderer reads for that type. A `columns` block recurses, carrying its child
+  tree and grid `:style`. Every surface renders from these — public delivery
+  (which adds media and form enrichment on top, keyed by `:media_id` and
+  `:form_slug`), the pop-out and token previews, the release preview and the
+  in-context editor — so they cannot disagree about what a block shows.
+
+  This used to go through `TypedBlocks.to_legacy/1` and then a second
+  projection off the legacy `%{type, content, data}` shape (#1537). A block
+  type with no clause of its own renders as an empty `custom` block, which is
+  what that path gave it too.
   """
-  @spec thin_blocks([map()]) :: [map()]
-  def thin_blocks(legacy_maps), do: Enum.map(legacy_maps, &keep_id/1)
+  @spec view_blocks([term()] | nil) :: [map()]
+  def view_blocks(blocks) do
+    blocks
+    |> TypedBlocks.to_typed()
+    |> Enum.map(&(&1 |> view() |> Map.put(:id, Map.get(&1, :id))))
+  end
 
-  # Every `thin_block/1` clause builds a fresh map for its own type, so the
-  # block's id was dropped on the way through — which meant the thin surfaces
-  # (the pop-out preview, the in-context overlay) rendered without the
-  # `data-block-id` anchor even after `render_block/1` learned to emit it.
-  # Re-attached once here rather than in each of a dozen clauses, so a new
-  # block type cannot forget it.
-  defp keep_id(legacy), do: legacy |> thin_block() |> Map.put(:id, Map.get(legacy, :id))
+  defp view(%Blocks.Heading{} = b), do: %{type: "heading", content: b.text}
 
-  defp thin_block(%{type: :columns, data: data}) do
+  # The single sanitize boundary for delivered and previewed rich text is the
+  # block's own `:web` serializer: stored `legacy_html` is untrusted HTML and is
+  # scrubbed there, while Portable Text renders trusted by construction.
+  # `render_block/1` prints `content` raw, so rich-text HTML must never reach
+  # it any other way.
+  defp view(%Blocks.RichText{} = b),
+    do: %{type: "rich_text", content: IO.iodata_to_binary(Blocks.render(b, :web) || "")}
+
+  # The alt rides along so every surface shows the alt delivery ships, and
+  # `media_id` so delivery can add the srcset, focal point and dimensions of the
+  # library item (a loaded MediaItem is a delivery concern, not a preview one).
+  defp view(%Blocks.Image{} = b),
+    do: %{type: "image", content: b.url, alt: b.alt || "", media_id: b.media_id}
+
+  defp view(%Blocks.Quote{} = b), do: %{type: "quote", content: b.text}
+
+  # Embed metadata (#489) so the previews and the in-context editor show the
+  # same card delivery does, rather than an empty figure.
+  defp view(%Blocks.Embed{} = b) do
+    %{
+      type: "embed",
+      content: b.url,
+      title: b.title,
+      author_name: b.author_name,
+      provider_name: b.provider_name,
+      thumbnail_url: b.thumbnail_url,
+      resolved_url: b.resolved_url
+    }
+  end
+
+  defp view(%Blocks.Divider{}), do: %{type: "divider", content: nil}
+
+  defp view(%Blocks.Form{} = b),
+    do: %{type: "form", content: b.form_slug, form_slug: b.form_slug}
+
+  # Repeating-item blocks (#482): item keys are atoms, to match what
+  # `render_block/1` reads; `:srcset`/`:focal` are delivery's to add.
+  defp view(%Blocks.Gallery{} = b) do
+    %{
+      type: "gallery",
+      content: b.title,
+      style: Blocks.Gallery.layout_style(b.layout),
+      images:
+        for image <- Blocks.Gallery.images(b) do
+          %{
+            url: image["url"],
+            alt: image["alt"],
+            caption: image["caption"],
+            media_id: image["media_id"]
+          }
+        end
+    }
+  end
+
+  defp view(%Blocks.Accordion{} = b) do
+    %{
+      type: "accordion",
+      content: b.title,
+      first_open: b.first_open == true,
+      panels: Blocks.Accordion.panels(b)
+    }
+  end
+
+  # GEO blocks (#357): the data-side fields the renderer reads, so every
+  # surface shows item rows and citations, not just the primary text.
+  defp view(%Blocks.Faq{} = b), do: %{type: "faq", content: b.title, items: Blocks.Faq.items(b)}
+
+  defp view(%Blocks.HowTo{} = b) do
+    %{
+      type: "how_to",
+      content: b.name,
+      description: b.description,
+      steps: Blocks.HowTo.steps(b)
+    }
+  end
+
+  defp view(%Blocks.Claim{} = b) do
+    %{
+      type: "claim",
+      content: b.text,
+      source_title: b.source_title,
+      source_url: b.source_url
+    }
+  end
+
+  defp view(%Blocks.Columns{} = b) do
     cols =
-      for col <- data["columns"] || [] do
-        children =
-          col
-          |> Map.get("blocks", [])
-          |> KilnCMS.CMS.TypedBlocks.to_typed()
-          |> KilnCMS.CMS.TypedBlocks.to_legacy()
-
-        %{blocks: thin_blocks(children)}
+      for col <- List.wrap(b.columns), is_map(col) do
+        %{blocks: col |> Map.get("blocks", Map.get(col, :blocks, [])) |> view_blocks()}
       end
 
     %{
       type: "columns",
       content: nil,
       columns: cols,
-      style: KilnCMS.Blocks.Columns.grid_style(data["layout"], data["gap"], length(cols))
+      style: Blocks.Columns.grid_style(b.layout, b.gap, length(cols))
     }
   end
 
-  # An image's alt rides along so surfaces that render from the thin shape — the
-  # pop-out preview, the in-context edit overlay — show the same alt text
-  # delivery will. `srcset`/`focal` deliberately do not: those need a loaded
-  # MediaItem, which is a delivery concern.
-  # Embed metadata (#489) rides the thin shape so the previews and the
-  # in-context editor show the same card delivery does, rather than an empty
-  # figure while the real page shows a title and a thumbnail.
-  defp thin_block(%{type: :embed, content: content, data: data}) do
-    %{
-      type: "embed",
-      content: content,
-      title: data["title"],
-      author_name: data["author_name"],
-      provider_name: data["provider_name"],
-      thumbnail_url: data["thumbnail_url"],
-      resolved_url: data["resolved_url"]
-    }
-  end
+  defp view(%Blocks.Custom{} = b), do: %{type: "custom", content: b.content}
 
-  defp thin_block(%{type: :image, content: content, data: data}),
-    do: %{type: "image", content: content, alt: data["alt"] || ""}
-
-  # Repeating-item blocks (#482). The thin shape carries no media enrichment —
-  # `thin_blocks/1` serves the pop-out preview and the editor, which render from
-  # the stored url rather than from a batch-loaded MediaItem — so item keys are
-  # atoms here to match what `render_block/1` reads, and `:srcset`/`:focal` are
-  # simply absent (the `:if` guards handle that).
-  defp thin_block(%{type: :gallery, content: content, data: data}) do
-    %{
-      type: "gallery",
-      content: content,
-      style: KilnCMS.Blocks.Gallery.layout_style(data["layout"]),
-      images:
-        for image <- data["images"] || [], is_map(image) do
-          %{url: image["url"], alt: image["alt"], caption: image["caption"]}
-        end
-    }
-  end
-
-  defp thin_block(%{type: :accordion, content: content, data: data}) do
-    %{
-      type: "accordion",
-      content: content,
-      first_open: data["first_open"] == true,
-      panels: data["panels"] || []
-    }
-  end
-
-  # GEO blocks (#357): carry the data-side fields the renderer reads, so the
-  # pop-out preview shows item rows and citations, not just the primary text.
-  defp thin_block(%{type: :faq, content: content, data: data}),
-    do: %{type: "faq", content: content, items: data["items"] || []}
-
-  defp thin_block(%{type: :how_to, content: content, data: data}) do
-    %{
-      type: "how_to",
-      content: content,
-      description: data["description"],
-      steps: data["steps"] || []
-    }
-  end
-
-  defp thin_block(%{type: :claim, content: content, data: data}) do
-    %{
-      type: "claim",
-      content: content,
-      source_title: data["source_title"],
-      source_url: data["source_url"]
-    }
-  end
-
-  defp thin_block(block), do: %{type: to_string(block.type), content: block.content}
+  defp view(_block), do: %{type: "custom", content: nil}
 
   # The items each renderable surface actually shows, filtered the same way the
   # block modules' own `:web` serializers filter. Two renderers over one block

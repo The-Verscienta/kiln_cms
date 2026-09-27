@@ -72,13 +72,17 @@ defmodule KilnCMS.CMS.StarterContent do
     %{
       title: "Home",
       slug: @home_slug,
+      # Typed blocks with Portable Text prose: the legacy `%{type:, content:}`
+      # params this used to pass stored the prose in the deprecated
+      # `legacy_html` on every new site (#1537).
       blocks: [
-        %{type: :heading, content: heading, data: %{"level" => 1}, order: 0},
+        %{"_type" => "heading", "text" => heading, "level" => 1},
         %{
-          type: :rich_text,
-          content:
-            "<p>This is your home page. Replace this text with a welcome for your visitors, then publish it — it becomes the first thing people see at your site's address.</p>",
-          order: 1
+          "_type" => "rich_text",
+          "body" =>
+            KilnCMS.Blocks.PortableText.from_html(
+              "<p>This is your home page. Replace this text with a welcome for your visitors, then publish it — it becomes the first thing people see at your site's address.</p>"
+            )
         }
       ]
     }

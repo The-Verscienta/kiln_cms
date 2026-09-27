@@ -186,7 +186,7 @@ defmodule KilnCMS.Blocks.GalleryAccordionTest do
         )
 
       assert [%Gallery{} = back] =
-               block |> List.wrap() |> TypedBlocks.to_legacy() |> TypedBlocks.to_typed()
+               block |> List.wrap() |> KilnCMS.LegacyBridge.to_legacy() |> TypedBlocks.to_typed()
 
       assert back.title == "Shots"
       assert back.layout == "masonry"
@@ -201,7 +201,7 @@ defmodule KilnCMS.Blocks.GalleryAccordionTest do
         accordion([%{"title" => "T", "content" => "C"}], %{title: "Specs", first_open: true})
 
       assert [%Accordion{} = back] =
-               block |> List.wrap() |> TypedBlocks.to_legacy() |> TypedBlocks.to_typed()
+               block |> List.wrap() |> KilnCMS.LegacyBridge.to_legacy() |> TypedBlocks.to_typed()
 
       assert back.title == "Specs"
       # A boolean has to survive the trip in both directions — it is written as a
