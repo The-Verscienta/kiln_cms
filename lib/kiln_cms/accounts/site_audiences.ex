@@ -32,8 +32,10 @@ defmodule KilnCMS.Accounts.SiteAudiences do
   affiliated account holds nothing on a site it is not a member of — so a legacy
   editor given a membership on site B would stop being an editor on the default
   site. Before creating the membership here, this carries the account onto the
-  default org exactly as `mix kiln.deprecations --migrate-audiences` does: a
-  default-org membership with its standing role and its current `User.audiences`.
+  default org with `KilnCMS.Accounts.LegacyAffiliation.ensure_default_membership/2`
+  — the same step billing takes before a first paid membership (#1649): a
+  default-org membership with its standing role, any live temporary role and its
+  current `User.audiences`.
   That write is created first and on its own, and it grants on the default org
   exactly what the fallback grants there today, so if the second write fails
   nothing is lost.
@@ -47,7 +49,7 @@ defmodule KilnCMS.Accounts.SiteAudiences do
   """
 
   alias KilnCMS.Accounts
-  alias KilnCMS.Accounts.RoleGrant
+  alias KilnCMS.Accounts.LegacyAffiliation
   alias KilnCMS.CMS.Audiences
 
   @typedoc """
@@ -88,8 +90,11 @@ defmodule KilnCMS.Accounts.SiteAudiences do
 
     with {:ok, memberships} <- Accounts.list_memberships_for_user(user_id, actor: actor) do
       case Enum.find(memberships, &(&1.organization_id == org_id)) do
-        %{} = membership -> update(membership, audiences, actor)
-        nil -> create(user, org_id, audiences, memberships == [], actor)
+        %{} = membership ->
+          update(membership, audiences, actor)
+
+        nil ->
+          create(user, org_id, audiences, LegacyAffiliation.unaffiliated?(memberships), actor)
       end
     end
   end
@@ -103,16 +108,17 @@ defmodule KilnCMS.Accounts.SiteAudiences do
   # A membership-less account on the default org: its standing role and any live
   # grant move onto the membership, so its tier there is what it was.
   defp create(user, org_id, audiences, true = _legacy?, actor) do
-    default_org_id = Accounts.default_org_id()
-
-    if org_id == default_org_id do
-      with {:ok, _membership} <- create_carrying_tier(user, org_id, audiences, actor),
+    if org_id == Accounts.default_org_id() do
+      with {:ok, _membership} <-
+             LegacyAffiliation.ensure_default_membership(user,
+               audiences: audiences,
+               actor: actor
+             ),
            do: {:ok, :created}
     else
       # Carry the account onto the default org first — see "A membership-less
       # account edited from another site" in the moduledoc.
-      with {:ok, _carried} <-
-             create_carrying_tier(user, default_org_id, list(user.audiences), actor),
+      with {:ok, _carried} <- LegacyAffiliation.ensure_default_membership(user, actor: actor),
            {:ok, _membership} <- create_viewer(user, org_id, audiences, actor),
            do: {:ok, :created}
     end
@@ -129,33 +135,6 @@ defmodule KilnCMS.Accounts.SiteAudiences do
       %{organization_id: org_id, user_id: user.id, role: :viewer, audiences: audiences},
       actor: actor
     )
-  end
-
-  # The STANDING role, never `RoleGrant.effective_role/1`: a live grant becomes a
-  # grant on the membership with the same expiry, not a permanent tier.
-  defp create_carrying_tier(user, org_id, audiences, actor) do
-    with {:ok, membership} <-
-           Accounts.create_org_membership(
-             %{organization_id: org_id, user_id: user.id, role: user.role, audiences: audiences},
-             actor: actor
-           ) do
-      carry_grant(user, membership, actor)
-    end
-  end
-
-  defp carry_grant(user, membership, actor) do
-    if RoleGrant.live?(user) and RoleGrant.elevation?(user.granted_role, membership.role) do
-      Accounts.grant_membership_temporary_role(
-        membership,
-        %{
-          granted_role: user.granted_role,
-          granted_role_expires_at: user.granted_role_expires_at
-        },
-        actor: actor
-      )
-    else
-      {:ok, membership}
-    end
   end
 
   # Only configured audiences, each once, in a stable order — the attribute's

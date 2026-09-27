@@ -22,6 +22,7 @@ defmodule KilnCMS.Billing.EntitlementsTest do
   alias KilnCMS.Accounts.User
   alias KilnCMS.Billing
   alias KilnCMS.Billing.Entitlements
+  alias KilnCMS.CMS
   alias KilnCMS.CMS.Audiences
 
   @gated hd(Audiences.gated())
@@ -423,6 +424,195 @@ defmodule KilnCMS.Billing.EntitlementsTest do
 
       assert by_org[default_org_id()] == [@gated]
       assert by_org[other.id] == []
+    end
+  end
+
+  describe "a legacy account's first paid membership (#1649)" do
+    # A membership-less ("unaffiliated") account holds its standing `User.role`
+    # on the default org. Its first membership used to be the paid `:viewer` one,
+    # which made it affiliated and demoted it. Every tier assertion below goes
+    # through a real content policy decision (`CMS.update_page` / `CMS.get_page`),
+    # not the stored row.
+
+    defp legacy_user(attrs) do
+      Ash.Seed.seed!(
+        User,
+        Map.merge(
+          %{
+            email: "legacy-#{System.unique_integer([:positive])}@example.com",
+            hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+            confirmed_at: DateTime.utc_now(),
+            role: :viewer
+          },
+          attrs
+        )
+      )
+    end
+
+    defp page_on(org_id, audience) do
+      actor = admin()
+
+      {:ok, page} =
+        CMS.create_page(
+          %{
+            title: "Page",
+            slug: "legacy-#{System.unique_integer([:positive])}",
+            audience: audience
+          },
+          actor: actor,
+          tenant: org_id
+        )
+
+      {:ok, page} = CMS.publish_page(page, %{}, actor: actor, tenant: org_id)
+      page
+    end
+
+    defp fresh(user), do: Accounts.get_user!(user.id, authorize?: false)
+
+    # Re-read first: the page is optimistically locked, so a struct an earlier
+    # edit already moved past would be refused for staleness, not authorization.
+    defp can_edit?(user, page, org_id) do
+      current = CMS.get_page!(page.id, authorize?: false, tenant: org_id)
+
+      match?(
+        {:ok, _page},
+        CMS.update_page(current, %{title: "Edited #{System.unique_integer()}"},
+          actor: fresh(user),
+          tenant: org_id
+        )
+      )
+    end
+
+    defp can_read?(user, page, org_id) do
+      case CMS.get_page(page.id, actor: fresh(user), tenant: org_id, not_found_error?: false) do
+        {:ok, %{id: id}} -> id == page.id
+        _other -> false
+      end
+    end
+
+    defp memberships_of(user) do
+      {:ok, memberships} = Accounts.list_memberships_for_user(user.id, authorize?: false)
+      memberships
+    end
+
+    test "a legacy editor who pays on the default org keeps editing it" do
+      editor = legacy_user(%{role: :editor})
+      page = page_on(default_org_id(), :public)
+      gated = page_on(default_org_id(), @gated)
+
+      assert can_edit?(editor, page, default_org_id())
+
+      membership(editor, tier(), :active)
+      assert {:ok, _delta} = Entitlements.recompute(editor.id)
+
+      assert can_edit?(editor, page, default_org_id())
+      assert can_read?(editor, gated, default_org_id())
+
+      assert [%{organization_id: org_id, role: :editor, audiences: [@gated]}] =
+               memberships_of(editor)
+
+      assert org_id == default_org_id()
+    end
+
+    test "a legacy editor who pays on another org keeps the default org and reads the paid one" do
+      other = org("paid")
+      # `:public` is an audience no tier can claim, so it is admin-owned and must
+      # survive onto the default-org membership. (`@gated` on the column would be
+      # billing-owned — see "Division of authority" in the moduledoc.)
+      editor = legacy_user(%{role: :editor, audiences: [:public]})
+      page = page_on(default_org_id(), :public)
+      paid_page = page_on(other.id, @gated)
+
+      membership(editor, tier(%{}, other.id), :active, other.id)
+      assert {:ok, _delta} = Entitlements.recompute(editor.id)
+
+      # Still an editor on its own site...
+      assert can_edit?(editor, page, default_org_id())
+      # ...a reader, not an author, on the site it paid on, and it reads there.
+      refute can_edit?(editor, paid_page, other.id)
+      assert can_read?(editor, paid_page, other.id)
+
+      by_org = Map.new(memberships_of(editor), &{&1.organization_id, {&1.role, &1.audiences}})
+      assert by_org[default_org_id()] == {:editor, [:public]}
+      assert by_org[other.id] == {:viewer, [@gated]}
+    end
+
+    test "a live temporary role is carried onto the default org with its expiry" do
+      other = org("paid")
+      expires = DateTime.utc_now() |> DateTime.add(2, :hour) |> DateTime.truncate(:second)
+      viewer = legacy_user(%{granted_role: :editor, granted_role_expires_at: expires})
+      page = page_on(default_org_id(), :public)
+
+      assert can_edit?(viewer, page, default_org_id())
+
+      membership(viewer, tier(%{}, other.id), :active, other.id)
+      assert {:ok, _delta} = Entitlements.recompute(viewer.id)
+
+      assert can_edit?(viewer, page, default_org_id())
+
+      carried = Enum.find(memberships_of(viewer), &(&1.organization_id == default_org_id()))
+      # The standing tier stays the standing tier; the grant keeps its end.
+      assert carried.role == :viewer
+      assert carried.granted_role == :editor
+      assert DateTime.compare(carried.granted_role_expires_at, expires) == :eq
+    end
+
+    test "an account already affiliated elsewhere gains no default-org membership" do
+      other = org("paid")
+      home = org("home")
+      u = legacy_user(%{role: :editor})
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        organization_id: home.id,
+        user_id: u.id,
+        role: :editor
+      })
+
+      membership(u, tier(%{}, other.id), :active, other.id)
+      assert {:ok, _delta} = Entitlements.recompute(u.id)
+
+      orgs = u |> memberships_of() |> Enum.map(& &1.organization_id) |> Enum.sort()
+      assert orgs == Enum.sort([home.id, other.id])
+    end
+
+    test "a legacy account with nothing entitling stays unaffiliated" do
+      editor = legacy_user(%{role: :editor})
+      membership(editor, tier(), :canceled)
+
+      assert {:ok, _delta} = Entitlements.recompute(editor.id)
+      assert memberships_of(editor) == []
+    end
+
+    test "recomputing again changes nothing" do
+      editor = legacy_user(%{role: :editor})
+      membership(editor, tier(), :active)
+
+      {:ok, _delta} = Entitlements.recompute(editor.id)
+      before = memberships_of(editor)
+      {:ok, _delta} = Entitlements.recompute(editor.id)
+
+      assert memberships_of(editor) == before
+    end
+
+    test "recomputes racing for one legacy account create one row per org" do
+      other = org("paid")
+      editor = legacy_user(%{role: :editor})
+      page = page_on(default_org_id(), :public)
+      membership(editor, tier(%{}, other.id), :active, other.id)
+
+      results =
+        1..4
+        |> Task.async_stream(fn _ -> Entitlements.recompute(editor.id) end,
+          max_concurrency: 4,
+          ordered: false
+        )
+        |> Enum.map(fn {:ok, result} -> result end)
+
+      assert Enum.all?(results, &match?({:ok, _delta}, &1))
+
+      orgs = editor |> memberships_of() |> Enum.map(& &1.organization_id) |> Enum.sort()
+      assert orgs == Enum.sort([default_org_id(), other.id])
+      assert can_edit?(editor, page, default_org_id())
     end
   end
 
