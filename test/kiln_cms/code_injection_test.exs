@@ -253,6 +253,39 @@ defmodule KilnCMS.CodeInjectionTest do
       assert KilnCMS.CMS.Validations.CspOrigins.valid_origin?("https://ok.example")
     end
 
+    # `connect-src` is `'self'` alone (#1615), and an `https://` source does
+    # not admit a `wss://` URL, so a vendor's websocket must be nameable — in
+    # that directive only.
+    test "a wss:// origin is accepted in connect_src and nowhere else" do
+      row =
+        save!(%{"connect_src" => ["wss://relay.example", "ws://localhost:4000"]}, user(:admin))
+
+      assert row.connect_src == ["wss://relay.example", "ws://localhost:4000"]
+
+      for field <- ["script_src", "img_src"] do
+        assert {:error, _} =
+                 CMS.save_site_code_injection(%{field => ["wss://relay.example"]},
+                   actor: user(:admin),
+                   tenant: org_id()
+                 ),
+               "#{field} should refuse a websocket origin"
+      end
+
+      assert {:error, _} =
+               CMS.save_site_code_injection(%{"connect_src" => ["ws://relay.example"]},
+                 actor: user(:admin),
+                 tenant: org_id()
+               )
+
+      refute KilnCMS.CMS.Validations.CspOrigins.valid_origin?("wss://relay.example")
+      assert KilnCMS.CMS.Validations.CspOrigins.valid_origin?("wss://relay.example", :connect_src)
+
+      refute KilnCMS.CMS.Validations.CspOrigins.valid_origin?(
+               "wss://relay.example",
+               :embed_origins
+             )
+    end
+
     test "refuses plaintext http to a non-local host" do
       assert {:error, _} =
                CMS.save_site_code_injection(%{"img_src" => ["http://tracker.example"]},

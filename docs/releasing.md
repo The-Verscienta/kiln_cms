@@ -114,8 +114,10 @@ people to pass the flag reflexively.
 6. **Watch the release image publish.** Pushing the tag starts
    [`.github/workflows/release.yml`](https://github.com/The-Verscienta/kiln_cms/blob/main/.github/workflows/release.yml),
    which builds the release image and pushes it to
-   `ghcr.io/the-verscienta/kiln_cms` as both `X.Y.Z` and `latest`, stamped with
-   the commit and build date. Nothing to run by hand; it authenticates as
+   `ghcr.io/the-verscienta/kiln_cms` as both `X.Y.Z` and `latest` (a release
+   candidate gets only its exact tag — see
+   [below](#cutting-a-release-candidate)), stamped with the commit and build
+   date. Nothing to run by hand; it authenticates as
    `GITHUB_TOKEN`.
 
    The version bump in `mix.exs` invalidates the dep layer, but the build
@@ -162,6 +164,64 @@ people to pass the flag reflexively.
    cd <your kiln checkout> && git fetch --tags && mix kiln.update --check
    ```
 
+## Cutting a release candidate
+
+A release candidate lets downstreams rehearse a release — the 1.0 upgrade in
+particular — before anyone's default update lands on it. Nothing floats onto a
+candidate by accident (#1541): each place that picks "the newest release"
+skips pre-releases, and each one has an explicit way in.
+
+1. **Tag it `vX.Y.Z-rc.N`** — the version it is a candidate *for*, then
+   `-rc.1`, `-rc.2`, …. By semver `1.0.0-rc.1` sorts below `1.0.0` and above
+   every earlier release, which is exactly why the tools below must be told
+   about it. The `-` is what every one of them looks for, so do not spell a
+   candidate any other way (`v1.0.0rc1` does not parse as a version at all).
+
+2. **Leave the changelog under `## [Unreleased]`.** Do not condense, do not
+   rename `docs/changelog/unreleased.md`, do not add a `## [X.Y.Z-rc.N]`
+   section — the final release does all of that, once. `mix kiln.update` reads
+   `[Unreleased]` as the candidate's own notes when the target is a
+   pre-release, so its Breaking and Upgrade notes still print before a pin
+   moves. Do bump `mix.exs` to `X.Y.Z-rc.N`, so an instance on the candidate
+   reports what it is running.
+
+3. **Tag and push** as in [step 5](#cutting-a-release), with the candidate's
+   name. `release.yml` publishes the image as `X.Y.Z-rc.N` only: `latest`
+   stays on the previous final release, so `docker pull …:latest` and the
+   `:latest` references in the README are unaffected.
+
+4. **Publish the GitHub release as a pre-release:**
+
+   ```bash
+   gh release create vX.Y.Z-rc.N --prerelease --title "vX.Y.Z-rc.N" --notes "…"
+   ```
+
+   `--prerelease` is what keeps it off every deployed instance's admin update
+   page: `Kiln.Updates` asks `releases/latest`, which GitHub defines as the
+   newest release that is *not* a pre-release. A candidate published without
+   the flag would become "latest"; the update check then refuses it
+   (`{:error, :prerelease}`) rather than telling anyone to install it, but the
+   page can no longer report on the final release either — fix it with
+   `gh release edit vX.Y.Z-rc.N --prerelease`.
+
+**How a downstream opts in.** A plain `mix kiln.update` never targets a
+candidate. To try one:
+
+```bash
+mix kiln.update --to vX.Y.Z-rc.N    # exactly that candidate
+mix kiln.update --pre               # the newest release, candidates included
+```
+
+The major-version guard still applies — `0.12.0 → 1.0.0-rc.1` needs
+`--allow-major` like the final would. A pin left on a candidate stays there
+under a plain update until the final release overtakes it (the task reports
+the pin as ahead rather than downgrading it), and then moves to the final as
+usual.
+
+The client SDKs follow the same rule: a `client-js-vX.Y.Z-rc.N` tag publishes
+to npm under the `next` dist-tag rather than `latest`, and Hex never resolves
+a `kiln_client` pre-release unless a requirement names one.
+
 ## Updating a project to a release
 
 From inside the project's pinned Kiln checkout — `kiln/upstream`, `upstream/`,
@@ -181,7 +241,8 @@ boot (see the `CMD` in the [`Dockerfile`](https://github.com/The-Verscienta/kiln
 them — **take a backup first** (`scripts/backup.sh`) if the report listed any.
 
 Useful flags: `--to vX.Y.Z` to land on a specific release rather than the
-newest, `--ref main` to deliberately track bleeding edge, `--allow-major` after
+newest, `--pre` to let a release candidate count as the newest, `--ref main`
+to deliberately track bleeding edge, `--allow-major` after
 reading the upgrade notes, and `--check --exit-code` to fail a CI job when a
 project has drifted behind upstream.
 
