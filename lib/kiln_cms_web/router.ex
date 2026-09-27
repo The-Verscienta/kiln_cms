@@ -8,7 +8,11 @@ defmodule KilnCMSWeb.Router do
   # Content-Security-Policy. Directives shared by every browser response; the
   # `script-src` directive is finalized per-pipeline (see `put_*_browser_csp`).
   # `style-src` keeps 'unsafe-inline' because inline `style=` attributes can't
-  # carry a nonce; everything else is locked to same-origin.
+  # carry a nonce, and templates and blocks use them (focal points, column
+  # widths, chart bars); the brand tokens and a site's custom CSS are `<style>`
+  # elements too. Reviewed for 1.0 (#1615): without script, injected CSS can
+  # restyle a page, but the only requests it can make go to origins `img-src`
+  # and `font-src` already trust. Everything else is locked to same-origin.
   @img_src_base "img-src 'self' data: blob:"
 
   # `<video>`/`<audio>`/`<track>` sources (#494). Without an explicit
@@ -18,12 +22,21 @@ defmodule KilnCMSWeb.Router do
   # `img-src` does (see `base_csp/0`), because it is the same CDN.
   @media_src_base "media-src 'self' blob:"
 
+  # `connect-src` is `'self'` alone (#1615; threat-model residual 12). Every
+  # socket Kiln's own pages open is same-origin — `/live`, `/ws/collab`, the
+  # longpoll fallback, passkey `fetch`es — and CSP3 matches `'self'` against
+  # `ws:`/`wss:` on the page's own host and port, so the `ws: wss:` this used to
+  # carry only ever admitted websockets to OTHER hosts: an exfiltration channel
+  # for any script that got past `script-src`. A site's code injection adds its
+  # vendors' origins (`wss://` included) per site; see `Plugs.CodeInjection`.
+  @connect_src "connect-src 'self'"
+
   @base_csp "default-src 'self'; " <>
               "style-src 'self' 'unsafe-inline'; " <>
               "#{@img_src_base}; " <>
               "#{@media_src_base}; " <>
               "font-src 'self' data:; " <>
-              "connect-src 'self' ws: wss:; " <>
+              "#{@connect_src}; " <>
               "frame-src 'self' https://www.youtube.com https://player.vimeo.com; " <>
               "object-src 'none'; base-uri 'self'; " <>
               "frame-ancestors 'self'; form-action 'self'"

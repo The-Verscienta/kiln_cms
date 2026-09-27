@@ -81,9 +81,23 @@ jobs:
           # `.github/SECURITY.md` says plainly that there is none — fixes land
           # on `main` and releases move forward only. `{{major}}` is worse
           # still pre-1.0: every release so far would be `0`.
+          #
+          # `latest` moves only for a final release (#1541). A release
+          # candidate (`v1.0.0-rc.1`) matches this workflow's `v*.*.*` trigger
+          # too, and an unconditional `latest` would hand the candidate to
+          # every `docker pull` and every compose file that floats on it.
+          # Semver marks a pre-release with a `-` after the patch number, and
+          # a final `vX.Y.Z` tag has none, so that is the test. The candidate
+          # still gets its exact tag (`1.0.0-rc.1`) from the semver line.
+          #
+          # `flavor: latest=false` stops the action adding a `latest` of its
+          # own: its default (`auto`) derives one from a semver tag, and the
+          # line below should be the only thing that decides.
           tags: |
             type=semver,pattern={{version}}
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+          flavor: |
+            latest=false
           labels: |
             org.opencontainers.image.version=${{ github.ref_name }}
 

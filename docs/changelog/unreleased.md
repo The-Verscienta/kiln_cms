@@ -26,6 +26,20 @@ carries the reasoning.
   audiences and standing role
   ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538)).
 
+<a id="a-site-whose-code-injection-snippet-opens-a-websocket-to-its-vendor-must"></a>
+
+- **A site whose code-injection snippet opens a websocket to its vendor must
+  now list that `wss://` origin under Connections.** The stock `connect-src`
+  no longer carries `ws: wss:` (see Security), and an `https://` source does
+  not admit a `wss://` URL, so a chat or live-analytics widget pasted into
+  Settings → Code injection that talks to its vendor over a websocket is
+  refused by the browser after the upgrade — look for a `connect-src`
+  violation naming a `wss://` URL in the public site's console. Add that
+  origin (e.g. `wss://relay.widget.example`) to the Connections list; the
+  field now accepts `wss://` origins, and only that field does. A snippet that
+  only `fetch`es or beacons needs nothing
+  ([#1615](https://github.com/The-Verscienta/kiln_cms/issues/1615)).
+
 <a id="before-upgrading-make-every-webhook-receiver-verify-x-kilncms-webhook-signature"></a>
 
 - **Before upgrading, make every webhook receiver verify
@@ -58,6 +72,26 @@ carries the reasoning.
   only the timestamped header and need no change
   ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616)).
 
+## Added
+
+<a id="release-candidates-are-opt-in-everywhere-mix-kilnupdate-pre"></a>
+
+- **Release candidates are opt-in everywhere: `mix kiln.update --pre`.** A
+  `vX.Y.Z-rc.N` tag sorts above every earlier final release, so before the
+  first one is pushed, each place that picks "the newest release" now skips
+  pre-releases (#1541). `mix kiln.update` defaults to the highest *final*
+  release; `--pre` lets a candidate count, and `--to v1.0.0-rc.1` names one.
+  A pin already on a candidate is not downgraded by a plain update, and moves
+  on once the final release ships. At a pre-release target the task prints
+  the `[Unreleased]` changelog section's Breaking and Upgrade notes, since a
+  candidate is tagged with its changes still there. `release.yml` pushes the
+  exact image tag for a candidate but moves `latest` only for a final release,
+  and a pre-release `client-js-v*` tag publishes to npm under `next`, not
+  `latest`. `Kiln.Updates` already asked `releases/latest`, which excludes
+  releases marked as pre-releases; a candidate published *without* the flag is
+  now refused as `{:error, :prerelease}` instead of being offered as an
+  update. `docs/releasing.md` gains "Cutting a release candidate".
+
 ## Changed
 
 <a id="an-unknown-option-to-use-kilncmscmscontent-now-warns-at-compile-time-instead-of"></a>
@@ -88,6 +122,65 @@ carries the reasoning.
   least a second on any 429 and retries up to five times, since a full sync
   (~3 requests a guide) is larger than the `:api` bucket and keeps talking to
   sites that haven't picked this fix up.
+
+## Security
+
+<a id="the-browser-csps-connect-src-is-self-alone-no-websocket-to-any"></a>
+
+- **The browser CSP's `connect-src` is `'self'` alone — no websocket to any
+  other host.** It had been `'self' ws: wss:` since the first skeleton commit,
+  which let any script that got past `script-src` open a websocket to any host
+  — an exfiltration channel, which is what `connect-src` exists to close. Every
+  socket Kiln's own pages open is same-origin (`/live` and its longpoll
+  fallback, `/ws/collab`, `/ws/gql`), and CSP3 matches `'self'` against
+  `ws:`/`wss:` on the page's own host and port, so the scheme sources only ever
+  admitted *other* hosts. No browser code in Kiln connects cross-origin:
+  uploads ride the LiveView channel, the presigned-upload API is for API
+  clients, oEmbed and Unsplash are resolved server-side, and `bridge.js` runs
+  on the external front end under that site's own policy. A new Playwright
+  spec (`e2e/tests/csp.spec.js`) drives the console, an editor, the media
+  library, a public page and the same page on a second host name with zero
+  CSP violations, and shows a socket to another origin is now refused. The
+  same pass reviewed `style-src 'unsafe-inline'` (kept: templates use inline
+  `style=` attributes, which cannot carry a nonce) and the runtime
+  `img-src`/`media-src` widening (kept: every source is operator
+  configuration, a fixed provider list, or the site's own bucket origin);
+  threat-model residual 12 now records the reviewed policy
+  ([#1615](https://github.com/The-Verscienta/kiln_cms/issues/1615)).
+
+<a id="the-audience-checkboxes-on-editor-accounts-edit-the-site-membership"></a>
+
+- **The audience checkboxes on `/editor/accounts` edit the site membership, not
+  the deprecated global column.** They wrote only `User.audiences`, which grants
+  access solely through the no-membership fallback 0.12 deprecates. For any
+  account holding a membership, which includes every account
+  `mix kiln.deprecations --migrate-audiences` moves, a tick saved and changed
+  nothing, and no console page edited `OrgMembership.audiences` at all. They now
+  write the account's membership on the site the page is served from, in their
+  own form beside the platform role, and the console no longer writes
+  `User.audiences`. An account with no membership there gets one on the first
+  save with the tier it already holds, so it changes what the account reads and
+  never what it authors; a membership-less account edited from another site is
+  first carried onto the default org, so a legacy editor keeps its tier there.
+  See [Paid memberships](../memberships.md#editing-audiences-from-the-console).
+  (#1646)
+
+<a id="paying-for-a-membership-no-longer-demotes-a-legacy-editor"></a>
+
+- **Paying for a membership no longer demotes a legacy editor.** Billing gives
+  a buyer a `:viewer` membership on each org they paid on. For an account with
+  no memberships at all, whose tier comes from `User.role`, that first
+  membership ended the no-membership fallback: buying on the default org made a
+  legacy editor a viewer there, and buying on another org left it with no tier
+  and no audiences on the default org. The recompute now first gives such an
+  account a default-org membership carrying its standing role, any live
+  temporary role with its expiry, and its `User.audiences`, then adds the paid
+  membership. The console's audience checkboxes already took this step (#1646);
+  both now share `KilnCMS.Accounts.LegacyAffiliation`. Billing's membership
+  writes are also upserts now, so two recomputes racing for one account no
+  longer collide on the unique index.
+  See [Paid memberships](../memberships.md#the-first-paid-membership).
+  (#1649)
 
 ## Deprecated
 
@@ -136,37 +229,3 @@ carries the reasoning.
   release enqueues carries `org_id`. Let the queue drain before upgrading to
   1.0; see the Upgrade notes
   ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538)).
-
-<a id="the-audience-checkboxes-on-editor-accounts-edit-the-site-membership"></a>
-
-- **The audience checkboxes on `/editor/accounts` edit the site membership, not
-  the deprecated global column.** They wrote only `User.audiences`, which grants
-  access solely through the no-membership fallback 0.12 deprecates. For any
-  account holding a membership, which includes every account
-  `mix kiln.deprecations --migrate-audiences` moves, a tick saved and changed
-  nothing, and no console page edited `OrgMembership.audiences` at all. They now
-  write the account's membership on the site the page is served from, in their
-  own form beside the platform role, and the console no longer writes
-  `User.audiences`. An account with no membership there gets one on the first
-  save with the tier it already holds, so it changes what the account reads and
-  never what it authors; a membership-less account edited from another site is
-  first carried onto the default org, so a legacy editor keeps its tier there.
-  See [Paid memberships](../memberships.md#editing-audiences-from-the-console).
-  (#1646)
-
-<a id="paying-for-a-membership-no-longer-demotes-a-legacy-editor"></a>
-
-- **Paying for a membership no longer demotes a legacy editor.** Billing gives
-  a buyer a `:viewer` membership on each org they paid on. For an account with
-  no memberships at all, whose tier comes from `User.role`, that first
-  membership ended the no-membership fallback: buying on the default org made a
-  legacy editor a viewer there, and buying on another org left it with no tier
-  and no audiences on the default org. The recompute now first gives such an
-  account a default-org membership carrying its standing role, any live
-  temporary role with its expiry, and its `User.audiences`, then adds the paid
-  membership. The console's audience checkboxes already took this step (#1646);
-  both now share `KilnCMS.Accounts.LegacyAffiliation`. Billing's membership
-  writes are also upserts now, so two recomputes racing for one account no
-  longer collide on the unique index.
-  See [Paid memberships](../memberships.md#the-first-paid-membership).
-  (#1649)
