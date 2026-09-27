@@ -52,6 +52,10 @@ defmodule KilnCMS.CMS.BlockBackfill do
       carries fields its block does not declare;
     * names a block type this build does not have (`:unknown_type` — typically a
       plugin that has since been removed);
+    * is behind a gap in its block's `migrate` chain (`:missing_migration`,
+      #1642) — `KilnCMS.Blocks.Upcaster.try_upcast/2` refuses it rather than
+      stamp never-migrated data current, and the backfill does not write it
+      either;
     * fails the union's stored cast (`:invalid`), or is not a block at all
       (`:unrecognized`).
 
@@ -134,7 +138,7 @@ defmodule KilnCMS.CMS.BlockBackfill do
         }
 
   # Note kinds that stop a row being written.
-  @refusals [:lossy, :unknown_type, :invalid, :unrecognized]
+  @refusals [:lossy, :unknown_type, :missing_migration, :invalid, :unrecognized]
   # Note kinds that leave a row writable but need an operator.
   @attention [:legacy_html_kept, :parked_custom]
 
@@ -549,18 +553,31 @@ defmodule KilnCMS.CMS.BlockBackfill do
         {map, notes ++ [note(path, :unknown_type, "no block type #{inspect(map["_type"])}")]}
 
       module ->
-        upcast = Upcaster.upcast_block_map(map)
-        notes = notes ++ version_note(map, upcast, module, path)
+        case Upcaster.try_upcast_block_map(map) do
+          {:ok, upcast} ->
+            prepare_upcast(
+              map,
+              upcast,
+              module,
+              path,
+              notes ++ version_note(map, upcast, module, path)
+            )
 
-        case foreign_keys(module, upcast) do
-          [] ->
-            {upcast, text_notes} = prepare_rich_text(upcast, module, path)
-            {upcast, child_notes} = prepare_children(upcast, module, path)
-            {upcast, notes ++ text_notes ++ child_notes}
-
-          keys ->
-            {map, notes ++ [note(path, :lossy, "undeclared field(s) " <> Enum.join(keys, ", "))]}
+          {:error, refusal} ->
+            {map, notes ++ [note(path, :missing_migration, refusal.detail)]}
         end
+    end
+  end
+
+  defp prepare_upcast(map, upcast, module, path, notes) do
+    case foreign_keys(module, upcast) do
+      [] ->
+        {upcast, text_notes} = prepare_rich_text(upcast, module, path)
+        {upcast, child_notes} = prepare_children(upcast, module, path)
+        {upcast, notes ++ text_notes ++ child_notes}
+
+      keys ->
+        {map, notes ++ [note(path, :lossy, "undeclared field(s) " <> Enum.join(keys, ", "))]}
     end
   end
 
