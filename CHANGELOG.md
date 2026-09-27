@@ -65,6 +65,11 @@ Every summary line below that was shortened links to its own entry there.
 - **Webhook deliveries no longer send `x-kilncms-signature`.**
   ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616) · [long form](docs/changelog/unreleased.md#webhook-deliveries-no-longer-send-x-kilncms-signature))
 
+### Added
+
+- **Release candidates are opt-in everywhere: `mix kiln.update --pre`.**
+  ([long form](docs/changelog/unreleased.md#release-candidates-are-opt-in-everywhere-mix-kilnupdate-pre))
+
 ### Fixed
 
 - **A 429's `retry-after` is rounded up, never 0.**

@@ -165,10 +165,25 @@ jobs:
         # Publishing a tarball runs no lifecycle scripts, so `prepublishOnly`
         # (lint + build + test) does not re-run here: the build job ran the
         # same gate against the same commit.
+        #
+        # A pre-release (`client-js-v0.3.0-rc.1`) goes out under the `next`
+        # dist-tag (#1541). Without `--tag`, npm points `latest` at whatever
+        # it publishes, so `npm install @kiln-cms/client` would start handing
+        # out the candidate. Semver marks a pre-release with a `-` after the
+        # patch number; the `client-js-v` prefix has hyphens of its own, so
+        # it is stripped before looking. (Hex needs no equivalent: its
+        # resolver skips pre-releases unless a requirement names one.)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           TARBALL: ${{ needs.js-build.outputs.tarball }}
-        run: npm publish "./$TARBALL" --provenance --access public
+          REF: ${{ github.ref_name }}
+        run: |
+          version="${REF#client-js-v}"
+          case "$version" in
+            *-*) dist_tag=next ;;
+            *) dist_tag=latest ;;
+          esac
+          npm publish "./$TARBALL" --provenance --access public --tag "$dist_tag"
 
   # ── kiln_client (Hex) ─────────────────────────────────────────────────────
 
