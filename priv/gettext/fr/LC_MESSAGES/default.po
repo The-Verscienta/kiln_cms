@@ -2276,6 +2276,11 @@ msgstr "août"
 msgid "Authentication"
 msgstr "Authentification"
 
+#: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
+#, elixir-autogen, elixir-format
+msgid "Authentication code"
+msgstr "Code d'authentification"
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format
 msgid "Author"
@@ -2324,6 +2329,11 @@ msgstr "En attente d'approbation"
 #, elixir-autogen, elixir-format
 msgid "Back"
 msgstr "Retour"
+
+#: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
+#, elixir-autogen, elixir-format
+msgid "Back to sign in"
+msgstr "Retour à la connexion"
 
 #: lib/kiln_cms_web/plugs/rate_limit.ex
 #, elixir-autogen, elixir-format
@@ -5242,10 +5252,10 @@ msgstr "Saisissez une adresse à laquelle envoyer le test."
 msgid "Enter an email address, like name@example.com."
 msgstr "Saisissez une adresse e-mail, par exemple nom@example.com."
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex
+#: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
 #, elixir-autogen, elixir-format
-msgid "Enter the 6-digit code from your authenticator app, or one of your recovery codes."
-msgstr "Saisissez le code à 6 chiffres de votre application d'authentification, ou l'un de vos codes de récupération."
+msgid "Enter the 6-digit code from your authenticator app."
+msgstr "Saisissez le code à 6 chiffres de votre application d'authentification."
 
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -8626,6 +8636,11 @@ msgid_plural "%{count} items can't ship as they stand, so the whole release woul
 msgstr[0] "Un élément ne peut pas être publié en l'état, toute la livraison échouerait donc. Corrigez-le ou retirez-le d'abord."
 msgstr[1] "%{count} éléments ne peuvent pas être publiés en l'état, toute la livraison échouerait donc. Corrigez-les ou retirez-les d'abord."
 
+#: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
+#, elixir-autogen, elixir-format
+msgid "One of the codes you saved when you turned on two-factor authentication."
+msgstr "L'un des codes que vous avez enregistrés en activant l'authentification à deux facteurs."
+
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "One per line. %{count} keyword saved."
@@ -9025,6 +9040,11 @@ msgstr "La configuration de la clé d'accès a été annulée ou n'est pas prise
 #, elixir-autogen, elixir-format
 msgid "Passkey sign-in failed. Try another method."
 msgstr "La connexion par clé d'accès a échoué. Essayez une autre méthode."
+
+#: lib/kiln_cms_web/live/sign_in_live.ex
+#, elixir-autogen, elixir-format
+msgid "Passkey sign-in failed. Use another method."
+msgstr "La connexion par clé d'accès a échoué. Utilisez une autre méthode."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -9763,6 +9783,11 @@ msgstr "Enregistrer un consentement"
 #, elixir-autogen, elixir-format
 msgid "Record consent"
 msgstr "Enregistrer le consentement"
+
+#: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
+#, elixir-autogen, elixir-format
+msgid "Recovery code"
+msgstr "Code de récupération"
 
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
@@ -13812,6 +13837,7 @@ msgid "Turning this on makes the server request every third-party URL your publi
 msgstr "En l'activant, le serveur interrogera périodiquement chaque URL tierce vers laquelle pointe votre contenu publié. Les requêtes sont espacées par domaine et s'identifient comme Kiln. Rien n'est vérifié tant que vous ne l'avez pas activé."
 
 #: lib/kiln_cms_web/controllers/two_factor_controller.ex
+#: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Two-factor authentication"
@@ -14156,6 +14182,16 @@ msgstr "Utiliser"
 msgid "Use \"true\" to pre-check the box."
 msgstr "Utilisez « true » pour cocher la case par défaut."
 
+#: lib/kiln_cms_web/live/sign_in_live.ex
+#, elixir-autogen, elixir-format
+msgid "Use a passkey"
+msgstr "Utiliser une clé d'accès"
+
+#: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
+#, elixir-autogen, elixir-format
+msgid "Use a recovery code instead"
+msgstr "Utiliser plutôt un code de récupération"
+
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
 #, elixir-autogen, elixir-format
 msgid "Use all"
@@ -14285,7 +14321,7 @@ msgstr "Vérifié"
 msgid "Verifies inbound webhooks. Copy it from the webhook endpoint you created in the provider's dashboard; it starts with whsec_."
 msgstr "Vérifie les webhooks entrants. Copiez-le depuis le point de terminaison webhook que vous avez créé dans le tableau de bord du prestataire ; il commence par whsec_."
 
-#: lib/kiln_cms_web/controllers/two_factor_controller.ex
+#: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Verify"
@@ -14295,6 +14331,11 @@ msgstr "Vérifier"
 #, elixir-autogen, elixir-format
 msgid "Verify now"
 msgstr "Vérifier maintenant"
+
+#: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
+#, elixir-autogen, elixir-format
+msgid "Verify recovery code"
+msgstr "Vérifier le code de récupération"
 
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format

@@ -355,6 +355,41 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="the-two-factor-prompt-has-a-labelled-code-field-the-pages-language-and-light-and"></a>
+
+- **The two-factor prompt has a labelled code field, the page's language and
+  light and dark themes.** `/sign-in/verify` was a standalone HTML string:
+  dark-only with hard-coded colours, a code input with no label (WCAG 1.3.1 /
+  4.1.2), and `lang="en"` over copy that was already translated (WCAG 3.1.1).
+  It is now a template in the same `Layouts.auth` shell as `/sign-in` — the
+  site's brand row, the skip-link target, `<html lang>` from the request's
+  locale, the ember tokens in both themes — drawn with the kit's `.field-*`
+  and `.btn` classes. The code field is labelled, tied to its help and error
+  text, and hints `autocomplete="one-time-code"` with a numeric keypad; a
+  recovery code, which is letters, gets its own labelled field behind a
+  "Use a recovery code instead" disclosure. The page still has no script of
+  its own, so its CSP is unchanged, and the code check, its per-account
+  budget, the first-factor token hold and the recovery-code path are
+  untouched.
+  ([#1676](https://github.com/The-Verscienta/kiln_cms/issues/1676))
+
+<a id="the-sign-in-pages-use-the-design-kit-the-setup-wizard-carries-the-brand-and-the"></a>
+
+- **The sign-in pages use the design kit, the setup wizard carries the brand,
+  and the passkey button is in the page's markup.** `KilnCMSWeb.AuthOverrides`
+  gave the sign-in, register, reset, magic-link and confirm pages their own
+  utility stacks for every button and input; they now take the kit's named
+  rules (`.btn`, `.field-input`, `.field-label`, `.link`, and new `.auth-*`
+  and `.field-checkbox` / `.field-input-error` rules), so they match the
+  console and the two-factor prompt. The first-run wizard opens on the same
+  brand row as the sign-in pages it leads to. And the "Use a passkey" button
+  is rendered by the server — translated, and visible to tests — instead of
+  being injected by `app.js`; it still ships hidden and is shown only in a
+  browser with WebAuthn, by a small LiveView hook rather than an inline
+  script. It also now appears on a locale-prefixed `/sign-in`, which the old
+  script's path check missed.
+  ([#1681](https://github.com/The-Verscienta/kiln_cms/issues/1681))
+
 <a id="a-hard-line-break-in-a-paragraph-heading-quote-or-list-item-is-delivered-as-br"></a>
 
 - **A hard line break in a paragraph, heading, quote or list item is

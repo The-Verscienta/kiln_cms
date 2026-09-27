@@ -1,0 +1,86 @@
+<div class="auth-page">
+  <div class="auth-card py-12">
+    <h1 class="auth-title mb-2">{gettext("Two-factor authentication")}</h1>
+    <p id="two-factor-help" class="auth-muted mb-6">
+      {gettext("Enter the 6-digit code from your authenticator app.")}
+    </p>
+
+    <%!-- `role="alert"` so a refused code is announced the moment the page
+          lands, and referenced from the field's `aria-describedby` so it is
+          read again when focus returns to the input. --%>
+    <p :if={@error} id="two-factor-error" role="alert" class="mb-4 text-sm text-error">
+      {@error}
+    </p>
+
+    <.form for={%{}} id="two-factor-form" action={~p"/sign-in/verify"} method="post">
+      <label for="two-factor-code" class="field-label">
+        {gettext("Authentication code")}
+      </label>
+      <input
+        id="two-factor-code"
+        name="code"
+        type="text"
+        class="field-input text-center text-lg tracking-[0.3em]"
+        autocomplete="one-time-code"
+        inputmode="numeric"
+        maxlength="12"
+        required
+        autofocus={!@recovery?}
+        aria-invalid={@error && !@recovery? && "true"}
+        aria-describedby={
+          described_by(["two-factor-help", @error && !@recovery? && "two-factor-error"])
+        }
+      />
+      <button type="submit" class="btn btn-primary btn-block mt-4">
+        {gettext("Verify")}
+      </button>
+    </.form>
+
+    <%!-- No script: a native disclosure, opened on the way back from a refused
+          recovery code so the user lands where they were typing. --%>
+    <details id="two-factor-recovery" class="mt-6" open={@recovery?}>
+      <summary class="link text-sm font-medium text-base-content">
+        {gettext("Use a recovery code instead")}
+      </summary>
+
+      <.form
+        for={%{}}
+        id="two-factor-recovery-form"
+        action={~p"/sign-in/verify"}
+        method="post"
+        class="mt-4"
+      >
+        <input type="hidden" name="factor" value="recovery" />
+        <label for="two-factor-recovery-code" class="field-label">
+          {gettext("Recovery code")}
+        </label>
+        <input
+          id="two-factor-recovery-code"
+          name="code"
+          type="text"
+          class="field-input font-mono uppercase tracking-widest"
+          autocomplete="off"
+          autocapitalize="characters"
+          spellcheck="false"
+          maxlength="12"
+          required
+          autofocus={@recovery?}
+          aria-invalid={@error && @recovery? && "true"}
+          aria-describedby={
+            described_by(["two-factor-recovery-help", @error && @recovery? && "two-factor-error"])
+          }
+        />
+        <p id="two-factor-recovery-help" class="auth-muted mt-1">
+          {gettext("One of the codes you saved when you turned on two-factor authentication.")}
+        </p>
+        <button type="submit" class="btn btn-default btn-block mt-4">
+          {gettext("Verify recovery code")}
+        </button>
+      </.form>
+    </details>
+
+    <p class="mt-6 text-center">
+      <a href={~p"/sign-in"} class="link auth-muted">{gettext("Back to sign in")}</a>
+    </p>
+  </div>
+</div>

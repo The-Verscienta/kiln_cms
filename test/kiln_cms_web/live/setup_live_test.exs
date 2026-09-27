@@ -24,6 +24,17 @@ defmodule KilnCMSWeb.SetupLiveTest do
       assert html =~ "Create your admin account"
     end
 
+    test "opens on the same brand row as the sign-in pages (#1681)", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/setup")
+
+      # Before an admin exists nothing has been branded, so this is the stock
+      # identity — the one a fresh install's sign-in page shows too.
+      brand = KilnCMS.Branding.defaults()
+
+      assert has_element?(lv, "#main a.auth-brand[href='/'] img[src='#{brand.logo_url}']")
+      assert lv |> element("#main a.auth-brand") |> render() =~ brand.site_name
+    end
+
     test "redirects home once an admin exists", %{conn: conn} do
       seed_user(:admin)
 

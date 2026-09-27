@@ -39,6 +39,97 @@ defmodule KilnCMSWeb.TwoFactorControllerTest do
     |> put_session(:pending_2fa, blob)
   end
 
+  describe "the prompt page (#1676)" do
+    # The page used to be a dark-only inline HTML string: no label on the code
+    # field, `lang="en"` over translated copy, and none of the sign-in page's
+    # shell. These pin the move into `Layouts.auth/1` and the kit.
+    test "renders in the auth layout with a labelled one-time-code field", %{conn: conn} do
+      html =
+        conn |> with_pending(enabled_user()) |> get(~p"/sign-in/verify") |> html_response(200)
+
+      doc = LazyHTML.from_document(html)
+
+      assert count(doc, "html[lang='en']") == 1
+      # `Layouts.auth/1`'s landmark and brand row, over the kit's auth page.
+      assert count(doc, "main#main .auth-page .auth-card") == 1
+      assert count(doc, "a.auth-brand[href='/']") == 1
+      assert doc |> LazyHTML.query("title") |> LazyHTML.text() =~ "Two-factor authentication"
+
+      # A real <label for>, the platform one-time-code hint, a digit keypad.
+      assert count(doc, "label.field-label[for='two-factor-code']") == 1
+
+      assert count(
+               doc,
+               "input#two-factor-code.field-input[name='code'][autocomplete='one-time-code'][inputmode='numeric'][required]"
+             ) == 1
+
+      assert count(doc, "#two-factor-code[aria-describedby='two-factor-help']") == 1
+      assert count(doc, "#two-factor-form input[name='_csrf_token']") == 1
+
+      # The recovery-code path is a native disclosure with its own labelled,
+      # letter-friendly field — base32 cannot be typed on a numeric keypad.
+      assert count(doc, "details#two-factor-recovery:not([open])") == 1
+      assert count(doc, "label[for='two-factor-recovery-code']") == 1
+      assert count(doc, "#two-factor-recovery-code:not([inputmode])") == 1
+      assert count(doc, "#two-factor-recovery-form input[name='factor'][value='recovery']") == 1
+
+      # No hard-coded colours, and nothing the browser CSP would have to allow.
+      refute html =~ ~s(style="background)
+      refute html =~ "#1c1a17"
+      refute Regex.match?(~r/<script(?![^>]*\ssrc=)(?![^>]*\snonce=)[^>]*>/, html)
+    end
+
+    for {locale, label} <- [
+          {"es", "Código de autenticación"},
+          {"fr", "Code d&#39;authentification"}
+        ] do
+      test "takes <html lang> and its copy from the request locale (#{locale})", %{conn: conn} do
+        html =
+          conn
+          |> with_pending(enabled_user())
+          |> get("/#{unquote(locale)}/sign-in/verify")
+          |> html_response(200)
+
+        assert html |> LazyHTML.from_document() |> count("html[lang='#{unquote(locale)}']") == 1
+        assert html =~ unquote(label)
+      end
+    end
+
+    test "a refused code is announced and tied to the field it refused", %{conn: conn} do
+      html =
+        conn
+        |> with_pending(enabled_user())
+        |> post(~p"/sign-in/verify", %{"code" => "000000"})
+        |> html_response(401)
+
+      doc = LazyHTML.from_document(html)
+
+      assert count(doc, "#two-factor-error[role='alert']") == 1
+      assert count(doc, "#two-factor-code[aria-invalid='true']") == 1
+
+      assert count(doc, "#two-factor-code[aria-describedby='two-factor-help two-factor-error']") ==
+               1
+
+      assert count(doc, "details#two-factor-recovery:not([open])") == 1
+    end
+
+    test "a refused recovery code reopens the recovery field", %{conn: conn} do
+      html =
+        conn
+        |> with_pending(enabled_user())
+        |> post(~p"/sign-in/verify", %{"code" => "AAAA-AAAA", "factor" => "recovery"})
+        |> html_response(401)
+
+      doc = LazyHTML.from_document(html)
+
+      assert count(doc, "details#two-factor-recovery[open]") == 1
+      assert count(doc, "#two-factor-recovery-code[aria-invalid='true'][autofocus]") == 1
+      assert count(doc, "#two-factor-code[aria-invalid]") == 0
+    end
+  end
+
+  defp count(doc, selector), do: doc |> LazyHTML.query(selector) |> Enum.count()
+
   test "GET /sign-in/verify without a pending token redirects to sign-in", %{conn: conn} do
     assert redirected_to(get(conn, ~p"/sign-in/verify")) == ~p"/sign-in"
   end

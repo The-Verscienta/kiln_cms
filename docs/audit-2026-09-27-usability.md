@@ -35,7 +35,7 @@ Prior design audits: closed July 2026 usability epic (see project plan) and
 | 2 | High | **Fixed** — verify | [#1671](https://github.com/The-Verscienta/kiln_cms/issues/1671) | `content_editor_live` Visual + chrome Save/Publish | Visual was `btn-primary` competing with Save; copy off design-language. Visual → default; Save → “Save draft”; Publish → “Publish now” |
 | 3 | High | **Fixed** — verify | [#1672](https://github.com/The-Verscienta/kiln_cms/issues/1672) | `calendar_live` month/week | Empty filtered month looked like a blank grid; now shows the list empty card |
 | 4 | High | **Fixed** — verify | [#1672](https://github.com/The-Verscienta/kiln_cms/issues/1672) | `task_live` scope chips | Empty copy identical for All vs block/document scope |
-| 5 | High | Open / backlog | [#1676](https://github.com/The-Verscienta/kiln_cms/issues/1676) | `two_factor_controller` `/sign-in/verify` | Standalone dark HTML island (no `Layouts.auth`, no light theme). Partial: auth `#main` skip target fixed |
+| 5 | High | **Fixed** — verify | [#1676](https://github.com/The-Verscienta/kiln_cms/issues/1676) | `two_factor_controller` `/sign-in/verify` | Standalone dark HTML island (no `Layouts.auth`, no light theme). Now a `TwoFactorHTML` template in `Layouts.auth`: labelled one-time-code field, `lang` from the locale, both themes, recovery-code disclosure, no script |
 | 6 | High | **Fixed** — verify | [#1675](https://github.com/The-Verscienta/kiln_cms/issues/1675) | `settings_live` TOTP | After recovery-code login, no UI to re-enrol authenticator (`recovery_login?` unused). Surfaced “Set up a new authenticator” |
 | 7 | High | **Fixed** — verify | [#1674](https://github.com/The-Verscienta/kiln_cms/issues/1674) | `content_html/search.html.heex` | Search stripped focus outline with no ring → kit `.field-input` / `.btn` |
 | 8 | High | **Fixed** — verify | [#1673](https://github.com/The-Verscienta/kiln_cms/issues/1673) | `form_controller` thank-you/error | Unstyled system-font page; embed errors had no recovery. Now `app.css` + success/error headings + embed “Try again” |
@@ -51,7 +51,7 @@ Prior design audits: closed July 2026 usability epic (see project plan) and
 | 18 | Medium | Open | [#1678](https://github.com/The-Verscienta/kiln_cms/issues/1678) | Lists empties (trash, taxonomy, inbox, search…) | Still inline `<p>` vs `<.empty_state>` |
 | 19 | Medium | Open | [#1679](https://github.com/The-Verscienta/kiln_cms/issues/1679) | Content editor density | Header action strip, inspector tabs vs `.tabs`, hover-only block chrome, device preview gap |
 | 20 | Medium | Open | [#1680](https://github.com/The-Verscienta/kiln_cms/issues/1680) | Settings density | Your settings / Mail long scroll without TOC; Form Builder kit drift; “← All content” crumbs on Team/Webhooks/Mail |
-| 21 | Medium | Open | [#1681](https://github.com/The-Verscienta/kiln_cms/issues/1681) | AuthOverrides / passkey CTA / setup brand | Bespoke utilities; JS-injected passkey; setup unbranded |
+| 21 | Medium | **Fixed** — verify | [#1681](https://github.com/The-Verscienta/kiln_cms/issues/1681) | AuthOverrides / passkey CTA / setup brand | Bespoke utilities; JS-injected passkey; setup unbranded. Kit `.btn`/`.field-*`/`.auth-*` classes; passkey server-rendered hidden + `PasskeySignIn` hook; `Layouts.auth_brand/1` on setup |
 | 22 | Medium | Open | [#1682](https://github.com/The-Verscienta/kiln_cms/issues/1682) | Delivery chrome | Preview ≠ live `public-*` hooks; header `aria-label`; locale-aware error links; mobile header wrap |
 | 23 | Medium | Open | [#1683](https://github.com/The-Verscienta/kiln_cms/issues/1683) | Form validation UX | Still replaces form with message page (recovery improved); per-field errors + re-render preferred |
 | 24 | Low | Open | — | Brand row not linked; icon-rail hides mark; h1 scale drift; TipTap EN strings; etc. | See workstream notes |
@@ -63,7 +63,7 @@ Prior design audits: closed July 2026 usability epic (see project plan) and
 | Finding | Decision |
 |---------|----------|
 | #1–#4, #6–#10, #12–#17 | **Fix now** (shipped below) |
-| #5 `/sign-in/verify` restyle onto `Layouts.auth` | **Backlog** — needs controller→template cutover under CSP constraints |
+| #5 `/sign-in/verify` restyle onto `Layouts.auth` | **Fixed** in [#1676](https://github.com/The-Verscienta/kiln_cms/issues/1676) — controller→template cutover; no script, CSP unchanged |
 | #11 `text-primary` → `text-primary-ink` sweep | **Backlog** — broad; start overview + chips |
 | #18–#23 Medium clusters | **Backlog** issue-track |
 | Low | Issue-track selectively |
