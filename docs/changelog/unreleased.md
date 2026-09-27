@@ -498,6 +498,21 @@ carries the reasoning.
   row under the site name, with finger-sized link targets.
   ([#1677](https://github.com/The-Verscienta/kiln_cms/issues/1677) · [#1682](https://github.com/The-Verscienta/kiln_cms/issues/1682))
 
+<a id="a-sign-in-or-console-page-opened-under-a-locale-prefix-connects-and-renders"></a>
+
+- **A sign-in or console page opened under a locale prefix connects, and
+  renders in that language.** `/es/sign-in` drew `<html lang="en">` and
+  English copy, failing WCAG 3.1.1, and never connected: the LiveView join
+  re-matches the browser's prefixed URL against a router that has no prefixed
+  routes, is refused, and the client reloads the same URL, so the sign-in form
+  never worked. The same held for `/fr/register`, `/es/reset` and every console
+  page. A GET for a LiveView page under a locale prefix now stores that locale
+  in the session, as the language switcher does, and redirects to the
+  unprefixed path. The page renders in the chosen language, and so do its live
+  navigations and the controller pages after it, `/sign-in/verify` included.
+  Controller pages, public delivery among them, keep their prefixed URLs
+  ([#1699](https://github.com/The-Verscienta/kiln_cms/issues/1699)).
+
 ## Security
 
 <a id="auth-budgets-now-hold-across-nodes-and-restarts"></a>

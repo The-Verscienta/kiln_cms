@@ -188,6 +188,10 @@ Every summary line below that was shortened links to its own entry there.
   the site's theme, and the public header nav is named and wraps on a phone.**
   ([#1677](https://github.com/The-Verscienta/kiln_cms/issues/1677) · [#1682](https://github.com/The-Verscienta/kiln_cms/issues/1682) · [long form](docs/changelog/unreleased.md#ember-links-and-labels-in-the-console-meet-aa-contrast-the-previews-wear-the))
 
+- **A sign-in or console page opened under a locale prefix connects, and
+  renders in that language.**
+  ([#1699](https://github.com/The-Verscienta/kiln_cms/issues/1699) · [long form](docs/changelog/unreleased.md#a-sign-in-or-console-page-opened-under-a-locale-prefix-connects-and-renders))
+
 ### Security
 
 - **Auth budgets now hold across nodes and restarts.**

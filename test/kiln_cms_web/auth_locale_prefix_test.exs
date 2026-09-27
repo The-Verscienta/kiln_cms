@@ -81,6 +81,15 @@ defmodule KilnCMSWeb.AuthLocalePrefixTest do
     end
   end
 
+  # The console's LiveViews are on `:browser`, not `:browser_auth`, and had the
+  # same unjoinable URL.
+  test "a console LiveView under a prefix redirects the same way", %{conn: conn} do
+    conn = get(conn, "/fr/editor/calendar")
+
+    assert redirected_to(conn, 302) == "/editor/calendar"
+    assert get_session(conn, "locale") == "fr"
+  end
+
   test "an unprefixed LiveView page keeps the session locale", %{conn: conn} do
     conn = conn |> init_test_session(%{"locale" => "fr"}) |> get("/sign-in")
     html = html_response(conn, 200)
