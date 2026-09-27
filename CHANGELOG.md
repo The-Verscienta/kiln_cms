@@ -77,6 +77,11 @@ Every summary line below that was shortened links to its own entry there.
 - **Release candidates are opt-in everywhere: `mix kiln.update --pre`.**
   ([long form](docs/changelog/unreleased.md#release-candidates-are-opt-in-everywhere-mix-kilnupdate-pre))
 
+### Changed
+
+- **Every surface carries one label: covered, internal or experimental.**
+  ([long form](docs/changelog/unreleased.md#every-surface-carries-one-label-covered-internal-or-experimental))
+
 ### Fixed
 
 - **A 429's `retry-after` is rounded up, never 0.**

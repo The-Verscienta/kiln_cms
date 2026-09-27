@@ -16,10 +16,33 @@ tree compiling, booting, and reading its own data unchanged. If it cannot, the
 release is a **major**, and `mix kiln.update` will refuse to move your pin
 without `--allow-major`.
 
+## Every surface, labelled
+
+Every surface of the core carries exactly one of three labels. The sections
+after this one argue the overlay contract in detail; this table is the
+summary, and the README carries the same table word for word.
+
+<!-- surface-labels:start -->
+<!-- This table appears twice, in README.md and in docs/overlay-contract.md,
+     and test/kiln_cms/docs/surface_labels_test.exs fails when the copies
+     differ. Edit both. -->
+
+| Label | What it means | Surfaces |
+|---|---|---|
+| **Covered** | A rename, a removal or a change of meaning needs a major release and goes through the deprecation path. Additions are not breaking | The overlay contract: the `KilnCMS.CMS.Content` options and the two `*_pattern` token vocabularies; the `__kiln_*__/0` functions; the workflow action names on a content resource; the merge-argument convention; `Kiln.Plugin` callbacks; `Kiln.Block` and its DSL, the `_type` and `_version` attributes, `Kiln.Block.Renderer` and `Kiln.Block.Info`; `Kiln.FieldType`; `Kiln.Advisory` and `Kiln.Forms.SpamCheck`; `Kiln.Plugins`, `Kiln.Version`, `Kiln.Updates` and `Kiln.Tokens`; `KilnCMS.Blocks`, `KilnCMS.Blocks.Upcaster` and `KilnCMS.CMS.ContentTypes`; `KilnCMS.Migrations`; `KilnCMS.SchemaExport` and `KilnCMS.Branding`; `KilnCMSWeb.PluginRouter` and `KilnCMSWeb.AshJsonApiRouter`; the config keys; the build conventions; the `public-*` CSS hook classes; the documented environment variables; `mix kiln.update` with its documented flags, `mix kiln.plugins.doctor` and `mix kiln.search.check`. Over HTTP, under the [API guide](api.md)'s own, stricter policy: `/api/json` and `/gql`, reads and documented writes; `/api/auth/sign_in`; `/api/content/:type/:slug` and `/api/content/:type/:id/revisions`; `/api/sync`; `/api/search` (the request and the response, not the order); `/api/resolve`; `/api/menus` and `/api/menus/:key`; `/api/ask`; `/api/locales`; `/api/schema`; `/api/media`, `/api/media/import-url` and `/api/media/uploads[/complete]`; `/api/forms/:slug` and `embed.js`; `/mcp`; `bridge.js`; `/sitemap.xml`, `/feed.xml` and `/feed.json`; `/preview/:token`; image transform URLs, `/media/:id/t/:ops`; and webhook deliveries: event names, payloads, and the `x-kilncms-webhook-signature` scheme |
+| **Covered, off by default** | Not a fourth label. These ship switched off and are **supported when enabled**: bugs in them are fixed like any other, and "off" is a default, not a stability rating. Each one's switch is a covered environment variable or config key, its console screens are internal like every other admin path, and its HTTP surface, where it has one, is covered | AI block assist; the SEO generator; provenance, with `/api/provenance/:type/:slug` and `/api/provenance/public-key`; content experiments; oEmbed cards; demo mode; the compliance gates; referrer analytics; SSO (OIDC) and two-factor authentication, both compile-gated; the per-site integrations for AI, search, storage, push, SSO and mail |
+| **Internal** | May change in any release, including a patch, without a deprecation | Everything under `KilnCMSWeb.*` except the two routers above: LiveViews, components, the component kit's class names, and the `/editor/...` admin paths, including the per-site integration screens; AshAdmin at `/admin`; `KilnCMS.*` internals not named above (changes, calculations, workers, and anything `@doc false`); the internal write actions a content resource carries for its own bookkeeping; the console's `side-*` classes and admin design tokens; core Oban queue names; search ranking behaviour and its tuning defaults; the generated GraphQL schema module itself, as distinct from the schema it produces; seeds, fixtures, `projects/example/` and `test/support/`; `to_markdown/1` on a block module; a hand-rolled `@behaviour` when a callback is added; every other `mix kiln.*` task, and the code `mix kiln.gen.content` and `mix kiln.gen.plugin` write |
+| **Experimental** | Incomplete, or resting on a dependency that is not stable yet. May change or be withdrawn in a minor | Semantic and hybrid search and the Meilisearch backend (both feature-flagged off, and the models need a `KILN_ML=1` build); `/api/content/:type/:slug/related`, which is empty without semantic search; the Bumblebee cross-encoder reranker (`rerank: false`; its model path is not exercised in CI); the CRDT collaborative-editing prototype (`:collab_prototype`, dev and test only); GraphQL subscriptions over `/ws/gql` (on, but built on `ash_graphql`'s subscription DSL, which is still beta) |
+<!-- surface-labels:end -->
+
 ## Covered surfaces
 
 A rename, a removal, or a change of meaning in anything below is a breaking
-change and forces a major bump. Additions to these surfaces are not breaking.
+change and forces a major bump. Additions to these surfaces are not breaking —
+for a module that implements a behaviour through its `use` form. A module that
+hand-rolls `@behaviour` instead is covered for the callbacks that exist, but a
+minor may add one, and that is not a major (see *What a minor may still do to
+you*).
 
 | Surface | What is promised |
 |---|---|
@@ -44,6 +67,8 @@ change and forces a major bump. Additions to these surfaces are not breaking.
 | Config keys | `:ash_domains`, `:content_domains`, `:plugins`, `:audiences`, `:mcp_tools`, and `config/project.exs` as the import point |
 | Build conventions | The `PROJECT` Docker build arg, and that an overlay's `priv/repo/migrations` and `priv/resource_snapshots` merge into the core's `priv/` |
 | `public-*` CSS hook classes | Named in [public theming](public-theming.md); site stylesheets and presets both hang off them |
+| Environment variables | The name and meaning of every variable in [Environment variables](environment-variables.md). The promise is that a minor leaves your tree *booting*, and a deployment boots from these |
+| `mix kiln.update`, `mix kiln.plugins.doctor`, `mix kiln.search.check` | The task names and their documented flags: the checks *Protecting your overlay in CI* below tells your pipeline to run. Every other `mix kiln.*` task is operator or developer tooling, and is not |
 
 Delivery URLs, GraphQL field names and JSON:API routes are derived from `:type`
 and `:plural`, so they inherit the promise above — but the HTTP contract has
@@ -76,7 +101,7 @@ that counting as a major.
   even though the functions that run it are.
 - **The generated GraphQL schema module itself**, as distinct from the schema it
   produces.
-- **Seeds, fixtures, and `projects/example/`.** The example overlay is a
+- **Seeds, fixtures, `projects/example/` and `test/support/`.** The example overlay is a
   worked reference that tracks the core; it is not an API. Nor is core test
   support: `test/support/` compiles only in the core's own `:test` env, and
   nothing in it — `KilnCMS.FixturePlugin` included — is a name your overlay
@@ -94,6 +119,25 @@ that counting as a major.
   test suite. What does transfer is the mechanic: `:plugins` replaces, exactly
   as `:ash_domains` and `:content_domains` do, so every core entry you want
   kept has to be restated — and re-synced when you bump the pin.
+- **`to_markdown/1` on a block module.** `KilnCMS.Blocks.to_markdown/1` calls
+  it for the `llm` fired surface when a block module exports it, and falls
+  back to the block's `search_text/1` otherwise. It is probed with
+  `function_exported?/3`, not declared on `Kiln.Block.Renderer`, and nothing
+  tests an overlay block's implementation of it. Your block may define it, and
+  the `llm` surface will use it today; a minor may rename or replace the probe.
+- **A hand-rolled `@behaviour`, when a callback is added.** The `use` form
+  inherits a default for every callback, so an addition is invisible to it. A
+  module that declares `@behaviour Kiln.Plugin` (or any behaviour above) itself
+  gets a missing-callback warning instead, which `--warnings-as-errors` turns
+  into a failed build. `Kiln.Plugin` declares no optional callbacks at all, and
+  `Kiln.FieldType` marks only its late additions optional. Hand-rolling is
+  allowed (`mix kiln.plugins.doctor` accepts it); it is not protected against
+  additions.
+- **Every other `mix kiln.*` task** — the operator tasks (backfills,
+  re-encryption, exports, imports, re-firing) and the developer ones — and the
+  code `mix kiln.gen.content` and `mix kiln.gen.plugin` write, which is a
+  starting point you own once it is generated. A release that needs you to run
+  a task names it, spelled as it is in that release, in its upgrade notes.
 
 ## What a minor may still do to you
 
@@ -184,15 +228,6 @@ Stated rather than discovered later.
 - **Eager backfill is not wired up.** Upcasting happens lazily on read; there
   is no job that rewrites stored blocks, so already-fired artifacts need
   re-firing after a block's shape changes.
-- **`to_markdown/1` on a block module is probed informally**, not declared on
-  the renderer behaviour. Treat it as unstable until it is.
-- **The hand-rolled `@behaviour` path is fragile against additions, on every
-  behaviour here.** `Kiln.Plugin` declares no optional callbacks at all, and
-  `Kiln.FieldType` marks only its three late additions optional — the rest are
-  required-but-defaulted, exactly like `Kiln.Plugin`'s. So a module that
-  declares `@behaviour` instead of using the `use` form gets missing-callback
-  warnings when a callback is added, which `--warnings-as-errors` turns into a
-  failed build. The `use` form is what makes additions safe; prefer it.
 
 ## Status of this document
 
