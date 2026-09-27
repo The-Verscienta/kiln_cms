@@ -33,6 +33,21 @@ people to pass the flag reflexively.
    matters most here: it builds the in-tree `example` overlay against the
    core, so a green run is evidence the overlay contract still holds.
 
+   It is not evidence the *upgrade* works. Run the **Upgrade rehearsal**
+   workflow (Actions → Upgrade rehearsal → Run workflow; it also runs weekly)
+   on `main` too. For each of the last few releases it pins a scratch project
+   at that tag, seeds it, and runs that release's own `mix kiln.update` to
+   `main`, tagged locally as the next `-rc.0`. Then it rebuilds with the
+   project's unchanged overlay, migrates, runs `mix kiln.blocks.backfill` and
+   reads every row back. It also checks that each old release prints the
+   Upgrade notes `upgrade_notes/3` expects for its range. To run one
+   locally (it uses its own `kiln_cms_test_rehearse_*` database and drops it
+   afterwards):
+
+   ```bash
+   CANDIDATE_REF=origin/main scripts/upgrade_rehearsal/rehearse.sh v0.11.0
+   ```
+
 2. **Write the changelog entry.** Move `## [Unreleased]` items into a new
    `## [X.Y.Z]` section, and rename `docs/changelog/unreleased.md` to
    `docs/changelog/vX.Y.Z.md` — it already holds the long form of everything
@@ -184,6 +199,15 @@ skips pre-releases, and each one has an explicit way in.
    pre-release, so its Breaking and Upgrade notes still print before a pin
    moves. Do bump `mix.exs` to `X.Y.Z-rc.N`, so an instance on the candidate
    reports what it is running.
+
+   The task that runs is the one in the checkout being *moved*, though, and
+   only 0.12 and later read `[Unreleased]` that way. A project on 0.11 or
+   older moving to a 0.12 candidate is shown **no** notes for it: its task
+   prints the earlier releases' notes, and then moves the pin anyway. The
+   upgrade rehearsal (#1540) caught this for every release from 0.5.0 to
+   0.11.0. So for a 0.12 candidate, paste its `### Upgrade notes` and
+   `### Breaking` into the pre-release's notes (step 4) and say so where the
+   candidate is announced. From 0.12 on, the notes print as described.
 
 3. **Tag and push** as in [step 5](#cutting-a-release), with the candidate's
    name. `release.yml` publishes the image as `X.Y.Z-rc.N` only: `latest`
