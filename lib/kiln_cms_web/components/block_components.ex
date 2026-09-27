@@ -312,7 +312,7 @@ defmodule KilnCMSWeb.BlockComponents do
 
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-6">
         <div :for={field <- @form.fields} class={field_width_class(field)}>
-          <.public_form_field field={field} />
+          <.public_form_field field={field} id_prefix={"kiln-form-" <> @form.slug} />
         </div>
       </div>
 
@@ -331,8 +331,13 @@ defmodule KilnCMSWeb.BlockComponents do
   """
   attr :field, :map, required: true
 
+  # Scopes the input `id` the `<label for>` points at. `public_form/1` passes
+  # the form's slug, so two forms on one page that share a field name (both
+  # asking for `email`) still get distinct ids.
+  attr :id_prefix, :string, default: "kiln-form"
+
   def public_form_field(assigns) do
-    assigns = assign(assigns, :field_id, "kiln-form-#{assigns.field.name}")
+    assigns = assign(assigns, :field_id, "#{assigns.id_prefix}-#{assigns.field.name}")
 
     ~H"""
     <label

@@ -16,8 +16,8 @@ chrome hierarchy**, **kit drift on secondary lists/settings/auth**, **form
 submit recovery**, and a handful of **a11y** gaps (form labels, auth skip
 target, public search focus, `text-primary` as link colour).
 
-Prior design audits: closed July 2026 usability epic (see project plan);
-[`docs/superpowers/specs/2026-09-27-usability-aesthetics-audit-design.md`](superpowers/specs/2026-09-27-usability-aesthetics-audit-design.md).
+Prior design audits: closed July 2026 usability epic (see project plan) and
+[`audit-2026-07-performance-usability.md`](audit-2026-07-performance-usability.md).
 
 ## Phase 0 — Baseline
 

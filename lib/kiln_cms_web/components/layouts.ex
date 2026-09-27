@@ -571,10 +571,17 @@ defmodule KilnCMSWeb.Layouts do
               >
                 <.icon name="hero-magnifying-glass" class="size-4" />
                 <span>{gettext("Search")}</span>
-                <%!-- Apple platforms use ⌘; everyone else Ctrl. Detected in
-                      app.js (`kiln-search-kbd`) so the cue matches the real
-                      shortcut (`metaKey || ctrlKey`). --%>
-                <span class="kbd ml-1" data-kiln-search-kbd>Ctrl+K</span>
+                <%!-- Apple platforms use ⌘; everyone else Ctrl. The
+                      `SearchKbd` hook in app.js rewrites it so the cue matches
+                      the real shortcut (`metaKey || ctrlKey`); `ignore` keeps a
+                      layout patch from reverting it to the server's text. --%>
+                <span
+                  id="console-search-kbd"
+                  class="kbd ml-1"
+                  data-kiln-search-kbd
+                  phx-hook="SearchKbd"
+                  phx-update="ignore"
+                >Ctrl+K</span>
               </.link>
               <%!-- The notification bell (#1320). A LiveComponent, so it loads
                     and owns its own rows from the `current_user` this layout

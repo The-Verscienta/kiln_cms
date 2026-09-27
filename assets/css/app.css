@@ -1143,14 +1143,20 @@
   }
 }
 
+/* The console's mobile nav drawer (`Layouts.console/1`). Unlayered on purpose:
+   the slide comes from a `transition-transform` UTILITY on the aside, and
+   utilities outrank `@layer components` — only an unlayered rule can answer a
+   reader who asked for less motion. */
 @media (prefers-reduced-motion: reduce) {
   .side-shell {
     transition: none;
   }
 }
 
-/* Kit transitions + status pulses respect reduced motion (drawer/side-shell
-   already did; buttons/tabs/flash cues were still animating). */
+/* Kit transitions + status pulses respect reduced motion (the drawer above
+   already did; buttons/tabs/flash cues were still animating). Unlayered for the
+   same reason as the drawer rule: `.animate-pulse` and friends are UTILITIES,
+   and a `@layer components` rule would lose to them. */
 @media (prefers-reduced-motion: reduce) {
   .btn,
   .tab,

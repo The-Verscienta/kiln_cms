@@ -1,7 +1,7 @@
 # Full-surface security audit — 2026-09-27
 
 A whole-codebase security pass against the living threat model and policy
-controls (not a feature delta). Scope matches [`.github/SECURITY.md`](../.github/SECURITY.md):
+controls (not a feature delta). Scope matches [`.github/SECURITY.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/.github/SECURITY.md):
 authz bypass, cross-tenant leak, XSS, secret exfiltration, SSRF. Out of scope:
 volumetric DoS, dependency CVEs with no Kiln-specific path, operator misconfig
 already warned against in deploy docs.
