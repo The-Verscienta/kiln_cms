@@ -117,7 +117,7 @@ defmodule KilnCMSWeb.EditorTelemetryTest do
     {:ok, lv, _html} =
       conn |> log_in(authed_user(:admin)) |> live(~p"/editor/pages/#{page.id}")
 
-    lv |> element("button", "Publish") |> render_click()
+    lv |> element("button", "Publish now") |> render_click()
 
     assert_receive {:telemetry, [:kiln_cms, :editor, :publish], measurements, metadata}
     assert is_integer(measurements.duration)

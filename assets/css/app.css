@@ -927,6 +927,10 @@
     cursor: pointer;
     transition: background-color 0.12s, color 0.12s, box-shadow 0.12s;
   }
+  .tab:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
   .tab:hover {
     color: var(--color-base-content);
   }
@@ -1139,13 +1143,27 @@
   }
 }
 
-/* The console's mobile nav drawer (`Layouts.console/1`). Unlayered on purpose:
-   the slide comes from a `transition-transform` UTILITY on the aside, and
-   utilities outrank `@layer components` — only an unlayered rule can answer a
-   reader who asked for less motion. */
 @media (prefers-reduced-motion: reduce) {
   .side-shell {
     transition: none;
+  }
+}
+
+/* Kit transitions + status pulses respect reduced motion (drawer/side-shell
+   already did; buttons/tabs/flash cues were still animating). */
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .tab,
+  .side-link,
+  .side-icon-btn,
+  .bell-trigger {
+    transition: none;
+  }
+
+  .animate-pulse,
+  .kiln-focus-pulse,
+  .save-status-flash {
+    animation: none !important;
   }
 }
 

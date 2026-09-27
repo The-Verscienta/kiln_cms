@@ -440,7 +440,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:admin)) |> live(~p"/editor/posts/#{post.id}")
 
-      lv |> element("button", "Publish") |> render_click()
+      lv |> element("button", "Publish now") |> render_click()
 
       assert CMS.get_post!(post.id, authorize?: false).state == :published
     end
@@ -2135,7 +2135,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:admin)) |> live(~p"/editor/pages/#{page.id}")
 
-      lv |> element("button", "Publish") |> render_click()
+      lv |> element("button", "Publish now") |> render_click()
 
       published = CMS.get_page!(page.id, authorize?: false)
       assert published.state == :published

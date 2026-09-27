@@ -13,6 +13,22 @@
 # Per the Ash usage rules, all data access goes through the domain code
 # interfaces (`Accounts.*` / `CMS.*`) rather than raw `Ash.create!/read!`.
 
+# Refuse production unless the operator opts in *and* overrides the published
+# demo passwords. `mix ecto.setup` against a production DATABASE_URL must not
+# create admin@kiln.test / kilnadmin123. First-admin for a real deploy is
+# `/setup` (`KilnCMS.Accounts.Bootstrap`).
+if Mix.env() == :prod do
+  unless System.get_env("ALLOW_PROD_SEEDS") == "confirm" do
+    Mix.raise("""
+    Refusing to seed in :prod.
+
+    Use /setup for the first admin on a production database, or set
+    ALLOW_PROD_SEEDS=confirm together with non-default ADMIN_PASSWORD and
+    EDITOR_PASSWORD if you deliberately want this script against a prod DB.
+    """)
+  end
+end
+
 alias KilnCMS.Accounts
 alias KilnCMS.Accounts.User
 
@@ -63,6 +79,19 @@ admin_email = System.get_env("ADMIN_EMAIL", "admin@kiln.test")
 admin_password = System.get_env("ADMIN_PASSWORD", "kilnadmin123")
 editor_email = System.get_env("EDITOR_EMAIL", "editor@kiln.test")
 editor_password = System.get_env("EDITOR_PASSWORD", "kilneditor123")
+
+if Mix.env() == :prod do
+  defaults = [{"kilnadmin123", admin_password}, {"kilneditor123", editor_password}]
+
+  if Enum.any?(defaults, fn {default, actual} -> actual == default end) do
+    Mix.raise("""
+    Refusing to seed production with the published demo passwords.
+
+    Set ADMIN_PASSWORD and EDITOR_PASSWORD to non-default values when
+    ALLOW_PROD_SEEDS=confirm is set.
+    """)
+  end
+end
 
 # Only the stock demo addresses get a demo name — see `seed_user` above.
 demo_name = fn email, default_email, name -> if email == default_email, do: name end

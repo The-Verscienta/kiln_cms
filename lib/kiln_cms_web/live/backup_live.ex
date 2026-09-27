@@ -163,6 +163,7 @@ defmodule KilnCMSWeb.BackupLive do
       flash={@flash}
       current_user={@current_user}
       current_org={@current_org}
+      page_title={@page_title}
       active={:backups}
     >
       <div class="mx-auto max-w-3xl space-y-6 p-4 sm:p-6">

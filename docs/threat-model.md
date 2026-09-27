@@ -50,21 +50,27 @@ the router so preflights are answered before route matching).
 | Surface | Route(s) | Auth | Rate bucket |
 |---|---|---|---|
 | Public HTML delivery | `/`, `/:slug`, `/:type/:slug`, `/blog`, `/blog/:slug`, `/search`, `/*path` | none | `:delivery` |
-| Probes & SEO | `/up`, `/sitemap.xml`, `/robots.txt`, `/llms.txt` | none | `:probe` |
+| Probes & SEO | `/up`, `/ready`, `/sitemap.xml`, `/robots.txt`, `/llms.txt`, `/manifest.webmanifest`, `/offline.html` | none | `:probe` (probes) / `:delivery` |
+| First-run bootstrap | `/setup` | none (policy `NoAdminExists`) | browser |
 | GraphQL | `/gql` (GET + POST), `/ws/gql` | optional JWT / API key | `:gql` (per operation, on both transports), `:gql_join` (socket connects) |
 | JSON:API | `/api/json/**` (GET/POST/PATCH/DELETE) | optional JWT / API key | `:api` |
-| Headless REST | `/api/content/**`, `/api/resolve`, `/api/locales`, `/api/search`, `/api/ask`, `/api/provenance/**`, `/api/visual-editing/:type/:slug` | optional JWT / API key | `:api` |
+| Headless REST | `/api/content/**`, `/api/resolve`, `/api/locales`, `/api/search`, `/api/ask`, `/api/provenance/**`, `/api/visual-editing/:type/:slug`, `/api/sync`, `/api/schema`, `/api/menus/**`, `/api/content/:type/:id/revisions/**` | optional JWT / API key | `:api` |
 | OpenAPI & explorer | `/api/json/open_api`, `/api/json/swaggerui` | none — and **not served in prod** unless `API_DOCS_ENABLED` (#567); the document (never the explorer) also answers any valid API key | `:docs` |
 | GraphQL SDL | `GET /api/graphql/schema.graphql` | none where introspection is on; **API key required** in prod unless `GRAPHQL_INTROSPECTION_ENABLED` | `:docs` |
 | Headless sign-in | `POST /api/auth/sign_in` | credentials → JWT, or a pending token for a 2FA account | `:auth` + per-account (#478) |
 | Headless second factor | `POST /api/auth/sign_in/verify` | encrypted pending token + TOTP or recovery code | `:auth`; the same per-account second-factor budget as the browser prompt (#714, #726) |
+| Content unlock | `POST /api/content/:type/:slug/unlock` | passphrase | `:unlock` |
 | Media upload | `POST /api/media`, `/api/media/import-url`, `/api/media/uploads[/complete]` | JWT / API key; `:read_write` + editor, checked **before** `POST /api/media`'s body is parsed (the endpoint leaves it unread) | `:api` + `:media_upload` |
 | MCP (LLM authoring) | `/mcp` | **API key required** | `:api` |
 | Public forms | `GET /api/forms/:slug`, `POST /forms/:slug`, `POST /api/forms/:slug` | none (no CSRF by design) | `:form` |
-| Form embed | `GET /forms/:slug/embed` | none | `:delivery` |
-| Preview | `/preview/:token`, `/preview/:token/live` | signed token *is* the credential | `:preview` |
-| Newsletter | `/newsletter/confirm/:token`, `/newsletter/unsubscribe/:token` | signed token | `:form` |
-| Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/auth/passkey/*` | varies | `:auth`, except `POST /auth/*/password/register`, which takes `:register` **instead** so the two registration doors agree (#724) |
+| Form embed | `GET /forms/:slug/embed` | none | `:delivery` (framing CSP) |
+| Preview | `/preview/:token`, `/preview/:token/live`, `/preview/release/:token` | signed token *is* the credential | `:preview` |
+| Newsletter | `POST /newsletter/subscribe`, `/newsletter/confirm/:token`, `/newsletter/unsubscribe/:token` | honeypot / opaque token | `:form` |
+| Billing webhook | `POST /billing/webhooks/stripe` | HMAC over raw body | `:billing_webhook` |
+| ActivityPub | `GET /actor`, `/actor/outbox`, `/actor/followers`; `POST /actor/inbox` | none (GET) / HTTP Signature (inbox) | `:delivery` / inbox pipeline |
+| Calendars / feeds | `/calendar.ics`, `/:plural/calendar.ics`, feeds | none (published) | `:delivery` |
+| Membership (paid audiences) | `/membership` | optional session | browser |
+| Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/auth/passkey/*`, site SSO | varies | `:auth`, except `POST /auth/*/password/register`, which takes `:register` **instead** so the two registration doors agree (#724) |
 | Second factor | `GET`/`POST /sign-in/verify` | signed `:pending_2fa` token + TOTP or recovery code | `:auth`; the `POST` also per-account, tighter than sign-in (#714) |
 | Credential submits over `/live` | LiveView `"submit"` on the sign-in, register, reset-request and magic-link forms — **all four render on all three auth pages** | credentials → session / account / mail | charged on the *action*, since no plug can reach them: sign-in `:auth` (#715) + per-account (#478); registration `:register` (#724); reset and magic-link `:auth` (#724) + the per-address mail budget |
 | Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none, except the three TOTP actions on `/editor/settings`: per-account, the second factor's own bucket (#727) |

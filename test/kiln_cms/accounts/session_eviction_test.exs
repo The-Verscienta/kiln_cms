@@ -88,6 +88,39 @@ defmodule KilnCMS.Accounts.SessionEvictionTest do
       assert_evicted(user.id)
     end
 
+    test "changing a password evicts live sockets" do
+      # Token revoke alone (`log_out_everywhere`) leaves open `/live` consoles
+      # until reconnect; eviction pairs with it the same way admin
+      # "sign out everywhere" does.
+      password = "password123456"
+      new_password = "newpassword123456"
+
+      user =
+        Ash.Seed.seed!(User, %{
+          email: "pw-evict-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt(password),
+          confirmed_at: DateTime.utc_now(),
+          role: :editor
+        })
+
+      watch(user.id)
+
+      assert {:ok, _} =
+               user
+               |> Ash.Changeset.for_update(
+                 :change_password,
+                 %{
+                   current_password: password,
+                   password: new_password,
+                   password_confirmation: new_password
+                 },
+                 actor: user
+               )
+               |> Ash.update()
+
+      assert_evicted(user.id)
+    end
+
     test "an ordinary preference change does not" do
       # Eviction costs a reconnect, so it fires on the actions that change a
       # grant rather than on every write to the row.

@@ -211,7 +211,7 @@ defmodule KilnCMSWeb.ContentEditorTaskAssignmentTest do
 
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/content/page/#{page.id}")
 
-      html = lv |> element("button", "Publish") |> render_click()
+      html = lv |> element("button", "Publish now") |> render_click()
       refute html =~ "Assign to…"
     end
   end

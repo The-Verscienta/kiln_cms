@@ -197,7 +197,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
             phx-disable-with={gettext("Saving…")}
             title={@conflict && gettext("Reload to resolve the edit conflict before saving.")}
           >
-            {gettext("Save")}
+            {gettext("Save draft")}
           </.button>
         </div>
       </div>
@@ -391,7 +391,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
     >
       {if @state == :in_review and @tier == :admin,
         do: gettext("Approve & publish"),
-        else: gettext("Publish")}
+        else: gettext("Publish now")}
     </button>
     <button
       :if={@state == :in_review and @tier == :admin}

@@ -117,6 +117,21 @@ defmodule KilnCMS.UnsplashTest do
     test "download without a download_location fails cleanly" do
       assert {:error, :bad_download_response} = Unsplash.download(%{download_location: nil})
     end
+
+    test "download refuses a private file URL returned by the download report" do
+      # The file URL is attacker-influenced if Unsplash (or a MITM) returns a
+      # redirect/target into link-local/metadata space — SafeFetch must refuse.
+      Req.Test.stub(KilnCMS.Unsplash, fn conn ->
+        assert conn.request_path == "/photos/abc123/download"
+        Req.Test.json(conn, %{"url" => "http://169.254.169.254/latest/meta-data/"})
+      end)
+
+      photo = %{download_location: "https://api.unsplash.com/photos/abc123/download"}
+
+      assert {:error, message} = Unsplash.download(photo)
+      assert is_binary(message)
+      assert message =~ "blocked"
+    end
   end
 
   describe "attribution/1" do

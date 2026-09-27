@@ -687,7 +687,7 @@ defmodule KilnCMSWeb.SettingsLive do
 
           <.demo_locked_note :if={@credentials_locked?} />
 
-          <div :if={@totp_enabled? && !@credentials_locked?} class="space-y-3">
+          <div :if={@totp_enabled? && !@enrolling && !@credentials_locked?} class="space-y-3">
             <p class="flex items-center gap-1.5 text-sm font-medium text-success">
               <.icon name="hero-shield-check" class="size-4" />
               {gettext("Two-factor authentication is on.")}
@@ -697,6 +697,26 @@ defmodule KilnCMSWeb.SettingsLive do
                 count: length(@current_user.totp_recovery_hashes || [])
               )}
             </p>
+            <%!-- After a recovery-code sign-in the live authenticator may be
+                  gone; surface re-enrolment (backend already accepts
+                  `recovery_login?`) instead of only disable/regenerate forms
+                  that still need a live code. --%>
+            <div
+              :if={@recovery_login?}
+              class="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm"
+            >
+              <p class="font-medium text-warning-content">
+                {gettext("You signed in with a recovery code.")}
+              </p>
+              <p class="mt-1 text-base-content/70">
+                {gettext(
+                  "Set up a new authenticator app so you can keep signing in without using another recovery code."
+                )}
+              </p>
+              <.button phx-click="start_totp" variant="primary" class="mt-3">
+                {gettext("Set up a new authenticator")}
+              </.button>
+            </div>
             <form
               id="regenerate-recovery-form"
               phx-submit="regenerate_recovery_codes"
@@ -725,7 +745,7 @@ defmodule KilnCMSWeb.SettingsLive do
             </form>
           </div>
 
-          <div :if={!@totp_enabled? && @enrolling && !@credentials_locked?} class="space-y-3">
+          <div :if={@enrolling && !@credentials_locked?} class="space-y-3">
             <p class="text-sm text-base-content/70">
               {gettext(
                 "Scan the QR code (or add the key) in your authenticator app, then enter the 6-digit code to confirm."

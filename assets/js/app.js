@@ -1076,6 +1076,14 @@ window.addEventListener("keydown", e => {
   }
 })
 
+// Match the search shortcut cue to the platform (⌘ on Apple, Ctrl elsewhere).
+;(() => {
+  const apple = /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || "")
+  document.querySelectorAll("[data-kiln-search-kbd]").forEach(el => {
+    el.textContent = apple ? "⌘K" : "Ctrl+K"
+  })
+})()
+
 // Show progress bar on live navigation and form submits
 topbar.config({barColors: {0: "#29d"}, shadowColor: "rgba(0, 0, 0, .3)"})
 window.addEventListener("phx:page-loading-start", _info => topbar.show(300))

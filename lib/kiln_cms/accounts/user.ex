@@ -405,6 +405,11 @@ defmodule KilnCMS.Accounts.User do
                 strategy_name: :password, password_argument: :current_password}
 
       change {AshAuthentication.Strategy.Password.HashPasswordChange, strategy_name: :password}
+
+      # `log_out_everywhere` above revokes stored tokens; this drops the live
+      # sockets that would otherwise keep working until reconnect (#675 pattern,
+      # same pairing as admin "sign out everywhere").
+      change {KilnCMS.Accounts.Changes.EvictSessions, reason: :password_changed}
     end
 
     read :sign_in_with_password do

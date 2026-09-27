@@ -140,7 +140,12 @@ defmodule KilnCMSWeb.Layouts do
           library's `Components.Flash`, so auth toasts match the rest of the
           console; that is why the `Components.Flash` override is now gone. --%>
     <.flash_group flash={@flash} />
-    {@inner_content}
+    <%!-- `#main` matches the global skip link in `root.html.heex` — auth was the
+          only shell that omitted the landmark, so keyboard users had nowhere to
+          land after "Skip to content". --%>
+    <main id="main">
+      {@inner_content}
+    </main>
     """
   end
 
@@ -566,7 +571,10 @@ defmodule KilnCMSWeb.Layouts do
               >
                 <.icon name="hero-magnifying-glass" class="size-4" />
                 <span>{gettext("Search")}</span>
-                <span class="kbd ml-1">⌘K</span>
+                <%!-- Apple platforms use ⌘; everyone else Ctrl. Detected in
+                      app.js (`kiln-search-kbd`) so the cue matches the real
+                      shortcut (`metaKey || ctrlKey`). --%>
+                <span class="kbd ml-1" data-kiln-search-kbd>Ctrl+K</span>
               </.link>
               <%!-- The notification bell (#1320). A LiveComponent, so it loads
                     and owns its own rows from the `current_user` this layout
