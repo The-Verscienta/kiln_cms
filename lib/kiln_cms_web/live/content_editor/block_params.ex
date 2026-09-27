@@ -671,11 +671,12 @@ defmodule KilnCMSWeb.ContentEditor.BlockParams do
 
   defp rich_text_to_block(%{"_union_type" => "rich_text", "legacy_html" => html} = block)
        when is_binary(html) and html != "" do
-    # Only when the conversion yields prose: an unparseable fragment keeps its
-    # `legacy_html`, which still renders, rather than trading it for nothing.
-    case {block["body"], KilnCMS.Blocks.PortableText.from_html(html)} do
+    # Only when the conversion is faithful and yields prose: HTML Portable Text
+    # cannot hold keeps its `legacy_html` (deprecated, #1537), which still
+    # renders, rather than trading it for something the author did not write.
+    case {block["body"], KilnCMS.Blocks.PortableText.from_html_faithful(html)} do
       {[_ | _], _} -> block
-      {_, [_ | _] = body} -> block |> Map.put("body", body) |> Map.put("legacy_html", "")
+      {_, {:ok, [_ | _] = body}} -> block |> Map.put("body", body) |> Map.put("legacy_html", "")
       _ -> block
     end
   end

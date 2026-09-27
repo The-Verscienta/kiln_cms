@@ -8,7 +8,7 @@ defmodule KilnCMS.CMS.SanitizeBlocksTest do
   defp legacy_blocks(record) do
     record.blocks
     |> KilnCMS.CMS.TypedBlocks.to_typed()
-    |> KilnCMS.CMS.TypedBlocks.to_legacy()
+    |> KilnCMS.LegacyBridge.to_legacy()
   end
 
   setup do

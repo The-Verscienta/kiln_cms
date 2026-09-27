@@ -49,10 +49,13 @@ defmodule KilnCMS.Application do
       # Cooldown buckets for the aggregated tenant-refusal-flood alert (#678) —
       # one fixed key per surface (`:plug`/`:live`/`:gql`/`:bridge`/`:collab`).
       {KilnCMSWeb.TenantRefusalAlert, clean_period: :timer.minutes(5)},
-      # Per-account auth budgets (#478). No `key_older_than`: the fixed-window
-      # algorithm's cleaner deletes strictly on `expires_at`, and never reads
-      # that option — setting it would be inert config that reads like a floor.
-      {KilnCMS.Accounts.AccountThrottle, clean_period: :timer.minutes(5)},
+      # The node-local fallback for the shared auth budgets (#478, #1619). The
+      # budgets themselves live in Postgres (`ThrottleStore`); this table is
+      # only written while the database cannot answer. No `key_older_than`: the
+      # fixed-window algorithm's cleaner deletes strictly on `expires_at`, and
+      # never reads that option — setting it would be inert config that reads
+      # like a floor.
+      {KilnCMS.Accounts.ThrottleStore.Local, clean_period: :timer.minutes(5)},
       # Per-user and per-org spend ceilings for every optional LLM feature (SEO
       # drafting, block assist). Started unconditionally: the table is empty
       # until someone asks for a generation, and starting it lazily would mean

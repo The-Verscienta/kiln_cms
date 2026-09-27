@@ -131,6 +131,14 @@ defmodule KilnCMS.Accounts do
       define :destroy_idempotent_request, action: :destroy
     end
 
+    # The shared auth budgets' counter table (#1619). Charged by
+    # `KilnCMS.Accounts.ThrottleStore` in raw SQL — see its moduledoc — so the
+    # only actions are the forbidden read and the system-only prune.
+    resource KilnCMS.Accounts.ThrottleCounter do
+      define :list_throttle_counters, action: :read
+      define :prune_throttle_counters, action: :prune
+    end
+
     resource KilnCMS.Accounts.User do
       define :list_users, action: :read
       define :get_user, action: :read, get_by: [:id]

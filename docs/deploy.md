@@ -384,6 +384,12 @@ and `RELEASE_NODE=kiln_cms@<this node's IP>` in each node's environment (the
 snippet Phoenix's Fly guide generates), or the nodes stay silently
 disconnected and cache busts never cross them.
 
+The auth budgets need nothing from the cluster at all. The sign-in, second
+factor, reset-mail and credential-form budgets count in Postgres
+(`throttle_counters`, #1619), so they hold across nodes whether or not the
+nodes are connected. The flood ceilings (`:api`, `:delivery`, …) stay per node
+by design, so an N-node cluster admits N times each of those.
+
 ## The reference `docker-compose.prod.yml`
 
 [`docker-compose.prod.yml`](../docker-compose.prod.yml) runs the app and a

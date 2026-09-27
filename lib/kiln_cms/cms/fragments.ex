@@ -73,7 +73,7 @@ defmodule KilnCMS.CMS.Fragments do
 
   Four published pages, three of them holding 200 fragment blocks each pointing
   at the next, cost **3** of 64 fetches and emit **eight million** block
-  structs — which then flow through `TypedBlocks.to_legacy/1`,
+  structs — which then flow through delivery's view building,
   `flatten_block_tree/1` and `enrich_block/3`, and get cached. `blocks` carries
   no length constraint and is writable over the headless API, so that is an
   anonymous `GET` away.

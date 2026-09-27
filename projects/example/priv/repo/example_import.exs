@@ -170,7 +170,10 @@ products =
         %{"_type" => "heading", "text" => "Everything you need, out of the box", "level" => 2},
         %{
           "_type" => "rich_text",
-          "legacy_html" => "<p>Widget Pro pairs with every Acme product below.</p>"
+          "body" =>
+            KilnCMS.Blocks.PortableText.from_html(
+              "<p>Widget Pro pairs with every Acme product below.</p>"
+            )
         },
         %{"_type" => "stat", "value" => "10,000+", "label" => "customers served"},
         %{
@@ -222,7 +225,11 @@ products =
         "display_order" => 2
       },
       blocks: [
-        %{"_type" => "rich_text", "legacy_html" => "<p>Available to registered customers.</p>"}
+        %{
+          "_type" => "rich_text",
+          "body" =>
+            KilnCMS.Blocks.PortableText.from_html("<p>Available to registered customers.</p>")
+        }
       ]
     },
     %{
@@ -257,7 +264,12 @@ products =
         "price" => money.(15.0, "USD"),
         "display_order" => 4
       },
-      blocks: [%{"_type" => "rich_text", "legacy_html" => "<p>Fits Widget Pro snugly.</p>"}]
+      blocks: [
+        %{
+          "_type" => "rich_text",
+          "body" => KilnCMS.Blocks.PortableText.from_html("<p>Fits Widget Pro snugly.</p>")
+        }
+      ]
     }
   ]
   |> Enum.map(&upsert_publish.("product", &1))
@@ -284,7 +296,10 @@ team_members =
       blocks: [
         %{
           "_type" => "rich_text",
-          "legacy_html" => "<p>Ada leads the Widget Pro platform team.</p>"
+          "body" =>
+            KilnCMS.Blocks.PortableText.from_html(
+              "<p>Ada leads the Widget Pro platform team.</p>"
+            )
         }
       ]
     },
@@ -412,7 +427,10 @@ faqs_attrs = [
     blocks: [
       %{
         "_type" => "rich_text",
-        "legacy_html" => "<p>Create an account, then follow the setup wizard.</p>"
+        "body" =>
+          KilnCMS.Blocks.PortableText.from_html(
+            "<p>Create an account, then follow the setup wizard.</p>"
+          )
       }
     ]
   },
@@ -424,7 +442,10 @@ faqs_attrs = [
     blocks: [
       %{
         "_type" => "rich_text",
-        "legacy_html" => "<p>Crea una cuenta y sigue el asistente de configuración.</p>"
+        "body" =>
+          KilnCMS.Blocks.PortableText.from_html(
+            "<p>Crea una cuenta y sigue el asistente de configuración.</p>"
+          )
       }
     ]
   },
@@ -435,7 +456,8 @@ faqs_attrs = [
     blocks: [
       %{
         "_type" => "rich_text",
-        "legacy_html" => "<p>All major credit cards and ACH transfer.</p>"
+        "body" =>
+          KilnCMS.Blocks.PortableText.from_html("<p>All major credit cards and ACH transfer.</p>")
       }
     ]
   },
@@ -446,7 +468,10 @@ faqs_attrs = [
     blocks: [
       %{
         "_type" => "rich_text",
-        "legacy_html" => "<p>Use the \"Forgot password\" link on the sign-in page.</p>"
+        "body" =>
+          KilnCMS.Blocks.PortableText.from_html(
+            "<p>Use the \"Forgot password\" link on the sign-in page.</p>"
+          )
       }
     ]
   },
@@ -455,7 +480,11 @@ faqs_attrs = [
     slug: "integrations",
     custom_fields: %{"category" => "integrations", "display_order" => 0},
     blocks: [
-      %{"_type" => "rich_text", "legacy_html" => "<p>Yes — see our integrations directory.</p>"}
+      %{
+        "_type" => "rich_text",
+        "body" =>
+          KilnCMS.Blocks.PortableText.from_html("<p>Yes — see our integrations directory.</p>")
+      }
     ]
   }
 ]
@@ -504,7 +533,11 @@ events =
         "location" => "Online"
       },
       blocks: [
-        %{"_type" => "rich_text", "legacy_html" => "<p>Join us for a live walkthrough.</p>"}
+        %{
+          "_type" => "rich_text",
+          "body" =>
+            KilnCMS.Blocks.PortableText.from_html("<p>Join us for a live walkthrough.</p>")
+        }
       ]
     },
     %{

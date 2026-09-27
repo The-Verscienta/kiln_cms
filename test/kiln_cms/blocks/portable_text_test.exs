@@ -204,7 +204,7 @@ defmodule KilnCMS.Blocks.PortableTextTest do
 
       assert html =~ "<pre><code>IO.puts(1)</code></pre>"
       assert html =~ "<hr/>"
-      assert html =~ "<p>a\nb</p>"
+      assert html =~ "<p>a<br/>b</p>"
     end
 
     test "code block language rides the PT block and highlights at render (#503)" do
@@ -648,6 +648,38 @@ defmodule KilnCMS.Blocks.PortableTextTest do
     test "round-trips through to_html/1 for the editor's own shapes" do
       html = "<h3>H</h3><p>a <em>b</em> <a href=\"https://x.test\">c</a></p><ul><li>i</li></ul>"
       assert html |> PortableText.from_html() |> PortableText.to_html() == html
+    end
+  end
+
+  # #1537: what the block backfill may rewrite stored `legacy_html` with.
+  describe "from_html_faithful/1" do
+    test "converts what a reader could not tell apart" do
+      for html <- [
+            "<p>Some <b>bold <i>both</i></b> and <a href=\"https://x.test\">a link</a></p>",
+            "<h2>a<br>b</h2><ol><li><p>x</p><ol><li><p>y</p></li></ol></li></ol>",
+            "<blockquote><p>one</p><p>two</p></blockquote>",
+            ~s(<table><tr><th colspan="2">Wide</th></tr><tr><td>1</td><td>2</td></tr></table>),
+            ~s(<pre><code class="language-elixir">def x</code></pre><hr>)
+          ] do
+        assert {:ok, [_ | _]} = PortableText.from_html_faithful(html), html
+      end
+    end
+
+    test "markup the sanitizer already strips does not count as lost" do
+      assert {:ok, _body} =
+               PortableText.from_html_faithful(~s(<p>x<sup>2</sup> <img src="/a.png"></p>))
+    end
+
+    test "refuses, and says why, when a reader would notice" do
+      assert {:error, "markup would change: <strong>"} =
+               PortableText.from_html_faithful("<pre><code>a <strong>b</strong></code></pre>")
+
+      assert {:error, "markup would change: " <> what} =
+               PortableText.from_html_faithful(
+                 "<blockquote><ul><li>q1</li><li>q2</li></ul></blockquote>"
+               )
+
+      assert what =~ "<li>"
     end
   end
 end

@@ -6,30 +6,96 @@ defmodule KilnCMS.Blocks.Upcaster do
   current version, the declared `migrate` chain (`Kiln.Block.Info.migrations/1`)
   runs to bring it to head. Upcasting is **lazy on read** (`upcast/2`,
   `upcast_block_map/1`, applied wherever typed blocks are obtained) and the same
-  function powers **eager backfill** (`upcast_all/1`, wrap in Oban once the stored
-  column is union — Phase C flip). Idempotent: a head-version map is returned
-  unchanged.
+  function powers the **eager backfill**, `mix kiln.blocks.backfill`
+  (`KilnCMS.CMS.BlockBackfill`, #1537), which writes the upcast shape back to
+  disk. Idempotent: a head-version map is returned unchanged.
 
   For already-*fired* artifacts on a schema bump, the strategy is **re-fire the
   affected types** (decision H1) — re-firing reads the now-upcast blocks.
+
+  ## A gap refuses (#1642)
+
+  The chain is followed step by step from the stored `_version`. When a
+  stored version has no `migrate` step onward (or the step runs backwards or
+  past the declared version), the upcast is **refused**: the stored map comes
+  back exactly as it was, `_version` included. It used to be stamped with the
+  head version anyway, which marked never-transformed data current so that no
+  later run would migrate it. `Kiln.Block.MigrationChain` warns about such a
+  chain when the block module compiles.
+
+  Two entry points per shape:
+
+    * `try_upcast/2` / `try_upcast_block_map/1` return `{:ok, map}` or
+      `{:error, refusal}` — for callers that report, like an eager backfill.
+    * `upcast/2` / `upcast_block_map/1` never fail — for read and delivery
+      paths. A refused block is returned as stored and a warning is logged;
+      the renderer reads whatever fields the stored shape has, which is the
+      conservative choice next to crashing a page render.
   """
+  require Logger
+
   alias KilnCMS.Blocks
+
+  @typedoc """
+  Why an upcast was refused. `kind` and `detail` are the fields a report
+  prints; the rest say which block and where its chain breaks.
+  """
+  @type refusal :: %{
+          kind: :missing_migration,
+          detail: String.t(),
+          module: module(),
+          type: String.t() | nil,
+          from: pos_integer(),
+          to: pos_integer(),
+          missing: pos_integer()
+        }
 
   @doc "Current (head) schema version for a block module."
   @spec current_version(module()) :: pos_integer()
   def current_version(module), do: Kiln.Block.Info.version(module) || 1
 
-  @doc "Upcast a stored block map to its module's current version."
+  @doc """
+  Upcast a stored block map to its module's current version.
+
+  Never fails: a refused upcast (see `try_upcast/2`) logs a warning and returns
+  the map exactly as stored.
+  """
   @spec upcast(module(), map()) :: map()
   def upcast(module, map) when is_map(map) do
+    case try_upcast(module, map) do
+      {:ok, upcast} ->
+        upcast
+
+      {:error, refusal} ->
+        Logger.warning(
+          "Block upcast refused, block left as stored: #{refusal.detail} (#{inspect(module)})"
+        )
+
+        map
+    end
+  end
+
+  @doc """
+  Upcast a stored block map to its module's current version, or say why not.
+
+  `{:error, refusal}` when the declared `migrate` chain cannot carry the stored
+  `_version` to head; the stored map is untouched. A map at or past head is
+  `{:ok, map}` unchanged.
+  """
+  @spec try_upcast(module(), map()) :: {:ok, map()} | {:error, refusal()}
+  def try_upcast(module, map) when is_map(map) do
     from = stored_version(map)
     to = current_version(module)
 
     if from >= to do
-      map
+      {:ok, map}
     else
-      migrations = module |> Kiln.Block.Info.migrations() |> Map.new(&{&1.from, &1})
-      Enum.reduce(from..(to - 1)//1, map, &apply_step(&2, &1, migrations))
+      steps = module |> Kiln.Block.Info.migrations() |> Map.new(&{&1.from, &1})
+
+      case walk(map, from, to, steps) do
+        {:ok, upcast} -> {:ok, upcast}
+        {:gap, at} -> {:error, refusal(module, map, from, to, at)}
+      end
     end
   end
 
@@ -44,15 +110,52 @@ defmodule KilnCMS.Blocks.Upcaster do
 
   def upcast_block_map(map), do: map
 
+  @doc """
+  `upcast_block_map/1`, reporting a refusal instead of logging it. A map whose
+  `_type` names no block (or has none) is `{:ok, map}` unchanged.
+  """
+  @spec try_upcast_block_map(map()) :: {:ok, map()} | {:error, refusal()}
+  def try_upcast_block_map(%{"_type" => type} = map) do
+    case Blocks.fetch(safe_atom(type)) do
+      {:ok, module} -> try_upcast(module, map)
+      :error -> {:ok, map}
+    end
+  end
+
+  def try_upcast_block_map(map), do: {:ok, map}
+
   @doc "Eager backfill over a list of stored block maps."
   @spec upcast_all([map()]) :: [map()]
   def upcast_all(maps) when is_list(maps), do: Enum.map(maps, &upcast_block_map/1)
 
-  defp apply_step(map, version, migrations) do
-    case Map.get(migrations, version) do
-      %{to: to, fun: fun} -> map |> fun.() |> Map.put("_version", to)
-      nil -> Map.put(map, "_version", version + 1)
+  # Follow the declared steps. Each must move forward without passing head;
+  # the first version with no such step is the gap, and nothing walked so far
+  # is kept — the caller still holds the stored map.
+  defp walk(map, to, to, _steps), do: {:ok, map}
+
+  defp walk(map, at, to, steps) do
+    case Map.get(steps, at) do
+      %{to: next, fun: fun} when next > at and next <= to ->
+        map |> fun.() |> Map.put("_version", next) |> walk(next, to, steps)
+
+      _missing_or_unusable ->
+        {:gap, at}
     end
+  end
+
+  defp refusal(module, map, from, to, at) do
+    type = Map.get(map, "_type")
+
+    %{
+      kind: :missing_migration,
+      detail:
+        "#{type || inspect(module)} v#{from} → v#{to}: no usable `migrate` step from v#{at}",
+      module: module,
+      type: type,
+      from: from,
+      to: to,
+      missing: at
+    }
   end
 
   defp stored_version(map), do: Map.get(map, "_version") || Map.get(map, :_version) || 1

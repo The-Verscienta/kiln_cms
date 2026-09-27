@@ -308,9 +308,12 @@ defmodule KilnCMS.Blocks.PortableText do
   # One TipTap node can emit several PT blocks (each list item is its own PT
   # block), so nodes return {blocks, next_key}.
   defp blocks_from_node(%{"type" => "blockquote"} = node, key) do
-    # Blockquotes wrap paragraphs in TipTap; flatten their inline content.
-    inline = node["content"] |> List.wrap() |> Enum.flat_map(&(&1["content"] || []))
-    {children, defs} = spans_and_defs(inline)
+    # Blockquotes wrap paragraphs in TipTap, and a PT block is one run of
+    # spans: flatten their inline content with a line break between
+    # paragraphs, the way a table cell does. Concatenating them ran the last
+    # word of one paragraph into the first of the next — "onetwo" — which the
+    # #1537 backfill corpus caught converting stored `legacy_html`.
+    {children, defs} = node |> cell_inline() |> spans_and_defs()
     {[pt_block("blockquote", key, children, defs)], key + 1}
   end
 
@@ -354,11 +357,16 @@ defmodule KilnCMS.Blocks.PortableText do
   # PT: one block per item with `listItem` + `level`; nesting via level.
   defp list_items(%{"content" => items}, kind, level, key) do
     Enum.reduce(List.wrap(items), {[], key}, fn item, {acc, key} ->
+      # Several paragraphs in one item keep a line break between them, as in
+      # a blockquote.
       inline =
         item["content"]
         |> List.wrap()
         |> Enum.filter(&(&1["type"] == "paragraph"))
-        |> Enum.flat_map(&(&1["content"] || []))
+        |> Enum.map(&(&1["content"] || []))
+        |> Enum.reject(&(&1 == []))
+        |> Enum.intersperse([%{"type" => "hardBreak"}])
+        |> List.flatten()
 
       {children, defs} = spans_and_defs(inline)
 
@@ -651,7 +659,7 @@ defmodule KilnCMS.Blocks.PortableText do
       |> chunk_items(level)
       |> Enum.map_join(fn {item, nested} ->
         defs = item["markDefs"] || []
-        text = Enum.map_join(item["children"] || [], &span_to_html(&1, defs))
+        text = Enum.map_join(item["children"] || [], &line_span_to_html(&1, defs))
         "<li>#{text}#{list_to_html(nested, level + 1)}</li>"
       end)
 
@@ -712,7 +720,7 @@ defmodule KilnCMS.Blocks.PortableText do
 
   defp block_to_html(%{} = block) do
     defs = block["markDefs"] || []
-    inner = Enum.map_join(block["children"] || [], &span_to_html(&1, defs))
+    inner = Enum.map_join(block["children"] || [], &line_span_to_html(&1, defs))
     wrap(block["style"] || "normal", inner)
   end
 
@@ -758,7 +766,7 @@ defmodule KilnCMS.Blocks.PortableText do
 
   defp cell_to_html(cell, head_row?) do
     defs = cell["markDefs"] || []
-    inner = Enum.map_join(cell["children"] || [], &cell_span_to_html(&1, defs))
+    inner = Enum.map_join(cell["children"] || [], &line_span_to_html(&1, defs))
     spans = span_attrs(cell)
 
     if cell["header"] do
@@ -769,14 +777,19 @@ defmodule KilnCMS.Blocks.PortableText do
     end
   end
 
-  # Line-break spans inside a cell render as <br/> so the break survives HTML
-  # whitespace collapsing and round-trips through the editor as a hardBreak
-  # instead of silently merging the cell's lines into one.
-  defp cell_span_to_html(%{"text" => "\n"} = span, _defs) do
+  # A line-break span (the editor's hardBreak) renders as <br/> so the break
+  # survives HTML whitespace collapsing and round-trips through the editor as a
+  # hardBreak, instead of silently merging the lines into one. Table cells did
+  # this first (#475); paragraphs, headings, quotes and list items rendered a
+  # bare newline, which every browser shows as a space — found running the
+  # #1537 backfill corpus, where it was the one thing a `<br>` in stored
+  # `legacy_html` could not survive. Code blocks keep their own renderer, where
+  # a newline is a newline.
+  defp line_span_to_html(%{"text" => "\n"} = span, _defs) do
     if (span["marks"] || []) == [], do: "<br/>", else: "\n"
   end
 
-  defp cell_span_to_html(span, defs), do: span_to_html(span, defs)
+  defp line_span_to_html(span, defs), do: span_to_html(span, defs)
 
   defp span_attrs(cell) do
     for key <- ["colspan", "rowspan"], n = cell[key], is_integer(n) and n > 1, into: "" do
@@ -854,4 +867,117 @@ defmodule KilnCMS.Blocks.PortableText do
   defp esc(value) do
     value |> to_string() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
   end
+
+  # ── faithful conversion of stored HTML ─────────────────────────────────────
+
+  @doc """
+  `from_html/1`, but only when a reader could not tell the difference —
+  `{:ok, body}`, or `{:error, reason}` naming what would change (#1537).
+
+  `from_html/1` is lossy by design (see its doc), which is fine for a
+  translator's working copy and wrong for rewriting stored prose. Faithful
+  means:
+
+    * the same words, in the same order, with a break wherever there was one
+      (whitespace runs aside: a separator stands in for every element boundary,
+      so two paragraphs run together are caught, while a paragraph break inside
+      a list item or quote may come out as a line break, which is how Portable
+      Text holds one); and
+    * the same text under every element that carries meaning — each mark, each
+      link (by href), each heading level, list, list item, quote, code block (by
+      language), table cell (by span) — and the same number of rules and images.
+
+  Wrappers are not compared: a `<div>` becomes a `<p>`, a quote's inner `<p>`
+  becomes the quote itself, and `<b>x <i>y</i></b>` splits into separately
+  marked runs, which changes markup, not what is read.
+
+  Compared against the **sanitized** HTML (`KilnCMS.HTMLSanitizer.sanitize_rich_text/1`)
+  — what every reader of a `legacy_html` block has been shown — so markup the
+  sanitizer already strips is not "lost" by converting. The body returned is
+  sanitized too.
+  """
+  @spec from_html_faithful(binary()) :: {:ok, [pt_block()]} | {:error, String.t()}
+  def from_html_faithful(html) when is_binary(html) do
+    sanitized = KilnCMS.HTMLSanitizer.sanitize_rich_text(html)
+    body = sanitized |> from_html() |> sanitize_body()
+
+    with {:ok, before} <- Floki.parse_fragment(sanitized),
+         {:ok, after_} <- Floki.parse_fragment(to_html(body)) do
+      {before_features, after_features} = {features(before), features(after_)}
+
+      cond do
+        words(before) != words(after_) ->
+          {:error, "text would change"}
+
+        before_features != after_features ->
+          {:error, "markup would change: " <> feature_diff(before_features, after_features)}
+
+        true ->
+          {:ok, body}
+      end
+    else
+      _ -> {:error, "unparseable HTML"}
+    end
+  end
+
+  defp words(nodes) do
+    nodes |> Floki.text(sep: " ") |> String.replace(~r/\s+/u, " ") |> String.trim()
+  end
+
+  @feature_aliases %{"b" => "strong", "i" => "em", "del" => "s", "strike" => "s"}
+  @structural ~w(p br div span section article header footer aside main table tbody thead tfoot tr)
+  @void ~w(hr img)
+
+  # feature → the text under it, concatenated in document order (whitespace
+  # dropped), or for a void element, how many there are.
+  defp features(nodes) do
+    nodes
+    |> Floki.find("*")
+    |> Enum.map(fn {tag, attrs, _children} = node ->
+      tag = Map.get(@feature_aliases, tag, tag)
+      {feature(tag, attrs), if(tag in @void, do: 1, else: squeeze(Floki.text([node])))}
+    end)
+    |> Enum.reject(fn {feature, _value} -> feature in @structural end)
+    |> Enum.reduce(%{}, fn
+      {feature, count}, acc when is_integer(count) ->
+        Map.update(acc, feature, count, &(&1 + count))
+
+      {feature, text}, acc ->
+        Map.update(acc, feature, text, &(&1 <> text))
+    end)
+  end
+
+  defp squeeze(text), do: String.replace(text, ~r/\s+/u, "")
+
+  # The attributes the sanitizer lets through that change what a reader sees:
+  # where a link goes, how far a cell spans, what language a code block is.
+  defp feature("a", attrs), do: {"a", html_attr(attrs, "href")}
+  defp feature("code", attrs), do: {"code", html_attr(attrs, "class")}
+
+  defp feature(cell, attrs) when cell in ["td", "th"],
+    do: {cell, html_attr(attrs, "colspan") || "1", html_attr(attrs, "rowspan") || "1"}
+
+  defp feature(tag, _attrs), do: tag
+
+  defp html_attr(attrs, name) do
+    Enum.find_value(attrs, fn
+      {^name, value} -> value
+      _ -> nil
+    end)
+  end
+
+  defp feature_diff(before, after_) do
+    (Map.keys(before) ++ Map.keys(after_))
+    |> Enum.uniq()
+    |> Enum.reject(&(Map.get(before, &1) == Map.get(after_, &1)))
+    |> Enum.map_join(", ", &feature_name/1)
+  end
+
+  defp feature_name({"a", href}), do: "<a href=#{inspect(href)}>"
+  defp feature_name({"code", class}), do: "<code class=#{inspect(class)}>"
+
+  defp feature_name({cell, colspan, rowspan}),
+    do: "<#{cell} colspan=#{colspan} rowspan=#{rowspan}>"
+
+  defp feature_name(tag), do: "<#{tag}>"
 end

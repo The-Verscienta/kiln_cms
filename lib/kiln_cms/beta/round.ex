@@ -340,18 +340,10 @@ defmodule KilnCMS.Beta.Round do
             slug: slug,
             excerpt: "Yours for this round — edit it, break it, tell us what happened.",
             blocks: [
-              %{
-                type: :heading,
-                content: "#{display}'s sandbox post",
-                data: %{"level" => 1},
-                order: 0
-              },
-              %{
-                type: :rich_text,
-                content:
-                  "<p>This post is seeded for beta round #{round}. Nothing here is precious — change anything.</p>",
-                order: 1
-              }
+              %{"_type" => "heading", "text" => "#{display}'s sandbox post", "level" => 1},
+              prose(
+                "This post is seeded for beta round #{round}. Nothing here is precious — change anything."
+              )
             ]
           },
           actor: actor,
@@ -370,6 +362,16 @@ defmodule KilnCMS.Beta.Round do
     end
   end
 
+  # One paragraph as a typed rich-text block, its prose in Portable Text rather
+  # than the deprecated `legacy_html` a legacy `%{type:, content:}` param
+  # stores (#1537).
+  defp prose(text) do
+    html =
+      "<p>" <> (text |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()) <> "</p>"
+
+    %{"_type" => "rich_text", "body" => KilnCMS.Blocks.PortableText.from_html(html)}
+  end
+
   defp seed_page(handle, display, round, actor, tenant) do
     slug = "beta-r#{round}-#{handle}-page"
 
@@ -381,7 +383,7 @@ defmodule KilnCMS.Beta.Round do
           %{
             title: "#{display}'s scratch page",
             slug: slug,
-            blocks: [%{type: :rich_text, content: "<p>First draft.</p>", order: 0}]
+            blocks: [prose("First draft.")]
           },
           actor: actor,
           tenant: tenant
@@ -392,13 +394,7 @@ defmodule KilnCMS.Beta.Round do
       CMS.update_page!(
         page,
         %{
-          blocks: [
-            %{
-              type: :rich_text,
-              content: "<p>Second draft — the first is in history.</p>",
-              order: 0
-            }
-          ]
+          blocks: [prose("Second draft — the first is in history.")]
         },
         actor: actor,
         tenant: tenant

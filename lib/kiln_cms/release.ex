@@ -109,6 +109,31 @@ defmodule KilnCMS.Release do
     result
   end
 
+  @doc """
+  Rewrite every block tree still stored in a legacy shape to the typed shape
+  (#1537) — `mix kiln.blocks.backfill` for a release, which has no Mix:
+
+      bin/kiln_cms eval 'KilnCMS.Release.backfill_blocks(dry_run: true)'
+      bin/kiln_cms eval 'KilnCMS.Release.backfill_blocks()'
+
+  Options are the task's: `dry_run: true`, `batch: n`, `tables: ["pages"]`.
+  Safe against a live site and resumable; returns `:ok`, or `{:error,
+  message}` when a row could not be converted (it is listed, and not
+  written). See `KilnCMS.CMS.BlockBackfill`.
+  """
+  @spec backfill_blocks(keyword()) :: :ok | {:error, String.t()}
+  def backfill_blocks(opts \\ []) do
+    load_app()
+
+    {:ok, result, _} =
+      Ecto.Migrator.with_repo(hd(repos()), fn _repo ->
+        KilnCMS.CMS.BlockBackfill.run_and_report(opts, &IO.puts/1)
+      end)
+
+    with {:error, message} <- result, do: IO.puts(message)
+    result
+  end
+
   defp repos do
     Application.fetch_env!(@app, :ecto_repos)
   end

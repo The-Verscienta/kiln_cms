@@ -655,9 +655,8 @@ defmodule KilnCMSWeb.InContextEditLive do
   # surface until someone remembered to add it. The builder already has a total
   # fallback of its own, so there is nothing for the list to protect.
   defp read_only_block(struct) do
-    [legacy] = TypedBlocks.to_legacy([struct])
-    [thin] = BlockComponents.thin_blocks([legacy])
-    thin
+    [view] = BlockComponents.view_blocks([struct])
+    view
   end
 
   # Stable-id region element id, keyed by `region_version` so a save/restore

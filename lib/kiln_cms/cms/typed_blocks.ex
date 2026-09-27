@@ -3,14 +3,26 @@ defmodule KilnCMS.CMS.TypedBlocks do
   Bridge between the legacy `KilnCMS.CMS.Block` storage and the Kiln v2 typed
   block representation (decision D11 / Phase C).
 
-  `from_legacy/1` is the canonical read-direction conversion that firing,
-  rendering, search, and embeddings (Phases D–J) use to obtain typed block structs
-  from whatever is stored. It is **total** — any legacy/unknown block maps to
-  `KilnCMS.Blocks.Custom` so downstream serializers never crash (decision A4).
+  `to_typed/1` is the canonical read-direction conversion that firing,
+  rendering, search, history and embeddings use to obtain typed block structs
+  from whatever is stored — typed or legacy. It is **total**: any legacy/unknown
+  block maps to `KilnCMS.Blocks.Custom` so downstream serializers never crash
+  (decision A4). It keeps reading the legacy shape after 1.0, because version
+  history is hash-chained and never rewritten.
 
-  `to_legacy/1` is the reverse. Public delivery and the previews still call it
-  at the boundary, so the legacy `BlockComponents` renderer is unchanged;
-  moving them off it is #1537.
+  **The bridge is deprecated and is removed at 1.0 (#1537):**
+
+    * `to_legacy/1` — nothing in the core calls it any more. Delivery, the
+      previews and the in-context editor render from
+      `KilnCMSWeb.BlockComponents.view_blocks/1`, built from the typed blocks.
+    * `from_legacy/1` — use `to_typed/1`, which accepts the same input.
+    * the legacy `KilnCMS.CMS.Block` shape as **write input**
+      (`%{type: :heading, content: …, data: …}`) — `BlockUnion`'s cast still
+      converts it, until 1.0. Write the typed shape (`%{"_type" => "heading",
+      "text" => …}`).
+
+  `mix kiln.blocks.backfill` rewrites the rows still stored in the legacy
+  shape; see `KilnCMS.CMS.BlockBackfill`.
 
   Legacy blocks arrive either as `%KilnCMS.CMS.Block{}` structs (top-level, atom
   keys) or as plain maps with string keys (nested `children` from jsonb), so the
@@ -504,6 +516,7 @@ defmodule KilnCMS.CMS.TypedBlocks do
   def input_map(%_{} = struct), do: struct |> attrs_of() |> drop_nils()
 
   @doc "Convert a stored legacy block list into typed block structs."
+  @deprecated "Use KilnCMS.CMS.TypedBlocks.to_typed/1, which reads the legacy shape too (#1537); removed at 1.0"
   @spec from_legacy([struct() | map()] | nil) :: [struct()]
   def from_legacy(blocks) do
     blocks
@@ -613,18 +626,132 @@ defmodule KilnCMS.CMS.TypedBlocks do
     }
   end
 
-  # columns, custom, and anything unmapped → the total fallback.
-  defp typed(other, id, content, data, _block) do
+  # A legacy `columns` block carried its layout and child tree in `data` — the
+  # shape `one_to_legacy/1` still writes for a typed one. It used to fall
+  # through to `Custom` below, which rendered only because delivery converted
+  # it straight back to `type: :columns` at the boundary; anything reading the
+  # typed struct (search, references, the fired artifacts) saw an opaque
+  # custom block with its children hidden in `data`. Found by the #1537
+  # backfill corpus. The children stay raw maps, as on a typed `Columns`, and
+  # are typed lazily wherever they are read.
+  defp typed(:columns, id, _content, data, _block) do
+    %Columns{
+      id: id,
+      _type: "columns",
+      layout: data_str(data, "layout"),
+      gap: data_str(data, "gap"),
+      columns: data_maps(data, "columns")
+    }
+  end
+
+  # custom, and anything unmapped → the total fallback.
+  #
+  # `legacy_type` is the type as STORED, not the atom it resolved to: a type
+  # name that was never an atom in this build (`to_type/1` refuses to mint
+  # one) resolved to `:custom`, so a stored `"pricing_table"` came back as
+  # `legacy_type: "custom"` and its name was gone from every typed read. Found
+  # by the #1537 backfill corpus, where it would have been gone from the row.
+  defp typed(other, id, content, data, block) do
     %Custom{
       id: id,
       _type: "custom",
-      legacy_type: to_string(other),
+      legacy_type: stored_type_name(get(block, :type), other),
       content: content,
       data: data
     }
   end
 
+  defp stored_type_name(raw, _resolved) when is_binary(raw) and raw != "", do: raw
+  defp stored_type_name(_raw, resolved), do: to_string(resolved)
+
+  @doc false
+  # What converting one stored **legacy** block (`%{"type" => …, "content" =>
+  # …, "data" => …}`, string or atom keys) to its typed struct would lose, as
+  # the names of the keys that do not survive — `[]` when nothing does.
+  #
+  # The legacy→typed mapping above reads a fixed set of `data` keys per type
+  # and ignores the rest, which is fine for a read (the stored row still holds
+  # them) and silent data loss for a rewrite. `KilnCMS.CMS.BlockBackfill`
+  # refuses to rewrite a row this reports anything for, and reports it
+  # instead (#1537).
+  #
+  # The oracle is the mapping itself run both ways, not a second table of
+  # "which keys each type reads": a key survives when converting to the typed
+  # struct and back reproduces it. A second table would drift from the clauses
+  # it describes the first time a block type grew a field.
+  @spec legacy_loss(map()) :: [String.t()]
+  def legacy_loss(%{} = block) do
+    typed = one_from_legacy(block)
+    back = one_to_legacy(typed)
+
+    content_loss(block, typed) ++
+      data_loss(get(block, :data), back.data) ++
+      children_loss(get(block, :children)) ++ extra_key_loss(block)
+  end
+
+  # `content` survives when the typed struct holds it in some field — `text`
+  # for a heading, `legacy_html` for rich text, `url` for an image whose `data`
+  # carried no url of its own. A divider has nowhere to put it.
+  defp content_loss(block, typed) do
+    content = get(block, :content)
+
+    if present?(content) and content not in (typed |> Map.from_struct() |> Map.values()),
+      do: ["content"],
+      else: []
+  end
+
+  defp data_loss(nil, _back), do: []
+
+  defp data_loss(%{} = data, back) do
+    for {key, value} <- data,
+        present?(value),
+        not loosely_equal?(value, Map.get(back, to_string(key))),
+        do: "data.#{key}"
+  end
+
+  defp data_loss(_not_a_map, _back), do: ["data"]
+
+  # `children` was the legacy block's nesting escape hatch; nothing typed reads
+  # it (a typed `columns` keeps its tree in `data["columns"]`).
+  defp children_loss(children), do: if(present?(children), do: ["children"], else: [])
+
+  @legacy_keys ~w(id type content data order children)
+
+  # `order` is deliberately not a loss: position in the list has been the order
+  # since the storage flip, on every read.
+  defp extra_key_loss(block) do
+    for {key, value} <- block,
+        to_string(key) not in @legacy_keys,
+        present?(value),
+        do: to_string(key)
+  end
+
+  defp present?(value), do: value not in [nil, "", [], %{}]
+
+  # Equal as far as a reader could tell: a form-posted `"3"` for a heading
+  # level the typed side holds as `3`, or a gallery image map the typed side
+  # filled out with blank defaults for keys it did not have.
+  defp loosely_equal?(same, same), do: true
+
+  defp loosely_equal?(%{} = original, %{} = converted) do
+    Enum.all?(original, fn {key, value} ->
+      not present?(value) or
+        loosely_equal?(value, Map.get(converted, to_string(key), Map.get(converted, key)))
+    end)
+  end
+
+  defp loosely_equal?(original, converted)
+       when is_list(original) and is_list(converted) and length(original) == length(converted),
+       do: original |> Enum.zip(converted) |> Enum.all?(fn {a, b} -> loosely_equal?(a, b) end)
+
+  defp loosely_equal?(original, converted) do
+    scalar?(original) and scalar?(converted) and to_string(original) == to_string(converted)
+  end
+
+  defp scalar?(value), do: is_binary(value) or is_number(value) or is_boolean(value)
+
   @doc "Best-effort reverse conversion back to legacy block maps."
+  @deprecated "Render from typed blocks instead, e.g. KilnCMSWeb.BlockComponents.view_blocks/1 (#1537); removed at 1.0"
   @spec to_legacy([struct()] | nil) :: [map()]
   def to_legacy(typed_blocks) do
     typed_blocks

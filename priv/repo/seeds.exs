@@ -122,12 +122,13 @@ ensure_content.(
         seo_title: "Welcome to KilnCMS",
         seo_description: "A world-class, Elixir-native headless CMS.",
         blocks: [
-          %{type: :heading, content: "Welcome to KilnCMS", data: %{"level" => 1}, order: 0},
+          %{"_type" => "heading", "text" => "Welcome to KilnCMS", "level" => 1},
           %{
-            type: :rich_text,
-            content:
-              "<p>This page was created by the seed script and published via the workflow.</p>",
-            order: 1
+            "_type" => "rich_text",
+            "body" =>
+              KilnCMS.Blocks.PortableText.from_html(
+                "<p>This page was created by the seed script and published via the workflow.</p>"
+              )
           }
         ]
       },
@@ -155,7 +156,11 @@ ensure_content.(
         title: "About",
         slug: "about",
         blocks: [
-          %{type: :rich_text, content: "<p>This is an unpublished draft page.</p>", order: 0}
+          %{
+            "_type" => "rich_text",
+            "body" =>
+              KilnCMS.Blocks.PortableText.from_html("<p>This is an unpublished draft page.</p>")
+          }
         ]
       },
       actor: admin,
@@ -181,12 +186,13 @@ ensure_content.(
         slug: "hello-world",
         excerpt: "The first post on a KilnCMS-powered site.",
         blocks: [
-          %{type: :heading, content: "Hello, World", data: %{"level" => 1}, order: 0},
+          %{"_type" => "heading", "text" => "Hello, World", "level" => 1},
           %{
-            type: :rich_text,
-            content:
-              "<p>KilnCMS pairs Ash's declarative modeling with LiveView's real-time UX.</p>",
-            order: 1
+            "_type" => "rich_text",
+            "body" =>
+              KilnCMS.Blocks.PortableText.from_html(
+                "<p>KilnCMS pairs Ash's declarative modeling with LiveView's real-time UX.</p>"
+              )
           }
         ]
       },

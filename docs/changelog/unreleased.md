@@ -26,6 +26,55 @@ carries the reasoning.
   audiences and standing role
   ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538)).
 
+<a id="run-mix-kilnblocksbackfill-once-after-deploying"></a>
+
+- **Run `mix kiln.blocks.backfill` once after deploying. It is safe on the live
+  site, and it rewrites stored blocks — rolling the pin back does not undo
+  it.** In a release image: `bin/kiln_cms eval
+  'KilnCMS.Release.backfill_blocks()'`. It rewrites every block tree still stored in a pre-typed shape — rows nobody has
+  saved since the typed-block storage flip, on every content type and in
+  working copies — to the typed shape at rest, and converts rich text still
+  held only in `legacy_html` to Portable Text where that is faithful. **It can
+  run after deploy, against the live site**: each row is a compare-and-swap
+  that skips a row an editor saves meanwhile, and it touches no `updated_at`,
+  version history or cache. It is idempotent and resumable (run it again to
+  finish an interrupted pass), and `--dry-run` shows what it would do. **It
+  rewrites data, and rolling the pin back does not undo it**: older releases
+  read the typed shape fine, but the legacy maps are gone, so take the backup
+  you would before any data migration. A row it cannot convert without losing
+  something is listed by table, id and block path and left untouched, and the
+  task exits non-zero; so does a rich-text block it had to leave in
+  `legacy_html`. Those rows keep reading exactly as they do today — fix them
+  in the editor before 1.0, which drops the legacy read path. Then run
+  `mix kiln.refire_all`: a converted rich-text block's fired `:json` artifact
+  carries its prose in `body` and no longer in `legacy_html`.
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537))
+
+<a id="if-your-overlay-compiles-with-warnings-as-errors-check-its-block-migrate-chains-first"></a>
+
+- **If your overlay compiles with `--warnings-as-errors`, check its blocks'
+  `migrate` chains first.** This release warns at compile time when a
+  `Kiln.Block`'s `migrate` steps skip a version, run backwards, overshoot the
+  declared `version`, or start two steps at the same version. Under
+  `mix compile --warnings-as-errors` that warning fails the build, so an
+  overlay's CI can go red on upgrade with no change of its own. Compile the
+  overlay against this release once; for each block the warning names,
+  declare the missing `migrate` step. A block with a gap already has stored
+  data its renderer cannot read correctly, and the upcaster now refuses to
+  mark it current
+  ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642)).
+
+<a id="a-new-throttlecounters-table-holds-the-auth-budgets-run-migrations-as"></a>
+
+- **A new `throttle_counters` table holds the auth budgets; run migrations as
+  usual.** `bin/migrate` (or the release's own migrate step) creates it. No
+  configuration changes. The order does not matter on a rolling deploy: until
+  the table exists, each node counts its budgets locally, as every release
+  before this one did, and logs that it is doing so at most once a minute.
+  Counts are not carried over from the old in-memory tables, so every budget
+  starts empty on upgrade, exactly as it did after any restart. An Oban cron
+  job in the `default` queue prunes closed windows every five minutes. (#1619)
+
 <a id="a-site-whose-code-injection-snippet-opens-a-websocket-to-its-vendor-must"></a>
 
 - **A site whose code-injection snippet opens a websocket to its vendor must
@@ -74,6 +123,34 @@ carries the reasoning.
 
 ## Added
 
+<a id="mix-kilnblocksbackfill-rewrites-legacy-shaped-stored-blocks-to-the-typed-shape"></a>
+
+- **`mix kiln.blocks.backfill` rewrites legacy-shaped stored blocks to the
+  typed shape.** `KilnCMS.CMS.BlockBackfill` finds every table with a
+  `{:array, BlockUnion}` column from the attribute type — pages, posts, dynamic
+  entries and every overlay type, `blocks` and `working_blocks` — and walks it
+  in keyset batches. Per stored element it recognises the pre-flip
+  `KilnCMS.CMS.Block` map, a bare `_type` map outside the union envelope, a
+  block behind its head `_version` (the declared `migrate` chain runs, the
+  same one the lazy read uses), legacy children inside a `columns` block, and
+  rich text held only in `legacy_html`. It refuses — reports, does not write —
+  a row that would lose data on conversion (a legacy `data` key, `content` or
+  `children` the typed block has nowhere to keep, decided by running the
+  legacy mapping both ways rather than by a second table of keys), a block
+  type this build does not have, or a value that fails the union's stored
+  cast. `legacy_html` is converted only when a reader could not tell: same
+  words with the same breaks, and the same text under every mark, link,
+  heading, list item, quote, code block and table cell; otherwise the block
+  keeps it and is reported. It writes through Ecto, not an Ash action, for the
+  reason `KilnCMS.Keys.Reencrypt` does, and because Ash elides a write whose
+  new value compares equal to the loaded one — and a legacy row loads as the
+  typed tree it would be rewritten to. Version history is not rewritten: its
+  rows are folded into the governance hash chain. The conversion was run over
+  a corpus of every stored shape (`test/support/legacy_block_corpus.ex`),
+  checking each rewritten tree renders on `:web` and `:json` as the stored one
+  did; the fixes it found are under Fixed.
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537))
+
 <a id="release-candidates-are-opt-in-everywhere-mix-kilnupdate-pre"></a>
 
 - **Release candidates are opt-in everywhere: `mix kiln.update --pre`.** A
@@ -107,7 +184,100 @@ carries the reasoning.
   2.0 makes it an error
   ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538)).
 
+<a id="public-delivery-the-previews-and-the-in-context-editor-render-from-the-typed"></a>
+
+- **Public delivery, the previews and the in-context editor render from the
+  typed blocks, not through the legacy block shape.** A new
+  `KilnCMSWeb.BlockComponents.view_blocks/1` builds the maps `render_block/1`
+  takes straight from the typed structs; delivery adds its media and form
+  enrichment on top of the same maps every preview renders, so the two cannot
+  drift. Nothing in the core calls `TypedBlocks.to_legacy/1` any more. Rich
+  text renders through the block's own `:web` serializer — Portable Text first,
+  sanitized `legacy_html` only where there is no body. Two visible
+  differences on the public page: each block now carries the `data-block-id`
+  anchor `render_block/1` documents (delivery's enrichment used to drop the
+  id), and an image with no media-library item shows its own alt text instead
+  of `alt=""`. The in-context editor's HTML compatibility path and the nested
+  columns editor now write Portable Text whenever it holds the HTML
+  faithfully, and the starter home page, the beta-round seeds, `seeds.exs` and
+  the example overlay's import write typed blocks with Portable Text instead of
+  legacy params that stored `legacy_html`.
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537))
+
+<a id="a-block-whose-migrate-steps-skip-a-version-now-warns-at-compile-time"></a>
+
+- **A block whose `migrate` steps skip a version now warns at compile time;
+  from Kiln 2.0 it is an error.** ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642))
+  `Kiln.Block.MigrationChain`, a Spark verifier on the `Kiln.Block` DSL,
+  checks that the `migrate` steps carry every version from 1 to the block's
+  declared `version` — and names a step that runs backwards, one that
+  overshoots the declared version, and two steps starting at the same version.
+  Nothing in the DSL required this before, so it is a warning rather than an
+  error: a block module that compiled on 0.11 still compiles. Under
+  `mix compile --warnings-as-errors` it does fail the build, which is
+  intended — every core block's chain is clean, and an overlay block with a
+  gap has stored data that can never reach the shape its renderer reads.
+  Declare the missing step. The warning becomes a compile error in Kiln 2.0.
+
+<a id="every-surface-carries-one-label-covered-internal-or-experimental"></a>
+
+- **Every surface carries one label: covered, internal or experimental.**
+  The README's stability table and `docs/overlay-contract.md` now hold the
+  same table, word for word, and `test/kiln_cms/docs/surface_labels_test.exs`
+  fails when the copies differ, when a row of the contract's *Covered surfaces*
+  table or an entry of its *Not covered* list is missing from the matching
+  row, when an endpoint in the API guide's surfaces table has no label, or
+  when one surface carries two. The README had been missing five of the
+  contract's internal entries. Features that ship switched off — AI assist,
+  the SEO generator, provenance, experiments, oEmbed, demo mode, compliance,
+  referrer analytics, SSO, two-factor auth and the per-site integrations — are
+  now labelled *supported when enabled* rather than lumped in with the
+  experimental ones. Three promises move. **Newly covered:** the documented
+  environment variables, and `mix kiln.update` (with its documented flags),
+  `mix kiln.plugins.doctor` and `mix kiln.search.check`, the tasks the
+  contract tells an overlay's CI to run. **Newly internal**, closing two of the
+  contract's known soft spots: `to_markdown/1` on a block module, which is
+  probed rather than declared on `Kiln.Block.Renderer` and has no test for an
+  overlay's implementation, and a hand-rolled `@behaviour` when a callback is
+  added — the `use` form is what the additions promise covers. Every other
+  `mix kiln.*` task is labelled internal too; a release that needs you to run
+  one names it in its upgrade notes. (#1542)
+
 ## Fixed
+
+<a id="a-hard-line-break-in-a-paragraph-heading-quote-or-list-item-is-delivered-as-br"></a>
+
+- **A hard line break in a paragraph, heading, quote or list item is
+  delivered as `<br/>`.** `KilnCMS.Blocks.PortableText.to_html/1` rendered the
+  editor's hardBreak as a bare newline everywhere but table cells, and a
+  browser collapses a newline to a space — so Shift+Enter in the editor showed
+  as one run-on line on the site and in every fired `:web` artifact. Found by
+  the #1537 backfill corpus: it was the one thing a `<br>` in stored
+  `legacy_html` could not survive conversion with.
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537))
+
+<a id="paragraphs-inside-a-quote-or-a-list-item-no-longer-run-together-when-saved-as"></a>
+
+- **Paragraphs inside a quote or a list item no longer run together when saved
+  as Portable Text.** A Portable Text block is one run of spans, and the
+  TipTap conversion concatenated a blockquote's or list item's paragraphs with
+  nothing between them — "one" and "two" became "onetwo". They are joined with
+  a line break now, as table cells already were; a list or heading inside a
+  quote keeps its text too, a line each, instead of being dropped. Found by
+  the #1537 backfill corpus.
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537))
+
+<a id="a-legacy-columns-block-reads-as-a-typed-columns-block-and-an-unmapped-legacy"></a>
+
+- **A legacy `columns` block reads as a typed `Columns` block, and an unmapped
+  legacy block keeps the type name it was stored under.** The legacy→typed
+  mapping had no `columns` clause, so a pre-flip columns block was an opaque
+  `Custom` to search, references and the fired artifacts, and rendered as
+  columns only because delivery converted it straight back. And a legacy type
+  whose name was never an atom in the running build came back as
+  `legacy_type: "custom"`, its real name gone from every typed read — and,
+  once rewritten, from the row. Both found by the #1537 backfill corpus.
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537))
 
 <a id="a-429s-retry-after-is-rounded-up-never-0"></a>
 
@@ -123,7 +293,46 @@ carries the reasoning.
   (~3 requests a guide) is larger than the `:api` bucket and keeps talking to
   sites that haven't picked this fix up.
 
+<a id="the-block-upcaster-refuses-a-gap-in-the-migrate-chain"></a>
+
+- **The block upcaster refuses a gap in the `migrate` chain instead of
+  stamping the block current.** ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642))
+  `KilnCMS.Blocks.Upcaster` walked every version from a stored block's
+  `_version` to head and, where no `migrate` step existed, bumped `_version`
+  anyway. The data was never transformed but was marked current, so no later
+  run — lazy or the #1537 backfill — would ever migrate it. The upcaster now
+  follows the declared steps and refuses when one is missing: the block comes
+  back exactly as stored, `_version` included, with nothing half-applied.
+  The new `try_upcast/2` and `try_upcast_block_map/1` return
+  `{:error, %{kind: :missing_migration, detail: ...}}` for callers that
+  report (the backfill's refusal report is the intended consumer);
+  `upcast/2` and `upcast_block_map/1` keep their map-returning contract for
+  read and delivery paths, which render the stored shape and log a warning
+  rather than crash.
+
 ## Security
+
+<a id="auth-budgets-now-hold-across-nodes-and-restarts"></a>
+
+- **Auth budgets now hold across nodes and restarts.** Every
+  `AccountThrottle` budget (password sign-in, the TOTP and recovery-code
+  budget, the reset and magic-link mail budgets, the owner alerts) and the
+  credential rate-limit buckets (`:auth`, `:register`, `:unlock`) used to count
+  in each node's ETS. On N nodes an attacker got N budgets, and a deploy forgave
+  every attempt. They now count in one Postgres table through
+  `KilnCMS.Accounts.ThrottleStore`: one `INSERT … ON CONFLICT DO UPDATE …
+  RETURNING` per charge, keyed on a SHA-256 of the key, windowed on the
+  database clock, and pruned by an Oban cron job. Measured locally, a charge
+  costs 0.34 ms at p50 (1.1 ms at p50 with sixteen writers on one key), against
+  the ~208 ms bcrypt verification the same sign-in already pays. Nothing is
+  written to the user row, so an unknown address still throttles exactly like a
+  known one. If the database cannot answer, a budget falls back to counting on
+  the node, which is the old bound and never a weaker one. The fallback is
+  logged. A charge made inside a transaction now raises instead of being
+  silently refunded by a rollback. The registration budget is therefore charged
+  in `before_transaction`, so a registration that fails on a taken address
+  still pays. Flood-ceiling buckets (`:api`, `:delivery`, `:gql`, …) stay per
+  node on purpose. This closes threat-model residual 10. (#1619)
 
 <a id="the-browser-csps-connect-src-is-self-alone-no-websocket-to-any"></a>
 
@@ -229,3 +438,21 @@ carries the reasoning.
   release enqueues carries `org_id`. Let the queue drain before upgrading to
   1.0; see the Upgrade notes
   ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538)).
+
+<a id="the-legacy-block-bridge-is-deprecated-for-removal-at-10"></a>
+
+- **The legacy block bridge is deprecated for removal at 1.0:
+  `KilnCMS.CMS.TypedBlocks.to_legacy/1`, `from_legacy/1`, `RichText.legacy_html`
+  and the legacy `KilnCMS.CMS.Block` write shape.** `to_legacy/1` and
+  `from_legacy/1` carry `@deprecated`, so a caller gets a compile warning:
+  render from typed blocks (`KilnCMSWeb.BlockComponents.view_blocks/1`), and
+  read stored blocks with `TypedBlocks.to_typed/1`, which accepts everything
+  `from_legacy/1` did. `KilnCMS.CMS.Block` carries `@moduledoc deprecated:`:
+  passing `blocks` as `%{type: :heading, content: …, data: …}` still casts
+  until 1.0 — write `%{"_type" => "heading", "text" => …}`. The rich-text
+  block's `legacy_html` is marked `deprecated` in the exported block JSON
+  Schema, so typed clients see it at codegen time; read `body`. It is still
+  rendered and round-tripped for blocks `mix kiln.blocks.backfill` could not
+  convert, and dropped at 1.0 — convert those blocks before then. Version
+  history keeps being read in whatever shape it was written.
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537))

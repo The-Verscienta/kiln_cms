@@ -76,14 +76,12 @@ defmodule KilnCMSWeb.InlineEditing do
   @spec put_block_field([map()], non_neg_integer(), String.t(), term()) :: [map()]
   def put_block_field(block_inputs, index, "body", value) do
     # Compatibility shim: a pre-round-trip client (stale tab across a deploy)
-    # pushes rich text as an HTML string. Route it to legacy_html rather than
-    # letting the body cast degrade it to [] and drop the edit.
+    # pushes rich text as an HTML string. It becomes Portable Text when that is
+    # faithful; only HTML that would not survive the conversion goes to the
+    # deprecated `legacy_html` (#1537) — never letting the body cast degrade
+    # it to [] and drop the edit.
     if is_binary(value) and String.starts_with?(String.trim_leading(value), "<") do
-      List.update_at(
-        block_inputs,
-        index,
-        &(&1 |> Map.put("legacy_html", value) |> Map.delete("body"))
-      )
+      put_html(block_inputs, index, value)
     else
       # Normalize to Portable Text here: an existing block (id set) goes
       # through the embedded-resource update cast, where body must already
@@ -101,6 +99,16 @@ defmodule KilnCMSWeb.InlineEditing do
 
   def put_block_field(block_inputs, index, field, value) do
     List.update_at(block_inputs, index, &Map.put(&1, field, value))
+  end
+
+  defp put_html(block_inputs, index, html) do
+    update =
+      case KilnCMS.Blocks.PortableText.from_html_faithful(html) do
+        {:ok, body} -> &(&1 |> Map.put("body", body) |> Map.put("legacy_html", nil))
+        {:error, _reason} -> &(&1 |> Map.put("legacy_html", html) |> Map.delete("body"))
+      end
+
+    List.update_at(block_inputs, index, update)
   end
 
   @doc "Stable-id region element id, keyed by `version` so a save remounts it."
