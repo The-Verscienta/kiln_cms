@@ -264,19 +264,68 @@ defmodule KilnCMSWeb.BlockComponents do
   adds a hidden marker so the submit response knows to serve the framing-friendly
   CSP, otherwise the thank-you page would be blocked by `frame-ancestors 'self'`.
   Also shared with `KilnCMSWeb.FormHTML`, so new field types work in both places.
+
+  `values` and `errors` are the re-render after a refused submission (#1683):
+  the visitor's own input filled back in, and `%{"field" => "message"}` from
+  `KilnCMS.Forms.submit/3` shown inline against each field, with a focused
+  summary at the top linking to every one. Both default to empty, which is the
+  first render. `values` must only ever carry the admin-defined fields' string
+  values — the caller builds it (`FormController`), and the honeypot is never
+  among them: this component renders it empty unconditionally.
   """
   attr :form, :map, required: true
   attr :embed, :boolean, default: false
   # The experiment variant this page was rendered with (#499), or nil.
   attr :variant, :string, default: nil
+  attr :values, :map, default: %{}, doc: "submitted string values by field name (#1683)"
+  attr :errors, :map, default: %{}, doc: "field name => error message (#1683)"
+
+  # The fill-time token (#477) to carry. nil mints a fresh one; a re-render
+  # passes the visitor's original, still-valid token so the signal keeps
+  # measuring from when they first saw the form rather than from the refusal.
+  attr :rendered_at, :string, default: nil
 
   def public_form(assigns) do
+    assigns =
+      assigns
+      |> assign(:id_prefix, "kiln-form-" <> assigns.form.slug)
+      |> assign(:error_items, error_items(assigns.form, assigns.errors))
+
     ~H"""
     <form
       method="post"
       action={"/forms/" <> @form.slug}
       class="kiln-form space-y-4 rounded-lg border border-base-300 p-4"
     >
+      <%!-- The error summary (#1683). `autofocus` moves focus here on load with
+            no script (the page is a plain POST response), and `role="alert"`
+            announces it; each item links to its field. --%>
+      <div
+        :if={@error_items != []}
+        id={@id_prefix <> "-error-summary"}
+        role="alert"
+        tabindex="-1"
+        autofocus
+        aria-labelledby={@id_prefix <> "-error-summary-title"}
+        class="rounded-lg border border-error/40 bg-error/5 p-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-error"
+      >
+        <h2 id={@id_prefix <> "-error-summary-title"} class="text-sm font-semibold text-error">
+          {gettext("There is a problem with your submission")}
+        </h2>
+        <ul class="mt-2 list-disc space-y-1 ps-5 text-sm">
+          <li :for={item <- @error_items}>
+            <a
+              :if={item.anchor}
+              href={"#" <> @id_prefix <> "-" <> item.anchor}
+              class="text-error underline underline-offset-2"
+            >
+              {item.text}
+            </a>
+            <span :if={!item.anchor} class="text-error">{item.text}</span>
+          </li>
+        </ul>
+      </div>
+
       <p :if={@form.description} class="text-sm text-base-content/70">{@form.description}</p>
 
       <%!-- Underscore-prefixed so it can't collide with an admin-defined field name. --%>
@@ -288,7 +337,7 @@ defmodule KilnCMSWeb.BlockComponents do
       <input
         type="hidden"
         name={KilnCMS.Forms.rendered_at_field()}
-        value={KilnCMS.Forms.rendered_at_token()}
+        value={@rendered_at || KilnCMS.Forms.rendered_at_token()}
       />
 
       <%!-- The A/B variant this page was rendered with (#499), so a conversion
@@ -312,7 +361,12 @@ defmodule KilnCMSWeb.BlockComponents do
 
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-6">
         <div :for={field <- @form.fields} class={field_width_class(field)}>
-          <.public_form_field field={field} id_prefix={"kiln-form-" <> @form.slug} />
+          <.public_form_field
+            field={field}
+            id_prefix={@id_prefix}
+            value={Map.get(@values, field.name, field.default_value)}
+            error={Map.get(@errors, field.name)}
+          />
         </div>
       </div>
 
@@ -336,8 +390,38 @@ defmodule KilnCMSWeb.BlockComponents do
   # asking for `email`) still get distinct ids.
   attr :id_prefix, :string, default: "kiln-form"
 
+  # What the input shows. `:default` is the first render (the field's own
+  # `default_value`); a re-render after a refusal passes the submitted string.
+  attr :value, :any, default: :default
+
+  # The refusal message for this field from `KilnCMS.Forms.submit/3`, or nil.
+  attr :error, :string, default: nil
+
   def public_form_field(assigns) do
-    assigns = assign(assigns, :field_id, "#{assigns.id_prefix}-#{assigns.field.name}")
+    field_id = "#{assigns.id_prefix}-#{assigns.field.name}"
+    error_id = assigns.error && field_id <> "-error"
+    help_id = assigns.field.help_text && field_id <> "-help"
+
+    current =
+      case assigns.value do
+        :default -> assigns.field.default_value
+        value -> value
+      end
+
+    described_by =
+      case Enum.reject([error_id, help_id], &is_nil/1) do
+        [] -> nil
+        ids -> Enum.join(ids, " ")
+      end
+
+    assigns =
+      assign(assigns,
+        field_id: field_id,
+        error_id: error_id,
+        help_id: help_id,
+        current: current,
+        described_by: described_by
+      )
 
     ~H"""
     <label
@@ -359,17 +443,21 @@ defmodule KilnCMSWeb.BlockComponents do
           name={@field.name}
           required={@field.required}
           placeholder={@field.placeholder}
+          aria-invalid={@error && "true"}
+          aria-describedby={@described_by}
           class="field-input w-full"
-        >{@field.default_value}</textarea>
+        >{@current}</textarea>
       <% :select -> %>
         <select
           id={@field_id}
           name={@field.name}
           required={@field.required}
+          aria-invalid={@error && "true"}
+          aria-describedby={@described_by}
           class="field-select w-full"
         >
           <option value="">{gettext("Select…")}</option>
-          <option :for={opt <- @field.options} value={opt} selected={opt == @field.default_value}>
+          <option :for={opt <- @field.options} value={opt} selected={opt == @current}>
             {opt}
           </option>
         </select>
@@ -381,7 +469,9 @@ defmodule KilnCMSWeb.BlockComponents do
             type="checkbox"
             name={@field.name}
             value="true"
-            checked={@field.default_value == "true"}
+            checked={@current == "true"}
+            aria-invalid={@error && "true"}
+            aria-describedby={@described_by}
           />
           <span class="font-medium">
             {@field.label}
@@ -398,14 +488,80 @@ defmodule KilnCMSWeb.BlockComponents do
           name={@field.name}
           required={@field.required}
           placeholder={@field.placeholder}
-          value={@field.default_value}
+          value={@current}
+          aria-invalid={@error && "true"}
+          aria-describedby={@described_by}
           class="field-input w-full"
         />
     <% end %>
 
-    <p :if={@field.help_text} class="mt-1 text-xs text-base-content/60">{@field.help_text}</p>
+    <p :if={@error} id={@error_id} class="mt-1 text-sm text-error">
+      <span class="sr-only">{gettext("Error:")}</span>
+      {form_error_message(@error)}
+    </p>
+    <p :if={@field.help_text} id={@help_id} class="mt-1 text-xs text-base-content/60">
+      {@field.help_text}
+    </p>
     """
   end
+
+  # The summary's lines (#1683), in the form's own field order so it reads top
+  # to bottom like the form, keyed to each field's LABEL (the raw `name` is an
+  # admin's machine key, not something a visitor has ever seen). An error on no
+  # field (`"form"`, when the form was switched off) has no anchor to link to
+  # and goes last.
+  defp error_items(_form, errors) when errors == %{}, do: []
+
+  defp error_items(form, errors) do
+    fields = Enum.filter(form.fields, &Map.has_key?(errors, &1.name))
+    names = MapSet.new(fields, & &1.name)
+
+    field_items =
+      Enum.map(fields, fn field ->
+        %{
+          anchor: field.name,
+          text:
+            gettext("%{label}: %{message}",
+              label: field.label,
+              message: form_error_message(errors[field.name])
+            )
+        }
+      end)
+
+    other_items =
+      errors
+      |> Enum.reject(fn {name, _} -> MapSet.member?(names, name) end)
+      |> Enum.sort()
+      |> Enum.map(fn {_name, message} -> %{anchor: nil, text: form_error_message(message)} end)
+
+    field_items ++ other_items
+  end
+
+  # `KilnCMS.Forms.submit/3` reports refusals as short English fragments. The
+  # headless JSON API returns them verbatim as part of its response shape, so
+  # they stay untranslated there; the HTML form is read by a person in the
+  # page's locale, so the known ones become whole translated sentences here.
+  # Anything unrecognised (a message added later) still shows, as-is.
+  defp form_error_message("is required"), do: gettext("This field is required.")
+
+  defp form_error_message("must be an email address"),
+    do: gettext("Enter an email address, like name@example.com.")
+
+  defp form_error_message("must be a whole number"), do: gettext("Enter a whole number.")
+
+  defp form_error_message("must be a date (YYYY-MM-DD)"),
+    do: gettext("Enter a date in the format YYYY-MM-DD.")
+
+  defp form_error_message("is not one of the allowed options"),
+    do: gettext("Choose one of the listed options.")
+
+  defp form_error_message("is no longer accepting submissions"),
+    do: gettext("This form is no longer accepting submissions.")
+
+  defp form_error_message(message) when message in ["is not valid", "must be a boolean"],
+    do: gettext("This value isn't valid.")
+
+  defp form_error_message(message), do: to_string(message)
 
   @doc """
   The field's column span on the public form's 6-column grid (`width` on

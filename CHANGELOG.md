@@ -173,6 +173,10 @@ Every summary line below that was shortened links to its own entry there.
   submission offers Try again.**
   ([#1673](https://github.com/The-Verscienta/kiln_cms/issues/1673) · [long form](docs/changelog/unreleased.md#public-form-labels-are-tied-to-their-inputs-and-a-refused-embedded-submission))
 
+- **A refused public form submission shows the form again, with your input
+  kept and each error next to its field.**
+  ([#1683](https://github.com/The-Verscienta/kiln_cms/issues/1683) · [long form](docs/changelog/unreleased.md#a-refused-public-form-submission-shows-the-form-again))
+
 - **Console pages show their title, and an empty calendar or task list says
   so.**
   ([#1670](https://github.com/The-Verscienta/kiln_cms/issues/1670) · [#1672](https://github.com/The-Verscienta/kiln_cms/issues/1672) · [long form](docs/changelog/unreleased.md#console-pages-show-their-title-and-an-empty-calendar-or-task-list-says-so))
