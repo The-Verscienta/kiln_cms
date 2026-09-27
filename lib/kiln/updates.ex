@@ -24,6 +24,14 @@ defmodule Kiln.Updates do
   reports "Up to date" indefinitely, so the fork's own security releases never
   surface.
 
+  ## Pre-releases
+
+  `releases/latest` is GitHub's newest release that is neither a draft nor
+  marked as a pre-release, so a release candidate published with
+  `gh release create --prerelease` (see `docs/releasing.md`) is never offered
+  here. One published *without* the flag would be; its tag is refused as
+  `{:error, :prerelease}` instead of being reported as an update.
+
   ## Network behaviour
 
   One unauthenticated GET to the releases API, made only when an admin opens
@@ -92,13 +100,21 @@ defmodule Kiln.Updates do
     * `{:error, :invalid_repo}` / `{:error, :invalid_releases_url}` — the
       upstream this instance was pointed at is unusable, so no request was
       made;
+    * `{:error, :prerelease}` — upstream's "latest" release is a pre-release
+      tag (`v1.0.0-rc.1`) that was published without being marked as one, so
+      there is no final release to compare against;
     * `{:error, reason}` — the check itself failed (offline, rate-limited).
   """
   @type result ::
           {:ok, :current}
           | {:ok, {:behind, release()}}
           | {:error,
-             :disabled | :unknown_version | :invalid_repo | :invalid_releases_url | term()}
+             :disabled
+             | :unknown_version
+             | :invalid_repo
+             | :invalid_releases_url
+             | :prerelease
+             | term()}
 
   @type release :: %{
           version: Version.t(),
@@ -318,6 +334,14 @@ defmodule Kiln.Updates do
 
   defp parse_release(%{"tag_name" => tag} = body, repo) do
     case Version.parse(String.trim_leading(tag, "v")) do
+      # `releases/latest` never returns a release marked as a pre-release, so
+      # a `-rc.1` here is a candidate published without `--prerelease`. It is
+      # not a release anyone should be told to move to, and the final release
+      # it displaced as "latest" is not in this response to compare against —
+      # so say nothing rather than "behind" or "up to date" (#1541).
+      {:ok, %Version{pre: [_ | _]}} ->
+        {:error, :prerelease}
+
       {:ok, version} ->
         {:ok,
          %{
