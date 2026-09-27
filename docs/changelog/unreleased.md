@@ -421,6 +421,26 @@ carries the reasoning.
   See [Paid memberships](../memberships.md#the-first-paid-membership).
   (#1649)
 
+<a id="the-activitypub-inbox-checks-a-signature-offline-before-it-fetches"></a>
+
+- **The ActivityPub inbox checks a signature offline before it fetches the
+  sender's key.** The key that verifies an inbound activity lives in the
+  sender's actor document, and the inbox fetched that document before looking
+  at the signature at all — so any caller could send an unsigned `Follow`
+  naming this site and make the server issue one outbound GET to an actor URL
+  of their choosing. The inbox now refuses, with no request made, anything that
+  fails a check needing no key: a missing or malformed `Signature` header, a
+  signed set not covering `(request-target) host date digest`, a `Date` outside
+  the five-minute window, a `Digest` that is not the body's, or a `keyId` that
+  does not belong to the activity's own `actor`. The last one is the same
+  binding the inbox already applied to the fetched document, asked earlier, so
+  no genuine request is refused that was accepted before. Only a request past
+  all of them fetches the key (through `SafeFetch`, cached per actor for ten
+  minutes, as before) and is verified. A well-formed request still costs one
+  fetch per new actor URL, since only the key can tell a forged signature from a
+  real one. See [Federation](../federation.md#the-fetch-comes-after-every-check-that-needs-no-network).
+  (#1665)
+
 ## Deprecated
 
 <a id="published-on-use-kilncmscmscontent-is-deprecated-and-removed-at-10"></a>

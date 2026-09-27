@@ -152,6 +152,10 @@ Every summary line below that was shortened links to its own entry there.
 - **The newsletter confirmation link no longer confirms on a GET.**
   ([#1664](https://github.com/The-Verscienta/kiln_cms/issues/1664) · [long form](docs/changelog/unreleased.md#the-newsletter-confirmation-link-no-longer-confirms-on-a-get))
 
+- **The ActivityPub inbox checks a signature offline before it fetches the
+  sender's key.**
+  ([#1665](https://github.com/The-Verscienta/kiln_cms/issues/1665) · [long form](docs/changelog/unreleased.md#the-activitypub-inbox-checks-a-signature-offline-before-it-fetches))
+
 ### Deprecated
 
 - **`published?:` on `use KilnCMS.CMS.Content` is deprecated, and removed at

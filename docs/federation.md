@@ -158,6 +158,31 @@ The `Accept` sent back is rebuilt from four known fields rather than echoing the
 inbound activity, so a caller cannot choose the size of what this server stores
 for 30 days and POSTs back.
 
+### The fetch comes after every check that needs no network
+
+The checks above are not run in the order listed. Everything that can be
+decided without the sender's key is decided **before** the key is fetched
+(#1665), because that fetch is the one step an unauthenticated caller can make
+cost this server a request:
+
+1. the activity must be one whose outcome the actor document could change (see
+   below) — otherwise it is accepted and dropped;
+2. the `Signature` header must parse, name an accepted algorithm, and cover
+   `(request-target) host date digest`; the `Date` must be inside the window;
+   the `Digest` must match the raw body (`HttpSignature.precheck/2`);
+3. the `keyId` must belong to the activity's own `actor` — compared as strings,
+   the same test later applied to the fetched document, so it refuses nothing a
+   genuine request would pass;
+4. only then is the actor document fetched (or read from the cache below), the
+   signature verified against its key, and the verified signature recorded in
+   the replay store.
+
+A request that fails steps 2 or 3 is answered 401 without a byte leaving the
+server. What is left cannot be removed: a well-formed request naming an actor
+URL of the caller's choosing still costs one fetch, since telling a forged
+signature from a real one needs the key. That fetch is bounded by the cache,
+`SafeFetch`, and the inbox route's per-IP `:api` rate bucket.
+
 ### Nothing is fetched for an activity that changes nothing
 
 Verifying a signature needs the sender's key, and that key lives in the sender's
