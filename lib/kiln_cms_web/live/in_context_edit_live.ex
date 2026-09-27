@@ -430,9 +430,14 @@ defmodule KilnCMSWeb.InContextEditLive do
         id="in-context-article"
         phx-hook="FocusBlock"
         data-kiln-focus={@focus_block_id}
-        class="prose max-w-none"
+        class="public-article prose max-w-none"
       >
-        <h1 class="text-3xl font-bold tracking-tight">{@record.title}</h1>
+        <%!-- The delivery templates' `public-*` hooks, so the page being edited
+              wears the site's theme preset like the live one (#1682).
+              `public-body` is left off the block list on purpose: a preset may
+              make it `display: contents`, and the Sortable container needs a
+              box of its own to drag within. --%>
+        <h1 class="public-title text-3xl font-bold tracking-tight">{@record.title}</h1>
 
         <p :if={@blocks == []} class="mt-6 text-base-content/70">
           {gettext("This page has no text blocks to edit inline yet.")}
@@ -508,7 +513,7 @@ defmodule KilnCMSWeb.InContextEditLive do
       class="sticky top-0 z-40 -mx-4 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-base-content/10 bg-base-100/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8"
     >
       <div class="flex items-center gap-2 text-sm">
-        <span class="inline-flex items-center gap-1.5 rounded bg-primary/10 px-2 py-1 font-medium text-primary">
+        <span class="inline-flex items-center gap-1.5 rounded bg-primary/10 px-2 py-1 font-medium text-primary-ink">
           <.icon name="hero-pencil-square" class="size-4" />
           {gettext("Editing in place")}
         </span>

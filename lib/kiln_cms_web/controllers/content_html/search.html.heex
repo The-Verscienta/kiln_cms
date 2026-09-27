@@ -18,11 +18,11 @@
       value={@query}
       placeholder={gettext("Search published content…")}
       autocomplete="off"
-      class="min-w-0 flex-1 rounded-lg border border-base-content/20 bg-transparent px-4 py-2.5 text-base focus:border-primary focus:outline-none"
+      class="field-input min-w-0 flex-1 px-4 py-2.5 text-base"
     />
     <button
       type="submit"
-      class="public-search-submit shrink-0 rounded-lg border border-base-content/20 px-4 py-2.5 text-base font-medium hover:bg-base-200 focus:border-primary focus:outline-none"
+      class="public-search-submit btn btn-default shrink-0 px-4 py-2.5 text-base"
     >
       {gettext("Search")}
     </button>
@@ -43,7 +43,7 @@
   <p :if={@suggestion} class="mt-4 text-base-content/60">
     <a
       href={KilnCMS.I18n.localized_path(@locale, "/search") <> "?q=" <> URI.encode_www_form(@suggestion)}
-      class="text-primary hover:underline"
+      class="text-primary-ink hover:underline"
     >
       {gettext("Did you mean “%{suggestion}”?", suggestion: @suggestion)}
     </a>

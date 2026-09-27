@@ -391,7 +391,7 @@ defmodule KilnCMSWeb.OverviewLive do
             <.link
               id="overview-publishing-team-link"
               navigate={~p"/editor/team"}
-              class="font-medium text-primary hover:underline"
+              class="font-medium text-primary-ink hover:underline"
             >
               {gettext("Open Team")} <span aria-hidden="true">→</span>
             </.link>
@@ -518,7 +518,7 @@ defmodule KilnCMSWeb.OverviewLive do
               <:title>
                 <.link
                   navigate={~p"/editor/branding"}
-                  class="font-medium text-primary hover:underline"
+                  class="font-medium text-primary-ink hover:underline"
                 >
                   {gettext("Name your site")}
                 </.link>
@@ -531,7 +531,7 @@ defmodule KilnCMSWeb.OverviewLive do
                   :if={@getting_started.home}
                   id="overview-open-home"
                   navigate={~p"/editor/content/page/#{@getting_started.home.id}"}
-                  class="font-medium text-primary hover:underline"
+                  class="font-medium text-primary-ink hover:underline"
                 >
                   {gettext("Write your home page")}
                 </.link>
@@ -548,7 +548,7 @@ defmodule KilnCMSWeb.OverviewLive do
                   type="button"
                   id="overview-create-home"
                   phx-click="create_home"
-                  class="font-medium text-primary hover:underline"
+                  class="font-medium text-primary-ink hover:underline"
                 >
                   {gettext("Create one")}
                 </button>
@@ -568,7 +568,7 @@ defmodule KilnCMSWeb.OverviewLive do
                   href={~p"/"}
                   target="_blank"
                   rel="noopener"
-                  class="font-medium text-primary hover:underline"
+                  class="font-medium text-primary-ink hover:underline"
                 >
                   {gettext("View your site")}
                 </a>
@@ -601,7 +601,7 @@ defmodule KilnCMSWeb.OverviewLive do
             </p>
             <ul class="mt-1 space-y-1 text-xs">
               <li :if={@my_open_tasks > 0}>
-                <.link navigate={~p"/editor/tasks"} class="text-primary hover:underline">
+                <.link navigate={~p"/editor/tasks"} class="text-primary-ink hover:underline">
                   {ngettext(
                     "%{count} task assigned to you",
                     "%{count} tasks assigned to you",
@@ -613,7 +613,7 @@ defmodule KilnCMSWeb.OverviewLive do
               <li :if={@open_block_tasks > 0}>
                 <.link
                   navigate={~p"/editor/tasks?view=team&scope=block"}
-                  class="text-primary hover:underline"
+                  class="text-primary-ink hover:underline"
                 >
                   {ngettext(
                     "%{count} open task anchored to a block",
@@ -637,7 +637,10 @@ defmodule KilnCMSWeb.OverviewLive do
               <%!-- Admins are the ones who approve, so to them the same count
                     is work waiting on them; to an editor it is status. --%>
               <li :if={Map.get(@by_state, :in_review, 0) > 0}>
-                <.link navigate={~p"/editor?status=in_review"} class="text-primary hover:underline">
+                <.link
+                  navigate={~p"/editor?status=in_review"}
+                  class="text-primary-ink hover:underline"
+                >
                   {if @admin?,
                     do:
                       ngettext(
@@ -652,7 +655,10 @@ defmodule KilnCMSWeb.OverviewLive do
                 </.link>
               </li>
               <li :if={@stale > 0}>
-                <.link navigate={~p"/editor?status=published"} class="text-primary hover:underline">
+                <.link
+                  navigate={~p"/editor?status=published"}
+                  class="text-primary-ink hover:underline"
+                >
                   {gettext("%{count} published untouched for %{days}+ days",
                     count: @stale,
                     days: 90
@@ -660,12 +666,12 @@ defmodule KilnCMSWeb.OverviewLive do
                 </.link>
               </li>
               <li :if={@upcoming > 0}>
-                <.link navigate={~p"/editor/calendar"} class="text-primary hover:underline">
+                <.link navigate={~p"/editor/calendar"} class="text-primary-ink hover:underline">
                   {gettext("%{count} scheduled this week", count: @upcoming)}
                 </.link>
               </li>
               <li :if={@webhooks && @webhooks.failed_24h > 0}>
-                <.link navigate={~p"/editor/webhooks"} class="text-primary hover:underline">
+                <.link navigate={~p"/editor/webhooks"} class="text-primary-ink hover:underline">
                   {gettext("%{count} webhook failures in 24h", count: @webhooks.failed_24h)}
                 </.link>
               </li>
@@ -686,7 +692,7 @@ defmodule KilnCMSWeb.OverviewLive do
               </.link>
               <.link
                 navigate={~p"/editor?status=draft"}
-                class="text-xs font-medium text-primary hover:underline"
+                class="text-xs font-medium text-primary-ink hover:underline"
               >
                 {gettext("View drafts")} <span aria-hidden="true">→</span>
               </.link>
@@ -715,7 +721,7 @@ defmodule KilnCMSWeb.OverviewLive do
         :if={@tile.path}
         navigate={@tile.path}
         aria-label={gettext("Open %{title}", title: @tile.title)}
-        class="mt-auto pt-1 text-xs font-medium text-primary hover:underline"
+        class="mt-auto pt-1 text-xs font-medium text-primary-ink hover:underline"
       >
         {gettext("Open")} <span aria-hidden="true">→</span>
       </.link>

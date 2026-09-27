@@ -5414,7 +5414,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   (#354) — a primary mode, not a detour (Theme C). --%>
             <.link
               navigate={~p"/editor/site/#{@kind}/#{@record.slug}"}
-              class="btn btn-sm btn-primary"
+              class="btn btn-sm btn-default"
               title={gettext("Edit on the rendered page")}
             >
               <.icon name="hero-pencil-square" class="mr-1 size-4" />{gettext("Visual")}

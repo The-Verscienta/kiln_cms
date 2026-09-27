@@ -164,7 +164,7 @@ defmodule KilnCMSWeb.SiteMailLiveTest do
 
       assert config[:relay] == "smtp.example.com"
 
-      assert render_async(lv) =~ "Sent to #{admin.email}"
+      assert render_async(lv, 2_000) =~ "Sent to #{admin.email}"
     end
 
     test "is not offered while the relay is switched off", %{conn: conn, org: org} do

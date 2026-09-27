@@ -927,6 +927,10 @@
     cursor: pointer;
     transition: background-color 0.12s, color 0.12s, box-shadow 0.12s;
   }
+  .tab:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
   .tab:hover {
     color: var(--color-base-content);
   }
@@ -1146,6 +1150,26 @@
 @media (prefers-reduced-motion: reduce) {
   .side-shell {
     transition: none;
+  }
+}
+
+/* Kit transitions + status pulses respect reduced motion (the drawer above
+   already did; buttons/tabs/flash cues were still animating). Unlayered for the
+   same reason as the drawer rule: `.animate-pulse` and friends are UTILITIES,
+   and a `@layer components` rule would lose to them. */
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .tab,
+  .side-link,
+  .side-icon-btn,
+  .bell-trigger {
+    transition: none;
+  }
+
+  .animate-pulse,
+  .kiln-focus-pulse,
+  .save-status-flash {
+    animation: none !important;
   }
 }
 

@@ -262,13 +262,15 @@ defmodule KilnCMSWeb.TokenPreviewLive do
             alternative this replaces: showing a DIFFERENT tenant's name and
             logo around the draft. --%>
       <Layouts.public current_org={@current_org}>
-        <article class="prose max-w-none">
-          <header :if={@excerpt?} class="mb-6">
-            <h1 class="text-3xl font-bold tracking-tight">{@title}</h1>
-            <p :if={@excerpt} class="mt-3 text-lg text-base-content/70">{@excerpt}</p>
+        <%!-- The delivery templates' `public-*` hooks, so a theme preset styles
+              the shared preview the way it styles the live page (#1682). --%>
+        <article class="public-article prose max-w-none">
+          <header :if={@excerpt?} class="public-masthead mb-6">
+            <h1 class="public-title text-3xl font-bold tracking-tight">{@title}</h1>
+            <p :if={@excerpt} class="public-lede mt-3 text-lg text-base-content/70">{@excerpt}</p>
           </header>
-          <h1 :if={!@excerpt?} class="text-3xl font-bold tracking-tight">{@title}</h1>
-          <div class="space-y-4" id="preview-blocks">
+          <h1 :if={!@excerpt?} class="public-title text-3xl font-bold tracking-tight">{@title}</h1>
+          <div class="public-body space-y-4" id="preview-blocks">
             <BlockComponents.render_block :for={block <- @blocks} block={block} />
           </div>
         </article>

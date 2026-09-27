@@ -124,6 +124,7 @@
 
     <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <article :for={feature <- features()} class="card card-pad">
+        <%!-- contrast-ok: tints a decorative icon beside its heading, not text --%>
         <span class="inline-flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <.icon name={feature.icon} class="size-5" />
         </span>
@@ -160,6 +161,7 @@
       </p>
       <ul class="mt-6 space-y-3 text-sm leading-6">
         <li :for={point <- developer_points()} class="flex gap-3">
+          <%!-- contrast-ok: decorative icon glyph, not text --%>
           <.icon name="hero-check-circle" class="mt-0.5 size-5 shrink-0 text-primary" />
           <span class="text-base-content/80">{point}</span>
         </li>

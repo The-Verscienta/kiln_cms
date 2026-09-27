@@ -39,6 +39,7 @@ defmodule KilnCMSWeb.SystemLive do
   alias Kiln.Updates
   alias Kiln.Version, as: Build
   alias KilnCMS.HTMLSanitizer
+  alias KilnCMSWeb.Tenant
 
   @impl true
   def mount(_params, _session, socket) do
@@ -47,8 +48,7 @@ defmodule KilnCMSWeb.SystemLive do
        socket
        |> assign(:page_title, gettext("System"))
        |> assign(:build, Build.current())
-       |> assign(:strict_host_gap, KilnCMSWeb.Tenant.strict_host_gap?())
-       |> assign(:strict_host_setting, KilnCMSWeb.Tenant.strict_host_setting())
+       |> assign_tenancy_notices()
        |> assign_embed_overreach()
        |> assign(:plugins, Plugins.manifests())
        |> assign(:update, :loading)
@@ -60,6 +60,19 @@ defmodule KilnCMSWeb.SystemLive do
        |> put_flash(:error, gettext("You need admin access to view that page."))
        |> push_navigate(to: ~p"/")}
     end
+  end
+
+  # Three standing tenancy notices, each the same predicate boot and the second
+  # org's create ask — one count for all three. The gap is a node that has not
+  # yet noticed a second org (#660, #1654); the other two are settings a
+  # multi-org deployment should not keep (#1662, #1661).
+  defp assign_tenancy_notices(socket) do
+    count = Tenant.org_count()
+
+    socket
+    |> assign(:strict_host_gap, Tenant.gap?(count))
+    |> assign(:strict_host_false_ignored, Tenant.false_ignored?(count))
+    |> assign(:console_shares_origin, Tenant.console_shares_origin?(count))
   end
 
   # Stored form / site-wide embed allowlists the operator's ceiling is cutting
@@ -170,7 +183,30 @@ defmodule KilnCMSWeb.SystemLive do
         </div>
 
         <section
+          :if={@strict_host_false_ignored}
+          id="strict-host-false-ignored"
+          class="card card-pad max-w-2xl border border-error/40 bg-error/10"
+        >
+          <h2 class="text-lg font-semibold text-error-ink">
+            {gettext("TENANT_STRICT_HOST=false is being ignored")}
+          </h2>
+
+          <p class="mt-2 text-sm text-error-ink">
+            {gettext(
+              "This deployment has more than one organization, and Kiln no longer honours TENANT_STRICT_HOST=false there. A request whose Host header matches no organization is refused, not served the default organization's site — a bare hostname or IP address included."
+            )}
+          </p>
+
+          <p class="mt-2 text-sm text-error-ink">
+            {gettext(
+              "Give every host that should reach a site to an organization, as a subdomain or a custom domain (the default organization can have one too), or redirect it to one at your proxy. The main host, the console host, the health checks and the payment webhook are never refused. Then remove TENANT_STRICT_HOST=false and restart."
+            )}
+          </p>
+        </section>
+
+        <section
           :if={@strict_host_gap}
+          id="strict-host-gap"
           class="card card-pad max-w-2xl border border-warning/40 bg-warning/10"
         >
           <h2 class="text-lg font-semibold text-warning-ink">
@@ -183,15 +219,31 @@ defmodule KilnCMSWeb.SystemLive do
             )}
           </p>
 
-          <p :if={@strict_host_setting == false} class="mt-2 text-sm text-warning-ink">
+          <p class="mt-2 text-sm text-warning-ink">
             {gettext(
-              "TENANT_STRICT_HOST=false is overriding the default, which rejects unrecognized hosts once a second organization exists. Remove the setting or set TENANT_STRICT_HOST=true, then restart. Keep it only if an unmatched host reaching the default organization is what you want."
+              "Host matching turns on by itself once a second organization exists, but this server has not noticed the new organization yet. It will within 30 seconds, or on restart."
+            )}
+          </p>
+        </section>
+
+        <section
+          :if={@console_shares_origin}
+          id="console-shares-origin"
+          class="card card-pad max-w-2xl border border-warning/40 bg-warning/10"
+        >
+          <h2 class="text-lg font-semibold text-warning-ink">
+            {gettext("The console shares an origin with every organization's site")}
+          </h2>
+
+          <p class="mt-2 text-sm text-warning-ink">
+            {gettext(
+              "KILN_CONSOLE_HOST is unset, so the editor console answers on each organization's own host. Code an organization's admin adds to their site's head or footer runs on the same origin as the console, and can act as any editor who opens that site while signed in — a platform admin included."
             )}
           </p>
 
-          <p :if={@strict_host_setting != false} class="mt-2 text-sm text-warning-ink">
+          <p class="mt-2 text-sm text-warning-ink">
             {gettext(
-              "TENANT_STRICT_HOST is unset, so host matching turns on by itself once a second organization exists, but this server has not noticed the new organization yet. It will within five minutes, or on restart."
+              "Set KILN_CONSOLE_HOST to a host no organization controls, add it to CHECK_ORIGINS, and restart. For now that host serves the default organization's console only. Otherwise, grant organization admin only to people you would trust with the console."
             )}
           </p>
         </section>

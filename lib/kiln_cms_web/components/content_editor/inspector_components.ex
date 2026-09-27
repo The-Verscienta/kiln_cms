@@ -586,7 +586,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
               type="button"
               phx-click="task_complete"
               phx-value-id={task.id}
-              class="btn-link text-primary hover:underline"
+              class="btn-link text-primary-ink hover:underline"
             >
               {gettext("Mark done")}
             </button>
@@ -712,7 +712,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
           <button
             type="button"
             phx-click="release_remove"
-            class="btn-link mt-2 text-primary hover:underline"
+            class="btn-link mt-2 text-primary-ink hover:underline"
           >
             {gettext("Remove from release")}
           </button>

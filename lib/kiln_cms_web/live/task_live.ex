@@ -213,6 +213,15 @@ defmodule KilnCMSWeb.TaskLive do
 
   defp overdue?(%{due_on: due_on}), do: due_on != nil and Date.before?(due_on, Date.utc_today())
 
+  # Scope chips filter by anchor; empty copy must say so (Content/Media
+  # `filtering?` pattern) rather than claiming there are no tasks at all.
+  defp task_empty_copy(:mine, :all), do: gettext("No open tasks assigned to you.")
+  defp task_empty_copy(:mine, :block), do: gettext("No open block tasks assigned to you.")
+  defp task_empty_copy(:mine, :document), do: gettext("No open document tasks assigned to you.")
+  defp task_empty_copy(:team, :all), do: gettext("No open tasks.")
+  defp task_empty_copy(:team, :block), do: gettext("No open tasks anchored to a block.")
+  defp task_empty_copy(:team, :document), do: gettext("No open tasks anchored to a document.")
+
   # Asked through `TaskSettings.describe/2` rather than by reading the field, so
   # the precedence rule lives in exactly one module (#818).
   defp overrides_site?(task, site_default) do
@@ -268,7 +277,7 @@ defmodule KilnCMSWeb.TaskLive do
             patch={scope_path(@view, value)}
             class={[
               "rounded-full border px-2.5 py-0.5 text-xs",
-              @scope == value && "border-primary bg-primary/10 text-primary",
+              @scope == value && "border-primary bg-primary/10 text-primary-ink",
               @scope != value && "border-base-content/20 hover:bg-base-200"
             ]}
           >
@@ -308,8 +317,8 @@ defmodule KilnCMSWeb.TaskLive do
         </div>
 
         <div :if={@view == :mine} class="card divide-y divide-base-content/10">
-          <p :if={@my_tasks == []} class="p-4 text-sm text-base-content/60">
-            {gettext("No open tasks assigned to you.")}
+          <p :if={@my_tasks == []} class="p-4 text-sm text-base-content/60" role="status">
+            {task_empty_copy(:mine, @scope)}
           </p>
           <.task_row
             :for={task <- @my_tasks}
@@ -319,8 +328,8 @@ defmodule KilnCMSWeb.TaskLive do
         </div>
 
         <div :if={@view == :team} class="space-y-4">
-          <p :if={@team_tasks == []} class="text-sm text-base-content/60">
-            {gettext("No open tasks.")}
+          <p :if={@team_tasks == []} class="text-sm text-base-content/60" role="status">
+            {task_empty_copy(:team, @scope)}
           </p>
           <div :for={{assignee, tasks} <- @team_tasks} class="card">
             <div class="border-b border-base-content/10 px-4 py-2 text-sm font-semibold">

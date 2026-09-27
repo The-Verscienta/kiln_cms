@@ -81,10 +81,26 @@ Every summary line below that was shortened links to its own entry there.
   `x-kilncms-webhook-signature`.**
   ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616) · [long form](docs/changelog/unreleased.md#before-upgrading-make-every-webhook-receiver-verify-x-kilncms-webhook-signature))
 
+- **If your `config/project.exs` restates `:ash_domains`, add
+  `KilnCMS.Notifications`.**
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/unreleased.md#if-your-configprojectexs-restates-ash_domains-add-kilncmsnotifications))
+
+- **On 0.8.0 or older, `mix kiln.update` shows you none of these notes.
+  Read them here before moving the pin.**
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/unreleased.md#on-080-or-older-mix-kilnupdate-shows-you-none-of-these-notes))
+
+- **If you set `TENANT_STRICT_HOST=false` on a multi-org deployment, give every
+  host that must keep working an organization first.**
+  ([#1662](https://github.com/The-Verscienta/kiln_cms/issues/1662) · [long form](docs/changelog/unreleased.md#tenant-strict-host-false-multi-org-upgrade))
+
 ### Breaking
 
 - **Webhook deliveries no longer send `x-kilncms-signature`.**
   ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616) · [long form](docs/changelog/unreleased.md#webhook-deliveries-no-longer-send-x-kilncms-signature))
+
+- **`TENANT_STRICT_HOST=false` is no longer honoured once a second
+  organization exists.**
+  ([#1662](https://github.com/The-Verscienta/kiln_cms/issues/1662) · [long form](docs/changelog/unreleased.md#tenant-strict-host-false-no-longer-honoured))
 
 ### Added
 
@@ -94,6 +110,14 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Release candidates are opt-in everywhere: `mix kiln.update --pre`.**
   ([long form](docs/changelog/unreleased.md#release-candidates-are-opt-in-everywhere-mix-kilnupdate-pre))
+
+- **An upgrade rehearsal runs a past release's `mix kiln.update` against the
+  candidate, with a seeded database.**
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/unreleased.md#an-upgrade-rehearsal-runs-every-past-releases-mix-kilnupdate-against-the))
+
+- **`mix kiln.plugins.doctor` flags a core domain missing from
+  `:ash_domains`.**
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/unreleased.md#mix-kilnpluginsdoctor-flags-a-core-domain-missing-from-ash_domains))
 
 ### Changed
 
@@ -114,6 +138,10 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Every surface carries one label: covered, internal or experimental.**
   ([long form](docs/changelog/unreleased.md#every-surface-carries-one-label-covered-internal-or-experimental))
+
+- **The content editor says Save draft and Publish now, and Visual is a
+  secondary button.**
+  ([#1671](https://github.com/The-Verscienta/kiln_cms/issues/1671) · [long form](docs/changelog/unreleased.md#the-content-editor-says-save-draft-and-publish-now))
 
 ### Fixed
 
@@ -140,6 +168,33 @@ Every summary line below that was shortened links to its own entry there.
   stamping the block current.**
   ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642) · [long form](docs/changelog/unreleased.md#the-block-upcaster-refuses-a-gap-in-the-migrate-chain))
 
+- **After signing in with a recovery code, you can set up a new
+  authenticator.**
+  ([#1675](https://github.com/The-Verscienta/kiln_cms/issues/1675) · [long form](docs/changelog/unreleased.md#after-signing-in-with-a-recovery-code-you-can-set-up-a-new-authenticator))
+
+- **Public form labels are tied to their inputs, and a refused embedded
+  submission offers Try again.**
+  ([#1673](https://github.com/The-Verscienta/kiln_cms/issues/1673) · [long form](docs/changelog/unreleased.md#public-form-labels-are-tied-to-their-inputs-and-a-refused-embedded-submission))
+
+- **A refused public form submission shows the form again, with your input
+  kept and each error next to its field.**
+  ([#1683](https://github.com/The-Verscienta/kiln_cms/issues/1683) · [long form](docs/changelog/unreleased.md#a-refused-public-form-submission-shows-the-form-again))
+
+- **Console pages show their title, and an empty calendar or task list says
+  so.**
+  ([#1670](https://github.com/The-Verscienta/kiln_cms/issues/1670) · [#1672](https://github.com/The-Verscienta/kiln_cms/issues/1672) · [long form](docs/changelog/unreleased.md#console-pages-show-their-title-and-an-empty-calendar-or-task-list-says-so))
+
+- **The account and membership pages show who is signed in; the sign-in
+  pages have a skip target.**
+  ([#1674](https://github.com/The-Verscienta/kiln_cms/issues/1674) · [long form](docs/changelog/unreleased.md#the-account-and-membership-pages-show-who-is-signed-in))
+
+- **The example overlay's migrations run beside the core's.**
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/unreleased.md#the-example-overlays-migrations-run-beside-the-cores))
+
+- **Ember links and labels in the console meet AA contrast; the previews wear
+  the site's theme, and the public header nav is named and wraps on a phone.**
+  ([#1677](https://github.com/The-Verscienta/kiln_cms/issues/1677) · [#1682](https://github.com/The-Verscienta/kiln_cms/issues/1682) · [long form](docs/changelog/unreleased.md#ember-links-and-labels-in-the-console-meet-aa-contrast-the-previews-wear-the))
+
 ### Security
 
 - **Auth budgets now hold across nodes and restarts.**
@@ -148,6 +203,32 @@ Every summary line below that was shortened links to its own entry there.
 - **The browser CSP's `connect-src` is `'self'` alone — no websocket to any
   other host.**
   ([long form](docs/changelog/unreleased.md#the-browser-csps-connect-src-is-self-alone-no-websocket-to-any))
+
+- **The seed script refuses a production database.**
+  ([#1651](https://github.com/The-Verscienta/kiln_cms/issues/1651) · [long form](docs/changelog/unreleased.md#the-seed-script-refuses-a-production-database))
+
+- **Changing your password signs out your open console tabs.**
+  ([#1652](https://github.com/The-Verscienta/kiln_cms/issues/1652) · [long form](docs/changelog/unreleased.md#changing-your-password-signs-out-your-open-console-tabs))
+
+- **Unsplash imports go through `SafeFetch`.**
+  ([#1653](https://github.com/The-Verscienta/kiln_cms/issues/1653) · [long form](docs/changelog/unreleased.md#unsplash-imports-go-through-safefetch))
+
+- **A node that missed the second organization's broadcast turns strict
+  within 30 seconds, not five minutes.**
+  ([#1654](https://github.com/The-Verscienta/kiln_cms/issues/1654) · [long form](docs/changelog/unreleased.md#org-count-recount-30-seconds))
+
+- **Kiln warns when a multi-org deployment has no `KILN_CONSOLE_HOST`.**
+  ([#1661](https://github.com/The-Verscienta/kiln_cms/issues/1661) · [long form](docs/changelog/unreleased.md#multi-org-without-console-host-warns))
+
+- **A newsletter campaign is created under the sender's own authorization.**
+  ([#1655](https://github.com/The-Verscienta/kiln_cms/issues/1655) · [long form](docs/changelog/unreleased.md#a-newsletter-campaign-is-created-under-the-senders-own-authorization))
+
+- **The newsletter confirmation link no longer confirms on a GET.**
+  ([#1664](https://github.com/The-Verscienta/kiln_cms/issues/1664) · [long form](docs/changelog/unreleased.md#the-newsletter-confirmation-link-no-longer-confirms-on-a-get))
+
+- **The ActivityPub inbox checks a signature offline before it fetches the
+  sender's key.**
+  ([#1665](https://github.com/The-Verscienta/kiln_cms/issues/1665) · [long form](docs/changelog/unreleased.md#the-activitypub-inbox-checks-a-signature-offline-before-it-fetches))
 
 ### Deprecated
 

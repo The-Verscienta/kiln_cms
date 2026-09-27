@@ -57,7 +57,7 @@ defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
           # the type's #805 pattern, not just the stored column (#1132). `after_action`
           # runs inside the publishing transaction where a failing read aborts the
           # commit; `after_transaction` runs after COMMIT where a best-effort
-          # notification belongs (see `WarnStrictHostGap` on #660/#818), and the
+          # notification belongs (see `WarnStrictHostFalseIgnored` on #660/#818), and the
           # read cannot undo the write. `Webhooks.dispatch` inserts Oban jobs —
           # inside the transaction the job and the publish commit or roll back
           # together; after COMMIT a crash between COMMIT and insert loses the

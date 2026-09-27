@@ -338,6 +338,8 @@ defmodule KilnCMS.MixProject do
       # Audits & release checklists
       "docs/audit-2026-07-full-surface.md": [],
       "docs/audit-2026-07-performance-usability.md": [],
+      "docs/audit-2026-09-27-security.md": [],
+      "docs/audit-2026-09-27-usability.md": [],
       "docs/deploy-p2.md": [],
       "docs/deploy-p3.md": [],
       "docs/deploy-staging.md": [],
@@ -487,6 +489,8 @@ defmodule KilnCMS.MixProject do
       "Audits & release checklists": [
         "docs/audit-2026-07-full-surface.md",
         "docs/audit-2026-07-performance-usability.md",
+        "docs/audit-2026-09-27-security.md",
+        "docs/audit-2026-09-27-usability.md",
         "docs/deploy-p2.md",
         "docs/deploy-p3.md",
         "docs/deploy-staging.md",

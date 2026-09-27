@@ -63,6 +63,27 @@ defmodule KilnCMSWeb.FormEmbedTest do
       assert html_response(conn, 404) =~ "Form not found"
     end
 
+    # #1673. A label that is not associated with its input is not announced
+    # when the input takes focus, and clicking it focuses nothing. The id is
+    # scoped by the form's slug so two forms on one page both asking for
+    # `email` do not share one.
+    test "every field label is associated with its input", %{conn: conn} do
+      form = form!()
+      html = conn |> unique_ip() |> get("/forms/#{form.slug}/embed") |> html_response(200)
+
+      field_id = "kiln-form-#{form.slug}-email"
+      doc = LazyHTML.from_document(html)
+
+      assert [label] = doc |> LazyHTML.query(~s(label[for="#{field_id}"])) |> Enum.to_list()
+      assert LazyHTML.text(label) =~ "Email"
+
+      assert [input] = doc |> LazyHTML.query("##{field_id}") |> Enum.to_list()
+      assert LazyHTML.attribute(input, "name") == ["email"]
+
+      # The required marker is spoken, not only drawn.
+      assert LazyHTML.text(label) =~ "required"
+    end
+
     # Regression: the 404 text used to be built through a `Gettext.gettext/2`
     # helper taking a runtime variable, so the extractor never saw the msgid, it
     # never entered the catalogs, and the page rendered English in every locale.
@@ -103,6 +124,41 @@ defmodule KilnCMSWeb.FormEmbedTest do
       html = html_response(conn, 200)
       assert html =~ "Merci!"
       assert csp(conn) =~ "frame-ancestors 'self'"
+      refute html =~ "/embed-frame.js"
+    end
+
+    # #1673, then #1683. An embed omits the referer Back link (it would reload
+    # the empty thank-you cycle), so a refused submission used to leave the
+    # visitor with no way back into the form. It now IS the form again, with
+    # their values kept — the full contract is in form_invalid_rerender_test.exs.
+    test "a refused embedded submission re-renders the form inside the iframe", %{conn: conn} do
+      form = form!()
+
+      html =
+        conn
+        |> unique_ip()
+        |> post("/forms/#{form.slug}", %{"email" => "not-an-email", "_kiln_embed" => "1"})
+        |> html_response(422)
+
+      assert html =~ ~s(action="/forms/#{form.slug}")
+      assert html =~ ~s(value="not-an-email")
+      assert html =~ ~s(name="_kiln_embed")
+      assert html =~ "/embed-frame.js"
+      assert html =~ ~s(href="/assets/css/app.css")
+    end
+
+    test "an on-site refusal re-renders the form, not a Back link", %{conn: conn} do
+      form = form!()
+
+      html =
+        conn
+        |> unique_ip()
+        |> put_req_header("referer", "http://www.example.com/contact")
+        |> post("/forms/#{form.slug}", %{"email" => "not-an-email"})
+        |> html_response(422)
+
+      assert html =~ ~s(value="not-an-email")
+      refute html =~ ~s(name="_kiln_embed")
       refute html =~ "/embed-frame.js"
     end
 

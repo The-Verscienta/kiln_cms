@@ -63,7 +63,7 @@ test.describe("body image upload", () => {
     await editor.click();
     await page.keyboard.type("Typed and saved at once");
     // No wait for the 300 ms debounce: the mousedown on Save flushes it.
-    await page.getByRole("button", {name: "Save", exact: true}).click();
+    await page.getByRole("button", {name: "Save draft", exact: true}).click();
     await expect(page.getByText("Saved.")).toBeVisible();
 
     await page.reload();

@@ -50,21 +50,27 @@ the router so preflights are answered before route matching).
 | Surface | Route(s) | Auth | Rate bucket |
 |---|---|---|---|
 | Public HTML delivery | `/`, `/:slug`, `/:type/:slug`, `/blog`, `/blog/:slug`, `/search`, `/*path` | none | `:delivery` |
-| Probes & SEO | `/up`, `/sitemap.xml`, `/robots.txt`, `/llms.txt` | none | `:probe` |
+| Probes & SEO | `/up`, `/ready`, `/sitemap.xml`, `/robots.txt`, `/llms.txt`, `/manifest.webmanifest`, `/offline.html` | none | `:probe` |
+| First-run bootstrap | `/setup` | none — the `:bootstrap_admin` policy (`Checks.NoAdminExists`) + advisory lock in `KilnCMS.Accounts.Bootstrap` are the gate | none |
 | GraphQL | `/gql` (GET + POST), `/ws/gql` | optional JWT / API key | `:gql` (per operation, on both transports), `:gql_join` (socket connects) |
 | JSON:API | `/api/json/**` (GET/POST/PATCH/DELETE) | optional JWT / API key | `:api` |
-| Headless REST | `/api/content/**`, `/api/resolve`, `/api/locales`, `/api/search`, `/api/ask`, `/api/provenance/**`, `/api/visual-editing/:type/:slug` | optional JWT / API key | `:api` |
+| Headless REST | `/api/content/**`, `/api/resolve`, `/api/locales`, `/api/search`, `/api/ask`, `/api/provenance/**`, `/api/visual-editing/:type/:slug`, `/api/sync`, `/api/schema`, `/api/menus/**`, `/api/content/:type/:id/revisions/**` | optional JWT / API key | `:api` |
 | OpenAPI & explorer | `/api/json/open_api`, `/api/json/swaggerui` | none — and **not served in prod** unless `API_DOCS_ENABLED` (#567); the document (never the explorer) also answers any valid API key | `:docs` |
 | GraphQL SDL | `GET /api/graphql/schema.graphql` | none where introspection is on; **API key required** in prod unless `GRAPHQL_INTROSPECTION_ENABLED` | `:docs` |
 | Headless sign-in | `POST /api/auth/sign_in` | credentials → JWT, or a pending token for a 2FA account | `:auth` + per-account (#478) |
 | Headless second factor | `POST /api/auth/sign_in/verify` | encrypted pending token + TOTP or recovery code | `:auth`; the same per-account second-factor budget as the browser prompt (#714, #726) |
+| Content unlock | `POST /api/content/:type/:slug/unlock`, `POST /_unlock` (CSRF) | passphrase | `:unlock` (`POST /_unlock` also `:delivery`) |
 | Media upload | `POST /api/media`, `/api/media/import-url`, `/api/media/uploads[/complete]` | JWT / API key; `:read_write` + editor, checked **before** `POST /api/media`'s body is parsed (the endpoint leaves it unread) | `:api` + `:media_upload` |
 | MCP (LLM authoring) | `/mcp` | **API key required** | `:api` |
 | Public forms | `GET /api/forms/:slug`, `POST /forms/:slug`, `POST /api/forms/:slug` | none (no CSRF by design) | `:form` |
-| Form embed | `GET /forms/:slug/embed` | none | `:delivery` |
-| Preview | `/preview/:token`, `/preview/:token/live` | signed token *is* the credential | `:preview` |
-| Newsletter | `/newsletter/confirm/:token`, `/newsletter/unsubscribe/:token` | signed token | `:form` |
-| Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/auth/passkey/*` | varies | `:auth`, except `POST /auth/*/password/register`, which takes `:register` **instead** so the two registration doors agree (#724) |
+| Form embed | `GET /forms/:slug/embed` | none | `:delivery` (framing CSP) |
+| Preview | `/preview/:token`, `/preview/:token/live`, `/preview/release/:token` | signed token *is* the credential | `:preview` |
+| Newsletter | `POST /newsletter/subscribe`, `/newsletter/confirm/:token`, `/newsletter/unsubscribe/:token` | honeypot / opaque token; the confirm and unsubscribe GETs only render a page, the POST changes the subscription (#1664) — confirm's POST is also CSRF-checked | `:form` |
+| Billing webhook | `POST /billing/webhooks/stripe` | HMAC over raw body | `:billing_webhook` |
+| ActivityPub | `GET /.well-known/webfinger`, `/actor`, `/actor/outbox`, `/actor/followers`, `/ap/object/:id`; `POST /actor/inbox` | none (GET) / HTTP Signature over the raw body (inbox) | `:probe` (GET) / `:api` (inbox) |
+| Calendars / feeds | `/calendar.ics`, `/:plural/calendar.ics`, `/:plural/:slug/calendar.ics`, `/:plural/index.json`, `/feed.xml`, `/feed.json`, `/:plural/feed.{xml,json}` (and the category/tag variants) | none (published only) | `:probe` |
+| Membership (paid audiences) | `/membership` | optional session | `:delivery` |
+| Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/auth/passkey/*`, `/auth/site-sso[/callback]` | varies | `:auth`, except `POST /auth/*/password/register`, which takes `:register` **instead** so the two registration doors agree (#724) |
 | Second factor | `GET`/`POST /sign-in/verify` | signed `:pending_2fa` token + TOTP or recovery code | `:auth`; the `POST` also per-account, tighter than sign-in (#714) |
 | Credential submits over `/live` | LiveView `"submit"` on the sign-in, register, reset-request and magic-link forms — **all four render on all three auth pages** | credentials → session / account / mail | charged on the *action*, since no plug can reach them: sign-in `:auth` (#715) + per-account (#478); registration `:register` (#724); reset and magic-link `:auth` (#724) + the per-address mail budget |
 | Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none, except the three TOTP actions on `/editor/settings`: per-account, the second factor's own bucket (#727) |
@@ -314,7 +320,8 @@ build if a resource is ever registered without that authorizer.
   an attacker-influenced response has an attacker-influenced *length* too.
   Since #753 there is exactly one implementation: every caller that fetches a
   URL the *content* chose — webhook delivery, oEmbed, link checking, federation,
-  social posting, portability import — goes through `SafeFetch`. A new caller
+  social posting, portability import, Unsplash import (#1653) — goes through
+  `SafeFetch`. A new caller
   reaching for `Req` directly, or copying its `connect_options`, is the bug that
   invariant exists to catch.
 - **Upload handling** — uploads validated from bytes rather than declared type,
@@ -675,15 +682,38 @@ a credential, so the operator's trust assumptions do not carry over:
   an anonymous visitor's question. It is the site's choice and the page says so.
 
 ### Other outbound calls
-`Kiln.Updates` (GitHub releases, admin-triggered), `KilnCMS.Unsplash`,
+`Kiln.Updates` (GitHub releases, admin-triggered),
 Meilisearch (the operator's instance — a site's own is below), S3/MinIO, the
 mailer, and the LLM providers behind `/api/ask` and
 SEO drafting all make outbound requests to *operator-configured or fixed*
 endpoints, not user-supplied ones — so they are not SSRF vectors in the way
 webhooks are. The exceptions are a site's own SMTP relay (#1322) and AI
-endpoint (above), which are tenant-chosen and SSRF-checked. Note that `/api/ask` lets an anonymous caller drive an outbound
+endpoint (above), which are tenant-chosen and SSRF-checked, and
+`KilnCMS.Unsplash`: its API host is fixed, but the image URL an import downloads
+comes from Unsplash's response, so every Unsplash request goes through
+`SafeFetch` — pinned, each redirect hop re-validated, and capped at the image
+upload ceiling (#1653). Note that `/api/ask` lets an anonymous caller drive an outbound
 LLM request; it is config-gated and rate-limited under `:api`, but it is a cost
 amplification surface.
+
+### ActivityPub inbox (`POST /actor/inbox`, #491)
+Off unless both the deployment (`KILN_FEDERATION_ENABLED`) and the site turn it
+on. Every activity the inbox acts on must carry an HTTP Signature, and the key
+that verifies it lives in the sender's actor document — so authenticating costs
+an outbound GET to a URL the unauthenticated caller named. That fetch is kept
+behind everything that can be decided without it (#1665): only a `Follow` or
+`Undo{Follow}` addressed to this site's actor needs one at all, and even that
+one is refused with no request made unless the `Signature` header parses,
+covers `(request-target) host date digest`, carries a `Date` inside the
+five-minute window and a `Digest` matching the raw body, and names a `keyId`
+belonging to the activity's own `actor`. What remains is the irreducible part —
+a well-formed request for an actor URL the caller chose still costs one fetch,
+because telling a forged signature from a real one needs the key. That fetch
+goes through `SafeFetch` (pinned address, no redirects, 128 KB cap), is cached
+per actor for ten minutes in a capped table, and sits under the route's per-IP
+`:api` bucket. A verified signature is then recorded in the replay store, and
+the fetched document must have been served from the URL it claims as its `id`.
+See [Federation](federation.md#security).
 
 ### A site's own Meilisearch instance (#1558)
 The one outbound integration above whose endpoint a **site admin** chooses
@@ -888,22 +918,29 @@ because other files cite them by number.
    access-control axis.
 
 3. **Unknown `Host` headers resolve to the default organization — on a
-   single-org deployment, or where `TENANT_STRICT_HOST=false`.** #563 added
-   the control; since #1547 an unset `TENANT_STRICT_HOST` turns it on by
-   itself once a second organization exists, on every node and with no
-   restart, so a multi-tenant deployment is no longer exposed by default. With
-   it on, an unresolvable `Host` is refused with a bare 404 rather than served
-   the default org, across everything the router serves plus LiveView mounts
-   and the GraphQL and visual-editing sockets. What remains:
-   - An operator can still set `TENANT_STRICT_HOST=false` on a multi-org
-     deployment. The app warns about that at boot, when the second org is
-     created, and on `/editor/system`.
+   single-org deployment.** #563 added the control; since #1547 an unset
+   `TENANT_STRICT_HOST` turns it on by itself once a second organization
+   exists, on every node and with no restart, so a multi-tenant deployment is
+   no longer exposed by default. Since #1662 an explicit
+   `TENANT_STRICT_HOST=false` no longer switches it off there either: once a
+   second organization exists, unknown hosts are refused whatever the setting
+   says, and Kiln logs an **error** — at boot, when the second org is created,
+   and on `/editor/system` — that the setting is being ignored. There is no
+   escape hatch; a host a multi-org deployment should answer on can be given
+   to an organization or redirected to one at the proxy. With the control on, an unresolvable `Host` is
+   refused with a bare 404 rather than served the default org, across
+   everything the router serves plus LiveView mounts and the GraphQL and
+   visual-editing sockets. What remains:
    - A node that misses the create's `Phoenix.PubSub` broadcast (partitioned,
-     or mid-boot) stays lenient until its periodic recount, at most five
-     minutes later.
+     or mid-boot) stays lenient until its periodic recount, at most **30
+     seconds** later (#1654; it was five minutes). The recount is one
+     `count(*)` on `organizations` per node every 30 seconds, and stops once
+     the node has seen a second organization. `/editor/system` shows the
+     window while it is open.
    - If the organizations cannot be counted at all (boot with Postgres down),
      an unset setting fails **closed**: unknown hosts are refused until a
-     count succeeds.
+     count succeeds. An explicit `false` stays lenient in that state — #1662
+     overrides it only on a count that actually found a second organization.
 
    Terminating unknown hosts at the proxy is still worth doing as well.
 
@@ -989,8 +1026,11 @@ because other files cite them by number.
 
    **1.0 verdict (decided, #1547): fixed.**
    Roadmap decision 4 (2026-09-18) settled this, and #1547 implements it: an
-   unset `TENANT_STRICT_HOST` turns on once a second organization exists, and
-   an explicit setting still wins (see the top of this item). The
+   unset `TENANT_STRICT_HOST` turns on once a second organization exists. The
+   2026-09-27 audit closed the two gaps that were left: an explicit `false`
+   is no longer honoured on a multi-org deployment (#1662, a `### Breaking`
+   change in 0.12.0), and a node that missed the broadcast catches up within
+   30 seconds rather than five minutes (#1654). The
    sub-residuals stay accepted: the plain-text refusal lets a sweep enumerate
    org slugs, and nothing router-reachable can meter `/live` longpoll. Both are
    documented with a proxy-level remedy.
@@ -1652,6 +1692,36 @@ because other files cite them by number.
     has no freshness-free signature in it. What remains is the receiver's side
     of the bargain: a receiver that skips the `t` check, or verifies nothing,
     is replayable by construction, and no sender change can fix that.
+
+16. **An org admin's code injection is same-origin with the console when
+    `KILN_CONSOLE_HOST` is unset (#1661).** Site code injection (`head_html` /
+    `footer_html`, #490) runs on an org's delivery pages. By default the
+    editor console answers on that same host, so an injected script can
+    `fetch("/editor/…", {credentials: "same-origin"})` in the browser of any
+    editor who opens the public site while signed in, and act with their
+    session — including a platform admin, who is an admin on every org. On a
+    single-org deployment the org admin and the operator are one party and
+    this is the operator's own script. On a multi-org deployment it is one
+    tenant's admin reaching other tenants' editors, and the operator's.
+
+    The mitigation is `KILN_CONSOLE_HOST` (#740): the console is then served
+    only on a host no tenant controls, and delivery script is cross-origin to
+    it. It stays **opt-in**, because a console host is a deployment change
+    (DNS, TLS, `CHECK_ORIGINS`) Kiln cannot make for an operator on upgrade,
+    and because org resolution is still host-derived, so that host reaches
+    the default organization's console only. What Kiln does instead is say
+    so: once a second organization exists and `KILN_CONSOLE_HOST` is unset,
+    it warns at boot (a `KilnCMS.Config.Report` warning, which reaches
+    Sentry), when the second org is created, and on `/editor/system`
+    (`KilnCMSWeb.Tenant.console_shares_origin?/0`). See
+    [code-injection.md](code-injection.md#read-this-before-granting-the-role).
+
+    **1.0 verdict (decided, #1661): accepted at 1.0 with a warning; set
+    `KILN_CONSOLE_HOST` on multi-org installs.** The alternative an operator
+    has without a console host is to treat "org admin" as equivalent to
+    console access and staff it accordingly. Per-tenant console hosts —
+    session-derived org resolution on the console host — are the follow-up
+    that would let a multi-org console host serve every tenant.
 
 **Not on this list, but named by the 1.0 roadmap: `/api/ask` lets an anonymous
 caller drive LLM cost** (see *Other outbound calls* above). **1.0 verdict

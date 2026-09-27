@@ -92,7 +92,7 @@ defmodule KilnCMSWeb.MembershipLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.public current_org={@current_org} locale={@locale}>
+    <Layouts.public current_org={@current_org} locale={@locale} current_user={@current_user}>
       <Layouts.flash_group flash={@flash} />
 
       <div class="space-y-8">

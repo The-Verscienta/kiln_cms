@@ -106,6 +106,56 @@ carries the reasoning.
   the new headers only
   ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616)).
 
+<a id="if-your-configprojectexs-restates-ash_domains-add-kilncmsnotifications"></a>
+
+- **If your `config/project.exs` restates `:ash_domains`, add
+  `KilnCMS.Notifications`.** It has been a core domain since 0.9.0, but a
+  project's list replaces the core's rather than adding to it, so a
+  `project.exs` written before then — or copied from the in-tree example,
+  which lacked it too — leaves it out. Nothing fails at boot. What happens is
+  that `mix ash.codegen` reads the `notifications` table as orphaned and
+  offers to generate a migration that DROPS it, with yes as the default
+  answer. Diff your list against `config/config.exs`;
+  `mix kiln.plugins.doctor` now names any core domain missing from it. The
+  upgrade rehearsal met that prompt upgrading from 0.5.0 through 0.9.0, and
+  the doctor flags the list every release from 0.5.0 to 0.11.0 shipped
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540)).
+
+<a id="on-080-or-older-mix-kilnupdate-shows-you-none-of-these-notes"></a>
+
+- **On 0.8.0 or older, `mix kiln.update` shows you none of these notes.
+  Read them here before moving the pin.** The task that runs is the one in
+  the checkout being moved. Up to 0.8.0 it read only the old `### Upgrading`
+  heading, which 0.9.0 renamed to `### Upgrade notes`. So a pin on 0.5.0 to
+  0.8.0 prints the list of new migrations and then moves, with none of the
+  Upgrade notes or Breaking entries of 0.9.0 and later. Read those sections of
+  this file for every release after yours first. The upgrade rehearsal showed
+  it from 0.5.0, 0.6.0, 0.7.0 and 0.8.0; from 0.9.0 on, the notes print. A
+  release *candidate* is the other case: only 0.12 and later print a
+  candidate's notes, so a 0.12 candidate's must be read from its release
+  page (see `docs/releasing.md`). One thing from those notes that 0.7 and
+  0.8 overlays copied from the example trip over: a custom field type calling
+  `safe_float` from `KilnCMS.CMS.Computed` (gone since 0.9.0) compiles with a
+  warning and raises on its first cast. Call `Kiln.FieldType.parse_float/1`
+  instead; `mix kiln.plugins.doctor` names the field type
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540)).
+
+<a id="tenant-strict-host-false-multi-org-upgrade"></a>
+
+- **If you set `TENANT_STRICT_HOST=false` on a multi-org deployment, give every
+  host that must keep working an organization first.** From 0.12 that setting
+  is ignored once a second organization exists (see Breaking), so a request
+  whose `Host` matches no organization gets a `404` instead of the default
+  org's site. Before upgrading, list the hosts your deployment actually
+  answers on and make each one a subdomain of `TENANT_BASE_HOST` or an
+  organization's `custom_domain` (the default org can have one), or redirect
+  it to one at your proxy. The `PHX_HOST` apex, `KILN_CONSOLE_HOST`, the
+  health probes (`/up`, `/ready`) and the payment webhook are never refused,
+  so a load balancer probing by IP keeps working. Then remove
+  `TENANT_STRICT_HOST=false`: left set, Kiln logs an error at every boot
+  saying it is being ignored. Single-org deployments are unaffected
+  ([#1662](https://github.com/The-Verscienta/kiln_cms/issues/1662)).
+
 ## Breaking
 
 <a id="webhook-deliveries-no-longer-send-x-kilncms-signature"></a>
@@ -120,6 +170,28 @@ carries the reasoning.
   `verify/4` are unchanged. The JS and Elixir client helpers already verified
   only the timestamped header and need no change
   ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616)).
+
+<a id="tenant-strict-host-false-no-longer-honoured"></a>
+
+- **`TENANT_STRICT_HOST=false` is no longer honoured once a second
+  organization exists.** Until now an explicit `false` kept the default-org
+  fallback on a multi-org deployment: any request whose `Host` matched no
+  organization — a bare IP, a forgotten alias, or a header an attacker chose —
+  was served the default org's content, branding and analytics. Kiln warned
+  about that at boot, on the second org's create and on `/editor/system`, but
+  served it anyway. Now the organization-count verdict that drives the unset
+  (auto) setting decides under `false` too: with two or more organizations,
+  unknown hosts are refused whatever the setting says, and the three warnings
+  become an **error** saying the setting is being ignored (at boot through
+  `KilnCMS.Config.Report.error/3`, so it reaches Sentry). `false` still keeps
+  the fallback on a single-org install, and still stays lenient while the
+  organizations cannot be counted (boot with the database down). There is no
+  escape hatch: a host that should reach a site can be given to an
+  organization or redirected at the proxy. `KilnCMSWeb.Tenant.strict_host?/0`
+  changes accordingly, and `KilnCMS.Accounts.Changes.WarnStrictHostGap` is
+  now `WarnStrictHostFalseIgnored`. This closes the explicit-`false` half of
+  threat-model residual risk 3
+  ([#1662](https://github.com/The-Verscienta/kiln_cms/issues/1662)).
 
 ## Added
 
@@ -168,6 +240,35 @@ carries the reasoning.
   releases marked as pre-releases; a candidate published *without* the flag is
   now refused as `{:error, :prerelease}` instead of being offered as an
   update. `docs/releasing.md` gains "Cutting a release candidate".
+
+<a id="an-upgrade-rehearsal-runs-every-past-releases-mix-kilnupdate-against-the"></a>
+
+- **An upgrade rehearsal runs a past release's `mix kiln.update` against the
+  candidate, with a seeded database.** `scripts/upgrade_rehearsal/rehearse.sh
+  vX.Y.Z` does what a downstream does. It pins a scratch project's submodule
+  at the tag, next to a copy of that tag's example overlay, then builds,
+  migrates and seeds it: the release's own seeds and the overlay's, plus a
+  page for every shape in the legacy block corpus and one with every block
+  type the release knows. Then it runs *that release's* `mix kiln.update` to
+  the candidate, tagged `-rc.0` in a local mirror (nothing is pushed). It
+  rebuilds with the unchanged overlay, generates migrations for any overlay
+  drift, runs `mix kiln.plugins.doctor`, migrates and runs
+  `mix kiln.blocks.backfill`. Every row must read back, and every published
+  page must render the same text before and after the backfill. It also
+  checks the Upgrade notes each release prints against the candidate's
+  `upgrade_notes/3`. The **Upgrade rehearsal** workflow runs it for the last
+  three releases weekly and on demand. Its database is its own and is dropped
+  afterwards
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540)).
+
+<a id="mix-kilnpluginsdoctor-flags-a-core-domain-missing-from-ash_domains"></a>
+
+- **`mix kiln.plugins.doctor` flags a core domain missing from
+  `:ash_domains`.** The core's domains are found from the modules compiled out
+  of its own `lib/`, so the check cannot drift from `config/config.exs`. See
+  the Upgrade note on `KilnCMS.Notifications`
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540)).
+
 
 ## Changed
 
@@ -258,6 +359,15 @@ carries the reasoning.
   `mix kiln.*` task is labelled internal too; a release that needs you to run
   one names it in its upgrade notes. (#1542)
 
+<a id="the-content-editor-says-save-draft-and-publish-now"></a>
+
+- **The content editor says Save draft and Publish now, and Visual is a
+  secondary button.** Visual was a primary button beside Save, so the header
+  had two competing primary actions; it is now a default button. The save and
+  publish buttons name what they do. A test or script that finds the editor's
+  buttons by their text needs the new labels.
+  ([#1671](https://github.com/The-Verscienta/kiln_cms/issues/1671))
+
 ## Fixed
 
 <a id="a-hard-line-break-in-a-paragraph-heading-quote-or-list-item-is-delivered-as-br"></a>
@@ -325,6 +435,99 @@ carries the reasoning.
   read and delivery paths, which render the stored shape and log a warning
   rather than crash.
 
+<a id="after-signing-in-with-a-recovery-code-you-can-set-up-a-new-authenticator"></a>
+
+- **After signing in with a recovery code, you can set up a new
+  authenticator.** Someone who signs in with a recovery code has usually lost
+  the device, and every two-factor form on `/editor/settings` asked for a code
+  from it. The backend already waived the outgoing factor for a recovery-code
+  session (#786); `/editor/settings` now offers "Set up a new authenticator"
+  in that session.
+  ([#1675](https://github.com/The-Verscienta/kiln_cms/issues/1675))
+
+<a id="public-form-labels-are-tied-to-their-inputs-and-a-refused-embedded-submission"></a>
+
+- **Public form labels are tied to their inputs, and a refused embedded
+  submission offers Try again.** A public form's labels had no `for`, so a
+  screen reader announced an unnamed field and clicking a label focused
+  nothing; each input now has an id scoped by the form's slug, and the required
+  marker is spoken as well as drawn. The thank-you and error pages wear the
+  site kit instead of bare system-font HTML, and an embedded form's error page,
+  which has no Back link, links back into the form.
+  ([#1673](https://github.com/The-Verscienta/kiln_cms/issues/1673))
+
+<a id="a-refused-public-form-submission-shows-the-form-again"></a>
+
+- **A refused public form submission shows the form again, with your input
+  kept and each error next to its field.** A form that failed validation was
+  replaced by a one-line page naming fields by their machine names, and its
+  Back link (or, embedded, its Try again link) reloaded an empty form. The
+  422 response is now the same form, inside the site's public layout or the
+  embed's iframe document, with the submitted values filled back in. Each
+  refused field is marked `aria-invalid` and described by its message, and a
+  summary at the top, which takes focus, lists the problems by label and links
+  to each field. The messages are translated. The honeypot and anything that
+  isn't one of the form's own fields are never echoed back. The JSON
+  endpoint's `errors` map is unchanged.
+  ([#1683](https://github.com/The-Verscienta/kiln_cms/issues/1683))
+
+<a id="console-pages-show-their-title-and-an-empty-calendar-or-task-list-says-so"></a>
+
+- **Console pages show their title, and an empty calendar or task list says
+  so.** Eight console pages (backups, code injection and the per-site AI, mail,
+  push, search, SSO and storage settings) assigned a page title but never
+  passed it to the layout, so the top bar was blank. A month or week with no
+  events drew an empty grid rather than the list view's empty card, and the
+  task list said "No open tasks" under a block or document filter, as though
+  there were none at all.
+  ([#1670](https://github.com/The-Verscienta/kiln_cms/issues/1670) [#1672](https://github.com/The-Verscienta/kiln_cms/issues/1672))
+
+<a id="the-account-and-membership-pages-show-who-is-signed-in"></a>
+
+- **The account and membership pages show who is signed in; the sign-in
+  pages have a skip target.** `/account` and `/membership` rendered the public
+  header without the reader, so it offered no account link or sign-out. The
+  auth pages were the one shell without `<main id="main">`, so "Skip to
+  content" went nowhere. The public search field and button, which removed the
+  focus outline and drew no ring, now use the kit's field and button.
+  ([#1674](https://github.com/The-Verscienta/kiln_cms/issues/1674))
+
+<a id="the-example-overlays-migrations-run-beside-the-cores"></a>
+
+- **The example overlay's migrations run beside the core's.** From 0.7.0,
+  `projects/example/priv/repo/migrations/20260815142530_add_content_lifecycles.exs`
+  had the same name and module as the core's `add_content_lifecycles`. Ecto
+  refuses a directory holding both, so no example-activated build could run
+  its migrations. It also altered `conditions`, a table the example never
+  had, where it meant `products`. The `overlay_drift` job runs codegen but
+  never migrations, so neither showed until the upgrade rehearsal ran them.
+  The file is now `..._add_example_content_lifecycles.exs`, with the same
+  timestamp (Ecto records the version, so a database that ran it is
+  unaffected), and it alters `products`. A new test fails when any overlay's
+  migration shares a version, name or module with a core one. An overlay
+  that copied the example should take the corrected file. The example's
+  `project.exs` now registers `KilnCMS.Notifications`
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540)).
+
+
+<a id="ember-links-and-labels-in-the-console-meet-aa-contrast-the-previews-wear-the"></a>
+
+- **Ember links and labels in the console meet AA contrast; the previews wear
+  the site's theme, and the public header nav is named and wraps on a phone.**
+  About thirty links, filter chips, tabs and labels (the overview's cards,
+  governance, analytics, the inspector, the calendar's "today", public search)
+  were set in raw `text-primary`: ember `#FF6200` is 3.0:1 on white and 2.7:1
+  on its own 10% tint, under the 4.5:1 WCAG 1.4.3 asks of text. They now use
+  the kit's `text-primary-ink` (7.3:1 on white, 6.5:1 on the tint; dark theme
+  8.2:1 and 7.0:1). Only icons and a chart bar keep raw ember, each marked
+  `contrast-ok:`, and a test fails on any new unmarked use. The editor preview,
+  the shared preview and the in-context editor carry the `public-*` hooks the
+  delivery templates do, so a theme preset or a site's custom CSS styles them
+  as it styles the live page. The public header's `<nav>` is labelled "Site",
+  distinct from the "Footer" nav, and on a narrow screen it drops to its own
+  row under the site name, with finger-sized link targets.
+  ([#1677](https://github.com/The-Verscienta/kiln_cms/issues/1677) · [#1682](https://github.com/The-Verscienta/kiln_cms/issues/1682))
+
 ## Security
 
 <a id="auth-budgets-now-hold-across-nodes-and-restarts"></a>
@@ -372,6 +575,36 @@ carries the reasoning.
   threat-model residual 12 now records the reviewed policy
   ([#1615](https://github.com/The-Verscienta/kiln_cms/issues/1615)).
 
+<a id="a-newsletter-campaign-is-created-under-the-senders-own-authorization"></a>
+
+- **A newsletter campaign is created under the sender's own authorization.**
+  `Newsletter.send_as_newsletter/2` wrote the campaign row with
+  `authorize?: false`, so the console's tier check was the only thing between
+  a click and an email that cannot be unsent — and that check read the user
+  struct the LiveView mounted with, so a global admin demoted mid-session could
+  still send. The create now runs as the caller under `NewsletterSend`'s
+  existing `OrgAdmin` policy, and the console re-reads the account before each
+  send, so both the tier check and the policy decide on the role as it is now.
+  The "on publish → send the newsletter" automation sends as
+  `%KilnCMS.SystemActor{subsystem: :automation}`, admitted for `:create` only
+  inside the admin policy (no bypass); reading the ledger stays admin-only. A
+  caller of `send_as_newsletter/2` without an admin actor now gets
+  `{:error, %Ash.Error.Forbidden{}}`
+  ([#1655](https://github.com/The-Verscienta/kiln_cms/issues/1655)).
+
+<a id="the-newsletter-confirmation-link-no-longer-confirms-on-a-get"></a>
+
+- **The newsletter confirmation link no longer confirms on a GET.**
+  `GET /newsletter/confirm/:token` flipped a subscriber to `:confirmed`, so a
+  mail security scanner or link prefetcher following the link completed the
+  double opt-in with no person involved — the one thing double opt-in exists
+  to prove. The GET now renders a one-button page in the site's own chrome and
+  changes nothing; `POST /newsletter/confirm/:token` (that button, CSRF-checked)
+  confirms. This mirrors how unsubscribe already worked. Confirmation emails
+  already in inboxes keep working: their link opens the page, one click from
+  done. An unknown token gets the same "link not recognized" page as before
+  ([#1664](https://github.com/The-Verscienta/kiln_cms/issues/1664)).
+
 <a id="the-audience-checkboxes-on-editor-accounts-edit-the-site-membership"></a>
 
 - **The audience checkboxes on `/editor/accounts` edit the site membership, not
@@ -405,6 +638,91 @@ carries the reasoning.
   longer collide on the unique index.
   See [Paid memberships](../memberships.md#the-first-paid-membership).
   (#1649)
+
+<a id="the-seed-script-refuses-a-production-database"></a>
+
+- **The seed script refuses a production database.** `priv/repo/seeds.exs`
+  runs from `mix setup` and `mix ecto.setup`, and against a production
+  `DATABASE_URL` it created `admin@kiln.test` with the password the README
+  publishes. Under `MIX_ENV=prod` it now stops before touching the database
+  unless `ALLOW_PROD_SEEDS=confirm` is set **and** `ADMIN_PASSWORD` and
+  `EDITOR_PASSWORD` are both overridden. A production site's first admin comes
+  from `/setup`.
+  ([#1651](https://github.com/The-Verscienta/kiln_cms/issues/1651))
+
+<a id="changing-your-password-signs-out-your-open-console-tabs"></a>
+
+- **Changing your password signs out your open console tabs.** The
+  password change already revoked every stored session token, but a mounted
+  LiveView authorized once, at connect, and kept working until it reconnected —
+  so a tab left open by whoever you changed the password to lock out stayed
+  signed in. `:change_password` now evicts the account's live sockets, the same
+  pairing an admin's "sign out everywhere" uses (#675).
+  ([#1652](https://github.com/The-Verscienta/kiln_cms/issues/1652))
+
+<a id="unsplash-imports-go-through-safefetch"></a>
+
+- **Unsplash imports go through `SafeFetch`.** The image URL an Unsplash
+  import downloads comes from Unsplash's response, and it was fetched with a
+  bare `Req`: redirects followed inside the client, past any address check, and
+  no bound on the body. Every Unsplash request is now pinned and re-validated
+  hop by hop by `KilnCMS.SafeFetch`, so a redirect into private or metadata
+  address space is refused, and the download is capped at the image upload
+  ceiling rather than buffered whole.
+  ([#1653](https://github.com/The-Verscienta/kiln_cms/issues/1653))
+
+<a id="org-count-recount-30-seconds"></a>
+
+- **A node that missed the second organization's broadcast turns strict
+  within 30 seconds, not five minutes.** Creating the second organization
+  flips host matching to strict on the creating node at once and tells the
+  other nodes over `Phoenix.PubSub`. PubSub is at-most-once, so a node that was
+  partitioned or mid-boot could miss it and keep serving unknown hosts the
+  default org until its periodic recount — every five minutes while it
+  believed there was one organization. `KilnCMSWeb.Tenant.OrgCount` now
+  recounts every 30 seconds until it has seen a second organization, and then
+  stops. The cost is one `count(*)` on `organizations` per node per 30 seconds
+  on a single-org install (about 2,900 trivial queries a day), and nothing on a
+  multi-org one. `/editor/system` says "within 30 seconds" while a node is
+  behind. Narrows threat-model residual risk 3
+  ([#1654](https://github.com/The-Verscienta/kiln_cms/issues/1654)).
+
+<a id="multi-org-without-console-host-warns"></a>
+
+- **Kiln warns when a multi-org deployment has no `KILN_CONSOLE_HOST`.** An
+  org admin's code injection (`head_html` / `footer_html`) runs on that org's
+  public pages, and without a console host the editor console answers on the
+  same origin. The script can then act with the session of any editor who
+  opens the site signed in, a platform admin included. On one org that is the
+  operator's own script; on two it is one tenant's admin reaching everyone
+  else. Kiln now warns once a second organization exists and
+  `KILN_CONSOLE_HOST` is unset: at boot (reaching Sentry), when the second org
+  is created, and as a standing notice on `/editor/system`. Nothing is forced.
+  A console host is a DNS/TLS/`CHECK_ORIGINS` change, and it serves the
+  default org's console only for now. The 1.0 position is recorded as
+  threat-model residual risk 16: accepted with a warning; set
+  `KILN_CONSOLE_HOST` on multi-org installs
+  ([#1661](https://github.com/The-Verscienta/kiln_cms/issues/1661)).
+
+<a id="the-activitypub-inbox-checks-a-signature-offline-before-it-fetches"></a>
+
+- **The ActivityPub inbox checks a signature offline before it fetches the
+  sender's key.** The key that verifies an inbound activity lives in the
+  sender's actor document, and the inbox fetched that document before looking
+  at the signature at all — so any caller could send an unsigned `Follow`
+  naming this site and make the server issue one outbound GET to an actor URL
+  of their choosing. The inbox now refuses, with no request made, anything that
+  fails a check needing no key: a missing or malformed `Signature` header, a
+  signed set not covering `(request-target) host date digest`, a `Date` outside
+  the five-minute window, a `Digest` that is not the body's, or a `keyId` that
+  does not belong to the activity's own `actor`. The last one is the same
+  binding the inbox already applied to the fetched document, asked earlier, so
+  no genuine request is refused that was accepted before. Only a request past
+  all of them fetches the key (through `SafeFetch`, cached per actor for ten
+  minutes, as before) and is verified. A well-formed request still costs one
+  fetch per new actor URL, since only the key can tell a forged signature from a
+  real one. See [Federation](../federation.md#the-fetch-comes-after-every-check-that-needs-no-network).
+  (#1665)
 
 ## Deprecated
 

@@ -37,16 +37,21 @@ defmodule KilnCMS.Forms.EmbedCeilingAutoTest do
     lock = Application.get_env(:kiln_cms, :embed_origins_locked)
     ceiling = Application.get_env(:kiln_cms, :embed_origins)
     multi = Application.get_env(:kiln_cms, :multitenancy_enabled)
+    tracking = Application.get_env(:kiln_cms, :tenant_org_tracking)
     verdict = OrgCount.verdict()
 
     on_exit(fn ->
       restore(:embed_origins_locked, lock)
       restore(:embed_origins, ceiling)
       restore(:multitenancy_enabled, multi)
+      restore(:tenant_org_tracking, tracking)
       OrgCount.put(verdict)
     end)
 
     Application.put_env(:kiln_cms, :multitenancy_enabled, true)
+    # `config/test.exs` turns the verdict's own tracking off for the run; these
+    # tests are about what the create does to it.
+    Application.put_env(:kiln_cms, :tenant_org_tracking, true)
     # Start from "nobody has counted", so a verdict another test left behind
     # cannot be what a test observes.
     OrgCount.put(:unknown)
@@ -392,7 +397,11 @@ defmodule KilnCMS.Forms.EmbedCeilingAutoTest do
       on_exit(&Kiln.Updates.clear_cache/0)
       Req.Test.stub(Kiln.Updates, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
 
-      %{conn: conn, user: user}
+      # On the apex, not the suite's default `www.example.com`: these tests
+      # make a second org and a `:multi` verdict, and since #1662 that refuses
+      # an unmatched Host even under the suite's pinned TENANT_STRICT_HOST=false.
+      # The apex is the default org's and is never refused.
+      %{conn: %{conn | host: Tenant.base_host()}, user: user}
     end
 
     test "shows the counts while stored lists are cut down", %{conn: conn, user: user} do
@@ -403,7 +412,7 @@ defmodule KilnCMS.Forms.EmbedCeilingAutoTest do
 
       {:ok, lv, html} = live(conn, ~p"/editor/system")
       # Let the release check finish while its stub is still installed.
-      _ = render_async(lv)
+      _ = render_async(lv, 2_000)
 
       assert html =~ "Some sites can no longer embed forms"
       assert html =~ "1 form allowlist(s) and 0 site-wide"
@@ -417,7 +426,7 @@ defmodule KilnCMS.Forms.EmbedCeilingAutoTest do
 
       {:ok, lv, html} = live(conn, ~p"/editor/system")
       # Let the release check finish while its stub is still installed.
-      _ = render_async(lv)
+      _ = render_async(lv, 2_000)
 
       assert html =~ "This instance"
       refute html =~ "Some sites can no longer embed forms"

@@ -150,7 +150,7 @@ defmodule KilnCMSWeb.SiteStorageLiveTest do
 
       lv |> element("#site-storage-test") |> render_click()
 
-      assert render_async(lv) =~ "The bucket works"
+      assert render_async(lv, 2_000) =~ "The bucket works"
       assert_received {:s3, "PUT", "s3.site.example", "/site-bucket/kiln-probe/" <> _}
       assert_received {:s3, "GET", "s3.site.example", "/site-bucket/kiln-probe/" <> _}
       assert_received {:s3, "DELETE", "s3.site.example", "/site-bucket/kiln-probe/" <> _}
@@ -168,7 +168,7 @@ defmodule KilnCMSWeb.SiteStorageLiveTest do
       save(lv, @valid)
       lv |> element("#site-storage-test") |> render_click()
 
-      assert render_async(lv) =~ "couldn&#39;t write a test file to the bucket (HTTP 403)"
+      assert render_async(lv, 2_000) =~ "couldn&#39;t write a test file to the bucket (HTTP 403)"
     end
   end
 

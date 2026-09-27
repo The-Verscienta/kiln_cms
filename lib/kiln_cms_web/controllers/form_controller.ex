@@ -70,7 +70,9 @@ defmodule KilnCMSWeb.FormController do
 
     case form do
       nil ->
-        conn |> put_status(404) |> html(page(gettext("Form not found."), nil, embed: true))
+        conn
+        |> put_status(404)
+        |> html(page(gettext("Form not found."), nil, embed: true, kind: :error))
 
       form ->
         conn
@@ -164,7 +166,7 @@ defmodule KilnCMSWeb.FormController do
       :not_found ->
         conn
         |> put_status(404)
-        |> html(page(gettext("Form not found."), nil, embed: embedded?))
+        |> html(page(gettext("Form not found."), nil, embed: embedded?, kind: :error))
 
       {:ok, form} ->
         html(
@@ -172,15 +174,80 @@ defmodule KilnCMSWeb.FormController do
           page(
             form.success_message || gettext("Thanks — we got your message."),
             back_href,
-            embed: embedded?
+            embed: embedded?,
+            kind: :ok
           )
         )
 
       {:error, form, errors} ->
-        conn
-        |> put_status(422)
-        |> html(page(error_text(form, errors), back_href, embed: embedded?))
+        render_invalid(conn, form, errors, params, embedded?)
     end
+  end
+
+  # A refused submission gets the SAME form back (#1683), not a page in its
+  # place: the visitor's values filled in, each error against its field's label,
+  # and a focused summary on top. It used to be a one-line message page whose
+  # Back link was a fresh GET — everything typed was gone, and inside an iframe
+  # there was no way back at all. Still a 422, so nothing reading the status
+  # (the tests, a monitoring probe, a headless caller that posted form-encoded)
+  # sees a change there.
+  #
+  # Embedded, it is the iframe document again, under the framing policy `submit/2`
+  # already put on the conn; on-site, it is the form inside the site's public
+  # chrome, under the strict CSP the pipeline set.
+  defp render_invalid(conn, form, errors, params, embedded?) do
+    assigns = [
+      form: form,
+      errors: errors,
+      values: submitted_values(form, params),
+      rendered_at: submitted_rendered_at(params),
+      variant: Params.string(params, Forms.variant_field())
+    ]
+
+    conn = conn |> put_status(422) |> put_view(KilnCMSWeb.FormHTML)
+
+    if embedded? do
+      render(conn, :embed, assigns)
+    else
+      conn
+      |> put_root_layout(html: {KilnCMSWeb.Layouts, :root})
+      |> put_layout(false)
+      |> render(
+        :invalid,
+        assigns ++
+          [
+            current_org: conn.assigns[:current_org],
+            locale: Gettext.get_locale(KilnCMSWeb.Gettext),
+            page_title: form.name
+          ]
+      )
+    end
+  end
+
+  # What goes back into the re-rendered inputs: the form's OWN fields only, and
+  # only as plain strings. That leaves out, by construction, every machinery
+  # field (`_kiln_*`), anything a bot added, a `%Plug.Upload{}` or a nested
+  # map/list, and — named explicitly, since an admin's field could in principle
+  # share its name — the honeypot: echoing a honeypot value back would hand the
+  # bot the one thing it must never learn it tripped.
+  defp submitted_values(form, params) do
+    honeypot = Forms.honeypot_field()
+
+    for %{name: name} <- form.fields,
+        name != honeypot,
+        value = Map.get(params, name),
+        is_binary(value),
+        into: %{},
+        do: {name, value}
+  end
+
+  # The visitor's original fill-time token (#477), when it still verifies, so a
+  # corrected re-submit is timed from when they first opened the form. Anything
+  # else — missing, forged, expired — gets a fresh one from the component, the
+  # same as a first render; the spam check itself is untouched.
+  defp submitted_rendered_at(params) do
+    token = Params.string(params, Forms.rendered_at_field())
+    if Forms.fill_time_ms(token), do: token
   end
 
   # Headless (JSON) submission.
@@ -221,45 +288,53 @@ defmodule KilnCMSWeb.FormController do
     end
   end
 
-  # A dependency-free thank-you/error page (public pages may be fired
-  # artifacts, so there's no LiveView context to return into).
-  #
-  # `embed: true` loads the height reporter and drops the wide margins, so the
-  # iframe shrinks to the (much shorter) message instead of keeping the form's
-  # height. Both are safe under the embed CSP: an external script from 'self'.
+  # Thank-you / error page. Loads `app.css` so success/error share the site kit
+  # (ember tokens, `.btn`) with the embed form — previously a bare system-font
+  # `<p>` that abandoned brand after submit. `embed: true` keeps the height
+  # reporter and tight padding so the iframe shrinks to the message.
   defp page(message, back_href, opts) do
     embed? = Keyword.get(opts, :embed, false)
-
-    back =
-      if back_href,
-        do:
-          ~s(<p><a href="#{Phoenix.HTML.html_escape(back_href) |> Phoenix.HTML.safe_to_string()}">&larr; #{h(gettext("Back"))}</a></p>),
-        else: ""
-
+    kind = Keyword.get(opts, :kind, :ok)
+    {tone_class, heading} = page_tone(kind)
+    back = page_nav_html(back_href)
     resizer = if embed?, do: ~s(<script defer src="/embed-frame.js"></script>), else: ""
 
-    body_style =
+    body_class =
       if embed?,
-        do: "font-family: system-ui, sans-serif; margin: 0; padding: 1rem",
-        else:
-          "font-family: system-ui, sans-serif; max-width: 36rem; margin: 4rem auto; padding: 0 1rem"
+        do: "kiln-embed-body bg-transparent p-4",
+        else: "mx-auto max-w-xl px-4 py-16"
 
     """
     <!DOCTYPE html>
-    <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>#{h(message)}</title>#{resizer}</head>
-    <body style="#{body_style}">
-    <p>#{h(message)}</p>
-    #{back}
-    </body></html>
+    <html lang="#{h(Gettext.get_locale(KilnCMSWeb.Gettext))}">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>#{h(message)}</title>
+      <link rel="stylesheet" href="/assets/css/app.css">
+      #{resizer}
+    </head>
+    <body class="#{body_class}">
+      <div class="card card-pad">
+        <h1 class="text-lg font-semibold tracking-tight #{tone_class}">#{h(heading)}</h1>
+        <p class="mt-2 text-sm text-base-content/80">#{h(message)}</p>
+        #{back}
+      </div>
+    </body>
+    </html>
     """
   end
 
-  defp error_text(_form, errors) do
-    detail = Enum.map_join(errors, "; ", fn {field, message} -> "#{field} #{message}" end)
-    # Interpolated rather than concatenated: a trailing-space msgid is a trap for
-    # translators, and some locales need the detail somewhere other than the end.
-    gettext("Your submission couldn't be saved: %{detail}", detail: detail)
+  defp page_tone(:error), do: {"text-error", gettext("Something needs fixing")}
+  defp page_tone(_), do: {"text-base-content", gettext("Thank you")}
+
+  defp page_nav_html(back_href) when is_binary(back_href) do
+    href = Phoenix.HTML.html_escape(back_href) |> Phoenix.HTML.safe_to_string()
+
+    ~s(<p class="mt-4"><a href="#{href}" class="btn btn-default btn-sm">&larr; #{h(gettext("Back"))}</a></p>)
   end
+
+  defp page_nav_html(_), do: ""
 
   # Only same-origin referers are offered as a back link (an open redirect
   # otherwise). Anything else falls back to no link.
