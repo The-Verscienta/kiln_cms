@@ -403,7 +403,7 @@ defmodule KilnCMS.Forms.EmbedCeilingAutoTest do
 
       {:ok, lv, html} = live(conn, ~p"/editor/system")
       # Let the release check finish while its stub is still installed.
-      _ = render_async(lv)
+      _ = render_async(lv, 2_000)
 
       assert html =~ "Some sites can no longer embed forms"
       assert html =~ "1 form allowlist(s) and 0 site-wide"
@@ -417,7 +417,7 @@ defmodule KilnCMS.Forms.EmbedCeilingAutoTest do
 
       {:ok, lv, html} = live(conn, ~p"/editor/system")
       # Let the release check finish while its stub is still installed.
-      _ = render_async(lv)
+      _ = render_async(lv, 2_000)
 
       assert html =~ "This instance"
       refute html =~ "Some sites can no longer embed forms"
