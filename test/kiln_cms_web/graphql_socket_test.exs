@@ -3,22 +3,13 @@ defmodule KilnCMSWeb.GraphqlSocketTest do
   # (the Hammer ETS table is one per node).
   use KilnCMS.DataCase, async: false
 
-  import KilnCMS.RateLimitHelpers, only: [client_address: 0]
+  import KilnCMS.RateLimitHelpers,
+    only: [client_address: 0, put_limit: 2, restore_limits_on_exit: 0]
 
   alias KilnCMS.Accounts.User
   alias KilnCMSWeb.GraphqlSocket
-  alias KilnCMSWeb.RateLimit
 
   @password "password123456"
-
-  defp put_gql_join_limit(limit) do
-    current = Application.get_env(:kiln_cms, RateLimit, [])
-
-    limits =
-      current |> Keyword.get(:limits, %{}) |> Map.put(:gql_join, {limit, :timer.minutes(1)})
-
-    Application.put_env(:kiln_cms, RateLimit, Keyword.put(current, :limits, limits))
-  end
 
   test "connect/3 sets actor in absinthe context when a valid token is provided" do
     email = "socket-#{System.unique_integer([:positive])}@example.com"
@@ -50,8 +41,11 @@ defmodule KilnCMSWeb.GraphqlSocketTest do
   end
 
   test "connect/3 charges the gql_join budget first, refusing an over-budget address before tenant/auth resolve" do
-    on_exit(fn -> Application.delete_env(:kiln_cms, RateLimit) end)
-    put_gql_join_limit(1)
+    # Restored, not deleted (#1614): a delete drops config/test.exs's raised
+    # limits for every later module, and the next conn to spend 61 /gql
+    # requests gets a 429 from the shipped 60/min.
+    restore_limits_on_exit()
+    put_limit(:gql_join, 1)
 
     address = client_address()
     connect_info = %{peer_data: %{address: address, port: 111, ssl_cert: nil}, x_headers: []}

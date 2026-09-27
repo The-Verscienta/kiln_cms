@@ -43,6 +43,8 @@ defmodule KilnCMS.RateLimitHelpers do
 
   alias KilnCMSWeb.RateLimit
 
+  @test_config Application.compile_env(:kiln_cms, RateLimit, [])
+
   @doc """
   A client address no other test — and no other file — is spending.
 
@@ -181,14 +183,59 @@ defmodule KilnCMS.RateLimitHelpers do
   end
 
   @doc """
-  Captures the current `RateLimit` env and puts it back when the test exits.
-  Call from `setup` before any `put_limit/3`. RESTORES rather than deletes:
-  `config/test.exs` sets this key at boot, and a delete would leave every
-  later module on the shipped limits.
+  The `RateLimit` env `config/test.exs` boots with — the raised test limits.
+
+  Read at compile time rather than captured when a test starts, because a
+  capture only restores what the *previous* test left behind. #1614 was
+  exactly that: `GraphqlSocketTest` "restored" with `delete_env/2`, every
+  later sync module ran on the shipped limits, and the next file to put more
+  than 60 `/gql` requests through one conn got a 429 — failing a test that
+  had done nothing wrong. Every restore goes back to this value instead, so a
+  leak cannot outlive the test that caused it.
+  """
+  @spec test_config() :: keyword()
+  def test_config, do: @test_config
+
+  @doc """
+  Puts the `RateLimit` env back to `test_config/0` when the test exits.
+  Call from `setup` (or the test body) before any `put_limit/3`. Restores
+  rather than deletes: `config/test.exs` sets this key at boot, and a delete
+  would leave every later module on the shipped limits (#1614).
   """
   @spec restore_limits_on_exit() :: :ok
-  def restore_limits_on_exit do
-    previous = Application.get_env(:kiln_cms, RateLimit, [])
-    ExUnit.Callbacks.on_exit(fn -> Application.put_env(:kiln_cms, RateLimit, previous) end)
+  def restore_limits_on_exit, do: ExUnit.Callbacks.on_exit(&restore_limits/0)
+
+  @doc "Puts the `RateLimit` env back to `test_config/0` now."
+  @spec restore_limits() :: :ok
+  def restore_limits, do: Application.put_env(:kiln_cms, RateLimit, @test_config)
+
+  @doc """
+  Fails the test unless the `RateLimit` env is still `test_config/0`.
+
+  Run by `ConnCase` and `DataCase` before every test. A test that tightened a
+  bucket and did not put it back does not fail itself — it fails whichever
+  later test first exceeds a shipped limit, with a 429 that names nothing.
+  This turns that into a failure that says what happened, at the first test
+  to see it, rather than at the one that happens to spend 61 requests.
+  """
+  @spec assert_test_limits!() :: :ok
+  def assert_test_limits! do
+    case Application.get_env(:kiln_cms, RateLimit) do
+      @test_config ->
+        :ok
+
+      leaked ->
+        raise ExUnit.AssertionError,
+          message: """
+          KilnCMSWeb.RateLimit's application env is not config/test.exs's (#1614).
+
+          An earlier async: false test changed it and did not put it back. Restore
+          with `KilnCMS.RateLimitHelpers.restore_limits_on_exit/0`, never
+          `Application.delete_env/2` or a value captured at the start of a test.
+
+          expected: #{inspect(@test_config)}
+          got:      #{inspect(leaked)}
+          """
+    end
   end
 end
