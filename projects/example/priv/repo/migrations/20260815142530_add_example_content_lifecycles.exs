@@ -84,9 +84,7 @@ defmodule KilnCMS.Repo.Migrations.AddExampleContentLifecycles do
       remove :expiry_action
     end
 
-    drop_if_exists index(:products, [:org_id, :unpublish_at],
-                     name: "products_unpublish_at_index"
-                   )
+    drop_if_exists index(:products, [:org_id, :unpublish_at], name: "products_unpublish_at_index")
 
     drop_if_exists index(:products, [:org_id, :last_reviewed_at],
                      name: "products_last_reviewed_at_index"
