@@ -178,7 +178,7 @@ defmodule KilnCMSWeb.InboxLive do
             patch={filter_path(value)}
             class={[
               "rounded-full border px-2.5 py-0.5 text-xs",
-              @filter == value && "border-primary bg-primary/10 text-primary",
+              @filter == value && "border-primary bg-primary/10 text-primary-ink",
               @filter != value && "border-base-content/20 hover:bg-base-200"
             ]}
           >

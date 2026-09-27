@@ -235,6 +235,7 @@ defmodule KilnCMSWeb.ChartComponents do
   # colour, so a theme change only has to update this one function.
   defp source_class(:direct), do: "text-base-content/50"
   defp source_class(:internal), do: "text-info"
+  # contrast-ok: fills a chart bar via currentColor — a graphic, not text.
   defp source_class(:search), do: "text-primary"
   defp source_class(:social), do: "text-secondary"
   defp source_class(:other), do: "text-base-content/25"

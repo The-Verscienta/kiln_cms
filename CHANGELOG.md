@@ -184,6 +184,10 @@ Every summary line below that was shortened links to its own entry there.
 - **The example overlay's migrations run beside the core's.**
   ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/unreleased.md#the-example-overlays-migrations-run-beside-the-cores))
 
+- **Ember links and labels in the console meet AA contrast; the previews wear
+  the site's theme, and the public header nav is named and wraps on a phone.**
+  ([#1677](https://github.com/The-Verscienta/kiln_cms/issues/1677) · [#1682](https://github.com/The-Verscienta/kiln_cms/issues/1682) · [long form](docs/changelog/unreleased.md#ember-links-and-labels-in-the-console-meet-aa-contrast-the-previews-wear-the))
+
 ### Security
 
 - **Auth budgets now hold across nodes and restarts.**

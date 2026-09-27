@@ -49,7 +49,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorHistoryComponent do
             <.link
               :if={cov.record && cov.record.id != @record.id}
               navigate={~p"/editor/content/#{@kind}/#{cov.record.id}"}
-              class="text-xs text-primary hover:underline"
+              class="text-xs text-primary-ink hover:underline"
             >
               {state_label(cov.status)} — {gettext("edit")}
             </.link>

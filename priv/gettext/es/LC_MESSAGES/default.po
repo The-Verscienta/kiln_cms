@@ -11564,6 +11564,7 @@ msgstr "El inicio de sesión único no está disponible ahora en este sitio. Ent
 msgid "Single sign-on saved."
 msgstr "Inicio de sesión único guardado."
 
+#: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Site"
