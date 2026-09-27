@@ -35,7 +35,8 @@ defmodule KilnCMS.Config.ReportUsageTest do
 
     expected = ~w(
       warn_if_no_mailer_in_prod
-      warn_if_multi_tenant_without_strict_host
+      warn_if_strict_host_false_ignored
+      warn_if_console_shares_origin
       warn_if_embed_lists_over_ceiling
       warn_if_chain_unsigned
       warn_if_seo_drafting_egresses
@@ -55,8 +56,10 @@ defmodule KilnCMS.Config.ReportUsageTest do
                "KilnCMS.Config.Report.warn/3 before #1126, and a bare Logger.warning " <>
                "silently stops reaching it (Sentry.LoggerHandler drops plain :warning logs)."
 
-      assert body =~ "KilnCMS.Config.Report.warn(",
-             "#{name} should report via KilnCMS.Config.Report.warn/3 (#1126)."
+      # `Report.error/3` is the louder sibling, for a setting Kiln overrides
+      # rather than advises against (#1662) — same two channels.
+      assert body =~ ~r/KilnCMS\.Config\.Report\.(warn|error)\(/,
+             "#{name} should report via KilnCMS.Config.Report.warn/3 or error/3 (#1126)."
     end
   end
 

@@ -98,4 +98,34 @@ defmodule KilnCMSWeb.NewsletterSendTest do
     assert [%Oban.Job{}] =
              Oban.Testing.all_enqueued(repo: KilnCMS.Repo, worker: KilnCMS.Newsletter.SendWorker)
   end
+
+  # #1655. The socket holds the user struct it mounted with, so a global admin
+  # demoted after mount still presents `role: :admin` — to the tier check and,
+  # had the struct been passed through, to the `NewsletterSend` policy too. The
+  # handler must decide on the row as it is now.
+  test "a global admin demoted after mount cannot send" do
+    admin = user(:admin)
+    post = fired_post(admin)
+    stale = admin
+
+    Ash.Seed.update!(admin, %{role: :editor})
+
+    assert {:noreply, refused} =
+             KilnCMSWeb.NewsletterLive.handle_event(
+               "send",
+               %{"send" => %{"post_id" => post.id, "segment_id" => "", "subject" => ""}},
+               socket_for(stale, post)
+             )
+
+    refute refused.assigns.flash["info"]
+
+    assert [] ==
+             Ash.read!(NewsletterSend,
+               authorize?: false,
+               tenant: KilnCMS.Accounts.default_org_id()
+             )
+
+    assert [] ==
+             Oban.Testing.all_enqueued(repo: KilnCMS.Repo, worker: KilnCMS.Newsletter.SendWorker)
+  end
 end

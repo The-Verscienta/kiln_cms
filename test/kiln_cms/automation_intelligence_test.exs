@@ -584,11 +584,18 @@ defmodule KilnCMS.AutomationIntelligenceTest do
       on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Search, previous) end)
     end
 
+    # Creating the second org logs the multi-org advisories (#1661, #1662);
+    # nothing here is about them.
     defp budget_org do
-      Accounts.create_organization!(
-        %{name: "AI budget org", slug: "aiq-budget-#{System.unique_integer([:positive])}"},
-        authorize?: false
-      )
+      {org, _log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          Accounts.create_organization!(
+            %{name: "AI budget org", slug: "aiq-budget-#{System.unique_integer([:positive])}"},
+            authorize?: false
+          )
+        end)
+
+      org
     end
 
     defp draft_in(org, actor, text, title) do

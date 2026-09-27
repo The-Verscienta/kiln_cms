@@ -14,8 +14,8 @@ defmodule KilnCMS.Accounts.Changes.WarnEmbedOverreach do
   boot already happened; this is the log line at the moment it becomes true.
 
   Only the crossing — exactly two organizations, with the setting unset — for
-  the reason `KilnCMS.Accounts.Changes.WarnStrictHostGap` gives: an explicit
-  `true` capped the lists long before, and a per-provisioning repeat is a
+  the reason `KilnCMS.Accounts.Changes.WarnStrictHostFalseIgnored` gives: an
+  explicit `true` capped the lists long before, and a per-provisioning repeat is a
   warning an operator learns to scroll past. `/editor/system` carries the
   standing state.
 

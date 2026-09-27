@@ -60,17 +60,29 @@ keeps the fallback, and the create that makes a deployment multi-tenant removes
 it: an unmatched host then gets a `404` (or a `503` with `retry-after` if the
 lookup could not run because the database is down) instead of the default org.
 No restart, and every node follows — the creating node tells the others over
-`Phoenix.PubSub`, and a node that missed the message recounts within five
-minutes. The apex (`PHX_HOST`) is never refused; health probes and the payment
+`Phoenix.PubSub`, and a node that missed the message recounts within 30
+seconds (#1654). The apex (`PHX_HOST`) is never refused; health probes and the payment
 webhook are exempt. The full behaviour, including what static files do, is under
 [`TENANT_STRICT_HOST`](environment-variables.md#multi-tenancy-336).
 
-An explicit setting wins either way. `TENANT_STRICT_HOST=true` refuses unknown
-hosts even with one org; `TENANT_STRICT_HOST=false` keeps the fallback even with
-many, which was the behaviour of every release before 0.11. Kiln warns if
-`false` is what keeps a multi-org deployment on the fallback: at boot, when the
-second org is created, and on `/editor/system` for as long as the gap stays
-open.
+`TENANT_STRICT_HOST=true` refuses unknown hosts even with one org.
+`TENANT_STRICT_HOST=false` keeps the fallback **only while there is one org**
+(#1662). Until 0.12 it kept it with many too, which served an unrecognized — and
+possibly attacker-chosen — `Host` another tenant's site; Kiln no longer honours
+`false` on a multi-org deployment. Once a second organization exists, unknown
+hosts are refused whatever the setting says, and Kiln logs an error saying the
+setting is being ignored: at boot, when the second org is created, and on
+`/editor/system` for as long as `false` stays set. Remove it.
+
+There is deliberately no switch to get the old behaviour back. Anything that
+relied on the fallback can be given a real home instead: a host that should
+reach a site belongs to an organization — a subdomain of `TENANT_BASE_HOST`, or
+its `custom_domain` (the default org can have one too) — and anything else, a
+second alias or a bare IP, is redirected to one of those at your proxy. The `PHX_HOST` apex and
+`KILN_CONSOLE_HOST` are never refused, and the health probes and the payment
+webhook are exempt. Organizations cannot be deleted, so a single-org install
+that creates a second one — even by accident — stays strict; check your hosts
+before you create it.
 
 If the organizations cannot be counted — a node that booted while Postgres was
 unreachable — an unset setting behaves as multi-org and refuses unknown hosts
@@ -116,8 +128,14 @@ optional `custom_domain`. Members are then managed per org at
 `/editor/team`.
 
 Creating the **second** org turns strict host matching on unless
-`TENANT_STRICT_HOST` is set (see above), so before you create it, make sure
-every host the deployment answers on is either `PHX_HOST` or belongs to an org.
+`TENANT_STRICT_HOST` is already `true` — and since 0.12 an explicit `false` does
+not stop it (see above) — so before you create it, make sure every host the
+deployment answers on is either `PHX_HOST` or belongs to an org.
+
+With `KILN_CONSOLE_HOST` unset, it is also the create that puts one org admin's
+code injection on the same origin as every other tenant's editors (#1661) — see
+[Serving the console from its own host](#serving-the-console-from-its-own-host).
+Kiln warns at boot, on that create, and on `/editor/system`.
 
 It also caps form embedding at `EMBED_ORIGINS` unless `EMBED_ORIGINS_LOCKED`
 is set (#1618): from then on an org admin's per-form or per-site embed
@@ -140,6 +158,15 @@ By default each org's editor console answers on that org's own host, so a
 page's custom scripts are same-origin with the console. `KILN_CONSOLE_HOST`
 serves the console from one dedicated host instead; tenant content is never
 served there. The console host resolves to the default org, which makes it
-the right fit for a single-org deployment. See
+the right fit for a single-org deployment.
+
+On a **multi-org** deployment the shared origin matters more: an org admin's
+code injection can act with the session of any editor who opens that org's
+site signed in, a platform admin included. Kiln warns about exactly that
+combination — more than one org and `KILN_CONSOLE_HOST` unset — at boot, when
+the second org is created, and on `/editor/system` (#1661). It is accepted at
+1.0 with that warning (threat model, residual risk 16): set `KILN_CONSOLE_HOST`
+on a multi-org install, knowing it serves the default org's console only for
+now, or grant org admin only to people you would trust with the console. See
 [environment-variables.md](environment-variables.md) and
 [code-injection.md](code-injection.md#read-this-before-granting-the-role).

@@ -73,16 +73,20 @@ defmodule KilnCMS.Accounts.Organization do
       # the backfill migration, which bypasses this action.
       validate KilnCMS.Accounts.Validations.MultitenancyEnabled
 
-      # A second org turns an unset TENANT_STRICT_HOST strict, on every node,
-      # with no restart (#1547). Before the warning below, which reads the
-      # effective setting this updates.
+      # A second org turns strict host matching on — unset TENANT_STRICT_HOST
+      # (#1547) and an explicit `false` (#1662) alike — on every node, with no
+      # restart. Before the changes below, which read the verdict this moves.
       change KilnCMS.Accounts.Changes.RecordOrgCount
 
       # Creating the org that makes this deployment multi-tenant while
-      # TENANT_STRICT_HOST=false is the moment an unrecognized Host starts being
-      # served another tenant's site. Boot checks the same thing, but boot
-      # already happened — see the change's moduledoc (#660).
-      change KilnCMS.Accounts.Changes.WarnStrictHostGap
+      # TENANT_STRICT_HOST=false is the moment Kiln stops honouring that
+      # setting. Boot checks the same thing, but boot already happened — see
+      # the change's moduledoc (#660, #1662).
+      change KilnCMS.Accounts.Changes.WarnStrictHostFalseIgnored
+
+      # ...and, with KILN_CONSOLE_HOST unset, the moment an org admin's code
+      # injection becomes same-origin with another tenant's editors (#1661).
+      change KilnCMS.Accounts.Changes.WarnConsoleSharesOrigin
 
       # The same verdict caps form framing at EMBED_ORIGINS when
       # EMBED_ORIGINS_LOCKED is unset (#1618); say so if stored allowlists are

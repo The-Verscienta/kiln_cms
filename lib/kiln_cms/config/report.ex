@@ -72,6 +72,29 @@ defmodule KilnCMS.Config.Report do
   end
 
   @doc """
+  `warn/3`, one step louder: `Logger.error/1` and a Sentry event at `:error`.
+
+  For a configuration Kiln has stopped honouring, rather than one it merely
+  advises against — an operator's explicit setting that the running system is
+  overriding (`TENANT_STRICT_HOST=false` on a multi-org deployment, #1662).
+  Same fingerprint scheme and the same no-secrets contract as `warn/3`.
+  """
+  @spec error(String.t(), String.t(), map()) :: :ok
+  def error(source, message, extra \\ %{})
+      when is_binary(source) and is_binary(message) and is_map(extra) do
+    Logger.error(message)
+
+    _ =
+      Sentry.capture_message(message,
+        level: :error,
+        fingerprint: ["kiln-config-warning", source],
+        extra: extra
+      )
+
+    :ok
+  end
+
+  @doc """
   Run `fun`, taking `default` if it cannot answer (#1288).
 
   The other half of a solvability warning: these checks need the database, and

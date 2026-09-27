@@ -63,6 +63,14 @@ and the mitigation is deployment-level, and now built in (#740):
 - Or treat "org admin" as equivalent to console access on that deployment, and
   staff it accordingly.
 
+On a **multi-org** deployment this is one tenant's admin reaching every other
+tenant's editors, so Kiln says so: once a second organization exists and
+`KILN_CONSOLE_HOST` is unset, it warns at boot, when the second org is created,
+and on `/editor/system` (#1661). That warning is the 1.0 position — accepted,
+not forced, because a console host is a DNS/TLS/`CHECK_ORIGINS` change Kiln
+cannot make for you on upgrade. Set `KILN_CONSOLE_HOST` on multi-org installs.
+See [threat-model.md](threat-model.md#residual-risks), residual risk 16.
+
 The `:delivery` pipeline keeps the markup out of console *pages*. It does not
 make a same-origin script harmless — only a separate origin does.
 
