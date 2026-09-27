@@ -54,214 +54,222 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+## [0.12.0] - 2026-09-27
+
+Long form: [docs/changelog/v0.12.0.md](docs/changelog/v0.12.0.md) —
+the 0.12.0 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
 ### Upgrade notes
 
 - **Before upgrading to 1.0, let queued webhook and newsletter jobs from before
   0.12 drain, and move accounts off the legacy audiences fallback;
   `mix kiln.deprecations` says what is left.**
-  ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/unreleased.md#before-upgrading-to-10-let-queued-webhook-and-newsletter-jobs-from-before-012))
+  ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/v0.12.0.md#before-upgrading-to-10-let-queued-webhook-and-newsletter-jobs-from-before-012))
 
 - **Run `mix kiln.blocks.backfill` once after deploying. It is safe on the live
   site, and it rewrites stored blocks — rolling the pin back does not undo
   it.**
-  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/unreleased.md#run-mix-kilnblocksbackfill-once-after-deploying))
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/v0.12.0.md#run-mix-kilnblocksbackfill-once-after-deploying))
 
 - **If your overlay compiles with `--warnings-as-errors`, check its blocks'
   `migrate` chains first.**
-  ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642) · [long form](docs/changelog/unreleased.md#if-your-overlay-compiles-with-warnings-as-errors-check-its-block-migrate-chains-first))
+  ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642) · [long form](docs/changelog/v0.12.0.md#if-your-overlay-compiles-with-warnings-as-errors-check-its-block-migrate-chains-first))
 
 - **A new `throttle_counters` table holds the auth budgets; run migrations as usual.**
-  ([#1619](https://github.com/The-Verscienta/kiln_cms/issues/1619) · [long form](docs/changelog/unreleased.md#a-new-throttlecounters-table-holds-the-auth-budgets-run-migrations-as))
+  ([#1619](https://github.com/The-Verscienta/kiln_cms/issues/1619) · [long form](docs/changelog/v0.12.0.md#a-new-throttlecounters-table-holds-the-auth-budgets-run-migrations-as))
 
 - **A site whose code-injection snippet opens a websocket to its vendor must
   now list that `wss://` origin under Connections.**
-  ([long form](docs/changelog/unreleased.md#a-site-whose-code-injection-snippet-opens-a-websocket-to-its-vendor-must))
+  ([long form](docs/changelog/v0.12.0.md#a-site-whose-code-injection-snippet-opens-a-websocket-to-its-vendor-must))
 
 - **Before upgrading, make every webhook receiver verify
   `x-kilncms-webhook-signature`.**
-  ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616) · [long form](docs/changelog/unreleased.md#before-upgrading-make-every-webhook-receiver-verify-x-kilncms-webhook-signature))
+  ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616) · [long form](docs/changelog/v0.12.0.md#before-upgrading-make-every-webhook-receiver-verify-x-kilncms-webhook-signature))
 
 - **If your `config/project.exs` restates `:ash_domains`, add
   `KilnCMS.Notifications`.**
-  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/unreleased.md#if-your-configprojectexs-restates-ash_domains-add-kilncmsnotifications))
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/v0.12.0.md#if-your-configprojectexs-restates-ash_domains-add-kilncmsnotifications))
 
 - **On 0.8.0 or older, `mix kiln.update` shows you none of these notes.
   Read them here before moving the pin.**
-  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/unreleased.md#on-080-or-older-mix-kilnupdate-shows-you-none-of-these-notes))
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/v0.12.0.md#on-080-or-older-mix-kilnupdate-shows-you-none-of-these-notes))
 
 - **If you set `TENANT_STRICT_HOST=false` on a multi-org deployment, give every
   host that must keep working an organization first.**
-  ([#1662](https://github.com/The-Verscienta/kiln_cms/issues/1662) · [long form](docs/changelog/unreleased.md#tenant-strict-host-false-multi-org-upgrade))
+  ([#1662](https://github.com/The-Verscienta/kiln_cms/issues/1662) · [long form](docs/changelog/v0.12.0.md#tenant-strict-host-false-multi-org-upgrade))
 
 ### Breaking
 
 - **Webhook deliveries no longer send `x-kilncms-signature`.**
-  ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616) · [long form](docs/changelog/unreleased.md#webhook-deliveries-no-longer-send-x-kilncms-signature))
+  ([#1616](https://github.com/The-Verscienta/kiln_cms/issues/1616) · [long form](docs/changelog/v0.12.0.md#webhook-deliveries-no-longer-send-x-kilncms-signature))
 
 - **`TENANT_STRICT_HOST=false` is no longer honoured once a second
   organization exists.**
-  ([#1662](https://github.com/The-Verscienta/kiln_cms/issues/1662) · [long form](docs/changelog/unreleased.md#tenant-strict-host-false-no-longer-honoured))
+  ([#1662](https://github.com/The-Verscienta/kiln_cms/issues/1662) · [long form](docs/changelog/v0.12.0.md#tenant-strict-host-false-no-longer-honoured))
 
 ### Added
 
 - **`mix kiln.blocks.backfill` rewrites legacy-shaped stored blocks to the typed
   shape.**
-  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/unreleased.md#mix-kilnblocksbackfill-rewrites-legacy-shaped-stored-blocks-to-the-typed-shape))
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/v0.12.0.md#mix-kilnblocksbackfill-rewrites-legacy-shaped-stored-blocks-to-the-typed-shape))
 
 - **Release candidates are opt-in everywhere: `mix kiln.update --pre`.**
-  ([long form](docs/changelog/unreleased.md#release-candidates-are-opt-in-everywhere-mix-kilnupdate-pre))
+  ([long form](docs/changelog/v0.12.0.md#release-candidates-are-opt-in-everywhere-mix-kilnupdate-pre))
 
 - **An upgrade rehearsal runs a past release's `mix kiln.update` against the
   candidate, with a seeded database.**
-  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/unreleased.md#an-upgrade-rehearsal-runs-every-past-releases-mix-kilnupdate-against-the))
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/v0.12.0.md#an-upgrade-rehearsal-runs-every-past-releases-mix-kilnupdate-against-the))
 
 - **`mix kiln.plugins.doctor` flags a core domain missing from
   `:ash_domains`.**
-  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/unreleased.md#mix-kilnpluginsdoctor-flags-a-core-domain-missing-from-ash_domains))
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/v0.12.0.md#mix-kilnpluginsdoctor-flags-a-core-domain-missing-from-ash_domains))
 
 ### Changed
 
 - **An unknown option to `use KilnCMS.CMS.Content` now warns at compile time
   instead of being silently ignored.**
-  ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/unreleased.md#an-unknown-option-to-use-kilncmscmscontent-now-warns-at-compile-time-instead-of))
+  ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/v0.12.0.md#an-unknown-option-to-use-kilncmscmscontent-now-warns-at-compile-time-instead-of))
 
 - **Public delivery, the previews and the in-context editor render from the
   typed blocks, not through the legacy block shape.**
-  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/unreleased.md#public-delivery-the-previews-and-the-in-context-editor-render-from-the-typed))
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/v0.12.0.md#public-delivery-the-previews-and-the-in-context-editor-render-from-the-typed))
 
 - **A block whose `migrate` steps skip a version now warns at compile time;
   from Kiln 2.0 it is an error.**
-  ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642) · [long form](docs/changelog/unreleased.md#a-block-whose-migrate-steps-skip-a-version-now-warns-at-compile-time))
+  ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642) · [long form](docs/changelog/v0.12.0.md#a-block-whose-migrate-steps-skip-a-version-now-warns-at-compile-time))
 
 - **Every surface carries one label: covered, internal or experimental.**
-  ([long form](docs/changelog/unreleased.md#every-surface-carries-one-label-covered-internal-or-experimental))
+  ([#1542](https://github.com/The-Verscienta/kiln_cms/issues/1542) · [long form](docs/changelog/v0.12.0.md#every-surface-carries-one-label-covered-internal-or-experimental))
 
 - **The content editor says Save draft and Publish now, and Visual is a
   secondary button.**
-  ([#1671](https://github.com/The-Verscienta/kiln_cms/issues/1671) · [long form](docs/changelog/unreleased.md#the-content-editor-says-save-draft-and-publish-now))
+  ([#1671](https://github.com/The-Verscienta/kiln_cms/issues/1671) · [long form](docs/changelog/v0.12.0.md#the-content-editor-says-save-draft-and-publish-now))
 
 ### Fixed
 
 - **The two-factor prompt has a labelled code field, the page's language and
   light and dark themes.**
-  ([#1676](https://github.com/The-Verscienta/kiln_cms/issues/1676) · [long form](docs/changelog/unreleased.md#the-two-factor-prompt-has-a-labelled-code-field-the-pages-language-and-light-and))
+  ([#1676](https://github.com/The-Verscienta/kiln_cms/issues/1676) · [long form](docs/changelog/v0.12.0.md#the-two-factor-prompt-has-a-labelled-code-field-the-pages-language-and-light-and))
 
 - **The sign-in pages use the design kit, the setup wizard carries the brand,
   and the passkey button is in the page's markup.**
-  ([#1681](https://github.com/The-Verscienta/kiln_cms/issues/1681) · [long form](docs/changelog/unreleased.md#the-sign-in-pages-use-the-design-kit-the-setup-wizard-carries-the-brand-and-the))
+  ([#1681](https://github.com/The-Verscienta/kiln_cms/issues/1681) · [long form](docs/changelog/v0.12.0.md#the-sign-in-pages-use-the-design-kit-the-setup-wizard-carries-the-brand-and-the))
 
 - **A hard line break in a paragraph, heading, quote or list item is delivered
   as `<br/>`.**
-  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/unreleased.md#a-hard-line-break-in-a-paragraph-heading-quote-or-list-item-is-delivered-as-br))
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/v0.12.0.md#a-hard-line-break-in-a-paragraph-heading-quote-or-list-item-is-delivered-as-br))
 
 - **Paragraphs inside a quote or a list item no longer run together when saved
   as Portable Text.**
-  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/unreleased.md#paragraphs-inside-a-quote-or-a-list-item-no-longer-run-together-when-saved-as))
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/v0.12.0.md#paragraphs-inside-a-quote-or-a-list-item-no-longer-run-together-when-saved-as))
 
 - **A legacy `columns` block reads as a typed `Columns` block, and an unmapped
   legacy block keeps the type name it was stored under.**
-  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/unreleased.md#a-legacy-columns-block-reads-as-a-typed-columns-block-and-an-unmapped-legacy))
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/v0.12.0.md#a-legacy-columns-block-reads-as-a-typed-columns-block-and-an-unmapped-legacy))
 
 - **A 429's `retry-after` is rounded up, never 0.**
-  ([long form](docs/changelog/unreleased.md#a-429s-retry-after-is-rounded-up-never-0))
+  ([long form](docs/changelog/v0.12.0.md#a-429s-retry-after-is-rounded-up-never-0))
+
 - **The audience checkboxes on `/editor/accounts` edit the site membership, not the deprecated global column.**
-  ([long form](docs/changelog/unreleased.md#the-audience-checkboxes-on-editor-accounts-edit-the-site-membership))
+  ([#1646](https://github.com/The-Verscienta/kiln_cms/issues/1646) · [long form](docs/changelog/v0.12.0.md#the-audience-checkboxes-on-editor-accounts-edit-the-site-membership))
+
 - **Paying for a membership no longer demotes a legacy editor.**
-  ([#1649](https://github.com/The-Verscienta/kiln_cms/issues/1649) · [long form](docs/changelog/unreleased.md#paying-for-a-membership-no-longer-demotes-a-legacy-editor))
+  ([#1649](https://github.com/The-Verscienta/kiln_cms/issues/1649) · [long form](docs/changelog/v0.12.0.md#paying-for-a-membership-no-longer-demotes-a-legacy-editor))
 
 - **The block upcaster refuses a gap in the `migrate` chain instead of
   stamping the block current.**
-  ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642) · [long form](docs/changelog/unreleased.md#the-block-upcaster-refuses-a-gap-in-the-migrate-chain))
+  ([#1642](https://github.com/The-Verscienta/kiln_cms/issues/1642) · [long form](docs/changelog/v0.12.0.md#the-block-upcaster-refuses-a-gap-in-the-migrate-chain))
 
 - **After signing in with a recovery code, you can set up a new
   authenticator.**
-  ([#1675](https://github.com/The-Verscienta/kiln_cms/issues/1675) · [long form](docs/changelog/unreleased.md#after-signing-in-with-a-recovery-code-you-can-set-up-a-new-authenticator))
+  ([#1675](https://github.com/The-Verscienta/kiln_cms/issues/1675) · [long form](docs/changelog/v0.12.0.md#after-signing-in-with-a-recovery-code-you-can-set-up-a-new-authenticator))
 
 - **Public form labels are tied to their inputs, and a refused embedded
   submission offers Try again.**
-  ([#1673](https://github.com/The-Verscienta/kiln_cms/issues/1673) · [long form](docs/changelog/unreleased.md#public-form-labels-are-tied-to-their-inputs-and-a-refused-embedded-submission))
+  ([#1673](https://github.com/The-Verscienta/kiln_cms/issues/1673) · [long form](docs/changelog/v0.12.0.md#public-form-labels-are-tied-to-their-inputs-and-a-refused-embedded-submission))
 
 - **A refused public form submission shows the form again, with your input
   kept and each error next to its field.**
-  ([#1683](https://github.com/The-Verscienta/kiln_cms/issues/1683) · [long form](docs/changelog/unreleased.md#a-refused-public-form-submission-shows-the-form-again))
+  ([#1683](https://github.com/The-Verscienta/kiln_cms/issues/1683) · [long form](docs/changelog/v0.12.0.md#a-refused-public-form-submission-shows-the-form-again))
 
 - **Console pages show their title, and an empty calendar or task list says
   so.**
-  ([#1670](https://github.com/The-Verscienta/kiln_cms/issues/1670) · [#1672](https://github.com/The-Verscienta/kiln_cms/issues/1672) · [long form](docs/changelog/unreleased.md#console-pages-show-their-title-and-an-empty-calendar-or-task-list-says-so))
+  ([#1670](https://github.com/The-Verscienta/kiln_cms/issues/1670) · [#1672](https://github.com/The-Verscienta/kiln_cms/issues/1672) · [long form](docs/changelog/v0.12.0.md#console-pages-show-their-title-and-an-empty-calendar-or-task-list-says-so))
 
 - **The account and membership pages show who is signed in; the sign-in
   pages have a skip target.**
-  ([#1674](https://github.com/The-Verscienta/kiln_cms/issues/1674) · [long form](docs/changelog/unreleased.md#the-account-and-membership-pages-show-who-is-signed-in))
+  ([#1674](https://github.com/The-Verscienta/kiln_cms/issues/1674) · [long form](docs/changelog/v0.12.0.md#the-account-and-membership-pages-show-who-is-signed-in))
 
 - **The example overlay's migrations run beside the core's.**
-  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/unreleased.md#the-example-overlays-migrations-run-beside-the-cores))
+  ([#1540](https://github.com/The-Verscienta/kiln_cms/issues/1540) · [long form](docs/changelog/v0.12.0.md#the-example-overlays-migrations-run-beside-the-cores))
 
 - **Ember links and labels in the console meet AA contrast; the previews wear
   the site's theme, and the public header nav is named and wraps on a phone.**
-  ([#1677](https://github.com/The-Verscienta/kiln_cms/issues/1677) · [#1682](https://github.com/The-Verscienta/kiln_cms/issues/1682) · [long form](docs/changelog/unreleased.md#ember-links-and-labels-in-the-console-meet-aa-contrast-the-previews-wear-the))
+  ([#1677](https://github.com/The-Verscienta/kiln_cms/issues/1677) · [#1682](https://github.com/The-Verscienta/kiln_cms/issues/1682) · [long form](docs/changelog/v0.12.0.md#ember-links-and-labels-in-the-console-meet-aa-contrast-the-previews-wear-the))
 
 - **A sign-in or console page opened under a locale prefix connects, and
   renders in that language.**
-  ([#1699](https://github.com/The-Verscienta/kiln_cms/issues/1699) · [long form](docs/changelog/unreleased.md#a-sign-in-or-console-page-opened-under-a-locale-prefix-connects-and-renders))
+  ([#1699](https://github.com/The-Verscienta/kiln_cms/issues/1699) · [long form](docs/changelog/v0.12.0.md#a-sign-in-or-console-page-opened-under-a-locale-prefix-connects-and-renders))
 
 ### Security
 
 - **Auth budgets now hold across nodes and restarts.**
-  ([#1619](https://github.com/The-Verscienta/kiln_cms/issues/1619) · [long form](docs/changelog/unreleased.md#auth-budgets-now-hold-across-nodes-and-restarts))
+  ([#1619](https://github.com/The-Verscienta/kiln_cms/issues/1619) · [long form](docs/changelog/v0.12.0.md#auth-budgets-now-hold-across-nodes-and-restarts))
 
 - **The browser CSP's `connect-src` is `'self'` alone — no websocket to any
   other host.**
-  ([long form](docs/changelog/unreleased.md#the-browser-csps-connect-src-is-self-alone-no-websocket-to-any))
+  ([#1615](https://github.com/The-Verscienta/kiln_cms/issues/1615) · [long form](docs/changelog/v0.12.0.md#the-browser-csps-connect-src-is-self-alone-no-websocket-to-any))
 
 - **The seed script refuses a production database.**
-  ([#1651](https://github.com/The-Verscienta/kiln_cms/issues/1651) · [long form](docs/changelog/unreleased.md#the-seed-script-refuses-a-production-database))
+  ([#1651](https://github.com/The-Verscienta/kiln_cms/issues/1651) · [long form](docs/changelog/v0.12.0.md#the-seed-script-refuses-a-production-database))
 
 - **Changing your password signs out your open console tabs.**
-  ([#1652](https://github.com/The-Verscienta/kiln_cms/issues/1652) · [long form](docs/changelog/unreleased.md#changing-your-password-signs-out-your-open-console-tabs))
+  ([#1652](https://github.com/The-Verscienta/kiln_cms/issues/1652) · [long form](docs/changelog/v0.12.0.md#changing-your-password-signs-out-your-open-console-tabs))
 
 - **Unsplash imports go through `SafeFetch`.**
-  ([#1653](https://github.com/The-Verscienta/kiln_cms/issues/1653) · [long form](docs/changelog/unreleased.md#unsplash-imports-go-through-safefetch))
+  ([#1653](https://github.com/The-Verscienta/kiln_cms/issues/1653) · [long form](docs/changelog/v0.12.0.md#unsplash-imports-go-through-safefetch))
 
 - **A node that missed the second organization's broadcast turns strict
   within 30 seconds, not five minutes.**
-  ([#1654](https://github.com/The-Verscienta/kiln_cms/issues/1654) · [long form](docs/changelog/unreleased.md#org-count-recount-30-seconds))
+  ([#1654](https://github.com/The-Verscienta/kiln_cms/issues/1654) · [long form](docs/changelog/v0.12.0.md#org-count-recount-30-seconds))
 
 - **Kiln warns when a multi-org deployment has no `KILN_CONSOLE_HOST`.**
-  ([#1661](https://github.com/The-Verscienta/kiln_cms/issues/1661) · [long form](docs/changelog/unreleased.md#multi-org-without-console-host-warns))
+  ([#1661](https://github.com/The-Verscienta/kiln_cms/issues/1661) · [long form](docs/changelog/v0.12.0.md#multi-org-without-console-host-warns))
 
 - **A newsletter campaign is created under the sender's own authorization.**
-  ([#1655](https://github.com/The-Verscienta/kiln_cms/issues/1655) · [long form](docs/changelog/unreleased.md#a-newsletter-campaign-is-created-under-the-senders-own-authorization))
+  ([#1655](https://github.com/The-Verscienta/kiln_cms/issues/1655) · [long form](docs/changelog/v0.12.0.md#a-newsletter-campaign-is-created-under-the-senders-own-authorization))
 
 - **The newsletter confirmation link no longer confirms on a GET.**
-  ([#1664](https://github.com/The-Verscienta/kiln_cms/issues/1664) · [long form](docs/changelog/unreleased.md#the-newsletter-confirmation-link-no-longer-confirms-on-a-get))
+  ([#1664](https://github.com/The-Verscienta/kiln_cms/issues/1664) · [long form](docs/changelog/v0.12.0.md#the-newsletter-confirmation-link-no-longer-confirms-on-a-get))
 
 - **The ActivityPub inbox checks a signature offline before it fetches the
   sender's key.**
-  ([#1665](https://github.com/The-Verscienta/kiln_cms/issues/1665) · [long form](docs/changelog/unreleased.md#the-activitypub-inbox-checks-a-signature-offline-before-it-fetches))
+  ([#1665](https://github.com/The-Verscienta/kiln_cms/issues/1665) · [long form](docs/changelog/v0.12.0.md#the-activitypub-inbox-checks-a-signature-offline-before-it-fetches))
 
 ### Deprecated
 
 - **`published?:` on `use KilnCMS.CMS.Content` is deprecated, and removed at
   1.0.**
-  ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/unreleased.md#published-on-use-kilncmscmscontent-is-deprecated-and-removed-at-10))
+  ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/v0.12.0.md#published-on-use-kilncmscmscontent-is-deprecated-and-removed-at-10))
 
 - **The `/editor/pages/:id` and `/editor/posts/:id` editor routes are
   deprecated, and removed at 1.0; use `/editor/content/page/:id` and
   `/editor/content/post/:id`.**
-  ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/unreleased.md#the-editorpagesid-and-editorpostsid-editor-routes-are-deprecated-and-removed-at))
+  ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/v0.12.0.md#the-editorpagesid-and-editorpostsid-editor-routes-are-deprecated-and-removed-at))
 
 - **The `User.audiences` fallback for an account with no organization membership
   is deprecated, and removed at 1.0.**
-  ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/unreleased.md#the-useraudiences-fallback-for-an-account-with-no-organization-membership-is))
+  ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/v0.12.0.md#the-useraudiences-fallback-for-an-account-with-no-organization-membership-is))
 
 - **Webhook and newsletter jobs enqueued without `org_id`, and pre-ledger
   webhook jobs, are deprecated, and not run by 1.0.**
-  ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/unreleased.md#webhook-and-newsletter-jobs-enqueued-without-orgid-and-pre-ledger-webhook-jobs))
+  ([#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) · [long form](docs/changelog/v0.12.0.md#webhook-and-newsletter-jobs-enqueued-without-orgid-and-pre-ledger-webhook-jobs))
 
 - **The legacy block bridge is deprecated for removal at 1.0:
   `KilnCMS.CMS.TypedBlocks.to_legacy/1`, `from_legacy/1`, `RichText.legacy_html`
   and the legacy `KilnCMS.CMS.Block` write shape.**
-  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/unreleased.md#the-legacy-block-bridge-is-deprecated-for-removal-at-10))
+  ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537) · [long form](docs/changelog/v0.12.0.md#the-legacy-block-bridge-is-deprecated-for-removal-at-10))
 
 ## [0.11.0] - 2026-09-26
 
@@ -1755,7 +1763,8 @@ that `mix kiln.update` compares against.
   one that can't be described by a changelog diff.
   ([long form](docs/changelog/v0.1.0.md#if-your-project-pins-a-sha-from-before-this-tag-your-first-update-is-the-only))
 
-[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.8.0...v0.9.0
