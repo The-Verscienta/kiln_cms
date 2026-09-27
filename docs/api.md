@@ -216,7 +216,7 @@ Notes:
 - It is redeemed **at most once**. A verify request that succeeded cannot be
   replayed. A wrong code or a `429` leaves it usable, so a client can retry the
   code without restarting.
-- Codes are budgeted **per account** — 5 per 15 minutes, per node — and the
+- Codes are budgeted **per account** — 5 per 15 minutes, across every node — and the
   budget is shared with the browser prompt at `/sign-in/verify`. A `429` here is
   not reset by signing in again; it carries `Retry-After` in whole seconds.
 - Errors from both steps carry a stable `code` alongside `detail`:
