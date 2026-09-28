@@ -157,6 +157,31 @@ defmodule KilnCMSWeb.SearchApiTest do
     assert body["suggestion"] == nil
   end
 
+  test "a search that cannot get a connection answers 503 with Retry-After, not a 500" do
+    # #1712: at pool saturation the checkout is dropped from the queue. This
+    # used to escape as a `DBConnection.ConnectionError` from whichever leg
+    # hit it — a 500 — and is now the search's one wait, answered as
+    # retryable. A process the test sandbox never allowed is the same
+    # failure to reach the pool (`DBConnection.OwnershipError`); plain
+    # `spawn` carries no `$callers`, so nothing allows it implicitly.
+    conn =
+      build_conn(:get, "/api/search", %{"q" => "anything"})
+      |> Plug.Conn.assign(:current_org, KilnCMS.Accounts.default_org())
+
+    test = self()
+
+    spawn(fn ->
+      send(test, {:answered, KilnCMSWeb.SearchApiController.index(conn, conn.params)})
+    end)
+
+    assert_receive {:answered, answered}, 5_000
+    assert answered.status == 503
+    assert Plug.Conn.get_resp_header(answered, "retry-after") == ["1"]
+
+    assert %{"errors" => [%{"code" => "temporarily_unavailable", "status" => "503"}]} =
+             Jason.decode!(answered.resp_body)
+  end
+
   # #296: the sections are DERIVED from the content-type registry, not a
   # hardcoded module list — a type a plugin/project registers on
   # `:content_domains` gets a section (and counts toward the analytics/

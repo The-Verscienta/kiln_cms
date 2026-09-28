@@ -48,6 +48,7 @@ defmodule KilnCMSWeb.SearchApiController do
   alias KilnCMS.I18n
   alias KilnCMS.Search
   alias KilnCMS.Search.Highlight
+  alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.Params
 
   @max_limit 25
@@ -58,6 +59,16 @@ defmodule KilnCMSWeb.SearchApiController do
   # then names the corrected term. Good exact-match queries stay clean:
   # `Search.suggest/2` never suggests when a title word equals the query.
   @suggest_below 3
+
+  # Seconds a client is asked to wait after a `503` from a saturated pool. A
+  # search holds a connection for milliseconds at a time, so the pool turns
+  # over many times a second; one second is enough to be past the burst that
+  # filled it, without a client giving up on a search it could have had.
+  @retry_after "1"
+
+  # The attributes a content hit is read with; its `highlight` and an entry's
+  # `type_name` are calculations, loaded alongside.
+  @hit_fields [:id, :title, :slug, :excerpt, :locale, :org_id]
 
   def index(conn, params) do
     query = params |> Params.string("q", "") |> String.trim()
@@ -71,7 +82,31 @@ defmodule KilnCMSWeb.SearchApiController do
     end
   end
 
+  # A saturated pool drops a query's checkout rather than queue it forever,
+  # and that used to escape from whichever leg hit it as a `500`. It is
+  # answered `503` + `Retry-After` now — a search a client can retry (#1712).
+  # The analytics write happens off the request (`Search.record_query_async/3`),
+  # after the search has been answered.
   defp search(conn, query, locale, limit, params) do
+    org_id = KilnCMSWeb.Tenant.current_org_id(conn)
+
+    case Search.unless_unavailable(fn -> {:ok, run(query, locale, limit, params, org_id)} end) do
+      {:ok, {payload, total}} ->
+        Search.record_query_async(query, total, locale: locale, tenant: org_id)
+        json(conn, payload)
+
+      {:error, :unavailable} ->
+        conn
+        |> put_resp_header("retry-after", @retry_after)
+        |> ApiError.send(
+          :service_unavailable,
+          "temporarily_unavailable",
+          "Search is temporarily unavailable; retry shortly."
+        )
+    end
+  end
+
+  defp run(query, locale, limit, params, org_id) do
     read_opts = [
       # No `actor:` — see the moduledoc. `authorize?: true` with no actor is
       # what pins this to the anonymous read policy, and `read_opts` is handed
@@ -80,7 +115,7 @@ defmodule KilnCMSWeb.SearchApiController do
       authorize?: true,
       # Scope search to the request's org (#336); resolved from the host by the
       # SetTenant plug. Content sections are isolated per site.
-      tenant: KilnCMSWeb.Tenant.current_org_id(conn),
+      tenant: org_id,
       locale: locale,
       limit: limit
     ]
@@ -88,7 +123,17 @@ defmodule KilnCMSWeb.SearchApiController do
     sections =
       Search.global(
         query,
-        read_opts ++ [highlight: true, filters: filters(params, read_opts[:tenant])]
+        read_opts ++
+          [
+            highlight: true,
+            filters: filters(params, org_id),
+            # What `item/4` renders, and what the reranker reads when it is
+            # on — not the block tree, which is most of a row (#1712).
+            select: @hit_fields,
+            # Everything but `media`, which this endpoint never returns: one
+            # read per request that was run and thrown away (#960, #1712).
+            sections: Search.content_sections() ++ Keyword.keys(KilnCMS.CMS.Taxonomy.searchable())
+          ]
       )
 
     # One result section per compiled content type, straight from the same
@@ -124,11 +169,6 @@ defmodule KilnCMSWeb.SearchApiController do
       |> Enum.map(&length/1)
       |> Enum.sum()
 
-    Search.record_query(query, total,
-      locale: locale,
-      tenant: KilnCMSWeb.Tenant.current_org_id(conn)
-    )
-
     suggestion = if total < @suggest_below, do: Search.suggest(query, read_opts), else: nil
 
     payload = %{query: query, locale: locale, results: results, suggestion: suggestion}
@@ -140,7 +180,7 @@ defmodule KilnCMSWeb.SearchApiController do
         do: Map.put(payload, :facets, Search.facets(query, read_opts)),
         else: payload
 
-    json(conn, payload)
+    {payload, total}
   end
 
   # Facet filter params → `Search` filters. Only the category facet is
