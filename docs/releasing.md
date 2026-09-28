@@ -252,7 +252,9 @@ a `kiln_client` pre-release unless a requirement names one.
 [`.github/SECURITY.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/.github/SECURITY.md#supported-versions)
 sets the policy: the latest minor gets every fix, and the previous minor gets
 security fixes for 90 days from the release date of the minor that replaced
-it. There are no long-lived maintenance branches. Each patch is cut from a
+it. The window applies within a major, from 1.0.0 on: `0.x` gets nothing
+after 1.0.0's release date, so there is no `0.12.x` backport once 1.0.0 is
+out. There are no long-lived maintenance branches. Each patch is cut from a
 short-lived branch off the line's newest tag, and the branch is deleted
 afterwards. v0.9.1 was the first patch cut this way.
 

@@ -8,7 +8,8 @@ before it for security fixes only, and for a limited time.
 | Line | Supported | Gets |
 |---|---|---|
 | The latest minor (e.g. `1.1.x` once `1.1.0` is out) | ✅ | Every fix, as a patch release on that line |
-| The previous minor (e.g. `1.0.x`) | 🔒 for 90 days | Security fixes only, for 90 days from the release date of the minor that replaced it |
+| The previous minor of the same major (e.g. `1.0.x`) | 🔒 for 90 days | Security fixes only, for 90 days from the release date of the minor that replaced it |
+| `0.x` (including `0.12.x`), once `1.0.0` is out | ❌ | Nothing from `1.0.0`'s release date: upgrade with `mix kiln.update --allow-major` |
 | Anything older | ❌ | Nothing: upgrade to a supported line |
 | `main` | Development | Fixes land here first; not a release |
 
@@ -17,9 +18,13 @@ released on 1 March, `1.0.x` gets security fixes until 30 May, and none after.
 A fix released within the window ships as a `1.0.x` patch; after it, the fix
 reaches you only by upgrading to `1.1.x`.
 
-The previous minor is whichever line came immediately before the latest one,
-across a major version too: when `1.0.0` ships, `0.12.x` gets the same 90 days.
-Before `1.0.0`, `0.12.x` is the latest minor.
+**The rule applies within a major line, from `1.0.0` on.** The previous minor
+is the one before the latest minor *of the same major*; the window does not
+carry across a major version. Until `1.0.0` ships, `0.12.x` is the latest
+minor and is supported as such. **Support for `0.x` ends on `1.0.0`'s release
+date:** from then on `0.12.x` gets no fixes, security or otherwise. Upgrade a
+`0.x` project with `mix kiln.update --allow-major` after reading the 1.0
+upgrade notes.
 
 **How a fix reaches a supported line.** It lands on `main` first. The latest
 minor gets a patch release. If that is not the previous minor's release, the
