@@ -31,8 +31,7 @@ carries the reasoning.
   good: never retried, never discarded, and for a `unique` worker (fire,
   static export, embeddings, link checks, the occurrence backfill) it blocked
   every later enqueue of the same job. `Oban.Lifeline` now runs, appended to
-  the plugin list by `KilnCMS.Application.oban_config/0` next to the injected
-  crontab. It moves a job `executing` for longer than
+  the plugin list at boot next to the injected crontab. It moves a job `executing` for longer than
   `KILN_OBAN_RESCUE_AFTER_MINUTES` (default 180) back to `available`, or to
   `discarded` once its attempts are spent. The rescue goes by time alone, so
   the window must exceed the longest legitimate job. That is a backup
