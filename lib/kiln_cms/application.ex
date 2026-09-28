@@ -171,6 +171,7 @@ defmodule KilnCMS.Application do
       # the config-only warnings at the top of start/2.
       warn_if_strict_host_false_ignored()
       warn_if_console_shares_origin()
+      warn_if_console_host_outside_rp_id()
       warn_if_embed_lists_over_ceiling()
       warn_if_chain_unsigned()
       enqueue_occurrence_backfill()
@@ -432,6 +433,25 @@ defmodule KilnCMS.Application do
       KilnCMS.Config.Report.warn(
         "console_host",
         KilnCMSWeb.Tenant.console_shares_origin_message()
+      )
+    end
+  end
+
+  # `KILN_CONSOLE_HOST` outside `PHX_HOST` (#1688): the browser refuses the
+  # passkeys' RP ID (the `PHX_HOST` host) on a console host that does not end
+  # in it, so nobody can sign in or enroll with a passkey there. Changing the RP
+  # ID would orphan every registered passkey, so this says so instead. Needs the
+  # endpoint's URL, hence after the tree is up.
+  defp warn_if_console_host_outside_rp_id do
+    if not KilnCMSWeb.Plugs.ConsoleHost.passkey_capable?() do
+      KilnCMS.Config.Report.warn(
+        "console_host_passkeys",
+        "KILN_CONSOLE_HOST (#{KilnCMSWeb.Plugs.ConsoleHost.console_host()}) is not " <>
+          "PHX_HOST or a subdomain of it, so passkeys cannot be used on the " <>
+          "console: their relying-party ID is the PHX_HOST host, and a browser " <>
+          "only accepts it on hosts under it. Editors can still sign in with a " <>
+          "password or SSO. Move the console host under PHX_HOST (for example " <>
+          "console.<PHX_HOST>) to use passkeys there. See docs/multi-tenancy.md."
       )
     end
   end

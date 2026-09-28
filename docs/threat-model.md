@@ -1704,24 +1704,39 @@ because other files cite them by number.
     this is the operator's own script. On a multi-org deployment it is one
     tenant's admin reaching other tenants' editors, and the operator's.
 
-    The mitigation is `KILN_CONSOLE_HOST` (#740): the console is then served
-    only on a host no tenant controls, and delivery script is cross-origin to
-    it. It stays **opt-in**, because a console host is a deployment change
-    (DNS, TLS, `CHECK_ORIGINS`) Kiln cannot make for an operator on upgrade,
-    and because org resolution is still host-derived, so that host reaches
-    the default organization's console only. What Kiln does instead is say
-    so: once a second organization exists and `KILN_CONSOLE_HOST` is unset,
-    it warns at boot (a `KilnCMS.Config.Report` warning, which reaches
-    Sentry), when the second org is created, and on `/editor/system`
-    (`KilnCMSWeb.Tenant.console_shares_origin?/0`). See
+    The mitigation is `KILN_CONSOLE_HOST` (#740): consoles are then served
+    only on hosts no tenant controls, and delivery script is cross-origin to
+    all of them. Since #1688 that covers **every** organization: the bare
+    console host is the default org's console and `<slug>.<console host>`
+    is each other org's, resolved from the host like a tenant subdomain, so
+    no org's console shares an origin with any site or with another org's
+    console. Cookies stay host-only (`__Host-` in production), so a session
+    on one console host is never sent to a site host or to another console
+    host. Passkeys keep their RP ID (the `PHX_HOST` host) and are accepted on
+    console origins under it, never on tenant site origins
+    (`KilnCMS.Accounts.WebAuthn.origin_allowed?/2`). Why one host per org
+    and not one shared, org-switching console host:
+    [decision record 0011](decisions/0011-each-organization-gets-its-own-console-origin-under-the-console-host.md).
+
+    It stays **opt-in**, because a console host is a DNS and TLS change
+    (the host and its wildcard) that Kiln cannot make for an operator on
+    upgrade. So Kiln says so: once a second organization exists and
+    `KILN_CONSOLE_HOST` is unset, it warns at boot (a `KilnCMS.Config.Report`
+    warning, which reaches Sentry), when the second org is created, and on
+    `/editor/system` (`KilnCMSWeb.Tenant.console_shares_origin?/0`). See
     [code-injection.md](code-injection.md#read-this-before-granting-the-role).
 
-    **1.0 verdict (decided, #1661): accepted at 1.0 with a warning; set
-    `KILN_CONSOLE_HOST` on multi-org installs.** The alternative an operator
-    has without a console host is to treat "org admin" as equivalent to
-    console access and staff it accordingly. Per-tenant console hosts —
-    session-derived org resolution on the console host — are the follow-up
-    that would let a multi-org console host serve every tenant.
+    **1.0 verdict (decided, #1661; structural gap closed, #1688): closed
+    by configuration.** With `KILN_CONSOLE_HOST` set, a multi-org
+    deployment isolates every org's console. What remains is the
+    unconfigured deployment, which is warned about. Its alternative is to
+    treat "org admin" as equivalent to console access and staff it
+    accordingly. One edge stays by design: the sign-in and account routes
+    are shared (`KilnCMSWeb.Surface`), because members sign in on the site
+    for gated content. So a session someone creates *on a site host* is
+    same-origin with that org's code injection. It reaches the shared routes
+    only, never a console route, and it is a separate session from the
+    one on any console host.
 
 **Not on this list, but named by the 1.0 roadmap: `/api/ask` lets an anonymous
 caller drive LLM cost** (see *Other outbound calls* above). **1.0 verdict

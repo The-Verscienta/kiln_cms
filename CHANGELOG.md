@@ -54,6 +54,18 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **On a multi-org deployment with `KILN_CONSOLE_HOST` set, add
+  `*.<console host>` to DNS and TLS before upgrading.**
+  ([#1688](https://github.com/The-Verscienta/kiln_cms/issues/1688) · [long form](docs/changelog/unreleased.md#on-a-multi-org-deployment-with-kiln_console_host-set-add-console-host-to-dns))
+
+### Security
+
+- **`KILN_CONSOLE_HOST` now isolates every organization's console, each on its
+  own `<slug>.<console host>` origin.**
+  ([#1688](https://github.com/The-Verscienta/kiln_cms/issues/1688) · [long form](docs/changelog/unreleased.md#kiln_console_host-now-isolates-every-organizations-console-each-on-its-own))
+
 ## [0.12.0] - 2026-09-27
 
 Long form: [docs/changelog/v0.12.0.md](docs/changelog/v0.12.0.md) —
