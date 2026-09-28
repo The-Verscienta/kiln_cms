@@ -53,11 +53,15 @@ defmodule KilnCMS.Media.VariantWorkerTest do
     })
   end
 
+  # Args as every enqueue site builds them: the item's own org (#1658).
+  defp job(item), do: %{media_item_id: item.id, org_id: item.org_id}
+  defp org_id, do: KilnCMS.Accounts.default_org_id()
+
   test "fetches the original, stores variants, writes dimensions, broadcasts", %{root: root} do
     item = media_item(store_png(1200, 800))
     Phoenix.PubSub.subscribe(KilnCMS.PubSub, VariantWorker.topic())
 
-    assert :ok = perform_job(VariantWorker, %{media_item_id: item.id})
+    assert :ok = perform_job(VariantWorker, job(item))
 
     reloaded = CMS.get_media_item!(item.id, authorize?: false)
     assert reloaded.width == 1200
@@ -77,7 +81,7 @@ defmodule KilnCMS.Media.VariantWorkerTest do
   test "writes each variant in the source format and every alternate (#473)", %{root: root} do
     item = media_item(store_png(1200, 800))
 
-    assert :ok = perform_job(VariantWorker, %{media_item_id: item.id})
+    assert :ok = perform_job(VariantWorker, job(item))
 
     variants = CMS.get_media_item!(item.id, authorize?: false).variants
 
@@ -96,12 +100,12 @@ defmodule KilnCMS.Media.VariantWorkerTest do
   test "re-running reclaims the storage the previous variants held", %{root: root} do
     item = media_item(store_png(1200, 800))
 
-    assert :ok = perform_job(VariantWorker, %{media_item_id: item.id})
+    assert :ok = perform_job(VariantWorker, job(item))
     first = CMS.get_media_item!(item.id, authorize?: false).variants
     old_keys = first |> Map.values() |> Enum.map(& &1["key"])
     assert old_keys != []
 
-    assert :ok = perform_job(VariantWorker, %{media_item_id: item.id})
+    assert :ok = perform_job(VariantWorker, job(item))
     second = CMS.get_media_item!(item.id, authorize?: false).variants
     new_keys = second |> Map.values() |> Enum.map(& &1["key"])
 
@@ -132,7 +136,7 @@ defmodule KilnCMS.Media.VariantWorkerTest do
         variants: %{"thumb" => stale}
       })
 
-    assert :ok = perform_job(VariantWorker, %{media_item_id: item.id})
+    assert :ok = perform_job(VariantWorker, job(item))
 
     assert CMS.get_media_item!(item.id, authorize?: false).variants == %{"thumb" => stale}
   end
@@ -143,7 +147,7 @@ defmodule KilnCMS.Media.VariantWorkerTest do
 
     small = media_item(store_png(150, 100))
 
-    assert :ok = perform_job(VariantWorker, %{media_item_id: small.id})
+    assert :ok = perform_job(VariantWorker, job(small))
 
     reloaded = CMS.get_media_item!(small.id, authorize?: false)
     assert reloaded.variants == %{}
@@ -154,7 +158,7 @@ defmodule KilnCMS.Media.VariantWorkerTest do
   test "is a graceful no-op for a non-raster original" do
     item = media_item(store(&File.write!(&1, "not an image"), ".txt"))
 
-    assert :ok = perform_job(VariantWorker, %{media_item_id: item.id})
+    assert :ok = perform_job(VariantWorker, job(item))
 
     reloaded = CMS.get_media_item!(item.id, authorize?: false)
     assert reloaded.width == nil
@@ -164,18 +168,19 @@ defmodule KilnCMS.Media.VariantWorkerTest do
   describe "the job's org (#1658)" do
     import ExUnit.CaptureLog
 
-    test "a job without org_id runs under the default org, and says so" do
+    test "a job without org_id is cancelled with a logged error and touches nothing" do
       item = media_item(store_png(1200, 800))
-      assert item.org_id == KilnCMS.Accounts.default_org_id()
 
       log =
         capture_log(fn ->
-          assert :ok = perform_job(VariantWorker, %{media_item_id: item.id})
+          assert {:cancel, "job has no org_id"} =
+                   perform_job(VariantWorker, %{media_item_id: item.id})
         end)
 
+      assert log =~ "[error]"
       assert log =~ "KilnCMS.Media.VariantWorker"
-      assert log =~ "has no `org_id`"
-      assert %{"thumb" => _} = CMS.get_media_item!(item.id, authorize?: false).variants
+      assert log =~ item.id
+      assert CMS.get_media_item!(item.id, authorize?: false).variants == %{}
     end
 
     test "a present org_id scopes the read: another site's job touches nothing" do
@@ -194,14 +199,15 @@ defmodule KilnCMS.Media.VariantWorkerTest do
   end
 
   test "discards the job when the MediaItem is gone" do
-    assert :ok = perform_job(VariantWorker, %{media_item_id: Ecto.UUID.generate()})
+    assert :ok =
+             perform_job(VariantWorker, %{media_item_id: Ecto.UUID.generate(), org_id: org_id()})
   end
 
   test "is a no-op when the stored original is missing" do
     # MediaItem points at a key that was never stored.
     item = media_item("orig-#{System.unique_integer([:positive])}.png")
 
-    assert :ok = perform_job(VariantWorker, %{media_item_id: item.id})
+    assert :ok = perform_job(VariantWorker, job(item))
     assert CMS.get_media_item!(item.id, authorize?: false).variants == %{}
   end
 end

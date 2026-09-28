@@ -56,9 +56,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
-- **Media jobs without an `org_id` run under the default organization instead
-  of silently doing nothing.**
-  ([#1658](https://github.com/The-Verscienta/kiln_cms/issues/1658) · [long form](docs/changelog/unreleased.md#media-jobs-without-an-org-id-run-under-the-default-org))
+- **Edited images get new variants under strict tenancy, and a media job with no
+  `org_id` is cancelled with a logged error instead of doing nothing silently.**
+  ([#1658](https://github.com/The-Verscienta/kiln_cms/issues/1658) · [long form](docs/changelog/unreleased.md#a-media-job-with-no-org-id-is-cancelled-not-silently-skipped))
 
 - **An old newsletter confirmation link no longer re-subscribes a reader who
   unsubscribed.**

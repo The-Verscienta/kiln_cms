@@ -7,21 +7,21 @@ carries the reasoning.
 
 ## Fixed
 
-<a id="media-jobs-without-an-org-id-run-under-the-default-org"></a>
+<a id="a-media-job-with-no-org-id-is-cancelled-not-silently-skipped"></a>
 
-- **Media jobs without an `org_id` run under the default organization instead
-  of silently doing nothing.** `VariantWorker`, `AVWorker` and `AVStripWorker`
-  read their item with the job's `org_id` as the tenant, and a job without one
-  used a `nil` tenant. Under strict tenancy that read failed and the job
-  returned `:ok` having done nothing. The in-admin image editor enqueued its
-  variant regeneration that way, so under strict tenancy an edited image kept
-  its old variants. The editor now passes the item's `org_id`, like every other
-  enqueue site. A job that still arrives without one runs under the default
-  organization and logs a warning naming the worker. This is the fallback the
-  firing, search and webhook workers already use
-  (`KilnCMS.Media.Ingest.job_org_id/2`). The read stays tenant-scoped, so an
-  item on another site is not found rather than read across organizations.
-  (#1658)
+- **Edited images get new variants under strict tenancy, and a media job with no
+  `org_id` is cancelled with a logged error instead of doing nothing silently.**
+  `VariantWorker`, `AVWorker` and `AVStripWorker` read their item with the
+  job's `org_id` as the tenant. A job without one used a `nil` tenant, and
+  under strict tenancy that read failed, so the job returned `:ok` having done
+  nothing. The in-admin image editor enqueued its variant regeneration that
+  way, so an edited image kept its old variants. The editor now passes the
+  item's `org_id`, as every other enqueue site already did. The workers now
+  treat a job with no `org_id` as a bug in whatever enqueued it: they log an
+  error naming the worker and the item and return `{:cancel, reason}` to Oban
+  (`KilnCMS.Media.Ingest.job_tenant/2`). They do not guess the default
+  organization. If such a job was queued before this release, it shows as
+  cancelled; `mix kiln.media.regenerate_variants --all` re-derives variants. (#1658)
 
 <a id="an-old-newsletter-confirmation-link-no-longer-re-subscribes"></a>
 
