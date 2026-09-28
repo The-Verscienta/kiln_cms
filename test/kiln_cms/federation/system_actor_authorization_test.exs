@@ -289,5 +289,44 @@ defmodule KilnCMS.Federation.SystemActorAuthorizationTest do
     end
   end
 
+  # The two reads whose refusal used to fail OPEN (#1659). Each is exercised
+  # with an actor the policy refuses — what a lost grant looks like — and must
+  # refuse rather than accept.
+  describe "fails closed without the grant" do
+    defp signed_headers do
+      {:ok, headers} =
+        KilnCMS.Federation.HttpSignature.sign(
+          "https://kiln.example/actor/inbox",
+          "https://remote.example/users/alice#main-key",
+          ~s({"type":"Follow"}),
+          private_key_pem: KilnCMS.Keys.generate_rsa_pem()
+        )
+
+      headers
+    end
+
+    test "record_seen: a refused write is :unavailable, not :ok" do
+      headers = signed_headers()
+
+      assert {:error, :unavailable} =
+               KilnCMS.Federation.HttpSignature.record_seen(headers, actor: nil)
+
+      # And the granted path still records, then spots the replay.
+      assert :ok = KilnCMS.Federation.HttpSignature.record_seen(headers)
+
+      assert {:error, "signature replayed"} =
+               KilnCMS.Federation.HttpSignature.record_seen(headers)
+    end
+
+    test "follower ceiling: a refused count is 'at the ceiling', not 0" do
+      follower!()
+
+      assert :ok = KilnCMS.Federation.Inbox.check_follower_ceiling(org_id())
+
+      assert {:error, _reason} =
+               KilnCMS.Federation.Inbox.check_follower_ceiling(org_id(), actor: nil)
+    end
+  end
+
   defp ids(rows), do: Enum.map(rows, & &1.id)
 end
