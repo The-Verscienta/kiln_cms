@@ -187,6 +187,42 @@ defmodule KilnCMSWeb.SearchApiPoolTest do
     assert Enum.count(sqls, &(&1 =~ ~s("blocks"))) == 1, Enum.join(sqls, "\n\n")
   end
 
+  test "the endpoint reads no block trees at all: its hits are read with the fields it renders",
+       %{conn: conn} do
+    word = "sapool#{System.unique_integer([:positive])}"
+    published_page("About #{word}")
+
+    test = self()
+    handler = "sapool-api-rows-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      handler,
+      [:kiln_cms, :repo, :query],
+      fn _event, _measurements, meta, _config ->
+        if (self() == test or test in Process.get(:"$callers", [])) and
+             meta[:source] in ~w(pages posts entries),
+           do: send(test, {:sql, meta[:query]})
+      end,
+      nil
+    )
+
+    body =
+      try do
+        conn |> get("/api/search?q=#{word}") |> json_response(200)
+      after
+        :telemetry.detach(handler)
+      end
+
+    assert [%{"title" => "About " <> _, "highlight" => "About <mark>" <> _}] =
+             body["results"]["pages"]
+
+    sqls = Stream.repeatedly(fn -> receive do: ({:sql, sql} -> sql), after: (0 -> nil) end)
+    sqls = Enum.take_while(sqls, & &1)
+
+    assert sqls != []
+    refute Enum.any?(sqls, &(&1 =~ ~s("blocks"))), Enum.join(sqls, "\n\n")
+  end
+
   describe "the analytics write" do
     setup do
       previous = Application.get_env(:kiln_cms, :async_analytics)

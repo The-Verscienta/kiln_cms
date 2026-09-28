@@ -527,7 +527,11 @@ defmodule KilnCMS.Search do
   query is never relaxed. Read options (`:actor`, `:authorize?`) pass
   through to every leg, so visibility is respected. `:limit` caps the result
   count (default 20); `:k` overrides the RRF constant; `:load` applies to
-  all legs (e.g. the `highlight` snippet calc); `rerank: true` reorders the
+  all legs (e.g. the `highlight` snippet calc); `:select` limits the
+  attributes read for the returned records (the primary key is always read,
+  a field the type does not have is skipped, and omitted, every attribute is
+  read — a reranked caller must include `:title` and `:excerpt`, which the
+  reranker reads); `rerank: true` reorders the
   fused results with the configured reranker. That option is the whole gate:
   the *scope* decision — every surface, ask alone, nowhere — is made by
   `global/2` from `rerank?/0` and `KilnCMS.Ask.rerank?/0`, and a direct
@@ -619,7 +623,7 @@ defmodule KilnCMS.Search do
       Map.merge(block_distances, tag_distances, fn _id, a, b -> min(a, b) end)
     )
     |> Enum.take(limit)
-    |> hydrate(resource, load, read_opts)
+    |> hydrate(resource, {Keyword.get(opts, :select), load}, read_opts)
     |> maybe_rerank(query, opts)
     |> Enum.map(&attach_hit/1)
   end
@@ -706,20 +710,25 @@ defmodule KilnCMS.Search do
   # hundred of those per search to keep ten was the largest share of a
   # search's CPU time (#1712).
   #
+  # `:select` narrows even that read to the attributes the caller uses
+  # (`GET /api/search` renders a title and a slug, not a block tree);
+  # omitted, the records are whole, as they always were.
+  #
   # Read through the resource's primary read under the caller's own read
   # options, so the rows pass the same policies the legs did. Re-paired with
   # each hit's score and legs by id, in the fused order; a row gone between
   # the legs and this read (deleted, unpublished) is dropped rather than
   # returned half-read.
-  @spec hydrate([hit()], module(), list(), keyword()) :: [hit()]
-  defp hydrate([], _resource, _load, _read_opts), do: []
+  @spec hydrate([hit()], module(), {[atom()] | nil, list()}, keyword()) :: [hit()]
+  defp hydrate([], _resource, _fields, _read_opts), do: []
 
-  defp hydrate(hits, resource, load, read_opts) do
+  defp hydrate(hits, resource, {select, load}, read_opts) do
     ids = Enum.map(hits, fn {record, _score, _legs} -> record.id end)
 
     by_id =
       resource
       |> Ash.Query.new()
+      |> then(&if(select, do: Ash.Query.select(&1, own_attributes(resource, select)), else: &1))
       |> Ash.Query.filter(id in ^ids)
       |> Ash.Query.load(load)
       |> Ash.read!(read_opts)
@@ -732,6 +741,11 @@ defmodule KilnCMS.Search do
       end
     end)
   end
+
+  # A `:select` names fields across every content type, and not every type
+  # has every one (`excerpt` is optional); each type reads the ones it has.
+  defp own_attributes(resource, fields),
+    do: Enum.filter(fields, &Ash.Resource.Info.attribute(resource, &1))
 
   # The semantic leg's `semantic_distance` rides on the record it returned;
   # the fused hit keeps it, as it did when the leg's record was the one
@@ -1240,7 +1254,8 @@ defmodule KilnCMS.Search do
   the `passage` calc — the longer, mark-free excerpt a reader answers *from*
   rather than clicks on, which is what `KilnCMS.Ask` cites. `:filters` (see
   `hybrid/3`) narrows the content sections — media and taxonomy don't carry
-  facets.
+  facets — and `:select` (see `hybrid/3`) the attributes their records are
+  read with.
 
   Every content hit carries its fused score and legs (`hit_score/1`,
   `hit_legs/1`), and the scores are comparable across sections — one `k` and
@@ -1292,6 +1307,7 @@ defmodule KilnCMS.Search do
           # `true`, and the config switch lived inside `hybrid/3` instead.
           rerank: Keyword.get(opts, :rerank, rerank?()),
           filters: Keyword.get(opts, :filters, %{}),
+          select: Keyword.get(opts, :select),
           # Embed the query ONCE for the whole sweep. Every section below runs
           # a semantic leg, and each would otherwise embed this same string
           # itself — one identical embedding per registered content type, the
@@ -1536,6 +1552,9 @@ defmodule KilnCMS.Search do
     content_resources()
     |> Enum.flat_map(fn resource ->
       resource
+      # The title is all a suggestion is made of; the rest of the row is a
+      # block tree and an embedding (#1712).
+      |> Ash.Query.select([:title])
       |> Ash.Query.for_read(:autocomplete, %{prefix: query, locale: locale})
       |> Ash.read!(read_opts)
     end)

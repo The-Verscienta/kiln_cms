@@ -66,6 +66,10 @@ defmodule KilnCMSWeb.SearchApiController do
   # filled it, without a client giving up on a search it could have had.
   @retry_after "1"
 
+  # The attributes a content hit is read with; its `highlight` and an entry's
+  # `type_name` are calculations, loaded alongside.
+  @hit_fields [:id, :title, :slug, :excerpt, :locale, :org_id]
+
   def index(conn, params) do
     query = params |> Params.string("q", "") |> String.trim()
     locale = validated_locale(Params.string(params, "locale"))
@@ -123,6 +127,9 @@ defmodule KilnCMSWeb.SearchApiController do
           [
             highlight: true,
             filters: filters(params, org_id),
+            # What `item/4` renders, and what the reranker reads when it is
+            # on — not the block tree, which is most of a row (#1712).
+            select: @hit_fields,
             # Everything but `media`, which this endpoint never returns: one
             # read per request that was run and thrown away (#960, #1712).
             sections: Search.content_sections() ++ Keyword.keys(KilnCMS.CMS.Taxonomy.searchable())
