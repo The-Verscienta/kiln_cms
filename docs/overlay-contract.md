@@ -190,21 +190,33 @@ because it compiles.
 ## Deprecated surfaces
 
 The policy above was first used in 0.12 ([#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537),
-[#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538)). Everything
-here still works, warns, and is removed at 1.0
-([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543)):
+[#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538)), and 1.0
+removed what 0.12 deprecated
+([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543)).
+
+### Removed at 1.0
+
+| Removed | What happens now | Instead |
+|---|---|---|
+| `published?:` on `use KilnCMS.CMS.Content` | the generic unknown-option warning at your `use` line (a compile error from 2.0) | remove it; every content type has the `:published` read |
+| `/editor/pages/:id` and `/editor/posts/:id` as editor routes | a `301` to the new route, for old bookmarks and mail. The redirect is a courtesy, not a covered surface | `/editor/content/page/:id` and `/editor/content/post/:id` |
+| The `User.audiences` fallback for an account with no organization membership | such an account reads no gated content until it holds a membership. After every deploy a background job gives it one on the default organization, carrying its audiences (`KilnCMS.Accounts.LegacyAudiencesWorker`) | an `OrgMembership` carrying the audiences. Run `mix kiln.deprecations --migrate-audiences` on 0.12 before upgrading, so there is no moment without access |
+| Webhook and newsletter jobs enqueued without `org_id`, and the pre-ledger webhook job shape | cancelled when they run, with an error in the log; their work is not done | nothing to change in code; let the queue drain on 0.12 before upgrading. `mix kiln.deprecations` counts what is left |
+
+`User.audiences` itself is kept: no access decision reads it, but it is the
+only record of what a legacy account held, and billing still writes the
+cross-organization union there. 2.0 may drop the column.
+
+### Still deprecated
 
 | Deprecated | How you are told | Instead |
 |---|---|---|
-| `published?:` on `use KilnCMS.CMS.Content` | compile-time warning at your `use` line | remove it; every content type has the `:published` read |
-| `/editor/pages/:id` and `/editor/posts/:id` | a log warning on each visit | `/editor/content/page/:id` and `/editor/content/post/:id`. Nothing in the core links to the old routes any more |
-| The `User.audiences` fallback for an account with no organization membership | a log warning, once per account per boot | an `OrgMembership` carrying the audiences: `mix kiln.deprecations --migrate-audiences` creates one on the default organization for every such account |
-| Webhook and newsletter jobs enqueued without `org_id`, and the pre-ledger webhook job shape | a log warning each time one runs | nothing to change in code; let the queue drain before upgrading to 1.0. `mix kiln.deprecations` counts what is left |
 | The legacy block bridge — **removed at 1.0**: `TypedBlocks.to_legacy/1`, `from_legacy/1`, `KilnCMS.CMS.Block` and the legacy `type`/`content`/`data` write shape, which a write now refuses with a cast error. Stored rows in that shape are still read. `RichText.legacy_html` is **kept**, deprecated, as the fallback for HTML Portable Text cannot hold faithfully | a compile error for the functions and the module; a cast error for the write shape; `deprecated` in the block JSON Schema | `to_typed/1` in place of `from_legacy/1`; render from typed blocks; write the typed shape (`%{"_type" => "heading", "text" => …}`) |
 
 `mix kiln.deprecations` (in a release,
 `bin/kiln_cms eval 'KilnCMS.Release.deprecations()'`) exits non-zero while
-anything on this instance still depends on one of these, so it can gate an
+this instance still holds data that only a removed surface read — accounts on
+the audiences fallback, or jobs in a pre-0.12 shape — so it can gate an
 upgrade to 1.0.
 
 ## Protecting your overlay in CI

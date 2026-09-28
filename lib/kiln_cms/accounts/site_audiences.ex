@@ -37,12 +37,8 @@ defmodule KilnCMS.Accounts.SiteAudiences do
   default-org membership with its standing role, any live temporary role and its
   current `User.audiences`.
   That write is created first and on its own, and it grants on the default org
-  exactly what the fallback grants there today, so if the second write fails
-  nothing is lost.
-
-  What does change, on purpose: once an account holds any membership, the global
-  column stops applying on the sites it is not a member of. That is the
-  fail-closed rule every scope axis follows.
+  what the account held there before it had a membership, so if the second write
+  fails nothing is lost.
 
   Every write goes through the membership's own actions as the caller's actor, so
   `OrgMembership`'s policies decide who may make it (platform admins today).
@@ -53,7 +49,7 @@ defmodule KilnCMS.Accounts.SiteAudiences do
   alias KilnCMS.CMS.Audiences
 
   @typedoc """
-  Where the account's audiences on a site come from — the three branches of
+  Where the account's audiences on a site come from — the three affiliation branches of
   `KilnCMS.Accounts.Scoping.audiences/2`.
   """
   @type source :: :membership | :legacy | :none
@@ -62,9 +58,13 @@ defmodule KilnCMS.Accounts.SiteAudiences do
   The audiences `user` reads on `org_id`, and which branch they come from, given
   the user's memberships (every site).
 
-  Answers what `KilnCMS.Accounts.Scoping.audiences/2` answers, from rows the
-  caller already holds and without its per-process memo, so a page re-rendering
-  straight after a save shows the save.
+  For `:membership` and `:none`, answers what
+  `KilnCMS.Accounts.Scoping.audiences/2` answers, from rows the caller already
+  holds and without its per-process memo, so a page re-rendering straight after
+  a save shows the save. For `:legacy` (no membership anywhere) it returns the
+  `User.audiences` column: what a save — or the post-deploy
+  `KilnCMS.Accounts.LegacyAudiencesWorker` — will carry onto a membership. Until
+  then `Scoping` grants such an account nothing (1.0 removed the fallback, #1543).
   """
   @spec for_site(map(), [map()], String.t()) :: {source(), [atom()]}
   def for_site(user, memberships, org_id) when is_list(memberships) do

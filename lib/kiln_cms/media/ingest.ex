@@ -143,6 +143,32 @@ defmodule KilnCMS.Media.Ingest do
   end
 
   @doc """
+  The tenant a queued media job (`KilnCMS.Media.VariantWorker`,
+  `KilnCMS.Media.AVWorker`, `KilnCMS.Media.AVStripWorker`) runs under (#1658):
+  `{:ok, org_id}` from its `org_id` arg, or `{:cancel, reason}` — which the
+  worker returns to Oban as is — when the arg is missing, after logging an
+  error naming the worker and the item.
+
+  Every enqueue site passes the item's `org_id`, so a job without one is a bug
+  in whatever enqueued it. It used to run with a `nil` tenant: under strict
+  tenancy the item read failed and the job returned `:ok` having done
+  nothing, with no trace. It is not defaulted to the default organization
+  either — that would guess the site of an item nothing vouches for. The job
+  is cancelled, visibly, and retrying would change nothing.
+  """
+  @spec job_tenant(map(), module()) :: {:ok, String.t()} | {:cancel, String.t()}
+  def job_tenant(%{"org_id" => org_id}, _worker) when is_binary(org_id), do: {:ok, org_id}
+
+  def job_tenant(args, worker) do
+    Logger.error(
+      "#{inspect(worker)} job for media item #{inspect(args["media_item_id"])} has no " <>
+        "`org_id`; cancelled. Whatever enqueued it must pass the item's org_id."
+    )
+
+    {:cancel, "job has no org_id"}
+  end
+
+  @doc """
   Queue background derivation for `item` — variants for an image, poster/probe
   for A/V, nothing for a document or caption track (neither has anything to
   derive).

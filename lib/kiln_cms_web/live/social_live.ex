@@ -209,9 +209,11 @@ defmodule KilnCMSWeb.SocialLive do
     >
       <div class="space-y-8">
         <div>
-          <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
-            &larr; {gettext("All content")}
-          </.link>
+          <Layouts.console_crumb
+            current_user={@current_user}
+            current_org={@current_org}
+            active={:social}
+          />
           <h1 class="mt-1 text-2xl font-semibold">{gettext("Social accounts")}</h1>
           <p class="text-sm text-base-content/70">
             {gettext(
@@ -267,9 +269,15 @@ defmodule KilnCMSWeb.SocialLive do
             {gettext("Connected")} ({length(@accounts)})
           </h2>
 
-          <p :if={@accounts == []} class="text-sm text-base-content/60">
-            {gettext("No accounts connected yet.")}
-          </p>
+          <.empty_state
+            :if={@accounts == []}
+            id="social-accounts-empty"
+            icon="hero-megaphone"
+            title={gettext("No accounts connected yet.")}
+            compact
+          >
+            {gettext("Connect one with the form above to announce new posts.")}
+          </.empty_state>
 
           <div :for={account <- @accounts} class="card card-pad space-y-3">
             <div class="flex flex-wrap items-center justify-between gap-2">
@@ -369,9 +377,15 @@ defmodule KilnCMSWeb.SocialLive do
             )}
           </p>
 
-          <p :if={@posts == []} class="text-sm text-base-content/60">
-            {gettext("Nothing announced yet.")}
-          </p>
+          <.empty_state
+            :if={@posts == []}
+            id="social-posts-empty"
+            icon="hero-paper-airplane"
+            title={gettext("Nothing announced yet.")}
+            compact
+          >
+            {gettext("Announcements appear here after content is published.")}
+          </.empty_state>
 
           <ul :if={@posts != []} class="divide-y divide-base-300">
             <li :for={post <- @posts} class="flex flex-wrap items-center gap-3 py-2 text-sm">

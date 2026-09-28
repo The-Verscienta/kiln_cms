@@ -259,9 +259,11 @@ defmodule KilnCMSWeb.TrashLive do
 
       <div class="space-y-6">
         <div>
-          <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
-            &larr; {gettext("All content")}
-          </.link>
+          <Layouts.console_crumb
+            current_user={@current_user}
+            current_org={@current_org}
+            active={:trash}
+          />
           <h1 class="mt-1 text-2xl font-semibold">{gettext("Trash")}</h1>
           <p class="text-sm text-base-content/60">
             {gettext(
@@ -292,9 +294,14 @@ defmodule KilnCMSWeb.TrashLive do
           </div>
         </div>
 
-        <p :if={@items == []} class="text-sm text-base-content/60">
-          {gettext("Trash is empty.")}
-        </p>
+        <.empty_state
+          :if={@items == []}
+          id="trash-empty"
+          icon="hero-trash"
+          title={gettext("Trash is empty.")}
+        >
+          {gettext("Deleted pages and posts wait here until you restore them or they are purged.")}
+        </.empty_state>
 
         <ul
           :if={@items != []}

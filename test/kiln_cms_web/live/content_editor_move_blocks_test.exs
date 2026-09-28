@@ -68,7 +68,7 @@ defmodule KilnCMSWeb.ContentEditorMoveBlocksTest do
 
   defp open_editor(conn, page) do
     {:ok, lv, _html} =
-      conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+      conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
     lv
   end

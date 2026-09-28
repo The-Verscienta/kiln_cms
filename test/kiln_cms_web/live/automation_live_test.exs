@@ -6,8 +6,12 @@ defmodule KilnCMSWeb.AutomationLiveTest do
 
   import Phoenix.LiveViewTest
 
+  alias KilnCMS.Accounts
   alias KilnCMS.Accounts.User
   alias KilnCMS.Automation
+  alias KilnCMS.Automation.Rule
+  alias KilnCMS.Automation.Validations.ActionConfig
+  alias KilnCMSWeb.AutomationLive.ConfigFields
 
   @password "password123456"
 
@@ -61,6 +65,10 @@ defmodule KilnCMSWeb.AutomationLiveTest do
     test "an admin can create a rule", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/editor/automation")
 
+      # Picking the action first renders its settings inputs — the form only
+      # ever shows the fields the selected reaction accepts.
+      view |> form("#new-rule-form", rule: %{action: "broadcast"}) |> render_change()
+
       view
       |> form("#new-rule-form",
         rule: %{
@@ -68,7 +76,8 @@ defmodule KilnCMSWeb.AutomationLiveTest do
           trigger_event: "published",
           content_type: "post",
           action: "broadcast",
-          config: ~s({"topic": "editorial"})
+          # Trimmed: "editorial " is a channel no listener is on.
+          config: %{topic: " editorial "}
         }
       )
       |> render_submit()
@@ -95,6 +104,8 @@ defmodule KilnCMSWeb.AutomationLiveTest do
       # sidebar's own "Tasks" link would satisfy a substring match on the page.
       assert html =~ ~s(<option value="task">Tasks</option>)
 
+      view |> form("#new-rule-form", rule: %{action: "broadcast"}) |> render_change()
+
       view
       |> form("#new-rule-form",
         rule: %{
@@ -102,7 +113,7 @@ defmodule KilnCMSWeb.AutomationLiveTest do
           trigger_event: "assigned",
           content_type: "task",
           action: "broadcast",
-          config: ~s({"topic": "tasks"})
+          config: %{topic: "tasks"}
         }
       )
       |> render_submit()
@@ -120,102 +131,313 @@ defmodule KilnCMSWeb.AutomationLiveTest do
       assert rule.content_type == "task"
     end
 
-    test "invalid JSON in the config is rejected with a flash", %{conn: conn} do
+    test "the settings are generated from the enforcing table", %{conn: conn} do
+      # One input per key `ActionConfig.shapes/0` accepts, required where
+      # `required_keys/2` says so — a hand-kept list beside the form is the
+      # doc-drifts-from-enforcement failure #944 is about.
+      {:ok, view, html} = live(conn, ~p"/editor/automation")
+
+      # The first action kind is what the untouched select displays.
+      assert has_element?(view, ~s(input[type="email"][name="rule[config][to]"][required]))
+      assert has_element?(view, ~s(input[name="rule[config][subject]"]))
+      assert has_element?(view, ~s(textarea[name="rule[config][body]"]))
+      assert html =~ "Send to"
+      refute has_element?(view, ~s(textarea[name="rule[config]"]))
+
+      view |> form("#new-rule-form", rule: %{action: "reindex"}) |> render_change()
+      assert render(view) =~ "Nothing to set up"
+      refute has_element?(view, ~s([name^="rule[config]"]))
+
+      view |> form("#new-rule-form", rule: %{action: "social_post"}) |> render_change()
+      assert has_element?(view, ~s(select[name="rule[config][provider]"][required]))
+
+      assert has_element?(
+               view,
+               ~s(select[name="rule[config][provider]"] option[value="mastodon"])
+             )
+    end
+
+    test "deliver_as shows only the fields where the finding is going (#946)", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/editor/automation")
 
+      view |> form("#new-rule-form", rule: %{action: "suggest_metadata"}) |> render_change()
+
+      # No deliver_as yet reads as email — the default the save applies.
+      assert has_element?(
+               view,
+               ~s(input[name="rule[config][deliver_as]"][value="email"][checked])
+             )
+
+      assert has_element?(view, ~s(input[name="rule[config][to]"][required]))
+      assert has_element?(view, ~s(input[type="checkbox"][name="rule[config][allow_egress]"]))
+      refute has_element?(view, ~s([name="rule[config][assignee]"]))
+
+      view
+      |> form("#new-rule-form",
+        rule: %{action: "suggest_metadata", config: %{deliver_as: "task"}}
+      )
+      |> render_change()
+
+      assert has_element?(view, ~s(select[name="rule[config][assignee]"][required]))
+      assert has_element?(view, ~s(input[type="number"][name="rule[config][due_in_days]"]))
+      refute has_element?(view, ~s([name="rule[config][to]"]))
+
+      view
+      |> form("#new-rule-form",
+        rule: %{action: "suggest_metadata", config: %{deliver_as: "comment"}}
+      )
+      |> render_change()
+
+      refute has_element?(view, ~s([name="rule[config][to]"]))
+      refute has_element?(view, ~s([name="rule[config][assignee]"]))
+    end
+
+    test "inputs are saved as the typed config the reaction reads", %{conn: conn} do
+      admin = authed_user(:admin)
+      conn = log_in(conn, admin)
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+
+      view |> form("#new-rule-form", rule: %{action: "suggest_metadata"}) |> render_change()
+
+      view
+      |> form("#new-rule-form",
+        rule: %{action: "suggest_metadata", config: %{deliver_as: "task"}}
+      )
+      |> render_change()
+
+      view
+      |> form("#new-rule-form",
+        rule: %{
+          name: "Draft metadata",
+          trigger_event: "in_review",
+          action: "suggest_metadata",
+          config: %{
+            deliver_as: "task",
+            assignee: admin.id,
+            due_in_days: "5",
+            allow_egress: "true"
+          }
+        }
+      )
+      |> render_submit()
+
+      rule = Enum.find(Automation.list_rules!(authorize?: false), &(&1.name == "Draft metadata"))
+
+      # The toggle is the JSON boolean and the day count an integer — the
+      # `"allow_egress": "true"` string the JSON box invited can't be produced.
+      assert rule.config == %{
+               "deliver_as" => "task",
+               "assignee" => admin.id,
+               "due_in_days" => 5,
+               "allow_egress" => true
+             }
+    end
+
+    test "blank optional fields mean the default, and are left out", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+
+      view
+      |> form("#new-rule-form",
+        rule: %{
+          name: "Email on publish",
+          trigger_event: "published",
+          action: "send_email",
+          config: %{to: " team@example.com ", subject: "", body: "   "}
+        }
+      )
+      |> render_submit()
+
+      rule =
+        Enum.find(Automation.list_rules!(authorize?: false), &(&1.name == "Email on publish"))
+
+      assert rule.config == %{"to" => "team@example.com"}
+    end
+
+    test "switching the action drops the previous action's settings", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+
+      view
+      |> form("#new-rule-form", rule: %{action: "send_email", config: %{to: "a@example.com"}})
+      |> render_change()
+
+      # The change that switches the select still posts the email fields —
+      # they're what was on screen — and they must not reach the broadcast
+      # rule as an unknown key.
       html =
         view
         |> form("#new-rule-form",
           rule: %{
-            name: "Bad",
+            name: "Broadcast",
             trigger_event: "published",
-            content_type: "",
-            action: "broadcast",
-            config: "not json"
+            action: "reindex",
+            config: %{to: "a@example.com"}
           }
         )
         |> render_submit()
 
-      assert html =~ "valid JSON"
-      assert Automation.list_rules!(authorize?: false) == []
+      refute html =~ "has no `to`"
+      rule = Enum.find(Automation.list_rules!(authorize?: false), &(&1.name == "Broadcast"))
+      assert rule.action == :reindex
+      assert rule.config == %{}
     end
 
     test "config that can never work is refused, beside the field (#944)", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/editor/automation")
 
-      html =
-        view
-        |> form("#new-rule-form",
-          rule: %{
-            name: "Never sends",
-            trigger_event: "published",
-            content_type: "",
-            action: "send_email",
-            config: ~s({"subject": "Live: {{title}}"})
-          }
-        )
-        |> render_submit()
+      # A browser stops this at the `required` attribute; LiveViewTest doesn't,
+      # which is what lets this check the server-side refusal behind it.
+      view
+      |> form("#new-rule-form",
+        rule: %{
+          name: "Never sends",
+          trigger_event: "published",
+          content_type: "",
+          action: "send_email",
+          config: %{subject: "Live: {{title}}"}
+        }
+      )
+      |> render_submit()
 
-      # Not a flash and not a log: the message has to be where the JSON was
-      # typed, which is why the hand-rolled textarea now renders its errors.
-      assert html =~ "missing `to`"
+      # Beside the field its label already names, so the message says only
+      # what is wrong — not the config-map wording the API gets.
+      assert has_element?(view, "#rule_config_to-error", "This is required.")
       assert Automation.list_rules!(authorize?: false) == []
     end
 
-    test "the string \"true\" on allow_egress is named as the mistake it is", %{conn: conn} do
-      # Every other key in that textarea is a string, so this is the natural
-      # thing to type — and the runtime gate fails closed, leaving a rule that
-      # looks enabled and emails nothing forever.
+    test "settings errors wait for the first save attempt", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/editor/automation")
 
-      html =
-        view
-        |> form("#new-rule-form",
-          rule: %{
-            name: "Drafts metadata",
-            trigger_event: "in_review",
-            content_type: "",
-            action: "suggest_metadata",
-            config: ~s({"to": "team@example.com", "allow_egress": "true"})
-          }
-        )
-        |> render_submit()
+      view |> form("#new-rule-form", rule: %{action: "suggest_tags"}) |> render_change()
 
-      assert html =~ "allow_egress"
-      assert html =~ "not a string"
-      assert Automation.list_rules!(authorize?: false) == []
+      view
+      |> form("#new-rule-form", rule: %{action: "suggest_tags", config: %{deliver_as: "task"}})
+      |> render_change()
+
+      # "Task" was just picked; "Assign to" is empty because nobody has had a
+      # chance to fill it, not because anyone got it wrong.
+      refute has_element?(view, "#rule_config_assignee-error")
+
+      view
+      |> form("#new-rule-form",
+        rule: %{
+          name: "Tags",
+          action: "suggest_tags",
+          config: %{deliver_as: "task", due_in_days: "0"}
+        }
+      )
+      |> render_submit()
+
+      assert has_element?(view, "#rule_config_assignee-error", "This is required.")
     end
 
-    test "the accepted keys beside the field come from the enforcing table", %{conn: conn} do
-      # Rendered from ActionConfig.shapes/0, so it cannot drift from what the
-      # save allows — a hand-maintained list is the failure mode #944 is about.
-      {:ok, view, html} = live(conn, ~p"/editor/automation")
+    test "a wrongly-typed value is explained in words beside its field", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
 
-      # The first action kind is what the untouched select displays.
-      assert html =~ "send_email accepts: to (required), subject, body"
+      view |> form("#new-rule-form", rule: %{action: "create_task"}) |> render_change()
 
-      html =
-        view
-        |> form("#new-rule-form", rule: %{action: "suggest_metadata"})
-        |> render_change()
+      view
+      |> form("#new-rule-form",
+        rule: %{name: "Stale", action: "create_task", config: %{due_in_days: "400"}}
+      )
+      |> render_submit()
 
-      # #946: `to` is no longer unconditionally required — it's the intelligence
-      # reactions' `deliver_as` axis (email/comment/task) now, and what's
-      # required depends on which, so the hint spells out each field's
-      # condition instead of a single "(required)" that only ever held for
-      # the default email case (#1252 review: this used to render with no
-      # required marker at all, silently reintroducing the #944 doc drift).
-      assert html =~
-               "suggest_metadata accepts: allow_egress, deliver_as, " <>
-                 "to (required unless deliver_as is &quot;comment&quot; or &quot;task&quot;), " <>
-                 "assignee (required when deliver_as is &quot;task&quot;), due_in_days"
+      assert has_element?(
+               view,
+               "#rule_config_due_in_days-error",
+               "Must be a whole number of days between 1 and 365, got 400."
+             )
+    end
 
-      html =
-        view
-        |> form("#new-rule-form", rule: %{action: "reindex"})
-        |> render_change()
+    test "editing leaves a legacy string \"true\" allow_egress switched off", %{conn: conn} do
+      # Seeded past the validation, the way a rule predating #944 exists. The
+      # worker treats the string as off; the edit form must not show it as on
+      # and turn it into the boolean on a save that only renames the rule.
+      rule =
+        Ash.Seed.seed!(Rule, %{
+          org_id: Accounts.default_org_id(),
+          name: "Legacy egress",
+          trigger_event: :in_review,
+          action: :suggest_metadata,
+          config: %{"to" => "team@example.com", "allow_egress" => "true"},
+          enabled: true
+        })
 
-      assert html =~ "reindex accepts: no config"
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+      view |> element("#rule-#{rule.id} button", "Edit") |> render_click()
+
+      refute has_element?(
+               view,
+               ~s(#edit-rule-#{rule.id} input[type="checkbox"][name="rule[config][allow_egress]"][checked])
+             )
+
+      view |> form("#edit-rule-#{rule.id}", rule: %{name: "Renamed"}) |> render_submit()
+
+      assert {:ok, %{name: "Renamed", config: config}} =
+               Automation.get_rule(rule.id, authorize?: false)
+
+      refute config["allow_egress"] == true
+    end
+
+    test "editing keeps a stored value its picker no longer offers", %{conn: conn} do
+      # A deleted segment: the rule is refused at send time today. Blanking
+      # the key on an unrelated save would make it mail every subscriber.
+      stale = Ash.UUID.generate()
+
+      {:ok, rule} =
+        Automation.create_rule(
+          %{
+            name: "Segment newsletter",
+            trigger_event: :published,
+            action: :newsletter,
+            config: %{"segment_id" => stale}
+          },
+          authorize?: false
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+      view |> element("#rule-#{rule.id} button", "Edit") |> render_click()
+
+      assert has_element?(
+               view,
+               ~s(#edit-rule-#{rule.id} select[name="rule[config][segment_id]"] option[value="#{stale}"][selected])
+             )
+
+      view
+      |> form("#edit-rule-#{rule.id}", rule: %{name: "Renamed newsletter"})
+      |> render_submit()
+
+      assert {:ok, %{name: "Renamed newsletter", config: %{"segment_id" => ^stale}}} =
+               Automation.get_rule(rule.id, authorize?: false)
+    end
+
+    test "editing a rule shows its stored settings in the inputs", %{conn: conn} do
+      {:ok, rule} =
+        Automation.create_rule(
+          %{
+            name: "Edit me",
+            trigger_event: :published,
+            action: :send_email,
+            config: %{"to" => "ops@example.com", "subject" => "Live: {{title}}"}
+          },
+          authorize?: false
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+      view |> element("#rule-#{rule.id} button", "Edit") |> render_click()
+
+      assert has_element?(
+               view,
+               ~s(#edit-rule-#{rule.id} input[name="rule[config][to]"][value="ops@example.com"])
+             )
+
+      view
+      |> form("#edit-rule-#{rule.id}",
+        rule: %{config: %{to: "ops@example.com", subject: "Now live: {{title}}"}}
+      )
+      |> render_submit()
+
+      assert {:ok, %{config: %{"subject" => "Now live: {{title}}"}}} =
+               Automation.get_rule(rule.id, authorize?: false)
     end
 
     test "an admin can toggle and delete a rule", %{conn: conn} do
@@ -232,6 +454,25 @@ defmodule KilnCMSWeb.AutomationLiveTest do
 
       view |> element("#rule-#{rule.id} button[aria-label='Delete rule']") |> render_click()
       assert Automation.list_rules!(authorize?: false) == []
+    end
+  end
+
+  describe "ConfigFields.meta/1" do
+    test "labels every key any reaction accepts" do
+      # A key added to `ActionConfig` without a label would render as its raw
+      # name to the non-developer this form exists for.
+      for {action, shape} <- ActionConfig.shapes(),
+          {key, _type} <- shape.required ++ shape.optional do
+        assert ConfigFields.meta(key), "#{action}'s `#{key}` has no label in ConfigFields.meta/1"
+      end
+    end
+
+    test "words every deliver_as value ActionConfig accepts" do
+      # The fallback humanizes the value and has no hint.
+      for value <- ActionConfig.deliver_as_values() do
+        assert {_label, hint} = ConfigFields.deliver_as_label(value)
+        assert hint, "deliver_as #{inspect(value)} has no wording in ConfigFields"
+      end
     end
   end
 end

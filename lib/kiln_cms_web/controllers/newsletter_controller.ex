@@ -51,8 +51,10 @@ defmodule KilnCMSWeb.NewsletterController do
       email == "" ->
         invalid(conn)
 
-      # Honeypot tripped: report success, store nothing, mail nothing.
-      params[Forms.honeypot_field()] not in [nil, ""] ->
+      # Honeypot tripped: report success, store nothing, mail nothing. The same
+      # predicate as public forms (#1657), so a whitespace-only or non-string
+      # value trips it here too.
+      Forms.honeypot_tripped?(params) ->
         submitted(conn)
 
       true ->
@@ -184,13 +186,16 @@ defmodule KilnCMSWeb.NewsletterController do
   land here, one click from done.
 
   An already-confirmed subscriber gets the confirmed page straight away rather
-  than a button that would do nothing.
+  than a button that would do nothing. Any other non-pending subscriber — one
+  who has since unsubscribed — gets a neutral "this link is no longer valid"
+  page with no button (#1690).
   """
   def confirm_form(conn, %{"token" => token}) do
     case confirm_lookup(token) do
       nil -> render_confirm(conn, :invalid, nil, token)
       %{status: :confirmed} = subscriber -> render_confirm(conn, :confirmed, subscriber, token)
-      subscriber -> render_confirm(conn, :form, subscriber, token)
+      %{status: :pending} = subscriber -> render_confirm(conn, :form, subscriber, token)
+      _no_longer_pending -> render_confirm(conn, :stale, nil, token)
     end
   end
 
@@ -204,14 +209,30 @@ defmodule KilnCMSWeb.NewsletterController do
       nil ->
         render_confirm(conn, :invalid, nil, token)
 
-      subscriber ->
-        # No actor (`:confirm` is admin-only by policy); the verified token is
-        # the grant, so the write bypasses authorization and runs under the
-        # found row's own site.
-        {:ok, _} =
-          Newsletter.confirm_subscriber(subscriber, authorize?: false, tenant: subscriber.org_id)
-
+      # Idempotent: a second click (or a resubmitted form) changes nothing —
+      # not even `confirmed_at`.
+      %{status: :confirmed} = subscriber ->
         render_confirm(conn, :confirmed, subscriber, token)
+
+      %{status: :pending} = subscriber ->
+        do_confirm(conn, subscriber, token)
+
+      # Only `pending → confirmed` (#1690). An old link must not re-subscribe
+      # a reader who has since unsubscribed.
+      _no_longer_pending ->
+        render_confirm(conn, :stale, nil, token)
+    end
+  end
+
+  defp do_confirm(conn, subscriber, token) do
+    # No actor (`:confirm` is admin-only by policy); the verified token is
+    # the grant, so the write bypasses authorization and runs under the
+    # found row's own site. `:confirm` itself refuses a row that is no longer
+    # `:pending`, so an unsubscribe landing between the lookup and this write
+    # still wins.
+    case Newsletter.confirm_subscriber(subscriber, authorize?: false, tenant: subscriber.org_id) do
+      {:ok, _} -> render_confirm(conn, :confirmed, subscriber, token)
+      {:error, %Ash.Error.Invalid{}} -> render_confirm(conn, :stale, nil, token)
     end
   end
 
@@ -238,6 +259,7 @@ defmodule KilnCMSWeb.NewsletterController do
   defp confirm_title(:form), do: gettext("Confirm your subscription")
   defp confirm_title(:confirmed), do: gettext("Subscription confirmed")
   defp confirm_title(:invalid), do: gettext("Link not recognized")
+  defp confirm_title(:stale), do: gettext("This link is no longer valid")
 
   # The one-button "confirm unsubscribe" page the GET link renders. No CSRF token
   # is needed (the :public_form pipeline is CSRF-free and the per-subscriber token

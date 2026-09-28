@@ -566,7 +566,19 @@ defmodule KilnCMSWeb.GovernanceLive do
       <.claims_panel claims={@claims} />
       <.health_panel health={@health} />
 
-      <p :if={@content == []} class="text-sm text-base-content/60">{gettext("No content yet.")}</p>
+      <.empty_state
+        :if={@content == []}
+        id="governance-content-empty"
+        icon="hero-document-text"
+        title={gettext("No content yet.")}
+      >
+        {gettext("Each page and post gets an audit trail here once it exists.")}
+        <:action>
+          <.link navigate={~p"/editor"} class="btn btn-sm btn-default">
+            {gettext("Go to content")}
+          </.link>
+        </:action>
+      </.empty_state>
 
       <ul :if={@content != []} class="card divide-y divide-base-content/10 overflow-hidden">
         <li :for={item <- @content} class="flex items-center justify-between p-3">
@@ -599,7 +611,7 @@ defmodule KilnCMSWeb.GovernanceLive do
     <div class="space-y-8">
       <div>
         <.link navigate={~p"/editor/governance"} class="text-sm text-base-content/60 hover:underline">
-          &larr; {gettext("All content")}
+          &larr; {gettext("Governance")}
         </.link>
         <h1 class="mt-1 text-2xl font-semibold">{@trail.item.title}</h1>
         <p class="text-sm text-base-content/60">

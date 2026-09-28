@@ -104,8 +104,8 @@ defmodule KilnCMSWeb.CollabPersisterTest do
     {low, high} = two_editors()
     page = CMS.create_page!(%{title: "Original", slug: slug()}, actor: low)
 
-    {:ok, lv_low, _} = conn |> log_in(low) |> live(~p"/editor/pages/#{page.id}")
-    {:ok, lv_high, _} = build_conn() |> log_in(high) |> live(~p"/editor/pages/#{page.id}")
+    {:ok, lv_low, _} = conn |> log_in(low) |> live(~p"/editor/content/page/#{page.id}")
+    {:ok, lv_high, _} = build_conn() |> log_in(high) |> live(~p"/editor/content/page/#{page.id}")
 
     # Both sessions see each other before we assert election behavior.
     await(lv_low, &(&1 =~ "2 editing"))
@@ -140,7 +140,7 @@ defmodule KilnCMSWeb.CollabPersisterTest do
     editor = authed_user(:editor)
     page = CMS.create_page!(%{title: "Solo", slug: slug()}, actor: editor)
 
-    {:ok, lv, _} = conn |> log_in(editor) |> live(~p"/editor/pages/#{page.id}")
+    {:ok, lv, _} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
 
     lv |> form("#page-editor", form: %{title: "Solo saved"}) |> render_change()
     send(lv.pid, :autosave)
@@ -152,8 +152,8 @@ defmodule KilnCMSWeb.CollabPersisterTest do
     {low, high} = two_editors()
     page = CMS.create_page!(%{title: "Handoff", slug: slug()}, actor: low)
 
-    {:ok, lv_low, _} = conn |> log_in(low) |> live(~p"/editor/pages/#{page.id}")
-    {:ok, lv_high, _} = build_conn() |> log_in(high) |> live(~p"/editor/pages/#{page.id}")
+    {:ok, lv_low, _} = conn |> log_in(low) |> live(~p"/editor/content/page/#{page.id}")
+    {:ok, lv_high, _} = build_conn() |> log_in(high) |> live(~p"/editor/content/page/#{page.id}")
     await(lv_high, &(&1 =~ "2 editing"))
 
     # Pending edits are only "synced" while the persister is around…

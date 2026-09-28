@@ -293,10 +293,12 @@ defmodule KilnCMS.Accounts.SiteSsoTest do
       assert {:error, :access_elsewhere} = Admission.admit(org.id, claims("legacy@#{domain}"))
     end
 
-    test "membership-less legacy audiences apply everywhere, so they refuse too",
+    test "membership-less User.audiences grant nothing anywhere since 1.0, so they don't refuse",
          %{org: org, domain: domain} do
+      # 0.12 refused this account: the fallback applied its audiences on every
+      # org. 1.0 removed the fallback (#1543), so it holds no access elsewhere.
       user!("paid@#{domain}", %{audiences: [:member]})
-      assert {:error, :access_elsewhere} = Admission.admit(org.id, claims("paid@#{domain}"))
+      assert {:ok, _user} = Admission.admit(org.id, claims("paid@#{domain}"))
     end
 
     test "an account whose only access is on this site is admitted, as-is",

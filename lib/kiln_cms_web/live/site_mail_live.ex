@@ -295,241 +295,255 @@ defmodule KilnCMSWeb.SiteMailLive do
         </:subtitle>
       </.header>
 
-      <div id="site-mail-status" class="mt-6 card card-pad text-sm">
-        <%= if @row && @row.enabled do %>
-          <p class="font-medium">
-            {gettext("This site's mail goes out through %{host}, from %{from}.",
-              host: @row.host,
-              from: @row.from_email
+      <.page_with_toc id="site-mail-toc" items={site_mail_toc()} class="mt-6">
+        <div id="site-mail-status" class="card card-pad text-sm scroll-mt-24">
+          <%= if @row && @row.enabled do %>
+            <p class="font-medium">
+              {gettext("This site's mail goes out through %{host}, from %{from}.",
+                host: @row.host,
+                from: @row.from_email
+              )}
+            </p>
+          <% else %>
+            <p class="font-medium">
+              <%= if @operator_from do %>
+                {gettext("This site's mail goes out through the deployment's relay, from %{from}.",
+                  from: @operator_from
+                )}
+              <% else %>
+                {gettext("This site's mail goes out through the deployment's relay.")}
+              <% end %>
+            </p>
+          <% end %>
+          <p class="mt-1 text-base-content/70">
+            {gettext(
+              "This covers newsletters, form notifications and autoresponders, workflow, task and comment notifications, and automation emails. Sign-in links, password resets and other account mail always use the deployment's relay, because accounts belong to the deployment, not to one site."
             )}
           </p>
-        <% else %>
-          <p class="font-medium">
-            <%= if @operator_from do %>
-              {gettext("This site's mail goes out through the deployment's relay, from %{from}.",
-                from: @operator_from
-              )}
-            <% else %>
-              {gettext("This site's mail goes out through the deployment's relay.")}
-            <% end %>
+        </div>
+
+        <div
+          :if={not @password_readable?}
+          id="site-mail-password-unreadable"
+          role="alert"
+          class="mt-4 rounded-lg border border-error/40 bg-error/10 p-4 text-sm text-error-ink"
+        >
+          <p class="font-medium">{gettext("The saved password can't be read. Re-enter it.")}</p>
+          <p class="mt-1">
+            {gettext(
+              "The deployment's secret key has changed since it was saved. Until you enter it again, this site's mail is held and retried, not sent."
+            )}
           </p>
-        <% end %>
-        <p class="mt-1 text-base-content/70">
-          {gettext(
-            "This covers newsletters, form notifications and autoresponders, workflow, task and comment notifications, and automation emails. Sign-in links, password resets and other account mail always use the deployment's relay, because accounts belong to the deployment, not to one site."
-          )}
-        </p>
-      </div>
+        </div>
 
-      <div
-        :if={not @password_readable?}
-        id="site-mail-password-unreadable"
-        role="alert"
-        class="mt-4 rounded-lg border border-error/40 bg-error/10 p-4 text-sm text-error-ink"
-      >
-        <p class="font-medium">{gettext("The saved password can't be read. Re-enter it.")}</p>
-        <p class="mt-1">
-          {gettext(
-            "The deployment's secret key has changed since it was saved. Until you enter it again, this site's mail is held and retried, not sent."
-          )}
-        </p>
-      </div>
+        <.form
+          for={@form}
+          id="site-mail-form"
+          phx-change="validate"
+          phx-submit="save"
+          class="mt-8 space-y-6 scroll-mt-24"
+        >
+          <h2 class="text-lg font-medium">{gettext("Relay")}</h2>
+          <.input
+            field={@form[:enabled]}
+            type="checkbox"
+            label={gettext("Send this site's mail through this relay")}
+            value={@form[:enabled].value}
+          />
 
-      <.form
-        for={@form}
-        id="site-mail-form"
-        phx-change="validate"
-        phx-submit="save"
-        class="mt-8 space-y-6"
-      >
-        <.input
-          field={@form[:enabled]}
-          type="checkbox"
-          label={gettext("Send this site's mail through this relay")}
-          value={@form[:enabled].value}
-        />
+          <div class="grid gap-4 sm:grid-cols-3">
+            <div class="sm:col-span-2">
+              <.input
+                field={@form[:host]}
+                type="text"
+                label={gettext("SMTP host")}
+                placeholder="smtp.postmarkapp.com"
+                autocomplete="off"
+              />
+            </div>
+            <.input field={@form[:port]} type="number" label={gettext("Port")} min="1" max="65535" />
+          </div>
 
-        <div class="grid gap-4 sm:grid-cols-3">
-          <div class="sm:col-span-2">
+          <.input
+            field={@form[:security]}
+            type="select"
+            label={gettext("Encryption")}
+            options={[
+              {gettext("STARTTLS (usually port 587)"), "starttls"},
+              {gettext("TLS (usually port 465)"), "tls"}
+            ]}
+            hint={gettext("Always encrypted, and the server's certificate is always checked.")}
+          />
+
+          <div class="grid gap-4 sm:grid-cols-2">
             <.input
-              field={@form[:host]}
+              field={@form[:username]}
               type="text"
-              label={gettext("SMTP host")}
-              placeholder="smtp.postmarkapp.com"
+              label={gettext("Username")}
               autocomplete="off"
             />
+            <.input
+              field={@form[:password]}
+              type="password"
+              label={gettext("Password")}
+              value=""
+              autocomplete="new-password"
+              placeholder={if @password_stored?, do: gettext("Saved. Leave blank to keep it.")}
+              hint={
+                gettext("Stored encrypted and never shown again. Clearing the username removes it.")
+              }
+            />
           </div>
-          <.input field={@form[:port]} type="number" label={gettext("Port")} min="1" max="65535" />
-        </div>
 
-        <.input
-          field={@form[:security]}
-          type="select"
-          label={gettext("Encryption")}
-          options={[
-            {gettext("STARTTLS (usually port 587)"), "starttls"},
-            {gettext("TLS (usually port 465)"), "tls"}
-          ]}
-          hint={gettext("Always encrypted, and the server's certificate is always checked.")}
-        />
+          <div class="grid gap-4 sm:grid-cols-2">
+            <.input
+              field={@form[:from_email]}
+              type="email"
+              label={gettext("From address")}
+              placeholder="news@example.com"
+              hint={gettext("Must be an address your provider will send for.")}
+            />
+            <.input
+              field={@form[:from_name]}
+              type="text"
+              label={gettext("From name")}
+              hint={gettext("Leave blank to use the site's name.")}
+            />
+          </div>
 
-        <div class="grid gap-4 sm:grid-cols-2">
-          <.input
-            field={@form[:username]}
-            type="text"
-            label={gettext("Username")}
-            autocomplete="off"
-          />
-          <.input
-            field={@form[:password]}
-            type="password"
-            label={gettext("Password")}
-            value=""
-            autocomplete="new-password"
-            placeholder={if @password_stored?, do: gettext("Saved. Leave blank to keep it.")}
-            hint={
-              gettext("Stored encrypted and never shown again. Clearing the username removes it.")
-            }
-          />
-        </div>
-
-        <div class="grid gap-4 sm:grid-cols-2">
-          <.input
-            field={@form[:from_email]}
-            type="email"
-            label={gettext("From address")}
-            placeholder="news@example.com"
-            hint={gettext("Must be an address your provider will send for.")}
-          />
-          <.input
-            field={@form[:from_name]}
-            type="text"
-            label={gettext("From name")}
-            hint={gettext("Leave blank to use the site's name.")}
-          />
-        </div>
-
-        <div class="flex flex-wrap items-center gap-3">
-          <.button phx-disable-with={gettext("Saving…")}>{gettext("Save")}</.button>
-          <.button
-            :if={@row && @row.enabled}
-            type="button"
-            variant="ghost"
-            id="site-mail-send-test"
-            phx-click="send_test"
-            disabled={@sending_test?}
-          >
-            {if @sending_test?,
-              do: gettext("Sending…"),
-              else: gettext("Send a test to %{email}", email: to_string(@current_user.email))}
-          </.button>
-          <.button
-            :if={@row}
-            type="button"
-            variant="ghost"
-            phx-click="reset"
-            data-confirm={
-              gettext("Remove this site's relay? Its mail will use the deployment's relay again.")
-            }
-          >
-            {gettext("Remove")}
-          </.button>
-        </div>
-      </.form>
-
-      <div :if={@test_result} id="site-mail-test-result" role="status" class="mt-4 text-sm">
-        <%= case @test_result do %>
-          <% {:ok, to} -> %>
-            <p class="text-success-ink">
-              {gettext("Sent to %{email}. Check that inbox.", email: to)}
-            </p>
-          <% {:error, message} -> %>
-            <p class="text-error-ink">
-              {gettext("The test didn't send: %{reason}", reason: message)}
-            </p>
-        <% end %>
-      </div>
-
-      <section id="site-mail-delivery-health" class="mt-12 space-y-6">
-        <div>
-          <h2 class="text-lg font-medium">{gettext("Delivery health")}</h2>
-          <p class="text-sm text-base-content/70">
-            {gettext(
-              "This site's recent permanent failures, and the addresses its relay rejected that this site has stopped mailing as a result."
-            )}
-          </p>
-        </div>
-
-        <div class="space-y-2">
-          <h3 class="text-sm font-medium text-base-content/80">{gettext("Recent failures")}</h3>
-          <p :if={@failures == []} class="text-sm text-base-content/60">
-            {gettext("No recent delivery failures.")}
-          </p>
-          <ul :if={@failures != []} id="site-mail-failures" class="space-y-2">
-            <li
-              :for={failure <- @failures}
-              class="rounded border border-base-content/10 p-3 text-sm"
+          <div class="flex flex-wrap items-center gap-3">
+            <.button phx-disable-with={gettext("Saving…")}>{gettext("Save")}</.button>
+            <.button
+              :if={@row && @row.enabled}
+              type="button"
+              variant="ghost"
+              id="site-mail-send-test"
+              phx-click="send_test"
+              disabled={@sending_test?}
             >
-              <div class="flex flex-wrap items-center gap-2">
-                <span class={[
-                  "rounded px-1.5 py-0.5 text-xs font-medium",
-                  if(failure.state == "cancelled",
-                    do: "bg-error/20 text-error",
-                    else: "bg-warning/20 text-warning"
-                  )
-                ]}>
-                  {if failure.state == "cancelled",
-                    do: gettext("hard bounce"),
-                    else: gettext("gave up")}
-                </span>
-                <code class="font-medium">{failure.domain}</code>
-                <span :if={failure.at} class="ml-auto text-xs text-base-content/50">
-                  {Calendar.strftime(failure.at, "%Y-%m-%d %H:%M UTC")}
-                </span>
-              </div>
-              <code :if={failure.reason} class="mt-1 block break-all text-xs text-base-content/60">
-                {failure.reason}
-              </code>
-            </li>
-          </ul>
+              {if @sending_test?,
+                do: gettext("Sending…"),
+                else: gettext("Send a test to %{email}", email: to_string(@current_user.email))}
+            </.button>
+            <.button
+              :if={@row}
+              type="button"
+              variant="ghost"
+              phx-click="reset"
+              data-confirm={
+                gettext("Remove this site's relay? Its mail will use the deployment's relay again.")
+              }
+            >
+              {gettext("Remove")}
+            </.button>
+          </div>
+        </.form>
+
+        <div :if={@test_result} id="site-mail-test-result" role="status" class="mt-4 text-sm">
+          <%= case @test_result do %>
+            <% {:ok, to} -> %>
+              <p class="text-success-ink">
+                {gettext("Sent to %{email}. Check that inbox.", email: to)}
+              </p>
+            <% {:error, message} -> %>
+              <p class="text-error-ink">
+                {gettext("The test didn't send: %{reason}", reason: message)}
+              </p>
+          <% end %>
         </div>
 
-        <div class="space-y-2">
-          <h3 class="text-sm font-medium text-base-content/80">
-            {gettext("Suppressed addresses")}
-          </h3>
-          <p class="text-xs text-base-content/50">
-            {gettext(
-              "This site's relay said these addresses don't exist, so this site's mail skips them. It stops only this site's mail: other sites, and sign-in and password-reset mail, still reach them. Remove one to let this site mail it again."
-            )}
-          </p>
-          <p :if={@suppressed == []} class="text-sm text-base-content/60">
-            {gettext("No suppressed addresses.")}
-          </p>
-          <ul :if={@suppressed != []} id="site-mail-suppressed" class="space-y-2">
-            <li
-              :for={entry <- @suppressed}
-              id={"site-suppressed-#{entry.id}"}
-              class="flex flex-wrap items-center gap-2 rounded border border-base-content/10 p-3 text-sm"
-            >
-              <code class="font-medium">{entry.email}</code>
-              <span :if={entry.last_failure_at} class="text-xs text-base-content/50">
-                {gettext("since")} {Calendar.strftime(entry.last_failure_at, "%Y-%m-%d")}
-              </span>
-              <.button
-                type="button"
-                variant="ghost"
-                phx-click="unsuppress"
-                phx-value-id={entry.id}
-                class="ml-auto"
+        <section id="site-mail-delivery-health" class="mt-12 space-y-6 scroll-mt-24">
+          <div>
+            <h2 class="text-lg font-medium">{gettext("Delivery health")}</h2>
+            <p class="text-sm text-base-content/70">
+              {gettext(
+                "This site's recent permanent failures, and the addresses its relay rejected that this site has stopped mailing as a result."
+              )}
+            </p>
+          </div>
+
+          <div id="site-mail-recent-failures" class="space-y-2 scroll-mt-24">
+            <h3 class="text-sm font-medium text-base-content/80">{gettext("Recent failures")}</h3>
+            <p :if={@failures == []} class="text-sm text-base-content/60">
+              {gettext("No recent delivery failures.")}
+            </p>
+            <ul :if={@failures != []} id="site-mail-failures" class="space-y-2">
+              <li
+                :for={failure <- @failures}
+                class="rounded border border-base-content/10 p-3 text-sm"
               >
-                {gettext("Remove")}
-              </.button>
-            </li>
-          </ul>
-        </div>
-      </section>
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class={[
+                    "rounded px-1.5 py-0.5 text-xs font-medium",
+                    if(failure.state == "cancelled",
+                      do: "bg-error/20 text-error",
+                      else: "bg-warning/20 text-warning"
+                    )
+                  ]}>
+                    {if failure.state == "cancelled",
+                      do: gettext("hard bounce"),
+                      else: gettext("gave up")}
+                  </span>
+                  <code class="font-medium">{failure.domain}</code>
+                  <span :if={failure.at} class="ml-auto text-xs text-base-content/50">
+                    {Calendar.strftime(failure.at, "%Y-%m-%d %H:%M UTC")}
+                  </span>
+                </div>
+                <code :if={failure.reason} class="mt-1 block break-all text-xs text-base-content/60">
+                  {failure.reason}
+                </code>
+              </li>
+            </ul>
+          </div>
+
+          <div id="site-mail-suppressed-addresses" class="space-y-2 scroll-mt-24">
+            <h3 class="text-sm font-medium text-base-content/80">
+              {gettext("Suppressed addresses")}
+            </h3>
+            <p class="text-xs text-base-content/50">
+              {gettext(
+                "This site's relay said these addresses don't exist, so this site's mail skips them. It stops only this site's mail: other sites, and sign-in and password-reset mail, still reach them. Remove one to let this site mail it again."
+              )}
+            </p>
+            <p :if={@suppressed == []} class="text-sm text-base-content/60">
+              {gettext("No suppressed addresses.")}
+            </p>
+            <ul :if={@suppressed != []} id="site-mail-suppressed" class="space-y-2">
+              <li
+                :for={entry <- @suppressed}
+                id={"site-suppressed-#{entry.id}"}
+                class="flex flex-wrap items-center gap-2 rounded border border-base-content/10 p-3 text-sm"
+              >
+                <code class="font-medium">{entry.email}</code>
+                <span :if={entry.last_failure_at} class="text-xs text-base-content/50">
+                  {gettext("since")} {Calendar.strftime(entry.last_failure_at, "%Y-%m-%d")}
+                </span>
+                <.button
+                  type="button"
+                  variant="ghost"
+                  phx-click="unsuppress"
+                  phx-value-id={entry.id}
+                  class="ml-auto"
+                >
+                  {gettext("Remove")}
+                </.button>
+              </li>
+            </ul>
+          </div>
+        </section>
+      </.page_with_toc>
     </Layouts.console>
     """
+  end
+
+  # The "On this page" contents (#1680) — ids the sections above carry.
+  defp site_mail_toc do
+    [
+      {"site-mail-status", gettext("Status")},
+      {"site-mail-form", gettext("Relay")},
+      {"site-mail-delivery-health", gettext("Delivery health")},
+      {"site-mail-recent-failures", gettext("Recent failures")},
+      {"site-mail-suppressed-addresses", gettext("Suppressed addresses")}
+    ]
   end
 end

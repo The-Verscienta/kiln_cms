@@ -57,7 +57,7 @@ defmodule KilnCMSWeb.ContentEditorMarkdownTest do
         actor: editor
       )
 
-    {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/pages/#{page.id}")
+    {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
     {lv, page}
   end
 
