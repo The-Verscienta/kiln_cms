@@ -65,23 +65,25 @@ defmodule KilnCMS.Search do
   def sequence_length, do: cfg(:sequence_length, 512)
 
   @doc """
-  How many of `global/2`'s sections may run concurrently. Default 1.
+  How many of `global/2`'s sections may run concurrently — and so how many
+  pooled connections one search can hold at once. Default 2.
 
-  At 1 the sections run one after another in the caller's process, so a
-  search has at most one query in flight — one pooled connection at a time,
-  however many content types are registered. Above 1 they fan out over that
-  many tasks, and a search can hold that many connections at once.
+  Each section checks a connection out per query, not for its whole run, so
+  this is a ceiling on a search's queries *in flight*. At 1 the sections run
+  one after another in the caller's process; above 1 they fan out over that
+  many tasks.
 
-  The fan-out is faster for one search on an idle node and slower for every
-  search on a busy one. It was the default (4) until #1712 measured it: four
-  connections per request fills a 10-connection pool (`POOL_SIZE`) with two
-  and a half searches, after which every request on the node, search or not,
-  queues for a connection, and under enough load is dropped from the queue.
-  Raise it only on a node whose pool is sized for `section_concurrency ×
-  concurrent searches` on top of everything else; see `docs/performance.md`.
+  It was 4 until #1712 measured it. Four in flight per search fill a
+  10-connection pool (`POOL_SIZE`, the default) at two and a half concurrent
+  searches, and then every request on the node, search or not, queues for a
+  connection; under enough load the pool drops them. At 2 a lone search is
+  still about twice as fast as at 1 (a sweep is eight or so sections of a
+  couple of milliseconds each), and a busy node was no slower. Raise it only
+  on a node whose pool is sized for `section_concurrency × concurrent
+  searches` on top of everything else; see `docs/performance.md`.
   """
   @spec section_concurrency() :: pos_integer()
-  def section_concurrency, do: cfg(:section_concurrency, 1)
+  def section_concurrency, do: cfg(:section_concurrency, 2)
 
   @doc """
   Instruction prefixes some retrieval models expect, prepended before
@@ -1380,23 +1382,17 @@ defmodule KilnCMS.Search do
   end
 
   # Sections are independent — no section's results affect another's — so
-  # they *can* run concurrently, and did by default until #1712. They now run
-  # one after another in the caller's process unless `section_concurrency/0`
-  # says otherwise, because the pool, not the database, is what a busy node
-  # runs out of: a sweep's sections are a few milliseconds of SQL each, and
-  # one query at a time per search costs less wall time under load than four,
-  # queued behind each other's requests. The numbers are in
-  # `docs/performance.md`.
+  # they run concurrently rather than one round trip after another, bounded
+  # by `section_concurrency/0` (2 since #1712, which measured 4 draining the
+  # pool). At 1 they run in the caller's process instead.
   #
-  # Deliberately NOT inside one `Repo.checkout` for the sweep. That pins a
-  # connection across everything between the queries too — fusion, the
-  # reranker, and any `Cachex.fetch` a policy or registry lookup misses,
-  # whose fallback runs in Cachex's own process and needs a connection of
-  # its own. Measured under the benchmark (#1712): ten concurrent searches
-  # holding all ten connections while each waited on a cache fallback for an
-  # eleventh, until the pool dropped them — every request of the run a 503.
-  # Checked out per query, a search holds a connection only while Postgres
-  # is working for it.
+  # Each query checks its connection out and back in; nothing here holds one
+  # for a whole section or sweep. #1712 tried one `Repo.checkout` around the
+  # sweep, to make a search one connection and one wait, and the benchmark
+  # answered nearly every request of a ten-client cold run with a 503: a
+  # checkout held across the work between queries sits idle while the pool
+  # starves — and some of that work needs the pool too (a `Cachex.fetch`
+  # fallback runs in Cachex's own process and checks out its own).
   #
   # The sequential sweep has no per-section timeout: each query carries the
   # repo's own, and nothing runs in a task that could wedge on its own.

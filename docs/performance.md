@@ -51,9 +51,12 @@ metric "headless API p95 under 50 ms" (#1546).
   (queue `:firing`) instead of rendering every surface inline, so the publish response isn't
   blocked on firing. Delivery falls back to a live render on miss; the artifact API answers
   `503` + `Retry-After` for the brief window before the artifact lands.
-- **Analytics never block or exhaust the pool.** `track_view` and search-query recording run
-  on a bounded `Task.Supervisor` (`max_children: 50`); excess best-effort writes are dropped
-  under a spike rather than queuing on the DB pool.
+- **Analytics never block or exhaust the pool.** `track_view` and search-query recording —
+  from the editor palette and from `GET /api/search` alike (`Search.record_query_async/3`;
+  until #1712 the API wrote it inline, inside the request) — run on a bounded
+  `Task.Supervisor` (`max_children: 100`); excess best-effort writes are dropped under a
+  spike rather than queuing on the DB pool.
+- **A search holds one connection at a time.** See [Search and the pool](#search-and-the-pool).
 - **Bounded editor mounts.** The editor index, media library, content-editor media picker,
   related-content picker, and trash each load at most **500** rows (newest first) per mount.
 

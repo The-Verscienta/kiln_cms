@@ -1,14 +1,14 @@
 defmodule KilnCMSWeb.SearchApiPoolTest do
   @moduledoc """
-  How `GET /api/search` uses the database pool (#1712): one query in flight
-  per request — so at most one connection — and the analytics write off the
-  request.
+  How `GET /api/search` uses the database pool (#1712): at most two queries
+  in flight per request — so at most two connections — and the analytics
+  write off the request.
 
-  Four connections per search — the old section fan-out — filled a
+  Four in flight per search — the old section fan-out — filled a
   10-connection pool with two and a half concurrent searches; the rest of the
   node then queued behind them, and under enough load had its checkouts
-  dropped. The unit of both assertions is the process a query runs in,
-  observed through the repo's telemetry.
+  dropped. Observed through the repo's telemetry: which process each query
+  ran in, and when it held its connection.
   """
   # async: false — toggles `:async_analytics` and needs the shared sandbox
   # for the supervised analytics task.
@@ -40,8 +40,10 @@ defmodule KilnCMSWeb.SearchApiPoolTest do
   end
 
   # Every repo query made by this test process or by any process it started,
-  # as `{pid, source}` — `{:write, source}` for an INSERT (the analytics
-  # upsert).
+  # as `{pid, source, held}` — `{:write, source}` for an INSERT (the
+  # analytics upsert). `held` is the monotonic interval the query had its
+  # connection for: the event fires after decoding, which happens once the
+  # connection is back in the pool, and the query itself ran just before.
   defp record_queries do
     test = self()
     handler = "sapool-#{System.unique_integer([:positive])}"
@@ -49,10 +51,13 @@ defmodule KilnCMSWeb.SearchApiPoolTest do
     :telemetry.attach(
       handler,
       [:kiln_cms, :repo, :query],
-      fn _event, _measurements, meta, _config ->
+      fn _event, measurements, meta, _config ->
         if self() == test or test in Process.get(:"$callers", []) do
+          now = System.monotonic_time()
+          decoded = now - (measurements[:decode_time] || 0)
+          held = {decoded - (measurements[:query_time] || 0), decoded}
           source = if write?(meta[:query]), do: {:write, meta[:source]}, else: meta[:source]
-          send(test, {:query, self(), source})
+          send(test, {:query, self(), source, held})
         end
       end,
       nil
@@ -66,31 +71,80 @@ defmodule KilnCMSWeb.SearchApiPoolTest do
 
   defp received_queries(acc \\ []) do
     receive do
-      {:query, pid, source} ->
-        received_queries([{pid, source} | acc])
+      {:query, pid, source, held} ->
+        received_queries([{pid, source, held} | acc])
     after
       0 -> Enum.reverse(acc)
     end
   end
 
-  test "a search runs its queries one at a time, in the request's process", %{conn: conn} do
-    word = "sapool#{System.unique_integer([:positive])}"
-    published_page("About #{word}")
-    record_queries()
+  # The most intervals that overlap at any one instant.
+  defp max_overlap(intervals) do
+    intervals
+    |> Enum.flat_map(fn {from, to} -> [{from, 1}, {to, -1}] end)
+    # At a tie, a release sorts before an acquire: back-to-back is not overlap.
+    |> Enum.sort_by(fn {at, delta} -> {at, delta} end)
+    |> Enum.scan(0, fn {_at, delta}, open -> open + delta end)
+    |> Enum.max(fn -> 0 end)
+  end
 
+  # How many of the sweep's worker processes were at work at once: each
+  # task's span, from its first query to its last. Not the queries' own
+  # intervals — under the test sandbox every process shares one connection,
+  # so queries never overlap here whatever the fan-out; the tasks running
+  # them do. The request's own process is left out: it waits on the tasks
+  # for the whole sweep and queries only before and after it.
+  defp max_workers_at_once(queries, caller) do
+    queries
+    |> Enum.reject(fn {pid, _source, _held} -> pid == caller end)
+    |> Enum.group_by(fn {pid, _source, _held} -> pid end, fn {_, _, held} -> held end)
+    |> Enum.map(fn {_pid, helds} ->
+      {helds |> Enum.map(&elem(&1, 0)) |> Enum.min(),
+       helds |> Enum.map(&elem(&1, 1)) |> Enum.max()}
+    end)
+    |> max_overlap()
+  end
+
+  defp search_queries(conn, word) do
+    record_queries()
     body = conn |> get("/api/search?q=#{word}&facets=true") |> json_response(200)
     assert [_hit] = body["results"]["pages"]
 
     queries =
-      Enum.filter(received_queries(), fn {_pid, source} -> source in @search_sources end)
+      Enum.filter(received_queries(), fn {_pid, source, _held} -> source in @search_sources end)
 
-    # Enough of them that "all" means something: a leg per content type,
-    # the taxonomy and media sections, the facets.
+    # Enough of them that the bound means something: a leg per content type,
+    # the taxonomy sections, the facets.
     assert length(queries) > 10
+    queries
+  end
 
-    # Every one ran in the request's own process, so one after another: none
-    # in a task, which would hold a connection of its own alongside.
-    assert Enum.all?(queries, fn {pid, _source} -> pid == self() end), inspect(queries)
+  test "a search works at most two sections at once", %{conn: conn} do
+    # The ceiling is the default, not a deployment's tuning.
+    assert Search.section_concurrency() <= 2
+
+    word = "sapool#{System.unique_integer([:positive])}"
+    published_page("About #{word}")
+    queries = search_queries(conn, word)
+
+    # It does fan out — the bound is not met by running nothing concurrently…
+    assert Enum.any?(queries, fn {pid, _source, _held} -> pid != self() end)
+    # …and no more than two sections, so two connections, at a time.
+    assert max_workers_at_once(queries, self()) <= 2, inspect(queries)
+  end
+
+  test "at a concurrency of 1 every query runs in the request's own process", %{conn: conn} do
+    original = Application.get_env(:kiln_cms, KilnCMS.Search, [])
+    on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Search, original) end)
+    Application.put_env(:kiln_cms, KilnCMS.Search, Keyword.put(original, :section_concurrency, 1))
+
+    word = "sapool#{System.unique_integer([:positive])}"
+    published_page("About #{word}")
+    queries = search_queries(conn, word)
+
+    # One after another: none in a task, which would hold a connection of
+    # its own alongside.
+    assert Enum.all?(queries, fn {pid, _source, _held} -> pid == self() end), inspect(queries)
   end
 
   test "the legs read ids; whole rows are read once, for the hits kept" do
@@ -154,12 +208,12 @@ defmodule KilnCMSWeb.SearchApiPoolTest do
       )
 
       writes =
-        Enum.filter(received_queries(), fn {_pid, source} ->
+        Enum.filter(received_queries(), fn {_pid, source, _held} ->
           source == {:write, "search_queries"}
         end)
 
       assert writes != []
-      assert Enum.all?(writes, fn {pid, _source} -> pid != self() end), inspect(writes)
+      assert Enum.all?(writes, fn {pid, _source, _held} -> pid != self() end), inspect(writes)
     end
   end
 

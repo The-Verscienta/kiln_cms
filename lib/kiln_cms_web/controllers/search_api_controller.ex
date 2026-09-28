@@ -119,7 +119,14 @@ defmodule KilnCMSWeb.SearchApiController do
     sections =
       Search.global(
         query,
-        read_opts ++ [highlight: true, filters: filters(params, org_id)]
+        read_opts ++
+          [
+            highlight: true,
+            filters: filters(params, org_id),
+            # Everything but `media`, which this endpoint never returns: one
+            # read per request that was run and thrown away (#960, #1712).
+            sections: Search.content_sections() ++ Keyword.keys(KilnCMS.CMS.Taxonomy.searchable())
+          ]
       )
 
     # One result section per compiled content type, straight from the same
