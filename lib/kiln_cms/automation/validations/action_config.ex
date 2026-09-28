@@ -29,7 +29,8 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
   needs nothing further. That is a requirement conditional on a sibling key's
   *value*, which the required/optional lists above can't express on their own
   — a shape may carry a `:required_when` tag naming a resolver
-  (`deliver_as_required/1`, the only one there is) that `check/2` calls with
+  (`deliver_as_required/1`, reading the `@deliver_as` table — the only
+  one there is) that `check/2` calls with
   the config, after the unconditional `:required` list, to get the additional
   fields the config as given needs. Deliberately narrow: this is the one
   shape that needs it, not a general conditional-validation language.
@@ -43,11 +44,17 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
 
   The cost is that adding a config key to a reaction means adding it here too.
   That is the intended coupling, and it is one-way: `@shapes` is the single
-  description of what a reaction accepts, and `KilnCMSWeb.AutomationLive`
-  renders its per-action key hint by *reading* `shapes/0` rather than by
-  restating it. A hand-maintained list of the same keys beside the field would
-  be a doc that drifts from its own enforcement — the shape of the bug this
-  validation exists to end.
+  description of what a reaction accepts, and the admin form
+  (`KilnCMSWeb.AutomationLive.ConfigFields`) generates one input per key by
+  *reading* `shapes/0` and `required_keys/2` rather than by restating them. A
+  hand-maintained list of the same keys beside the field would be a doc that
+  drifts from its own enforcement — the shape of the bug this validation
+  exists to end. The form adds only labels and widgets, keyed by the names
+  this table declares, and a test fails when a key here has none.
+
+  The validation stays strict even though the form now produces well-typed
+  values: API clients and seeds still write `config` as raw JSON, and
+  `"allow_egress": "true"` is as easy a mistake there as it ever was.
   """
   use Ash.Resource.Validation
 
@@ -65,26 +72,42 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
     {"due_in_days", :integer}
   ]
 
-  # `deliver_as` (#946): which fields the four intelligence reactions need
-  # beyond the base shape depends on where the finding is going. No key at all
-  # reads as `"email"` — the pre-#946 behaviour every existing rule already
-  # relies on — so an absent `deliver_as` still needs `to`, exactly as before.
-  # Defined ahead of `@shapes` below (a module attribute is evaluated where it
-  # appears, not deferred like a function body) so `&deliver_as_required/1`
-  # can capture it.
+  # `deliver_as` (#946): where an intelligence reaction's finding lands, and
+  # the keys each landing place reads — `:required` ones must be present,
+  # `:uses` are read when present. The one description of the axis: the
+  # validation derives what's required from it, and the admin form
+  # (`KilnCMSWeb.AutomationLive.ConfigFields`) derives which values to offer
+  # and which fields to show from it, so a new landing place or key added here
+  # reaches both. A keyword list, not a map, because its order is the order
+  # the form offers the values in.
+  @deliver_as [
+    email: %{required: ["to"], uses: ["to"]},
+    comment: %{required: [], uses: []},
+    task: %{required: ["assignee"], uses: ["assignee", "due_in_days"]}
+  ]
+  @deliver_as_values Enum.map(@deliver_as, fn {value, _} -> to_string(value) end)
+
+  # No key at all reads as `"email"` — the pre-#946 behaviour every existing
+  # rule already relies on — so an absent `deliver_as` still needs `to`,
+  # exactly as before.
+  #
+  # `Map.get(config, "deliver_as", "email")` would only default on an *absent*
+  # key — an explicit `"deliver_as": null` (a JSON author's natural way to
+  # write "use the default") stores as a present key with a `nil` value and
+  # would require nothing, silently bypassing the `to` check every other
+  # spelling of "email" gets.
+  defp current_deliver_as(config), do: Map.get(config, "deliver_as") || "email"
+
+  # An unrecognized value finds no entry and requires nothing extra —
+  # `typed/2` reports it against `:deliver_as` once the value is checked.
+  defp deliver_as_entry(value) do
+    Enum.find_value(@deliver_as, fn {known, entry} -> to_string(known) == value && entry end)
+  end
+
   defp deliver_as_required(config) do
-    # `Map.get(config, "deliver_as", "email")` would only default on an
-    # *absent* key — an explicit `"deliver_as": null` (a JSON author's natural
-    # way to write "use the default") stores as a present key with a `nil`
-    # value and falls through to `_other -> []` below, requiring nothing and
-    # silently bypassing the `to` check every other spelling of "email" gets.
-    case Map.get(config, "deliver_as") || "email" do
-      "email" -> [{"to", :email}]
-      "task" -> [{"assignee", :uuid}]
-      "comment" -> []
-      # Not a recognized value — `typed/2` reports it against `:deliver_as`
-      # once the value is checked; nothing extra to require here.
-      _other -> []
+    case deliver_as_entry(current_deliver_as(config)) do
+      nil -> []
+      entry -> Enum.filter(@deliver_as_optional, fn {key, _} -> key in entry.required end)
     end
   end
 
@@ -164,6 +187,47 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
   @spec shapes() :: map()
   def shapes, do: @shapes
 
+  @doc """
+  The keys `action` requires for `config` as given — the unconditional
+  `:required` list plus whatever a `:required_when` resolver adds for it.
+
+  Public so the admin form marks a field required by the same rule `check/2`
+  enforces: "to" is required on a `suggest_tags` rule delivering by email and
+  not on one delivering as a comment, and only the config can say which.
+  """
+  @spec required_keys(atom(), map()) :: [String.t()]
+  def required_keys(action, config) when is_map(config) do
+    case shape(action) do
+      nil -> []
+      shape -> Enum.map(shape.required ++ conditional_required(shape, config), &elem(&1, 0))
+    end
+  end
+
+  @doc "The `deliver_as` values, in the order the admin form offers them."
+  @spec deliver_as_values() :: [String.t()]
+  def deliver_as_values, do: @deliver_as_values
+
+  @doc """
+  Whether `key` is read by `action` given `config`.
+
+  Every key is, except on the intelligence reactions, where a key belonging to
+  a `deliver_as` landing place is only read when that landing place is the
+  chosen one — `to` means nothing to a rule delivering as a comment. The admin
+  form hides a key this returns `false` for.
+  """
+  @spec applicable?(atom(), String.t(), map()) :: boolean()
+  def applicable?(action, key, config) when is_map(config) do
+    case shape(action) do
+      %{required_when: :deliver_as} ->
+        owned? = Enum.any?(@deliver_as, fn {_value, entry} -> key in entry.uses end)
+        current = deliver_as_entry(current_deliver_as(config))
+        not owned? or (current != nil and key in current.uses)
+
+      _shape ->
+        true
+    end
+  end
+
   @impl true
   def validate(changeset, _opts, _context) do
     action = Ash.Changeset.get_attribute(changeset, :action)
@@ -192,7 +256,7 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
 
   # A non-map `config` can't reach here through the resource (the attribute is
   # `:map`), but a validation that assumes its input is a courtesy to nobody.
-  defp check(_shape, _config), do: error("must be a JSON object.")
+  defp check(_shape, _config), do: error("must be a JSON object.", reason: "not_an_object")
 
   defp conditional_required(%{required_when: :deliver_as}, config),
     do: deliver_as_required(config)
@@ -210,8 +274,14 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
 
   defp missing(required, config) do
     case Enum.find(required, fn {key, _type} -> blank?(Map.get(config, key)) end) do
-      nil -> :ok
-      {key, _type} -> error("is missing `#{key}`, which this action needs to do anything.")
+      nil ->
+        :ok
+
+      {key, _type} ->
+        error("is missing `#{key}`, which this action needs to do anything.",
+          config_key: key,
+          reason: "missing"
+        )
     end
   end
 
@@ -224,7 +294,9 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
         error(
           "has no `#{key}` for this action. It accepts: #{list(known)}. " <>
             "An unrecognized key is usually a typo, and a rule saved with one " <>
-            "looks configured while doing nothing."
+            "looks configured while doing nothing.",
+          config_key: key,
+          reason: "unknown"
         )
     end
   end
@@ -236,7 +308,8 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
       value = Map.get(config, key)
 
       unless well_typed?(type, value) do
-        error("`#{key}` #{expectation(type)}, got #{inspect(value)}.")
+        detail = "#{expectation(type)}, got #{inspect(value)}."
+        error("`#{key}` " <> detail, config_key: key, reason: "invalid", detail: detail)
       end
     end)
   end
@@ -265,7 +338,7 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
   end
 
   defp well_typed?(:deliver_as, value) do
-    well_typed?(:string, value) and value in ~w(email comment task)
+    well_typed?(:string, value) and value in @deliver_as_values
   end
 
   # A uuid string, shallow-checked (format only) the same way `:email` is —
@@ -281,7 +354,7 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
   defp expectation(:day_count), do: "must be a whole number of days between 1 and 365"
   defp expectation(:email), do: "must be an email address"
   defp expectation(:provider), do: "must be one of #{list(Account.providers())}"
-  defp expectation(:deliver_as), do: "must be one of email, comment, task"
+  defp expectation(:deliver_as), do: "must be one of #{list(@deliver_as_values)}"
   defp expectation(:uuid), do: "must be a uuid"
   defp expectation(:integer), do: "must be a positive whole number"
   defp expectation(_type), do: "must be a non-empty string"
@@ -292,11 +365,21 @@ defmodule KilnCMS.Automation.Validations.ActionConfig do
 
   defp list(values), do: values |> Enum.map_join(", ", &to_string/1)
 
-  defp error(message) do
+  # `vars` carry the same facts as the message in structured form —
+  # `config_key`, `reason` (`"missing"`/`"unknown"`/`"invalid"`/
+  # `"not_an_object"`) and, for `"invalid"`, `detail` (the message minus its
+  # key) — so the admin
+  # form can put an error under its field and word it for that field without
+  # parsing this English. None of them appears as a `%{}` placeholder in the
+  # message, so Splode's interpolation leaves the message as written. Strings,
+  # not atoms: AshPhoenix hands var values to the form stringified, and a
+  # reason compared as an atom there would never match.
+  defp error(message, vars) do
     {:error,
      Ash.Error.Changes.InvalidAttribute.exception(
        field: :config,
-       message: "Action config " <> message
+       message: "Action config " <> message,
+       vars: vars
      )}
   end
 end

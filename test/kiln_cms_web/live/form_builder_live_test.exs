@@ -222,7 +222,7 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
   test "the general tab saves form settings, including the submit label", %{conn: conn} do
     {form, [], lv, _html} = builder(conn, authed_user(:admin))
 
-    lv |> element(~s(nav button[phx-value-tab="general"])) |> render_click()
+    lv |> element(~s(#form-builder-tabs button[phx-value-tab="general"])) |> render_click()
 
     html =
       lv
@@ -250,7 +250,7 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
         %{name: "email", label: "Email", field_type: :email}
       ])
 
-    lv |> element(~s(nav button[phx-value-tab="confirmations"])) |> render_click()
+    lv |> element(~s(#form-builder-tabs button[phx-value-tab="confirmations"])) |> render_click()
 
     html = lv |> element("section") |> render()
     assert html =~ "[field:#{field.name}]"
@@ -278,7 +278,7 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
   test "the confirmations tab rejects an unknown token", %{conn: conn} do
     {form, [], lv, _html} = builder(conn, authed_user(:admin))
 
-    lv |> element(~s(nav button[phx-value-tab="confirmations"])) |> render_click()
+    lv |> element(~s(#form-builder-tabs button[phx-value-tab="confirmations"])) |> render_click()
 
     html =
       lv
@@ -299,7 +299,7 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
   test "the embed tab shows a copyable snippet", %{conn: conn} do
     {form, [], lv, _html} = builder(conn, authed_user(:admin))
 
-    html = lv |> element(~s(nav button[phx-value-tab="embed"])) |> render_click()
+    html = lv |> element(~s(#form-builder-tabs button[phx-value-tab="embed"])) |> render_click()
 
     assert html =~ "/embed.js"
     assert html =~ "data-kiln-form=&quot;#{form.slug}&quot;"
@@ -332,7 +332,7 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     {:ok, lv, _html} =
       %{conn | host: host} |> log_in(admin) |> live(~p"/editor/forms/#{form.id}")
 
-    html = lv |> element(~s(nav button[phx-value-tab="embed"])) |> render_click()
+    html = lv |> element(~s(#form-builder-tabs button[phx-value-tab="embed"])) |> render_click()
 
     # The snippet renders inside a `value="..."` attribute, so `<`/`"` are
     # HTML-entity-escaped (matches the sibling "copyable snippet" test above).
@@ -351,7 +351,7 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
         authorize?: false
       )
 
-    html = lv |> element(~s(nav button[phx-value-tab="entries"])) |> render_click()
+    html = lv |> element(~s(#form-builder-tabs button[phx-value-tab="entries"])) |> render_click()
     assert html =~ "visitor@example.com"
 
     lv
@@ -381,7 +381,9 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
           authorize?: false
         )
 
-      html = lv |> element(~s(nav button[phx-value-tab="entries"])) |> render_click()
+      html =
+        lv |> element(~s(#form-builder-tabs button[phx-value-tab="entries"])) |> render_click()
+
       assert html =~ "Hi there"
       assert html =~ "Buy now"
       assert html =~ "Spam"
@@ -409,7 +411,7 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
           authorize?: false
         )
 
-      lv |> element(~s(nav button[phx-value-tab="entries"])) |> render_click()
+      lv |> element(~s(#form-builder-tabs button[phx-value-tab="entries"])) |> render_click()
 
       html =
         lv
@@ -440,7 +442,7 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
       s2 =
         CMS.create_form_submission!(%{form_id: form.id, data: %{"a" => "2"}}, authorize?: false)
 
-      lv |> element(~s(nav button[phx-value-tab="entries"])) |> render_click()
+      lv |> element(~s(#form-builder-tabs button[phx-value-tab="entries"])) |> render_click()
       selected_html = render_click(lv, "select_all_visible", %{})
       assert selected_html =~ "2 selected"
 
@@ -455,7 +457,9 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     test "the CSV export link is present and admin-gated at the controller", %{conn: conn} do
       admin = authed_user(:admin)
       {form, [], lv, _html} = builder(conn, admin)
-      html = lv |> element(~s(nav button[phx-value-tab="entries"])) |> render_click()
+
+      html =
+        lv |> element(~s(#form-builder-tabs button[phx-value-tab="entries"])) |> render_click()
 
       assert html =~ ~s(/editor/forms/#{form.id}/entries/export.csv)
     end
@@ -471,7 +475,7 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
 
       CMS.create_form_submission!(%{form_id: form.id, data: %{"a" => "2"}}, authorize?: false)
 
-      lv |> element(~s(nav button[phx-value-tab="entries"])) |> render_click()
+      lv |> element(~s(#form-builder-tabs button[phx-value-tab="entries"])) |> render_click()
       selected_html = render_click(lv, "select_all_visible", %{})
       assert selected_html =~ "2 selected"
 

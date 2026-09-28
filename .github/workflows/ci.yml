@@ -150,6 +150,26 @@ jobs:
         # into them still resolves.
         run: mix kiln.changelog --check
 
+      - name: Check new migrations keep the running release working
+        # Expand/contract (#1716, docs/releasing.md): during a rolling deploy
+        # the old release serves against the new schema, so a migration the PR
+        # adds may not drop, rename or retype what the old release reads, add
+        # NOT NULL without a default, or lock a large table for an index build
+        # — unless a `# kiln:contract-ok since vX.Y.Z — <reason>` marker says
+        # which shipped release stopped reading it. Only migrations ADDED
+        # relative to the base are judged; the history is exempt.
+        #
+        # The base branch's CURRENT tip, not the event's base SHA: a file main
+        # gained after this PR's merge commit shows up as a deletion, which is
+        # ignored, whereas an older base would re-judge main's own migrations.
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        env:
+          BASE_REF: ${{ github.base_ref || github.event.merge_group.base_ref }}
+        run: |
+          base="${BASE_REF#refs/heads/}"
+          git fetch --no-tags --depth=1 origin "+refs/heads/${base}:refs/remotes/origin/${base}"
+          mix kiln.migrations.check --base "origin/${base}"
+
       # NOTE (#419): the migration/snapshot drift check moved to the
       # strict_tenancy job — snapshots are generated from the STRICT build
       # (the canonical prod schema: org-composite FKs), which this fail-open

@@ -18,10 +18,13 @@ defmodule KilnCMS.Federation.SeenSignatureSweeper do
   @spec run() :: non_neg_integer()
   def run do
     expired = Ash.Query.for_read(SeenSignature, :expired)
-    count = Ash.count!(expired, authorize?: false)
+    count = Ash.count!(expired, actor: KilnCMS.Federation.system())
 
     if count > 0 do
-      Ash.bulk_destroy!(expired, :destroy, %{}, authorize?: false, strategy: :atomic)
+      Ash.bulk_destroy!(expired, :destroy, %{},
+        actor: KilnCMS.Federation.system(),
+        strategy: :atomic
+      )
     end
 
     count

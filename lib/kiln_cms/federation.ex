@@ -137,7 +137,7 @@ defmodule KilnCMS.Federation do
   def active_settings(org_id, opts \\ []) do
     with true <- enabled?(),
          {:ok, [%{enabled: true, origin: origin} = settings]} when is_binary(origin) <-
-           list_site_federation(authorize?: false, tenant: org_id) do
+           list_site_federation(actor: system(), tenant: org_id) do
       cond do
         not Keyword.get(opts, :require_key?, false) -> {:ok, settings}
         is_binary(KilnCMS.Federation.SiteFederation.private_key_pem(settings)) -> {:ok, settings}
@@ -160,14 +160,13 @@ defmodule KilnCMS.Federation do
   """
   @spec deliver_to_followers(map(), atom(), Ash.UUID.t() | nil, Ash.UUID.t()) :: :ok
   def deliver_to_followers(activity, activity_type, document_id, org_id) do
-    # `authorize?: false` on both calls below: this runs inside a worker, as the
-    # system, after the gates that matter have passed (federation on for the
-    # deployment and the site). The follower read and the ledger writes are
-    # scoped by `tenant: org_id`, and neither has an actor to authorize.
-    followers = deliverable_followers!(authorize?: false, tenant: org_id)
+    # This runs inside a worker, as the system, after the gates that matter
+    # have passed (federation on for the deployment and the site). The
+    # follower read and the ledger writes are scoped by `tenant: org_id`, and
+    # the system actor is admitted to exactly those (#1659).
+    followers = deliverable_followers!(actor: system(), tenant: org_id)
 
     Enum.each(followers, fn follower ->
-      # authorize? bypass: the system writing its own ledger — see above.
       {:ok, delivery} =
         create_federation_delivery(
           %{
@@ -177,7 +176,7 @@ defmodule KilnCMS.Federation do
             activity: activity,
             document_id: document_id
           },
-          authorize?: false,
+          actor: system(),
           tenant: org_id
         )
 
@@ -203,7 +202,7 @@ defmodule KilnCMS.Federation do
     |> Ash.Query.filter(
       (kind == :actor and value == ^actor_uri) or (kind == :instance and value == ^host)
     )
-    |> Ash.exists?(authorize?: false, tenant: org_id)
+    |> Ash.exists?(actor: system(), tenant: org_id)
   end
 
   @doc """
@@ -228,15 +227,15 @@ defmodule KilnCMS.Federation do
 
     KilnCMS.Federation.Follower
     |> Ash.Query.filter(actor_uri == ^uri)
-    |> Ash.bulk_destroy!(:destroy, %{}, authorize?: false, tenant: org_id, strategy: :atomic)
+    |> Ash.bulk_destroy!(:destroy, %{}, actor: system(), tenant: org_id, strategy: :atomic)
   end
 
   defp drop_covered_followers(%{kind: :instance, value: host}, org_id) do
     # Hosts are compared in Elixir: `actor_uri` is a URL and the host is a
     # substring of it, and a follower list is bounded by `max_followers/0`.
-    list_followers!(authorize?: false, tenant: org_id)
+    list_followers!(actor: system(), tenant: org_id)
     |> Enum.filter(&(actor_host(&1.actor_uri) == host))
-    |> Enum.each(&destroy_follower(&1, authorize?: false, tenant: org_id))
+    |> Enum.each(&destroy_follower(&1, actor: system(), tenant: org_id))
   end
 
   @doc "The lowercased host of an actor URI, or `nil` for something that is not a URL."
@@ -292,4 +291,15 @@ defmodule KilnCMS.Federation do
   def req_options, do: Keyword.get(config(), :req_options, [])
 
   defp config, do: Application.get_env(:kiln_cms, __MODULE__, [])
+
+  @doc """
+  The actor federation's own bookkeeping runs as (#1659): the inbox, the
+  fan-out, the delivery worker, the replay-nonce store and its sweeper.
+
+  A `KilnCMS.SystemActor`, admitted by name on each federation resource — see
+  `docs/policy-matrix.md`, "The system actor" — rather than
+  `authorize?: false`, which would skip every policy on the resource.
+  """
+  @spec system() :: KilnCMS.SystemActor.t()
+  def system, do: KilnCMS.SystemActor.new(:federation)
 end

@@ -390,9 +390,11 @@ defmodule KilnCMSWeb.MailSettingsLive do
     >
       <div class="space-y-8">
         <div>
-          <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
-            &larr; {gettext("All content")}
-          </.link>
+          <Layouts.console_crumb
+            current_user={@current_user}
+            current_org={@current_org}
+            active={:mail}
+          />
           <h1 class="mt-1 text-2xl font-semibold">{gettext("Mail")}</h1>
           <p class="text-sm text-base-content/70">
             {gettext(
@@ -401,337 +403,361 @@ defmodule KilnCMSWeb.MailSettingsLive do
           </p>
         </div>
 
-        <section class="card card-pad">
-          <h2 class="text-lg font-medium">{gettext("Status")}</h2>
-          <dl class="mt-3 grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
-            <div class="flex justify-between gap-4 sm:block">
-              <dt class="text-base-content/60">{gettext("Delivery mode")}</dt>
-              <dd class="font-medium">
-                <%= case @mode do %>
-                  <% :direct -> %>
-                    {gettext("Direct (built-in MTA)")}
-                  <% :smtp -> %>
-                    {gettext("SMTP relay")}
-                  <% :custom -> %>
-                    {gettext("Custom adapter")}
-                  <% :local -> %>
-                    {gettext("Local mailbox (no real delivery)")}
-                <% end %>
-              </dd>
-            </div>
-            <div class="flex justify-between gap-4 sm:block">
-              <dt class="text-base-content/60">{gettext("From address")}</dt>
-              <dd class="font-medium">
-                <%= if @from do %>
-                  {elem(@from, 1)}
-                <% else %>
-                  {gettext("not configured")}
-                <% end %>
-              </dd>
-            </div>
-            <div class="flex justify-between gap-4 sm:block">
-              <dt class="text-base-content/60">{gettext("HELO host")}</dt>
-              <dd class="font-medium">{@helo_host || gettext("not configured")}</dd>
-            </div>
-            <div class="flex justify-between gap-4 sm:block">
-              <dt class="text-base-content/60">{gettext("DKIM signing")}</dt>
-              <dd class="font-medium">
-                <%= if @settings.dkim_public_key do %>
-                  {gettext("configured (selector %{selector})", selector: @settings.dkim_selector)}
-                <% else %>
-                  {gettext("no key — mail goes out unsigned")}
-                <% end %>
-              </dd>
-            </div>
-          </dl>
-          <p :if={@mode == :local} class="mt-3 text-sm text-base-content/70">
-            {gettext(
-              "Direct delivery is off. Set MAIL_MODE=direct (with MAIL_FROM_EMAIL) to send straight to recipient mail servers; you can prepare the key and DNS records first."
-            )}
-          </p>
-        </section>
-
-        <section class="space-y-4">
-          <h2 class="text-lg font-medium">{gettext("DKIM key")}</h2>
-          <div class="space-y-2">
-            <label
-              :for={provider <- Keys.provider_names()}
-              class="flex cursor-pointer items-start gap-3 rounded border border-base-content/10 p-3 hover:bg-base-200/40"
-            >
-              <input
-                type="radio"
-                name="provider"
-                value={provider}
-                checked={@selected_provider == provider}
-                phx-click="select_provider"
-                phx-value-provider={provider}
-                class="mt-1"
-              />
-              <span>
-                <span class="flex items-center gap-2 font-medium">
-                  {provider_label(provider)}
-                  <span
-                    :if={@settings.dkim_key_provider == provider and @settings.dkim_public_key}
-                    class="rounded bg-success/20 px-1.5 py-0.5 text-xs text-success"
-                  >
-                    {gettext("active")}
-                  </span>
-                </span>
-                <span class="block text-sm text-base-content/70">{provider_hint(provider)}</span>
-              </span>
-            </label>
-          </div>
-
-          <div :if={Keys.writable?(@selected_provider)} class="flex items-center gap-3">
-            <%= if @settings.dkim_key_provider == @selected_provider and @settings.dkim_public_key do %>
-              <.button
-                type="button"
-                phx-click="rotate"
-                data-confirm={
-                  gettext(
-                    "Rotate the DKIM key? You must publish the new DNS record before signed mail verifies again."
-                  )
-                }
-              >
-                {gettext("Rotate key")}
-              </.button>
-              <span class="text-sm text-base-content/70">
-                {gettext("Key present. The private key is never displayed.")}
-              </span>
-            <% else %>
-              <.button type="button" phx-click="generate" variant="primary">
-                {gettext("Generate key")}
-              </.button>
-            <% end %>
-          </div>
-
-          <form
-            :if={not Keys.writable?(@selected_provider)}
-            id="key-source-form"
-            phx-submit="save_key_source"
-            class="flex flex-wrap items-end gap-3"
-          >
-            <input type="hidden" name="source[provider]" value={@selected_provider} />
-            <div class="min-w-64 flex-1">
-              <.input
-                type="text"
-                id="key-source-pointer"
-                name="source[pointer]"
-                value={pointer_value(@settings, @selected_provider)}
-                label={
-                  if @selected_provider == :env,
-                    do: gettext("Environment variable name"),
-                    else: gettext("Absolute file path (e.g. /run/secrets/dkim.pem)")
-                }
-              />
-            </div>
-            <.button type="submit">{gettext("Save & check source")}</.button>
-          </form>
-        </section>
-
-        <section class="space-y-4">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <h2 class="text-lg font-medium">{gettext("DNS records")}</h2>
-            <div class="flex items-center gap-3">
-              <span :if={@settings.last_verified_at} class="text-xs text-base-content/60">
-                {gettext("last checked")} {Calendar.strftime(
-                  @settings.last_verified_at,
-                  "%Y-%m-%d %H:%M UTC"
-                )}
-              </span>
-              <.button type="button" phx-click="verify" disabled={@verifying?}>
-                <%= if @verifying? do %>
-                  {gettext("Checking…")}
-                <% else %>
-                  {gettext("Verify now")}
-                <% end %>
-              </.button>
-            </div>
-          </div>
-
-          <form id="server-ip-form" phx-submit="save_server_ip" class="flex flex-wrap items-end gap-3">
-            <div>
-              <.input
-                type="text"
-                id="server-ip-input"
-                name="settings[server_ip]"
-                value={@settings.server_ip}
-                label={gettext("Server public IP (for the SPF and reverse-DNS checks)")}
-                placeholder="203.0.113.9"
-              />
-            </div>
-            <.button type="submit">{gettext("Save IP")}</.button>
-          </form>
-
-          <ul class="space-y-3">
-            <li
-              :for={record <- @records}
-              class="rounded border border-base-content/10 p-3"
-              data-check={record.check}
-            >
-              <div class="flex flex-wrap items-center gap-2">
-                <.status_badge result={result_for(@results, record.check)} />
-                <span class="font-mono text-xs text-base-content/60">{record.type}</span>
-                <code class="break-all text-sm font-medium">{record.host}</code>
-                <button
-                  type="button"
-                  id={"copy-#{record.check}"}
-                  phx-hook="Clipboard"
-                  data-clipboard-text={record.value}
-                  class="btn btn-sm btn-default ml-auto shrink-0"
-                >
-                  {gettext("Copy value")}
-                </button>
-              </div>
-              <code class="mt-2 block break-all rounded bg-base-200/60 p-2 text-xs">
-                {record.value}
-              </code>
-              <p
-                :if={result_for(@results, record.check)}
-                class="mt-2 text-sm text-base-content/70"
-              >
-                {result_for(@results, record.check)["detail"]}
-              </p>
-              <p :if={record.check == :ptr} class="mt-1 text-xs text-base-content/50">
-                {gettext("Reverse DNS is set in your hosting provider's panel, not in your DNS zone.")}
-              </p>
-            </li>
-          </ul>
-        </section>
-
-        <section class="space-y-4">
-          <h2 class="text-lg font-medium">{gettext("Delivery test")}</h2>
-
-          <div class="flex flex-wrap items-center gap-3">
-            <.button type="button" phx-click="preflight" disabled={@preflighting?}>
-              <%= if @preflighting? do %>
-                {gettext("Probing…")}
-              <% else %>
-                {gettext("Check outbound port 25")}
-              <% end %>
-            </.button>
-            <div :if={@preflight} class="flex items-center gap-2 text-sm">
-              <.status_badge result={@preflight} />
-              <span class="text-base-content/70">{@preflight["detail"]}</span>
-            </div>
-          </div>
-
-          <form id="send-test-form" phx-submit="send_test" class="flex flex-wrap items-end gap-3">
-            <div class="min-w-64">
-              <.input
-                type="email"
-                id="test-to-input"
-                name="test[to]"
-                value={@test_to}
-                label={gettext("Send a test email to")}
-                required
-              />
-            </div>
-            <.button type="submit" disabled={@sending_test?}>
-              <%= if @sending_test? do %>
-                {gettext("Sending…")}
-              <% else %>
-                {gettext("Send test")}
-              <% end %>
-            </.button>
-          </form>
-          <div
-            :if={@test_result}
-            class="flex items-start gap-2 text-sm"
-            data-test-result={@test_result["status"]}
-          >
-            <.status_badge result={@test_result} />
-            <code class="break-all text-xs">{@test_result["detail"]}</code>
-          </div>
-          <p class="text-xs text-base-content/50">
-            {gettext(
-              "For an outside opinion on deliverability (SPF/DKIM/DMARC scoring), send a test to a service like mail-tester.com."
-            )}
-          </p>
-        </section>
-
-        <section class="space-y-6">
-          <div>
-            <h2 class="text-lg font-medium">{gettext("Delivery health")}</h2>
-            <p class="text-sm text-base-content/70">
-              {gettext(
-                "Recent permanent failures and the addresses KilnCMS has stopped mailing as a result."
-              )}
-            </p>
-          </div>
-
-          <div class="space-y-2">
-            <h3 class="text-sm font-medium text-base-content/80">
-              {gettext("Recent failures")}
-            </h3>
-            <p :if={@failures == []} class="text-sm text-base-content/60">
-              {gettext("No recent delivery failures.")}
-            </p>
-            <ul :if={@failures != []} class="space-y-2">
-              <li
-                :for={failure <- @failures}
-                class="rounded border border-base-content/10 p-3 text-sm"
-              >
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class={[
-                    "rounded px-1.5 py-0.5 text-xs font-medium",
-                    if(failure.state == "cancelled",
-                      do: "bg-error/20 text-error",
-                      else: "bg-warning/20 text-warning"
-                    )
-                  ]}>
-                    {if failure.state == "cancelled",
-                      do: gettext("hard bounce"),
-                      else: gettext("gave up")}
-                  </span>
-                  <code class="font-medium">{failure.domain}</code>
-                  <span :if={failure.at} class="ml-auto text-xs text-base-content/50">
-                    {Calendar.strftime(failure.at, "%Y-%m-%d %H:%M UTC")}
-                  </span>
+        <.page_with_toc id="mail-toc" items={mail_toc()}>
+          <div class="space-y-8">
+            <section id="mail-status" class="card card-pad scroll-mt-24">
+              <h2 class="text-lg font-medium">{gettext("Status")}</h2>
+              <dl class="mt-3 grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
+                <div class="flex justify-between gap-4 sm:block">
+                  <dt class="text-base-content/60">{gettext("Delivery mode")}</dt>
+                  <dd class="font-medium">
+                    <%= case @mode do %>
+                      <% :direct -> %>
+                        {gettext("Direct (built-in MTA)")}
+                      <% :smtp -> %>
+                        {gettext("SMTP relay")}
+                      <% :custom -> %>
+                        {gettext("Custom adapter")}
+                      <% :local -> %>
+                        {gettext("Local mailbox (no real delivery)")}
+                    <% end %>
+                  </dd>
                 </div>
-                <code :if={failure.reason} class="mt-1 block break-all text-xs text-base-content/60">
-                  {failure.reason}
-                </code>
-              </li>
-            </ul>
-          </div>
+                <div class="flex justify-between gap-4 sm:block">
+                  <dt class="text-base-content/60">{gettext("From address")}</dt>
+                  <dd class="font-medium">
+                    <%= if @from do %>
+                      {elem(@from, 1)}
+                    <% else %>
+                      {gettext("not configured")}
+                    <% end %>
+                  </dd>
+                </div>
+                <div class="flex justify-between gap-4 sm:block">
+                  <dt class="text-base-content/60">{gettext("HELO host")}</dt>
+                  <dd class="font-medium">{@helo_host || gettext("not configured")}</dd>
+                </div>
+                <div class="flex justify-between gap-4 sm:block">
+                  <dt class="text-base-content/60">{gettext("DKIM signing")}</dt>
+                  <dd class="font-medium">
+                    <%= if @settings.dkim_public_key do %>
+                      {gettext("configured (selector %{selector})", selector: @settings.dkim_selector)}
+                    <% else %>
+                      {gettext("no key — mail goes out unsigned")}
+                    <% end %>
+                  </dd>
+                </div>
+              </dl>
+              <p :if={@mode == :local} class="mt-3 text-sm text-base-content/70">
+                {gettext(
+                  "Direct delivery is off. Set MAIL_MODE=direct (with MAIL_FROM_EMAIL) to send straight to recipient mail servers; you can prepare the key and DNS records first."
+                )}
+              </p>
+            </section>
 
-          <div class="space-y-2">
-            <h3 class="text-sm font-medium text-base-content/80">
-              {gettext("Suppressed addresses")}
-            </h3>
-            <p class="text-xs text-base-content/50">
-              {gettext(
-                "These addresses hard-bounced and are skipped on future sends. Remove one to let it receive mail again."
-              )}
-            </p>
-            <p :if={@suppressed == []} class="text-sm text-base-content/60">
-              {gettext("No suppressed addresses.")}
-            </p>
-            <ul :if={@suppressed != []} class="space-y-2">
-              <li
-                :for={entry <- @suppressed}
-                class="flex flex-wrap items-center gap-2 rounded border border-base-content/10 p-3 text-sm"
-              >
-                <code class="font-medium">{entry.email}</code>
-                <span :if={entry.last_failure_at} class="text-xs text-base-content/50">
-                  {gettext("since")} {Calendar.strftime(entry.last_failure_at, "%Y-%m-%d")}
-                </span>
-                <.button
-                  type="button"
-                  phx-click="unsuppress"
-                  phx-value-id={entry.id}
-                  class="ml-auto"
+            <section id="mail-dkim" class="space-y-4 scroll-mt-24">
+              <h2 class="text-lg font-medium">{gettext("DKIM key")}</h2>
+              <div class="space-y-2">
+                <label
+                  :for={provider <- Keys.provider_names()}
+                  class="flex cursor-pointer items-start gap-3 rounded border border-base-content/10 p-3 hover:bg-base-200/40"
                 >
-                  {gettext("Remove")}
+                  <input
+                    type="radio"
+                    name="provider"
+                    value={provider}
+                    checked={@selected_provider == provider}
+                    phx-click="select_provider"
+                    phx-value-provider={provider}
+                    class="mt-1"
+                  />
+                  <span>
+                    <span class="flex items-center gap-2 font-medium">
+                      {provider_label(provider)}
+                      <span
+                        :if={@settings.dkim_key_provider == provider and @settings.dkim_public_key}
+                        class="rounded bg-success/20 px-1.5 py-0.5 text-xs text-success"
+                      >
+                        {gettext("active")}
+                      </span>
+                    </span>
+                    <span class="block text-sm text-base-content/70">{provider_hint(provider)}</span>
+                  </span>
+                </label>
+              </div>
+
+              <div :if={Keys.writable?(@selected_provider)} class="flex items-center gap-3">
+                <%= if @settings.dkim_key_provider == @selected_provider and @settings.dkim_public_key do %>
+                  <.button
+                    type="button"
+                    phx-click="rotate"
+                    data-confirm={
+                      gettext(
+                        "Rotate the DKIM key? You must publish the new DNS record before signed mail verifies again."
+                      )
+                    }
+                  >
+                    {gettext("Rotate key")}
+                  </.button>
+                  <span class="text-sm text-base-content/70">
+                    {gettext("Key present. The private key is never displayed.")}
+                  </span>
+                <% else %>
+                  <.button type="button" phx-click="generate" variant="primary">
+                    {gettext("Generate key")}
+                  </.button>
+                <% end %>
+              </div>
+
+              <form
+                :if={not Keys.writable?(@selected_provider)}
+                id="key-source-form"
+                phx-submit="save_key_source"
+                class="flex flex-wrap items-end gap-3"
+              >
+                <input type="hidden" name="source[provider]" value={@selected_provider} />
+                <div class="min-w-64 flex-1">
+                  <.input
+                    type="text"
+                    id="key-source-pointer"
+                    name="source[pointer]"
+                    value={pointer_value(@settings, @selected_provider)}
+                    label={
+                      if @selected_provider == :env,
+                        do: gettext("Environment variable name"),
+                        else: gettext("Absolute file path (e.g. /run/secrets/dkim.pem)")
+                    }
+                  />
+                </div>
+                <.button type="submit">{gettext("Save & check source")}</.button>
+              </form>
+            </section>
+
+            <section id="mail-dns" class="space-y-4 scroll-mt-24">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <h2 class="text-lg font-medium">{gettext("DNS records")}</h2>
+                <div class="flex items-center gap-3">
+                  <span :if={@settings.last_verified_at} class="text-xs text-base-content/60">
+                    {gettext("last checked")} {Calendar.strftime(
+                      @settings.last_verified_at,
+                      "%Y-%m-%d %H:%M UTC"
+                    )}
+                  </span>
+                  <.button type="button" phx-click="verify" disabled={@verifying?}>
+                    <%= if @verifying? do %>
+                      {gettext("Checking…")}
+                    <% else %>
+                      {gettext("Verify now")}
+                    <% end %>
+                  </.button>
+                </div>
+              </div>
+
+              <form
+                id="server-ip-form"
+                phx-submit="save_server_ip"
+                class="flex flex-wrap items-end gap-3"
+              >
+                <div>
+                  <.input
+                    type="text"
+                    id="server-ip-input"
+                    name="settings[server_ip]"
+                    value={@settings.server_ip}
+                    label={gettext("Server public IP (for the SPF and reverse-DNS checks)")}
+                    placeholder="203.0.113.9"
+                  />
+                </div>
+                <.button type="submit">{gettext("Save IP")}</.button>
+              </form>
+
+              <ul class="space-y-3">
+                <li
+                  :for={record <- @records}
+                  class="rounded border border-base-content/10 p-3"
+                  data-check={record.check}
+                >
+                  <div class="flex flex-wrap items-center gap-2">
+                    <.status_badge result={result_for(@results, record.check)} />
+                    <span class="font-mono text-xs text-base-content/60">{record.type}</span>
+                    <code class="break-all text-sm font-medium">{record.host}</code>
+                    <button
+                      type="button"
+                      id={"copy-#{record.check}"}
+                      phx-hook="Clipboard"
+                      data-clipboard-text={record.value}
+                      class="btn btn-sm btn-default ml-auto shrink-0"
+                    >
+                      {gettext("Copy value")}
+                    </button>
+                  </div>
+                  <code class="mt-2 block break-all rounded bg-base-200/60 p-2 text-xs">
+                    {record.value}
+                  </code>
+                  <p
+                    :if={result_for(@results, record.check)}
+                    class="mt-2 text-sm text-base-content/70"
+                  >
+                    {result_for(@results, record.check)["detail"]}
+                  </p>
+                  <p :if={record.check == :ptr} class="mt-1 text-xs text-base-content/50">
+                    {gettext(
+                      "Reverse DNS is set in your hosting provider's panel, not in your DNS zone."
+                    )}
+                  </p>
+                </li>
+              </ul>
+            </section>
+
+            <section id="mail-delivery-test" class="space-y-4 scroll-mt-24">
+              <h2 class="text-lg font-medium">{gettext("Delivery test")}</h2>
+
+              <div class="flex flex-wrap items-center gap-3">
+                <.button type="button" phx-click="preflight" disabled={@preflighting?}>
+                  <%= if @preflighting? do %>
+                    {gettext("Probing…")}
+                  <% else %>
+                    {gettext("Check outbound port 25")}
+                  <% end %>
                 </.button>
-              </li>
-            </ul>
+                <div :if={@preflight} class="flex items-center gap-2 text-sm">
+                  <.status_badge result={@preflight} />
+                  <span class="text-base-content/70">{@preflight["detail"]}</span>
+                </div>
+              </div>
+
+              <form id="send-test-form" phx-submit="send_test" class="flex flex-wrap items-end gap-3">
+                <div class="min-w-64">
+                  <.input
+                    type="email"
+                    id="test-to-input"
+                    name="test[to]"
+                    value={@test_to}
+                    label={gettext("Send a test email to")}
+                    required
+                  />
+                </div>
+                <.button type="submit" disabled={@sending_test?}>
+                  <%= if @sending_test? do %>
+                    {gettext("Sending…")}
+                  <% else %>
+                    {gettext("Send test")}
+                  <% end %>
+                </.button>
+              </form>
+              <div
+                :if={@test_result}
+                class="flex items-start gap-2 text-sm"
+                data-test-result={@test_result["status"]}
+              >
+                <.status_badge result={@test_result} />
+                <code class="break-all text-xs">{@test_result["detail"]}</code>
+              </div>
+              <p class="text-xs text-base-content/50">
+                {gettext(
+                  "For an outside opinion on deliverability (SPF/DKIM/DMARC scoring), send a test to a service like mail-tester.com."
+                )}
+              </p>
+            </section>
+
+            <section id="mail-delivery-health" class="space-y-6 scroll-mt-24">
+              <div>
+                <h2 class="text-lg font-medium">{gettext("Delivery health")}</h2>
+                <p class="text-sm text-base-content/70">
+                  {gettext(
+                    "Recent permanent failures and the addresses KilnCMS has stopped mailing as a result."
+                  )}
+                </p>
+              </div>
+
+              <div class="space-y-2">
+                <h3 class="text-sm font-medium text-base-content/80">
+                  {gettext("Recent failures")}
+                </h3>
+                <p :if={@failures == []} class="text-sm text-base-content/60">
+                  {gettext("No recent delivery failures.")}
+                </p>
+                <ul :if={@failures != []} class="space-y-2">
+                  <li
+                    :for={failure <- @failures}
+                    class="rounded border border-base-content/10 p-3 text-sm"
+                  >
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class={[
+                        "rounded px-1.5 py-0.5 text-xs font-medium",
+                        if(failure.state == "cancelled",
+                          do: "bg-error/20 text-error",
+                          else: "bg-warning/20 text-warning"
+                        )
+                      ]}>
+                        {if failure.state == "cancelled",
+                          do: gettext("hard bounce"),
+                          else: gettext("gave up")}
+                      </span>
+                      <code class="font-medium">{failure.domain}</code>
+                      <span :if={failure.at} class="ml-auto text-xs text-base-content/50">
+                        {Calendar.strftime(failure.at, "%Y-%m-%d %H:%M UTC")}
+                      </span>
+                    </div>
+                    <code
+                      :if={failure.reason}
+                      class="mt-1 block break-all text-xs text-base-content/60"
+                    >
+                      {failure.reason}
+                    </code>
+                  </li>
+                </ul>
+              </div>
+
+              <div class="space-y-2">
+                <h3 class="text-sm font-medium text-base-content/80">
+                  {gettext("Suppressed addresses")}
+                </h3>
+                <p class="text-xs text-base-content/50">
+                  {gettext(
+                    "These addresses hard-bounced and are skipped on future sends. Remove one to let it receive mail again."
+                  )}
+                </p>
+                <p :if={@suppressed == []} class="text-sm text-base-content/60">
+                  {gettext("No suppressed addresses.")}
+                </p>
+                <ul :if={@suppressed != []} class="space-y-2">
+                  <li
+                    :for={entry <- @suppressed}
+                    class="flex flex-wrap items-center gap-2 rounded border border-base-content/10 p-3 text-sm"
+                  >
+                    <code class="font-medium">{entry.email}</code>
+                    <span :if={entry.last_failure_at} class="text-xs text-base-content/50">
+                      {gettext("since")} {Calendar.strftime(entry.last_failure_at, "%Y-%m-%d")}
+                    </span>
+                    <.button
+                      type="button"
+                      phx-click="unsuppress"
+                      phx-value-id={entry.id}
+                      class="ml-auto"
+                    >
+                      {gettext("Remove")}
+                    </.button>
+                  </li>
+                </ul>
+              </div>
+            </section>
           </div>
-        </section>
+        </.page_with_toc>
       </div>
     </Layouts.console>
     """
+  end
+
+  # The "On this page" contents (#1680) — ids the sections above carry.
+  defp mail_toc do
+    [
+      {"mail-status", gettext("Status")},
+      {"mail-dkim", gettext("DKIM key")},
+      {"mail-dns", gettext("DNS records")},
+      {"mail-delivery-test", gettext("Delivery test")},
+      {"mail-delivery-health", gettext("Delivery health")}
+    ]
   end
 
   attr :result, :map, default: nil

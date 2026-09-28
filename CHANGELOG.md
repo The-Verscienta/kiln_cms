@@ -54,6 +54,26 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Added
+
+- **`mix kiln.migrations.check` fails a PR whose new migration breaks the
+  release still serving mid-deploy.**
+  ([#1716](https://github.com/The-Verscienta/kiln_cms/issues/1716) · [long form](docs/changelog/unreleased.md#mix-kilnmigrationscheck-gates-expand-contract))
+
+### Changed
+
+- **Automation rules are set up with ordinary fields instead of a JSON box.**
+  ([long form](docs/changelog/unreleased.md#automation-rules-are-set-up-with-ordinary-fields-instead-of-a-json-box))
+
+- **Console lists share one empty state; long settings pages get a table of
+  contents; screen crumbs point at their real parent.**
+  ([#1678](https://github.com/The-Verscienta/kiln_cms/issues/1678) · [#1680](https://github.com/The-Verscienta/kiln_cms/issues/1680) · [long form](docs/changelog/unreleased.md#console-lists-share-one-empty-state-long-settings-pages-get-a-table-of-contents))
+
+- **The release image's `latest` tag moves only to the highest final release,
+  and from 1.0.0 a floating major tag (`1`) follows the highest final release of
+  its major.**
+  ([#1544](https://github.com/The-Verscienta/kiln_cms/issues/1544) · [long form](docs/changelog/unreleased.md#the-release-images-latest-tag-moves-only-to-the-highest-final-release-and-from))
+
 ### Fixed
 
 - **Edited images get new variants under strict tenancy, and a media job with no
@@ -68,6 +88,14 @@ Every summary line below that was shortened links to its own entry there.
 
 - **The newsletter sign-up honeypot and public forms trip on the same rule.**
   ([#1657](https://github.com/The-Verscienta/kiln_cms/issues/1657) · [long form](docs/changelog/unreleased.md#newsletter-sign-up-honeypot-matches-forms))
+
+- **Federation runs under the policies.** 24 more internal writes and reads run
+  as scoped system actors; the replay check and follower ceiling fail closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#federation-runs-under-the-policies))
+
+- **`mint` 1.11.0 closes three advisories: HTTP/1 response smuggling and two
+  HTTP/2 client memory exhaustions (EEF-CVE-2026-91043 HIGH, -92103, -94194).**
+  ([#1722](https://github.com/The-Verscienta/kiln_cms/pull/1722) · [long form](docs/changelog/unreleased.md#mint-1110-closes-three-advisories-http1-response-smuggling-and-two-http2))
 
 ## [0.12.0] - 2026-09-27
 

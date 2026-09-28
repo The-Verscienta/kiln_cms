@@ -235,9 +235,11 @@ defmodule KilnCMSWeb.WebhookLive do
     >
       <div class="space-y-8">
         <div>
-          <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
-            &larr; {gettext("All content")}
-          </.link>
+          <Layouts.console_crumb
+            current_user={@current_user}
+            current_org={@current_org}
+            active={:webhooks}
+          />
           <h1 class="mt-1 text-2xl font-semibold">{gettext("Webhooks")}</h1>
           <p class="text-sm text-base-content/70">
             {gettext(
@@ -421,9 +423,15 @@ defmodule KilnCMSWeb.WebhookLive do
             )}
           </p>
 
-          <p :if={@deliveries == []} class="text-sm text-base-content/60">
-            {gettext("No deliveries yet.")}
-          </p>
+          <.empty_state
+            :if={@deliveries == []}
+            id="webhook-deliveries-empty"
+            icon="hero-arrow-up-tray"
+            title={gettext("No deliveries yet.")}
+            compact
+          >
+            {gettext("Each attempt to call an endpoint is listed here.")}
+          </.empty_state>
 
           <div :if={@deliveries != []} class="overflow-x-auto">
             <table class="table">

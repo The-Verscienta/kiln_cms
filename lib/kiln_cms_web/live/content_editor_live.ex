@@ -3665,19 +3665,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp generic_release_error, do: gettext("Couldn't add it to that release.")
 
-  # This org's editors/admins — the roster a task can be assigned to (viewers
-  # can't act on content, so they're excluded). By EFFECTIVE tier on the org
-  # the task will be written under (#419), not global `User.role`: that is what
-  # `AssigneeIsEditor` checks at the write, so the picker offers exactly the
-  # people the submit accepts. `users_with_tier/2` is a system read —
-  # `User`'s and `OrgMembership`'s read policies are self-only.
-  defp assignable_users(org) do
-    org
-    |> Accounts.Scoping.users_with_tier([:editor, :admin])
-    |> Enum.sort_by(&user_label/1)
-    |> Enum.map(&{user_label(&1), &1.id})
-  end
-
   defp close_comment_panel(socket) do
     socket
     |> assign(:comment_block, nil)

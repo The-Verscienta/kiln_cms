@@ -81,18 +81,23 @@ defmodule KilnCMS.Federation.Follower do
     end
   end
 
-  # The inbox writes these with `authorize?: false`, the same way
-  # `KilnCMS.Webhooks` dispatches: a remote `Follow` authenticates with an HTTP
-  # signature, and there is no Kiln user behind it to be an actor. A `bypass`
-  # would be the wrong tool — it skips every policy below it for anyone it
-  # matches, which is a much wider hole than the one being opened.
+  # The follower list is kept by the system (#1659): the inbox records a remote
+  # `Follow` (an HTTP signature authenticates it, and there is no Kiln user
+  # behind it to be an actor), the fan-out reads who to deliver to, the
+  # delivery worker keeps the failure count and drops a dead follower, and a
+  # block removes the followers it covers. Every one of those runs as
+  # `KilnCMS.SystemActor`, admitted with `authorize_if` — never a `bypass`,
+  # which would skip every policy below it for anyone it matches. The tenant
+  # filter still applies, so a system actor sees one org's followers at a time.
   policies do
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
     policy action_type([:create, :update, :destroy]) do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

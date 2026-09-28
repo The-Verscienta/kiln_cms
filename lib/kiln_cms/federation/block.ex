@@ -49,8 +49,12 @@ defmodule KilnCMS.Federation.Block do
   end
 
   policies do
+    # The inbox asks "is this actor or its instance blocked?" before it
+    # records a `Follow` (`KilnCMS.Federation.blocked?/2`, #1659). Read only:
+    # deciding who to block stays an admin act.
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
     policy action_type([:create, :update, :destroy]) do
