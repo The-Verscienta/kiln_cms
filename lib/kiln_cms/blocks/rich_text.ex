@@ -15,9 +15,11 @@ defmodule KilnCMS.Blocks.RichText do
       canvas, the nested column editor and the inline editor all store `body`;
     * it renders (sanitized) only when `body` is empty.
 
-  Read `body` first. The exported block schema marks the property `readOnly`
-  and `deprecated`: a client should not send new prose there, and a later major
-  may remove it once a converter can hold what it keeps.
+  Read `body` first, and write `body` wherever Portable Text can hold the prose.
+  The exported block schema keeps the property `deprecated`: a later major may
+  remove it once a converter can hold what it keeps. (The docs publisher,
+  `scripts/publish_docs.exs`, writes rendered guides here, since their code
+  blocks are exactly what Portable Text cannot hold.)
   """
   use Kiln.Block
 
@@ -69,9 +71,9 @@ defmodule KilnCMS.Blocks.RichText do
   # Both render branches emit `body` as a real array (the fallback emits `[]`
   # alongside the sanitized HTML), so it is required and never null.
   #
-  # `legacy_html` carries the JSON Schema `deprecated` (#1537) and `readOnly`
-  # (#1543) keywords, which is how the markers reach a typed client's generated
-  # code rather than only this changelog. It stays in the schema because the
+  # `legacy_html` carries the JSON Schema `deprecated` keyword (#1537), which is
+  # how the marker reaches a typed client's generated code rather than only this
+  # changelog. It stays in the schema because the
   # `:json` artifact still emits it for a block whose `body` is empty.
   @impl Kiln.Block.Renderer
   def json_schema do
@@ -84,10 +86,9 @@ defmodule KilnCMS.Blocks.RichText do
           |> Kiln.Block.JsonSchema.type_schema()
           |> Map.merge(%{
             "deprecated" => true,
-            "readOnly" => true,
             "description" =>
               "Sanitized HTML that Portable Text cannot hold faithfully, present only " <>
-                "when `body` is empty. Read `body` first; do not write new prose here."
+                "when `body` is empty. Read `body` first, and write `body` wherever it can hold the prose."
           })
       }
     }

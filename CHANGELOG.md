@@ -72,9 +72,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
-- **Keep `RichText.legacy_html` as a read-only fallback instead of removing it;
+- **Keep `RichText.legacy_html` as a fallback instead of removing it;
   the nested column editor now stores Portable Text.**
-  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#keep-legacy-html-as-a-read-only-fallback))
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#keep-legacy-html-as-a-fallback))
 
 ### Fixed
 

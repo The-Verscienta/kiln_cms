@@ -153,7 +153,7 @@ After 0.12, the covered list changes only by deprecation.
   `from_legacy/1`, `KilnCMS.CMS.Block` and the legacy write shape, and the
   editor's nested column editor stores Portable Text instead of
   `legacy_html`. The read side stays (refused backfill rows, version history),
-  and `RichText.legacy_html` stays as a read-only fallback for HTML Portable
+  and `RichText.legacy_html` stays as a fallback for HTML Portable
   Text cannot hold — removing it would have destroyed the only faithful copy
   of that prose.
 - `.github/SECURITY.md` names the supported release lines and the backport

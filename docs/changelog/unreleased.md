@@ -50,16 +50,16 @@ carries the reasoning.
 
 ## Changed
 
-<a id="keep-legacy-html-as-a-read-only-fallback"></a>
+<a id="keep-legacy-html-as-a-fallback"></a>
 
-- **Keep `RichText.legacy_html` as a read-only fallback instead of removing it;
+- **Keep `RichText.legacy_html` as a fallback instead of removing it;
   the nested column editor now stores Portable Text.** 0.12 marked the field
   for removal at 1.0. It is the only faithful copy of prose Portable Text
   cannot hold — marks inside a code block, a list inside a quote — which is
   exactly what `mix kiln.blocks.backfill` keeps and reports, so removing it
   would have deleted that prose from the rows the backfill protected. It still
-  renders, sanitized, when `body` is empty, and the exported block schema now
-  marks it `readOnly` as well as `deprecated`. What changes is who writes it:
+  renders, sanitized, when `body` is empty, and the exported block schema keeps
+  it `deprecated`. What changes is who writes it:
   the nested column editor edited every rich-text child as raw HTML stored in
   `legacy_html`; it now stores `body`, keeping HTML only where the conversion
   would not be faithful — the rule the inline editor and the backfill already

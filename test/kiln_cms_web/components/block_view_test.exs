@@ -71,10 +71,10 @@ defmodule KilnCMSWeb.BlockViewTest do
       refute Code.ensure_loaded?(Module.concat([KilnCMS, CMS, Block]))
     end
 
-    test "legacy_html is a read-only, deprecated fallback in the exported block schema" do
+    test "legacy_html stays a deprecated fallback in the exported block schema" do
       schema = Kiln.Block.JsonSchema.for_module(Blocks.RichText)
 
-      assert %{"deprecated" => true, "readOnly" => true} = schema["properties"]["legacy_html"]
+      assert %{"deprecated" => true} = schema["properties"]["legacy_html"]
       refute Map.has_key?(schema["properties"]["body"], "deprecated")
     end
   end
