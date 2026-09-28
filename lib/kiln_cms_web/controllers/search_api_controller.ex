@@ -48,6 +48,7 @@ defmodule KilnCMSWeb.SearchApiController do
   alias KilnCMS.I18n
   alias KilnCMS.Search
   alias KilnCMS.Search.Highlight
+  alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.Params
 
   @max_limit 25
@@ -58,6 +59,12 @@ defmodule KilnCMSWeb.SearchApiController do
   # then names the corrected term. Good exact-match queries stay clean:
   # `Search.suggest/2` never suggests when a title word equals the query.
   @suggest_below 3
+
+  # Seconds a client is asked to wait after a `503` from a saturated pool. A
+  # search's hold on a connection is tens of milliseconds, so the pool turns
+  # over many times a second; one second is enough to be past the burst that
+  # filled it, without a client giving up on a search it could have had.
+  @retry_after "1"
 
   def index(conn, params) do
     query = params |> Params.string("q", "") |> String.trim()
@@ -71,7 +78,34 @@ defmodule KilnCMSWeb.SearchApiController do
     end
   end
 
+  # One pooled connection for the whole request (`Search.with_connection/1`):
+  # the category lookup, the sweep, the "did you mean" and the facet counts
+  # all run on it in turn, so a search costs the pool one connection and
+  # waits for it once. That wait is where a saturated pool is felt, and it
+  # answers `503` + `Retry-After` — a search a client can retry — rather than
+  # the `500` a dropped checkout used to raise from somewhere inside the
+  # sweep (#1712). The analytics write happens after the connection is
+  # handed back, off the request (`Search.record_query_async/3`).
   defp search(conn, query, locale, limit, params) do
+    org_id = KilnCMSWeb.Tenant.current_org_id(conn)
+
+    case Search.with_connection(fn -> {:ok, run(query, locale, limit, params, org_id)} end) do
+      {:ok, {payload, total}} ->
+        Search.record_query_async(query, total, locale: locale, tenant: org_id)
+        json(conn, payload)
+
+      {:error, :unavailable} ->
+        conn
+        |> put_resp_header("retry-after", @retry_after)
+        |> ApiError.send(
+          :service_unavailable,
+          "temporarily_unavailable",
+          "Search is temporarily unavailable; retry shortly."
+        )
+    end
+  end
+
+  defp run(query, locale, limit, params, org_id) do
     read_opts = [
       # No `actor:` — see the moduledoc. `authorize?: true` with no actor is
       # what pins this to the anonymous read policy, and `read_opts` is handed
@@ -80,7 +114,7 @@ defmodule KilnCMSWeb.SearchApiController do
       authorize?: true,
       # Scope search to the request's org (#336); resolved from the host by the
       # SetTenant plug. Content sections are isolated per site.
-      tenant: KilnCMSWeb.Tenant.current_org_id(conn),
+      tenant: org_id,
       locale: locale,
       limit: limit
     ]
@@ -88,7 +122,7 @@ defmodule KilnCMSWeb.SearchApiController do
     sections =
       Search.global(
         query,
-        read_opts ++ [highlight: true, filters: filters(params, read_opts[:tenant])]
+        read_opts ++ [highlight: true, filters: filters(params, org_id)]
       )
 
     # One result section per compiled content type, straight from the same
@@ -124,11 +158,6 @@ defmodule KilnCMSWeb.SearchApiController do
       |> Enum.map(&length/1)
       |> Enum.sum()
 
-    Search.record_query(query, total,
-      locale: locale,
-      tenant: KilnCMSWeb.Tenant.current_org_id(conn)
-    )
-
     suggestion = if total < @suggest_below, do: Search.suggest(query, read_opts), else: nil
 
     payload = %{query: query, locale: locale, results: results, suggestion: suggestion}
@@ -140,7 +169,7 @@ defmodule KilnCMSWeb.SearchApiController do
         do: Map.put(payload, :facets, Search.facets(query, read_opts)),
         else: payload
 
-    json(conn, payload)
+    {payload, total}
   end
 
   # Facet filter params → `Search` filters. Only the category facet is

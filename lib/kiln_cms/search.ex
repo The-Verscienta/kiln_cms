@@ -65,18 +65,24 @@ defmodule KilnCMS.Search do
   def sequence_length, do: cfg(:sequence_length, 512)
 
   @doc """
-  How many of `global/2`'s sections may run concurrently.
+  How many of `global/2`'s sections may run concurrently. Default 1.
 
-  Sections are independent, so they fan out rather than running one round trip
-  after another. The bound matters because each one holds a DB connection for
-  the duration of its queries — unbounded fan-out would drain the Ecto pool
-  (`POOL_SIZE`, default 10) and starve everything else on the node. The
-  default deliberately leaves most of the pool free for concurrent traffic;
-  raise it if your pool is sized for it, and remember a *second* simultaneous
-  search wants the same headroom. Default 4.
+  At 1 the sections run one after another on **one** pooled connection,
+  checked out once for the whole sweep (one `Repo.checkout`), so a search
+  costs the pool one connection however many content types are registered.
+  Above 1 they fan out over that many tasks, each holding a connection of its
+  own for the duration of its queries.
+
+  The fan-out is faster for one search on an idle node and slower for every
+  search on a busy one. It was the default (4) until #1712 measured it: four
+  connections per request fills a 10-connection pool (`POOL_SIZE`) with two
+  and a half searches, after which every request on the node, search or not,
+  queues for a connection, and under enough load is dropped from the queue.
+  Raise it only on a node whose pool is sized for `section_concurrency ×
+  concurrent searches` on top of everything else; see `docs/performance.md`.
   """
   @spec section_concurrency() :: pos_integer()
-  def section_concurrency, do: cfg(:section_concurrency, 4)
+  def section_concurrency, do: cfg(:section_concurrency, 1)
 
   @doc """
   Instruction prefixes some retrieval models expect, prepended before
@@ -415,6 +421,12 @@ defmodule KilnCMS.Search do
   # `Ash.Query.filter/2` is a macro — for `semantic_neighbours/3`.
   require Ash.Query
 
+  # What a leg reads: the id, which is all fusion keys on. Calculations a leg
+  # loads (the semantic leg's distance) and the ones it sorts by are computed
+  # in its SQL regardless; the rest of the row is read once, for the hits
+  # fusion keeps — see `hydrate/4`.
+  @leg_select [:id]
+
   # Top-N taken from each leg before fusion, and the RRF rank constant (the
   # standard k=60 dampens the contribution of low-ranked results).
   @hybrid_candidates 50
@@ -554,13 +566,15 @@ defmodule KilnCMS.Search do
 
     args = Map.merge(%{query: query, locale: locale}, filters)
 
-    # The legs fetch bare records. Fusion needs only ids and order, and
-    # reranking reads title/excerpt, which are attributes — so loading calcs
-    # here would compute them for up to `@hybrid_candidates` rows *per leg*
-    # to keep `limit` of them. `highlight` is a `ts_headline` over the whole
-    # document, so that is most of the query's cost thrown away. The one calc
-    # a leg does load is the semantic leg's `semantic_distance`, which its
-    # ORDER BY computes anyway (see `semantic_context/1`).
+    # The legs fetch ids alone (`@leg_select`). Fusion needs only ids and
+    # order, so reading whole rows — or loading calcs — here would pay for up
+    # to `@hybrid_candidates` rows *per leg* to keep `limit` of them.
+    # `highlight` is a `ts_headline` over the whole document, so that is most
+    # of the query's cost thrown away. The one calc a leg does load is the
+    # semantic leg's `semantic_distance`, which its ORDER BY computes anyway
+    # (see `semantic_context/1`). The kept hits are read whole, with `:load`,
+    # in one query (`hydrate/4`) — before the reranker, which reads their
+    # title and excerpt.
     #
     # Both keyword legs read `search_vector`, so they share one containment:
     # a type without the column loses both, and logs it once.
@@ -604,8 +618,8 @@ defmodule KilnCMS.Search do
       Map.merge(block_distances, tag_distances, fn _id, a, b -> min(a, b) end)
     )
     |> Enum.take(limit)
+    |> hydrate(resource, load, read_opts)
     |> maybe_rerank(query, opts)
-    |> load_results(load, read_opts)
     |> Enum.map(&attach_hit/1)
   end
 
@@ -682,25 +696,49 @@ defmodule KilnCMS.Search do
     if Keyword.get(opts, :rerank, false), do: rerank(query, hits), else: hits
   end
 
-  # Calculations are loaded once fusion has settled on the records actually
-  # being returned — see the note in `hybrid/3`. Loaded by id rather than
-  # trusting `Ash.load!` to hand the list back in order, and re-paired with
-  # the hit's score and legs, which a load does not carry.
-  @spec load_results([hit()], list(), keyword()) :: [hit()]
-  defp load_results([], _load, _read_opts), do: []
-  defp load_results(hits, [], _read_opts), do: hits
+  # The legs read ids, not records (`@leg_select`); the records are read here,
+  # once, for the hits fusion kept — with the caller's calculations (see the
+  # note in `hybrid/3`) in the same query. A leg holds up to
+  # `@hybrid_candidates` rows and a section runs up to eight legs, and a
+  # whole content row is its block tree twice over (`blocks`,
+  # `working_blocks`), its `search_text` and its embedding: decoding a few
+  # hundred of those per search to keep ten was the largest share of a
+  # search's CPU time (#1712).
+  #
+  # Read through the resource's primary read under the caller's own read
+  # options, so the rows pass the same policies the legs did. Re-paired with
+  # each hit's score and legs by id, in the fused order; a row gone between
+  # the legs and this read (deleted, unpublished) is dropped rather than
+  # returned half-read.
+  @spec hydrate([hit()], module(), list(), keyword()) :: [hit()]
+  defp hydrate([], _resource, _load, _read_opts), do: []
 
-  defp load_results(hits, load, read_opts) do
-    loaded =
-      hits
-      |> Enum.map(fn {record, _score, _legs} -> record end)
-      |> Ash.load!(load, read_opts)
+  defp hydrate(hits, resource, load, read_opts) do
+    ids = Enum.map(hits, fn {record, _score, _legs} -> record.id end)
+
+    by_id =
+      resource
+      |> Ash.Query.new()
+      |> Ash.Query.filter(id in ^ids)
+      |> Ash.Query.load(load)
+      |> Ash.read!(read_opts)
       |> Map.new(&{&1.id, &1})
 
-    Enum.map(hits, fn {record, score, legs} ->
-      {Map.get(loaded, record.id, record), score, legs}
+    Enum.flat_map(hits, fn {record, score, legs} ->
+      case Map.fetch(by_id, record.id) do
+        {:ok, full} -> [{carry_distance(full, record), score, legs}]
+        :error -> []
+      end
     end)
   end
+
+  # The semantic leg's `semantic_distance` rides on the record it returned;
+  # the fused hit keeps it, as it did when the leg's record was the one
+  # returned.
+  defp carry_distance(full, %{semantic_distance: distance}) when is_number(distance),
+    do: %{full | semantic_distance: distance}
+
+  defp carry_distance(full, _leg_record), do: full
 
   # The one embedding a search pays — a global sweep's, shared by every
   # section, or a single `hybrid/3` call's, shared by its semantic and block
@@ -814,6 +852,7 @@ defmodule KilnCMS.Search do
       by_id =
         resource
         |> Ash.Query.new()
+        |> Ash.Query.select(@leg_select)
         |> Ash.Query.filter(id in ^ids and locale == ^locale)
         |> Ash.read!(read_opts)
         |> Map.new(&{&1.id, &1})
@@ -882,6 +921,7 @@ defmodule KilnCMS.Search do
   defp tagged_documents(resource, locale, tag_id, read_opts) do
     resource
     |> Ash.Query.new()
+    |> Ash.Query.select(@leg_select)
     |> Ash.Query.filter(locale == ^locale and exists(tags, id == ^tag_id))
     |> Ash.Query.sort(inserted_at: :desc)
     |> Ash.Query.limit(@hybrid_candidates)
@@ -1340,16 +1380,17 @@ defmodule KilnCMS.Search do
     end
   end
 
-  # Sections are independent — no section's results affect another's — so they
-  # run concurrently rather than one round trip after another. On an install
-  # with a dozen registered content types that is the difference between ~19
-  # sequential sweeps and `section_concurrency/0` at a time.
+  # Sections are independent — no section's results affect another's — so
+  # they *can* run concurrently, and did by default until #1712. They now run
+  # one after another on a single checked-out connection unless
+  # `section_concurrency/0` says otherwise, because the pool, not the
+  # database, is what a busy node runs out of: a sweep's sections are a few
+  # milliseconds of SQL each, and one connection doing them in turn costs less
+  # wall time under load than four connections waiting for each other's
+  # requests to finish. The numbers are in `docs/performance.md`.
   #
-  # Concurrency is bounded because each section holds a DB connection for the
-  # duration of its queries: unbounded fan-out would drain the Ecto pool
-  # (`POOL_SIZE`, default 10) and starve every other request on the node. The
-  # default leaves most of the pool free for concurrent traffic; raise it if
-  # your pool is sized for it.
+  # The sequential sweep has no per-section timeout: each query carries the
+  # repo's own, and nothing runs in a task that could wedge on its own.
   #
   # A failing section still takes the whole call down, matching the previous
   # `Ash.read!` behaviour — a search that silently omits a section would be
@@ -1357,17 +1398,25 @@ defmodule KilnCMS.Search do
   # no `search_vector` column, contained in `without_search_vector/2`, because
   # that failure is permanent and belongs to one type.)
   #
-  # What it must not do is take the call down *anonymously*. A raise inside a
-  # linked task exits the caller with a bare `{exception, stacktrace}`, and the
-  # `{:ok, pair}` clause this used to have then met a `{:exit, _}` with a
-  # `FunctionClauseError` — burying the real error under a clause failure in
-  # the search module. Each section is caught inside its own task instead, so
-  # the caller re-raises the actual exception with its original stacktrace; a
-  # section that times out is reported by name rather than as a bare exit.
+  # What the concurrent sweep must not do is take the call down
+  # *anonymously*. A raise inside a linked task exits the caller with a bare
+  # `{exception, stacktrace}`, and the `{:ok, pair}` clause this used to have
+  # then met a `{:exit, _}` with a `FunctionClauseError` — burying the real
+  # error under a clause failure in the search module. Each section is caught
+  # inside its own task instead, so the caller re-raises the actual exception
+  # with its original stacktrace; a section that times out is reported by
+  # name rather than as a bare exit.
   defp run_sections(sections) do
+    case section_concurrency() do
+      1 -> KilnCMS.Repo.checkout(fn -> Map.new(sections, fn {key, run} -> {key, run.()} end) end)
+      concurrency -> run_sections_concurrently(sections, concurrency)
+    end
+  end
+
+  defp run_sections_concurrently(sections, concurrency) do
     sections
     |> Task.async_stream(&run_section/1,
-      max_concurrency: section_concurrency(),
+      max_concurrency: concurrency,
       timeout: @section_timeout,
       ordered: false,
       on_timeout: :kill_task,
@@ -1534,6 +1583,53 @@ defmodule KilnCMS.Search do
     _ -> :ok
   end
 
+  @doc """
+  `record_query/3` off the caller's process: on the shared, bounded
+  `KilnCMS.TaskSupervisor`, so a search request neither waits for the upsert
+  nor holds a pooled connection while it queues on the `(org, query, locale)`
+  row's lock — which every concurrent search for a popular term wants at once
+  (#1712). At the supervisor's `max_children` the write is dropped, not
+  queued: search analytics under-count a spike rather than slow it down.
+
+  `config :kiln_cms, :async_analytics, false` (the test env) records inline
+  instead, so the write stays on the test's SQL sandbox connection.
+  """
+  @spec record_query_async(String.t(), non_neg_integer(), keyword()) :: :ok
+  def record_query_async(query, result_count, opts \\ []) when is_binary(query) do
+    if Application.get_env(:kiln_cms, :async_analytics, true) do
+      Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn ->
+        record_query(query, result_count, opts)
+      end)
+    else
+      record_query(query, result_count, opts)
+    end
+
+    :ok
+  end
+
+  @doc """
+  Run `fun` on one pooled connection, checked out once for the whole call —
+  how a search keeps to a single connection however many reads it issues.
+  Every `KilnCMS.Repo` query `fun` makes **in this process** reuses it; a
+  nested call reuses the outer checkout.
+
+  The checkout is the one place a search waits for the pool, and when the pool
+  is saturated it is where the wait ends: the pool drops a request that has
+  queued too long, and this returns `{:error, :unavailable}` instead of
+  raising, so a caller can answer "try again" (`GET /api/search` answers
+  `503` with `Retry-After`) rather than crash. A database that is down reads
+  the same way. Any other error raises.
+  """
+  @spec with_connection((-> result)) :: result | {:error, :unavailable} when result: term()
+  def with_connection(fun) when is_function(fun, 0) do
+    KilnCMS.Repo.checkout(fun)
+  rescue
+    error ->
+      if KilnCMS.Firing.Delivery.db_unavailable?(error),
+        do: {:error, :unavailable},
+        else: reraise(error, __STACKTRACE__)
+  end
+
   defp section(resource, action, params, read_opts, limit, load) do
     resource
     |> Ash.Query.for_read(action, params)
@@ -1552,6 +1648,7 @@ defmodule KilnCMS.Search do
   defp run_leg(resource, action, args, read_opts, context \\ %{}) do
     resource
     |> Ash.Query.new()
+    |> Ash.Query.select(@leg_select)
     |> Ash.Query.limit(@hybrid_candidates)
     |> Ash.Query.set_context(context)
     |> Ash.Query.for_read(action, args)

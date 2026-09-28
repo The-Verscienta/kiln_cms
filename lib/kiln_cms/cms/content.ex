@@ -1482,15 +1482,37 @@ defmodule KilnCMS.CMS.Content do
     # matches neither of them — the surviving hits are whatever happens to
     # mention everything (the search-ranking report, P2). Longest
     # title first: the most specific name the query contains outranks a
-    # one-word title it also happens to contain. A sequential scan over the
-    # type's titles (the reversed direction has no index shape), bounded by
-    # the caller's limit. Facets narrow it like the other legs. No published
-    # twin: this is internal to fusion, not an API action.
+    # one-word title it also happens to contain. Facets narrow it like the
+    # other legs. No published twin: this is internal to fusion, not an API
+    # action.
+    #
+    # The phrase match itself has no index shape — it builds a tsquery from
+    # every row's title — so on its own it was a sequential scan of the type
+    # on every search, the slowest statement of a rare-word query (#1712). It
+    # is guarded by a prefilter that does: the title's lexemes, as an array,
+    # must overlap the query's. That is implied by the phrase match, never
+    # narrower than it — a title whose lexemes all occur in the query shares
+    # at least one with it, and a title with none (all stop words) matches
+    # neither — so it changes which rows the scan *reads*, not which it
+    # returns. Its left side is, character for character, the expression of
+    # the `<table>_title_lexemes_index` GIN index below, which is what lets
+    # Postgres answer it from the index: the row's own `locale` column, not
+    # the argument (equal, by the clause before it, but the planner matches
+    # index expressions by text).
     title_read = fn name ->
       filter_ast =
         join_and.(
           [
             quote(do: ^ref(:locale) == ^arg(:locale)),
+            quote do
+              fragment(
+                "tsvector_to_array(to_tsvector(kiln_regconfig(?), ?)) && tsvector_to_array(to_tsvector(kiln_regconfig(?), ?))",
+                ^ref(:locale),
+                ^ref(:title),
+                ^arg(:locale),
+                ^arg(:query)
+              )
+            end,
             quote do
               fragment(
                 "to_tsvector(kiln_regconfig(?), ?) @@ phraseto_tsquery(kiln_regconfig(?), ?)",
@@ -2031,6 +2053,21 @@ defmodule KilnCMS.CMS.Content do
             name: unquote("#{table}_title_trgm_index"),
             using: "gin",
             all_tenants?: true
+
+          # The title leg's prefilter (`:search_title`, #1712): each title's
+          # lexemes under its own locale's text-search config, as an array, so
+          # `&&` against the query's lexemes is an index lookup rather than a
+          # tsvector built from every title on every search. The expression
+          # must stay identical to the one in the action's filter, or the
+          # planner stops matching it. `all_tenants?: true` for the same
+          # reason as the trigram index. Built CONCURRENTLY: it is one GIN
+          # build per content table on upgrade, and a large table should keep
+          # taking writes while it runs.
+          index ["tsvector_to_array(to_tsvector(kiln_regconfig(locale), title))"],
+            name: unquote("#{table}_title_lexemes_index"),
+            using: "gin",
+            all_tenants?: true,
+            concurrently: true
 
           # Point-lookup index for the delivery hot path (`public_by_slug`).
           # `:unique_slug` is now the `org_id`-LEADING `(org_id, slug, locale)`
