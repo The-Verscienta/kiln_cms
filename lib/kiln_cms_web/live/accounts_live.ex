@@ -145,8 +145,9 @@ defmodule KilnCMSWeb.AccountsLive do
   # --- one account -----------------------------------------------------------
 
   # The standing platform role. Only the role: `:manage_access` also accepts
-  # `audiences`, but that is the global column only the deprecated no-membership
-  # fallback reads, so the console no longer writes it (#1646).
+  # `audiences`, but that is the global column no access decision reads since
+  # 1.0 removed the no-membership fallback, so the console no longer writes it
+  # (#1646, #1543).
   def handle_event("save_access", %{"access" => params}, socket) when is_map(params) do
     %{actor: actor, account: account} = socket.assigns
 
