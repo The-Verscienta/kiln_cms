@@ -5,8 +5,30 @@ defmodule KilnCMS.Governance do
   **version timeline** (PaperTrail: what changed, when), the linked **consents**
   (#356), and the **publish points** that back point-in-time delivery (#338).
 
-  Read-only and admin-facing: the dashboard route is admin-gated, so the trail is
-  gathered as the system (`authorize?: false`). No data is mutated here.
+  Read-only and admin-facing: the dashboard route is admin-gated. No data is
+  mutated here.
+
+  ## Who the reads run as (#1659)
+
+  The governance subsystem's own bookkeeping (anchors, checkpoints and their
+  entries) and the entitlement trail are read as `system/0`, a
+  `KilnCMS.SystemActor` admitted by name on each of those resources. See
+  `docs/policy-matrix.md`, "The system actor".
+
+  Three kinds of read stay `authorize?: false` on purpose, each with its reason
+  at the call site. A system-actor grant there would be a *standing* read for
+  every system caller, which is wider than the one dashboard it serves (the
+  #1402 argument):
+
+    * **content** (`content_index/2`, `trail/3`) would hand system code the
+      whole corpus, drafts included;
+    * **`Accounts.User`** (display names) would be a grant over every account
+      on the deployment;
+    * **consents and version rows** are the compliance and editorial history
+      itself (the `PointInTime` argument).
+
+  Each of those is tenant-scoped and reached only from the admin-gated
+  dashboard.
   """
   require Ash.Query
 
@@ -15,6 +37,47 @@ defmodule KilnCMS.Governance do
   alias KilnCMS.Governance.Witness
 
   @publish_actions [:publish, :publish_scheduled]
+
+  # See `with_actor/2`.
+  @actor_override {__MODULE__, :actor_override}
+
+  @doc """
+  The actor the governance subsystem's own bookkeeping runs as (#1659): the
+  anchor chain, checkpoint minting and witness publication, and the
+  dashboard's read of the entitlement trail.
+
+  A `KilnCMS.SystemActor`, admitted by name on `CMS.HistoryAnchor`,
+  `CMS.ChainCheckpoint`, `CMS.ChainCheckpointEntry` and
+  `Billing.MembershipEvent` (see `docs/policy-matrix.md`, "The system actor"),
+  rather than `authorize?: false`, which would skip every policy on them.
+  """
+  @spec system() :: KilnCMS.SystemActor.t() | nil
+  def system do
+    case Process.get(@actor_override, :unset) do
+      :unset -> KilnCMS.SystemActor.new(:governance)
+      actor -> actor
+    end
+  end
+
+  @doc false
+  # Test seam (#1659): run `fun` with `system/0` answering `actor` in this
+  # process. It exists so a test can take the grant away and prove that every
+  # governance read fails CLOSED (raises) rather than filtering to `[]`, which
+  # is how a refused read answers. Process-local, and nothing on a request path
+  # calls it; code that could call it could equally pass any actor it liked.
+  @spec with_actor(term(), (-> result)) :: result when result: term()
+  def with_actor(actor, fun) do
+    previous = Process.get(@actor_override, :unset)
+    Process.put(@actor_override, actor)
+
+    try do
+      fun.()
+    after
+      if previous == :unset,
+        do: Process.delete(@actor_override),
+        else: Process.put(@actor_override, previous)
+    end
+  end
 
   @typedoc "One entry in a document's version timeline."
   @type event :: %{
@@ -35,16 +98,20 @@ defmodule KilnCMS.Governance do
   would surface them without a read here.
 
   Returns maps: `%{at, kind, from_status, to_status, added, removed, member,
-  tier, provider_event_id, actor}`. Read as the system, like the rest of this
-  module; the routes that call it are admin-gated.
+  tier, provider_event_id, actor}`. Read as `system/0`; the routes that call it
+  are admin-gated.
+
+  **Fails closed.** The read runs with `authorize_with: :error`, so a lost grant
+  raises instead of filtering to `[]`. An audit trail that silently reads empty
+  looks exactly like a site where nothing changed.
   """
   @spec entitlement_index(Ash.UUID.t(), pos_integer()) :: [map()]
   def entitlement_index(org_id, limit \\ 100) do
     events =
       KilnCMS.Billing.MembershipEvent
-      |> Ash.Query.for_read(:recent, %{}, authorize?: false, tenant: org_id)
+      |> Ash.Query.for_read(:recent, %{}, actor: system(), tenant: org_id)
       |> Ash.Query.limit(limit)
-      |> Ash.read!()
+      |> Ash.read!(authorize_with: :error)
 
     names = entitlement_names(events)
     tiers = entitlement_tiers(events, org_id)
@@ -76,6 +143,10 @@ defmodule KilnCMS.Governance do
     if ids == [] do
       %{}
     else
+      # `authorize?: false`: display names for the admin-gated dashboard.
+      # `Accounts.User`'s read policy is self-only, and a system-actor grant
+      # there would be a standing read over every account on the deployment,
+      # the case #1402 refused. The ids come from this org's own event rows.
       KilnCMS.Accounts.User
       |> Ash.Query.filter(id in ^ids)
       |> Ash.read!(authorize?: false)
@@ -89,9 +160,11 @@ defmodule KilnCMS.Governance do
     if ids == [] do
       %{}
     else
+      # Tier names are public (`MembershipTier`'s read policy is
+      # `authorize_if always()`), so this read needs no grant of its own.
       KilnCMS.Billing.MembershipTier
       |> Ash.Query.filter(id in ^ids)
-      |> Ash.read!(authorize?: false, tenant: org_id)
+      |> Ash.read!(actor: system(), tenant: org_id)
       |> Map.new(&{&1.id, &1.name})
     end
   end
@@ -213,6 +286,11 @@ defmodule KilnCMS.Governance do
   def content_index(org_id, limit \\ 50) do
     # Scoped to the request's site (epic #336) so the governance dashboard only
     # lists the current org's content.
+    #
+    # `authorize?: false`: a content read stays a bypass rather than becoming a
+    # system-actor grant, which would hand every system caller the whole corpus,
+    # drafts included (#1402). The caller is the admin-gated dashboard, and the
+    # read is tenant-scoped and metadata-only.
     compiled =
       Enum.flat_map(ContentTypes.all(), fn ct ->
         ct.resource
@@ -245,6 +323,8 @@ defmodule KilnCMS.Governance do
       descriptors ->
         names = Map.new(descriptors, &{&1.definition.id, &1.type})
 
+        # `authorize?: false`: a content read, for the reason given in
+        # `content_index/2` above.
         KilnCMS.CMS.Entry
         |> Ash.Query.sort(updated_at: :desc)
         |> Ash.Query.limit(limit)
@@ -295,6 +375,9 @@ defmodule KilnCMS.Governance do
     # Scoped to the request's site (epic #336): the type resolves, the record
     # loads, and the version timeline reads all under `org_id`, so an admin on
     # one site's host can never pull another org's content or audit trail by id.
+    #
+    # `authorize?: false` on the record read: content, so no system-actor grant
+    # (#1402, see `content_index/2`). The dashboard route is admin-gated.
     with ct when not is_nil(ct) <- ContentTypes.get(type, org_id),
          resource = storage_resource(ct),
          {:ok, record} when not is_nil(record) <-
@@ -361,7 +444,9 @@ defmodule KilnCMS.Governance do
         # (#731). Keyed on the STORAGE type for the reason the anchors are.
         witnessed: describe_witnessed(storage, id, record.org_id),
         # Scoped to the record's own site (epic #336) so the trail only shows
-        # consents from the same org as the content.
+        # consents from the same org as the content. `authorize?: false`:
+        # consents are compliance records holding personal data, so they get no
+        # standing system-actor read. The dashboard is admin-gated.
         consents:
           KilnCMS.CMS.list_consents_for!(to_string(ct.type), id,
             authorize?: false,
@@ -445,6 +530,8 @@ defmodule KilnCMS.Governance do
     if ids == [] do
       %{}
     else
+      # `authorize?: false`: display names, for the reason given in
+      # `entitlement_names/1`. No standing system grant over `Accounts.User`.
       KilnCMS.Accounts.User
       |> Ash.Query.filter(id in ^ids)
       |> Ash.read!(authorize?: false)

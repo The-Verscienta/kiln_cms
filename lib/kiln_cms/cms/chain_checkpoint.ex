@@ -96,10 +96,15 @@ defmodule KilnCMS.CMS.ChainCheckpoint do
   end
 
   policies do
-    # Written by the checkpoint worker as the system; reading the audit surface
-    # is admin-only, like every other governance resource.
+    # Reading the audit surface is admin-only, like every other governance
+    # resource. The checkpoint worker mints, publishes and re-reads checkpoints
+    # as `KilnCMS.Governance.system/0` (#1659), named action by action inside
+    # this policy rather than granted by a bypass, so an action added later
+    # (a `destroy`, say) is not admitted by default.
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+      forbid_unless action([:read, :recent, :unwitnessed, :create, :record_publication])
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

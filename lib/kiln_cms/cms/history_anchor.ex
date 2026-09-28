@@ -115,10 +115,15 @@ defmodule KilnCMS.CMS.HistoryAnchor do
   end
 
   policies do
-    # Written by the publish pipeline (`authorize?: false`); reading the audit
-    # surface is admin-only.
+    # Reading the audit surface is admin-only. The publish pipeline mints
+    # anchors, and the chain reads them back, as `KilnCMS.Governance.system/0`
+    # (#1659): `create` and `for_content` only, narrowed inside this policy
+    # rather than granted by a bypass. The plain `read` is not admitted —
+    # nothing in the governance subsystem lists anchors across documents.
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+      forbid_unless action([:create, :for_content])
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

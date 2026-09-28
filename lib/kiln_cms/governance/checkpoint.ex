@@ -188,7 +188,7 @@ defmodule KilnCMS.Governance.Checkpoint do
   defp commit(attrs, changed, proofs, org_id) do
     KilnCMS.Repo.transaction(fn ->
       case CMS.create_chain_checkpoint(attrs,
-             authorize?: false,
+             actor: system(),
              tenant: org_id,
              return_notifications?: true
            ) do
@@ -536,7 +536,7 @@ defmodule KilnCMS.Governance.Checkpoint do
             version_count: head.version_count,
             proof: elem(proofs, index)
           },
-          authorize?: false,
+          actor: system(),
           tenant: org_id,
           return_notifications?: true
         )
@@ -546,7 +546,7 @@ defmodule KilnCMS.Governance.Checkpoint do
   end
 
   defp record_publication(checkpoint, org_id, attrs) do
-    CMS.record_checkpoint_publication!(checkpoint, attrs, authorize?: false, tenant: org_id)
+    CMS.record_checkpoint_publication!(checkpoint, attrs, actor: system(), tenant: org_id)
   rescue
     error ->
       Logger.error("Recording checkpoint publication failed: #{inspect(error)}")
@@ -554,6 +554,23 @@ defmodule KilnCMS.Governance.Checkpoint do
   end
 
   # ── reading ───────────────────────────────────────────────────────────────
+  #
+  # Every read below runs as `system/0` with `authorize_with: :error` (#1659).
+  # Each one backs a decision that a refused read, which filters to `[]`, would
+  # answer the permissive way without saying so:
+  #
+  #   * `recent/2` picks the previous checkpoint: `[]` restarts the chain at
+  #     sequence 1 with no link to the one before;
+  #   * `unwitnessed/2` is the retry queue and the dashboard's outage count:
+  #     `[]` reads as "nothing waiting", i.e. healthy;
+  #   * `entries/2` is what gets published: `[]` publishes an empty commitment;
+  #   * `latest_entry/3` is the witness itself: `[]` is `:none`, "never
+  #     witnessed", which is exactly what a truncation wants to look like.
+  #
+  # With `:error` a missing grant raises instead. `witnessed_head/3` turns that
+  # into `:unreadable` (floored to `:unverifiable`), and the worker logs it.
+
+  defp system, do: KilnCMS.Governance.system()
 
   @doc "This org's newest checkpoint, or nil."
   @spec latest(Ash.UUID.t()) :: struct() | nil
@@ -566,7 +583,12 @@ defmodule KilnCMS.Governance.Checkpoint do
   def recent(org_id, limit \\ nil) do
     query = if limit, do: [limit: limit], else: []
 
-    CMS.list_chain_checkpoints!(authorize?: false, tenant: org_id, query: query)
+    CMS.list_chain_checkpoints!(
+      actor: system(),
+      authorize_with: :error,
+      tenant: org_id,
+      query: query
+    )
   end
 
   @doc """
@@ -583,7 +605,12 @@ defmodule KilnCMS.Governance.Checkpoint do
   def unwitnessed(org_id, limit \\ nil) do
     query = if limit, do: [limit: limit], else: []
 
-    CMS.list_unwitnessed_checkpoints!(authorize?: false, tenant: org_id, query: query)
+    CMS.list_unwitnessed_checkpoints!(
+      actor: system(),
+      authorize_with: :error,
+      tenant: org_id,
+      query: query
+    )
   end
 
   @doc """
@@ -599,7 +626,11 @@ defmodule KilnCMS.Governance.Checkpoint do
   @spec entries(struct(), Ash.UUID.t()) :: [struct()]
   def entries(checkpoint, org_id) do
     checkpoint.id
-    |> CMS.list_checkpoint_entries_in!(authorize?: false, tenant: org_id)
+    |> CMS.list_checkpoint_entries_in!(
+      actor: system(),
+      authorize_with: :error,
+      tenant: org_id
+    )
     |> Enum.sort_by(&{&1.resource_type, &1.source_id})
   end
 
@@ -655,7 +686,8 @@ defmodule KilnCMS.Governance.Checkpoint do
 
   defp latest_entry(type, source_id, org_id) do
     CMS.list_checkpoint_entries_for!(type, source_id,
-      authorize?: false,
+      actor: system(),
+      authorize_with: :error,
       tenant: org_id,
       query: [limit: 1]
     )
@@ -666,13 +698,17 @@ defmodule KilnCMS.Governance.Checkpoint do
   # module docs.
   defp attest(entry, org_id) do
     case Ash.get(CMS.ChainCheckpoint, entry.checkpoint_id,
-           authorize?: false,
+           actor: system(),
+           authorize_with: :error,
            tenant: org_id,
            not_found_error?: false
          ) do
       {:ok, %{} = checkpoint} ->
         attest_against(entry, checkpoint, org_id)
 
+      # Not found, or a read that failed. `authorize_with: :error` puts a
+      # refused grant in the second group rather than in `{:ok, nil}`, and
+      # either way the verdict stays red rather than reading as witnessed.
       _ ->
         {:tampered,
          "checkpoint entry #{entry.id} names checkpoint #{entry.checkpoint_id}, " <>
