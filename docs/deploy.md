@@ -161,7 +161,10 @@ The image's `CMD` is:
    `Ecto.Migrator` serialises concurrent runs with a lock on
    `schema_migrations` (ecto_sql's default `:table_lock`), so this stays safe
    when several replicas start at once: one migrates, the others wait, then
-   all serve.
+   all serve. During a rolling deploy the old release keeps serving against
+   the migrated schema; the expand/contract policy that keeps that safe, and
+   what zero-downtime does and does not cover, are in
+   [`releasing.md`](releasing.md#migrations-expand-migrate-contract).
 2. **`bin/server`** sets `PHX_SERVER=true` and starts the release. The Ash +
    Nx/Axon/Bumblebee stack is not fast to cold-boot; the image's healthcheck
    allows a generous start period for it (below).

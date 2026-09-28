@@ -95,13 +95,7 @@ defmodule Mix.Tasks.Kiln.Federation do
     username = opts[:username] || default_username(org_id)
 
     settings =
-      Ash.create!(
-        SiteFederation,
-        %{origin: origin, username: username},
-        action: :enable,
-        authorize?: false,
-        tenant: org_id
-      )
+      Federation.enable_site_federation!(origin, username, actor: operator(), tenant: org_id)
 
     identity = Actor.identity(settings)
 
@@ -125,7 +119,7 @@ defmodule Mix.Tasks.Kiln.Federation do
         Mix.shell().info("Federation was never enabled for this site; nothing to do.")
 
       settings ->
-        Ash.update!(settings, %{}, action: :disable, authorize?: false, tenant: org_id)
+        Federation.disable_site_federation!(settings, actor: operator(), tenant: org_id)
 
         # The identity survives on purpose — see the resource's moduledoc.
         Mix.shell().info(
@@ -141,10 +135,7 @@ defmodule Mix.Tasks.Kiln.Federation do
         Mix.raise("Federation was never enabled for this site; there is no key to replace.")
 
       settings ->
-        # `authorize?: false`: an operator at a shell on the host is the
-        # deployment's own authority, above any org role — the same bypass
-        # `enable` and `disable` take.
-        case Ash.update(settings, %{}, action: :rekey, authorize?: false, tenant: org_id) do
+        case Federation.rekey_site_federation(settings, actor: operator(), tenant: org_id) do
           {:ok, _settings} ->
             Mix.shell().info(
               "Re-keyed. The handle, actor id and keyId are unchanged; the signing key is new."
@@ -177,7 +168,7 @@ defmodule Mix.Tasks.Kiln.Federation do
   end
 
   defp settings(org_id) do
-    case Ash.read(SiteFederation, authorize?: false, tenant: org_id) do
+    case Federation.list_site_federation(actor: operator(), tenant: org_id) do
       {:ok, [settings]} -> settings
       _other -> nil
     end
@@ -190,8 +181,15 @@ defmodule Mix.Tasks.Kiln.Federation do
   defp identity_or_nil(_settings), do: nil
 
   defp follower_count(org_id) do
-    Ash.count!(KilnCMS.Federation.Follower, authorize?: false, tenant: org_id)
+    Ash.count!(KilnCMS.Federation.Follower, actor: operator(), tenant: org_id)
   end
+
+  # An operator at a shell on the host is the deployment's own authority, above
+  # any org role. It runs as a `KilnCMS.SystemActor` (#1659), which
+  # `SiteFederation` admits to exactly `read`, `enable`, `disable`, `rekey` and
+  # the delivery stamp — not the settings form's `save` — and `Follower` to
+  # reads (see `docs/policy-matrix.md`, "The system actor").
+  defp operator, do: KilnCMS.SystemActor.new(:operator)
 
   # The org's slug is the natural handle — it is already the subdomain label,
   # so `@acme@acme.example.com` reads the way an operator expects.

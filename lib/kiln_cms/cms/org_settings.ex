@@ -52,6 +52,13 @@ defmodule KilnCMS.CMS.OrgSettings do
       `AshAdmin.Resource` extension and its `admin` block are emitted.
     * `:extensions` — further Ash extensions (`AshOban`, `AshPaperTrail.Resource`).
     * `:domain` — defaults to `KilnCMS.CMS`.
+    * `:system_actions` — actions `KilnCMS.SystemActor` may run (#1659).
+      Defaults to `[]`: no system grant. Each named action is admitted with
+      `forbid_unless action(...)` + `authorize_if KilnCMS.Checks.SystemActor`
+      *inside* the read and write policies below, never a bypass — Ash ANDs
+      policies, so a second policy in the resource body could not lift these
+      ones' refusal. A resource that sets it needs a row in
+      `docs/policy-matrix.md` ("The system actor").
 
   ## The read side
 
@@ -89,6 +96,7 @@ defmodule KilnCMS.CMS.OrgSettings do
     admin_columns = Keyword.get(opts, :admin_columns)
     extra_extensions = Keyword.get(opts, :extensions, [])
     domain = Keyword.get(opts, :domain, KilnCMS.CMS)
+    system_actions = Keyword.get(opts, :system_actions, [])
 
     unless read in [:public, :editor, :admin] do
       raise ArgumentError,
@@ -135,6 +143,18 @@ defmodule KilnCMS.CMS.OrgSettings do
             resource_group :content
             table_columns unquote(admin_columns)
           end
+        end
+      end
+
+    # The system grant, spliced into both policies (or `nil`, a no-op). For a
+    # person the first clause of each policy has already decided, so these two
+    # are unreachable; for a system actor every action but the named ones
+    # forbids at the first.
+    system_clauses =
+      if system_actions != [] do
+        quote do
+          forbid_unless action(unquote(system_actions))
+          authorize_if KilnCMS.Checks.SystemActor
         end
       end
 
@@ -192,11 +212,13 @@ defmodule KilnCMS.CMS.OrgSettings do
       policies do
         policy action_type(:read) do
           authorize_if unquote(read_check)
+          unquote(system_clauses)
         end
 
         # Changing what a whole site does is an admin act, on every one of these.
         policy action_type([:create, :update, :destroy]) do
           authorize_if KilnCMS.CMS.Checks.OrgAdmin
+          unquote(system_clauses)
         end
       end
 
