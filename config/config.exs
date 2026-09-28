@@ -75,7 +75,21 @@ config :kiln_cms, Oban,
     # so pruning bounds both the table size and how long token/PII data sits
     # in the database (and in backups).
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7}
+    # `Oban.Lifeline` (rescue of jobs orphaned `executing` by a shutdown) is
+    # appended in KilnCMS.Application.oban_config/0, from
+    # `:oban_rescue_after_minutes` below — for the same #608 reason as Cron.
   ]
+
+# How long a job may sit `executing` before `Oban.Lifeline` decides its node
+# died under it and puts it back to `available` (or `discarded` once its
+# attempts are spent) — #1718. Without a rescuer, a job killed by a deploy's
+# shutdown stays `executing` for ever and, if `unique`, blocks every later
+# enqueue of itself. MUST exceed the longest legitimate job: the rescue is
+# purely time-based, so a live job older than this runs twice. The longest
+# bounded job is a backup (`KilnCMS.Backups.Worker.timeout/1`, 2 h), hence 3 h.
+# `false` switches rescuing off (e.g. for Oban Pro's DynamicLifeline).
+# Runtime override: KILN_OBAN_RESCUE_AFTER_MINUTES.
+config :kiln_cms, :oban_rescue_after_minutes, 180
 
 config :kiln_cms,
   ash_domains: [

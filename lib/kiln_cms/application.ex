@@ -218,14 +218,105 @@ defmodule KilnCMS.Application do
 
   # The core Oban config with plugin queues merged in (D18) — plugins declare
   # queues in code (`oban_queues/0`) instead of editing the host's config.
-  defp oban_config do
+  #
+  # Public (`@doc false`) only so a test can assert the assembled plugin list:
+  # the crontab and the Lifeline rescuer are both injected here, and under
+  # `testing: :manual` Oban starts no plugins at all — so an injector rewrite
+  # that dropped the other's plugin would pass every other test.
+  @doc false
+  def oban_config do
     Application.fetch_env!(:kiln_cms, Oban)
     |> Keyword.update(:queues, Kiln.Plugins.oban_queues(), fn queues ->
       Keyword.merge(Kiln.Plugins.oban_queues(), queues)
     end)
-    |> Keyword.update(:plugins, [], &with_cron_entries/1)
+    |> Keyword.update(:plugins, [], &(&1 |> with_cron_entries() |> with_lifeline()))
     |> with_demo_queue()
   end
+
+  # Rescue jobs orphaned in `executing` (#1718). A node stopped mid-deploy
+  # gives its running jobs `shutdown_grace_period` (15 s) and then kills them;
+  # the row stays `executing` for ever — never retried, never discarded, and
+  # under `unique` it blocks every later enqueue of the same job.
+  # `Oban.Lifeline` moves such a row back to `available` (or to `discarded`
+  # once `max_attempts` is spent) after `rescue_after`.
+  #
+  # The rescuer is purely time-based: it cannot tell an orphan from a job that
+  # is genuinely still running, so `rescue_after` must exceed the longest
+  # legitimate run or a live job executes twice. The ceiling today is
+  # `KilnCMS.Backups.Worker.timeout/1` (2 h); the default is 3 h, and
+  # `test/kiln_cms/oban_lifeline_test.exs` fails if any worker's `timeout/1`
+  # grows past it. See docs/deploy.md ("Jobs interrupted by a deploy").
+  #
+  # Injected here rather than written into `config :kiln_cms, Oban` for the
+  # crontab's #608 reason: `KILN_OBAN_RESCUE_AFTER_MINUTES` sets a flat key. A
+  # Lifeline already in the list (Oban Pro's, say) is left alone.
+  defp with_lifeline(plugins) do
+    cond do
+      Enum.any?(plugins, &lifeline?/1) ->
+        plugins
+
+      rescue_after = oban_rescue_after() ->
+        plugins ++ [{Oban.Lifeline, rescue_after: rescue_after}]
+
+      true ->
+        plugins
+    end
+  end
+
+  defp lifeline?({module, _opts}), do: lifeline?(module)
+  defp lifeline?(module) when is_atom(module), do: String.ends_with?(inspect(module), "Lifeline")
+  defp lifeline?(_plugin), do: false
+
+  @default_rescue_after_minutes 180
+
+  @doc false
+  # The rescue window in milliseconds, or `nil` when rescuing is switched off
+  # (`KILN_OBAN_RESCUE_AFTER_MINUTES=false`). Like a cron expression, a bad
+  # value costs the setting, never the boot: Oban validates plugin options with
+  # a raise out of `Oban.Config.new/1`, which would take the whole supervision
+  # tree down over a typo in an env var. A bad value keeps the default rather
+  # than switching rescuing off — stranded jobs are the failure being fixed.
+  @spec oban_rescue_after() :: pos_integer() | nil
+  def oban_rescue_after do
+    configured =
+      Application.get_env(
+        :kiln_cms,
+        :oban_rescue_after_minutes,
+        @default_rescue_after_minutes
+      )
+
+    case parse_rescue_minutes(configured) do
+      {:ok, minutes} ->
+        :timer.minutes(minutes)
+
+      :off ->
+        nil
+
+      :error ->
+        IO.puts(
+          :standard_error,
+          "KILN_OBAN_RESCUE_AFTER_MINUTES=#{inspect(configured)} is not a positive whole " <>
+            "number of minutes - using the default of #{@default_rescue_after_minutes}. See #1718."
+        )
+
+        :timer.minutes(@default_rescue_after_minutes)
+    end
+  end
+
+  defp parse_rescue_minutes(minutes) when is_integer(minutes) and minutes > 0, do: {:ok, minutes}
+  defp parse_rescue_minutes(off) when off in [false, nil], do: :off
+
+  defp parse_rescue_minutes(raw) when is_binary(raw) do
+    trimmed = raw |> String.trim() |> String.downcase()
+
+    case Integer.parse(trimmed) do
+      _ when trimmed in ~w(false off no) -> :off
+      {minutes, ""} when minutes > 0 -> {:ok, minutes}
+      _ -> :error
+    end
+  end
+
+  defp parse_rescue_minutes(_other), do: :error
 
   # The demo reset's own queue (`KilnCMS.Demo.ResetWorker`), started only in
   # demo mode so no other deployment runs an idle producer for it. One worker:

@@ -98,6 +98,42 @@ defmodule KilnCMS.NewsletterTest do
     assert send.failed_count == 0
   end
 
+  # A fan-out run twice — retried after a crash, or rescued by Oban.Lifeline
+  # after a deploy killed it mid-loop (#1718) — must not mail anyone twice.
+  test "re-running the fan-out enqueues each recipient once" do
+    actor = admin()
+    a = subscriber(actor, email: "rerun-a-#{System.unique_integer([:positive])}@example.com")
+    b = subscriber(actor, email: "rerun-b-#{System.unique_integer([:positive])}@example.com")
+
+    post = published_post(actor, "Rerun #{slug()}")
+    assert {:ok, send} = Newsletter.send_as_newsletter(post, actor: actor)
+
+    args = %{"newsletter_send_id" => send.id, "org_id" => send.org_id}
+
+    # The first run delivers; the second finds every recipient already served.
+    assert :ok = Oban.Testing.perform_job(Newsletter.SendWorker, args, repo: KilnCMS.Repo)
+    drain()
+    assert :ok = Oban.Testing.perform_job(Newsletter.SendWorker, args, repo: KilnCMS.Repo)
+    drain()
+
+    mail_jobs =
+      Oban.Testing.all_enqueued(repo: KilnCMS.Repo, worker: Newsletter.MailWorker)
+      |> Enum.concat(completed_mail_jobs(send.id))
+
+    assert mail_jobs |> Enum.map(& &1.args["subscriber_id"]) |> Enum.sort() ==
+             Enum.sort([a.id, b.id])
+
+    got = recipients(sent_emails(post.title)) |> Enum.sort()
+    assert got == Enum.sort([to_string(a.email), to_string(b.email)])
+  end
+
+  defp completed_mail_jobs(send_id) do
+    Oban.Job
+    |> Ecto.Query.where(worker: "KilnCMS.Newsletter.MailWorker", state: "completed")
+    |> KilnCMS.Repo.all()
+    |> Enum.filter(&(&1.args["newsletter_send_id"] == send_id))
+  end
+
   test "a segment scopes delivery to its members" do
     actor = admin()
     segment = Newsletter.create_segment!(%{name: "VIPs", slug: slug()}, actor: actor)

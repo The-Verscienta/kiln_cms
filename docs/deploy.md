@@ -540,6 +540,50 @@ listed. The full explanation, and what gating can't undo, is in
 the threat-model entry is *Media (`/uploads/*`)* in
 [`threat-model.md`](threat-model.md).
 
+## Jobs interrupted by a deploy
+
+Stopping a node (`SIGTERM`, a rolling deploy, a scale-down) gives its running
+Oban jobs 15 s (`shutdown_grace_period`) to finish. A job still running after
+that is killed, and its row is left in `executing` with nobody working it.
+
+Kiln runs `Oban.Lifeline` to recover these. Once a minute the cluster's Oban
+leader looks for jobs that have been `executing` for longer than
+**`KILN_OBAN_RESCUE_AFTER_MINUTES`** (default **180**). It moves each back to
+`available` to run again, or to `discarded` if it had already used its last
+attempt. Without the rescue, such a row would stay `executing` for ever. For a
+`unique` worker it would also block every later enqueue of the same job.
+
+The rescue goes by time alone. It cannot tell a dead job from a slow one, so
+the window must be longer than any job legitimately runs. Otherwise a live job
+runs a second time. The longest job with a timeout is a backup
+(`KilnCMS.Backups.Worker`, 2 h), and a test fails if any worker's `timeout/1`
+comes within 30 minutes of the window. Raise the variable if you have added a
+longer worker. Lower it to get stranded work back sooner, but only if you know
+your longest real job. `false` switches the rescue off, for a deployment that
+runs its own rescuer (a Lifeline already in the Oban plugin list is left
+alone).
+
+A rescued job starts again from the beginning. What that means for each kind
+of work:
+
+- **Idempotent, safe to repeat:** firing and re-firing (artifacts upsert),
+  search indexing and embeddings, media variants and the A/V metadata strip,
+  CDN purges, scheduled publish/unpublish triggers, cron sweeps, the
+  occurrence backfill, billing webhooks (claimed once per event).
+- **Delivered at least once:** outbound webhooks, federation deliveries, web
+  push, and single emails (transactional mail, form notifications, one
+  newsletter recipient). A job killed after the remote side accepted the
+  message but before Oban recorded success sends it again. This is the same
+  guarantee an ordinary retry already gives.
+- **Newsletter fan-out** (`SendWorker`) is safe to repeat. Each
+  `{send, subscriber}` pair can be enqueued only once, so a repeat reaches only
+  the recipients the first run missed.
+- **`max_attempts: 1` workers are discarded, not re-run:** backups,
+  demo reset, slug regeneration, content-release go-live/rollback. A backup
+  leaves a `.partial` file that is never mistaken for a finished one; take a
+  new backup. A release left in `publishing` or `rolling_back` is freed with
+  the admin-only **abandon** action in the release console.
+
 ## Upgrading a deployment
 
 For a running instance an upgrade is: read the release's `### Upgrading`

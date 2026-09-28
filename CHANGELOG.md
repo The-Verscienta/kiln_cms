@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Jobs already stuck `executing` from earlier deploys run again (or are
+  discarded) within a minute of upgrading.**
+  ([#1718](https://github.com/The-Verscienta/kiln_cms/issues/1718) · [long form](docs/changelog/unreleased.md#jobs-already-stuck-executing-from-earlier-deploys-run-again-or-are-discarded))
+
 - **Run `mix kiln.org_slugs` to find organizations whose slug can't be a hostname.**
   ([#1710](https://github.com/The-Verscienta/kiln_cms/issues/1710) · [long form](docs/changelog/unreleased.md#run-mix-kilnorgslugs-to-find-organizations-whose-slug-cant-be-a-hostname))
 
@@ -127,6 +131,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#1544](https://github.com/The-Verscienta/kiln_cms/issues/1544) · [long form](docs/changelog/unreleased.md#the-release-images-latest-tag-moves-only-to-the-highest-final-release-and-from))
 
 ### Fixed
+
+- **A job killed by a deploy's shutdown is rescued after three hours instead of
+  staying `executing` for ever.**
+  ([#1718](https://github.com/The-Verscienta/kiln_cms/issues/1718) · [long form](docs/changelog/unreleased.md#a-job-killed-by-a-deploys-shutdown-is-rescued-after-three-hours-instead-of))
 
 - **An organization's slug must be a hostname label, and is stored lowercase.**
   ([#1710](https://github.com/The-Verscienta/kiln_cms/issues/1710) · [long form](docs/changelog/unreleased.md#an-organizations-slug-must-be-a-hostname-label-and-is-stored-lowercase))
