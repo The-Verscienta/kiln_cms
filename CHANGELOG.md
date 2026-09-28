@@ -116,6 +116,9 @@ Every summary line below that was shortened links to its own entry there.
   release still serving mid-deploy.**
   ([#1716](https://github.com/The-Verscienta/kiln_cms/issues/1716) · [long form](docs/changelog/unreleased.md#mix-kilnmigrationscheck-gates-expand-contract))
 
+- **Rich-text blocks turn lists into real lists: typed with "•" or "1)", pasted
+  as bullet characters (a PDF, an email), or pasted from Word with nesting kept.**
+
 ### Changed
 
 - **Keep `RichText.legacy_html` as a fallback instead of removing it;
