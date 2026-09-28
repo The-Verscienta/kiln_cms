@@ -83,7 +83,11 @@ defmodule Mix.Tasks.Kiln.Migrations.CheckTest do
 
     test "modify whose previous type is unknown" do
       up = "alter table(:posts) do\n  modify :views, :bigint\nend"
-      assert [:type_change] == rules(migration(up))
+
+      assert [%{rule: :type_change, message: message}] =
+               Check.check_source(migration(up), version: @version)
+
+      assert message =~ "previous type is unknown"
     end
 
     test "modify to null: false" do

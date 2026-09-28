@@ -218,7 +218,7 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
     and the old shape has not been read since a shipped release, say so above
     the statement:
 
-        # kiln:contract-ok since vX.Y.Z — <what stopped reading it, and why it is safe>
+        # kiln:contract-ok since vX.Y.Z -- <what stopped reading it, and why it is safe>
     """)
   end
 
@@ -332,14 +332,17 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
 
     history
     |> Enum.take_while(fn {name, _} -> name < base end)
-    |> Enum.reduce(%{}, fn {_, events}, acc ->
-      Enum.reduce(events, acc, fn
-        {:set, table, column, type, _line}, acc -> Map.put(acc, {table, column}, type)
-        {:drop_table, table, _line}, acc -> Map.reject(acc, fn {{t, _}, _} -> t == table end)
-        {:create_table, _table, _line}, acc -> acc
-      end)
-    end)
+    |> Enum.flat_map(fn {_, events} -> events end)
+    |> Enum.reduce(%{}, &apply_event/2)
   end
+
+  defp apply_event({:set, table, column, type, _line}, acc),
+    do: Map.put(acc, {table, column}, type)
+
+  defp apply_event({:drop_table, table, _line}, acc),
+    do: Map.reject(acc, fn {{t, _}, _} -> t == table end)
+
+  defp apply_event({:create_table, _table, _line}, acc), do: acc
 
   @doc """
   The schema events a migration's forward direction declares, in source
@@ -554,7 +557,7 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
     |> sql_text()
     |> then(fn text ->
       for {re, label} <- @sql_patterns, Regex.match?(re, text) do
-        finding(ctx, meta, :raw_sql, "raw SQL contains #{label} (heuristic — review it)",
+        finding(ctx, meta, :raw_sql, "raw SQL contains #{label} (heuristic; review it)",
           hint:
             "if it drops, renames or retypes something the running release reads, it " <>
               "belongs in a later release"
@@ -585,48 +588,51 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
 
     new_type = type_string(type)
 
-    type_finding =
-      cond do
-        is_nil(from_type) ->
-          [
-            finding(
-              ctx,
-              meta,
-              :type_change,
-              "modifies #{table}.#{col} to #{new_type}, and its previous type is unknown",
-              hint: "add `from:` or check it is not a type change the running release cannot read"
-            )
-          ]
+    type_findings(ctx, meta, "#{table}.#{col}", from_type, new_type) ++
+      null_findings(ctx, meta, "#{table}.#{col}", opts, from_opts)
+  end
 
-        from_type != new_type ->
-          [
-            finding(
-              ctx,
-              meta,
-              :type_change,
-              "changes #{table}.#{col} from #{from_type} to #{new_type}",
-              hint: "add a new column of the new type, backfill, and drop the old one later"
-            )
-          ]
-
-        true ->
-          []
-      end
-
-    null_finding =
-      if Keyword.get(opts, :null) == false and Keyword.get(from_opts, :null) != false do
+  defp type_findings(ctx, meta, column, from_type, new_type) do
+    cond do
+      is_nil(from_type) ->
         [
-          finding(ctx, meta, :set_not_null, "makes #{table}.#{col} NOT NULL",
-            hint:
-              "the running release may still write NULL; tighten it in the release " <>
-                "after the one that always sets it (and backfill first)"
+          finding(
+            ctx,
+            meta,
+            :type_change,
+            "modifies #{column} to #{new_type}, and its previous type is unknown",
+            hint: "add `from:` or check it is not a type change the running release cannot read"
           )
         ]
-      else
-        []
-      end
 
-    type_finding ++ null_finding
+      from_type != new_type ->
+        [
+          finding(
+            ctx,
+            meta,
+            :type_change,
+            "changes #{column} from #{from_type} to #{new_type}",
+            hint: "add a new column of the new type, backfill, and drop the old one later"
+          )
+        ]
+
+      true ->
+        []
+    end
+  end
+
+  defp null_findings(ctx, meta, column, opts, from_opts) do
+    if Keyword.get(opts, :null) == false and Keyword.get(from_opts, :null) != false do
+      [
+        finding(ctx, meta, :set_not_null, "makes #{column} NOT NULL",
+          hint:
+            "the running release may still write NULL; tighten it in the release " <>
+              "after the one that always sets it (and backfill first)"
+        )
+      ]
+    else
+      []
+    end
   end
 
   defp previous_type(ctx, table, column, line) do
@@ -674,7 +680,7 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
   end
 
   defp finding(ctx, meta, rule, message, hint: hint) do
-    %{file: ctx.file, line: meta[:line] || 1, rule: rule, message: "#{message} — #{hint}"}
+    %{file: ctx.file, line: meta[:line] || 1, rule: rule, message: "#{message}; #{hint}"}
   end
 
   ## Markers
@@ -730,28 +736,32 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
       text =~ @contract_marker ->
         with %{"version" => v} <- Regex.named_captures(@contract_re, text),
              {:ok, since} <- Version.parse(v) do
-          if Version.compare(since, version) == :gt do
-            {:error,
-             %{
-               file: file,
-               line: line,
-               rule: :marker_unshipped,
-               message:
-                 "marker names v#{since}, which has not shipped (mix.exs is at #{version}) — " <>
-                   "name the release that stopped reading the old shape"
-             }}
-          else
-            {:marker, :contract, line}
-          end
+          shipped_marker(since, version, file, line)
         else
-          _ -> {:error, malformed(file, line, "# kiln:contract-ok since vX.Y.Z — <reason>")}
+          _ -> {:error, malformed(file, line, "# kiln:contract-ok since vX.Y.Z -- <reason>")}
         end
 
       Regex.match?(@lock_re, text) ->
         {:marker, :lock, line}
 
       true ->
-        {:error, malformed(file, line, "# kiln:lock-ok — <reason>")}
+        {:error, malformed(file, line, "# kiln:lock-ok -- <reason>")}
+    end
+  end
+
+  defp shipped_marker(since, version, file, line) do
+    if Version.compare(since, version) == :gt do
+      {:error,
+       %{
+         file: file,
+         line: line,
+         rule: :marker_unshipped,
+         message:
+           "marker names v#{since}, which has not shipped (mix.exs is at #{version}); " <>
+             "name the release that stopped reading the old shape"
+       }}
+    else
+      {:marker, :contract, line}
     end
   end
 
@@ -760,7 +770,7 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
       file: file,
       line: line,
       rule: :malformed_marker,
-      message: "malformed override marker — the shape is `#{shape}`"
+      message: "malformed override marker; the shape is `#{shape}`"
     }
   end
 
@@ -788,7 +798,7 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
           line: line,
           rule: :unused_marker,
           message:
-            "override marker excuses nothing — put it directly above the statement it " <>
+            "override marker excuses nothing; put it directly above the statement it " <>
               "covers, or delete it"
         }
       end
