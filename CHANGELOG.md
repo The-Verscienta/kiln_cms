@@ -54,6 +54,18 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **A new index on every content table's titles is built `CONCURRENTLY` by the
+  migration; if it is interrupted, drop the invalid index and migrate again.**
+  ([#1712](https://github.com/The-Verscienta/kiln_cms/issues/1712) · [long form](docs/changelog/unreleased.md#a-new-index-on-every-content-tables-titles-is-built-concurrently-by-the))
+
+### Fixed
+
+- **Search holds at most two pooled connections, and answers `503` rather than
+  `500` when the pool is full.**
+  ([#1712](https://github.com/The-Verscienta/kiln_cms/issues/1712) · [long form](docs/changelog/unreleased.md#search-holds-at-most-two-pooled-connections-and-answers-503-rather-than-500))
+
 ## [0.12.0] - 2026-09-27
 
 Long form: [docs/changelog/v0.12.0.md](docs/changelog/v0.12.0.md) —

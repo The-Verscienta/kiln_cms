@@ -104,6 +104,55 @@ small node, then tune from the `kiln_cms.repo.query.queue_time` metric (rising q
 pool too small). Tune individual queue limits per deployment; cap the most bursty (`search`)
 lower if embeddings dominate.
 
+## Search and the pool
+
+A search is the heaviest anonymous read Kiln serves: `KilnCMS.Search.global/2` runs a
+section per content type, taxonomy resource and (outside `/api/search`) media, and each
+content section fuses up to eight legs. Since #1712 it is built to share the pool:
+
+- **At most two sections in flight.** `section_concurrency` (`config :kiln_cms,
+  KilnCMS.Search`) caps how many sections run at once, and so how many connections one
+  search can hold. It defaults to **2**. It was 4, which filled the default 10-connection
+  pool at two and a half concurrent searches. At 1 a lone search takes about twice as long,
+  so 2 is the default. Raise it only on a pool sized for `section_concurrency × concurrent
+  searches` on top of Oban and every other request.
+- **A connection per query, not per search.** Each query checks a connection out and gives
+  it back. Holding one checkout for a whole search was tried and made things worse. The
+  connection sat idle between queries, and a cache fallback inside the search, which runs
+  in Cachex's own process, needed a second one. At ten clients the pool dropped nearly
+  every request.
+- **`503`, not `500`, when the pool gives up.** A checkout the pool drops
+  (`connection not available and request was dropped from queue`) makes `GET /api/search`
+  answer `503 temporarily_unavailable` with `Retry-After: 1`, which is never cached.
+- **Legs read ids.** Fusion needs only ids. The records are read once, for the hits kept,
+  and `/api/search` reads only the fields it renders, so a search no longer decodes block
+  trees it throws away.
+- **The title leg is indexed.** `<table>_title_lexemes_index` is a GIN index on each
+  title's lexemes. A rare-word title lookup on 1,700 posts went from a 7.4 ms sequential
+  scan to 0.04 ms.
+- **Analytics off the request.** The `search_queries` upsert runs on the task supervisor.
+
+Measured with `scripts/benchmarks/api_latency.sh` (#1546): `MIX_ENV=prod`, `POOL_SIZE=10`,
+500 pages, 1,500 posts and 200 drafts, closed-loop clients, Apple M5 Pro with PostgreSQL
+on the same host. The laptop was shared with other work: load average 10–25 before and
+6–12 after. Server-side p50 / p95 / p99 in ms, for the warm pass (the cold pass reads
+the same):
+
+| Query | Clients | Before | After | Throughput before → after |
+|---|---|---|---|---|
+| rare word | 1 | 36.0 / 52.3 / 65.4 | 23.4 / 25.8 / 27.9 | 26 → 43 req/s |
+| rare word | 10 | 69.2 / 110.0 / 125.8 | 50.4 / 93.5 / 108.0 | 141 → 186 req/s |
+| rare word | 50 | 351.3 / 437.8 / 550.1 | 246.8 / 314.0 / 359.2 | 144 → 206 req/s |
+| common word | 1 | 48.2 / 66.9 / 75.8 | 29.2 / 36.3 / 38.5 | 20 → 33 req/s |
+| common word | 10 | 280.0 / 486.3 / 571.3 | 94.6 / 140.7 / 152.1 | 34 → 102 req/s |
+| common word | 50 | 1,254 / 2,161 / 3,334 | 481.6 / 574.0 / 624.9 | 36 → 106 req/s |
+
+A single search now meets the 50 ms target. Beyond ten clients, latency is bounded by
+throughput rather than by the pool: with 50 closed-loop clients at 206 req/s, each request
+waits about 240 ms by Little's law. What is left per request is CPU, the Ash
+query-building for about thirteen reads, and, for a word on every document, ranking every
+match before the top-N sort (#1712, cause 3).
+
 ## Telemetry to watch
 
 These are defined in `KilnCMSWeb.Telemetry.metrics/0`. Two things can read them:
