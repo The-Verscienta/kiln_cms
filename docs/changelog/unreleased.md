@@ -7,30 +7,6 @@ carries the reasoning.
 
 ## Upgrade notes
 
-<a id="on-012-before-upgrading-to-10"></a>
-
-- **On 0.12, before `mix kiln.update --allow-major` to 1.0: run the block
-  backfill and `mix kiln.deprecations --migrate-audiences`, and drain the queue.**
-  1.0 is a major, so `mix kiln.update` refuses it without `--allow-major`, and
-  it removes what 0.12 deprecated (see *Breaking*). Three things to do while
-  still on 0.12, in this order:
-
-  1. `mix kiln.blocks.backfill` (in a release,
-     `bin/kiln_cms eval 'KilnCMS.Release.backfill_blocks()'`), if you have not
-     since 0.12, so no stored block is still in the legacy shape.
-  2. `mix kiln.deprecations --migrate-audiences` (in a release,
-     `bin/kiln_cms eval 'KilnCMS.Release.deprecations(migrate_audiences: true)'`).
-     It gives every account that still reads gated content through the
-     `User.audiences` fallback a default-organization membership carrying the
-     same audiences. 1.0 does this on its own after every deploy, but only
-     moments after the node starts serving; running it first means no reader
-     loses access even for that moment.
-  3. Let the webhook and newsletter queues drain. `mix kiln.deprecations` exits
-     non-zero while any account or queued job is left, so it can gate the
-     upgrade script. A job still queued in a pre-0.12 shape is cancelled by
-     1.0, with an error in the log, and its work is not done.
-  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543))
-
 ## Breaking
 
 <a id="remove-the-published-option"></a>
@@ -91,3 +67,193 @@ carries the reasoning.
   keys, not their values. Jobs 0.12 or later enqueued always carry `org_id` and
   are unaffected.
   ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543))
+<a id="a-media-job-with-no-org-id-is-cancelled-not-silently-skipped"></a>
+
+- **Edited images get new variants under strict tenancy, and a media job with no
+  `org_id` is cancelled with a logged error instead of doing nothing silently.**
+  `VariantWorker`, `AVWorker` and `AVStripWorker` read their item with the
+  job's `org_id` as the tenant. A job without one used a `nil` tenant, and
+  under strict tenancy that read failed, so the job returned `:ok` having done
+  nothing. The in-admin image editor enqueued its variant regeneration that
+  way, so an edited image kept its old variants. The editor now passes the
+  item's `org_id`, as every other enqueue site already did. The workers now
+  treat a job with no `org_id` as a bug in whatever enqueued it: they log an
+  error naming the worker and the item and return `{:cancel, reason}` to Oban
+  (`KilnCMS.Media.Ingest.job_tenant/2`). They do not guess the default
+  organization. If such a job was queued before this release, it shows as
+  cancelled; `mix kiln.media.regenerate_variants --all` re-derives variants. (#1658)
+
+<a id="an-old-newsletter-confirmation-link-no-longer-re-subscribes"></a>
+
+- **An old newsletter confirmation link no longer re-subscribes a reader who
+  unsubscribed.** Confirmation now only moves a subscriber from pending to
+  confirmed. When the subscriber has unsubscribed since, both the link's page
+  and its button show a neutral "this link is no longer valid, subscribe
+  again" page and change nothing. The page names no address and no status. The
+  `Subscriber` `:confirm` action enforces the rule itself, so an unsubscribe
+  that lands between the lookup and the write still wins. Confirming an
+  already-confirmed subscriber again is a no-op that keeps the original
+  `confirmed_at`. (#1690)
+
+## Added
+
+<a id="on-012-before-upgrading-to-10"></a>
+
+- **On 0.12, before `mix kiln.update --allow-major` to 1.0: run the block
+  backfill and `mix kiln.deprecations --migrate-audiences`, and drain the queue.**
+  1.0 is a major, so `mix kiln.update` refuses it without `--allow-major`, and
+  it removes what 0.12 deprecated (see *Breaking*). Three things to do while
+  still on 0.12, in this order:
+
+  1. `mix kiln.blocks.backfill` (in a release,
+     `bin/kiln_cms eval 'KilnCMS.Release.backfill_blocks()'`), if you have not
+     since 0.12, so no stored block is still in the legacy shape.
+  2. `mix kiln.deprecations --migrate-audiences` (in a release,
+     `bin/kiln_cms eval 'KilnCMS.Release.deprecations(migrate_audiences: true)'`).
+     It gives every account that still reads gated content through the
+     `User.audiences` fallback a default-organization membership carrying the
+     same audiences. 1.0 does this on its own after every deploy, but only
+     moments after the node starts serving; running it first means no reader
+     loses access even for that moment.
+  3. Let the webhook and newsletter queues drain. `mix kiln.deprecations` exits
+     non-zero while any account or queued job is left, so it can gate the
+     upgrade script. A job still queued in a pre-0.12 shape is cancelled by
+     1.0, with an error in the log, and its work is not done.
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543))
+
+## Changed
+
+<a id="the-release-images-latest-tag-moves-only-to-the-highest-final-release-and-from"></a>
+
+- **The release image's `latest` tag moves only to the highest final release,
+  and from 1.0.0 a floating major tag (`1`) follows the highest final release
+  of its major.** The previous minor now gets security fixes for 90 days
+  from short-lived branches off its tag (`.github/SECURITY.md`), so a patch
+  such as `1.0.3` can be pushed after `1.1.0`. Before this change the release
+  workflow moved `latest` onto every final tag it built, and the backport
+  would have rolled every `docker pull …:latest` back a minor. A step now
+  compares the tag against every release tag upstream
+  (`scripts/release/floating_tags.sh`, covered by
+  `test/scripts/release_floating_tags_test.exs`). `latest` moves only when the
+  tag is the highest final release, and `1` only when it is the highest final
+  `1.x`. A patch on an older line is published under its exact version only.
+  Release candidates still move neither, and before 1.0.0 there is no floating
+  major, since every release so far would be `0`. There is no floating minor
+  (`1.0`) either: the previous minor stops getting fixes after 90 days, so a
+  tag floating on it would go quiet
+  ([#1544](https://github.com/The-Verscienta/kiln_cms/issues/1544)).
+
+## Fixed
+
+## Security
+
+<a id="newsletter-sign-up-honeypot-matches-forms"></a>
+
+- **The newsletter sign-up honeypot and public forms trip on the same rule.**
+  The two surfaces render the same hidden `website` input but checked it
+  differently: forms trimmed a string value first, so a whitespace-only value
+  passed as human, while newsletter sign-up had its own inline test. Both now
+  call `KilnCMS.Forms.honeypot_tripped?/1`, and it is the stricter reading:
+  only an absent field or the empty string an untouched input submits counts
+  as a human. Any other value trips it, including whitespace-only strings and
+  non-string values such as a list or a map. A tripped honeypot still reports
+  success and stores nothing on both surfaces. (#1657)
+<a id="automation-rules-are-set-up-with-ordinary-fields-instead-of-a-json-box"></a>
+
+- **Automation rules are set up with ordinary fields instead of a JSON box.**
+  The "Action config (JSON)" textarea on `/editor/automation` is gone. Picking
+  a reaction now shows one input per setting it takes, such as an email field
+  for "Send to", a network picker for social posts, a person picker for task
+  assignees, and a toggle for `allow_egress`, with the required ones marked.
+  The intelligence reactions show the fields for the chosen "Send findings as"
+  option (email, comment or task) and hide the rest. Template fields have
+  chips that insert `{{title}}` and the other placeholders. The inputs are
+  generated from `ActionConfig`'s shape table, so the form cannot offer a key
+  the save refuses. The validation itself is unchanged and still refuses the
+  string `"true"` for `allow_egress` from the API and seeds. Stored rules need
+  no migration.
+<a id="console-lists-share-one-empty-state-long-settings-pages-get-a-table-of-contents"></a>
+
+- **Console lists share one empty state; long settings pages get a table of
+  contents; screen crumbs point at their real parent.** Trash (content and
+  media), Taxonomy, Inbox, the search palette, Governance, Team, Social,
+  Experiments, Newsletter, Webhook deliveries, Federation followers and Form
+  Builder entries now render the kit `<.empty_state>` — a title, one line on
+  what will appear there and, where there is one, the next step (Inbox's
+  empty Unread filter offers "Show all notifications") — instead of a bare
+  muted sentence. Your settings, Outgoing mail and Mail carry an "On this page"
+  contents: plain anchor links to the page's own section ids, sticky in a right
+  column on wide screens and a row of chips on narrow ones, no JavaScript. The
+  Form Builder's section switcher is the kit `.tabs` with the full ARIA tabs
+  pattern (tablist/tab/tabpanel, `aria-selected`, roving `tabindex`,
+  Left/Right/Home/End). And the "← All content" crumb that sixteen non-content
+  screens (Team, Billing, Mail, Webhooks, …) carried now names the screen's
+  parent, read from `KilnCMSWeb.ConsoleNav`: the Configure hub section it is
+  listed under, or Home
+  ([#1678](https://github.com/The-Verscienta/kiln_cms/issues/1678),
+  [#1680](https://github.com/The-Verscienta/kiln_cms/issues/1680)).
+
+<a id="federation-runs-under-the-policies"></a>
+
+- **Federation runs under the policies.** The inbox, the publish fan-out, the
+  delivery worker, the replay-nonce store and its sweeper, and
+  `mix kiln.federation` reached `Follower`, `Delivery`, `Block`,
+  `SiteFederation` and `SeenSignature` through `authorize?: false`, which skips
+  every policy on the resource. They now run as `KilnCMS.SystemActor`, and
+  each resource admits it for exactly what it needs: the follower list in full,
+  the delivery ledger's `create`/`settle` (not its prune), the block list's
+  reads (not its writes), the site settings' read, delivery stamp and the
+  operator's `enable`/`disable`/`rekey` (not the settings form), and the nonce
+  store's `record`/`expired`/`destroy` (not a plain read). `KilnCMS.CMS.OrgSettings`
+  gains a `system_actions:` option that narrows the grant inside the macro's
+  policies. The `mix kiln.authz.check` backlog drops by 24 sites and five files.
+
+  Two of those reads used to fail **open**, and now fail closed whatever the
+  grants say. The replay-nonce write logged and accepted on the date window
+  when the store refused or failed it; the inbox now answers such a delivery
+  `503` with `Retry-After: 60`, so an honest sender retries it and a replay is
+  never accepted unrecorded. And the inbox's follower-ceiling count, which a
+  refused read would have answered with 0, is preceded by a one-row read with
+  `authorize_with: :error`; a refusal or a failed count is treated as "at the
+  ceiling", and the follow is refused and logged. Honest senders see no
+  difference unless the nonce store is down. (#1659)
+
+<a id="mix-kilnmigrationscheck-gates-expand-contract"></a>
+
+- **`mix kiln.migrations.check` fails a PR whose new migration breaks the
+  release still serving mid-deploy.** From 1.0 schema changes follow an
+  expand → migrate → contract policy across releases, written out in
+  [`docs/releasing.md`](../releasing.md#migrations-expand-migrate-contract):
+  add nullable or defaulted, backfill outside the migration, and drop, rename
+  or tighten only in a later release. The task reads each migration a PR adds
+  (core and overlay directories, forward direction only) and flags dropped or
+  renamed tables and columns, type changes (resolved from `from:` or the
+  migration history), `NOT NULL` without a default or a backfill release,
+  destructive raw SQL, non-concurrent indexes on large tables, and a
+  concurrent index inside a transaction. A deliberate contract step carries a
+  `# kiln:contract-ok since vX.Y.Z — <reason>` marker naming the shipped
+  release that stopped reading the old shape. It runs in the `build` CI job on
+  pull requests. The existing history is exempt; judged whole, it would have
+  flagged 106 statements, among them
+  `20260919191545_drop_webhook_plaintext_secret`. The same section of
+  `docs/releasing.md` says what zero-downtime does and does not cover.
+  Operators are unaffected.
+  ([#1716](https://github.com/The-Verscienta/kiln_cms/issues/1716))
+<a id="mint-1110-closes-three-advisories-http1-response-smuggling-and-two-http2"></a>
+
+- **`mint` 1.11.0 closes three advisories: HTTP/1 response smuggling and two
+  HTTP/2 client memory exhaustions (EEF-CVE-2026-91043 HIGH, -92103, -94194).**
+  All three were published against `mint` 1.10.1 on 2026-09-28 and fixed in
+  1.11.0. A malicious HTTP/2 server could make the client decode HPACK-indexed
+  `cookie` fields far past `max_header_list_size`, which is enforced only on
+  the compressed block (EEF-CVE-2026-91043, HIGH). It could also hold up to
+  about 16 MiB per connection in a frame larger than `max_frame_size`, which is
+  checked only once the whole payload has arrived (EEF-CVE-2026-92103). A
+  malicious HTTP/1 server could send `Transfer-Encoding: chunked, gzip`, which
+  Mint framed as chunked although RFC 9112 reads such a body to connection
+  close. That desynchronizes Mint from a strict intermediary on a pooled
+  connection (EEF-CVE-2026-94194). Kiln reaches Mint through Req and Finch on
+  every outbound HTTP path, and webhooks, ActivityPub federation and media URL
+  import aim at hosts an operator or editor supplies, so a hostile origin is
+  reachable. `mint` is transitive only, so this is a one-line `mix.lock`
+  change.

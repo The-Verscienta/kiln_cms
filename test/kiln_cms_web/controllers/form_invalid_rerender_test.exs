@@ -178,18 +178,31 @@ defmodule KilnCMSWeb.FormInvalidRerenderTest do
   end
 
   describe "what is never echoed" do
-    # Anything non-blank in the honeypot is a fake success (200) before
-    # validation runs, so the only honeypot value that can reach a re-render is
-    # whitespace — and even that must not come back.
+    # Any value but "" in the honeypot is a fake success (200) before
+    # validation runs — whitespace-only included since #1657 — so the only
+    # honeypot value that can reach a re-render is the empty one, and the
+    # re-render still renders the field empty.
     test "the honeypot is rendered empty on a re-render", %{conn: conn} do
       form = full_form!()
 
       html =
         conn
-        |> post_invalid(form, %{"website" => "   "})
+        |> post_invalid(form, %{"website" => ""})
         |> html_response(422)
 
       assert attr(doc(html), "input[name=website]", "value") == nil
+    end
+
+    test "a whitespace-only honeypot is a fake success, not a re-render (#1657)",
+         %{conn: conn} do
+      form = full_form!()
+
+      html =
+        conn
+        |> post_invalid(form, %{"website" => "   "})
+        |> html_response(200)
+
+      assert html =~ "Merci!"
     end
 
     test "a filled honeypot still gets the fake success, not the re-render", %{conn: conn} do

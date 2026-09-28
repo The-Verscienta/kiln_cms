@@ -315,9 +315,11 @@ defmodule KilnCMSWeb.NewsletterLive do
     >
       <div class="space-y-10">
         <div>
-          <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
-            &larr; {gettext("All content")}
-          </.link>
+          <Layouts.console_crumb
+            current_user={@current_user}
+            current_org={@current_org}
+            active={:newsletter}
+          />
           <h1 class="mt-1 text-2xl font-semibold">{gettext("Newsletter")}</h1>
           <p class="text-sm text-base-content/70">
             {gettext("Send a published post to your subscribers via the built-in mail server.")}
@@ -456,9 +458,15 @@ defmodule KilnCMSWeb.NewsletterLive do
 
         <section class="space-y-4">
           <h2 class="text-lg font-medium">{gettext("Recent campaigns")}</h2>
-          <p :if={@sends == []} class="text-sm text-base-content/60">
-            {gettext("No campaigns yet.")}
-          </p>
+          <.empty_state
+            :if={@sends == []}
+            id="newsletter-sends-empty"
+            icon="hero-envelope"
+            title={gettext("No campaigns yet.")}
+            compact
+          >
+            {gettext("Sent campaigns and their delivery counts appear here.")}
+          </.empty_state>
 
           <div :if={@sends != []} class="overflow-x-auto">
             <table class="table">

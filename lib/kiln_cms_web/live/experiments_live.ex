@@ -378,9 +378,15 @@ defmodule KilnCMSWeb.ExperimentsLive do
 
         <section class="space-y-3">
           <h2 class="text-lg font-medium">{gettext("Experiments")} ({length(@experiments)})</h2>
-          <p :if={@experiments == []} class="text-sm text-base-content/60">
-            {gettext("No experiments yet.")}
-          </p>
+          <.empty_state
+            :if={@experiments == []}
+            id="experiments-empty"
+            icon="hero-beaker"
+            title={gettext("No experiments yet.")}
+            compact
+          >
+            {gettext("Create one with the form above to test a headline or a block.")}
+          </.empty_state>
           <ul :if={@experiments != []} class="card divide-y divide-base-content/10 overflow-hidden">
             <li
               :for={experiment <- @experiments}

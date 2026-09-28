@@ -521,9 +521,11 @@ defmodule KilnCMSWeb.AccountsLive do
     ~H"""
     <div class="space-y-6">
       <div>
-        <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
-          &larr; {gettext("All content")}
-        </.link>
+        <Layouts.console_crumb
+          current_user={@current_user}
+          current_org={@current_org}
+          active={:accounts}
+        />
         <h1 class="mt-1 text-2xl font-semibold">{gettext("Accounts")}</h1>
         <p class="text-sm text-base-content/70">
           {gettext(

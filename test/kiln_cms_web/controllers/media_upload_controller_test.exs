@@ -130,8 +130,12 @@ defmodule KilnCMSWeb.MediaUploadControllerTest do
       assert item.uploaded_by_id == ctx.editor.id
       assert item.focal_x == 0.25
 
-      # Derivation was queued, as for a library upload.
-      assert_enqueued(worker: KilnCMS.Media.VariantWorker, args: %{media_item_id: item.id})
+      # Derivation was queued, as for a library upload, under the item's own
+      # org — the worker cancels a job without one (#1658).
+      assert_enqueued(
+        worker: KilnCMS.Media.VariantWorker,
+        args: %{media_item_id: item.id, org_id: item.org_id}
+      )
     end
 
     test "a JWT-authenticated editor may upload too", ctx do

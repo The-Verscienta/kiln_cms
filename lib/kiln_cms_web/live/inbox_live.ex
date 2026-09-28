@@ -186,10 +186,20 @@ defmodule KilnCMSWeb.InboxLive do
           </.link>
         </div>
 
-        <div class="card divide-y divide-base-content/10">
-          <p :if={@notifications == []} class="p-4 text-sm text-base-content/60">
-            {empty_message(@filter)}
-          </p>
+        <.empty_state
+          :if={@notifications == []}
+          id="inbox-empty"
+          icon={empty_icon(@filter)}
+          title={empty_title(@filter)}
+        >
+          {empty_message(@filter)}
+          <:action :if={@filter == :unread}>
+            <.link patch={filter_path(:all)} class="btn btn-sm btn-default">
+              {gettext("Show all notifications")}
+            </.link>
+          </:action>
+        </.empty_state>
+        <div :if={@notifications != []} class="card divide-y divide-base-content/10">
           <.row :for={notification <- @notifications} notification={notification} />
         </div>
       </div>
@@ -253,9 +263,14 @@ defmodule KilnCMSWeb.InboxLive do
   defp unread_label(0), do: gettext("Unread")
   defp unread_label(count), do: gettext("Unread (%{count})", count: count)
 
-  defp empty_message(:unread), do: gettext("Nothing unread.")
+  defp empty_icon(:unread), do: "hero-check-circle"
+  defp empty_icon(_all), do: "hero-inbox"
+
+  defp empty_title(:unread), do: gettext("Nothing unread.")
+  defp empty_title(_all), do: gettext("Your inbox is empty")
+
+  defp empty_message(:unread), do: gettext("You are all caught up.")
 
   defp empty_message(_all),
-    do:
-      gettext("Nothing yet. Review requests, comments, mentions and task assignments land here.")
+    do: gettext("Review requests, comments, mentions and task assignments land here.")
 end

@@ -34,6 +34,7 @@ defmodule KilnCMS.Media.VariantWorker do
   require Logger
 
   alias KilnCMS.{CMS, ImageProcessor, Storage}
+  alias KilnCMS.Media.Ingest
 
   @topic "media:updated"
 
@@ -42,14 +43,14 @@ defmodule KilnCMS.Media.VariantWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"media_item_id" => id} = args}) do
-    # `org_id` scopes the re-fetch/update to the item's site (epic #336). Old jobs
-    # enqueued before #336 carry no `org_id`; a nil tenant reads globally, which
-    # under `global?: true` still finds the row by its (globally-unique) id.
-    tenant = args["org_id"]
-
-    case CMS.get_media_item(id, authorize?: false, tenant: tenant) do
-      {:ok, %{storage_key: key} = item} when is_binary(key) -> process(item, key, tenant)
-      _ -> :ok
+    # `org_id` scopes the re-fetch/update to the item's site (epic #336). A job
+    # without one is cancelled with a logged error (#1658) — never run with a
+    # `nil` tenant, which strict tenancy turns into a silent no-op.
+    with {:ok, tenant} <- Ingest.job_tenant(args, __MODULE__) do
+      case CMS.get_media_item(id, authorize?: false, tenant: tenant) do
+        {:ok, %{storage_key: key} = item} when is_binary(key) -> process(item, key, tenant)
+        _ -> :ok
+      end
     end
   end
 

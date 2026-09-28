@@ -534,6 +534,26 @@ defmodule KilnCMSWeb.FederationControllerTest do
       _ = org_id
     end
 
+    # #1659: the replay store fails CLOSED. It used to log and accept on the
+    # date window, so a store that refused the write (a lost grant, an outage)
+    # let every replay through without a word. A 503 makes an honest sender
+    # retry; nothing is written for the activity meanwhile.
+    test "a replay store that refuses the write answers 503 and records nothing", %{
+      conn: conn,
+      remote_pem: remote_pem,
+      org_id: org_id
+    } do
+      conn =
+        conn
+        # An actor the store's policy refuses — what a lost grant looks like.
+        |> put_private(:kiln_inbox_opts, nonce_actor: nil)
+        |> post_signed(follow_activity(), remote_pem)
+
+      assert response(conn, 503)
+      assert get_resp_header(conn, "retry-after") == ["60"]
+      assert [] = Ash.read!(Follower, authorize?: false, tenant: org_id)
+    end
+
     # A remote server's bad minute must not be remembered as a bad ten.
     test "a failed fetch is not cached", %{conn: conn, remote_pem: remote_pem} do
       test_pid = self()

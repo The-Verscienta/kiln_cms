@@ -134,6 +134,32 @@ defmodule KilnCMS.FormsTest do
     assert CMS.recent_form_submissions!(form.id, authorize?: false) == []
   end
 
+  test "a whitespace-only or non-string honeypot also discards (#1657)" do
+    form = form!([%{name: "message", label: "Message", field_type: :text}])
+
+    for value <- ["   ", "\t\n", ["x"], %{"a" => "b"}] do
+      assert {:ok, :discarded} =
+               Forms.submit(form, %{"message" => "spam", Forms.honeypot_field() => value})
+    end
+
+    assert CMS.recent_form_submissions!(form.id, authorize?: false) == []
+  end
+
+  describe "honeypot_tripped?/1 — the rule every public surface shares (#1657)" do
+    test "an absent field or an untouched (empty) input is a human" do
+      refute Forms.honeypot_tripped?(%{})
+      refute Forms.honeypot_tripped?(%{Forms.honeypot_field() => nil})
+      refute Forms.honeypot_tripped?(%{Forms.honeypot_field() => ""})
+    end
+
+    test "any filled value trips it — whitespace-only and non-strings included" do
+      for value <- ["http://spam.example", " ", "\n", ["x"], %{"a" => "b"}, 1] do
+        assert Forms.honeypot_tripped?(%{Forms.honeypot_field() => value}),
+               "expected #{inspect(value)} to trip the honeypot"
+      end
+    end
+  end
+
   test "an inactive form rejects submissions" do
     form = form!(%{active: true}, [])
 

@@ -292,8 +292,9 @@ defmodule KilnCMSWeb.ContentEditor.Preview do
   # Inline preview rendered through the **same typed serializers that firing
   # uses** (Kiln v2) — what you preview is exactly what publishes/delivers. Full
   # block maps (incl. `data`/`children`) go through the legacy→typed bridge and
-  # the per-block `render(:web)`. Rich-text HTML is sanitized first (mirroring the
-  # save-time `SanitizeBlocks` change), so the rendered output is safe.
+  # the per-block `render(:web)`. Rich-text HTML is sanitized first
+  # (`sanitize_preview_block/1`, the same `HTMLSanitizer.sanitize_rich_text/1` the
+  # `BlockUnion` cast applies on save), so the rendered output is safe.
   # sobelow_skip ["XSS.Raw"]
   # A `{block_id, safe_html}` per block, so the Preview tab can wrap each block
   # individually and offer a per-block "edit on the page" jump (Theme C). The id is

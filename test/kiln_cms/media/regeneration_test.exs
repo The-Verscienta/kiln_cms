@@ -299,6 +299,14 @@ defmodule KilnCMS.Media.RegenerationTest do
 
       assert %{enqueued: 1, scanned: 2} = Regeneration.run(org_id())
       assert queued_ids() == [stale.id]
+
+      # Under the org it ran for — the worker cancels a job without one (#1658).
+      assert [%{args: %{"org_id" => queued_org}}] =
+               KilnCMS.Repo.all(
+                 from(j in Oban.Job, where: j.worker == "KilnCMS.Media.VariantWorker")
+               )
+
+      assert queued_org == org_id()
     end
 
     # THROUGH `run/2`, not `current?/1` — the bug this pins was invisible to a
