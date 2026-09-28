@@ -21,6 +21,32 @@ defmodule KilnCMS.Media.IngestTest do
     })
   end
 
+  describe "job_org_id/2 (#1658)" do
+    import ExUnit.CaptureLog
+
+    test "a job's own org_id is used as is, silently" do
+      org_id = Ash.UUID.generate()
+
+      assert capture_log(fn ->
+               assert Ingest.job_org_id(%{"org_id" => org_id}, __MODULE__) == org_id
+             end) == ""
+    end
+
+    test "a job without one runs under the default org, with a warning naming the worker" do
+      for args <- [%{"media_item_id" => "m1"}, %{"media_item_id" => "m1", "org_id" => nil}] do
+        log =
+          capture_log(fn ->
+            assert Ingest.job_org_id(args, KilnCMS.Media.AVWorker) ==
+                     KilnCMS.Accounts.default_org_id()
+          end)
+
+        assert log =~ "KilnCMS.Media.AVWorker"
+        assert log =~ ~s("m1")
+        assert log =~ "default organization"
+      end
+    end
+  end
+
   describe "store_url/2 refuses unsafe targets" do
     test "loopback" do
       assert {:error, {:unsafe_url, _}} = Ingest.store_url("http://localhost/pic.jpg")

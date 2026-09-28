@@ -143,6 +143,34 @@ defmodule KilnCMS.Media.Ingest do
   end
 
   @doc """
+  The org a queued media job (`KilnCMS.Media.VariantWorker`,
+  `KilnCMS.Media.AVWorker`, `KilnCMS.Media.AVStripWorker`) runs under: its
+  `org_id` arg, or — for a job enqueued without one — the default
+  organization, with a logged warning naming the worker (#1658).
+
+  Every enqueue site passes the item's `org_id`. A job without it was
+  enqueued by an older release (before epic #336, or by the image editor,
+  which omitted it until #1658). Its tenant used to be `nil`: under strict
+  tenancy the item read then failed and the job returned `:ok` having done
+  nothing, with no trace. Defaulting to the default org is the convention the
+  other workers follow (`KilnCMS.Deprecations.job_org_id/2`, the firing and
+  search workers): right on a single-site install, where every item lives
+  there, and fail-closed elsewhere — the read stays tenant-scoped, so an item
+  on another site is simply not found, never read across orgs.
+  """
+  @spec job_org_id(map(), module()) :: String.t()
+  def job_org_id(%{"org_id" => org_id}, _worker) when is_binary(org_id), do: org_id
+
+  def job_org_id(args, worker) do
+    Logger.warning(
+      "#{inspect(worker)} job for media item #{inspect(args["media_item_id"])} has no " <>
+        "`org_id`; running it against the default organization"
+    )
+
+    KilnCMS.Accounts.default_org_id()
+  end
+
+  @doc """
   Queue background derivation for `item` — variants for an image, poster/probe
   for A/V, nothing for a document or caption track (neither has anything to
   derive).

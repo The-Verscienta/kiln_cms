@@ -161,6 +161,38 @@ defmodule KilnCMS.Media.VariantWorkerTest do
     assert reloaded.variants == %{}
   end
 
+  describe "the job's org (#1658)" do
+    import ExUnit.CaptureLog
+
+    test "a job without org_id runs under the default org, and says so" do
+      item = media_item(store_png(1200, 800))
+      assert item.org_id == KilnCMS.Accounts.default_org_id()
+
+      log =
+        capture_log(fn ->
+          assert :ok = perform_job(VariantWorker, %{media_item_id: item.id})
+        end)
+
+      assert log =~ "KilnCMS.Media.VariantWorker"
+      assert log =~ "has no `org_id`"
+      assert %{"thumb" => _} = CMS.get_media_item!(item.id, authorize?: false).variants
+    end
+
+    test "a present org_id scopes the read: another site's job touches nothing" do
+      item = media_item(store_png(1200, 800))
+
+      other =
+        Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+          name: "other",
+          slug: "other-#{System.unique_integer([:positive])}",
+          status: :active
+        })
+
+      assert :ok = perform_job(VariantWorker, %{media_item_id: item.id, org_id: other.id})
+      assert CMS.get_media_item!(item.id, authorize?: false).variants == %{}
+    end
+  end
+
   test "discards the job when the MediaItem is gone" do
     assert :ok = perform_job(VariantWorker, %{media_item_id: Ecto.UUID.generate()})
   end

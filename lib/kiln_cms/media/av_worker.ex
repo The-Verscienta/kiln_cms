@@ -29,6 +29,7 @@ defmodule KilnCMS.Media.AVWorker do
   use Oban.Worker, queue: :media, max_attempts: 3
 
   alias KilnCMS.{AVProcessor, CMS, Storage}
+  alias KilnCMS.Media.Ingest
 
   require Logger
 
@@ -47,7 +48,9 @@ defmodule KilnCMS.Media.AVWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"media_item_id" => id} = args}) do
-    tenant = args["org_id"]
+    # The item's site (epic #336); a job without `org_id` runs under the default
+    # org, with a warning (#1658).
+    tenant = Ingest.job_org_id(args, __MODULE__)
 
     case CMS.get_media_item(id, authorize?: false, tenant: tenant) do
       {:ok, %{storage_key: key} = item} when is_binary(key) -> process(item, key, tenant)

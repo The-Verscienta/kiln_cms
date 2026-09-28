@@ -74,8 +74,13 @@ defmodule KilnCMS.Media.TransformTest do
     assert {:ok, _old} = Storage.fetch(key)
     assert {:ok, _new} = Storage.fetch(updated.storage_key)
 
-    # Variant regeneration is queued for the edited original.
-    assert_enqueued(worker: KilnCMS.Media.VariantWorker, args: %{media_item_id: item.id})
+    # Variant regeneration is queued for the edited original, under the item's
+    # own site (#1658) — a job without `org_id` used to be a silent no-op under
+    # strict tenancy.
+    assert_enqueued(
+      worker: KilnCMS.Media.VariantWorker,
+      args: %{media_item_id: item.id, org_id: item.org_id}
+    )
   end
 
   test "flips keep dimensions and mirror the focal point" do
