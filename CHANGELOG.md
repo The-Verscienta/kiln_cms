@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **On a multi-org deployment with `KILN_CONSOLE_HOST` set, add
+  `*.<console host>` to DNS and TLS before upgrading.**
+  ([#1688](https://github.com/The-Verscienta/kiln_cms/issues/1688) · [long form](docs/changelog/unreleased.md#on-a-multi-org-deployment-with-kiln_console_host-set-add-console-host-to-dns))
+
 - **Before upgrading to 1.0, run `mix kiln.blocks.backfill` on 0.12, and move any
   code that writes legacy `type`/`content`/`data` blocks to the typed shape.**
   ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#before-upgrading-to-10-run-the-block-backfill))
@@ -65,6 +69,11 @@ Every summary line below that was shortened links to its own entry there.
   ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#on-012-before-upgrading-to-10))
 
 ### Breaking
+
+- **On a multi-org install with `KILN_CONSOLE_HOST` set, each non-default
+  org's console moves to `<slug>.<console host>`: add wildcard DNS and a
+  wildcard TLS certificate for `*.<console host>` before upgrading.**
+  ([#1688](https://github.com/The-Verscienta/kiln_cms/issues/1688) · [long form](docs/changelog/unreleased.md#on-a-multi-org-install-with-kiln_console_host-set-each-non-default-orgs-console))
 
 - **Remove `TypedBlocks.to_legacy/1`, `TypedBlocks.from_legacy/1` and
   `KilnCMS.CMS.Block`; use `to_typed/1` and render from typed blocks.**
@@ -129,6 +138,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#1690](https://github.com/The-Verscienta/kiln_cms/issues/1690) · [long form](docs/changelog/unreleased.md#an-old-newsletter-confirmation-link-no-longer-re-subscribes))
 
 ### Security
+
+- **`KILN_CONSOLE_HOST` now isolates every organization's console, each on its
+  own `<slug>.<console host>` origin.**
+  ([#1688](https://github.com/The-Verscienta/kiln_cms/issues/1688) · [long form](docs/changelog/unreleased.md#kiln_console_host-now-isolates-every-organizations-console-each-on-its-own))
 
 - **The newsletter sign-up honeypot and public forms trip on the same rule.**
   ([#1657](https://github.com/The-Verscienta/kiln_cms/issues/1657) · [long form](docs/changelog/unreleased.md#newsletter-sign-up-honeypot-matches-forms))

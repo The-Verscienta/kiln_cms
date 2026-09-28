@@ -64,7 +64,19 @@ extra_origins =
 # not, so passing it says nothing about WHICH org a socket may act as. That is
 # each socket's own tenant resolution (#654) — every one of the four resolves
 # from the host it connected on, whatever origin admitted it.
-check_origin = ["https://" <> host, "//*." <> host | extra_origins]
+#
+# KILN_CONSOLE_HOST (#740) and every org's console host under it
+# (`<slug>.<console host>`, #1688) are Kiln's own hosts and serve the console's
+# sockets, so they are admitted here rather than left for the operator to add
+# to CHECK_ORIGINS. Under PHX_HOST (the layout passkeys need) the wildcard
+# above already covered them; this is for a console host outside it.
+console_origins =
+  case "KILN_CONSOLE_HOST" |> System.get_env("") |> String.trim() |> String.downcase() do
+    "" -> []
+    console_host -> ["//" <> console_host, "//*." <> console_host]
+  end
+
+check_origin = ["https://" <> host, "//*." <> host] ++ console_origins ++ extra_origins
 
 config :kiln_cms, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 

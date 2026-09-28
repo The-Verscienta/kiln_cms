@@ -11504,8 +11504,8 @@ msgstr "IP publique du serveur (pour les vérifications SPF et DNS inverse)"
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
-msgid "Set KILN_CONSOLE_HOST to a host no organization controls, add it to CHECK_ORIGINS, and restart. For now that host serves the default organization's console only. Otherwise, grant organization admin only to people you would trust with the console."
-msgstr "Définissez KILN_CONSOLE_HOST sur un hôte qu'aucune organisation ne contrôle, ajoutez-le à CHECK_ORIGINS, puis redémarrez. Pour l'instant, cet hôte ne sert que la console de l'organisation par défaut. Sinon, n'accordez le rôle d'administrateur d'organisation qu'à des personnes à qui vous confieriez la console."
+msgid "Set KILN_CONSOLE_HOST to a host no organization controls, such as console under your main host, point it and every subdomain of it at Kiln in DNS and TLS, and restart. Each organization's console then gets its own host, its slug followed by the console host. Otherwise, grant organization admin only to people you would trust with the console."
+msgstr "Définissez KILN_CONSOLE_HOST sur un hôte qu'aucune organisation ne contrôle, par exemple console sous votre hôte principal, faites pointer cet hôte et tous ses sous-domaines vers Kiln dans le DNS et le TLS, puis redémarrez. La console de chaque organisation a alors son propre hôte : son slug suivi de l'hôte de la console. Sinon, n'accordez le rôle d'administrateur d'organisation qu'à des personnes à qui vous confieriez la console."
 
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format

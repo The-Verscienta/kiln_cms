@@ -46,29 +46,30 @@ is close to granting them the console.
 This is inherent to same-origin code injection — Ghost's works the same way —
 and the mitigation is deployment-level, and now built in (#740):
 
-- **Serve the console from a host no tenant controls.** Set
-  `KILN_CONSOLE_HOST=console.example.com` (and add it to `CHECK_ORIGINS`):
-  every console route is then served **only** on that host — an editor who
-  types `/editor` on the site is redirected there — and the console host
-  serves **no tenant content**, so a snippet on `acme.example` is cross-origin
-  to `console.example.com`: the console's cookies are not attached to its
-  requests and its DOM is not reachable. Which routes are "console" is a
-  decision the router owns (`KilnCMSWeb.Surface`), pinned by a test, not a
-  prefix guess — `/api`, `/auth` and `/media` all begin routes on both sides.
-  On a multi-org deployment the console host reaches the **default org's**
-  console only (org resolution is still host-derived; per-tenant console
-  hosts are the follow-up), so it fits a single-org deployment today, which
-  is where this feature is most used. Do this before you hand this role to
-  anyone you would not also make a platform admin.
+- **Serve the console from hosts no tenant controls.** Set
+  `KILN_CONSOLE_HOST=console.example.com`, with DNS and TLS for it and for
+  `*.console.example.com`. Every console route is then served **only** on
+  console hosts: the default org's at `console.example.com`, and every other
+  org's at `<slug>.console.example.com` (#1688). An editor who types `/editor`
+  on their site is redirected to their org's console host. Console hosts serve
+  **no tenant content**, so a snippet on `acme.example.com` is cross-origin to
+  every console: the consoles' cookies are not attached to its requests and
+  their DOM is not reachable. No two orgs' consoles share an origin either.
+  Which routes are "console" is a decision the router owns
+  (`KilnCMSWeb.Surface`), pinned by a test, not a prefix guess: `/api`,
+  `/auth` and `/media` all begin routes on both sides. Keep the console host
+  under `PHX_HOST` so passkeys work there. Do this before you hand this role
+  to anyone you would not also make a platform admin.
 - Or treat "org admin" as equivalent to console access on that deployment, and
   staff it accordingly.
 
 On a **multi-org** deployment this is one tenant's admin reaching every other
 tenant's editors, so Kiln says so: once a second organization exists and
 `KILN_CONSOLE_HOST` is unset, it warns at boot, when the second org is created,
-and on `/editor/system` (#1661). That warning is the 1.0 position — accepted,
-not forced, because a console host is a DNS/TLS/`CHECK_ORIGINS` change Kiln
-cannot make for you on upgrade. Set `KILN_CONSOLE_HOST` on multi-org installs.
+and on `/editor/system` (#1661). The console host stays opt-in rather than
+forced, because it is a DNS and TLS change Kiln cannot make for you on upgrade.
+Set `KILN_CONSOLE_HOST` on multi-org installs; since #1688 it isolates every
+org's console, not only the default org's.
 See [threat-model.md](threat-model.md#residual-risks), residual risk 16.
 
 The `:delivery` pipeline keeps the markup out of console *pages*. It does not
