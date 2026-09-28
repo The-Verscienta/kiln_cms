@@ -49,7 +49,7 @@ newsletter subscribe POST.
 | 9 | Medium | Accepted residual | [#1664](https://github.com/The-Verscienta/kiln_cms/issues/1664) | Newsletter `GET …/confirm` | Confirm mutates on GET (mail prefetch can complete opt-in). Tokens are high-entropy; subscribe remains POST-only. Consider POST confirm later. |
 | 10 | Low | **Fixed** | [#1656](https://github.com/The-Verscienta/kiln_cms/issues/1656) | `lib/kiln_cms/cms/changes/sanitize_blocks.ex` | Orphaned change module; live write path is `TypedBlocks.sanitize_attrs/1`. Audit drift, not a bypass. |
 | 11 | Low | Open | [#1665](https://github.com/The-Verscienta/kiln_cms/issues/1665) | ActivityPub inbox | Actor fetch before signature verify (SSRF-bounded by SafeFetch). Documented residual. |
-| 12 | Low | Open | [#1657](https://github.com/The-Verscienta/kiln_cms/issues/1657) | Newsletter honeypot | Weaker than forms honeypot (whitespace passes). |
+| 12 | Low | **Fixed** | [#1657](https://github.com/The-Verscienta/kiln_cms/issues/1657) | Newsletter honeypot | Weaker than forms honeypot (whitespace passes). |
 | 13 | Low | **Fixed** | [#1658](https://github.com/The-Verscienta/kiln_cms/issues/1658) | Media workers | Missing `org_id` in legacy job args → `nil` tenant; fail-closed under default `strict_tenancy`. Align with `default_org_id()` like other workers. |
 | 14 | Info | Track | [#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) | `#1402` follow-up | 304 unexplained `authorize?: false` in non-web lib — ratchet holds; SystemActor migration incomplete. |
 | 15 | Info | **Documented** | [#1666](https://github.com/The-Verscienta/kiln_cms/issues/1666) | `/uploads/*` | Capability-URL residual; private storage correctly off Plug.Static. |

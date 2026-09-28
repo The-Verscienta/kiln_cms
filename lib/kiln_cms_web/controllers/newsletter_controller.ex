@@ -51,8 +51,10 @@ defmodule KilnCMSWeb.NewsletterController do
       email == "" ->
         invalid(conn)
 
-      # Honeypot tripped: report success, store nothing, mail nothing.
-      params[Forms.honeypot_field()] not in [nil, ""] ->
+      # Honeypot tripped: report success, store nothing, mail nothing. The same
+      # predicate as public forms (#1657), so a whitespace-only or non-string
+      # value trips it here too.
+      Forms.honeypot_tripped?(params) ->
         submitted(conn)
 
       true ->

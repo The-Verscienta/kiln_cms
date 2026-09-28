@@ -22,3 +22,17 @@ carries the reasoning.
   (`KilnCMS.Media.Ingest.job_org_id/2`). The read stays tenant-scoped, so an
   item on another site is not found rather than read across organizations.
   (#1658)
+
+## Security
+
+<a id="newsletter-sign-up-honeypot-matches-forms"></a>
+
+- **The newsletter sign-up honeypot and public forms trip on the same rule.**
+  The two surfaces render the same hidden `website` input but checked it
+  differently: forms trimmed a string value first, so a whitespace-only value
+  passed as human, while newsletter sign-up had its own inline test. Both now
+  call `KilnCMS.Forms.honeypot_tripped?/1`, and it is the stricter reading:
+  only an absent field or the empty string an untouched input submits counts
+  as a human. Any other value trips it, including whitespace-only strings and
+  non-string values such as a list or a map. A tripped honeypot still reports
+  success and stores nothing on both surfaces. (#1657)

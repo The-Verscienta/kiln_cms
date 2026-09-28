@@ -60,6 +60,11 @@ Every summary line below that was shortened links to its own entry there.
   of silently doing nothing.**
   ([#1658](https://github.com/The-Verscienta/kiln_cms/issues/1658) · [long form](docs/changelog/unreleased.md#media-jobs-without-an-org-id-run-under-the-default-org))
 
+### Security
+
+- **The newsletter sign-up honeypot and public forms trip on the same rule.**
+  ([#1657](https://github.com/The-Verscienta/kiln_cms/issues/1657) · [long form](docs/changelog/unreleased.md#newsletter-sign-up-honeypot-matches-forms))
+
 ## [0.12.0] - 2026-09-27
 
 Long form: [docs/changelog/v0.12.0.md](docs/changelog/v0.12.0.md) —

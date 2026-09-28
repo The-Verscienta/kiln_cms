@@ -164,6 +164,41 @@ defmodule KilnCMSWeb.NewsletterControllerTest do
       refute find(email)
     end
 
+    # The same predicate as public forms (`KilnCMS.Forms.honeypot_tripped?/1`):
+    # a whitespace-only or non-string value is a bot too (#1657).
+    for {label, value} <- [
+          {"whitespace-only", "   "},
+          {"list", ["http://spam.example"]},
+          {"map", %{"a" => "b"}}
+        ] do
+      test "a #{label} honeypot value also reports fake success and stores nothing",
+           %{conn: conn} do
+        email = address()
+
+        conn =
+          post(conn, ~p"/newsletter/subscribe", %{
+            "email" => email,
+            KilnCMS.Forms.honeypot_field() => unquote(Macro.escape(value))
+          })
+
+        assert html_response(conn, 200) =~ "Check your inbox"
+        refute find(email)
+      end
+    end
+
+    test "an empty honeypot (an untouched input) still subscribes", %{conn: conn} do
+      email = address()
+
+      conn =
+        post(conn, ~p"/newsletter/subscribe", %{
+          "email" => email,
+          KilnCMS.Forms.honeypot_field() => ""
+        })
+
+      assert html_response(conn, 200) =~ "Check your inbox"
+      assert find(email).status == :pending
+    end
+
     test "a malformed address is rejected without a 500", %{conn: conn} do
       # `Mail.enqueue!/1` raises on a bad recipient; the resource validation is
       # what keeps that from escaping this anonymous endpoint as a crash.
