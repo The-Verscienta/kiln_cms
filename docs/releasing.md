@@ -129,11 +129,12 @@ people to pass the flag reflexively.
 6. **Watch the release image publish.** Pushing the tag starts
    [`.github/workflows/release.yml`](https://github.com/The-Verscienta/kiln_cms/blob/main/.github/workflows/release.yml),
    which builds the release image and pushes it to
-   `ghcr.io/the-verscienta/kiln_cms` as both `X.Y.Z` and `latest` (a release
-   candidate gets only its exact tag — see
-   [below](#cutting-a-release-candidate)), stamped with the commit and build
-   date. Nothing to run by hand; it authenticates as
-   `GITHUB_TOKEN`.
+   `ghcr.io/the-verscienta/kiln_cms` as `X.Y.Z` and `latest`, and from 1.0.0
+   also as the floating major `X` (`1`). It is stamped with the commit and
+   build date. A release candidate gets only its exact tag (see
+   [below](#cutting-a-release-candidate)), and so does a patch on an older
+   line (see [Patch releases and backports](#patch-releases-and-backports)).
+   Nothing to run by hand; it authenticates as `GITHUB_TOKEN`.
 
    The version bump in `mix.exs` invalidates the dep layer, but the build
    reads `main`'s cache for the rest: v0.9.0's took about nine minutes. Check
@@ -245,6 +246,119 @@ usual.
 The client SDKs follow the same rule: a `client-js-vX.Y.Z-rc.N` tag publishes
 to npm under the `next` dist-tag rather than `latest`, and Hex never resolves
 a `kiln_client` pre-release unless a requirement names one.
+
+## Patch releases and backports
+
+[`.github/SECURITY.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/.github/SECURITY.md#supported-versions)
+sets the policy: the latest minor gets every fix, and the previous minor gets
+security fixes for 90 days from the release date of the minor that replaced
+it. There are no long-lived maintenance branches. Each patch is cut from a
+short-lived branch off the line's newest tag, and the branch is deleted
+afterwards. v0.9.1 was the first patch cut this way.
+
+**When `main` will do.** A patch carries fixes only. If everything on `main`
+since the line's newest tag is a fix, cut the patch from `main` as in
+[Cutting a release](#cutting-a-release) and stop here. Otherwise, and always
+for the previous minor, use a branch:
+
+1. **Fix it on `main` first**, through a normal PR with its changelog entry.
+   A backport is a copy of a fix that has already been reviewed, never the
+   first place it lands.
+
+2. **Branch from the line's newest tag.** Name the branch after the version
+   you are cutting:
+
+   ```bash
+   git fetch --tags origin
+   git checkout -b release/v1.0.3 v1.0.2
+   git cherry-pick -x <fix commit>        # -m 1 if it is a merge commit
+   ```
+
+   `-x` records the source commit in the message. Expect conflicts in
+   `CHANGELOG.md` and `docs/changelog/unreleased.md` only: take the tag's
+   version of each, then add just this patch's entries and long-form blocks.
+
+3. **Get CI on the exact tree.** `ci.yml` runs on pushes to `main` and on pull
+   requests to any base, so push a base branch at the tag and open the release
+   branch as a PR against it. Title it "don't merge": it exists only for the
+   CI run.
+
+   ```bash
+   git push origin v1.0.2:refs/heads/release/v1.0.x
+   git push -u origin release/v1.0.3
+   gh pr create --base release/v1.0.x --title "v1.0.3 (CI only, don't merge)" --body "…"
+   ```
+
+4. **Cut it on the branch**: steps 2 to 4 of
+   [Cutting a release](#cutting-a-release), with a `## [1.0.3]` section,
+   `--condense`, and the `mix.exs` and API spec bump. For a patch on the
+   previous minor, leave the deploy templates and the README's version line
+   alone: they follow the latest line, and `main` owns them.
+
+5. **Tag the branch and push only the tag.**
+
+   ```bash
+   git tag v1.0.3
+   git push origin v1.0.3
+   ```
+
+   `release.yml` publishes the image as `1.0.3`. `latest` and the major tag
+   `1` move only if this is the highest final release overall (for `latest`)
+   or on its major (for `1`), so `1.0.3` pushed after `1.1.0` moves neither.
+   The run log's "Decide which floating tags move" step says why.
+   `scripts/release/floating_tags.sh` makes the call, and
+   `test/scripts/release_floating_tags_test.exs` covers it.
+
+6. **Publish the GitHub release without making it "latest"** if a newer line
+   exists:
+
+   ```bash
+   gh release create v1.0.3 --latest=false --title "v1.0.3" --notes "…"
+   ```
+
+   Say `--latest=false` explicitly. The releases API's default for a new
+   release is to make it latest, and `gh`'s own default is an automatic choice
+   that weighs creation date as well as version. Neither is safe to rely on
+   for an older line. Every deployed instance's update page (`Kiln.Updates`) asks
+   `releases/latest`, so a 1.1 instance would compare itself against `1.0.3`,
+   read itself as ahead, and report "up to date" while a `1.1.x` patch
+   existed. If that happens, run `gh release edit v1.1.1 --latest` on the
+   highest release.
+
+7. **Merge the branch back into `main` with a merge commit.** Open
+   `release/v1.0.3 → main` and merge it with **Create a merge commit**, never
+   squash or rebase. `mix kiln.update` refuses to move a pin to a release
+   that is missing commits the pin already has (it reads them as local
+   patches to the core). The cherry-picked commit has its own SHA, so until
+   the patch's tag is an ancestor of the newer release, a site on `v1.0.3` is
+   refused an update to `1.1.x`. On the merge-back, move the patch's changelog
+   entries into a `## [1.0.3]` section below the newer releases.
+
+   If the latest minor needs the same fix as a patch and `main` is not
+   releasable, cut `release/v1.1.1` from `v1.1.0` in the same way, and merge
+   `release/v1.0.3` into it **before** you tag `v1.1.1`. Then merge
+   `release/v1.1.1` back into `main`. `v1.0.3` is then an ancestor of
+   `v1.1.1`, and a site on `v1.0.3` can move straight to it.
+
+8. **Delete the branches**, `release/v1.0.3` and the CI base
+   `release/v1.0.x`. The tag keeps the history reachable.
+
+**What `mix kiln.update` does with a patch tag.** A plain update targets the
+highest final release, not the newest tag and not the newest on the pin's own
+line. A project pinned at `v1.0.2` after `v1.1.1` and `v1.0.3` exist is
+offered `v1.1.1`. A minor move needs no flag, and the Breaking and Upgrade
+notes print for every release in between. To take the backport and stay on
+the line:
+
+```bash
+mix kiln.update --to v1.0.3
+```
+
+A pin at `v1.0.3` is refused a move to `v1.1.0`, if `v1.1.0` was released
+before the fix: it does not have the fix, and the task reports the patch's
+commits as ones the target is missing. Move to the `1.1.x` patch that has
+the fix instead. `--force` skips the check, but only use it if the release
+notes say `1.1` was never affected.
 
 ## Updating a project to a release
 

@@ -2,16 +2,43 @@
 
 ## Supported versions
 
-KilnCMS is pre-1.0. Security fixes land on `main` only, and downstream projects
-pick them up by moving their submodule pin (`mix kiln.update`). There are no
-maintained release branches yet.
+Kiln supports release lines by **minor** version: the newest one fully, the one
+before it for security fixes only, and for a limited time.
 
-| Version | Supported |
-|---|---|
-| `main` | ✅ |
-| Anything older | ❌ — rebase onto `main` |
+| Line | Supported | Gets |
+|---|---|---|
+| The latest minor (e.g. `1.1.x` once `1.1.0` is out) | ✅ | Every fix, as a patch release on that line |
+| The previous minor (e.g. `1.0.x`) | 🔒 for 90 days | Security fixes only, for 90 days from the release date of the minor that replaced it |
+| Anything older | ❌ | Nothing: upgrade to a supported line |
+| `main` | Development | Fixes land here first; not a release |
 
-Once 1.0 ships this table will name the release lines that receive backports.
+**The 90 days are counted from the next minor's release date.** If `1.1.0` is
+released on 1 March, `1.0.x` gets security fixes until 30 May, and none after.
+A fix released within the window ships as a `1.0.x` patch; after it, the fix
+reaches you only by upgrading to `1.1.x`.
+
+The previous minor is whichever line came immediately before the latest one,
+across a major version too: when `1.0.0` ships, `0.12.x` gets the same 90 days.
+Before `1.0.0`, `0.12.x` is the latest minor.
+
+**How a fix reaches a supported line.** It lands on `main` first. The latest
+minor gets a patch release. If that is not the previous minor's release, the
+fix is cherry-picked onto a short-lived branch cut from the previous minor's
+newest tag, tagged as its next patch, and the branch is deleted
+([`docs/releasing.md`](../docs/releasing.md#patch-releases-and-backports) has
+the procedure). There are no long-lived maintenance branches: the project has
+one maintainer, and the policy does not promise more than one person can keep
+patched.
+
+**Picking up a fix.** Downstream projects move their submodule pin with
+`mix kiln.update` (the newest release) or `mix kiln.update --to vX.Y.Z` (a
+patch on an older line). The container image is published under its exact
+version (`ghcr.io/the-verscienta/kiln_cms:1.0.3`) on every line. From `1.0.0`
+it is also published under the floating major tag (`:1`) and `:latest`, but
+those two only ever point at the highest release. A patch on the previous minor
+never moves them, so an install that tracks `:1` gets the latest minor's
+patches, not the previous minor's. Pin exact versions if you stay on the
+previous minor.
 
 ## Reporting a vulnerability
 
@@ -43,8 +70,10 @@ can discuss the issue, prepare a fix, and credit you when it's published.
 - **Acknowledgement** within 3 business days.
 - **An initial assessment** — severity, affected versions, whether we can
   reproduce it — within 10 business days.
-- **A fix on `main`**, plus a published GitHub Security Advisory with a CVE where
-  warranted. We'll credit you by the name or handle you ask for, or keep you
+- **A fix on `main`** and a patch release for each
+  [supported line](#supported-versions) the problem affects, plus a published
+  GitHub Security Advisory with a CVE where warranted. The advisory lists the
+  patched version on each line. We'll credit you by the name or handle you ask for, or keep you
   anonymous if you prefer.
 - We ask for coordinated disclosure: please give us 90 days before publishing,
   or less if we ship a fix sooner and agree on a date with you.
