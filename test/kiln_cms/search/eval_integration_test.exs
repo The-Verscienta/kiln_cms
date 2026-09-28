@@ -13,6 +13,8 @@ defmodule KilnCMS.Search.EvalIntegrationTest do
   """
   use KilnCMS.DataCase, async: true
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.CMS
   alias KilnCMS.Search.Eval
   alias KilnCMS.Search.Eval.Retriever
@@ -55,22 +57,23 @@ defmodule KilnCMS.Search.EvalIntegrationTest do
       slug: "welcome",
       seo_title: "Welcome to KilnCMS",
       seo_description: "A world-class, Elixir-native headless CMS.",
-      blocks: [
-        %{type: :heading, content: "Welcome to KilnCMS", data: %{"level" => 1}, order: 0},
-        %{
-          type: :rich_text,
-          content:
-            "<p>This page was created by the seed script and published via the workflow.</p>",
-          order: 1
-        }
-      ]
+      blocks:
+        typed_blocks([
+          %{type: :heading, content: "Welcome to KilnCMS", data: %{"level" => 1}, order: 0},
+          %{
+            type: :rich_text,
+            content:
+              "<p>This page was created by the seed script and published via the workflow.</p>",
+            order: 1
+          }
+        ])
     })
 
     CMS.create_page!(
       %{
         title: "About",
         slug: "about",
-        blocks: [rich_text("<p>This is an unpublished draft page.</p>")]
+        blocks: typed_blocks([rich_text("<p>This is an unpublished draft page.</p>")])
       },
       actor: actor,
       tenant: org
@@ -80,15 +83,16 @@ defmodule KilnCMS.Search.EvalIntegrationTest do
       title: "Hello, World",
       slug: "hello-world",
       excerpt: "The first post on a KilnCMS-powered site.",
-      blocks: [
-        %{type: :heading, content: "Hello, World", data: %{"level" => 1}, order: 0},
-        %{
-          type: :rich_text,
-          content:
-            "<p>KilnCMS pairs Ash's declarative modeling with LiveView's real-time UX.</p>",
-          order: 1
-        }
-      ]
+      blocks:
+        typed_blocks([
+          %{type: :heading, content: "Hello, World", data: %{"level" => 1}, order: 0},
+          %{
+            type: :rich_text,
+            content:
+              "<p>KilnCMS pairs Ash's declarative modeling with LiveView's real-time UX.</p>",
+            order: 1
+          }
+        ])
     })
 
     KilnCMS.DataCase.drain_oban()

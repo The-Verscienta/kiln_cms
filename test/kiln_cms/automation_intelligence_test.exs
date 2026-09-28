@@ -94,7 +94,10 @@ defmodule KilnCMS.AutomationIntelligenceTest do
         %{
           title: title,
           slug: "ai-#{System.unique_integer([:positive])}",
-          blocks: [%{type: :rich_text, content: "<p>#{text}</p>", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>#{text}</p>", order: 0}
+            ])
         },
         actor: actor
       )
@@ -603,7 +606,10 @@ defmodule KilnCMS.AutomationIntelligenceTest do
         %{
           title: title,
           slug: "ai-#{System.unique_integer([:positive])}",
-          blocks: [%{type: :rich_text, content: "<p>#{text}</p>", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>#{text}</p>", order: 0}
+            ])
         },
         actor: actor,
         tenant: org

@@ -35,10 +35,11 @@ defmodule KilnCMS.Firing.FiringTest do
         %{
           title: "Fired",
           slug: slug(),
-          blocks: [
-            %{type: :heading, content: "Welcome", data: %{"level" => 1}, order: 0},
-            %{type: :rich_text, content: "<p>Body</p>", order: 1}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "Welcome", data: %{"level" => 1}, order: 0},
+              %{type: :rich_text, content: "<p>Body</p>", order: 1}
+            ])
         },
         actor: actor
       )
@@ -89,10 +90,11 @@ defmodule KilnCMS.Firing.FiringTest do
           %{
             title: "Graphed",
             slug: slug(),
-            blocks: [
-              %{type: :heading, content: "T", order: 0},
-              %{type: :image, data: %{"url" => "/p.png", "alt" => "pic"}, order: 1}
-            ]
+            blocks:
+              KilnCMS.TypedFixtures.typed_blocks([
+                %{type: :heading, content: "T", order: 0},
+                %{type: :image, data: %{"url" => "/p.png", "alt" => "pic"}, order: 1}
+              ])
           },
           actor: actor
         )
@@ -123,7 +125,12 @@ defmodule KilnCMS.Firing.FiringTest do
 
       post =
         CMS.create_post!(
-          %{title: "GEO", slug: slug(), blocks: [%{type: :heading, content: "H", order: 0}]},
+          %{
+            title: "GEO",
+            slug: slug(),
+            blocks:
+              KilnCMS.TypedFixtures.typed_blocks([%{type: :heading, content: "H", order: 0}])
+          },
           actor: actor
         )
 
@@ -201,26 +208,27 @@ defmodule KilnCMS.Firing.FiringTest do
           %{
             title: "Answers",
             slug: slug(),
-            blocks: [
-              %{
-                type: :faq,
-                content: "FAQ",
-                data: %{"items" => [%{"question" => "Q?", "answer" => "A."}]},
-                order: 0
-              },
-              %{
-                type: :how_to,
-                content: "Do it",
-                data: %{"steps" => [%{"name" => "One", "text" => "First."}]},
-                order: 1
-              },
-              %{
-                type: :claim,
-                content: "Water is wet.",
-                data: %{"source_title" => "Src", "source_url" => "https://s.example"},
-                order: 2
-              }
-            ]
+            blocks:
+              KilnCMS.TypedFixtures.typed_blocks([
+                %{
+                  type: :faq,
+                  content: "FAQ",
+                  data: %{"items" => [%{"question" => "Q?", "answer" => "A."}]},
+                  order: 0
+                },
+                %{
+                  type: :how_to,
+                  content: "Do it",
+                  data: %{"steps" => [%{"name" => "One", "text" => "First."}]},
+                  order: 1
+                },
+                %{
+                  type: :claim,
+                  content: "Water is wet.",
+                  data: %{"source_title" => "Src", "source_url" => "https://s.example"},
+                  order: 2
+                }
+              ])
           },
           actor: actor
         )
@@ -255,23 +263,24 @@ defmodule KilnCMS.Firing.FiringTest do
           %{
             title: "Gallery",
             slug: slug(),
-            blocks: [
-              %{
-                type: :gallery,
-                content: "Shots",
-                data: %{
-                  "layout" => "grid",
-                  "images" => [%{"url" => "/a.jpg", "alt" => "A kiln", "caption" => "At work"}]
+            blocks:
+              KilnCMS.TypedFixtures.typed_blocks([
+                %{
+                  type: :gallery,
+                  content: "Shots",
+                  data: %{
+                    "layout" => "grid",
+                    "images" => [%{"url" => "/a.jpg", "alt" => "A kiln", "caption" => "At work"}]
+                  },
+                  order: 0
                 },
-                order: 0
-              },
-              %{
-                type: :accordion,
-                content: "Specifications",
-                data: %{"panels" => [%{"title" => "Size", "content" => "Large"}]},
-                order: 1
-              }
-            ]
+                %{
+                  type: :accordion,
+                  content: "Specifications",
+                  data: %{"panels" => [%{"title" => "Size", "content" => "Large"}]},
+                  order: 1
+                }
+              ])
           },
           actor: actor
         )
@@ -356,7 +365,12 @@ defmodule KilnCMS.Firing.FiringTest do
 
       draft =
         CMS.create_page!(
-          %{title: "Draft", slug: slug(), blocks: [%{type: :heading, content: "Hi", order: 0}]},
+          %{
+            title: "Draft",
+            slug: slug(),
+            blocks:
+              KilnCMS.TypedFixtures.typed_blocks([%{type: :heading, content: "Hi", order: 0}])
+          },
           actor: actor
         )
 
@@ -372,7 +386,12 @@ defmodule KilnCMS.Firing.FiringTest do
 
       page =
         CMS.create_page!(
-          %{title: "Draft", slug: slug(), blocks: [%{type: :heading, content: "Hi", order: 0}]},
+          %{
+            title: "Draft",
+            slug: slug(),
+            blocks:
+              KilnCMS.TypedFixtures.typed_blocks([%{type: :heading, content: "Hi", order: 0}])
+          },
           actor: actor
         )
 

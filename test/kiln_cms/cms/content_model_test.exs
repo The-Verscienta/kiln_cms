@@ -6,6 +6,8 @@ defmodule KilnCMS.CMS.ContentModelTest do
   """
   use KilnCMS.DataCase, async: true
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.CMS
 
   defp user(role) do
@@ -204,10 +206,11 @@ defmodule KilnCMS.CMS.ContentModelTest do
           %{
             title: "T",
             slug: slug(),
-            blocks: [
-              %{type: :heading, content: "Hello world", order: 0},
-              %{type: :rich_text, content: "<p>three more words here</p>", order: 1}
-            ]
+            blocks:
+              typed_blocks([
+                %{type: :heading, content: "Hello world", order: 0},
+                %{type: :rich_text, content: "<p>three more words here</p>", order: 1}
+              ])
           },
           actor: admin
         )

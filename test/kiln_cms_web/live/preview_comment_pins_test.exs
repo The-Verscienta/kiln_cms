@@ -63,10 +63,11 @@ defmodule KilnCMSWeb.PreviewCommentPinsTest do
       %{
         title: "Reviewed Draft",
         slug: "pin-#{System.unique_integer([:positive])}",
-        blocks: [
-          %{type: :heading, content: "First", data: %{"level" => 2}, order: 0},
-          %{type: :quote, content: "Second", order: 1}
-        ]
+        blocks:
+          KilnCMS.TypedFixtures.typed_blocks([
+            %{type: :heading, content: "First", data: %{"level" => 2}, order: 0},
+            %{type: :quote, content: "Second", order: 1}
+          ])
       },
       actor: actor
     )

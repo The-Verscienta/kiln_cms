@@ -55,7 +55,12 @@ defmodule KilnCMS.MultitenancyTest do
   end
 
   defp attrs(slug),
-    do: %{title: "T", slug: slug, blocks: [%{type: :rich_text, content: "<p>x</p>", order: 0}]}
+    do: %{
+      title: "T",
+      slug: slug,
+      blocks:
+        KilnCMS.TypedFixtures.typed_blocks([%{type: :rich_text, content: "<p>x</p>", order: 0}])
+    }
 
   # Content ops with authorization bypassed (the delivery-path scenario).
   defp create_page(attrs, opts),

@@ -2,13 +2,15 @@ defmodule KilnCMS.CMS.SanitizeBlocksTest do
   @moduledoc "Block sanitization now happens inside the BlockUnion cast (Kiln v2)."
   use KilnCMS.DataCase, async: true
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.CMS
 
   # Blocks are stored as the typed union; read back as legacy maps for assertions.
   defp legacy_blocks(record) do
     record.blocks
     |> KilnCMS.CMS.TypedBlocks.to_typed()
-    |> KilnCMS.LegacyBridge.to_legacy()
+    |> KilnCMS.LegacyView.blocks()
   end
 
   setup do
@@ -29,13 +31,14 @@ defmodule KilnCMS.CMS.SanitizeBlocksTest do
         %{
           title: "Sanitize",
           slug: "sanitize-#{System.unique_integer([:positive])}",
-          blocks: [
-            %{
-              type: :rich_text,
-              content: "<p>OK</p><script>alert(1)</script>",
-              order: 0
-            }
-          ]
+          blocks:
+            typed_blocks([
+              %{
+                type: :rich_text,
+                content: "<p>OK</p><script>alert(1)</script>",
+                order: 0
+              }
+            ])
         },
         actor: editor
       )
@@ -54,10 +57,11 @@ defmodule KilnCMS.CMS.SanitizeBlocksTest do
         %{
           title: "URLs",
           slug: "urls-#{System.unique_integer([:positive])}",
-          blocks: [
-            %{type: :image, content: js, order: 0},
-            %{type: :embed, content: js, order: 1}
-          ]
+          blocks:
+            typed_blocks([
+              %{type: :image, content: js, order: 0},
+              %{type: :embed, content: js, order: 1}
+            ])
         },
         actor: editor
       )
@@ -74,7 +78,8 @@ defmodule KilnCMS.CMS.SanitizeBlocksTest do
         %{
           title: "Embed",
           slug: "embed-#{System.unique_integer([:positive])}",
-          blocks: [%{type: :embed, content: "https://example.com/a-thing", order: 0}]
+          blocks:
+            typed_blocks([%{type: :embed, content: "https://example.com/a-thing", order: 0}])
         },
         actor: editor
       )
@@ -95,9 +100,10 @@ defmodule KilnCMS.CMS.SanitizeBlocksTest do
         %{
           title: "YT",
           slug: "yt-#{System.unique_integer([:positive])}",
-          blocks: [
-            %{type: :embed, content: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", order: 0}
-          ]
+          blocks:
+            typed_blocks([
+              %{type: :embed, content: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", order: 0}
+            ])
         },
         actor: editor
       )

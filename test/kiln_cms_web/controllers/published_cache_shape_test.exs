@@ -14,6 +14,8 @@ defmodule KilnCMSWeb.PublishedCacheShapeTest do
   # a concurrent test's cache bust would mask the collision being asserted.
   use KilnCMSWeb.ConnCase, async: false
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.CMS
 
   setup do
@@ -41,7 +43,8 @@ defmodule KilnCMSWeb.PublishedCacheShapeTest do
         %{
           title: "Shape Regression",
           slug: slug,
-          blocks: [%{type: :heading, content: "Hello", data: %{"level" => 1}, order: 0}]
+          blocks:
+            typed_blocks([%{type: :heading, content: "Hello", data: %{"level" => 1}, order: 0}])
         },
         actor: actor
       )

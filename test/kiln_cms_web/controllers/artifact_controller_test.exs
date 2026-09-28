@@ -2,6 +2,8 @@ defmodule KilnCMSWeb.ArtifactControllerTest do
   @moduledoc "Headless fired-artifact delivery (Kiln v2 — D9)."
   use KilnCMSWeb.ConnCase, async: true
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.CMS
 
   defp admin do
@@ -22,10 +24,11 @@ defmodule KilnCMSWeb.ArtifactControllerTest do
         %{
           title: "Headless",
           slug: slug,
-          blocks: [
-            %{type: :heading, content: "Welcome", data: %{"level" => 1}, order: 0},
-            %{type: :image, data: %{"url" => "/p.png", "alt" => "pic"}, order: 1}
-          ]
+          blocks:
+            typed_blocks([
+              %{type: :heading, content: "Welcome", data: %{"level" => 1}, order: 0},
+              %{type: :image, data: %{"url" => "/p.png", "alt" => "pic"}, order: 1}
+            ])
         },
         actor: actor
       )

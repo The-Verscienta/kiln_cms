@@ -9,6 +9,8 @@ defmodule KilnCMS.Firing.DeliveryTest do
   """
   use KilnCMS.DataCase, async: true
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.CMS
   alias KilnCMS.Firing.Delivery
 
@@ -30,7 +32,8 @@ defmodule KilnCMS.Firing.DeliveryTest do
         %{
           title: "Resilient",
           slug: slug,
-          blocks: [%{type: :heading, content: "Up", data: %{"level" => 1}, order: 0}]
+          blocks:
+            typed_blocks([%{type: :heading, content: "Up", data: %{"level" => 1}, order: 0}])
         },
         actor: actor
       )

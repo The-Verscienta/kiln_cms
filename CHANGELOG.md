@@ -54,6 +54,34 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Before upgrading to 1.0, run `mix kiln.blocks.backfill` on 0.12, and move any
+  code that writes legacy `type`/`content`/`data` blocks to the typed shape.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#before-upgrading-to-10-run-the-block-backfill))
+
+### Breaking
+
+- **Remove `TypedBlocks.to_legacy/1`, `TypedBlocks.from_legacy/1` and
+  `KilnCMS.CMS.Block`; use `to_typed/1` and render from typed blocks.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#remove-the-legacy-block-bridge-functions))
+
+- **Refuse a block written in the legacy `type`/`content`/`data` shape; stored
+  rows in that shape are still read.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#refuse-the-legacy-block-write-shape))
+
+### Changed
+
+- **Keep `RichText.legacy_html` as a read-only fallback instead of removing it;
+  the nested column editor now stores Portable Text.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#keep-legacy-html-as-a-read-only-fallback))
+
+### Fixed
+
+- **A stored block of a type the build no longer has, or one that is not a
+  block, no longer fails its page's delivery.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#unreadable-stored-blocks-no-longer-fail-delivery))
+
 ## [0.12.0] - 2026-09-27
 
 Long form: [docs/changelog/v0.12.0.md](docs/changelog/v0.12.0.md) —

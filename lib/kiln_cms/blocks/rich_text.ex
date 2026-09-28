@@ -1,16 +1,23 @@
 defmodule KilnCMS.Blocks.RichText do
   @moduledoc """
   A rich-prose block (Kiln v2 typed block — D10). `body` is canonical Portable
-  Text (D12); `legacy_html` is a transitional fallback for content not yet
-  migrated off stored TipTap HTML. `mix kiln.blocks.backfill` (#1537) is that
-  migration: it converts `legacy_html` to `body` wherever the conversion is
-  faithful, and reports the blocks where it is not.
+  Text (D12).
 
-  **`legacy_html` is deprecated and is removed at 1.0.** Nothing in the core
-  writes new prose to it when Portable Text can hold the prose; it is still
-  read — rendered, round-tripped by the editor — for blocks the backfill could
-  not convert. Read `body`. The exported block schema marks the property
-  `deprecated`.
+  `legacy_html` holds HTML that Portable Text cannot hold faithfully — marks
+  inside a code block, a list inside a quote. 0.12 deprecated it for removal at
+  1.0; **1.0 keeps it as a fallback instead** (#1543), because for exactly
+  those blocks it is the only faithful copy of the author's prose, and removing
+  the field would have dropped it:
+
+    * `mix kiln.blocks.backfill` converts `legacy_html` to `body` wherever that
+      is faithful, and keeps and reports it where it is not;
+    * no editor writes to it when Portable Text can hold the prose — the
+      canvas, the nested column editor and the inline editor all store `body`;
+    * it renders (sanitized) only when `body` is empty.
+
+  Read `body` first. The exported block schema marks the property `readOnly`
+  and `deprecated`: a client should not send new prose there, and a later major
+  may remove it once a converter can hold what it keeps.
   """
   use Kiln.Block
 
@@ -62,9 +69,10 @@ defmodule KilnCMS.Blocks.RichText do
   # Both render branches emit `body` as a real array (the fallback emits `[]`
   # alongside the sanitized HTML), so it is required and never null.
   #
-  # `legacy_html` carries the JSON Schema `deprecated` keyword (#1537), which is
-  # how the marker reaches a typed client's generated code rather than only this
-  # changelog: it is removed at 1.0.
+  # `legacy_html` carries the JSON Schema `deprecated` (#1537) and `readOnly`
+  # (#1543) keywords, which is how the markers reach a typed client's generated
+  # code rather than only this changelog. It stays in the schema because the
+  # `:json` artifact still emits it for a block whose `body` is empty.
   @impl Kiln.Block.Renderer
   def json_schema do
     %{
@@ -76,9 +84,10 @@ defmodule KilnCMS.Blocks.RichText do
           |> Kiln.Block.JsonSchema.type_schema()
           |> Map.merge(%{
             "deprecated" => true,
+            "readOnly" => true,
             "description" =>
-              "Deprecated: stored HTML not yet converted to Portable Text. " <>
-                "Read `body`; removed at 1.0."
+              "Sanitized HTML that Portable Text cannot hold faithfully, present only " <>
+                "when `body` is empty. Read `body` first; do not write new prose here."
           })
       }
     }

@@ -39,7 +39,10 @@ defmodule KilnCMSWeb.ContentControllerTest do
       page =
         page(%{
           title: "Public Page",
-          blocks: [%{type: :heading, content: "Hello Heading", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "Hello Heading", order: 0}
+            ])
         })
 
       conn = get(conn, ~p"/#{page.slug}")
@@ -165,9 +168,10 @@ defmodule KilnCMSWeb.ContentControllerTest do
       page =
         page(%{
           title: "Img Page",
-          blocks: [
-            %{type: :image, content: "/uploads/orig", data: %{"media_id" => media.id}, order: 0}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :image, content: "/uploads/orig", data: %{"media_id" => media.id}, order: 0}
+            ])
         })
 
       html = conn |> get(~p"/#{page.slug}") |> html_response(200)
@@ -232,9 +236,15 @@ defmodule KilnCMSWeb.ContentControllerTest do
       page =
         page(%{
           title: "Picture Page",
-          blocks: [
-            %{type: :image, content: "/uploads/p-orig", data: %{"media_id" => media.id}, order: 0}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{
+                type: :image,
+                content: "/uploads/p-orig",
+                data: %{"media_id" => media.id},
+                order: 0
+              }
+            ])
         })
 
       html = conn |> get(~p"/#{page.slug}") |> html_response(200)
@@ -280,9 +290,15 @@ defmodule KilnCMSWeb.ContentControllerTest do
       page =
         page(%{
           title: "Legacy Img",
-          blocks: [
-            %{type: :image, content: "/uploads/o-orig", data: %{"media_id" => media.id}, order: 0}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{
+                type: :image,
+                content: "/uploads/o-orig",
+                data: %{"media_id" => media.id},
+                order: 0
+              }
+            ])
         })
 
       html = conn |> get(~p"/#{page.slug}") |> html_response(200)
@@ -318,9 +334,15 @@ defmodule KilnCMSWeb.ContentControllerTest do
       page =
         page(%{
           title: "Focal Page",
-          blocks: [
-            %{type: :image, content: "/uploads/f-orig", data: %{"media_id" => media.id}, order: 0}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{
+                type: :image,
+                content: "/uploads/f-orig",
+                data: %{"media_id" => media.id},
+                order: 0
+              }
+            ])
         })
 
       html = conn |> get(~p"/#{page.slug}") |> html_response(200)
@@ -530,9 +552,10 @@ defmodule KilnCMSWeb.ContentControllerTest do
       page =
         page(%{
           title: "Form Page",
-          blocks: [
-            %{type: :form, content: form.slug, data: %{"form_slug" => form.slug}, order: 0}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :form, content: form.slug, data: %{"form_slug" => form.slug}, order: 0}
+            ])
         })
 
       html = conn |> get(~p"/#{page.slug}") |> html_response(200)
@@ -582,7 +605,10 @@ defmodule KilnCMSWeb.ContentControllerTest do
         post(%{
           title: "Public Post",
           excerpt: "A lead-in.",
-          blocks: [%{type: :heading, content: "Post Heading", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "Post Heading", order: 0}
+            ])
         })
 
       html = conn |> get(~p"/blog/#{post.slug}") |> html_response(200)

@@ -61,7 +61,10 @@ defmodule KilnCMS.ProvenanceTest do
           %{
             title: "Signed",
             slug: slug,
-            blocks: [%{type: :heading, content: "Trust", data: %{"level" => 1}, order: 0}]
+            blocks:
+              KilnCMS.TypedFixtures.typed_blocks([
+                %{type: :heading, content: "Trust", data: %{"level" => 1}, order: 0}
+              ])
           },
           attrs
         ),

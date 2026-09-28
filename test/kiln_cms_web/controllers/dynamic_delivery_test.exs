@@ -9,6 +9,8 @@ defmodule KilnCMSWeb.DynamicDeliveryTest do
   # cached dynamic-type registry), which other tests may bust concurrently.
   use KilnCMSWeb.ConnCase, async: false
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.Cache
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
@@ -44,7 +46,10 @@ defmodule KilnCMSWeb.DynamicDeliveryTest do
         %{
           title: "Pancakes",
           slug: "pancakes-#{System.unique_integer([:positive])}",
-          blocks: [%{type: :heading, content: "Fluffy stack", data: %{"level" => 1}, order: 0}]
+          blocks:
+            typed_blocks([
+              %{type: :heading, content: "Fluffy stack", data: %{"level" => 1}, order: 0}
+            ])
         },
         actor: actor
       )

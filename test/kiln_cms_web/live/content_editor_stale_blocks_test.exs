@@ -15,6 +15,8 @@ defmodule KilnCMSWeb.ContentEditorStaleBlocksTest do
   """
   use KilnCMSWeb.ConnCase, async: true
 
+  import KilnCMS.TypedFixtures
+
   @moduletag :capture_log
 
   import Phoenix.LiveViewTest
@@ -99,7 +101,12 @@ defmodule KilnCMSWeb.ContentEditorStaleBlocksTest do
 
     test "with PARTIAL blocks params keeps the new block and the client's edits", %{conn: conn} do
       editor = authed_editor()
-      page = draft(editor, %{blocks: [%{type: :heading, content: "Old heading", order: 0}]})
+
+      page =
+        draft(editor, %{
+          blocks: typed_blocks([%{type: :heading, content: "Old heading", order: 0}])
+        })
+
       heading_id = block_id(page, 0)
 
       {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/pages/#{page.id}")
@@ -162,10 +169,11 @@ defmodule KilnCMSWeb.ContentEditorStaleBlocksTest do
 
       page =
         draft(editor, %{
-          blocks: [
-            %{type: :heading, content: "Keep", order: 0},
-            %{type: :heading, content: "Drop", order: 1}
-          ]
+          blocks:
+            typed_blocks([
+              %{type: :heading, content: "Keep", order: 0},
+              %{type: :heading, content: "Drop", order: 1}
+            ])
         })
 
       keep_id = block_id(page, 0)

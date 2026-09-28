@@ -6,7 +6,7 @@ defmodule KilnCMS.Blocks.Columns do
   block list into a shallow tree.
 
   Children are stored as raw block maps (jsonb), mirroring the legacy
-  `KilnCMS.CMS.Block.children` escape hatch, rather than as a first-class
+  the pre-typed `Block`'s `children` escape hatch, rather than as a first-class
   `Ash.Type.Union` member. A recursive union member (a block whose field is the
   union that lists it) is a compile-time cycle; keeping children as maps and
   typing them lazily at render time (via `KilnCMS.CMS.TypedBlocks`) sidesteps that

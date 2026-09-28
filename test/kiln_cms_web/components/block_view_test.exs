@@ -62,18 +62,19 @@ defmodule KilnCMSWeb.BlockViewTest do
              BlockComponents.view_blocks([%Blocks.Video{id: "v1", url: "https://x.test/v.mp4"}])
   end
 
-  describe "the bridge is deprecated for removal at 1.0" do
-    test "to_legacy/1 and from_legacy/1 carry @deprecated" do
-      deprecated = KilnCMS.CMS.TypedBlocks.__info__(:deprecated)
+  describe "the legacy block bridge, at 1.0 (#1543)" do
+    test "to_legacy/1, from_legacy/1 and KilnCMS.CMS.Block are gone" do
+      exports = KilnCMS.CMS.TypedBlocks.__info__(:functions)
 
-      assert {{:to_legacy, 1}, _} = List.keyfind(deprecated, {:to_legacy, 1}, 0)
-      assert {{:from_legacy, 1}, _} = List.keyfind(deprecated, {:from_legacy, 1}, 0)
+      refute {:to_legacy, 1} in exports
+      refute {:from_legacy, 1} in exports
+      refute Code.ensure_loaded?(Module.concat([KilnCMS, CMS, Block]))
     end
 
-    test "legacy_html is marked deprecated in the exported block schema" do
+    test "legacy_html is a read-only, deprecated fallback in the exported block schema" do
       schema = Kiln.Block.JsonSchema.for_module(Blocks.RichText)
 
-      assert %{"deprecated" => true} = schema["properties"]["legacy_html"]
+      assert %{"deprecated" => true, "readOnly" => true} = schema["properties"]["legacy_html"]
       refute Map.has_key?(schema["properties"]["body"], "deprecated")
     end
   end

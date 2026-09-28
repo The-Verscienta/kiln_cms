@@ -86,7 +86,7 @@ defmodule KilnCMS.DeliveryInternalsPolicyTest do
   # A typed block tree whose single block references `target_id` — the shape
   # `References.extract/1` pulls an edge out of.
   defp ref_blocks(target_id) do
-    KilnCMS.LegacyBridge.from_legacy([
+    KilnCMS.CMS.TypedBlocks.to_typed([
       %{
         type: :custom,
         content: "see also",

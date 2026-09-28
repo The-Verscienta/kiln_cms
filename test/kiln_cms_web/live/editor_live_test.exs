@@ -83,7 +83,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
   defp blocks_legacy(record) do
     record.blocks
     |> KilnCMS.CMS.TypedBlocks.to_typed()
-    |> KilnCMS.LegacyBridge.to_legacy()
+    |> KilnCMS.LegacyView.blocks()
   end
 
   defp page_versions(page_id) do
@@ -751,7 +751,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
     test "an unknown remove_block id is a no-op, not a crash", %{conn: conn} do
       page =
-        draft_page(%{title: "Bounds", blocks: [%{type: :heading, content: "Keep", order: 0}]})
+        draft_page(%{
+          title: "Bounds",
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([%{type: :heading, content: "Keep", order: 0}])
+        })
 
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
@@ -775,7 +779,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
     test "block events with no bid at all hit the fallback clauses, not a crash",
          %{conn: conn} do
       page =
-        draft_page(%{title: "NoBid", blocks: [%{type: :heading, content: "Only", order: 0}]})
+        draft_page(%{
+          title: "NoBid",
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([%{type: :heading, content: "Only", order: 0}])
+        })
 
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
@@ -801,10 +809,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
     test "deleting by id removes the right block even after a reorder", %{conn: conn} do
       page =
         draft_page(%{
-          blocks: [
-            %{type: :heading, content: "Alpha", order: 0},
-            %{type: :heading, content: "Bravo", order: 1}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "Alpha", order: 0},
+              %{type: :heading, content: "Bravo", order: 1}
+            ])
         })
 
       [alpha, _bravo] = blocks_legacy(page)
@@ -828,10 +837,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       page =
         draft_page(%{
-          blocks: [
-            %{type: :image, content: "", order: 0},
-            %{type: :image, content: "", order: 1}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :image, content: "", order: 0},
+              %{type: :image, content: "", order: 1}
+            ])
         })
 
       [img_a, img_b] = blocks_legacy(page)
@@ -1118,7 +1128,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
     test "picking a library image sets the block's url and media_id", %{conn: conn} do
       media = Ash.Seed.seed!(MediaItem, %{filename: "x.jpg", url: "/uploads/x"})
-      page = draft_page(%{blocks: [%{type: :image, content: "", order: 0}]})
+
+      page =
+        draft_page(%{
+          blocks: KilnCMS.TypedFixtures.typed_blocks([%{type: :image, content: "", order: 0}])
+        })
 
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
@@ -1140,7 +1154,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
     # Regression for #169: the picker is a labeled modal dialog with a focus trap.
     test "the picker exposes dialog semantics and a focus trap", %{conn: conn} do
-      page = draft_page(%{blocks: [%{type: :image, content: "", order: 0}]})
+      page =
+        draft_page(%{
+          blocks: KilnCMS.TypedFixtures.typed_blocks([%{type: :image, content: "", order: 0}])
+        })
 
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
@@ -1156,7 +1173,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
 
     test "opens as a right-side drawer with a mode-aware title (Theme D)", %{conn: conn} do
-      page = draft_page(%{blocks: [%{type: :image, content: "", order: 0}]})
+      page =
+        draft_page(%{
+          blocks: KilnCMS.TypedFixtures.typed_blocks([%{type: :image, content: "", order: 0}])
+        })
 
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
@@ -1236,10 +1256,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
     setup %{conn: conn} do
       page =
         draft_page(%{
-          blocks: [
-            %{type: :heading, content: "A", order: 0},
-            %{type: :heading, content: "B", order: 1}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "A", order: 0},
+              %{type: :heading, content: "B", order: 1}
+            ])
         })
 
       [a, b] = blocks_legacy(page)
@@ -1340,10 +1361,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
          %{conn: conn} do
       page =
         draft_page(%{
-          blocks: [
-            %{type: :heading, content: "A", order: 0},
-            %{type: :heading, content: "B", order: 1}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "A", order: 0},
+              %{type: :heading, content: "B", order: 1}
+            ])
         })
 
       [a, _b] = blocks_legacy(page)
@@ -1365,7 +1387,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
 
     test "an unknown block id is a no-op", %{conn: conn} do
-      page = draft_page(%{blocks: [%{type: :heading, content: "Solo", order: 0}]})
+      page =
+        draft_page(%{
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([%{type: :heading, content: "Solo", order: 0}])
+        })
 
       {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
@@ -1377,7 +1403,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
 
     test "each block's chrome wires a Duplicate control", %{conn: conn} do
-      page = draft_page(%{blocks: [%{type: :heading, content: "X", order: 0}]})
+      page =
+        draft_page(%{
+          blocks: KilnCMS.TypedFixtures.typed_blocks([%{type: :heading, content: "X", order: 0}])
+        })
 
       {:ok, _lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
@@ -1394,7 +1423,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page =
         draft_page(%{
           slug: "click-me",
-          blocks: [%{type: :heading, content: "Clickable", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "Clickable", order: 0}
+            ])
         })
 
       [block] = blocks_legacy(page)
@@ -1516,7 +1548,13 @@ defmodule KilnCMSWeb.EditorLiveTest do
     # title/slug/DSL inputs (the TipTap editor acquires on focus via its hook),
     # and the host carries `data-locked` so the hook makes the editor read-only.
     test "soft-locks a rich-text block while another session holds it", %{conn: conn} do
-      page = draft_page(%{blocks: [%{type: :rich_text, content: "<p>hi</p>", order: 0}]})
+      page =
+        draft_page(%{
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>hi</p>", order: 0}
+            ])
+        })
 
       {:ok, lv, html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
@@ -1763,7 +1801,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page =
         draft_page(%{
           title: "PreviewTitle",
-          blocks: [%{type: :heading, content: "PreviewHeading", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "PreviewHeading", order: 0}
+            ])
         })
 
       {:ok, _lv, html} =
@@ -1826,7 +1867,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page =
         draft_page(%{
           title: "RTPage",
-          blocks: [%{type: :rich_text, content: "<p>Pop-out RichText</p>", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>Pop-out RichText</p>", order: 0}
+            ])
         })
 
       Phoenix.PubSub.subscribe(KilnCMS.PubSub, PreviewLive.topic("page", page.id))
@@ -1904,10 +1948,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
     test "reorders blocks via the sortable hook and persists the new order", %{conn: conn} do
       page =
         draft_page(%{
-          blocks: [
-            %{type: :heading, content: "A", order: 0},
-            %{type: :rich_text, content: "B", order: 1}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "A", order: 0},
+              %{type: :rich_text, content: "B", order: 1}
+            ])
         })
 
       {:ok, lv, _html} =
@@ -1929,10 +1974,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
          %{conn: conn} do
       page =
         draft_page(%{
-          blocks: [
-            %{type: :heading, content: "Head", order: 0},
-            %{type: :rich_text, content: "<p>seed</p>", order: 1}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "Head", order: 0},
+              %{type: :rich_text, content: "<p>seed</p>", order: 1}
+            ])
         })
 
       [_head, rich] = blocks_legacy(page)
@@ -1974,10 +2020,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
          %{conn: conn} do
       page =
         draft_page(%{
-          blocks: [
-            %{type: :rich_text, content: "<p>AAA</p>", order: 0},
-            %{type: :rich_text, content: "<p>BBB</p>", order: 1}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>AAA</p>", order: 0},
+              %{type: :rich_text, content: "<p>BBB</p>", order: 1}
+            ])
         })
 
       {:ok, lv, _html} =
@@ -1998,7 +2045,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       # save round-trips it. (The live editing itself is browser-verified.)
       page =
         draft_page(%{
-          blocks: [%{type: :rich_text, content: "<p>Hi <strong>there</strong></p>", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>Hi <strong>there</strong></p>", order: 0}
+            ])
         })
 
       {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
@@ -2019,7 +2069,14 @@ defmodule KilnCMSWeb.EditorLiveTest do
     # browser-verified; here we assert the server-rendered wiring it depends on.)
     test "the rich_text host carries its block id and the unified slash hint",
          %{conn: conn} do
-      page = draft_page(%{blocks: [%{type: :rich_text, content: "<p>hi</p>", order: 0}]})
+      page =
+        draft_page(%{
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>hi</p>", order: 0}
+            ])
+        })
+
       [block] = blocks_legacy(page)
 
       {:ok, _lv, html} =
@@ -2030,7 +2087,14 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
 
     test "the live preview reflects block content and updates on change", %{conn: conn} do
-      page = draft_page(%{blocks: [%{type: :heading, content: "Original Heading", order: 0}]})
+      page =
+        draft_page(%{
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "Original Heading", order: 0}
+            ])
+        })
+
       {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
 
       # Preview renders the heading block through the typed serializers — i.e.
@@ -2061,7 +2125,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
     test "renders DSL-declared fields per block, gated by field-level policy", %{conn: conn} do
       page =
         draft_page(%{
-          blocks: [%{type: :quote, content: "Q", data: %{"citation" => "me"}, order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :quote, content: "Q", data: %{"citation" => "me"}, order: 0}
+            ])
         })
 
       # An editor sees the quote's text + citation, but NOT the admin-only featured flag.
@@ -2987,7 +3054,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page =
         draft_page(%{
           title: "A11yPage",
-          blocks: [%{type: :rich_text, content: "<p>hi</p>", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>hi</p>", order: 0}
+            ])
         })
 
       {:ok, _lv, html} =
@@ -3006,7 +3076,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page =
         draft_page(%{
           title: "SlashPage",
-          blocks: [%{type: :rich_text, content: "<p>x</p>", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>x</p>", order: 0}
+            ])
         })
 
       {:ok, _lv, html} =
@@ -3023,7 +3096,15 @@ defmodule KilnCMSWeb.EditorLiveTest do
     # so the editor survives; a version bump changes it so it remounts).
     test "rich-text editors remount after a conflict reload", %{conn: conn} do
       editor = authed_user(:editor)
-      page = draft_page(%{blocks: [%{type: :rich_text, content: "<p>hi</p>", order: 0}]})
+
+      page =
+        draft_page(%{
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>hi</p>", order: 0}
+            ])
+        })
+
       [block] = blocks_legacy(page)
 
       {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/pages/#{page.id}")
@@ -3043,10 +3124,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
     test "blocks can be reordered with keyboard move buttons", %{conn: conn} do
       page =
         draft_page(%{
-          blocks: [
-            %{type: :heading, content: "First", order: 0},
-            %{type: :heading, content: "Second", order: 1}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "First", order: 0},
+              %{type: :heading, content: "Second", order: 1}
+            ])
         })
 
       {:ok, lv, html} =
@@ -3111,7 +3193,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page =
         draft_page(%{
           title: "PrevPage",
-          blocks: [%{type: :heading, content: "PrevBlock", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "PrevBlock", order: 0}
+            ])
         })
 
       {:ok, _lv, html} =

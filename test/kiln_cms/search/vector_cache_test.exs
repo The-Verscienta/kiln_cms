@@ -9,6 +9,8 @@ defmodule KilnCMS.Search.VectorCacheTest do
   # async: false — swaps the global embedder and shares one Cachex instance.
   use KilnCMS.DataCase, async: false
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.CMS
   alias KilnCMS.Search.{BlockIndexer, VectorCache}
 
@@ -73,6 +75,7 @@ defmodule KilnCMS.Search.VectorCacheTest do
       paragraphs
       |> Enum.with_index()
       |> Enum.map(fn {text, i} -> %{type: :rich_text, content: "<p>#{text}</p>", order: i} end)
+      |> typed_blocks()
 
     CMS.create_page!(%{title: "Doc #{System.unique_integer()}", slug: slug(), blocks: blocks},
       actor: actor
@@ -144,12 +147,13 @@ defmodule KilnCMS.Search.VectorCacheTest do
       CMS.update_page!(
         doc,
         %{
-          blocks: [
-            %{type: :rich_text, content: "<p>alpha one</p>", order: 0},
-            %{type: :rich_text, content: "<p>beta two</p>", order: 1},
-            %{type: :rich_text, content: "<p>gamma three REWRITTEN</p>", order: 2},
-            %{type: :rich_text, content: "<p>delta four</p>", order: 3}
-          ]
+          blocks:
+            typed_blocks([
+              %{type: :rich_text, content: "<p>alpha one</p>", order: 0},
+              %{type: :rich_text, content: "<p>beta two</p>", order: 1},
+              %{type: :rich_text, content: "<p>gamma three REWRITTEN</p>", order: 2},
+              %{type: :rich_text, content: "<p>delta four</p>", order: 3}
+            ])
         },
         actor: actor
       )
@@ -192,7 +196,7 @@ defmodule KilnCMS.Search.VectorCacheTest do
     assert calls(counter) == 1, "an identical paragraph was embedded twice"
   end
 
-  defp para(text), do: [%{type: :rich_text, content: "<p>#{text}</p>", order: 0}]
+  defp para(text), do: typed_blocks([%{type: :rich_text, content: "<p>#{text}</p>", order: 0}])
 
   test "an embedder failure is not memoized" do
     previous = Application.get_env(:kiln_cms, KilnCMS.Search, [])
