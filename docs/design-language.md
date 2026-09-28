@@ -107,7 +107,12 @@ written as a function component or a raw `class="…"` in a template.
   look like one flow.
 - **Tabs** — `.tabs` (segmented-control container) + `.tab`; drive the active
   segment with `aria-selected="true"` (accessible, no extra class). Used for the
-  media Library/Trash switch.
+  media Library/Trash switch. When the tabs switch panels on the same page (the
+  Form Builder's sections, the editor's inspector), use the full ARIA tabs
+  pattern: `role="tablist"` + `phx-hook="TabKeys"` (Left/Right/Home/End, from
+  `assets/js/tab_keys.js`), `role="tab"` with `aria-controls`, `tabindex="0"`
+  on the selected tab and `-1` on the rest, and `role="tabpanel"` +
+  `aria-labelledby` on the panel.
 - **Tables** — `.table` on a raw `<table>` for consistent header/cell/row
   styling (+ `.table-zebra` for stripes). Cells keep their own alignment / width
   / colour utilities; `.table` owns padding, borders and the header treatment.
@@ -169,7 +174,14 @@ written as a function component or a raw `class="…"` in a template.
 - **Entry status system** — Draft → Published → Archived, surfaced with
   `<.badge>`.
 - **Save & Publish flow** — autosave plus explicit validation before publish.
-- **Editor preview** — live preview with device-width modes.
+- **Editor preview** — a live preview in the inspector rail, a side-by-side
+  mode that widens it to half the editor, and the full-page Preview in a new
+  tab. There are no device-width modes; a narrow window is the phone check.
+- **Hover-revealed controls** — a control that fades in on hover (a block's
+  move/duplicate/remove, the preview's "Edit" jump) also shows on
+  `focus-within`, so Tab reaches it, and on `pointer-coarse`, since a touch
+  screen has no hover. Fade with `opacity`, never `hidden`: a `display: none`
+  control is out of the Tab order.
 - **Media, empty, and permission states** — each has a dedicated treatment
   (`<.empty_state>` for the first two; permission states degrade gracefully
   rather than dead-ending).

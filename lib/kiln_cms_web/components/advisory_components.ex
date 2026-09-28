@@ -153,9 +153,12 @@ defmodule KilnCMSWeb.AdvisoryComponents do
   defp grade_label(:ok), do: gettext("Needs work")
   defp grade_label(:poor), do: gettext("Poor")
 
-  defp grade_tone(:good), do: "bg-success/15 text-success"
-  defp grade_tone(:ok), do: "bg-warning/20 text-warning-content"
-  defp grade_tone(:poor), do: "bg-error/12 text-error"
+  # The `*-ink` tokens on a pale tint (#1679), as CoreComponents.badge/1 does:
+  # `text-warning-content` on `bg-warning/20` measured 1.38:1 in dark mode.
+  # The editor's accessibility chip uses the same pair.
+  defp grade_tone(:good), do: "bg-success/15 text-success-ink"
+  defp grade_tone(:ok), do: "bg-warning/15 text-warning-ink"
+  defp grade_tone(:poor), do: "bg-error/15 text-error-ink"
 
   defp severity_tone(:error), do: "text-error"
   defp severity_tone(:warning), do: "text-warning"

@@ -2398,6 +2398,11 @@ msgstr "La facturation n'est pas encore configurée. Tant que les deux secrets n
 msgid "Block"
 msgstr "Bloc"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Block actions"
+msgstr "Actions du bloc"
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Block actor"
@@ -9117,6 +9122,11 @@ msgstr "Envoyer une charge utile signée (POST) à des services externes lorsque
 #, elixir-autogen, elixir-format
 msgid "Page %{page}"
 msgstr "Page %{page}"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Page actions"
+msgstr "Actions de la page"
 
 #: lib/kiln_cms_web/controllers/content_controller.ex
 #: lib/kiln_cms_web/controllers/error_html/404.html.heex

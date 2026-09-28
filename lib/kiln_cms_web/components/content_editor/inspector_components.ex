@@ -963,15 +963,24 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   # state; the panels themselves stay mounted (toggled by CSS in render/1).
   # `settings_alert` raises a dot on the Settings tab so validation errors in a
   # hidden panel still get noticed.
+  #
+  # The kit `.tabs` segmented control with the WAI-ARIA tabs pattern (#1679,
+  # the same shape as the Form Builder's, #1680): each tab names the panel it
+  # controls (all three stay mounted, so every `aria-controls` resolves), only
+  # the selected tab sits in the Tab order, and the shared `TabKeys` hook
+  # (assets/js/tab_keys.js) adds Left/Right/Home/End. The panels carry the
+  # matching `role="tabpanel"` + `aria-labelledby` (`inspector_panel_attrs/1`).
   attr :tab, :atom, required: true
   attr :settings_alert, :boolean, default: false
 
   def inspector_tabs(assigns) do
     ~H"""
     <div
+      id="inspector-tabs"
       role="tablist"
       aria-label={gettext("Inspector")}
-      class="flex items-center gap-1 rounded-lg bg-base-200/60 p-1 text-sm"
+      phx-hook="TabKeys"
+      class="tabs flex w-full"
     >
       <button
         :for={
@@ -981,16 +990,15 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
             {:history, gettext("History"), "hero-clock", false}
           ]
         }
+        id={"inspector-tab-#{id}"}
         type="button"
         role="tab"
+        class="tab flex-1 justify-center"
         aria-selected={to_string(@tab == id)}
+        aria-controls={"inspector-panel-#{id}"}
+        tabindex={if @tab == id, do: "0", else: "-1"}
         phx-click="switch_inspector_tab"
         phx-value-tab={id}
-        class={[
-          "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 font-medium transition",
-          (@tab == id && "bg-base-100 text-base-content shadow-sm") ||
-            "text-base-content/60 hover:text-base-content"
-        ]}
       >
         <.icon name={icon} class="size-4" />
         <span>{label}</span>
@@ -1002,6 +1010,19 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       </button>
     </div>
     """
+  end
+
+  @doc """
+  The ARIA attributes of inspector panel `tab`, as rendered on the root of
+  each inspector panel component: `role="tabpanel"`, the `id` its tab's
+  `aria-controls` names, and `aria-labelledby` back to that tab.
+  """
+  def inspector_panel_attrs(tab) when tab in [:preview, :settings, :history] do
+    [
+      id: "inspector-panel-#{tab}",
+      role: "tabpanel",
+      "aria-labelledby": "inspector-tab-#{tab}"
+    ]
   end
 
   # A titled card inside an inspector panel (Theme A). Replaces the old buried
@@ -1036,6 +1057,8 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   # wrapped in a hover target that reveals an "Edit" jump into the in-context editor
   # focused on that block (Theme C — the preview is a launch point for visual
   # editing). `@html` blocks with a nil id (legacy) render without the jump.
+  # The jump is faded out, not `hidden` (#1679): a `display: none` link is out
+  # of the Tab order, so the hover-only version was unreachable by keyboard.
   attr :form, :any, required: true
   attr :html, :any, required: true
   attr :kind, :atom, required: true
@@ -1053,7 +1076,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
         <.link
           :if={id}
           navigate={~p"/editor/site/#{@kind}/#{@slug}?#{[focus: id]}"}
-          class="absolute right-1 top-1 z-10 hidden items-center gap-1 rounded bg-base-100/95 px-1.5 py-0.5 text-xs font-medium text-base-content no-underline shadow ring-1 ring-base-content/10 group-hover:inline-flex"
+          class="absolute right-1 top-1 z-10 inline-flex items-center gap-1 rounded bg-base-100/95 px-1.5 py-0.5 text-xs font-medium text-base-content no-underline opacity-0 shadow ring-1 ring-base-content/10 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-primary pointer-coarse:opacity-100"
           title={gettext("Edit this block on the page")}
         >
           <.icon name="hero-pencil-square" class="size-3" />{gettext("Edit")}

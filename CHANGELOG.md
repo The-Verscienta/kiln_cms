@@ -129,6 +129,10 @@ Every summary line below that was shortened links to its own entry there.
   contents; screen crumbs point at their real parent.**
   ([#1678](https://github.com/The-Verscienta/kiln_cms/issues/1678) · [#1680](https://github.com/The-Verscienta/kiln_cms/issues/1680) · [long form](docs/changelog/unreleased.md#console-lists-share-one-empty-state-long-settings-pages-get-a-table-of-contents))
 
+- **The content editor's chrome is on the component kit: the inspector is a
+  keyboard-driven tab strip, and block controls show on focus and on touch.**
+  ([#1679](https://github.com/The-Verscienta/kiln_cms/issues/1679) · [long form](docs/changelog/unreleased.md#the-content-editors-chrome-is-on-the-component-kit))
+
 - **The release image's `latest` tag moves only to the highest final release,
   and from 1.0.0 a floating major tag (`1`) follows the highest final release of
   its major.**
