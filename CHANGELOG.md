@@ -118,6 +118,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Rich-text blocks turn lists into real lists: typed with "•" or "1)", pasted
   as bullet characters (a PDF, an email), or pasted from Word with nesting kept.**
+  ([#1729](https://github.com/The-Verscienta/kiln_cms/pull/1729))
 
 ### Changed
 
