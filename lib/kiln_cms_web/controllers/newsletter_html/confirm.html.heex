@@ -6,6 +6,9 @@
       goes no further. The human completes the opt-in with one click, a POST.
     * `:confirmed` — after that POST (or a GET of an already-confirmed link).
     * `:invalid` — an unknown token.
+    * `:stale` — a known token whose subscriber is no longer pending, i.e. has
+      unsubscribed since (#1690). Nothing changes; subscribing again mails a
+      fresh link. Deliberately neutral: it names no address and no status.
 
   The form carries the session's CSRF token: it is rendered into the visitor's
   own session by the GET, so the POST is an ordinary protected browser submit.
@@ -38,6 +41,15 @@
         <h1 class="text-2xl font-semibold text-balance">{gettext("Link not recognized")}</h1>
         <p class="text-base-content/70">
           {gettext("This confirmation link is invalid or expired.")}
+        </p>
+      <% :stale -> %>
+        <h1 class="text-2xl font-semibold text-balance">
+          {gettext("This link is no longer valid")}
+        </h1>
+        <p class="text-base-content/70">
+          {gettext(
+            "Nothing has changed. To receive the newsletter, subscribe again on the site — we'll send you a new confirmation link."
+          )}
         </p>
     <% end %>
   </section>

@@ -1,5 +1,10 @@
-defmodule KilnCMS.CMS.SanitizeBlocksTest do
-  @moduledoc "Block sanitization now happens inside the BlockUnion cast (Kiln v2)."
+defmodule KilnCMS.CMS.BlockCastSanitizationTest do
+  @moduledoc """
+  The write-path sanitizer for content blocks: `KilnCMS.CMS.BlockUnion`'s cast
+  runs every block through `KilnCMS.CMS.TypedBlocks.to_union_input/1`, whose
+  `sanitize_attrs/1` cleans rich-text HTML and media URLs before anything is
+  stored. There is no separate save-time change; this cast is the one control.
+  """
   use KilnCMS.DataCase, async: true
 
   alias KilnCMS.CMS

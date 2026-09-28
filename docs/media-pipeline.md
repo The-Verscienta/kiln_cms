@@ -678,6 +678,59 @@ An **image** can never be gated (its responsive-variant pipeline —
 A/V both can; gating an existing item requires private storage to be
 configured first, same as a fresh upload.
 
+### Public media URLs are capability URLs
+
+> **Warning — anyone holding a public media URL can fetch the file.** Keep
+> sensitive files out of public storage.
+
+A media item with the `:public` audience (every image, and every document or
+A/V file nobody has gated) lives in **public storage**, and its bytes answer at
+a plain URL with **no authentication, no audience check, no tenant check and
+no rate limit**:
+
+* **Local adapter** — `/uploads/<key>`, served by `Plug.Static` straight from
+  `priv/uploads`, on any host the app answers.
+* **S3 adapter** — `S3_PUBLIC_BASE_URL` + `<key>`, served by the bucket or the
+  CDN in front of it; the request never reaches Kiln.
+
+The same holds for every derived variant and poster frame. What the app does
+or does not link to changes nothing: an item attached to an unpublished draft,
+or to no content at all, is as reachable as one on the home page.
+
+What stands between such a file and the world is the **key**: a random UUID
+(`Storage.generate_key/1`), which cannot be guessed or enumerated, so the URL
+works as a capability — whoever has it can read the file, and nobody else can
+find it. That also means the URL is the secret. It escapes wherever a URL
+does: a shared link, a forwarded email, a page's HTML once the item is used
+on published content, browser history, proxy or CDN logs. It cannot be
+revoked short of deleting the item, and the `immutable` cache headers above
+let a CDN and browsers keep serving it for up to a year after that.
+
+For anything that must not be public:
+
+* **Gate it.** Give the document or A/V item a non-`:public` audience (see
+  [Gated documents](#gated-documents)). That moves the blob to **private
+  storage** — `priv/private_uploads`, which has no static mount, or the
+  `S3_PRIVATE_BUCKET` bucket, which needs no public read — and from then on
+  it is reachable only through `GET /media/:id/download` and the A/V stream
+  route, both of which run the ordinary policy-checked read on every request.
+  On S3, configure `S3_PRIVATE_BUCKET` first; without it gating is refused.
+  Gate **before** the URL is shared: gating moves the bytes, but it cannot
+  recall a copy someone already downloaded or a CDN already cached.
+* **Don't upload sensitive images.** Images can't be gated (their variant
+  pipeline assumes public storage), so an image is public for as long as it
+  exists.
+* **Don't let the public bucket be listed.** On S3 the bucket's public
+  policy should grant anonymous `GetObject` only, never `ListBucket` — a
+  listable bucket hands out every key, and with them every capability.
+  `Plug.Static` never lists a directory.
+
+This is an accepted residual, not a gap waiting for a fix: public media is
+meant to be served by a CDN without a round trip through the app. See the
+*Media (`/uploads/*`)* entry under *Per-surface risks & mitigations* in
+[threat-model.md](threat-model.md) (security audit 2026-09-27, finding 15,
+#1666).
+
 ## Video and audio (#494)
 
 The library accepts self-hosted **video, audio and WebVTT caption tracks**,

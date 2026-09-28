@@ -145,6 +145,8 @@ defmodule KilnCMS.Media.AVQuarantineTest do
                all_enqueued(worker: AVStripWorker)
 
       assert args["media_item_id"] == item.id
+      # The worker cancels a job without the item's org (#1658).
+      assert args["org_id"] == item.org_id
       assert all_enqueued(worker: KilnCMS.Media.AVWorker) == []
     end
 
@@ -174,7 +176,8 @@ defmodule KilnCMS.Media.AVQuarantineTest do
       # left describing the upload.
       assert released.byte_size == byte_size(promoted)
 
-      assert [_] = all_enqueued(worker: KilnCMS.Media.AVWorker)
+      assert [%{args: av_args}] = all_enqueued(worker: KilnCMS.Media.AVWorker)
+      assert av_args["org_id"] == item.org_id
     end
 
     test "the job declares a finite ceiling" do

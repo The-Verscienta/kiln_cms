@@ -150,11 +150,23 @@ defmodule KilnCMS.Forms do
   @spec variant_field() :: String.t()
   def variant_field, do: @variant_field
 
-  defp honeypot_tripped?(params) do
+  @doc """
+  Whether a public submission's params trip the honeypot (`honeypot_field/0`).
+
+  The one rule every public surface that renders the honeypot shares — form
+  submissions here and newsletter sign-up (`KilnCMSWeb.NewsletterController`,
+  #1657). Only an absent field or the empty string a browser submits for an
+  untouched input counts as a human. Anything else trips it: any non-empty
+  string — whitespace-only included, since a human never sees the field to type
+  a space into it — and any non-string value (a list or map no text input
+  produces).
+  """
+  @spec honeypot_tripped?(map()) :: boolean()
+  def honeypot_tripped?(params) when is_map(params) do
     case Map.get(params, @honeypot_field) do
-      value when is_binary(value) -> String.trim(value) != ""
       nil -> false
-      _non_string -> true
+      "" -> false
+      _filled -> true
     end
   end
 

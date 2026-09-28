@@ -74,7 +74,20 @@ Every summary line below that was shortened links to its own entry there.
   its major.**
   ([#1544](https://github.com/The-Verscienta/kiln_cms/issues/1544) · [long form](docs/changelog/unreleased.md#the-release-images-latest-tag-moves-only-to-the-highest-final-release-and-from))
 
+### Fixed
+
+- **Edited images get new variants under strict tenancy, and a media job with no
+  `org_id` is cancelled with a logged error instead of doing nothing silently.**
+  ([#1658](https://github.com/The-Verscienta/kiln_cms/issues/1658) · [long form](docs/changelog/unreleased.md#a-media-job-with-no-org-id-is-cancelled-not-silently-skipped))
+
+- **An old newsletter confirmation link no longer re-subscribes a reader who
+  unsubscribed.**
+  ([#1690](https://github.com/The-Verscienta/kiln_cms/issues/1690) · [long form](docs/changelog/unreleased.md#an-old-newsletter-confirmation-link-no-longer-re-subscribes))
+
 ### Security
+
+- **The newsletter sign-up honeypot and public forms trip on the same rule.**
+  ([#1657](https://github.com/The-Verscienta/kiln_cms/issues/1657) · [long form](docs/changelog/unreleased.md#newsletter-sign-up-honeypot-matches-forms))
 
 - **Federation runs under the policies.** 24 more internal writes and reads run
   as scoped system actors; the replay check and follower ceiling fail closed.

@@ -54,6 +54,14 @@ config :kiln_cms, :graphql_introspection, false
 # off unless an operator turns them on with `API_DOCS_ENABLED` (#567).
 config :kiln_cms, :api_docs, false
 
+# CRDT co-editing is a prototype (#1324): `/ws/collab` refuses every join while
+# this is off. Unset already reads as off (`KilnCMS.Collab.Crdt.enabled?/0`
+# defaults to `false`), but a production build pins it explicitly, like the
+# two flags above, so turning the prototype on takes a deliberate config
+# change rather than the absence of one (#1660). Pinned by
+# test/config/prod_flags_test.exs.
+config :kiln_cms, :collab_prototype, false
+
 # Webhook targets must be HTTPS and must not resolve to private addresses.
 config :kiln_cms, KilnCMS.Webhooks.SafeUrl, require_https: true, resolve_dns: true
 

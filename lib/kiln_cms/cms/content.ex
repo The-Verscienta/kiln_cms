@@ -3263,7 +3263,8 @@ defmodule KilnCMS.CMS.Content do
         # Typed polymorphic block tree (Kiln v2 — decision D11). `BlockUnion`'s
         # cast is legacy-tolerant: legacy stored rows convert lazily on read and
         # legacy params still cast, so this flip needs no data migration. Rich-text
-        # HTML / media URLs are sanitized inside the cast (replacing SanitizeBlocks).
+        # HTML / media URLs are sanitized inside the cast (`TypedBlocks.sanitize_attrs/1`),
+        # the one write-path sanitizer — there is no separate save-time change.
         # Not `public?` — the auto JSON:API/GraphQL surface can't render a union of
         # embedded resources cleanly, and the v2 API surface is the *fired*
         # artifacts (`KilnCMS.Firing.Engine.read/3`), not the raw editable tree.

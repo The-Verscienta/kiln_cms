@@ -109,7 +109,23 @@ defmodule KilnCMS.Media.AVWorkerTest do
       item =
         Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{filename: "x.mp4", content_type: "video/mp4"})
 
-      assert :ok = AVWorker.perform(%Oban.Job{args: %{"media_item_id" => item.id}})
+      assert :ok =
+               AVWorker.perform(%Oban.Job{
+                 args: %{"media_item_id" => item.id, "org_id" => item.org_id}
+               })
+    end
+
+    test "a job without org_id is cancelled, not run under a guessed org (#1658)" do
+      item =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{filename: "x.mp4", content_type: "video/mp4"})
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:cancel, _reason} =
+                   AVWorker.perform(%Oban.Job{args: %{"media_item_id" => item.id}})
+        end)
+
+      assert log =~ "KilnCMS.Media.AVWorker"
     end
   end
 
