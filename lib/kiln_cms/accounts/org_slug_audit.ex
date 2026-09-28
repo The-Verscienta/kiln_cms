@@ -28,6 +28,7 @@ defmodule KilnCMS.Accounts.OrgSlugAudit do
   require Logger
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Organization
   alias KilnCMS.Accounts.OrgSlug
 
   @typedoc """
@@ -36,7 +37,7 @@ defmodule KilnCMS.Accounts.OrgSlugAudit do
   is none), and `blocked` why there is none.
   """
   @type finding :: %{
-          org: Ash.Resource.record(),
+          org: %Organization{},
           problem: :format | :reserved,
           fix: String.t() | nil,
           blocked: nil | :format | :reserved | {:collision, [String.t()]}
@@ -82,7 +83,7 @@ defmodule KilnCMS.Accounts.OrgSlugAudit do
   Downcase the slug of every `:fixable` org in `report/0`, logging each one.
   Returns the renamed orgs, or the first org that could not be written.
   """
-  @spec fix() :: {:ok, [Ash.Resource.record()]} | {:error, {Ash.Resource.record(), term()}}
+  @spec fix() :: {:ok, [%Organization{}]} | {:error, {%Organization{}, term()}}
   def fix do
     report().fixable
     |> Enum.reduce_while({:ok, []}, fn %{org: org, fix: slug}, {:ok, done} ->
