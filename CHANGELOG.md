@@ -54,6 +54,16 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Run `mix kiln.org_slugs` to find organizations whose slug can't be a hostname.**
+  ([#1710](https://github.com/The-Verscienta/kiln_cms/issues/1710) · [long form](docs/changelog/unreleased.md#run-mix-kilnorgslugs-to-find-organizations-whose-slug-cant-be-a-hostname))
+
+### Fixed
+
+- **An organization's slug must be a hostname label, and is stored lowercase.**
+  ([#1710](https://github.com/The-Verscienta/kiln_cms/issues/1710) · [long form](docs/changelog/unreleased.md#an-organizations-slug-must-be-a-hostname-label-and-is-stored-lowercase))
+
 ## [0.12.0] - 2026-09-27
 
 Long form: [docs/changelog/v0.12.0.md](docs/changelog/v0.12.0.md) —

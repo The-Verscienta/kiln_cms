@@ -92,8 +92,7 @@ defmodule KilnCMS.Accounts.OrgSlugAudit do
           # A warning, not info: a tenant's host just changed, and that belongs
           # in the log a production deployment actually keeps.
           Logger.warning(
-            "Organization #{org.id} slug downcased from #{inspect(org.slug)} to #{inspect(slug)} (#1710)",
-            org_id: org.id
+            "Organization #{org.id} slug downcased from #{inspect(org.slug)} to #{inspect(slug)} (#1710)"
           )
 
           {:cont, {:ok, [updated | done]}}
