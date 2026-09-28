@@ -94,6 +94,46 @@ defmodule KilnCMSWeb.SearchApiPoolTest do
     assert Enum.all?(queries, fn {_pid, _source, checked_out?} -> checked_out? end)
   end
 
+  test "the legs read ids; whole rows are read once, for the hits kept" do
+    word = "sapool#{System.unique_integer([:positive])}"
+    for i <- 1..3, do: published_page("#{word} guide #{i}")
+
+    test = self()
+    handler = "sapool-rows-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      handler,
+      [:kiln_cms, :repo, :query],
+      fn _event, _measurements, meta, _config ->
+        if self() == test and meta[:source] == "pages", do: send(test, {:sql, meta[:query]})
+      end,
+      nil
+    )
+
+    hits =
+      try do
+        Search.hybrid(:page, word,
+          authorize?: true,
+          load: [highlight: %{query: word, locale: "en"}]
+        )
+      after
+        :telemetry.detach(handler)
+      end
+
+    assert length(hits) == 3
+    # The hits are whole records, as they always were.
+    assert Enum.all?(hits, &(is_list(&1.blocks) and is_binary(&1.highlight)))
+
+    sqls = Stream.repeatedly(fn -> receive do: ({:sql, sql} -> sql), after: (0 -> nil) end)
+    sqls = Enum.take_while(sqls, & &1)
+
+    # Several legs ran against the table (keyword, title, any-term…); the
+    # block trees were read by exactly one statement — the one that read the
+    # kept hits.
+    assert length(sqls) >= 3
+    assert Enum.count(sqls, &(&1 =~ ~s("blocks"))) == 1, Enum.join(sqls, "\n\n")
+  end
+
   describe "the analytics write" do
     setup do
       previous = Application.get_env(:kiln_cms, :async_analytics)
