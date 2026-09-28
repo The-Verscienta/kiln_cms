@@ -270,6 +270,148 @@ to deliberately track bleeding edge, `--allow-major` after
 reading the upgrade notes, and `--check --exit-code` to fail a CI job when a
 project has drifted behind upstream.
 
+## Migrations: expand, migrate, contract
+
+A rolling deploy runs two releases at once. The first new node migrates the
+database on boot, and the old release's nodes keep serving against the
+**new** schema until the load balancer has moved every request over. A
+migration is only safe if the release before it keeps working against it.
+From 1.0 every schema change follows this policy (#1716):
+
+1. **Expand.** Add tables and columns. A new column is nullable or has a
+   default, so the old release's inserts, which do not know it exists, still
+   succeed. Keep the old table or column in place.
+2. **Migrate.** Backfill in an Oban job or a release task, not in the
+   migration. From this release on, the code writes both shapes (or the new
+   one only) and reads the new one.
+3. **Contract.** Drop, rename or tighten only in a **later** release, once no
+   release that could still be running reads the old shape. That is at least
+   the release after the one that stopped reading it.
+
+The cases that come up:
+
+- **Renaming a column or table** takes two releases: add the new one and
+  backfill it (release N, which stops reading the old one), then drop the old
+  one (release N+1). A plain `rename` is a drop as far as the old release is
+  concerned.
+- **Changing a column's type** is a rename in disguise. Add a column of the
+  new type, backfill it, and drop the old one a release later.
+- **`NOT NULL`** needs either a default, which Postgres 11+ applies without
+  rewriting the table as long as the default is not volatile, or a backfill
+  release first. Tighten a column to `null: false` in the release after the
+  one whose code always sets it. The old release may still insert `NULL`
+  until then.
+- **Dropping a column** waits until the release that stopped reading it has
+  shipped. Ash selects every attribute, so the old release breaks the moment
+  the column is gone (`20260919191545_drop_webhook_plaintext_secret` is the
+  example that prompted this policy). Remove the attribute from the resource
+  in release N, then run `mix ash.codegen` for the drop in release N+1.
+- **An index on a large table** is built concurrently. A plain
+  `CREATE INDEX` takes a lock that blocks writes to the table for the whole
+  build. In a resource, use `custom_indexes do index [...], concurrently: true
+  end`. For the unique index behind an identity, run
+  `mix ash.codegen <name> --concurrent-indexes`. Either way codegen puts the
+  index in its own migration with `@disable_ddl_transaction true` and
+  `@disable_migration_lock true`, because Postgres refuses
+  `CREATE INDEX CONCURRENTLY` inside a transaction. An index on a table the
+  same migration creates needs none of this.
+
+### The check
+
+`mix kiln.migrations.check` runs on every pull request (the `build` job in
+`ci.yml`). It reads each migration the PR **adds**, under
+`priv/repo/migrations` and every overlay's `projects/*/priv/repo/migrations`,
+and only its forward direction (`up`/`change`). It fails on:
+
+| Flagged | Why |
+|---|---|
+| `drop table`, `rename table` (or a column) | the old release still reads the table or column |
+| `remove :col` | the old release still selects the column |
+| `modify` that changes the type | the old release reads the old type. The previous type comes from `from:` or the migration history. If it is unknown, the change is flagged too. |
+| `modify ... null: false`, or `add ... null: false` without `default:` on an existing table | the old release may still write `NULL`, or omit the column |
+| `execute` SQL containing `DROP TABLE/COLUMN/VIEW/SCHEMA/TYPE`, `RENAME`, `ALTER COLUMN ... TYPE` or `SET NOT NULL` | a heuristic that flags the statement for review. Dropping and re-creating a function or trigger is not flagged. |
+| a non-concurrent index on a table listed in `Mix.Tasks.Kiln.Migrations.Check.large_tables/0` | the build blocks writes |
+| `concurrently: true` without `@disable_ddl_transaction true` | the migration would fail at boot |
+
+The history is exempt. Only the diff against the base is judged, so
+`mix kiln.migrations.check --all` over today's history reports what the
+policy would have caught. On 0.12.0 that was 106 findings: 65 non-concurrent
+indexes on large tables, 34 `SET NOT NULL`s (most of them the #336
+multi-tenancy `org_id` backfill-then-tighten migrations), 4 dropped tables,
+2 `NOT NULL` columns added without a default, and the dropped webhook
+secret. Run it locally before pushing. It is stdlib-only, so it runs in a
+checkout with no `deps/`:
+
+```bash
+mix kiln.migrations.check                  # vs origin/main
+mix kiln.migrations.check --base v0.12.0   # vs another ref
+```
+
+**When the contract step is the point**, say so in the migration, on the
+line above the statement (or at the end of its first line):
+
+```elixir
+# kiln:contract-ok since v0.12.0 — 0.12.0 stopped reading webhook_endpoints.secret
+alter table(:webhook_endpoints) do
+  remove :secret
+end
+```
+
+The version names the **shipped** release that stopped reading the old
+shape, so it may not be newer than the version in `mix.exs`. The reason is
+required, and `--` works in place of the em dash. The marker covers the one
+statement it sits on. An `alter table` block counts as one statement, so a
+marker above it covers every op inside. For an index build that is safe for
+another reason, such as a table that is small everywhere, use
+`# kiln:lock-ok — <reason>`. A malformed marker is itself a failure. So is
+a marker that names an unshipped release, or one that excuses nothing.
+
+### What zero-downtime does and does not cover
+
+The policy makes the **schema** safe for two releases at once. Kiln's boot
+and probes already handle the rest of an ordinary rolling deploy
+([`deploy.md`](deploy.md), "What happens at boot" and "Health endpoints"):
+
+- **Migrate on boot, serialised.** Every node runs `bin/migrate` before it
+  serves. `Ecto.Migrator` holds a lock on `schema_migrations`, so the first
+  new node migrates and the rest wait. The lock does not block the old
+  release's queries.
+- **Readiness.** `/live` only answers once `bin/migrate` has finished and
+  the endpoint is up, and `/up` also requires the database. Pointing the
+  load balancer's readiness check at `/up` keeps a new node out of rotation
+  until it can serve.
+- **Graceful drain on `SIGTERM`.** The release stops its listener and gives
+  in-flight HTTP requests up to 15 s to finish (Bandit/Thousand Island's
+  `shutdown_timeout` default). Running Oban jobs get Oban's 15 s
+  `shutdown_grace_period`.
+
+It does **not** cover:
+
+- **LiveView and WebSocket sessions.** They are disconnected when their node
+  stops, and the client reconnects to a new node, which remounts the view.
+  LiveView's form recovery re-sends a form that has `phx-change`, and an open
+  GraphQL subscription must resubscribe.
+- **A job that outlives the grace period.** Oban kills it and leaves the row
+  in `executing`. Kiln configures no `Oban.Plugins.Lifeline`, so nothing moves
+  it back to `available`. It stays stuck until someone retries it by hand.
+- **Readiness does not flip before shutdown.** `/up` keeps answering 200
+  until the listener closes, so the load balancer should stop routing on
+  its own deregistration (Kubernetes removes the pod from the Service
+  endpoints on termination, but in parallel with the `SIGTERM`). A short
+  `preStop` sleep closes that race.
+- **Lock waits.** Kiln sets no `lock_timeout`, so a migration's
+  `ALTER TABLE` waits behind a long-running query, and every query on that
+  table queues behind the waiting migration. Deploy outside a heavy
+  export or report.
+- **A release that skips one.** Expand/contract assumes each release is
+  deployed in turn. Jumping from N-1 to N+1 runs N's expand and N+1's
+  contract in one boot while N-1 nodes are still serving. Deploy each
+  minor in sequence, or accept a short outage and stop the old nodes first.
+- **Single-instance deployments.** One container on one host (the Compose
+  reference deployment, or a platform with a disk attached) has no second
+  node to serve while the new one boots, so it drops traffic for the length
+  of the boot however compatible the migration is.
+
 ## Build stamping
 
 The release workflow already does this for the published core image — this is
