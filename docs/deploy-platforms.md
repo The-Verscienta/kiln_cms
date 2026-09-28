@@ -232,7 +232,7 @@ these deployments get per-deployment, not per-visitor, rate limiting.
 
 Each template pins an image tag. To upgrade:
 
-1. Read the new release's `### Upgrading` section in
+1. Read the new release's `### Upgrade notes` and `### Breaking` sections in
    [CHANGELOG.md](https://github.com/The-Verscienta/kiln_cms/blob/main/CHANGELOG.md).
 2. Change the tag: `image.url` in `render.yaml` (then sync the Blueprint),
    the image in Railway's service settings, `[build] image` in `fly.toml`
@@ -240,6 +240,26 @@ Each template pins an image tag. To upgrade:
    `doctl apps update <app-id> --spec .do/app.yaml`).
 
 Migrations run on boot, as on any deployment.
+
+### Which tag to pin
+
+| Tag | Moves | Use it when |
+|-----|-------|-------------|
+| `0.12.0`, `1.0.3` (exact) | Never | **Recommended.** Every upgrade is a change you made and can roll back. |
+| `1` (floating major, from 1.0.0) | To each new final `1.x` release: patches and minors | You want fixes without editing the tag, and accept a minor release, with its migrations, landing on the next restart or redeploy |
+| `latest` | To the highest final release, across majors | Trying Kiln out. Never for a site you keep |
+
+`1` and `latest` never point at a release candidate. They also never move
+backwards: a security patch for the previous minor (see
+[SECURITY.md](https://github.com/The-Verscienta/kiln_cms/blob/main/.github/SECURITY.md#supported-versions))
+is published under its exact tag only. If you stay on the previous minor
+during its 90-day window, pin exact versions and move to each patch yourself.
+There is no floating minor tag (`1.0`): the previous minor stops getting fixes
+after those 90 days, so a tag that floated on it would go quiet.
+
+Whether a floating tag is re-pulled depends on the platform. Most keep the
+image they first pulled until you redeploy, so a floating tag saves you the
+edit, not the redeploy.
 
 ## Backups
 

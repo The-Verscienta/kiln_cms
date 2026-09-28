@@ -60,6 +60,13 @@ Every summary line below that was shortened links to its own entry there.
   release still serving mid-deploy.**
   ([#1716](https://github.com/The-Verscienta/kiln_cms/issues/1716) · [long form](docs/changelog/unreleased.md#mix-kilnmigrationscheck-gates-expand-contract))
 
+### Changed
+
+- **The release image's `latest` tag moves only to the highest final release,
+  and from 1.0.0 a floating major tag (`1`) follows the highest final release of
+  its major.**
+  ([#1544](https://github.com/The-Verscienta/kiln_cms/issues/1544) · [long form](docs/changelog/unreleased.md#the-release-images-latest-tag-moves-only-to-the-highest-final-release-and-from))
+
 ### Security
 
 - **Federation runs under the policies.** 24 more internal writes and reads run
