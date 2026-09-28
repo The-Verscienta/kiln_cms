@@ -23,6 +23,25 @@ carries the reasoning.
   already the case
   ([#1688](https://github.com/The-Verscienta/kiln_cms/issues/1688)).
 
+## Breaking
+
+<a id="on-a-multi-org-install-with-kiln_console_host-set-each-non-default-orgs-console"></a>
+
+- **On a multi-org install with `KILN_CONSOLE_HOST` set, each non-default
+  org's console moves to `<slug>.<console host>`: add wildcard DNS and a
+  wildcard TLS certificate for `*.<console host>` before upgrading.** The documented meaning of `KILN_CONSOLE_HOST` changes for
+  this one configuration. Before, a console route on a non-default
+  organization's site redirected to the bare console host, which is the
+  default organization's console. Now it redirects to that organization's own
+  console host, `<slug>.<console host>` (for example
+  `acme.console.example.com`). Unless that name resolves to Kiln and is covered
+  by the certificate, those editors reach no console at all after the upgrade.
+  A certificate for `*.example.com` does not cover `acme.console.example.com`.
+  Editors signed in on the bare console host sign in again on their
+  organization's console host. Single-org installs, and installs without
+  `KILN_CONSOLE_HOST`, are unaffected
+  ([#1688](https://github.com/The-Verscienta/kiln_cms/issues/1688)).
+
 ## Security
 
 <a id="kiln_console_host-now-isolates-every-organizations-console-each-on-its-own"></a>

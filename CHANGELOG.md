@@ -60,6 +60,13 @@ Every summary line below that was shortened links to its own entry there.
   `*.<console host>` to DNS and TLS before upgrading.**
   ([#1688](https://github.com/The-Verscienta/kiln_cms/issues/1688) · [long form](docs/changelog/unreleased.md#on-a-multi-org-deployment-with-kiln_console_host-set-add-console-host-to-dns))
 
+### Breaking
+
+- **On a multi-org install with `KILN_CONSOLE_HOST` set, each non-default
+  org's console moves to `<slug>.<console host>`: add wildcard DNS and a
+  wildcard TLS certificate for `*.<console host>` before upgrading.**
+  ([#1688](https://github.com/The-Verscienta/kiln_cms/issues/1688) · [long form](docs/changelog/unreleased.md#on-a-multi-org-install-with-kiln_console_host-set-each-non-default-orgs-console))
+
 ### Security
 
 - **`KILN_CONSOLE_HOST` now isolates every organization's console, each on its
