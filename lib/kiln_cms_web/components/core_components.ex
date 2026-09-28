@@ -555,16 +555,26 @@ defmodule KilnCMSWeb.CoreComponents do
   attr :icon, :string, default: "hero-inbox"
   attr :title, :string, required: true
   attr :class, :any, default: nil
+
+  attr :compact, :boolean,
+    default: false,
+    doc: "less vertical padding, for an empty list inside a section of a longer page"
+
+  attr :rest, :global, doc: "e.g. an `id` for tests and anchors"
   slot :inner_block
   slot :action
 
   def empty_state(assigns) do
     ~H"""
-    <div class={[
-      "flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed",
-      "border-base-content/15 bg-base-100 px-6 py-12 text-center",
-      @class
-    ]}>
+    <div
+      class={[
+        "flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed",
+        "border-base-content/15 bg-base-100 px-6 text-center",
+        if(@compact, do: "py-8", else: "py-12"),
+        @class
+      ]}
+      {@rest}
+    >
       <.icon name={@icon} class="size-8 text-base-content/30" />
       <div class="space-y-1">
         <p class="text-sm font-medium text-base-content">{@title}</p>
@@ -573,6 +583,60 @@ defmodule KilnCMSWeb.CoreComponents do
         </p>
       </div>
       <div :if={@action != []} class="mt-1">{render_slot(@action)}</div>
+    </div>
+    """
+  end
+
+  @doc """
+  A long settings page with an "On this page" table of contents (#1680).
+
+  The contents are plain `#anchor` links to ids already on the page — no JS, so
+  they work before the socket connects and survive a reload at the anchor. On a
+  wide screen the list sits in a sticky right-hand column; below `lg` it is a
+  row of chips above the content. Give each target section `scroll-mt-24` so
+  the sticky top bar does not cover its heading after the jump.
+
+  ## Examples
+
+      <.page_with_toc id="settings-toc" items={[{"settings-profile", gettext("Profile")}]}>
+        <section id="settings-profile" class="scroll-mt-24">…</section>
+      </.page_with_toc>
+  """
+  attr :id, :string, required: true, doc: "the id of the contents `<nav>`"
+  attr :items, :list, required: true, doc: "`{anchor_id, label}` pairs, in page order"
+  attr :class, :any, default: nil
+  slot :inner_block, required: true
+
+  def page_with_toc(assigns) do
+    ~H"""
+    <div class={["lg:grid lg:grid-cols-[minmax(0,1fr)_12rem] lg:items-start lg:gap-10", @class]}>
+      <nav
+        id={@id}
+        aria-label={gettext("On this page")}
+        class="mb-6 lg:sticky lg:top-24 lg:col-start-2 lg:row-start-1 lg:mb-0"
+      >
+        <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/60">
+          {gettext("On this page")}
+        </p>
+        <ul class="flex flex-wrap gap-1.5 lg:flex-col lg:gap-0.5 lg:border-l lg:border-base-content/10">
+          <li :for={{anchor, label} <- @items}>
+            <a
+              href={"#" <> anchor}
+              class={[
+                "block rounded-full border border-base-content/15 px-2.5 py-0.5 text-sm text-base-content/70",
+                "transition-colors hover:bg-base-200 hover:text-base-content",
+                "lg:-ml-px lg:rounded-none lg:border-0 lg:border-l-2 lg:border-transparent lg:px-3 lg:py-1",
+                "lg:hover:border-base-content/30 lg:hover:bg-transparent"
+              ]}
+            >
+              {label}
+            </a>
+          </li>
+        </ul>
+      </nav>
+      <div class="min-w-0 lg:col-start-1 lg:row-start-1">
+        {render_slot(@inner_block)}
+      </div>
     </div>
     """
   end

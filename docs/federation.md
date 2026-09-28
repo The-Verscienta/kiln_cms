@@ -126,8 +126,12 @@ Verification checks, in order:
   answered 401 whatever its `Date` says. Postgres, not a node-local cache, so
   a replay landing on another node is refused there too. Rows are held for
   twice the date window and swept hourly (`KilnCMS.Federation.SeenSignatureSweeper`,
-  `KILN_FEDERATION_NONCE_SWEEP_CRON`); a store that cannot be written logs and
-  falls back to the date window alone rather than taking the inbox down;
+  `KILN_FEDERATION_NONCE_SWEEP_CRON`). A store that cannot be written — an
+  outage, or a refused write — **fails closed** (#1659): the delivery is
+  answered `503` with `Retry-After: 60`, so an honest server retries it once
+  the store is back, and nothing is recorded meanwhile. It used to log and
+  accept on the date window alone, which let every replay through exactly
+  when the store could not tell;
 - `host` is checked against the site's **pinned origin**, not against the
   request. `conn.host` is the caller's own `Host` header, so verifying against
   it would bind a signature to nothing — the same signed request would replay
@@ -147,7 +151,10 @@ host than the actor (otherwise one actor could name a victim's server as its
 inbox and turn the site's publishing schedule into a signed flood aimed at a
 third party), and when the site is at its follower ceiling (50,000 by default —
 `one_per_actor` dedups an exact URI, so one attacker domain serving many actor
-URLs would otherwise become many permanent delivery targets).
+URLs would otherwise become many permanent delivery targets). A follower count
+that fails, or that the policy refuses, counts as "at the ceiling" and is
+logged (#1659) — a refused read would otherwise count 0 and switch the ceiling
+off.
 
 An `Undo` is honoured only when it names a `Follow` **addressed to this site**.
 `Undo{Like}` and `Undo{Announce}` are far more common and carry `object` as a

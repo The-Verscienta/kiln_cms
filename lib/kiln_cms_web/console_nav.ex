@@ -149,6 +149,33 @@ defmodule KilnCMSWeb.ConsoleNav do
   end
 
   @doc """
+  The screen one level up from the console screen keyed `key` — where the
+  "←" crumb above its heading points (#1680).
+
+  Read off the same nav the sidebar draws, so a crumb cannot disagree with it:
+
+    * a screen in a Configure section goes back to the Configure hub, at that
+      section (`/editor/configure#configure-group-<section>`);
+    * anything else — an author screen, or a configure screen for someone the
+      hub is not shown to — goes back to Home.
+
+  Returns `%{label: String.t(), path: String.t()}`.
+  """
+  def parent(user, org, key) do
+    %{author: author, hub: hub, configure_groups: groups} = nav(user, org)
+    group = hub && Enum.find(groups, fn group -> Enum.any?(group.items, &(&1.key == key)) end)
+
+    case group do
+      %{key: group_key} ->
+        %{label: hub.label, path: hub.path <> "#configure-group-#{group_key}"}
+
+      _ ->
+        home = Enum.find(author, &(&1.key == :overview))
+        %{label: home.label, path: home.path}
+    end
+  end
+
+  @doc """
   The destinations that answer `query`, best first (see `rank/2`).
 
   Plain substring matching, not the trigram search the content half of the

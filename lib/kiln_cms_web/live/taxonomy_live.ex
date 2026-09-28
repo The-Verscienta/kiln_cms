@@ -446,9 +446,11 @@ defmodule KilnCMSWeb.TaxonomyLive do
     >
       <div class="space-y-8">
         <div>
-          <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
-            &larr; {gettext("All content")}
-          </.link>
+          <Layouts.console_crumb
+            current_user={@current_user}
+            current_org={@current_org}
+            active={:taxonomy}
+          />
           <h1 class="mt-1 text-2xl font-semibold">{gettext("Taxonomy")}</h1>
           <p class="text-sm text-base-content/70">
             {gettext("Manage the categories and tags content can be organized by.")}
@@ -551,9 +553,15 @@ defmodule KilnCMSWeb.TaxonomyLive do
         </.button>
       </.form>
 
-      <p :if={@records == []} class="text-sm text-base-content/60">
-        {@labels.none_yet}
-      </p>
+      <.empty_state
+        :if={@records == []}
+        id={"taxonomy-empty-#{@kind.key}"}
+        icon="hero-tag"
+        title={@labels.none_yet}
+        compact
+      >
+        {gettext("Add the first one with the form above.")}
+      </.empty_state>
 
       <ul :if={@records != [] and is_nil(@grouped)} class="card divide-y divide-base-content/10">
         <.taxonomy_row

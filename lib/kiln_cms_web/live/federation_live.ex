@@ -426,9 +426,15 @@ defmodule KilnCMSWeb.FederationLive do
               {gettext("%{count} will be delivered to", count: @deliverable_count)}
             </span>
           </h2>
-          <p :if={@followers == []} class="text-sm text-base-content/60">
-            {gettext("Nobody follows this site yet.")}
-          </p>
+          <.empty_state
+            :if={@followers == []}
+            id="federation-followers-empty"
+            icon="hero-users"
+            title={gettext("Nobody follows this site yet.")}
+            compact
+          >
+            {gettext("Fediverse accounts that follow this site appear here.")}
+          </.empty_state>
           <div :if={@followers != []} class="card overflow-x-auto">
             <table class="table" id="followers-table">
               <thead>

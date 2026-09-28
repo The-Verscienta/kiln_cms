@@ -166,9 +166,11 @@ defmodule KilnCMSWeb.FormLive do
     >
       <div class="space-y-8">
         <div>
-          <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
-            &larr; {gettext("All content")}
-          </.link>
+          <Layouts.console_crumb
+            current_user={@current_user}
+            current_org={@current_org}
+            active={:forms}
+          />
           <div class="mt-1 flex flex-wrap items-center justify-between gap-3">
             <h1 class="text-2xl font-semibold">{gettext("Forms")}</h1>
             <.link navigate={~p"/editor/forms/settings"} class="btn btn-ghost btn-sm">

@@ -523,455 +523,504 @@ defmodule KilnCMSWeb.SettingsLive do
           </p>
         </div>
 
-        <%!-- The sidebar preset — the same choice as the switch at the foot of
+        <.page_with_toc
+          id="settings-toc"
+          items={settings_toc(@push_available?)}
+          class="max-w-4xl"
+        >
+          <div class="space-y-6">
+            <%!-- The sidebar preset — the same choice as the switch at the foot of
               the sidebar, and the same event (`KilnCMSWeb.NavPreset`), which
               updates `@current_user` so both redraw together. --%>
-        <section id="settings-sidebar" class="card card-pad max-w-xl">
-          <h2 class="mb-1 text-lg font-medium">{gettext("Sidebar")}</h2>
-          <p class="mb-4 text-sm text-base-content/60">
-            {gettext(
-              "Every screen stays in search (⌘K) either way; this only decides what the sidebar lists."
-            )}
-          </p>
-          <div class="flex flex-wrap gap-2" role="group" aria-label={gettext("Sidebar")}>
-            <button
-              :for={
-                {value, label} <- [
-                  {"essentials", gettext("Essentials")},
-                  {"everything", gettext("Everything")}
-                ]
-              }
-              type="button"
-              id={"settings-nav-preset-#{value}"}
-              phx-click="set_nav_preset"
-              phx-value-preset={value}
-              aria-pressed={to_string(nav_preset_value(@current_user) == value)}
-              class={[
-                "btn btn-sm",
-                nav_preset_value(@current_user) == value && "btn-primary"
-              ]}
-            >
-              {label}
-            </button>
-          </div>
-          <p class="mt-3 text-xs text-base-content/60">
-            {if nav_preset_value(@current_user) == "essentials",
-              do:
-                gettext(
-                  "Essentials: Home, Content, Media, Calendar, Tasks and Inbox, then Configure and Your settings."
-                ),
-              else: gettext("Everything: every screen you can open, grouped by section.")}
-          </p>
-        </section>
-
-        <%!-- How the content list marks each row (#1323). Words by default;
-              the trigram glyph is kept for the people who read it. --%>
-        <section id="settings-status-marks" class="card card-pad max-w-xl">
-          <h2 class="mb-1 text-lg font-medium">{gettext("Content list")}</h2>
-          <p class="mb-4 text-sm text-base-content/60">
-            {gettext(
-              "How each item in the content list shows whether it is published, translated and scheduled."
-            )}
-          </p>
-          <div class="flex flex-wrap gap-2" role="group" aria-label={gettext("Status marks")}>
-            <button
-              :for={
-                {value, label} <- [
-                  {:words, gettext("Words")},
-                  {:trigrams, gettext("Trigram glyphs")}
-                ]
-              }
-              type="button"
-              id={"settings-status-marks-#{value}"}
-              phx-click="set_status_marks"
-              phx-value-marks={value}
-              aria-pressed={to_string(status_marks(@current_user) == value)}
-              class={["btn btn-sm", status_marks(@current_user) == value && "btn-primary"]}
-            >
-              {label}
-            </button>
-          </div>
-          <p class="mt-3 text-xs text-base-content/60">
-            {if status_marks(@current_user) == :trigrams,
-              do:
-                gettext(
-                  "Trigram glyphs: three lines per item — published at the bottom, translated in the middle, scheduled on top; solid means yes. Hover one for its reading."
-                ),
-              else:
-                gettext(
-                  "Words: the state badge, the date an item publishes or unpublishes, and “Missing translations” when a language is still to do."
+            <section id="settings-sidebar" class="card card-pad max-w-xl scroll-mt-24">
+              <h2 class="mb-1 text-lg font-medium">{gettext("Sidebar")}</h2>
+              <p class="mb-4 text-sm text-base-content/60">
+                {gettext(
+                  "Every screen stays in search (⌘K) either way; this only decides what the sidebar lists."
                 )}
-          </p>
-        </section>
+              </p>
+              <div class="flex flex-wrap gap-2" role="group" aria-label={gettext("Sidebar")}>
+                <button
+                  :for={
+                    {value, label} <- [
+                      {"essentials", gettext("Essentials")},
+                      {"everything", gettext("Everything")}
+                    ]
+                  }
+                  type="button"
+                  id={"settings-nav-preset-#{value}"}
+                  phx-click="set_nav_preset"
+                  phx-value-preset={value}
+                  aria-pressed={to_string(nav_preset_value(@current_user) == value)}
+                  class={[
+                    "btn btn-sm",
+                    nav_preset_value(@current_user) == value && "btn-primary"
+                  ]}
+                >
+                  {label}
+                </button>
+              </div>
+              <p class="mt-3 text-xs text-base-content/60">
+                {if nav_preset_value(@current_user) == "essentials",
+                  do:
+                    gettext(
+                      "Essentials: Home, Content, Media, Calendar, Tasks and Inbox, then Configure and Your settings."
+                    ),
+                  else: gettext("Everything: every screen you can open, grouped by section.")}
+              </p>
+            </section>
 
-        <section class="card card-pad max-w-xl">
-          <h2 class="mb-1 text-lg font-medium">{gettext("Profile")}</h2>
-          <p class="mb-4 text-sm text-base-content/60">
-            {gettext("Your display name is used as the author byline on content you publish.")}
-          </p>
+            <%!-- How the content list marks each row (#1323). Words by default;
+              the trigram glyph is kept for the people who read it. --%>
+            <section id="settings-status-marks" class="card card-pad max-w-xl scroll-mt-24">
+              <h2 class="mb-1 text-lg font-medium">{gettext("Content list")}</h2>
+              <p class="mb-4 text-sm text-base-content/60">
+                {gettext(
+                  "How each item in the content list shows whether it is published, translated and scheduled."
+                )}
+              </p>
+              <div class="flex flex-wrap gap-2" role="group" aria-label={gettext("Status marks")}>
+                <button
+                  :for={
+                    {value, label} <- [
+                      {:words, gettext("Words")},
+                      {:trigrams, gettext("Trigram glyphs")}
+                    ]
+                  }
+                  type="button"
+                  id={"settings-status-marks-#{value}"}
+                  phx-click="set_status_marks"
+                  phx-value-marks={value}
+                  aria-pressed={to_string(status_marks(@current_user) == value)}
+                  class={["btn btn-sm", status_marks(@current_user) == value && "btn-primary"]}
+                >
+                  {label}
+                </button>
+              </div>
+              <p class="mt-3 text-xs text-base-content/60">
+                {if status_marks(@current_user) == :trigrams,
+                  do:
+                    gettext(
+                      "Trigram glyphs: three lines per item — published at the bottom, translated in the middle, scheduled on top; solid means yes. Hover one for its reading."
+                    ),
+                  else:
+                    gettext(
+                      "Words: the state badge, the date an item publishes or unpublishes, and “Missing translations” when a language is still to do."
+                    )}
+              </p>
+            </section>
 
-          <.form
-            for={@profile_form}
-            id="profile-form"
-            phx-change="validate_profile"
-            phx-submit="save_profile"
-            class="space-y-3"
-          >
-            <.input field={@profile_form[:name]} type="text" label={gettext("Display name")} />
-            <.button type="submit" variant="primary">{gettext("Save profile")}</.button>
-          </.form>
-        </section>
+            <section id="settings-profile" class="card card-pad max-w-xl scroll-mt-24">
+              <h2 class="mb-1 text-lg font-medium">{gettext("Profile")}</h2>
+              <p class="mb-4 text-sm text-base-content/60">
+                {gettext("Your display name is used as the author byline on content you publish.")}
+              </p>
 
-        <section class="card card-pad max-w-xl">
-          <h2 class="mb-1 text-lg font-medium">{gettext("Password")}</h2>
-          <p class="mb-4 text-sm text-base-content/60">
-            {gettext("Enter your current password, then choose a new one (at least 8 characters).")}
-          </p>
+              <.form
+                for={@profile_form}
+                id="profile-form"
+                phx-change="validate_profile"
+                phx-submit="save_profile"
+                class="space-y-3"
+              >
+                <.input field={@profile_form[:name]} type="text" label={gettext("Display name")} />
+                <.button type="submit" variant="primary">{gettext("Save profile")}</.button>
+              </.form>
+            </section>
 
-          <.demo_locked_note :if={@credentials_locked?} />
-          <.form
-            :if={!@credentials_locked?}
-            for={@password_form}
-            id="password-form"
-            phx-change="validate_password"
-            phx-submit="save_password"
-            class="space-y-3"
-          >
-            <.input
-              field={@password_form[:current_password]}
-              type="password"
-              label={gettext("Current password")}
-              autocomplete="current-password"
-            />
-            <.input
-              field={@password_form[:password]}
-              type="password"
-              label={gettext("New password")}
-              autocomplete="new-password"
-            />
-            <.input
-              field={@password_form[:password_confirmation]}
-              type="password"
-              label={gettext("Confirm new password")}
-              autocomplete="new-password"
-            />
-            <.button type="submit" variant="primary">{gettext("Change password")}</.button>
-          </.form>
-        </section>
+            <section id="settings-password" class="card card-pad max-w-xl scroll-mt-24">
+              <h2 class="mb-1 text-lg font-medium">{gettext("Password")}</h2>
+              <p class="mb-4 text-sm text-base-content/60">
+                {gettext(
+                  "Enter your current password, then choose a new one (at least 8 characters)."
+                )}
+              </p>
 
-        <section class="card card-pad max-w-xl">
-          <h2 class="mb-1 text-lg font-medium">{gettext("Two-factor authentication")}</h2>
-          <p class="mb-4 text-sm text-base-content/60">
-            {gettext(
-              "Require a time-based code from an authenticator app (Google Authenticator, 1Password, …) as a second factor when you sign in."
-            )}
-          </p>
+              <.demo_locked_note :if={@credentials_locked?} />
+              <.form
+                :if={!@credentials_locked?}
+                for={@password_form}
+                id="password-form"
+                phx-change="validate_password"
+                phx-submit="save_password"
+                class="space-y-3"
+              >
+                <.input
+                  field={@password_form[:current_password]}
+                  type="password"
+                  label={gettext("Current password")}
+                  autocomplete="current-password"
+                />
+                <.input
+                  field={@password_form[:password]}
+                  type="password"
+                  label={gettext("New password")}
+                  autocomplete="new-password"
+                />
+                <.input
+                  field={@password_form[:password_confirmation]}
+                  type="password"
+                  label={gettext("Confirm new password")}
+                  autocomplete="new-password"
+                />
+                <.button type="submit" variant="primary">{gettext("Change password")}</.button>
+              </.form>
+            </section>
 
-          <div
-            :if={@recovery_codes}
-            class="mb-4 space-y-2 rounded-lg border border-warning/50 bg-warning/10 p-4"
-          >
-            <p class="text-sm font-medium">
-              {gettext("Your recovery codes — save them now, they won't be shown again.")}
-            </p>
-            <p class="text-xs text-base-content/70">
-              {gettext("Each code signs you in once if you lose your authenticator.")}
-            </p>
-            <ul class="grid grid-cols-2 gap-x-6 gap-y-1 font-mono text-sm" data-role="recovery-codes">
-              <li :for={code <- @recovery_codes}>{code}</li>
-            </ul>
-            <button type="button" phx-click="dismiss_recovery_codes" class="btn btn-sm btn-default">
-              {gettext("I've saved them")}
-            </button>
-          </div>
+            <section id="settings-two-factor" class="card card-pad max-w-xl scroll-mt-24">
+              <h2 class="mb-1 text-lg font-medium">{gettext("Two-factor authentication")}</h2>
+              <p class="mb-4 text-sm text-base-content/60">
+                {gettext(
+                  "Require a time-based code from an authenticator app (Google Authenticator, 1Password, …) as a second factor when you sign in."
+                )}
+              </p>
 
-          <.demo_locked_note :if={@credentials_locked?} />
+              <div
+                :if={@recovery_codes}
+                class="mb-4 space-y-2 rounded-lg border border-warning/50 bg-warning/10 p-4"
+              >
+                <p class="text-sm font-medium">
+                  {gettext("Your recovery codes — save them now, they won't be shown again.")}
+                </p>
+                <p class="text-xs text-base-content/70">
+                  {gettext("Each code signs you in once if you lose your authenticator.")}
+                </p>
+                <ul
+                  class="grid grid-cols-2 gap-x-6 gap-y-1 font-mono text-sm"
+                  data-role="recovery-codes"
+                >
+                  <li :for={code <- @recovery_codes}>{code}</li>
+                </ul>
+                <button
+                  type="button"
+                  phx-click="dismiss_recovery_codes"
+                  class="btn btn-sm btn-default"
+                >
+                  {gettext("I've saved them")}
+                </button>
+              </div>
 
-          <div :if={@totp_enabled? && !@enrolling && !@credentials_locked?} class="space-y-3">
-            <p class="flex items-center gap-1.5 text-sm font-medium text-success">
-              <.icon name="hero-shield-check" class="size-4" />
-              {gettext("Two-factor authentication is on.")}
-            </p>
-            <p class="text-sm text-base-content/70">
-              {gettext("%{count} unused recovery codes remain.",
-                count: length(@current_user.totp_recovery_hashes || [])
-              )}
-            </p>
-            <%!-- After a recovery-code sign-in the live authenticator may be
+              <.demo_locked_note :if={@credentials_locked?} />
+
+              <div :if={@totp_enabled? && !@enrolling && !@credentials_locked?} class="space-y-3">
+                <p class="flex items-center gap-1.5 text-sm font-medium text-success">
+                  <.icon name="hero-shield-check" class="size-4" />
+                  {gettext("Two-factor authentication is on.")}
+                </p>
+                <p class="text-sm text-base-content/70">
+                  {gettext("%{count} unused recovery codes remain.",
+                    count: length(@current_user.totp_recovery_hashes || [])
+                  )}
+                </p>
+                <%!-- After a recovery-code sign-in the live authenticator may be
                   gone; surface re-enrolment (backend already accepts
                   `recovery_login?`) instead of only disable/regenerate forms
                   that still need a live code. --%>
-            <div
-              :if={@recovery_login?}
-              class="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm"
+                <div
+                  :if={@recovery_login?}
+                  class="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm"
+                >
+                  <p class="font-medium text-warning-content">
+                    {gettext("You signed in with a recovery code.")}
+                  </p>
+                  <p class="mt-1 text-base-content/70">
+                    {gettext(
+                      "Set up a new authenticator app so you can keep signing in without using another recovery code."
+                    )}
+                  </p>
+                  <.button phx-click="start_totp" variant="primary" class="mt-3">
+                    {gettext("Set up a new authenticator")}
+                  </.button>
+                </div>
+                <form
+                  id="regenerate-recovery-form"
+                  phx-submit="regenerate_recovery_codes"
+                  class="flex items-end gap-2"
+                >
+                  <.input
+                    name="code"
+                    value=""
+                    type="text"
+                    inputmode="numeric"
+                    autocomplete="one-time-code"
+                    label={gettext("Enter a current code to generate new recovery codes")}
+                  />
+                  <.button type="submit" variant="ghost">{gettext("Regenerate")}</.button>
+                </form>
+                <form id="disable-totp-form" phx-submit="disable_totp" class="flex items-end gap-2">
+                  <.input
+                    name="code"
+                    value=""
+                    type="text"
+                    inputmode="numeric"
+                    autocomplete="one-time-code"
+                    label={gettext("Enter a current code to turn it off")}
+                  />
+                  <.button type="submit" variant="danger">{gettext("Disable")}</.button>
+                </form>
+              </div>
+
+              <div :if={@enrolling && !@credentials_locked?} class="space-y-3">
+                <p class="text-sm text-base-content/70">
+                  {gettext(
+                    "Scan the QR code (or add the key) in your authenticator app, then enter the 6-digit code to confirm."
+                  )}
+                </p>
+                <.totp_qr :if={@enrolling.qr_svg} svg={@enrolling.qr_svg} />
+                <p class="text-sm">
+                  {gettext("Setup key")}:
+                  <code class="rounded bg-base-200 px-1.5 py-0.5 font-mono text-sm break-all">{@enrolling.secret}</code>
+                </p>
+                <details class="text-xs text-base-content/60">
+                  <summary class="cursor-pointer">{gettext("Provisioning URI")}</summary>
+                  <code class="break-all">{@enrolling.uri}</code>
+                </details>
+                <form id="confirm-totp-form" phx-submit="confirm_totp" class="flex items-end gap-2">
+                  <.input
+                    name="code"
+                    value=""
+                    type="text"
+                    inputmode="numeric"
+                    autocomplete="one-time-code"
+                    label={gettext("6-digit code")}
+                  />
+                  <.button type="submit" variant="primary">{gettext("Confirm")}</.button>
+                  <button type="button" phx-click="cancel_totp" class="btn btn-default">
+                    {gettext("Cancel")}
+                  </button>
+                </form>
+              </div>
+
+              <div :if={!@totp_enabled? && !@enrolling && !@credentials_locked?}>
+                <.button phx-click="start_totp" variant="primary">
+                  {gettext("Enable two-factor authentication")}
+                </.button>
+              </div>
+            </section>
+
+            <section
+              class="card card-pad max-w-xl scroll-mt-24"
+              id="passkeys"
+              phx-hook="PasskeyEnroll"
             >
-              <p class="font-medium text-warning-content">
-                {gettext("You signed in with a recovery code.")}
-              </p>
-              <p class="mt-1 text-base-content/70">
+              <h2 class="mb-1 text-lg font-medium">{gettext("Passkeys")}</h2>
+              <p class="mb-4 text-sm text-base-content/60">
                 {gettext(
-                  "Set up a new authenticator app so you can keep signing in without using another recovery code."
+                  "Sign in with your device's fingerprint, face, or PIN instead of a password. A passkey verifies you on the device, so it counts as two factors on its own."
                 )}
               </p>
-              <.button phx-click="start_totp" variant="primary" class="mt-3">
-                {gettext("Set up a new authenticator")}
-              </.button>
-            </div>
-            <form
-              id="regenerate-recovery-form"
-              phx-submit="regenerate_recovery_codes"
-              class="flex items-end gap-2"
-            >
-              <.input
-                name="code"
-                value=""
-                type="text"
-                inputmode="numeric"
-                autocomplete="one-time-code"
-                label={gettext("Enter a current code to generate new recovery codes")}
-              />
-              <.button type="submit" variant="ghost">{gettext("Regenerate")}</.button>
-            </form>
-            <form id="disable-totp-form" phx-submit="disable_totp" class="flex items-end gap-2">
-              <.input
-                name="code"
-                value=""
-                type="text"
-                inputmode="numeric"
-                autocomplete="one-time-code"
-                label={gettext("Enter a current code to turn it off")}
-              />
-              <.button type="submit" variant="danger">{gettext("Disable")}</.button>
-            </form>
-          </div>
 
-          <div :if={@enrolling && !@credentials_locked?} class="space-y-3">
-            <p class="text-sm text-base-content/70">
-              {gettext(
-                "Scan the QR code (or add the key) in your authenticator app, then enter the 6-digit code to confirm."
-              )}
-            </p>
-            <.totp_qr :if={@enrolling.qr_svg} svg={@enrolling.qr_svg} />
-            <p class="text-sm">
-              {gettext("Setup key")}:
-              <code class="rounded bg-base-200 px-1.5 py-0.5 font-mono text-sm break-all">{@enrolling.secret}</code>
-            </p>
-            <details class="text-xs text-base-content/60">
-              <summary class="cursor-pointer">{gettext("Provisioning URI")}</summary>
-              <code class="break-all">{@enrolling.uri}</code>
-            </details>
-            <form id="confirm-totp-form" phx-submit="confirm_totp" class="flex items-end gap-2">
-              <.input
-                name="code"
-                value=""
-                type="text"
-                inputmode="numeric"
-                autocomplete="one-time-code"
-                label={gettext("6-digit code")}
-              />
-              <.button type="submit" variant="primary">{gettext("Confirm")}</.button>
-              <button type="button" phx-click="cancel_totp" class="btn btn-default">
-                {gettext("Cancel")}
-              </button>
-            </form>
-          </div>
-
-          <div :if={!@totp_enabled? && !@enrolling && !@credentials_locked?}>
-            <.button phx-click="start_totp" variant="primary">
-              {gettext("Enable two-factor authentication")}
-            </.button>
-          </div>
-        </section>
-
-        <section class="card card-pad max-w-xl" id="passkeys" phx-hook="PasskeyEnroll">
-          <h2 class="mb-1 text-lg font-medium">{gettext("Passkeys")}</h2>
-          <p class="mb-4 text-sm text-base-content/60">
-            {gettext(
-              "Sign in with your device's fingerprint, face, or PIN instead of a password. A passkey verifies you on the device, so it counts as two factors on its own."
-            )}
-          </p>
-
-          <ul :if={@passkeys != []} class="mb-4 divide-y divide-base-content/10">
-            <li
-              :for={passkey <- @passkeys}
-              class="flex items-center justify-between gap-3 py-2"
-              id={"passkey-#{passkey.id}"}
-            >
-              <div class="min-w-0">
-                <p class="truncate text-sm font-medium">{passkey.name}</p>
-                <p class="text-xs text-base-content/60">
-                  {gettext("Added %{date}",
-                    date: Calendar.strftime(passkey.inserted_at, "%Y-%m-%d")
-                  )}
-                  <span :if={passkey.last_used_at}>
-                    · {gettext("last used %{date}",
-                      date: Calendar.strftime(passkey.last_used_at, "%Y-%m-%d")
-                    )}
-                  </span>
-                </p>
-              </div>
-              <button
-                :if={!@credentials_locked?}
-                type="button"
-                phx-click="remove_passkey"
-                phx-value-id={passkey.id}
-                data-confirm={gettext("Remove this passkey? You can no longer sign in with it.")}
-                aria-label={gettext("Remove passkey")}
-                class="btn btn-sm btn-ghost text-base-content/60 hover:text-error"
-              >
-                <.icon name="hero-trash" class="size-4" />
-              </button>
-            </li>
-          </ul>
-
-          <.demo_locked_note :if={@credentials_locked?} />
-          <form
-            :if={!@credentials_locked?}
-            phx-submit="passkey_begin"
-            class="flex items-end gap-2"
-            id="add-passkey-form"
-          >
-            <.input
-              name="name"
-              value=""
-              type="text"
-              label={gettext("Name (e.g. \"MacBook Touch ID\")")}
-              placeholder={gettext("Passkey")}
-            />
-            <.button type="submit" variant="primary">{gettext("Add a passkey")}</.button>
-          </form>
-          <p :if={!@credentials_locked?} class="mt-2 text-xs text-base-content/60">
-            {gettext("Your browser will prompt you to confirm with this device's screen lock.")}
-          </p>
-        </section>
-
-        <section class="card card-pad max-w-xl">
-          <h2 class="mb-1 text-lg font-medium">{gettext("Email notifications")}</h2>
-          <p class="mb-4 text-sm text-base-content/60">
-            {gettext("All notifications are on by default. Uncheck any you'd rather not receive.")}
-          </p>
-
-          <.form
-            for={@form}
-            id="notification-prefs-form"
-            phx-change="validate"
-            phx-submit="save"
-            class="space-y-3"
-          >
-            <.input
-              field={@form[:notify_on_review_request]}
-              type="checkbox"
-              label={gettext("Review requested — content I can approve was submitted for review")}
-            />
-            <.input
-              field={@form[:notify_on_publish]}
-              type="checkbox"
-              label={gettext("Published — content I authored went live")}
-            />
-            <.input
-              field={@form[:notify_on_return_to_draft]}
-              type="checkbox"
-              label={gettext("Changes requested — content I authored was returned to draft")}
-            />
-            <.input
-              field={@form[:notify_on_comment]}
-              type="checkbox"
-              label={gettext("Comments — replies on threads I'm in, and when someone @mentions me")}
-            />
-
-            <.button type="submit" variant="primary">
-              {gettext("Save preferences")}
-            </.button>
-          </.form>
-        </section>
-
-        <section :if={@push_available?} id="push-settings" class="card card-pad max-w-xl">
-          <h2 class="mb-1 text-lg font-medium">{gettext("Push notifications")}</h2>
-          <p class="mb-4 text-sm text-base-content/60">
-            {gettext(
-              "Get a notification on this device when something needs your review. Install KilnCMS to your home screen first — on iPhone and iPad, notifications only work for the installed app."
-            )}
-          </p>
-
-          <p class="mb-3 text-xs text-base-content/60">
-            {gettext(
-              "Notifications never contain draft content — only that something is waiting, and what kind."
-            )}
-          </p>
-
-          <button
-            id="push-toggle"
-            type="button"
-            phx-hook="PushToggle"
-            data-vapid-key={@push_key}
-            data-enabled={to_string(@push_subscribed?)}
-            disabled={not @push_supported?}
-            class={[
-              "btn btn-sm",
-              if(@push_subscribed?, do: "btn-default", else: "btn-primary"),
-              not @push_supported? && "opacity-50"
-            ]}
-          >
-            {if @push_subscribed?,
-              do: gettext("Turn off on this device"),
-              else: gettext("Turn on for this device")}
-          </button>
-
-          <p :if={not @push_supported?} class="mt-2 text-sm text-base-content/60">
-            {gettext(
-              "This browser can't receive push notifications. On iPhone and iPad they need iOS 16.4 or later and the app added to your home screen."
-            )}
-          </p>
-
-          <p :if={@push_note} class="mt-2 text-sm text-warning">{@push_note}</p>
-
-          <div :if={@push_devices != []} class="mt-4">
-            <h3 class="mb-2 text-sm font-medium">{gettext("Devices receiving notifications")}</h3>
-            <ul class="space-y-2">
-              <li
-                :for={device <- @push_devices}
-                class="flex items-center justify-between gap-3 rounded border border-base-content/10 px-3 py-2 text-sm"
-              >
-                <span>
-                  {device.label}
-                  <span class="ml-2 text-xs text-base-content/50">
-                    {if device.last_delivered_at,
-                      do: gettext("last used %{ago} ago", ago: ago(device.last_delivered_at)),
-                      else: gettext("not used yet")}
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  phx-click="remove_push_device"
-                  data-confirm={gettext("Stop sending notifications to this device?")}
-                  phx-value-id={device.id}
-                  class="btn btn-sm btn-ghost"
+              <ul :if={@passkeys != []} class="mb-4 divide-y divide-base-content/10">
+                <li
+                  :for={passkey <- @passkeys}
+                  class="flex items-center justify-between gap-3 py-2"
+                  id={"passkey-#{passkey.id}"}
                 >
-                  {gettext("Remove")}
-                </button>
-              </li>
-            </ul>
+                  <div class="min-w-0">
+                    <p class="truncate text-sm font-medium">{passkey.name}</p>
+                    <p class="text-xs text-base-content/60">
+                      {gettext("Added %{date}",
+                        date: Calendar.strftime(passkey.inserted_at, "%Y-%m-%d")
+                      )}
+                      <span :if={passkey.last_used_at}>
+                        · {gettext("last used %{date}",
+                          date: Calendar.strftime(passkey.last_used_at, "%Y-%m-%d")
+                        )}
+                      </span>
+                    </p>
+                  </div>
+                  <button
+                    :if={!@credentials_locked?}
+                    type="button"
+                    phx-click="remove_passkey"
+                    phx-value-id={passkey.id}
+                    data-confirm={gettext("Remove this passkey? You can no longer sign in with it.")}
+                    aria-label={gettext("Remove passkey")}
+                    class="btn btn-sm btn-ghost text-base-content/60 hover:text-error"
+                  >
+                    <.icon name="hero-trash" class="size-4" />
+                  </button>
+                </li>
+              </ul>
+
+              <.demo_locked_note :if={@credentials_locked?} />
+              <form
+                :if={!@credentials_locked?}
+                phx-submit="passkey_begin"
+                class="flex items-end gap-2"
+                id="add-passkey-form"
+              >
+                <.input
+                  name="name"
+                  value=""
+                  type="text"
+                  label={gettext("Name (e.g. \"MacBook Touch ID\")")}
+                  placeholder={gettext("Passkey")}
+                />
+                <.button type="submit" variant="primary">{gettext("Add a passkey")}</.button>
+              </form>
+              <p :if={!@credentials_locked?} class="mt-2 text-xs text-base-content/60">
+                {gettext("Your browser will prompt you to confirm with this device's screen lock.")}
+              </p>
+            </section>
+
+            <section id="settings-email-notifications" class="card card-pad max-w-xl scroll-mt-24">
+              <h2 class="mb-1 text-lg font-medium">{gettext("Email notifications")}</h2>
+              <p class="mb-4 text-sm text-base-content/60">
+                {gettext("All notifications are on by default. Uncheck any you'd rather not receive.")}
+              </p>
+
+              <.form
+                for={@form}
+                id="notification-prefs-form"
+                phx-change="validate"
+                phx-submit="save"
+                class="space-y-3"
+              >
+                <.input
+                  field={@form[:notify_on_review_request]}
+                  type="checkbox"
+                  label={gettext("Review requested — content I can approve was submitted for review")}
+                />
+                <.input
+                  field={@form[:notify_on_publish]}
+                  type="checkbox"
+                  label={gettext("Published — content I authored went live")}
+                />
+                <.input
+                  field={@form[:notify_on_return_to_draft]}
+                  type="checkbox"
+                  label={gettext("Changes requested — content I authored was returned to draft")}
+                />
+                <.input
+                  field={@form[:notify_on_comment]}
+                  type="checkbox"
+                  label={
+                    gettext("Comments — replies on threads I'm in, and when someone @mentions me")
+                  }
+                />
+
+                <.button type="submit" variant="primary">
+                  {gettext("Save preferences")}
+                </.button>
+              </.form>
+            </section>
+
+            <section
+              :if={@push_available?}
+              id="push-settings"
+              class="card card-pad max-w-xl scroll-mt-24"
+            >
+              <h2 class="mb-1 text-lg font-medium">{gettext("Push notifications")}</h2>
+              <p class="mb-4 text-sm text-base-content/60">
+                {gettext(
+                  "Get a notification on this device when something needs your review. Install KilnCMS to your home screen first — on iPhone and iPad, notifications only work for the installed app."
+                )}
+              </p>
+
+              <p class="mb-3 text-xs text-base-content/60">
+                {gettext(
+                  "Notifications never contain draft content — only that something is waiting, and what kind."
+                )}
+              </p>
+
+              <button
+                id="push-toggle"
+                type="button"
+                phx-hook="PushToggle"
+                data-vapid-key={@push_key}
+                data-enabled={to_string(@push_subscribed?)}
+                disabled={not @push_supported?}
+                class={[
+                  "btn btn-sm",
+                  if(@push_subscribed?, do: "btn-default", else: "btn-primary"),
+                  not @push_supported? && "opacity-50"
+                ]}
+              >
+                {if @push_subscribed?,
+                  do: gettext("Turn off on this device"),
+                  else: gettext("Turn on for this device")}
+              </button>
+
+              <p :if={not @push_supported?} class="mt-2 text-sm text-base-content/60">
+                {gettext(
+                  "This browser can't receive push notifications. On iPhone and iPad they need iOS 16.4 or later and the app added to your home screen."
+                )}
+              </p>
+
+              <p :if={@push_note} class="mt-2 text-sm text-warning">{@push_note}</p>
+
+              <div :if={@push_devices != []} class="mt-4">
+                <h3 class="mb-2 text-sm font-medium">{gettext("Devices receiving notifications")}</h3>
+                <ul class="space-y-2">
+                  <li
+                    :for={device <- @push_devices}
+                    class="flex items-center justify-between gap-3 rounded border border-base-content/10 px-3 py-2 text-sm"
+                  >
+                    <span>
+                      {device.label}
+                      <span class="ml-2 text-xs text-base-content/50">
+                        {if device.last_delivered_at,
+                          do: gettext("last used %{ago} ago", ago: ago(device.last_delivered_at)),
+                          else: gettext("not used yet")}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      phx-click="remove_push_device"
+                      data-confirm={gettext("Stop sending notifications to this device?")}
+                      phx-value-id={device.id}
+                      class="btn btn-sm btn-ghost"
+                    >
+                      {gettext("Remove")}
+                    </button>
+                  </li>
+                </ul>
+              </div>
+            </section>
+
+            <section id="settings-data" class="card card-pad max-w-xl scroll-mt-24">
+              <h2 class="mb-1 text-lg font-medium">{gettext("Your data")}</h2>
+              <p class="mb-4 text-sm text-base-content/60">
+                {gettext(
+                  "Download a copy of your account profile and notification preferences as JSON."
+                )}
+              </p>
+
+              <.link
+                href={~p"/editor/account/export.json"}
+                download="kiln-account-export.json"
+                class="btn btn-default"
+              >
+                <.icon name="hero-arrow-down-tray" class="h-4 w-4" />
+                {gettext("Export my data")}
+              </.link>
+            </section>
           </div>
-        </section>
-
-        <section class="card card-pad max-w-xl">
-          <h2 class="mb-1 text-lg font-medium">{gettext("Your data")}</h2>
-          <p class="mb-4 text-sm text-base-content/60">
-            {gettext("Download a copy of your account profile and notification preferences as JSON.")}
-          </p>
-
-          <.link
-            href={~p"/editor/account/export.json"}
-            download="kiln-account-export.json"
-            class="btn btn-default"
-          >
-            <.icon name="hero-arrow-down-tray" class="h-4 w-4" />
-            {gettext("Export my data")}
-          </.link>
-        </section>
+        </.page_with_toc>
       </div>
     </Layouts.console>
     """
+  end
+
+  # The "On this page" contents (#1680): one entry per section, in page order,
+  # each an id the section above carries. Push is listed only when its
+  # section renders — a link to a missing id would jump nowhere.
+  defp settings_toc(push_available?) do
+    Enum.reject(
+      [
+        {"settings-sidebar", gettext("Sidebar")},
+        {"settings-status-marks", gettext("Content list")},
+        {"settings-profile", gettext("Profile")},
+        {"settings-password", gettext("Password")},
+        {"settings-two-factor", gettext("Two-factor authentication")},
+        {"passkeys", gettext("Passkeys")},
+        {"settings-email-notifications", gettext("Email notifications")},
+        push_available? && {"push-settings", gettext("Push notifications")},
+        {"settings-data", gettext("Your data")}
+      ],
+      &(&1 == false)
+    )
   end
 
   # A spent second-factor budget (#727) and a wrong code are opposite advice:

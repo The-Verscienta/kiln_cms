@@ -83,8 +83,13 @@ Honest, not discouraging:
   answer.
 - **KilnCMS is pre-1.0** (see the status section in
   [the README](https://github.com/The-Verscienta/kiln_cms#status--maturity)).
-  Fixes land on `main` and reach you when you move your submodule pin; there
-  are no maintained release branches to backport to.
+  Fixes land on `main` and reach you when you move your submodule pin. Only
+  the latest minor release is supported; the one before it gets security
+  fixes for 90 days after its successor ships, from a short-lived branch off
+  its tag, and nothing else. That rule starts at 1.0.0 and applies within a
+  major: support for 0.x ends the day 1.0.0 ships, with no 90-day window for
+  0.12.x. There are no long-lived maintenance branches.
+  [SECURITY.md](SECURITY.md#supported-versions) has the table.
 
 ## If you are evaluating KilnCMS for a team
 

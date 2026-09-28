@@ -302,9 +302,11 @@ defmodule KilnCMSWeb.AnalyticsLive do
     >
       <div class="space-y-6">
         <div>
-          <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
-            &larr; {gettext("All content")}
-          </.link>
+          <Layouts.console_crumb
+            current_user={@current_user}
+            current_org={@current_org}
+            active={:analytics}
+          />
           <h1 class="mt-1 text-2xl font-semibold">{gettext("Analytics")}</h1>
           <p class="text-sm text-base-content/60">
             {gettext("Privacy-first content views — aggregate counts only, no visitor tracking.")}
