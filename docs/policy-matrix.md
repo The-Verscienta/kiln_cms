@@ -33,8 +33,10 @@ implied.
   applied by `KilnCMS.CMS.Checks.InAudience`): a member's
   `OrgMembership.audiences` for the site being served; `[]` for an actor
   affiliated elsewhere but not here (**fail-closed**, since the org comes from a
-  client-controlled host); the global `User.audiences` column only for accounts
-  with no memberships at all (pre-#336 data and single-org installs).
+  client-controlled host); `[]` for an account with no memberships at all. The
+  global `User.audiences` column is read by no policy: its fallback for
+  membership-less accounts was removed at 1.0 (#1543), and a post-deploy job
+  moves such accounts onto a default-org membership carrying it.
 - A published record is readable when its audience is `:public`, **or** its
   audience is one the reader holds *on that org*. Editors/admins see everything.
 

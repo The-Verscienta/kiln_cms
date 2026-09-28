@@ -83,7 +83,7 @@ defmodule KilnCMSWeb.EditorTagWindowTest do
 
     post = CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [zzz.id]}, actor: editor)
 
-    {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+    {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/content/post/#{post.id}")
 
     assert html =~ "Showing the first 3 tags"
     # The window, plus the attached tag from past it (the union), so detach

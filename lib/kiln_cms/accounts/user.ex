@@ -215,9 +215,10 @@ defmodule KilnCMS.Accounts.User do
       prepare AshAuthentication.Preparations.FilterBySubject
     end
 
-    # The accounts still reading gated content through the legacy
-    # `User.audiences` fallback (`KilnCMS.Accounts.Scoping.audiences/2`), which
-    # 1.0 removes (#1538): audiences held, and no membership anywhere. Backs
+    # The accounts that read gated content through the `User.audiences`
+    # fallback 1.0 removed (#1543) and have not been moved onto a membership
+    # yet: audiences held, and no membership anywhere. Backs the post-deploy
+    # safety net (`KilnCMS.Accounts.LegacyAudiencesWorker`) and
     # `mix kiln.deprecations` — see `KilnCMS.Deprecations`.
     read :legacy_audience_accounts do
       description "Accounts on the deprecated User.audiences fallback (operator report)."
@@ -1049,13 +1050,14 @@ defmodule KilnCMS.Accounts.User do
       public? false
     end
 
-    # Consumer-facing access tiers this user belongs to (the *read* axis, kept
-    # separate from `role` — see KilnCMS.CMS.Audiences). Gates which published,
-    # audience-restricted content the user may read. Empty by default, so a fresh
-    # account sees only `:public` content until an admin grants audiences via
-    # `:manage_access`. Not `public?` — it's access-control data, never part of
-    # the author byline, and the content read policy reads it off the actor
-    # struct regardless of API visibility.
+    # INERT since 1.0 (#1543): no access decision reads this column. Audiences
+    # are per org, on `OrgMembership.audiences` (`Scoping.audiences/2`); the
+    # membership-less fallback that read this column was deprecated in 0.12 and
+    # removed at 1.0. It is kept, not dropped, because dropping it would destroy
+    # the only record of what a legacy account held — `LegacyAudiencesWorker`
+    # copies it onto a membership after each deploy — and 2.0 may drop it.
+    # Billing still writes the cross-org union here (`Entitlements`), and the
+    # GDPR export reports it. Not `public?` — access-control data.
     attribute :audiences, {:array, :atom} do
       constraints items: [one_of: KilnCMS.CMS.Audiences.all()]
       default []

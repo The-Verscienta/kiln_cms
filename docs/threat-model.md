@@ -764,7 +764,7 @@ the provider. See [sso.md](sso.md#per-site-providers).
 - **Reaching another site** — a site's provider never signs in an account with
   access anywhere else: a platform admin (standing or temporary), a member of
   any other organization at any tier, or a membership-less account whose global
-  role or legacy audiences reach beyond the site. Checked at every sign-in, in
+  role reaches beyond the site. Checked at every sign-in, in
   `KilnCMS.Accounts.SiteSso.Admission`. Kiln has no site-scoped session, so the
   guarantee is made at admission. **Accepted:** a session such a provider
   minted before the account later gained access elsewhere keeps working until

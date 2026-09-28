@@ -118,8 +118,8 @@ The audience checkboxes set what gated content the account can read **on the
 site the page is served from**, and they write that site's `OrgMembership` —
 the value the read policy consults (see
 [Reading gated content](memberships.md#reading-gated-content)). They never
-write the global `User.audiences` column, which only the deprecated
-no-membership fallback reads. To edit another site's audiences, open the page on
+write the global `User.audiences` column, which no access decision reads since
+1.0 removed the no-membership fallback. To edit another site's audiences, open the page on
 that site's host.
 
 An account with no membership on the site gets one on the first save. Its role
