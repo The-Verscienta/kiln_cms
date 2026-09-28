@@ -54,6 +54,18 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Jobs already stuck `executing` from earlier deploys run again (or are
+  discarded) within a minute of upgrading.**
+  ([#1718](https://github.com/The-Verscienta/kiln_cms/issues/1718) · [long form](docs/changelog/unreleased.md#jobs-already-stuck-executing-from-earlier-deploys-run-again-or-are-discarded))
+
+### Fixed
+
+- **A job killed by a deploy's shutdown is rescued after three hours instead of
+  staying `executing` for ever.**
+  ([#1718](https://github.com/The-Verscienta/kiln_cms/issues/1718) · [long form](docs/changelog/unreleased.md#a-job-killed-by-a-deploys-shutdown-is-rescued-after-three-hours-instead-of))
+
 ## [0.12.0] - 2026-09-27
 
 Long form: [docs/changelog/v0.12.0.md](docs/changelog/v0.12.0.md) —

@@ -8,6 +8,15 @@ defmodule KilnCMS.Newsletter.SendWorker do
   triggering request never blocks on delivery and each recipient retries
   independently. Runs on the dedicated `:newsletter` queue so a large blast
   can't starve transactional `:mail`.
+
+  ## Safe to re-run
+
+  A second run of the same send — a retry after a crash part-way through the
+  fan-out, or a rescue by `Oban.Lifeline` after a deploy killed it (#1718) —
+  re-enqueues only the recipients the first run did not reach: `MailWorker`
+  is `unique` on `{newsletter_send_id, subscriber_id}` across every job
+  state, so a recipient who already has a job (queued, delivered, or
+  cancelled) is not mailed twice.
   """
   use Oban.Worker, queue: :newsletter, max_attempts: 3
 
