@@ -81,23 +81,29 @@ defmodule KilnCMS.Accounts.SiteAudiencesTest do
     do: Enum.find(memberships(user), &(&1.organization_id == org_id))
 
   describe "for_site/3" do
-    test "answers what Scoping.audiences/2 answers, on every branch" do
+    test "answers what Scoping.audiences/2 answers, for a member and a foreign account" do
       other = org()
 
       member = user()
       membership(member, default_org_id(), %{audiences: [@gated]})
 
-      legacy = user(%{audiences: [@gated]})
-
       foreign = user(%{audiences: [@gated]})
       membership(foreign, other.id, %{audiences: [@gated]})
 
-      for {account, source} <- [{member, :membership}, {legacy, :legacy}, {foreign, :none}] do
+      for {account, source} <- [{member, :membership}, {foreign, :none}] do
         assert {^source, audiences} =
                  SiteAudiences.for_site(account, memberships(account), default_org_id())
 
         assert audiences == Scoping.audiences(account, default_org_id())
       end
+    end
+
+    test "shows a membership-less account's column — what a save carries — which grants nothing" do
+      legacy = user(%{audiences: [@gated]})
+
+      assert {:legacy, [@gated]} = SiteAudiences.for_site(legacy, [], default_org_id())
+      # 1.0 removed the fallback (#1543): until a membership exists, nothing.
+      assert Scoping.audiences(legacy, default_org_id()) == []
     end
   end
 

@@ -77,7 +77,7 @@ defmodule KilnCMSWeb.ContentEditorStaleBlocksTest do
       editor = authed_editor()
       page = draft(editor, %{blocks: []})
 
-      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/pages/#{page.id}")
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
 
       render_click(lv, "add_block", %{"type" => "divider"})
       assert render(lv) =~ ~s(data-sort-id="0")
@@ -102,7 +102,7 @@ defmodule KilnCMSWeb.ContentEditorStaleBlocksTest do
       page = draft(editor, %{blocks: [%{type: :heading, content: "Old heading", order: 0}]})
       heading_id = block_id(page, 0)
 
-      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/pages/#{page.id}")
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
 
       # Prime the form the way a real session is primed: the first validate
       # carries the full rendered block list.
@@ -143,7 +143,7 @@ defmodule KilnCMSWeb.ContentEditorStaleBlocksTest do
       editor = authed_editor()
       page = draft(editor, %{blocks: []})
 
-      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/pages/#{page.id}")
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
 
       render_click(lv, "add_block", %{"type" => "divider"})
 
@@ -171,7 +171,7 @@ defmodule KilnCMSWeb.ContentEditorStaleBlocksTest do
       keep_id = block_id(page, 0)
       drop_id = block_id(page, 1)
 
-      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/pages/#{page.id}")
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
       lv |> form("#page-editor") |> render_change()
 
       render_click(lv, "remove_block", %{"bid" => drop_id})

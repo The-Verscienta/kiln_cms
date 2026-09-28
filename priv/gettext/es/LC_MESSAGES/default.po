@@ -13431,8 +13431,8 @@ msgstr "Esta cuenta escribió:"
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "This account belongs to no site yet, so these come from its account-wide audiences, which 1.0 stops reading. Saving gives it a membership here that carries them."
-msgstr "Esta cuenta aún no pertenece a ningún sitio, así que estas vienen de sus audiencias de cuenta, que la 1.0 deja de leer. Al guardar recibe aquí una membresía que las conserva."
+msgid "This account belongs to no site yet. These are its account-wide audiences, which no longer grant anything on their own: the next deploy moves them onto a membership on the default site, and saving gives it one here that carries them now."
+msgstr "Esta cuenta aún no pertenece a ningún sitio. Estas son sus audiencias de cuenta, que ya no dan acceso a nada por sí solas: el próximo despliegue las pasa a una membresía en el sitio predeterminado, y al guardar recibe ya aquí una membresía que las conserva."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format

@@ -187,7 +187,7 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
     "lib/kiln_cms/social/announcer.ex" => 6,
     "lib/kiln_cms/staging/scrub.ex" => 1,
     "lib/kiln_cms/webhooks.ex" => 2,
-    "lib/kiln_cms/webhooks/delivery_worker.ex" => 6,
+    "lib/kiln_cms/webhooks/delivery_worker.ex" => 5,
     "lib/mix/tasks/kiln.audit.verify.ex" => 1,
     "lib/mix/tasks/kiln.embed_all.ex" => 2,
     "lib/mix/tasks/kiln.experiment.ex" => 7,

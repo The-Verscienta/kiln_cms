@@ -54,6 +54,30 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **On 0.12, before `mix kiln.update --allow-major` to 1.0: run the block
+  backfill and `mix kiln.deprecations --migrate-audiences`, and drain the queue.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#on-012-before-upgrading-to-10))
+
+### Breaking
+
+- **Remove the `published?:` option on `use KilnCMS.CMS.Content`; passing it now
+  warns as an unknown option.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#remove-the-published-option))
+
+- **Remove the `/editor/pages/:id` and `/editor/posts/:id` editor routes; each
+  now answers with a `301` to `/editor/content/page|post/:id`.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#remove-the-editor-route-aliases))
+
+- **Remove the `User.audiences` fallback for accounts with no membership; a job
+  on every boot moves such accounts onto a default-organization membership.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#remove-the-user-audiences-fallback))
+
+- **Stop running webhook and newsletter jobs queued in a pre-0.12 argument
+  shape; each is cancelled with an error in the log.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#stop-running-pre-012-job-shapes))
+
 ### Added
 
 - **`mix kiln.migrations.check` fails a PR whose new migration breaks the

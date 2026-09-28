@@ -12,14 +12,16 @@ defmodule KilnCMS.CMS.AudienceAccessTest do
   alias KilnCMS.Accounts
   alias KilnCMS.CMS
 
+  # Audiences are read off a membership since 1.0 (#1543), not the user column.
   defp user(role, audiences \\ []) do
-    Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+    KilnCMS.Accounts.User
+    |> Ash.Seed.seed!(%{
       email: "aud-#{role}-#{System.unique_integer([:positive])}@example.com",
       hashed_password: Bcrypt.hash_pwd_salt("password123456"),
       confirmed_at: DateTime.utc_now(),
-      role: role,
-      audiences: audiences
+      role: role
     })
+    |> KilnCMS.OrgFixtures.grant_audiences(audiences)
   end
 
   describe "public_to_anonymous?/1 — the shared rule, and its direction" do

@@ -13431,7 +13431,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "This account belongs to no site yet, so these come from its account-wide audiences, which 1.0 stops reading. Saving gives it a membership here that carries them."
+msgid "This account belongs to no site yet. These are its account-wide audiences, which no longer grant anything on their own: the next deploy moves them onto a membership on the default site, and saving gives it one here that carries them now."
 msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex

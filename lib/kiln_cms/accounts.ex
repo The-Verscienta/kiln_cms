@@ -143,8 +143,9 @@ defmodule KilnCMS.Accounts do
       define :list_users, action: :read
       define :get_user, action: :read, get_by: [:id]
       define :get_user_by_email, action: :get_by_email, args: [:email]
-      # Accounts on the deprecated `User.audiences` fallback (#1538) — the
-      # `mix kiln.deprecations` report; system-only, pass `authorize?: false`.
+      # Accounts left on the `User.audiences` fallback 1.0 removed (#1543) — the
+      # post-deploy safety net and the `mix kiln.deprecations` report;
+      # system-only, pass `authorize?: false`.
       define :list_legacy_audience_accounts, action: :legacy_audience_accounts
       define :update_notification_prefs, action: :update_notification_prefs
       # The console sidebar preset — self only; pass `actor: user`.

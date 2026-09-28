@@ -146,12 +146,15 @@ defmodule KilnCMS.Accounts.Scoping do
       from a client-controlled host, so falling back to the global column there
       would let a member of one site read another's gated content by switching
       hosts;
-    * an **unaffiliated** actor (no memberships at all — pre-#336 data that missed
-      the backfill) keeps the legacy `User.audiences` column, so single-org
-      installs and legacy rows behave exactly as before.
+    * an **unaffiliated** actor (no memberships at all) gets `[]` too. Until 1.0
+      it read the global `User.audiences` column instead; 0.12 deprecated that
+      fallback and 1.0 removed it (#1543). `KilnCMS.Accounts.LegacyAudiencesWorker`
+      moves any account still relying on it onto a default-org membership after
+      each deploy, so an upgrade strands nobody.
 
-  `KilnCMS.Billing.Entitlements` writes both columns on every transition, so the
-  per-org value is already populated for anyone who bought through billing.
+  Audiences are granted only through a membership: billing
+  (`KilnCMS.Billing.Entitlements`) and the console's audience checkboxes
+  (`KilnCMS.Accounts.SiteAudiences`) both write the per-org value.
 
   Anonymous callers short-circuit to `[]` without a lookup — the delivery hot path
   never pays for this.
@@ -163,32 +166,8 @@ defmodule KilnCMS.Accounts.Scoping do
   def audiences(actor, subject) do
     case affiliation(actor, audience_org_id(subject)) do
       {:member, membership} -> list_of(membership, :audiences)
-      :unaffiliated -> legacy_audiences(actor)
+      :unaffiliated -> []
       :foreign_org -> []
-    end
-  end
-
-  # Deprecated in 0.12, removed at 1.0 (#1538): a membership-less account's
-  # audiences come from the global column, on every org. Warns once per account
-  # per boot, and only when the fallback grants something — an account with no
-  # audiences reads the same with or without it.
-  defp legacy_audiences(actor) do
-    case list_of(actor, :audiences) do
-      [] ->
-        []
-
-      audiences ->
-        KilnCMS.Deprecations.warn_once(
-          :legacy_user_audiences,
-          Map.get(actor, :id),
-          "Account #{Map.get(actor, :id)} reads gated content through the deprecated " <>
-            "User.audiences fallback (it holds audiences but no organization membership). " <>
-            "1.0 removes the fallback; run `mix kiln.deprecations --migrate-audiences` " <>
-            "to move such accounts onto a membership.",
-          user_id: Map.get(actor, :id)
-        )
-
-        audiences
     end
   end
 

@@ -286,7 +286,8 @@ defmodule KilnCMS.CMS.TypeDefinition do
       public?: true,
       constraints: [max_length: KilnCMS.Limits.line()]
 
-    # Mirror the Content macro's `:excerpt?` / `:published?` options.
+    # `has_excerpt` mirrors the Content macro's `:excerpt?` option; `has_published_feed` is
+    # informational (every type has the `:published` read).
     attribute :has_excerpt, :boolean, allow_nil?: false, default: false, public?: true
     attribute :has_published_feed, :boolean, allow_nil?: false, default: false, public?: true
 
