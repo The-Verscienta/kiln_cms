@@ -52,18 +52,21 @@ defmodule KilnCMSWeb.SearchApiPoolTest do
       handler,
       [:kiln_cms, :repo, :query],
       fn _event, measurements, meta, _config ->
-        if self() == test or test in Process.get(:"$callers", []) do
-          now = System.monotonic_time()
-          decoded = now - (measurements[:decode_time] || 0)
-          held = {decoded - (measurements[:query_time] || 0), decoded}
-          source = if write?(meta[:query]), do: {:write, meta[:source]}, else: meta[:source]
-          send(test, {:query, self(), source, held})
-        end
+        if self() == test or test in Process.get(:"$callers", []),
+          do: send(test, {:query, self(), source(meta), held(measurements)})
       end,
       nil
     )
 
     on_exit(fn -> :telemetry.detach(handler) end)
+  end
+
+  defp source(meta),
+    do: if(write?(meta[:query]), do: {:write, meta[:source]}, else: meta[:source])
+
+  defp held(measurements) do
+    decoded = System.monotonic_time() - (measurements[:decode_time] || 0)
+    {decoded - (measurements[:query_time] || 0), decoded}
   end
 
   defp write?(sql) when is_binary(sql), do: sql =~ ~r/^\s*INSERT/i
