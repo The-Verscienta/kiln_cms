@@ -93,7 +93,7 @@ newsletter subscribe POST.
 4. Continue `#1402` SystemActor migration.
 5. Delete or re-wire orphaned `SanitizeBlocks` (#10).
 6. Align media worker missing-`org_id` with `default_org_id()` (#13).
-7. Consider pinning `:collab_prototype, false` in `prod.exs` (Info).
+7. ~~Consider pinning `:collab_prototype, false` in `prod.exs` (Info).~~ Done (#1660).
 
 ## Method notes
 

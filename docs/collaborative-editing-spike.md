@@ -2,8 +2,8 @@
 
 > **Production status: disabled — prototype.** CRDT co-editing (simultaneous
 > typing in one rich-text block) is gated on `config :kiln_cms,
-> :collab_prototype`, which is set only in `config/dev.exs` and
-> `config/test.exs`. A production build refuses `/ws/collab` joins, so editors
+> :collab_prototype`, which is on only in `config/dev.exs` and
+> `config/test.exs` (`config/prod.exs` pins it off). A production build refuses `/ws/collab` joins, so editors
 > get presence, soft field locks and a conflict banner — not live co-editing.
 > Whether to finish and enable it is
 > [#1324](https://github.com/The-Verscienta/kiln_cms/issues/1324).

@@ -81,10 +81,10 @@ the router so preflights are answered before route matching).
 | Dev tools | `/dev/dashboard`, `/dev/mailbox`, `/admin`, `/gql/playground` | compile-gated off in prod | — |
 
 **`/ws/collab` is a prototype surface.** Its joins are refused unless
-`config :kiln_cms, :collab_prototype` is set, and that is set only in
-`config/dev.exs` and `config/test.exs` — so a production build carries the socket
-but accepts no CRDT session (#1324, and
-[collaborative-editing-spike.md](collaborative-editing-spike.md)). Everything
+`config :kiln_cms, :collab_prototype` is on, and it is on only in
+`config/dev.exs` and `config/test.exs` (`config/prod.exs` pins it `false`,
+#1660) — so a production build carries the socket but accepts no CRDT session
+(#1324, and [collaborative-editing-spike.md](collaborative-editing-spike.md)). Everything
 below about the collab room is modelled as if it were live, because that is the
 bar it has to clear before it can be enabled; it is not a live surface today.
 
