@@ -11,7 +11,9 @@ defmodule KilnCMSWeb.AutomationLiveTest do
   alias KilnCMS.Automation
   alias KilnCMS.Automation.Rule
   alias KilnCMS.Automation.Validations.ActionConfig
+  alias KilnCMS.CMS.ContentTypes
   alias KilnCMSWeb.AutomationLive.ConfigFields
+  alias KilnCMSWeb.AutomationLive.Wording
 
   @password "password123456"
 
@@ -34,6 +36,11 @@ defmodule KilnCMSWeb.AutomationLiveTest do
       })
 
     user
+  end
+
+  defp type_label(type) do
+    {label, _type} = Enum.find(ContentTypes.options(nil), &(elem(&1, 1) == type))
+    label
   end
 
   defp log_in(conn, user) do
@@ -82,11 +89,17 @@ defmodule KilnCMSWeb.AutomationLiveTest do
       )
       |> render_submit()
 
-      assert render(view) =~ "Notify on publish"
-      assert render(view) =~ "post.published"
-
       rule =
         Enum.find(Automation.list_rules!(authorize?: false), &(&1.name == "Notify on publish"))
+
+      # The rules list says what the rule does in words, not `post.published`.
+      assert has_element?(view, "#rule-#{rule.id}", "Notify on publish")
+
+      assert has_element?(
+               view,
+               "#rule-#{rule.id}",
+               "When #{type_label("post")} content is published, broadcast on “editorial”."
+             )
 
       assert rule.trigger_event == :published
       assert rule.action == :broadcast
@@ -118,17 +131,91 @@ defmodule KilnCMSWeb.AutomationLiveTest do
       )
       |> render_submit()
 
-      assert render(view) =~ "Notify on task assignment"
-      assert render(view) =~ "task.assigned"
-
       rule =
         Enum.find(
           Automation.list_rules!(authorize?: false),
           &(&1.name == "Notify on task assignment")
         )
 
+      assert has_element?(
+               view,
+               "#rule-#{rule.id}",
+               "When a task is assigned, broadcast on “tasks”."
+             )
+
       assert rule.trigger_event == :assigned
       assert rule.content_type == "task"
+    end
+
+    test "every reaction is a card that says what it does", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+
+      for action <- Rule.action_kinds() do
+        %{label: label} = Wording.action(action)
+
+        assert has_element?(
+                 view,
+                 ~s(#new-rule-form label[for="rule_action_#{action}"]),
+                 label
+               )
+      end
+
+      # The untouched form has the first reaction chosen, as the select did.
+      first = List.first(Rule.action_kinds())
+      assert has_element?(view, ~s(input#rule_action_#{first}[checked]))
+    end
+
+    test "the sentence the rule reads as follows the form as it changes", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+
+      assert has_element?(
+               view,
+               "#rule_summary",
+               "When any content is published, send an email."
+             )
+
+      view
+      |> form("#new-rule-form",
+        rule: %{content_type: "post", trigger_event: "updated", action: "invalidate_cache"}
+      )
+      |> render_change()
+
+      assert has_element?(
+               view,
+               "#rule_summary",
+               "When #{type_label("post")} content is updated, clear the cache."
+             )
+
+      # It is also the name field's placeholder: what a blank name becomes.
+      assert has_element?(
+               view,
+               ~s(#rule_name[placeholder="When #{type_label("post")} content is updated, clear the cache."])
+             )
+    end
+
+    test "a rule saved without a name is named by its sentence", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+
+      view
+      |> form("#new-rule-form",
+        rule: %{
+          name: "",
+          trigger_event: "published",
+          action: "send_email",
+          config: %{to: "ed@example.com"}
+        }
+      )
+      |> render_submit()
+
+      assert [rule] = Automation.list_rules!(authorize?: false)
+      assert rule.name == "When any content is published, email ed@example.com."
+
+      # The list shows the sentence once, as the name, not twice.
+      assert view
+             |> element("#rule-#{rule.id}")
+             |> render()
+             |> String.split("ed@example.com")
+             |> length() == 2
     end
 
     test "the settings are generated from the enforcing table", %{conn: conn} do
@@ -454,6 +541,29 @@ defmodule KilnCMSWeb.AutomationLiveTest do
 
       view |> element("#rule-#{rule.id} button[aria-label='Delete rule']") |> render_click()
       assert Automation.list_rules!(authorize?: false) == []
+    end
+  end
+
+  describe "Wording" do
+    test "words every trigger and reaction Rule has" do
+      # A new one would otherwise reach the builder as a raw atom.
+      for trigger <- Rule.triggers() do
+        assert Wording.trigger_phrase(trigger), "trigger #{trigger} has no wording"
+      end
+
+      for action <- Rule.action_kinds() do
+        assert Wording.action(action), "reaction #{action} has no card wording"
+      end
+    end
+
+    test "every trigger is offered, once" do
+      offered = for {_group, options} <- Wording.trigger_options(), {_label, t} <- options, do: t
+      assert Enum.sort(offered) == Enum.sort(Rule.triggers())
+    end
+
+    test "every reaction is on exactly one card" do
+      carded = for {_group, cards} <- Wording.action_groups(), {a, _card} <- cards, do: a
+      assert Enum.sort(carded) == Enum.sort(Rule.action_kinds())
     end
   end
 

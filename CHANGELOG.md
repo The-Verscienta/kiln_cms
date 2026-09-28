@@ -59,6 +59,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Automation rules are set up with ordinary fields instead of a JSON box.**
   ([long form](docs/changelog/unreleased.md#automation-rules-are-set-up-with-ordinary-fields-instead-of-a-json-box))
 
+- **The automation builder reads as steps and says each rule back as a
+  sentence.**
+  ([long form](docs/changelog/unreleased.md#the-automation-builder-reads-as-steps-and-says-each-rule-back-as-a-sentence))
+
 ## [0.12.0] - 2026-09-27
 
 Long form: [docs/changelog/v0.12.0.md](docs/changelog/v0.12.0.md) —
