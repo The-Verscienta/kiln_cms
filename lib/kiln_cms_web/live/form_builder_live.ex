@@ -17,6 +17,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
   alias KilnCMS.CMS.FormField
   alias KilnCMS.Forms.Autoresponder
   alias KilnCMS.Forms.EmbedPolicy
+  alias Phoenix.LiveView.ColocatedHook
 
   import KilnCMSWeb.BlockComponents, only: [public_form_field: 1, field_width_class: 1]
 
@@ -577,670 +578,729 @@ defmodule KilnCMSWeb.FormBuilderLive do
           </a>
         </div>
 
-        <nav class="flex flex-wrap gap-1 border-b border-base-content/10" role="tablist">
+        <script :type={ColocatedHook} name=".TabKeys">
+          // The WAI-ARIA tabs keyboard model on a server-driven tablist:
+          // Left/Right move to the neighbouring tab (wrapping), Home/End to the
+          // ends, and the tab is activated as it is focused. Tab itself leaves
+          // the list — only the selected tab is in the tab order (tabindex=0).
+          export default {
+            mounted() {
+              this.el.addEventListener("keydown", e => {
+                const tabs = Array.from(this.el.querySelectorAll('[role="tab"]'))
+                const i = tabs.indexOf(document.activeElement)
+                if (i === -1) return
+                const next = {
+                  ArrowRight: (i + 1) % tabs.length,
+                  ArrowLeft: (i - 1 + tabs.length) % tabs.length,
+                  Home: 0,
+                  End: tabs.length - 1,
+                }[e.key]
+                if (next === undefined) return
+                e.preventDefault()
+                tabs[next].focus()
+                tabs[next].click()
+              })
+            },
+          }
+        </script>
+
+        <div
+          id="form-builder-tabs"
+          class="tabs flex-wrap"
+          role="tablist"
+          aria-label={gettext("Form sections")}
+          phx-hook=".TabKeys"
+        >
           <button
             :for={tab <- [:fields, :general, :notifications, :confirmations, :embed, :entries]}
+            id={"form-builder-tab-#{tab}"}
             type="button"
             role="tab"
+            class="tab"
             aria-selected={to_string(@tab == tab)}
+            aria-controls={@tab == tab && "form-builder-panel"}
+            tabindex={if @tab == tab, do: "0", else: "-1"}
             phx-click="set_tab"
             phx-value-tab={tab}
-            class={[
-              "rounded-t px-3 py-2 text-sm",
-              @tab == tab && "border-b-2 border-primary font-medium text-primary-ink",
-              @tab != tab && "text-base-content/70 hover:text-base-content"
-            ]}
           >
             {tab_label(tab)}
           </button>
-        </nav>
+        </div>
 
-        <div :if={@tab == :fields} class="grid gap-4 lg:grid-cols-[13rem_minmax(0,1fr)_19rem]">
-          <%!-- Palette: click a type to append it to the form. --%>
-          <aside class="card card-pad h-fit space-y-1" aria-label={gettext("Add a field")}>
-            <h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/70">
-              {gettext("Add a field")}
-            </h2>
-            <button
-              :for={entry <- palette()}
-              type="button"
-              phx-click="add_field"
-              phx-value-type={entry.type}
-              class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-base-200"
-            >
-              <.icon name={entry.icon} class="size-4 text-base-content/60" />
-              {entry.label}
-            </button>
-          </aside>
-
-          <%!-- Canvas: the real public-form markup, one selectable card per field. --%>
-          <section class="card card-pad" aria-label={gettext("Form preview")}>
-            <p :if={@form.description} class="mb-3 text-sm text-base-content/70">
-              {@form.description}
-            </p>
-
-            <p
-              :if={@fields == []}
-              class="rounded border border-dashed border-base-300 p-6 text-center text-sm text-base-content/60"
-            >
-              {gettext("No fields yet — add one from the palette.")}
-            </p>
-
-            <div id="builder-canvas" phx-hook="Sortable" class="grid grid-cols-1 gap-3 sm:grid-cols-6">
-              <div
-                :for={field <- @fields}
-                data-sort-id={field.id}
-                class={[
-                  field_width_class(field),
-                  "group relative rounded-lg border p-3",
-                  @selected_id == field.id && "border-primary ring-1 ring-primary",
-                  @selected_id != field.id && "border-base-300 hover:border-primary/40"
-                ]}
+        <div
+          id="form-builder-panel"
+          role="tabpanel"
+          aria-labelledby={"form-builder-tab-#{@tab}"}
+          tabindex="0"
+          class="focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary rounded"
+        >
+          <div :if={@tab == :fields} class="grid gap-4 lg:grid-cols-[13rem_minmax(0,1fr)_19rem]">
+            <%!-- Palette: click a type to append it to the form. --%>
+            <aside class="card card-pad h-fit space-y-1" aria-label={gettext("Add a field")}>
+              <h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/70">
+                {gettext("Add a field")}
+              </h2>
+              <button
+                :for={entry <- palette()}
+                type="button"
+                phx-click="add_field"
+                phx-value-type={entry.type}
+                class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-base-200"
               >
+                <.icon name={entry.icon} class="size-4 text-base-content/60" />
+                {entry.label}
+              </button>
+            </aside>
+
+            <%!-- Canvas: the real public-form markup, one selectable card per field. --%>
+            <section class="card card-pad" aria-label={gettext("Form preview")}>
+              <p :if={@form.description} class="mb-3 text-sm text-base-content/70">
+                {@form.description}
+              </p>
+
+              <p
+                :if={@fields == []}
+                class="rounded border border-dashed border-base-300 p-6 text-center text-sm text-base-content/60"
+              >
+                {gettext("No fields yet — add one from the palette.")}
+              </p>
+
+              <div
+                id="builder-canvas"
+                phx-hook="Sortable"
+                class="grid grid-cols-1 gap-3 sm:grid-cols-6"
+              >
+                <div
+                  :for={field <- @fields}
+                  data-sort-id={field.id}
+                  class={[
+                    field_width_class(field),
+                    "group relative rounded-lg border p-3",
+                    @selected_id == field.id && "border-primary ring-1 ring-primary",
+                    @selected_id != field.id && "border-base-300 hover:border-primary/40"
+                  ]}
+                >
+                  <button
+                    type="button"
+                    phx-click="select_field"
+                    phx-value-id={field.id}
+                    aria-label={gettext("Edit field %{label}", label: field.label)}
+                    class="absolute inset-0 z-[5] cursor-pointer rounded-lg"
+                  ></button>
+
+                  <div class={[
+                    "absolute -top-2.5 right-2 z-10 gap-0.5 rounded border border-base-300 bg-base-100 px-0.5 shadow-sm",
+                    @selected_id == field.id && "flex",
+                    @selected_id != field.id && "hidden group-hover:flex"
+                  ]}>
+                    <button
+                      type="button"
+                      data-drag-handle
+                      aria-label={gettext("Reorder field %{label}", label: field.label)}
+                      class="cursor-grab active:cursor-grabbing p-1 text-base-content/60 hover:text-base-content"
+                    >
+                      <.icon name="hero-arrows-up-down" class="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      phx-click="duplicate_field"
+                      phx-value-id={field.id}
+                      aria-label={gettext("Duplicate field %{label}", label: field.label)}
+                      class="p-1 text-base-content/60 hover:text-base-content"
+                    >
+                      <.icon name="hero-square-2-stack" class="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      phx-click="delete_field"
+                      phx-value-id={field.id}
+                      data-confirm={gettext("Delete this field?")}
+                      aria-label={gettext("Delete field %{label}", label: field.label)}
+                      class="p-1 text-base-content/60 hover:text-error"
+                    >
+                      <.icon name="hero-trash" class="size-3.5" />
+                    </button>
+                  </div>
+
+                  <fieldset disabled class="pointer-events-none select-none">
+                    <.public_form_field field={field} />
+                  </fieldset>
+                </div>
+              </div>
+
+              <div :if={@fields != []} class="mt-4">
                 <button
                   type="button"
-                  phx-click="select_field"
-                  phx-value-id={field.id}
-                  aria-label={gettext("Edit field %{label}", label: field.label)}
-                  class="absolute inset-0 z-[5] cursor-pointer rounded-lg"
-                ></button>
+                  disabled
+                  class="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-content opacity-70"
+                >
+                  {@form.submit_label || gettext("Submit")}
+                </button>
+              </div>
+            </section>
 
-                <div class={[
-                  "absolute -top-2.5 right-2 z-10 gap-0.5 rounded border border-base-300 bg-base-100 px-0.5 shadow-sm",
-                  @selected_id == field.id && "flex",
-                  @selected_id != field.id && "hidden group-hover:flex"
-                ]}>
+            <%!-- Options panel: edit the selected field in place. --%>
+            <aside class="card card-pad h-fit" aria-label={gettext("Field settings")}>
+              <% selected = Enum.find(@fields, &(&1.id == @selected_id)) %>
+              <p :if={!selected} class="text-sm text-base-content/60">
+                {gettext("Select a field on the canvas to edit it, or add one from the palette.")}
+              </p>
+
+              <div :if={selected} class="space-y-3">
+                <div class="flex items-center justify-between gap-2">
+                  <h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/70">
+                    {gettext("Field settings")}
+                  </h2>
                   <button
                     type="button"
-                    data-drag-handle
-                    aria-label={gettext("Reorder field %{label}", label: field.label)}
-                    class="cursor-grab active:cursor-grabbing p-1 text-base-content/60 hover:text-base-content"
+                    phx-click="deselect_field"
+                    aria-label={gettext("Close field settings")}
+                    class="text-base-content/70 hover:text-base-content"
                   >
-                    <.icon name="hero-arrows-up-down" class="size-3.5" />
+                    <.icon name="hero-x-mark" class="size-4" />
+                  </button>
+                </div>
+
+                <form
+                  id={"field-settings-#{selected.id}"}
+                  phx-change="update_field"
+                  class="space-y-3 text-sm"
+                >
+                  <input type="hidden" name="field[id]" value={selected.id} />
+
+                  <div>
+                    <label for="fs-label" class="font-medium">{gettext("Label")}</label>
+                    <input
+                      id="fs-label"
+                      name="field[label]"
+                      value={selected.label}
+                      phx-debounce="300"
+                      class="field-input mt-1"
+                    />
+                  </div>
+
+                  <div>
+                    <label for="fs-name" class="font-medium">{gettext("Machine name")}</label>
+                    <input
+                      id="fs-name"
+                      name="field[name]"
+                      value={selected.name}
+                      phx-debounce="blur"
+                      class="field-input mt-1 font-mono text-xs"
+                    />
+                    <p class="mt-1 text-xs text-base-content/60">
+                      {gettext(
+                        "Keys this field's value in submissions — renaming orphans old entries."
+                      )}
+                    </p>
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-2">
+                    <div>
+                      <label for="fs-type" class="font-medium">{gettext("Type")}</label>
+                      <select id="fs-type" name="field[field_type]" class="field-select mt-1">
+                        <option
+                          :for={entry <- palette()}
+                          value={entry.type}
+                          selected={entry.type == selected.field_type}
+                        >
+                          {entry.label}
+                        </option>
+                      </select>
+                    </div>
+                    <div>
+                      <label for="fs-width" class="font-medium">{gettext("Width")}</label>
+                      <select id="fs-width" name="field[width]" class="field-select mt-1">
+                        <option value="full" selected={selected.width == :full}>
+                          {gettext("Full")}
+                        </option>
+                        <option value="half" selected={selected.width == :half}>
+                          {gettext("Half")}
+                        </option>
+                        <option value="third" selected={selected.width == :third}>
+                          {gettext("Third")}
+                        </option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <label class="flex items-center gap-2">
+                    <input type="hidden" name="field[required]" value="false" />
+                    <input
+                      type="checkbox"
+                      name="field[required]"
+                      value="true"
+                      checked={selected.required}
+                      class="size-4 rounded border border-base-content/30 accent-primary"
+                    />
+                    {gettext("Required")}
+                  </label>
+
+                  <div :if={selected.field_type == :select}>
+                    <label for="fs-options" class="font-medium">
+                      {gettext("Options — one per line")}
+                    </label>
+                    <textarea
+                      id="fs-options"
+                      name="field[options]"
+                      phx-debounce="300"
+                      rows="4"
+                      class="field-input mt-1 text-xs"
+                    >{Enum.join(selected.options, "\n")}</textarea>
+                  </div>
+
+                  <div :if={selected.field_type not in [:boolean, :select]}>
+                    <label for="fs-placeholder" class="font-medium">{gettext("Placeholder")}</label>
+                    <input
+                      id="fs-placeholder"
+                      name="field[placeholder]"
+                      value={selected.placeholder}
+                      phx-debounce="300"
+                      class="field-input mt-1"
+                    />
+                  </div>
+
+                  <div>
+                    <label for="fs-default" class="font-medium">{gettext("Default value")}</label>
+                    <input
+                      id="fs-default"
+                      name="field[default_value]"
+                      value={selected.default_value}
+                      phx-debounce="300"
+                      class="field-input mt-1"
+                    />
+                    <p :if={selected.field_type == :boolean} class="mt-1 text-xs text-base-content/60">
+                      {gettext("Use \"true\" to pre-check the box.")}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label for="fs-help" class="font-medium">{gettext("Help text")}</label>
+                    <input
+                      id="fs-help"
+                      name="field[help_text]"
+                      value={selected.help_text}
+                      phx-debounce="300"
+                      class="field-input mt-1"
+                    />
+                  </div>
+                </form>
+              </div>
+            </aside>
+          </div>
+
+          <section :if={@tab == :general} class="card card-pad max-w-2xl">
+            <form phx-submit="save_form" class="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label for="gf-name" class="text-sm font-medium">{gettext("Name")}</label>
+                <input
+                  id="gf-name"
+                  name="form[name]"
+                  value={@form.name}
+                  required
+                  class="field-input mt-1"
+                />
+              </div>
+              <div>
+                <label for="gf-slug" class="text-sm font-medium">{gettext("Slug")}</label>
+                <input
+                  id="gf-slug"
+                  name="form[slug]"
+                  value={@form.slug}
+                  required
+                  class="field-input mt-1"
+                />
+              </div>
+              <div class="sm:col-span-2">
+                <label for="gf-description" class="text-sm font-medium">{gettext("Description")}</label>
+                <textarea
+                  id="gf-description"
+                  name="form[description]"
+                  rows="2"
+                  class="field-input mt-1"
+                >{@form.description}</textarea>
+              </div>
+              <div>
+                <label for="gf-submit-label" class="text-sm font-medium">
+                  {gettext("Submit button label")}
+                </label>
+                <input
+                  id="gf-submit-label"
+                  name="form[submit_label]"
+                  value={@form.submit_label}
+                  placeholder={gettext("Submit")}
+                  class="field-input mt-1"
+                />
+              </div>
+              <label class="flex items-center gap-2 self-end text-sm">
+                <input type="hidden" name="form[active]" value="false" />
+                <input
+                  type="checkbox"
+                  name="form[active]"
+                  value="true"
+                  checked={@form.active}
+                  class="size-4 rounded border border-base-content/30 accent-primary"
+                />
+                {gettext("Active (accepting submissions)")}
+              </label>
+              <div class="sm:col-span-2">
+                <.button type="submit" variant="primary">{gettext("Save")}</.button>
+              </div>
+            </form>
+          </section>
+
+          <section :if={@tab == :notifications} class="card card-pad max-w-2xl">
+            <form phx-submit="save_form" class="space-y-3">
+              <div>
+                <label for="nf-email" class="text-sm font-medium">{gettext("Notify email")}</label>
+                <input
+                  id="nf-email"
+                  name="form[notify_email]"
+                  value={@form.notify_email}
+                  placeholder="team@example.com"
+                  class="field-input mt-1"
+                />
+                <p class="mt-1 text-xs text-base-content/60">
+                  {gettext("Each submission is mailed here. Leave blank for no notification.")}
+                </p>
+              </div>
+              <.button type="submit" variant="primary">{gettext("Save")}</.button>
+            </form>
+          </section>
+
+          <section :if={@tab == :confirmations} class="card card-pad max-w-2xl">
+            <form phx-submit="save_form" class="space-y-3">
+              <div>
+                <label for="cf-success" class="text-sm font-medium">{gettext("Success message")}</label>
+                <input
+                  id="cf-success"
+                  name="form[success_message]"
+                  value={@form.success_message}
+                  class="field-input mt-1"
+                />
+                <p class="mt-1 text-xs text-base-content/60">
+                  {gettext("Shown on the thank-you page after a successful submission.")}
+                </p>
+              </div>
+
+              <hr class="border-t border-base-content/10" />
+
+              <label class="flex items-center gap-2 text-sm">
+                <input type="hidden" name="form[autoresponder_enabled]" value="false" />
+                <input
+                  type="checkbox"
+                  name="form[autoresponder_enabled]"
+                  value="true"
+                  checked={@form.autoresponder_enabled}
+                  class="size-4 rounded border border-base-content/30 accent-primary"
+                />
+                {gettext("Email the submitter a confirmation")}
+              </label>
+              <p class="text-xs text-base-content/60">
+                {gettext("Only sends when the form has an email field and the visitor filled it in.")}
+              </p>
+
+              <div>
+                <label for="cf-ar-subject" class="text-sm font-medium">{gettext("Subject")}</label>
+                <input
+                  id="cf-ar-subject"
+                  name="form[autoresponder_subject]"
+                  value={@form.autoresponder_subject}
+                  placeholder={gettext("Thanks for reaching out, [field:name]!")}
+                  class="field-input mt-1"
+                />
+              </div>
+              <div>
+                <label for="cf-ar-body" class="text-sm font-medium">{gettext("Body")}</label>
+                <textarea
+                  id="cf-ar-body"
+                  name="form[autoresponder_body]"
+                  rows="4"
+                  class="field-input mt-1"
+                >{@form.autoresponder_body}</textarea>
+              </div>
+              <p class="text-xs text-base-content/60">
+                {gettext("Available tokens: %{tokens}",
+                  tokens: autoresponder_token_hint(@form, @fields)
+                )}
+              </p>
+
+              <.button type="submit" variant="primary">{gettext("Save")}</.button>
+            </form>
+          </section>
+
+          <section :if={@tab == :embed} class="card card-pad max-w-2xl space-y-2">
+            <label class="text-sm font-medium">{gettext("Embed on another site")}</label>
+
+            <p :if={!@form.active} class="text-xs text-warning">
+              {gettext(
+                "This form is inactive — the embed shows “Form not found” until you activate it."
+              )}
+            </p>
+
+            <p :if={is_nil(@embed_origins_label)} class="text-xs text-warning">
+              {gettext(
+                "Cross-site embedding is off: this form may only be framed by pages on its own site. List the sites that should be allowed to embed it below."
+              )}
+            </p>
+
+            <p :if={@embed_origins_label} class="text-xs text-base-content/60">
+              {gettext("Sites allowed to embed this form: %{origins}",
+                origins: @embed_origins_label
+              )}
+            </p>
+
+            <div class="flex items-center gap-2">
+              <input
+                type="text"
+                value={embed_snippet(@form.slug, @current_org)}
+                readonly
+                aria-label={gettext("Embed code")}
+                class="field-input min-w-0 flex-1 font-mono text-xs"
+              />
+              <button
+                type="button"
+                id="copy-embed-code"
+                phx-hook="Clipboard"
+                data-clipboard-text={embed_snippet(@form.slug, @current_org)}
+                class="btn btn-sm btn-default shrink-0"
+              >
+                {gettext("Copy")}
+              </button>
+            </div>
+
+            <p class="text-xs text-base-content/60">
+              {gettext("The iframe sizes itself to the form.")}
+            </p>
+
+            <hr class="border-t border-base-content/10" />
+
+            <form phx-submit="save_form" class="space-y-3">
+              <fieldset class="space-y-1">
+                <legend class="text-sm font-medium">{gettext("Who may embed this form")}</legend>
+                <p class="text-xs text-base-content/60">
+                  {gettext(
+                    "This setting applies to this form only — another site's forms are unaffected by what you allow here."
+                  )}
+                </p>
+                <%!-- #1133: the operator's ceiling. Says that one exists, never
+                   what is in it — the list would enumerate other sites'
+                   partners on a shared deployment (#1130). --%>
+                <p :if={KilnCMS.Forms.EmbedCeiling.locked?()} class="text-xs text-base-content/60">
+                  {gettext(
+                    "The operator of this deployment has capped which sites may embed forms. You can narrow that list here but not add to it — ask them to allow a site that is refused."
+                  )}
+                </p>
+
+                <label class="flex items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="form[embed_mode]"
+                    value="inherit"
+                    checked={embed_mode(@form) == "inherit"}
+                    class="size-4 accent-primary"
+                  />
+                  {gettext("Use this site's default")}
+                </label>
+
+                <label class="flex items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="form[embed_mode]"
+                    value="closed"
+                    checked={embed_mode(@form) == "closed"}
+                    class="size-4 accent-primary"
+                  />
+                  {gettext("This site only")}
+                </label>
+
+                <label class="flex items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="form[embed_mode]"
+                    value="list"
+                    checked={embed_mode(@form) == "list"}
+                    class="size-4 accent-primary"
+                  />
+                  {gettext("Only these sites:")}
+                </label>
+              </fieldset>
+
+              <input
+                id="cf-embed-origins"
+                name="form[embed_origins]"
+                value={@embed_origins_draft || embed_origins_value(@form)}
+                aria-label={gettext("Sites allowed to embed this form")}
+                placeholder="https://example.com, https://blog.example.com"
+                class="field-input font-mono text-xs"
+              />
+              <p class="text-xs text-base-content/60">
+                {gettext(
+                  "Comma-separated origins (scheme and host, optionally a port). Pages on this form's own site may always frame it."
+                )}
+              </p>
+
+              <.button type="submit" variant="primary">{gettext("Save")}</.button>
+            </form>
+          </section>
+
+          <section :if={@tab == :entries} class="max-w-3xl space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div role="group" aria-label={gettext("Filter by status")} class="flex gap-1">
+                <button
+                  :for={{value, label} <- status_filters()}
+                  type="button"
+                  phx-click="filter_status"
+                  phx-value-status={value}
+                  aria-pressed={to_string(@status_filter == parse_status(value))}
+                  class={[
+                    "rounded border px-2 py-1 text-xs",
+                    if(@status_filter == parse_status(value),
+                      do: "border-primary bg-primary text-primary-content",
+                      else: "border-base-content/20 hover:bg-base-200"
+                    )
+                  ]}
+                >
+                  {label}
+                </button>
+              </div>
+
+              <a
+                href={
+                  ~p"/editor/forms/#{@form.id}/entries/export.csv?#{export_query(@status_filter)}"
+                }
+                class="btn btn-default px-2 py-1 text-xs"
+              >
+                <.icon name="hero-arrow-down-tray" class="size-3.5" />{gettext("Export CSV")}
+              </a>
+            </div>
+
+            <div
+              :if={MapSet.size(@selected_submissions) > 0}
+              class="flex items-center gap-2 rounded border border-base-content/15 bg-base-200/50 p-2 text-xs"
+            >
+              <span>
+                {ngettext(
+                  "%{count} selected",
+                  "%{count} selected",
+                  MapSet.size(@selected_submissions), count: MapSet.size(@selected_submissions))}
+              </span>
+              <button
+                type="button"
+                phx-click="bulk_mark_spam"
+                class="btn btn-default px-2 py-0.5 text-xs"
+              >
+                {gettext("Mark as spam")}
+              </button>
+              <button
+                type="button"
+                phx-click="bulk_mark_reviewed"
+                class="btn btn-default px-2 py-0.5 text-xs"
+              >
+                {gettext("Mark as reviewed")}
+              </button>
+              <button
+                type="button"
+                phx-click="clear_selection"
+                class="btn-link text-base-content/60 underline hover:text-base-content"
+              >
+                {gettext("Clear")}
+              </button>
+            </div>
+
+            <.empty_state
+              :if={@submissions == []}
+              id="form-submissions-empty"
+              icon="hero-inbox-arrow-down"
+              title={gettext("No submissions yet")}
+              compact
+            >
+              {gettext("Entries appear here as soon as someone submits this form.")}
+            </.empty_state>
+
+            <button
+              :if={@submissions != []}
+              type="button"
+              phx-click="select_all_visible"
+              class="btn-link text-xs text-base-content/60 underline hover:text-base-content"
+            >
+              {gettext("Select all visible")}
+            </button>
+
+            <ul :if={@submissions != []} class="space-y-2">
+              <li
+                :for={submission <- @submissions}
+                class="card rounded border border-base-content/10 p-3 text-sm"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <div class="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      phx-click="toggle_select"
+                      phx-value-id={submission.id}
+                      checked={MapSet.member?(@selected_submissions, submission.id)}
+                      aria-label={gettext("Select this submission")}
+                      class="size-4 rounded border-base-content/30 accent-primary"
+                    />
+                    <span class={[
+                      "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                      status_badge_class(submission.status)
+                    ]}>
+                      {status_label(submission.status)}
+                    </span>
+                    <span :if={submission.spam_score > 0} class="text-xs text-base-content/50">
+                      {gettext("score %{score}", score: submission.spam_score)}
+                    </span>
+                  </div>
+                  <time
+                    id={"submission-#{submission.id}"}
+                    phx-hook="LocalTime"
+                    datetime={DateTime.to_iso8601(submission.inserted_at)}
+                    class="text-xs text-base-content/60"
+                  >
+                    {Calendar.strftime(submission.inserted_at, "%Y-%m-%d %H:%M")} UTC
+                  </time>
+                </div>
+                <dl class="mt-1 grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
+                  <div :for={{key, value} <- submission.data} class="flex gap-2">
+                    <dt class="font-medium">{key}</dt>
+                    <dd class="min-w-0 break-words text-base-content/80">{to_string(value)}</dd>
+                  </div>
+                </dl>
+                <div class="mt-2 flex items-center gap-2 text-xs">
+                  <button
+                    :if={submission.status != :spam}
+                    type="button"
+                    phx-click="mark_submission_spam"
+                    phx-value-id={submission.id}
+                    class="btn btn-default px-2 py-0.5 text-xs"
+                  >
+                    {gettext("Mark as spam")}
+                  </button>
+                  <button
+                    :if={submission.status != :reviewed}
+                    type="button"
+                    phx-click="mark_submission_reviewed"
+                    phx-value-id={submission.id}
+                    class="btn btn-default px-2 py-0.5 text-xs"
+                  >
+                    {gettext("Mark as reviewed")}
                   </button>
                   <button
                     type="button"
-                    phx-click="duplicate_field"
-                    phx-value-id={field.id}
-                    aria-label={gettext("Duplicate field %{label}", label: field.label)}
-                    class="p-1 text-base-content/60 hover:text-base-content"
-                  >
-                    <.icon name="hero-square-2-stack" class="size-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    phx-click="delete_field"
-                    phx-value-id={field.id}
-                    data-confirm={gettext("Delete this field?")}
-                    aria-label={gettext("Delete field %{label}", label: field.label)}
-                    class="p-1 text-base-content/60 hover:text-error"
+                    phx-click="delete_submission"
+                    phx-value-id={submission.id}
+                    data-confirm={gettext("Delete this submission?")}
+                    aria-label={gettext("Delete submission")}
+                    class="ml-auto rounded p-1 hover:bg-base-200 hover:text-error"
                   >
                     <.icon name="hero-trash" class="size-3.5" />
                   </button>
                 </div>
-
-                <fieldset disabled class="pointer-events-none select-none">
-                  <.public_form_field field={field} />
-                </fieldset>
-              </div>
-            </div>
-
-            <div :if={@fields != []} class="mt-4">
-              <button
-                type="button"
-                disabled
-                class="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-content opacity-70"
-              >
-                {@form.submit_label || gettext("Submit")}
-              </button>
-            </div>
+              </li>
+            </ul>
           </section>
-
-          <%!-- Options panel: edit the selected field in place. --%>
-          <aside class="card card-pad h-fit" aria-label={gettext("Field settings")}>
-            <% selected = Enum.find(@fields, &(&1.id == @selected_id)) %>
-            <p :if={!selected} class="text-sm text-base-content/60">
-              {gettext("Select a field on the canvas to edit it, or add one from the palette.")}
-            </p>
-
-            <div :if={selected} class="space-y-3">
-              <div class="flex items-center justify-between gap-2">
-                <h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/70">
-                  {gettext("Field settings")}
-                </h2>
-                <button
-                  type="button"
-                  phx-click="deselect_field"
-                  aria-label={gettext("Close field settings")}
-                  class="text-base-content/70 hover:text-base-content"
-                >
-                  <.icon name="hero-x-mark" class="size-4" />
-                </button>
-              </div>
-
-              <form
-                id={"field-settings-#{selected.id}"}
-                phx-change="update_field"
-                class="space-y-3 text-sm"
-              >
-                <input type="hidden" name="field[id]" value={selected.id} />
-
-                <div>
-                  <label for="fs-label" class="font-medium">{gettext("Label")}</label>
-                  <input
-                    id="fs-label"
-                    name="field[label]"
-                    value={selected.label}
-                    phx-debounce="300"
-                    class="field-input mt-1"
-                  />
-                </div>
-
-                <div>
-                  <label for="fs-name" class="font-medium">{gettext("Machine name")}</label>
-                  <input
-                    id="fs-name"
-                    name="field[name]"
-                    value={selected.name}
-                    phx-debounce="blur"
-                    class="field-input mt-1 font-mono text-xs"
-                  />
-                  <p class="mt-1 text-xs text-base-content/60">
-                    {gettext("Keys this field's value in submissions — renaming orphans old entries.")}
-                  </p>
-                </div>
-
-                <div class="grid grid-cols-2 gap-2">
-                  <div>
-                    <label for="fs-type" class="font-medium">{gettext("Type")}</label>
-                    <select id="fs-type" name="field[field_type]" class="field-select mt-1">
-                      <option
-                        :for={entry <- palette()}
-                        value={entry.type}
-                        selected={entry.type == selected.field_type}
-                      >
-                        {entry.label}
-                      </option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="fs-width" class="font-medium">{gettext("Width")}</label>
-                    <select id="fs-width" name="field[width]" class="field-select mt-1">
-                      <option value="full" selected={selected.width == :full}>
-                        {gettext("Full")}
-                      </option>
-                      <option value="half" selected={selected.width == :half}>
-                        {gettext("Half")}
-                      </option>
-                      <option value="third" selected={selected.width == :third}>
-                        {gettext("Third")}
-                      </option>
-                    </select>
-                  </div>
-                </div>
-
-                <label class="flex items-center gap-2">
-                  <input type="hidden" name="field[required]" value="false" />
-                  <input
-                    type="checkbox"
-                    name="field[required]"
-                    value="true"
-                    checked={selected.required}
-                    class="size-4 rounded border border-base-content/30 accent-primary"
-                  />
-                  {gettext("Required")}
-                </label>
-
-                <div :if={selected.field_type == :select}>
-                  <label for="fs-options" class="font-medium">
-                    {gettext("Options — one per line")}
-                  </label>
-                  <textarea
-                    id="fs-options"
-                    name="field[options]"
-                    phx-debounce="300"
-                    rows="4"
-                    class="field-input mt-1 text-xs"
-                  >{Enum.join(selected.options, "\n")}</textarea>
-                </div>
-
-                <div :if={selected.field_type not in [:boolean, :select]}>
-                  <label for="fs-placeholder" class="font-medium">{gettext("Placeholder")}</label>
-                  <input
-                    id="fs-placeholder"
-                    name="field[placeholder]"
-                    value={selected.placeholder}
-                    phx-debounce="300"
-                    class="field-input mt-1"
-                  />
-                </div>
-
-                <div>
-                  <label for="fs-default" class="font-medium">{gettext("Default value")}</label>
-                  <input
-                    id="fs-default"
-                    name="field[default_value]"
-                    value={selected.default_value}
-                    phx-debounce="300"
-                    class="field-input mt-1"
-                  />
-                  <p :if={selected.field_type == :boolean} class="mt-1 text-xs text-base-content/60">
-                    {gettext("Use \"true\" to pre-check the box.")}
-                  </p>
-                </div>
-
-                <div>
-                  <label for="fs-help" class="font-medium">{gettext("Help text")}</label>
-                  <input
-                    id="fs-help"
-                    name="field[help_text]"
-                    value={selected.help_text}
-                    phx-debounce="300"
-                    class="field-input mt-1"
-                  />
-                </div>
-              </form>
-            </div>
-          </aside>
         </div>
-
-        <section :if={@tab == :general} class="card card-pad max-w-2xl">
-          <form phx-submit="save_form" class="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label for="gf-name" class="text-sm font-medium">{gettext("Name")}</label>
-              <input
-                id="gf-name"
-                name="form[name]"
-                value={@form.name}
-                required
-                class="field-input mt-1"
-              />
-            </div>
-            <div>
-              <label for="gf-slug" class="text-sm font-medium">{gettext("Slug")}</label>
-              <input
-                id="gf-slug"
-                name="form[slug]"
-                value={@form.slug}
-                required
-                class="field-input mt-1"
-              />
-            </div>
-            <div class="sm:col-span-2">
-              <label for="gf-description" class="text-sm font-medium">{gettext("Description")}</label>
-              <textarea id="gf-description" name="form[description]" rows="2" class="field-input mt-1">{@form.description}</textarea>
-            </div>
-            <div>
-              <label for="gf-submit-label" class="text-sm font-medium">
-                {gettext("Submit button label")}
-              </label>
-              <input
-                id="gf-submit-label"
-                name="form[submit_label]"
-                value={@form.submit_label}
-                placeholder={gettext("Submit")}
-                class="field-input mt-1"
-              />
-            </div>
-            <label class="flex items-center gap-2 self-end text-sm">
-              <input type="hidden" name="form[active]" value="false" />
-              <input
-                type="checkbox"
-                name="form[active]"
-                value="true"
-                checked={@form.active}
-                class="size-4 rounded border border-base-content/30 accent-primary"
-              />
-              {gettext("Active (accepting submissions)")}
-            </label>
-            <div class="sm:col-span-2">
-              <.button type="submit" variant="primary">{gettext("Save")}</.button>
-            </div>
-          </form>
-        </section>
-
-        <section :if={@tab == :notifications} class="card card-pad max-w-2xl">
-          <form phx-submit="save_form" class="space-y-3">
-            <div>
-              <label for="nf-email" class="text-sm font-medium">{gettext("Notify email")}</label>
-              <input
-                id="nf-email"
-                name="form[notify_email]"
-                value={@form.notify_email}
-                placeholder="team@example.com"
-                class="field-input mt-1"
-              />
-              <p class="mt-1 text-xs text-base-content/60">
-                {gettext("Each submission is mailed here. Leave blank for no notification.")}
-              </p>
-            </div>
-            <.button type="submit" variant="primary">{gettext("Save")}</.button>
-          </form>
-        </section>
-
-        <section :if={@tab == :confirmations} class="card card-pad max-w-2xl">
-          <form phx-submit="save_form" class="space-y-3">
-            <div>
-              <label for="cf-success" class="text-sm font-medium">{gettext("Success message")}</label>
-              <input
-                id="cf-success"
-                name="form[success_message]"
-                value={@form.success_message}
-                class="field-input mt-1"
-              />
-              <p class="mt-1 text-xs text-base-content/60">
-                {gettext("Shown on the thank-you page after a successful submission.")}
-              </p>
-            </div>
-
-            <hr class="border-t border-base-content/10" />
-
-            <label class="flex items-center gap-2 text-sm">
-              <input type="hidden" name="form[autoresponder_enabled]" value="false" />
-              <input
-                type="checkbox"
-                name="form[autoresponder_enabled]"
-                value="true"
-                checked={@form.autoresponder_enabled}
-                class="size-4 rounded border border-base-content/30 accent-primary"
-              />
-              {gettext("Email the submitter a confirmation")}
-            </label>
-            <p class="text-xs text-base-content/60">
-              {gettext("Only sends when the form has an email field and the visitor filled it in.")}
-            </p>
-
-            <div>
-              <label for="cf-ar-subject" class="text-sm font-medium">{gettext("Subject")}</label>
-              <input
-                id="cf-ar-subject"
-                name="form[autoresponder_subject]"
-                value={@form.autoresponder_subject}
-                placeholder={gettext("Thanks for reaching out, [field:name]!")}
-                class="field-input mt-1"
-              />
-            </div>
-            <div>
-              <label for="cf-ar-body" class="text-sm font-medium">{gettext("Body")}</label>
-              <textarea
-                id="cf-ar-body"
-                name="form[autoresponder_body]"
-                rows="4"
-                class="field-input mt-1"
-              >{@form.autoresponder_body}</textarea>
-            </div>
-            <p class="text-xs text-base-content/60">
-              {gettext("Available tokens: %{tokens}",
-                tokens: autoresponder_token_hint(@form, @fields)
-              )}
-            </p>
-
-            <.button type="submit" variant="primary">{gettext("Save")}</.button>
-          </form>
-        </section>
-
-        <section :if={@tab == :embed} class="card card-pad max-w-2xl space-y-2">
-          <label class="text-sm font-medium">{gettext("Embed on another site")}</label>
-
-          <p :if={!@form.active} class="text-xs text-warning">
-            {gettext(
-              "This form is inactive — the embed shows “Form not found” until you activate it."
-            )}
-          </p>
-
-          <p :if={is_nil(@embed_origins_label)} class="text-xs text-warning">
-            {gettext(
-              "Cross-site embedding is off: this form may only be framed by pages on its own site. List the sites that should be allowed to embed it below."
-            )}
-          </p>
-
-          <p :if={@embed_origins_label} class="text-xs text-base-content/60">
-            {gettext("Sites allowed to embed this form: %{origins}",
-              origins: @embed_origins_label
-            )}
-          </p>
-
-          <div class="flex items-center gap-2">
-            <input
-              type="text"
-              value={embed_snippet(@form.slug, @current_org)}
-              readonly
-              aria-label={gettext("Embed code")}
-              class="field-input min-w-0 flex-1 font-mono text-xs"
-            />
-            <button
-              type="button"
-              id="copy-embed-code"
-              phx-hook="Clipboard"
-              data-clipboard-text={embed_snippet(@form.slug, @current_org)}
-              class="btn btn-sm btn-default shrink-0"
-            >
-              {gettext("Copy")}
-            </button>
-          </div>
-
-          <p class="text-xs text-base-content/60">
-            {gettext("The iframe sizes itself to the form.")}
-          </p>
-
-          <hr class="border-t border-base-content/10" />
-
-          <form phx-submit="save_form" class="space-y-3">
-            <fieldset class="space-y-1">
-              <legend class="text-sm font-medium">{gettext("Who may embed this form")}</legend>
-              <p class="text-xs text-base-content/60">
-                {gettext(
-                  "This setting applies to this form only — another site's forms are unaffected by what you allow here."
-                )}
-              </p>
-              <%!-- #1133: the operator's ceiling. Says that one exists, never
-                   what is in it — the list would enumerate other sites'
-                   partners on a shared deployment (#1130). --%>
-              <p :if={KilnCMS.Forms.EmbedCeiling.locked?()} class="text-xs text-base-content/60">
-                {gettext(
-                  "The operator of this deployment has capped which sites may embed forms. You can narrow that list here but not add to it — ask them to allow a site that is refused."
-                )}
-              </p>
-
-              <label class="flex items-center gap-2 text-sm">
-                <input
-                  type="radio"
-                  name="form[embed_mode]"
-                  value="inherit"
-                  checked={embed_mode(@form) == "inherit"}
-                  class="size-4 accent-primary"
-                />
-                {gettext("Use this site's default")}
-              </label>
-
-              <label class="flex items-center gap-2 text-sm">
-                <input
-                  type="radio"
-                  name="form[embed_mode]"
-                  value="closed"
-                  checked={embed_mode(@form) == "closed"}
-                  class="size-4 accent-primary"
-                />
-                {gettext("This site only")}
-              </label>
-
-              <label class="flex items-center gap-2 text-sm">
-                <input
-                  type="radio"
-                  name="form[embed_mode]"
-                  value="list"
-                  checked={embed_mode(@form) == "list"}
-                  class="size-4 accent-primary"
-                />
-                {gettext("Only these sites:")}
-              </label>
-            </fieldset>
-
-            <input
-              id="cf-embed-origins"
-              name="form[embed_origins]"
-              value={@embed_origins_draft || embed_origins_value(@form)}
-              aria-label={gettext("Sites allowed to embed this form")}
-              placeholder="https://example.com, https://blog.example.com"
-              class="field-input font-mono text-xs"
-            />
-            <p class="text-xs text-base-content/60">
-              {gettext(
-                "Comma-separated origins (scheme and host, optionally a port). Pages on this form's own site may always frame it."
-              )}
-            </p>
-
-            <.button type="submit" variant="primary">{gettext("Save")}</.button>
-          </form>
-        </section>
-
-        <section :if={@tab == :entries} class="max-w-3xl space-y-3">
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <div role="group" aria-label={gettext("Filter by status")} class="flex gap-1">
-              <button
-                :for={{value, label} <- status_filters()}
-                type="button"
-                phx-click="filter_status"
-                phx-value-status={value}
-                aria-pressed={to_string(@status_filter == parse_status(value))}
-                class={[
-                  "rounded border px-2 py-1 text-xs",
-                  if(@status_filter == parse_status(value),
-                    do: "border-primary bg-primary text-primary-content",
-                    else: "border-base-content/20 hover:bg-base-200"
-                  )
-                ]}
-              >
-                {label}
-              </button>
-            </div>
-
-            <a
-              href={~p"/editor/forms/#{@form.id}/entries/export.csv?#{export_query(@status_filter)}"}
-              class="btn btn-default px-2 py-1 text-xs"
-            >
-              <.icon name="hero-arrow-down-tray" class="size-3.5" />{gettext("Export CSV")}
-            </a>
-          </div>
-
-          <div
-            :if={MapSet.size(@selected_submissions) > 0}
-            class="flex items-center gap-2 rounded border border-base-content/15 bg-base-200/50 p-2 text-xs"
-          >
-            <span>
-              {ngettext("%{count} selected", "%{count} selected", MapSet.size(@selected_submissions),
-                count: MapSet.size(@selected_submissions)
-              )}
-            </span>
-            <button
-              type="button"
-              phx-click="bulk_mark_spam"
-              class="btn btn-default px-2 py-0.5 text-xs"
-            >
-              {gettext("Mark as spam")}
-            </button>
-            <button
-              type="button"
-              phx-click="bulk_mark_reviewed"
-              class="btn btn-default px-2 py-0.5 text-xs"
-            >
-              {gettext("Mark as reviewed")}
-            </button>
-            <button
-              type="button"
-              phx-click="clear_selection"
-              class="btn-link text-base-content/60 underline hover:text-base-content"
-            >
-              {gettext("Clear")}
-            </button>
-          </div>
-
-          <p :if={@submissions == []} class="text-sm text-base-content/60">
-            {gettext("None yet.")}
-          </p>
-
-          <button
-            :if={@submissions != []}
-            type="button"
-            phx-click="select_all_visible"
-            class="btn-link text-xs text-base-content/60 underline hover:text-base-content"
-          >
-            {gettext("Select all visible")}
-          </button>
-
-          <ul :if={@submissions != []} class="space-y-2">
-            <li
-              :for={submission <- @submissions}
-              class="card rounded border border-base-content/10 p-3 text-sm"
-            >
-              <div class="flex items-center justify-between gap-2">
-                <div class="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    phx-click="toggle_select"
-                    phx-value-id={submission.id}
-                    checked={MapSet.member?(@selected_submissions, submission.id)}
-                    aria-label={gettext("Select this submission")}
-                    class="size-4 rounded border-base-content/30 accent-primary"
-                  />
-                  <span class={[
-                    "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-                    status_badge_class(submission.status)
-                  ]}>
-                    {status_label(submission.status)}
-                  </span>
-                  <span :if={submission.spam_score > 0} class="text-xs text-base-content/50">
-                    {gettext("score %{score}", score: submission.spam_score)}
-                  </span>
-                </div>
-                <time
-                  id={"submission-#{submission.id}"}
-                  phx-hook="LocalTime"
-                  datetime={DateTime.to_iso8601(submission.inserted_at)}
-                  class="text-xs text-base-content/60"
-                >
-                  {Calendar.strftime(submission.inserted_at, "%Y-%m-%d %H:%M")} UTC
-                </time>
-              </div>
-              <dl class="mt-1 grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
-                <div :for={{key, value} <- submission.data} class="flex gap-2">
-                  <dt class="font-medium">{key}</dt>
-                  <dd class="min-w-0 break-words text-base-content/80">{to_string(value)}</dd>
-                </div>
-              </dl>
-              <div class="mt-2 flex items-center gap-2 text-xs">
-                <button
-                  :if={submission.status != :spam}
-                  type="button"
-                  phx-click="mark_submission_spam"
-                  phx-value-id={submission.id}
-                  class="btn btn-default px-2 py-0.5 text-xs"
-                >
-                  {gettext("Mark as spam")}
-                </button>
-                <button
-                  :if={submission.status != :reviewed}
-                  type="button"
-                  phx-click="mark_submission_reviewed"
-                  phx-value-id={submission.id}
-                  class="btn btn-default px-2 py-0.5 text-xs"
-                >
-                  {gettext("Mark as reviewed")}
-                </button>
-                <button
-                  type="button"
-                  phx-click="delete_submission"
-                  phx-value-id={submission.id}
-                  data-confirm={gettext("Delete this submission?")}
-                  aria-label={gettext("Delete submission")}
-                  class="ml-auto rounded p-1 hover:bg-base-200 hover:text-error"
-                >
-                  <.icon name="hero-trash" class="size-3.5" />
-                </button>
-              </div>
-            </li>
-          </ul>
-        </section>
       </div>
     </Layouts.console>
     """
