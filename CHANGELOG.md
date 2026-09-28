@@ -136,6 +136,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **An empty heading line in a rich-text block is now visible in the editor —
+  dashed, labelled with its level — so the "heading has no text" finding has
+  something on screen to point at.** ([#1728](https://github.com/The-Verscienta/kiln_cms/pull/1728))
+
 - **Search holds at most two pooled connections, and answers `503` rather than
   `500` when the pool is full.**
   ([#1712](https://github.com/The-Verscienta/kiln_cms/issues/1712) · [long form](docs/changelog/unreleased.md#search-holds-at-most-two-pooled-connections-and-answers-503-rather-than-500))
