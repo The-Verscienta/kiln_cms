@@ -266,7 +266,8 @@ defmodule KilnCMS.Federation.Inbox do
   # URLs is N rows — each one a delivery target on every publish, forever. The
   # ceiling is what stops a follower list from becoming an amplifier.
   defp check_follower_ceiling(org_id) do
-    if Ash.count!(Follower, authorize?: false, tenant: org_id) < Federation.max_followers() do
+    if Ash.count!(Follower, actor: Federation.system(), tenant: org_id) <
+         Federation.max_followers() do
       :ok
     else
       {:error, "this site is at its follower ceiling"}
@@ -275,7 +276,7 @@ defmodule KilnCMS.Federation.Inbox do
 
   defp do_record_follow(activity, identity, remote, org_id) do
     case Federation.follow(remote.id, remote.inbox, %{shared_inbox_uri: remote.shared_inbox},
-           authorize?: false,
+           actor: Federation.system(),
            tenant: org_id
          ) do
       {:ok, follower} ->
@@ -290,8 +291,8 @@ defmodule KilnCMS.Federation.Inbox do
   defp unfollow(actor_uri, org_id) do
     Follower
     |> Ash.Query.filter(actor_uri == ^actor_uri)
-    |> Ash.read!(authorize?: false, tenant: org_id)
-    |> Enum.each(&Ash.destroy(&1, authorize?: false, tenant: org_id))
+    |> Ash.read!(actor: Federation.system(), tenant: org_id)
+    |> Enum.each(&Ash.destroy(&1, actor: Federation.system(), tenant: org_id))
 
     :ok
   rescue
@@ -313,7 +314,7 @@ defmodule KilnCMS.Federation.Inbox do
              activity_type: :accept,
              activity: accept
            },
-           authorize?: false,
+           actor: Federation.system(),
            tenant: org_id
          ) do
       {:ok, delivery} ->

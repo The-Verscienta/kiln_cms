@@ -172,7 +172,7 @@ defmodule KilnCMS.Federation.HttpSignature do
       expires_at = DateTime.add(DateTime.utc_now(), 2 * @max_skew_seconds, :second)
 
       %{signature_hash: hash, expires_at: expires_at}
-      |> KilnCMS.Federation.record_seen_signature(authorize?: false)
+      |> KilnCMS.Federation.record_seen_signature(actor: KilnCMS.Federation.system())
       |> interpret_record()
     else
       _ -> {:error, "signature header is malformed"}
