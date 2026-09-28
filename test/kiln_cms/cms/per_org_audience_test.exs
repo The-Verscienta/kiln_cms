@@ -147,14 +147,14 @@ defmodule KilnCMS.CMS.PerOrgAudienceTest do
     end
   end
 
-  describe "legacy compatibility" do
-    test "a membership-less user keeps the global User.audiences column" do
-      # Pre-#336 data that missed the backfill, and every single-org install:
-      # behaviour must be exactly as before.
+  describe "membership-less accounts" do
+    test "the global User.audiences column grants nothing since 1.0 (#1543)" do
+      # The fallback 0.12 deprecated. `LegacyAudiencesWorker` moves such an
+      # account onto a membership after each deploy; until then, fail-closed.
       reader = user(%{audiences: [@gated]})
       page = gated_page(default_org_id())
 
-      assert can_read?(reader, page, default_org_id())
+      refute can_read?(reader, page, default_org_id())
     end
 
     test "a membership-less user without the audience still can't read" do
@@ -199,10 +199,10 @@ defmodule KilnCMS.CMS.PerOrgAudienceTest do
       assert Accounts.Scoping.audiences(reader, org_a.id) == [@gated]
     end
 
-    test "falls back to the user column when unaffiliated" do
+    test "is [] when unaffiliated, whatever the user column holds" do
       reader = user(%{audiences: [@gated]})
 
-      assert Accounts.Scoping.audiences(reader, default_org_id()) == [@gated]
+      assert Accounts.Scoping.audiences(reader, default_org_id()) == []
     end
 
     test "is fail-closed for a foreign org" do

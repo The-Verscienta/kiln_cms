@@ -6,6 +6,8 @@ defmodule KilnCMS.CMS.VersionSnapshotTest do
   """
   use KilnCMS.DataCase, async: true
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.CMS
   alias KilnCMS.CMS.VersionSnapshot
 
@@ -60,7 +62,7 @@ defmodule KilnCMS.CMS.VersionSnapshotTest do
         %{
           title: "Live",
           slug: slug(),
-          blocks: [%{type: :heading, content: "Heading", order: 0}]
+          blocks: typed_blocks([%{type: :heading, content: "Heading", order: 0}])
         },
         actor: admin
       )

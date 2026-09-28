@@ -37,6 +37,7 @@ defmodule KilnCMS.Config.ReportUsageTest do
       warn_if_no_mailer_in_prod
       warn_if_strict_host_false_ignored
       warn_if_console_shares_origin
+      warn_if_console_host_outside_rp_id
       warn_if_embed_lists_over_ceiling
       warn_if_chain_unsigned
       warn_if_org_slugs_unreachable

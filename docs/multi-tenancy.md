@@ -124,7 +124,8 @@ actor.
 Creating and updating orgs is a **platform-admin** action
 (`KilnCMS.Accounts.create_organization/2` with an admin actor); there is no
 screen for it yet. An org has a `name`, a `slug` (its subdomain) and an
-optional `custom_domain`. Members are then managed per org at
+optional `custom_domain`. The slug also names its console host when
+`KILN_CONSOLE_HOST` is set (`<slug>.<console host>`, below). Members are then managed per org at
 `/editor/team`.
 
 The slug is a hostname label, because it becomes one (#1710). It is trimmed
@@ -166,17 +167,45 @@ which refuses any org beyond the default one.
 
 By default each org's editor console answers on that org's own host, so a
 page's custom scripts are same-origin with the console. `KILN_CONSOLE_HOST`
-serves the console from one dedicated host instead; tenant content is never
-served there. The console host resolves to the default org, which makes it
-the right fit for a single-org deployment.
+moves every console onto hosts that serve no tenant content:
 
-On a **multi-org** deployment the shared origin matters more: an org admin's
-code injection can act with the session of any editor who opens that org's
-site signed in, a platform admin included. Kiln warns about exactly that
-combination — more than one org and `KILN_CONSOLE_HOST` unset — at boot, when
-the second org is created, and on `/editor/system` (#1661). It is accepted at
-1.0 with that warning (threat model, residual risk 16): set `KILN_CONSOLE_HOST`
-on a multi-org install, knowing it serves the default org's console only for
-now, or grant org admin only to people you would trust with the console. See
-[environment-variables.md](environment-variables.md) and
+| Org | Site (code injection runs here) | Console |
+|---|---|---|
+| default | `example.com` | `console.example.com` |
+| `acme` | `acme.example.com` (or its `custom_domain`) | `acme.console.example.com` |
+| `beta` | `beta.example.com` | `beta.console.example.com` |
+
+Each org's console host is derived from its slug (#1688), so there is nothing
+to configure per org. An editor who opens `/editor` on an org's site is
+redirected to that org's console host. Every console host is its own origin
+with its own session cookie, so no site's script can reach any console, and no
+org's console shares an origin with another org's. Signing in on one console
+host does not sign you in on another; each is a separate sign-in.
+
+Setting it up:
+
+1. **Pick a host under `PHX_HOST`**, e.g. `console.example.com` for
+   `PHX_HOST=example.com`. Passkeys' relying-party ID is the `PHX_HOST` host,
+   and a browser accepts it only on hosts under it. A console host outside
+   `PHX_HOST` still works, but without passkey sign-in, and Kiln warns about
+   that at boot. Existing passkeys keep working; nobody re-enrolls.
+2. **DNS and TLS for the host and its wildcard**: `console.example.com` and
+   `*.console.example.com`. A certificate for `*.example.com` does not cover
+   `acme.console.example.com`.
+3. Set `KILN_CONSOLE_HOST=console.example.com` and restart. Kiln adds the
+   console hosts to the socket origin check itself; `CHECK_ORIGINS` needs no
+   change.
+
+On a single-org deployment only the bare console host is ever used, so the
+wildcard is optional there.
+
+On a **multi-org** deployment without it, an org admin's code injection can act
+with the session of any editor who opens that org's site signed in, a platform
+admin included. Kiln warns about exactly that combination (more than one org
+and `KILN_CONSOLE_HOST` unset) at boot, when the second org is created, and on
+`/editor/system` (#1661, threat model residual risk 16). The alternative is to
+grant org admin only to people you would trust with the console. Why one
+console host per org rather than one shared, org-switching console host is
+[decision record 0011](decisions/0011-each-organization-gets-its-own-console-origin-under-the-console-host.md).
+See [environment-variables.md](environment-variables.md) and
 [code-injection.md](code-injection.md#read-this-before-granting-the-role).

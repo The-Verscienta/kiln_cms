@@ -17,13 +17,10 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   alias KilnCMS.Webhooks
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"delivery_id" => id} = args} = job) do
+  def perform(%Oban.Job{args: %{"delivery_id" => id, "org_id" => tenant}} = job)
+      when is_binary(tenant) do
     # `org_id` scopes the ledger read/settlement to the delivery's site (epic
-    # #336). Strict-tenancy prep (#419): a legacy job with no org resolves the
-    # default org explicitly (matching the firing workers) instead of a
-    # nil-tenant global read. That fallback is deprecated (#1538) and logs.
-    tenant = Deprecations.job_org_id(args, __MODULE__)
-
+    # #336); every job this release enqueues carries it.
     case CMS.get_webhook_delivery(id, authorize?: false, tenant: tenant, load: [:endpoint]) do
       {:ok, delivery} -> attempt(delivery, job)
       # Ledger row pruned/deleted from under the job — nothing to deliver.
@@ -31,30 +28,12 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
     end
   end
 
-  # Legacy args shape: jobs enqueued before the ledger existed may still sit
-  # in the queue across a deploy. Deliver without recording; pre-ledger jobs
-  # predate multi-tenancy, so the endpoint lives in the default org (#419).
-  # Deprecated in 0.12 and removed at 1.0 (#1538): drain the queue first.
-  def perform(%Oban.Job{args: %{"endpoint_id" => id, "event" => event, "payload" => payload}}) do
-    Deprecations.warn_legacy_job(
-      __MODULE__,
-      "has the pre-ledger `endpoint_id` shape and was delivered without a ledger row"
-    )
-
-    case CMS.get_webhook_endpoint(id,
-           authorize?: false,
-           tenant: KilnCMS.Accounts.default_org_id()
-         ) do
-      {:ok, %{active: true} = endpoint} ->
-        case deliver(endpoint, nil, event, payload) do
-          {:ok, _status} -> :ok
-          error -> error
-        end
-
-      _ ->
-        :ok
-    end
-  end
+  # Any other shape was enqueued by a release before 0.12: a ledger job with no
+  # `org_id`, or a pre-ledger `endpoint_id`/`event`/`payload` job. 0.12 still
+  # ran both with a deprecation warning; 1.0 removed them (#1543). Cancelled,
+  # not raised: a crash would retry a job that can never succeed, and running it
+  # against a guessed org is exactly the fallback that was removed.
+  def perform(%Oban.Job{args: args}), do: Deprecations.cancel_legacy_job(__MODULE__, args)
 
   defp attempt(%{endpoint: endpoint} = delivery, job) do
     cond do
@@ -153,14 +132,12 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
     # `delivery_id` rides inside the body, so the signature covers it; the
     # header copy is for routing and logging without a parse. Stable across a
     # delivery's retries — it is the ledger row's id.
-    envelope = %{event: event, data: payload}
-    envelope = if delivery_id, do: Map.put(envelope, :delivery_id, delivery_id), else: envelope
-    body = Jason.encode!(envelope)
+    body = Jason.encode!(%{event: event, data: payload, delivery_id: delivery_id})
 
     # Headers are built here, at send time, from nothing the job stored: a job
-    # enqueued before an upgrade (either args shape above) goes out with the
-    # headers of the release that runs it. That is how #1616 dropped the
-    # body-only `x-kilncms-signature` without a job migration.
+    # enqueued before an upgrade goes out with the headers of the release that
+    # runs it. That is how #1616 dropped the body-only `x-kilncms-signature`
+    # without a job migration.
     timestamp = System.system_time(:second)
 
     headers =
@@ -168,8 +145,9 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
         {"content-type", "application/json"},
         {Webhooks.timestamped_signature_header(),
          Webhooks.timestamped_signature(secret, timestamp, body)},
-        {Webhooks.event_header(), event}
-      ] ++ if(delivery_id, do: [{Webhooks.delivery_id_header(), delivery_id}], else: [])
+        {Webhooks.event_header(), event},
+        {Webhooks.delivery_id_header(), delivery_id}
+      ]
 
     endpoint.url
     |> SafeFetch.post(body,

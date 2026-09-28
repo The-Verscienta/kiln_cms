@@ -78,6 +78,7 @@ config :kiln_cms,
 # during whatever spec happens to be first (and inside the `mix run seeds.exs`
 # VM, which halts underneath it).
 config :kiln_cms, :occurrence_backfill_on_boot, false
+config :kiln_cms, :legacy_audiences_migration_on_boot, false
 
 config :kiln_cms, token_signing_secret: "e2eTokenSigningSecretForBrowserTests0"
 

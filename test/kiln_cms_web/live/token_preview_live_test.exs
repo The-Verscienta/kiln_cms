@@ -40,7 +40,10 @@ defmodule KilnCMSWeb.TokenPreviewLiveTest do
       title: "Guest Draft",
       slug: "tp-#{System.unique_integer([:positive])}",
       state: :draft,
-      blocks: [%{type: :heading, content: "Hello guests", data: %{"level" => 1}, order: 0}]
+      blocks:
+        KilnCMS.TypedFixtures.typed_blocks([
+          %{type: :heading, content: "Hello guests", data: %{"level" => 1}, order: 0}
+        ])
     })
   end
 
@@ -75,7 +78,10 @@ defmodule KilnCMSWeb.TokenPreviewLiveTest do
         slug: "tp-#{System.unique_integer([:positive])}",
         state: :draft,
         org_id: o.id,
-        blocks: [%{type: :heading, content: "Theirs", data: %{"level" => 1}, order: 0}]
+        blocks:
+          KilnCMS.TypedFixtures.typed_blocks([
+            %{type: :heading, content: "Theirs", data: %{"level" => 1}, order: 0}
+          ])
       })
 
     # `Layouts.public` used to be rendered bare here, and `Branding.for_org(nil)`
@@ -101,7 +107,10 @@ defmodule KilnCMSWeb.TokenPreviewLiveTest do
         slug: "tp-#{System.unique_integer([:positive])}",
         state: :draft,
         org_id: o.id,
-        blocks: [%{type: :heading, content: "Theirs", data: %{"level" => 1}, order: 0}]
+        blocks:
+          KilnCMS.TypedFixtures.typed_blocks([
+            %{type: :heading, content: "Theirs", data: %{"level" => 1}, order: 0}
+          ])
       })
 
     # Served on the default site's host: the token's org is not the serving org.
@@ -122,11 +131,15 @@ defmodule KilnCMSWeb.TokenPreviewLiveTest do
         title: "Published title",
         slug: "tp-#{System.unique_integer([:positive])}",
         state: :published,
-        blocks: [%{type: :heading, content: "Published body", data: %{"level" => 1}, order: 0}],
+        blocks:
+          KilnCMS.TypedFixtures.typed_blocks([
+            %{type: :heading, content: "Published body", data: %{"level" => 1}, order: 0}
+          ]),
         working_title: "Edited title",
-        working_blocks: [
-          %{type: :heading, content: "Edited body", data: %{"level" => 1}, order: 0}
-        ],
+        working_blocks:
+          KilnCMS.TypedFixtures.typed_blocks([
+            %{type: :heading, content: "Edited body", data: %{"level" => 1}, order: 0}
+          ]),
         working_copy_at: DateTime.utc_now()
       })
 

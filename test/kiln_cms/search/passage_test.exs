@@ -10,6 +10,8 @@ defmodule KilnCMS.Search.PassageTest do
   """
   use KilnCMS.DataCase, async: true
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.CMS
 
   defp admin do
@@ -46,7 +48,7 @@ defmodule KilnCMS.Search.PassageTest do
         %{
           title: "Pad Thai",
           slug: slug(),
-          blocks: [%{type: :rich_text, content: "<p>#{@body}</p>", order: 0}]
+          blocks: typed_blocks([%{type: :rich_text, content: "<p>#{@body}</p>", order: 0}])
         },
         actor: actor
       )
@@ -68,7 +70,7 @@ defmodule KilnCMS.Search.PassageTest do
         %{
           title: "Pad Thai",
           slug: slug(),
-          blocks: [%{type: :rich_text, content: "<p>#{@body}</p>", order: 0}]
+          blocks: typed_blocks([%{type: :rich_text, content: "<p>#{@body}</p>", order: 0}])
         },
         actor: actor
       )

@@ -52,7 +52,10 @@ defmodule KilnCMSWeb.PreviewLiveTest do
       %{
         title: "Shared Draft",
         slug: "prev-#{System.unique_integer([:positive])}",
-        blocks: [%{type: :heading, content: "Together", data: %{"level" => 1}, order: 0}]
+        blocks:
+          KilnCMS.TypedFixtures.typed_blocks([
+            %{type: :heading, content: "Together", data: %{"level" => 1}, order: 0}
+          ])
       },
       actor: actor
     )
@@ -155,7 +158,10 @@ defmodule KilnCMSWeb.PreviewLiveTest do
           title: "Gemeinsamer Entwurf",
           slug: page.slug,
           locale: "de",
-          blocks: [%{type: :heading, content: "Zusammen", data: %{"level" => 1}, order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "Zusammen", data: %{"level" => 1}, order: 0}
+            ])
         },
         authorize?: false
       )

@@ -5,6 +5,8 @@ defmodule KilnCMS.CMS.ContentSearchTest do
   """
   use KilnCMS.DataCase, async: true
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.CMS
 
   defp admin do
@@ -80,7 +82,10 @@ defmodule KilnCMS.CMS.ContentSearchTest do
         %{
           title: "Wildlife",
           slug: slug(),
-          blocks: [%{type: :rich_text, content: "<p>The unicorns roam freely.</p>", order: 0}]
+          blocks:
+            typed_blocks([
+              %{type: :rich_text, content: "<p>The unicorns roam freely.</p>", order: 0}
+            ])
         },
         actor: admin
       )
@@ -152,9 +157,10 @@ defmodule KilnCMS.CMS.ContentSearchTest do
         %{
           title: "#{term} #{term} #{term}",
           slug: slug(),
-          blocks: [
-            %{type: :rich_text, content: "<p>#{term} #{term} #{term} #{term}</p>", order: 0}
-          ]
+          blocks:
+            typed_blocks([
+              %{type: :rich_text, content: "<p>#{term} #{term} #{term} #{term}</p>", order: 0}
+            ])
         },
         actor: admin
       )

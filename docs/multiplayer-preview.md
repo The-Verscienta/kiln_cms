@@ -4,8 +4,8 @@
 > people watching the same draft preview — a presence bar and live cursors, both
 > live in a production build. CRDT co-*editing* (simultaneous typing in one
 > rich-text block) is a **separate prototype, disabled in production**: it is
-> gated on `config :kiln_cms, :collab_prototype`, which is set only in
-> `config/dev.exs` and `config/test.exs`. See
+> gated on `config :kiln_cms, :collab_prototype`, which is on only in
+> `config/dev.exs` and `config/test.exs` (`config/prod.exs` pins it off). See
 > [collaborative-editing-spike.md](collaborative-editing-spike.md).
 
 Two (or more) people can open the **same** live preview of a draft and see each

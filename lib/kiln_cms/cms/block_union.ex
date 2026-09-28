@@ -12,14 +12,17 @@ defmodule KilnCMS.CMS.BlockUnion do
 
   > `blocks` and `working_blocks` on every content type have been typed
   > `{:array, BlockUnion}` since the storage flip, and any write that touches
-  > them stores the typed shape. The flip shipped without a data migration, so
-  > a row nobody has saved since can still hold the legacy `KilnCMS.CMS.Block`
-  > shape at rest; the tolerant `cast_stored` below converts it on every read.
+  > them stores the typed shape. **Writes must be typed:** since 1.0 (#1543) a
+  > block in the pre-typed `type`/`content`/`data` shape is refused at the cast
+  > (`KilnCMS.CMS.TypedBlocks.LegacyInputError`), where 0.12 still converted it.
+  >
+  > **Reads stay tolerant.** The flip shipped without a data migration, so a
+  > row nobody has saved since can still hold the legacy shape at rest, and
+  > version history — hash-chained, never rewritten — always will. `cast_stored`
+  > below converts such a block on every read, and an unknown one to
+  > `KilnCMS.Blocks.Custom`, so delivery never crashes on it.
   > `mix kiln.blocks.backfill` (`KilnCMS.CMS.BlockBackfill`, #1537) rewrites
-  > those rows once, on disk — after it has run on a deployment, the only
-  > legacy shapes left at rest are the rows it reported and version history,
-  > which is hash-chained and never rewritten. The tolerant casts stay until
-  > 1.0 for both.
+  > those rows once, on disk; the ones it refuses keep being read this way.
   """
   # The member list is the compile-time union of core + plugin blocks (D18) —
   # see `KilnCMS.Blocks.union_types/0`. A plugin's `blocks/0` joins storage,
@@ -30,11 +33,12 @@ defmodule KilnCMS.CMS.BlockUnion do
 
   alias KilnCMS.CMS.TypedBlocks
   alias KilnCMS.CMS.TypedBlocks.InvalidChildBlockError
+  alias KilnCMS.CMS.TypedBlocks.LegacyInputError
 
-  # Tolerant casts (Kiln v2 storage flip): accept legacy block params and legacy
-  # stored rows by normalizing them to the typed shape before the union cast. This
-  # keeps existing callers/tests working and converts old rows lazily on read — no
-  # data migration required.
+  # Input casts normalize typed input (tag-shaped maps, structs, `%Ash.Union{}`s,
+  # stored envelopes) before the union cast, and refuse the legacy write shape
+  # (`LegacyInputError`, #1543). Stored casts still convert legacy rows lazily on
+  # read — see the moduledoc.
   #
   # `TypedBlocks.to_union_input/1` (via `sanitize_children/2`) also validates
   # every nested child through the same Ash cast a top-level block gets, and
@@ -80,6 +84,7 @@ defmodule KilnCMS.CMS.BlockUnion do
     value |> TypedBlocks.to_union_input() |> super(constraints)
   rescue
     e in InvalidChildBlockError -> {:error, e.errors}
+    e in LegacyInputError -> {:error, message: Exception.message(e)}
   end
 
   @impl Ash.Type
@@ -87,6 +92,7 @@ defmodule KilnCMS.CMS.BlockUnion do
     list |> Enum.map(&TypedBlocks.to_union_input/1) |> super(constraints)
   rescue
     e in InvalidChildBlockError -> {:error, e.errors}
+    e in LegacyInputError -> {:error, message: Exception.message(e)}
   end
 
   def cast_input_array(other, constraints), do: super(other, constraints)
@@ -101,12 +107,14 @@ defmodule KilnCMS.CMS.BlockUnion do
     super(old_value, Enum.map(new_value, &TypedBlocks.to_union_input/1), constraints)
   rescue
     e in InvalidChildBlockError -> {:error, e.errors}
+    e in LegacyInputError -> {:error, message: Exception.message(e)}
   end
 
   def prepare_change(old_value, new_value, constraints) do
     super(old_value, TypedBlocks.to_union_input(new_value), constraints)
   rescue
     e in InvalidChildBlockError -> {:error, e.errors}
+    e in LegacyInputError -> {:error, message: Exception.message(e)}
   end
 
   @impl Ash.Type
@@ -117,6 +125,7 @@ defmodule KilnCMS.CMS.BlockUnion do
     super(old_values, Enum.map(new_values, &TypedBlocks.to_union_input/1), constraints)
   rescue
     e in InvalidChildBlockError -> {:error, e.errors}
+    e in LegacyInputError -> {:error, message: Exception.message(e)}
   end
 
   def prepare_change_array(old_values, new_values, constraints),

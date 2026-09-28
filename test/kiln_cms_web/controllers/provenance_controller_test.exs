@@ -3,6 +3,8 @@ defmodule KilnCMSWeb.ProvenanceControllerTest do
   # async: false — provenance config + signing key are global env state.
   use KilnCMSWeb.ConnCase, async: false
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.CMS
 
   setup do
@@ -45,7 +47,8 @@ defmodule KilnCMSWeb.ProvenanceControllerTest do
         %{
           title: "Trusted",
           slug: slug,
-          blocks: [%{type: :heading, content: "Signed", data: %{"level" => 1}, order: 0}]
+          blocks:
+            typed_blocks([%{type: :heading, content: "Signed", data: %{"level" => 1}, order: 0}])
         },
         actor: actor
       )

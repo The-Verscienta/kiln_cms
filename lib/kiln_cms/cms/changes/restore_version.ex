@@ -157,7 +157,8 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
       # Values arrive in the shape PaperTrail stored (JSON), which
       # `force_change_attribute/3` casts back.
       value = Map.get_lazy(state, to_string(name), fn -> default(acc.resource, name) end)
-      Ash.Changeset.force_change_attribute(acc, name, restorable_value(acc, name, value))
+      value = acc |> restorable_value(name, value) |> upcast_blocks(name)
+      Ash.Changeset.force_change_attribute(acc, name, value)
     end)
   end
 
@@ -172,6 +173,22 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
   defp restorable_value(_changeset, :working_blocks, _value), do: []
   defp restorable_value(_changeset, name, _value) when name in @working_copy_fields, do: nil
   defp restorable_value(_changeset, _name, value), do: value
+
+  # A version from before the storage flip holds its block tree in the
+  # pre-typed `type`/`content`/`data` shape, and history is hash-chained, so it
+  # stays that way. The write cast refuses that shape since 1.0 (#1543), so the
+  # tree goes through the read conversion first — the same one every read of
+  # that version already shows — and is written back typed. A post-flip
+  # snapshot (union `type`/`value` envelopes) converts to itself.
+  @block_trees [:blocks, :working_blocks]
+
+  defp upcast_blocks(value, name) when name in @block_trees and is_list(value) do
+    value
+    |> KilnCMS.CMS.TypedBlocks.to_typed()
+    |> Enum.map(&KilnCMS.CMS.TypedBlocks.input_map/1)
+  end
+
+  defp upcast_blocks(value, _name), do: value
 
   # The value the attribute held before anything wrote it — which is what the
   # record carried at a version whose fold has no key for it.

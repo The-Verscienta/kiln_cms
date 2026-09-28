@@ -39,14 +39,16 @@ defmodule KilnCMS.DeliveryInternalsPolicyTest do
 
   defp org_id, do: Accounts.default_org_id()
 
+  # Audiences are read off a membership since 1.0 (#1543), not the user column.
   defp user(role, audiences \\ []) do
-    Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+    KilnCMS.Accounts.User
+    |> Ash.Seed.seed!(%{
       email: "dip-#{role}-#{uniq()}@example.com",
       hashed_password: Bcrypt.hash_pwd_salt("password123456"),
       confirmed_at: DateTime.utc_now(),
-      role: role,
-      audiences: audiences
+      role: role
     })
+    |> KilnCMS.OrgFixtures.grant_audiences(audiences)
   end
 
   # Seed the document directly in its final state — the publish workflow isn't
@@ -86,7 +88,7 @@ defmodule KilnCMS.DeliveryInternalsPolicyTest do
   # A typed block tree whose single block references `target_id` — the shape
   # `References.extract/1` pulls an edge out of.
   defp ref_blocks(target_id) do
-    KilnCMS.LegacyBridge.from_legacy([
+    KilnCMS.CMS.TypedBlocks.to_typed([
       %{
         type: :custom,
         content: "see also",

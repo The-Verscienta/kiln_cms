@@ -9,6 +9,8 @@ defmodule KilnCMSWeb.AnalyticsTelemetryTest do
   """
   use KilnCMSWeb.ConnCase, async: false
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.CMS
 
   # Forward one event to this process and detach when the test ends.
@@ -87,7 +89,8 @@ defmodule KilnCMSWeb.AnalyticsTelemetryTest do
         %{
           title: "Surface",
           slug: "surf-#{System.unique_integer([:positive])}",
-          blocks: [%{type: :heading, content: "Hi", data: %{"level" => 1}, order: 0}]
+          blocks:
+            typed_blocks([%{type: :heading, content: "Hi", data: %{"level" => 1}, order: 0}])
         },
         actor: actor
       )

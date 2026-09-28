@@ -96,8 +96,8 @@ not trusted for everything it asserts:
   down stops the provider signing anyone in.
 - **Never an account with access elsewhere.** The provider cannot sign in a
   platform admin, anyone with a membership on another site (at any tier), or a
-  membership-less account whose global editor/admin role or legacy audiences
-  reach beyond this site. Those people sign in with a password, an email link,
+  membership-less account whose global editor/admin role
+  reaches beyond this site. Those people sign in with a password, an email link,
   a passkey, or the operator's provider instead.
 - **No pre-registered accounts.** An account whose address was never confirmed
   is refused rather than handed to the provider's user.

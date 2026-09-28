@@ -640,6 +640,38 @@ defmodule KilnCMSWeb.Layouts do
   end
 
   @doc """
+  The "← Parent" crumb above a console screen's heading (#1680).
+
+  The parent comes from `KilnCMSWeb.ConsoleNav.parent/3` — the Configure hub
+  section for a configuration screen, Home for everything else — so the crumb
+  and the sidebar are the same map. Before this, sixteen screens hard-coded
+  "← All content", which sent Team, Billing or Mail back to a content list they
+  have nothing to do with.
+  """
+  attr :current_user, :map, required: true
+  attr :current_org, :any, default: nil
+  attr :active, :atom, required: true, doc: "the screen's `ConsoleNav` key"
+
+  def console_crumb(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :parent,
+        KilnCMSWeb.ConsoleNav.parent(assigns.current_user, assigns.current_org, assigns.active)
+      )
+
+    ~H"""
+    <.link
+      id="console-crumb"
+      navigate={@parent.path}
+      class="text-sm text-base-content/60 hover:underline"
+    >
+      &larr; {@parent.label}
+    </.link>
+    """
+  end
+
+  @doc """
   Names the deployment when `KILN_ENV_LABEL` is set, and renders nothing at all
   otherwise (#469).
 

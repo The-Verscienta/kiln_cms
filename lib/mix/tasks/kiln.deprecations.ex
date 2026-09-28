@@ -1,11 +1,12 @@
 defmodule Mix.Tasks.Kiln.Deprecations do
-  @shortdoc "Report the data a 1.0 upgrade would strand, and migrate legacy audiences"
+  @shortdoc "Report data only a removed surface read, and migrate legacy audiences"
 
   @moduledoc """
-  Find what this instance still relies on that 0.12 deprecated and 1.0
-  removes (#1538) — the data side of `KilnCMS.Deprecations`:
+  Find what this instance still holds that only a surface 0.12 deprecated and
+  1.0 removed (#1538, #1543) could read — the data side of
+  `KilnCMS.Deprecations`:
 
-    * accounts that read gated content through the legacy `User.audiences`
+    * accounts that read gated content through the removed `User.audiences`
       fallback (they hold audiences but no organization membership);
     * queued webhook and newsletter jobs still in a pre-0.12 argument shape.
 
@@ -16,8 +17,12 @@ defmodule Mix.Tasks.Kiln.Deprecations do
 
   `--migrate-audiences` gives each listed account a membership on the default
   organization carrying its audiences and standing role — what the fallback
-  already grants there — and prints the report again. Jobs are not migrated:
-  let the queue drain, or cancel them, before upgrading to 1.0.
+  granted there — and prints the report again. 1.0 also does this on its own
+  after every deploy (`KilnCMS.Accounts.LegacyAudiencesWorker`); run it on 0.12
+  before upgrading so there is no moment without access.
+
+  Jobs are not migrated: 1.0 cancels each one with a logged error when it runs.
+  On 0.12, let the queue drain (or cancel them) before upgrading.
 
   Exits non-zero while anything is left, so it can gate an upgrade script.
 

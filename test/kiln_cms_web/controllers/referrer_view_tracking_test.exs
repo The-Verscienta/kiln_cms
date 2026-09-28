@@ -28,7 +28,10 @@ defmodule KilnCMSWeb.ReferrerViewTrackingTest do
         %{
           title: "Referred",
           slug: slug,
-          blocks: [%{type: :heading, content: "Hi", data: %{"level" => 1}, order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "Hi", data: %{"level" => 1}, order: 0}
+            ])
         },
         actor: actor
       )

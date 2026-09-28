@@ -68,6 +68,33 @@ jobs:
         # none. Format matches `docs/releasing.md`'s manual recipe.
         run: echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
+      - name: Decide which floating tags move
+        id: lines
+        # `latest` and the major tag (`1`) follow the highest final release,
+        # not the newest tag (#1544). The previous minor gets security fixes
+        # for 90 days from a short-lived branch off its tag
+        # (`.github/SECURITY.md`), so `v1.0.3` can be pushed after `v1.1.0`,
+        # and moving `latest` or `1` onto it would roll back everyone who
+        # floats on them. The comparison lives in a script so a test can
+        # assert it (`test/scripts/release_floating_tags_test.exs`); the
+        # reason for each answer lands in this step's log.
+        #
+        # `git ls-remote` rather than the checkout's tags: the checkout is
+        # shallow and holds only this ref, and asking the remote needs no
+        # history. The listing is taken in its own assignment so a failed
+        # `ls-remote` fails the step (`bash -e`): piped straight into the
+        # loop, it would hand the script an empty list, and every tag would
+        # look like the highest. The ref reaches the script through `env`,
+        # never interpolated into it (see the Summarize step).
+        shell: bash
+        env:
+          REF: ${{ github.ref_name }}
+        run: |
+          listing=$(git ls-remote --tags --refs origin 'refs/tags/v*')
+          tags=()
+          while IFS=$'\t' read -r _sha tag; do tags+=("$tag"); done <<<"$listing"
+          scripts/release/floating_tags.sh "$REF" "${tags[@]}" >> "$GITHUB_OUTPUT"
+
       - name: Derive image tags
         id: meta
         uses: docker/metadata-action@v5
@@ -76,26 +103,36 @@ jobs:
           # `The-Verscienta/kiln_cms`, and `ghcr.io/The-Verscienta/...` is not
           # a valid name.
           images: ghcr.io/the-verscienta/kiln_cms
-          # The exact version and `latest`, and nothing that floats within a
-          # line. A `0.8` tag would imply a maintained 0.8.x line, and
-          # `.github/SECURITY.md` says plainly that there is none — fixes land
-          # on `main` and releases move forward only. `{{major}}` is worse
-          # still pre-1.0: every release so far would be `0`.
+          # The exact version, `latest`, and from 1.0 the major (`1`), and
+          # nothing that floats within a minor. A `1.0` tag would imply a
+          # maintained 1.0.x line, but `.github/SECURITY.md` supports only the
+          # latest minor (the previous one gets 90 days of security fixes,
+          # then nothing), so a floating minor would go stale on a schedule.
+          # A floating major is honest: there is one supported line per
+          # major. Pre-1.0 `{{major}}` would be `0` for every release, so the
+          # step above leaves it off until 1.0.0.
           #
-          # `latest` moves only for a final release (#1541). A release
-          # candidate (`v1.0.0-rc.1`) matches this workflow's `v*.*.*` trigger
-          # too, and an unconditional `latest` would hand the candidate to
-          # every `docker pull` and every compose file that floats on it.
-          # Semver marks a pre-release with a `-` after the patch number, and
-          # a final `vX.Y.Z` tag has none, so that is the test. The candidate
-          # still gets its exact tag (`1.0.0-rc.1`) from the semver line.
+          # Both floating tags move only for a final release (#1541). A
+          # release candidate (`v1.0.0-rc.1`) matches this workflow's
+          # `v*.*.*` trigger too, and an unconditional `latest` would hand the
+          # candidate to every `docker pull` and every compose file that
+          # floats on it. Semver marks a pre-release with a `-` after the
+          # patch number, and a final `vX.Y.Z` tag has none, so that is the
+          # test. The candidate still gets its exact tag (`1.0.0-rc.1`) from
+          # the `{{version}}` line.
+          #
+          # And both move only to the highest final release: of every release
+          # for `latest`, of its own major for `1` (#1544). The step above
+          # decides that. The `-` test stays alongside it, so a candidate
+          # cannot move either tag even if that step got it wrong.
           #
           # `flavor: latest=false` stops the action adding a `latest` of its
           # own: its default (`auto`) derives one from a semver tag, and the
           # line below should be the only thing that decides.
           tags: |
             type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+            type=semver,pattern={{major}},enable=${{ !contains(github.ref_name, '-') && steps.lines.outputs.major == 'true' }}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') && steps.lines.outputs.latest == 'true' }}
           flavor: |
             latest=false
           labels: |

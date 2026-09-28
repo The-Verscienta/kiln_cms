@@ -43,14 +43,16 @@ defmodule KilnCMS.CMS.MediaItemTest do
     })
   end
 
+  # Audiences are read off a membership since 1.0 (#1543), not the user column.
   defp reader(audiences) do
-    Ash.Seed.seed!(User, %{
+    User
+    |> Ash.Seed.seed!(%{
       email: "media-reader-#{System.unique_integer([:positive])}@example.com",
       hashed_password: Bcrypt.hash_pwd_salt("password123456"),
       confirmed_at: DateTime.utc_now(),
-      role: :viewer,
-      audiences: audiences
+      role: :viewer
     })
+    |> KilnCMS.OrgFixtures.grant_audiences(audiences)
   end
 
   defp put(key, content) do

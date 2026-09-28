@@ -161,7 +161,10 @@ The image's `CMD` is:
    `Ecto.Migrator` serialises concurrent runs with a lock on
    `schema_migrations` (ecto_sql's default `:table_lock`), so this stays safe
    when several replicas start at once: one migrates, the others wait, then
-   all serve.
+   all serve. During a rolling deploy the old release keeps serving against
+   the migrated schema; the expand/contract policy that keeps that safe, and
+   what zero-downtime does and does not cover, are in
+   [`releasing.md`](releasing.md#migrations-expand-migrate-contract).
 2. **`bin/server`** sets `PHX_SERVER=true` and starts the release. The Ash +
    Nx/Axon/Bumblebee stack is not fast to cold-boot; the image's healthcheck
    allows a generous start period for it (below).
@@ -515,6 +518,27 @@ is the canonical list; in deploy order:
 - Backups scheduled and a restore rehearsed ([`backups.md`](backups.md#restore-drill-quarterly)).
 - Error tracking / tracing (`SENTRY_DSN`, OpenTelemetry) — env-gated no-ops
   until set ([`observability.md`](observability.md)).
+- Sensitive files kept out of public storage — see the warning below.
+
+### Public media is readable by anyone with its URL
+
+> **Warning.** Every public media file — every image, and every document or
+> A/V file that is not gated to an audience — is served with **no
+> authentication** at `/uploads/<key>` (Local adapter, `Plug.Static`) or at
+> `S3_PUBLIC_BASE_URL` + `<key>` (S3 and its CDN). Being unpublished, or
+> unlinked, does not hide it.
+
+The keys are random UUIDs, so such a URL can't be guessed — it works as a
+capability, and whoever holds it can read the file. For anything that must
+stay private: set `S3_PRIVATE_BUCKET` if you run the S3 adapter (the Local
+adapter's private directory needs nothing), then give the document or A/V
+item a non-public audience, which moves it to private storage served only
+through the authorized download and stream routes. Images can't be gated,
+so don't upload sensitive ones. On S3, don't let the public bucket be
+listed. The full explanation, and what gating can't undo, is in
+[`media-pipeline.md`](media-pipeline.md#public-media-urls-are-capability-urls);
+the threat-model entry is *Media (`/uploads/*`)* in
+[`threat-model.md`](threat-model.md).
 
 ## Upgrading a deployment
 

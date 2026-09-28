@@ -85,9 +85,9 @@ defmodule KilnCMS.Release do
   end
 
   @doc """
-  `mix kiln.deprecations` for a release (#1538): report the accounts and queued
-  jobs that still depend on a surface 1.0 removes, and optionally move the
-  accounts onto a membership first.
+  `mix kiln.deprecations` for a release (#1538, #1543): report the accounts and
+  queued jobs still holding data only a removed surface read, and optionally
+  move the accounts onto a membership first.
 
       bin/kiln_cms eval 'KilnCMS.Release.deprecations()'
       bin/kiln_cms eval 'KilnCMS.Release.deprecations(migrate_audiences: true)'

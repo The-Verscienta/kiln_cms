@@ -138,14 +138,28 @@ defmodule KilnCMS.WebhookReliabilityTest do
 
     endpoint = endpoint!()
 
-    %{"endpoint_id" => endpoint.id, "event" => "page.published", "payload" => %{"title" => "Old"}}
+    # The job stores only the ledger row's id and org: nothing about the
+    # headers, which the release that runs it builds at send time.
+    delivery =
+      CMS.create_webhook_delivery!(
+        %{endpoint_id: endpoint.id, event: "page.published", payload: %{"title" => "Old"}},
+        authorize?: false
+      )
+
+    %{"delivery_id" => delivery.id, "org_id" => delivery.org_id}
     |> KilnCMS.Webhooks.DeliveryWorker.new()
     |> Oban.insert!()
 
     drain_with_retries()
 
     assert_received {:received, body, headers}
-    assert Jason.decode!(body) == %{"event" => "page.published", "data" => %{"title" => "Old"}}
+
+    assert Jason.decode!(body) == %{
+             "event" => "page.published",
+             "data" => %{"title" => "Old"},
+             "delivery_id" => delivery.id
+           }
+
     refute Map.has_key?(headers, "x-kilncms-signature")
 
     assert Webhooks.verify(
@@ -325,7 +339,10 @@ defmodule KilnCMS.WebhookReliabilityTest do
 
     CMS.update_webhook_endpoint!(endpoint, %{active: false}, actor: admin())
 
-    %{delivery_id: delivery.id} |> KilnCMS.Webhooks.DeliveryWorker.new() |> Oban.insert!()
+    %{delivery_id: delivery.id, org_id: delivery.org_id}
+    |> KilnCMS.Webhooks.DeliveryWorker.new()
+    |> Oban.insert!()
+
     drain_with_retries()
 
     assert CMS.get_webhook_delivery!(delivery.id, authorize?: false).status == :failed

@@ -21,7 +21,10 @@ defmodule KilnCMSWeb.PathAliasTest do
           title: "Aliased page",
           slug: "pa-#{uniq()}",
           state: :published,
-          blocks: [%{type: :heading, content: "Alias Body Heading", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "Alias Body Heading", order: 0}
+            ])
         },
         attrs
       )

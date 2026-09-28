@@ -103,7 +103,7 @@ defmodule KilnCMSWeb.ConsoleSharesOriginTest do
       assert log =~ "the second on this deployment"
       assert log =~ "KILN_CONSOLE_HOST is unset"
       assert log =~ "code injection"
-      assert log =~ "CHECK_ORIGINS"
+      assert log =~ "<slug>.<console host>"
     end
 
     test "says nothing on the third organization and after" do
