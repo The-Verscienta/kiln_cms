@@ -8394,6 +8394,11 @@ msgstr ""
 msgid "Nothing has been set for this site yet, so it follows whatever the operator configured for the whole deployment. Saving below gives this site its own settings."
 msgstr ""
 
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
+#, elixir-autogen, elixir-format
+msgid "Nothing has changed. To receive the newsletter, subscribe again on the site — we'll send you a new confirmation link."
+msgstr ""
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing has written %{path} yet. Either no backup has run, or it writes somewhere else."
@@ -13386,6 +13391,12 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "This isn't an image, so nothing reads this out. It's shown because a value was set — clear it if it doesn't belong."
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
+#, elixir-autogen, elixir-format
+msgid "This link is no longer valid"
 msgstr ""
 
 #: lib/kiln_cms_web/live/team_live.ex

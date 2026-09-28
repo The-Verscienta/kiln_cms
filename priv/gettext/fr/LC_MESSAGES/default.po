@@ -8394,6 +8394,11 @@ msgstr "Rien n'a encore été défini pour ce site : il suit donc ce que l'opér
 msgid "Nothing has been set for this site yet, so it follows whatever the operator configured for the whole deployment. Saving below gives this site its own settings."
 msgstr "Rien n'a encore été défini pour ce site : il suit donc ce que l'opérateur a configuré pour l'ensemble du déploiement. Enregistrer ci-dessous donne à ce site ses propres paramètres."
 
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
+#, elixir-autogen, elixir-format
+msgid "Nothing has changed. To receive the newsletter, subscribe again on the site — we'll send you a new confirmation link."
+msgstr "Rien n'a changé. Pour recevoir la newsletter, abonnez-vous de nouveau sur le site : nous vous enverrons un nouveau lien de confirmation."
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing has written %{path} yet. Either no backup has run, or it writes somewhere else."
@@ -13387,6 +13392,12 @@ msgstr "Il s'agit de la version la plus récente de Kiln."
 #, elixir-autogen, elixir-format
 msgid "This isn't an image, so nothing reads this out. It's shown because a value was set — clear it if it doesn't belong."
 msgstr "Ce n'est pas une image, donc rien ne lit ce texte à voix haute. Il s'affiche parce qu'une valeur a été définie : effacez-la si elle n'a pas lieu d'être."
+
+#: lib/kiln_cms_web/controllers/newsletter_controller.ex
+#: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
+#, elixir-autogen, elixir-format
+msgid "This link is no longer valid"
+msgstr "Ce lien n'est plus valide"
 
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format

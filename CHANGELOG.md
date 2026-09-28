@@ -60,6 +60,10 @@ Every summary line below that was shortened links to its own entry there.
   of silently doing nothing.**
   ([#1658](https://github.com/The-Verscienta/kiln_cms/issues/1658) · [long form](docs/changelog/unreleased.md#media-jobs-without-an-org-id-run-under-the-default-org))
 
+- **An old newsletter confirmation link no longer re-subscribes a reader who
+  unsubscribed.**
+  ([#1690](https://github.com/The-Verscienta/kiln_cms/issues/1690) · [long form](docs/changelog/unreleased.md#an-old-newsletter-confirmation-link-no-longer-re-subscribes))
+
 ### Security
 
 - **The newsletter sign-up honeypot and public forms trip on the same rule.**

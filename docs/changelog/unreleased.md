@@ -23,6 +23,18 @@ carries the reasoning.
   item on another site is not found rather than read across organizations.
   (#1658)
 
+<a id="an-old-newsletter-confirmation-link-no-longer-re-subscribes"></a>
+
+- **An old newsletter confirmation link no longer re-subscribes a reader who
+  unsubscribed.** Confirmation now only moves a subscriber from pending to
+  confirmed. When the subscriber has unsubscribed since, both the link's page
+  and its button show a neutral "this link is no longer valid, subscribe
+  again" page and change nothing. The page names no address and no status. The
+  `Subscriber` `:confirm` action enforces the rule itself, so an unsubscribe
+  that lands between the lookup and the write still wins. Confirming an
+  already-confirmed subscriber again is a no-op that keeps the original
+  `confirmed_at`. (#1690)
+
 ## Security
 
 <a id="newsletter-sign-up-honeypot-matches-forms"></a>
