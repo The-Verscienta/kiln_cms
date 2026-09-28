@@ -159,20 +159,30 @@ defmodule KilnCMS.Federation.HttpSignature do
 
   Called by the inbox after `verify/6` says `:ok`, never before. The row's
   expiry is twice the date window, so a signature is held for as long as its
-  `Date` could still verify. `:ok`, or `{:error, "signature replayed"}`; a
-  store that cannot be written answers `:ok` and logs — a nonce-store outage
-  must not take the inbox down, and the date window still bounds replay to
-  what phase 1 accepted.
+  `Date` could still verify. `:ok`, or `{:error, "signature replayed"}`.
+
+  **Fails closed** (#1659): a store that refuses or fails the write answers
+  `{:error, :unavailable}` and logs. Accepting would let a replay through
+  exactly when the store cannot tell — and a lost grant on
+  `KilnCMS.Federation.SeenSignature` would do that silently, forever. The
+  inbox answers `:unavailable` with a 503, so an honest sender retries the
+  delivery once the store is back; the retry carries a fresh signature.
+
+  `opts[:actor]` defaults to `KilnCMS.Federation.system/0`; tests pass another
+  to prove a refusal is refused.
   """
-  @spec record_seen([{String.t(), String.t()}]) :: :ok | {:error, String.t()}
-  def record_seen(headers) do
+  @spec record_seen([{String.t(), String.t()}], keyword()) ::
+          :ok | {:error, String.t() | :unavailable}
+  def record_seen(headers, opts \\ []) do
     with {:ok, params} <- parse_signature(header(headers, "signature")),
          {:ok, signature} <- Map.fetch(params, "signature") do
       hash = :crypto.hash(:sha256, signature) |> Base.encode16(case: :lower)
       expires_at = DateTime.add(DateTime.utc_now(), 2 * @max_skew_seconds, :second)
 
       %{signature_hash: hash, expires_at: expires_at}
-      |> KilnCMS.Federation.record_seen_signature(authorize?: false)
+      |> KilnCMS.Federation.record_seen_signature(
+        actor: Keyword.get(opts, :actor, KilnCMS.Federation.system())
+      )
       |> interpret_record()
     else
       _ -> {:error, "signature header is malformed"}
@@ -196,10 +206,11 @@ defmodule KilnCMS.Federation.HttpSignature do
     require Logger
 
     Logger.warning(
-      "federation replay store unavailable, accepting on the date window: #{inspect(detail)}"
+      "federation replay store unavailable, refusing the delivery for a retry: " <>
+        inspect(detail)
     )
 
-    :ok
+    {:error, :unavailable}
   end
 
   @doc "The `keyId` a signature header claims, without verifying anything."

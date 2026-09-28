@@ -151,7 +151,17 @@ defmodule KilnCMSWeb.FederationController do
     with {:ok, settings} <- site(conn),
          {:ok, raw_body} <- raw_body(conn),
          {:ok, activity} <- Jason.decode(raw_body),
-         :ok <- Inbox.handle(settings, activity, conn.req_headers, raw_body, org_id) do
+         :ok <-
+           Inbox.handle(
+             settings,
+             activity,
+             conn.req_headers,
+             raw_body,
+             org_id,
+             # Test seam only (#1659): server-side `conn.private`, which no
+             # request can set.
+             Map.get(conn.private, :kiln_inbox_opts, [])
+           ) do
       send_resp(conn, 202, "")
     else
       :error ->
@@ -159,6 +169,14 @@ defmodule KilnCMSWeb.FederationController do
 
       {:error, %Jason.DecodeError{}} ->
         send_resp(conn, 400, "")
+
+      # The replay store could not record the signature, so a replay cannot be
+      # ruled out (#1659). Transient, and the sender's fault is not assumed:
+      # 503 is the one answer that makes an honest server retry.
+      {:error, :unavailable} ->
+        conn
+        |> put_resp_header("retry-after", "60")
+        |> send_resp(503, "")
 
       {:error, reason} ->
         Logger.info("Federation inbox refused a request: #{reason}")
