@@ -74,6 +74,7 @@ defmodule KilnCMS.Accounts do
       define :get_organization_by_slug, action: :by_slug, args: [:slug]
       define :get_organization_by_domain, action: :by_custom_domain, args: [:custom_domain]
       define :create_organization, action: :create
+      define :update_organization, action: :update
     end
 
     resource KilnCMS.Accounts.OrgMembership do
