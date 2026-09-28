@@ -214,5 +214,8 @@ contend for the same rows. `repo.query.queue_time` p95 reached 56 ms (API) and 2
 without reaching request latency. The writes are asynchronous, and the task supervisor
 sheds them at `max_children`. Under a real spread of documents the contention is lower.
 
-Still to measure for #1546: the cache-miss HTML path, editor autosave and publish, and
-the same runs on production-shaped hardware.
+The headless API across a realistic corpus (JSON:API, GraphQL, search, sync;
+cold and warm; 1–50 concurrent clients) was measured for #1546 on 2026-09-27:
+see [`benchmarks.md`](benchmarks.md), and `scripts/benchmarks/` to rerun it.
+Still to measure: the cache-miss HTML path, editor autosave and publish, and
+all of it on production-shaped hardware.
