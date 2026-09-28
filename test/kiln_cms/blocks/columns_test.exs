@@ -176,12 +176,20 @@ defmodule KilnCMS.Blocks.ColumnsTest do
   end
 
   describe "TypedBlocks round-trip" do
-    test "to_legacy carries the layout + child tree in data, keyed :columns" do
-      assert [legacy] = KilnCMS.LegacyBridge.to_legacy([sample()])
-      assert legacy.type == :columns
-      assert legacy.content == nil
-      assert legacy.data["layout"] == "1-1"
-      assert [%{"blocks" => _}, %{"blocks" => _}] = legacy.data["columns"]
+    test "a stored legacy columns row reads its layout + child tree from data" do
+      stored = %{
+        "type" => "columns",
+        "data" => %{
+          "layout" => "1-1",
+          "columns" => [
+            %{"blocks" => [%{"_type" => "divider"}]},
+            %{"blocks" => []}
+          ]
+        }
+      }
+
+      assert [%Columns{layout: "1-1"} = block] = TypedBlocks.to_typed([stored])
+      assert [%{"blocks" => _}, %{"blocks" => _}] = block.columns
     end
 
     test "to_typed re-materializes a stored typed columns map" do

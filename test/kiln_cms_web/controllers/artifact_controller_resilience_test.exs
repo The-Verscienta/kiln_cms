@@ -9,6 +9,8 @@ defmodule KilnCMSWeb.ArtifactControllerResilienceTest do
   """
   use KilnCMSWeb.ConnCase, async: true
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.CMS
 
   defp admin do
@@ -29,7 +31,8 @@ defmodule KilnCMSWeb.ArtifactControllerResilienceTest do
         %{
           title: "Always Up",
           slug: slug,
-          blocks: [%{type: :heading, content: "Cached", data: %{"level" => 1}, order: 0}]
+          blocks:
+            typed_blocks([%{type: :heading, content: "Cached", data: %{"level" => 1}, order: 0}])
         },
         actor: actor
       )

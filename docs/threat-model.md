@@ -81,10 +81,10 @@ the router so preflights are answered before route matching).
 | Dev tools | `/dev/dashboard`, `/dev/mailbox`, `/admin`, `/gql/playground` | compile-gated off in prod | — |
 
 **`/ws/collab` is a prototype surface.** Its joins are refused unless
-`config :kiln_cms, :collab_prototype` is set, and that is set only in
-`config/dev.exs` and `config/test.exs` — so a production build carries the socket
-but accepts no CRDT session (#1324, and
-[collaborative-editing-spike.md](collaborative-editing-spike.md)). Everything
+`config :kiln_cms, :collab_prototype` is on, and it is on only in
+`config/dev.exs` and `config/test.exs` (`config/prod.exs` pins it `false`,
+#1660) — so a production build carries the socket but accepts no CRDT session
+(#1324, and [collaborative-editing-spike.md](collaborative-editing-spike.md)). Everything
 below about the collab room is modelled as if it were live, because that is the
 bar it has to clear before it can be enabled; it is not a live surface today.
 
@@ -595,7 +595,12 @@ build if a resource is ever registered without that authorizer.
   which is the only thing standing between an unpublished asset and the world.
   `Content-Disposition: attachment` + `nosniff` prevent the bucket being used to
   serve active content. S3/MinIO deployments serve media entirely outside the
-  app.
+  app. Accepted by design (security audit 2026-09-27, finding 15, #1666): a
+  public media URL is a capability URL. Gated documents and A/V live in
+  private storage, which has no static mount and is served only through the
+  policy-checked download and stream routes. Operator guidance is in
+  [media-pipeline.md](media-pipeline.md#public-media-urls-are-capability-urls)
+  and [deploy.md](deploy.md#public-media-is-readable-by-anyone-with-its-url).
 
 ### Webhooks (outbound)
 - **Gated content is delivered** — a content event carries the full block tree
@@ -764,7 +769,7 @@ the provider. See [sso.md](sso.md#per-site-providers).
 - **Reaching another site** — a site's provider never signs in an account with
   access anywhere else: a platform admin (standing or temporary), a member of
   any other organization at any tier, or a membership-less account whose global
-  role or legacy audiences reach beyond the site. Checked at every sign-in, in
+  role reaches beyond the site. Checked at every sign-in, in
   `KilnCMS.Accounts.SiteSso.Admission`. Kiln has no site-scoped session, so the
   guarantee is made at admission. **Accepted:** a session such a provider
   minted before the account later gained access elsewhere keeps working until
@@ -1704,24 +1709,39 @@ because other files cite them by number.
     this is the operator's own script. On a multi-org deployment it is one
     tenant's admin reaching other tenants' editors, and the operator's.
 
-    The mitigation is `KILN_CONSOLE_HOST` (#740): the console is then served
-    only on a host no tenant controls, and delivery script is cross-origin to
-    it. It stays **opt-in**, because a console host is a deployment change
-    (DNS, TLS, `CHECK_ORIGINS`) Kiln cannot make for an operator on upgrade,
-    and because org resolution is still host-derived, so that host reaches
-    the default organization's console only. What Kiln does instead is say
-    so: once a second organization exists and `KILN_CONSOLE_HOST` is unset,
-    it warns at boot (a `KilnCMS.Config.Report` warning, which reaches
-    Sentry), when the second org is created, and on `/editor/system`
-    (`KilnCMSWeb.Tenant.console_shares_origin?/0`). See
+    The mitigation is `KILN_CONSOLE_HOST` (#740): consoles are then served
+    only on hosts no tenant controls, and delivery script is cross-origin to
+    all of them. Since #1688 that covers **every** organization: the bare
+    console host is the default org's console and `<slug>.<console host>`
+    is each other org's, resolved from the host like a tenant subdomain, so
+    no org's console shares an origin with any site or with another org's
+    console. Cookies stay host-only (`__Host-` in production), so a session
+    on one console host is never sent to a site host or to another console
+    host. Passkeys keep their RP ID (the `PHX_HOST` host) and are accepted on
+    console origins under it, never on tenant site origins
+    (`KilnCMS.Accounts.WebAuthn.origin_allowed?/2`). Why one host per org
+    and not one shared, org-switching console host:
+    [decision record 0011](decisions/0011-each-organization-gets-its-own-console-origin-under-the-console-host.md).
+
+    It stays **opt-in**, because a console host is a DNS and TLS change
+    (the host and its wildcard) that Kiln cannot make for an operator on
+    upgrade. So Kiln says so: once a second organization exists and
+    `KILN_CONSOLE_HOST` is unset, it warns at boot (a `KilnCMS.Config.Report`
+    warning, which reaches Sentry), when the second org is created, and on
+    `/editor/system` (`KilnCMSWeb.Tenant.console_shares_origin?/0`). See
     [code-injection.md](code-injection.md#read-this-before-granting-the-role).
 
-    **1.0 verdict (decided, #1661): accepted at 1.0 with a warning; set
-    `KILN_CONSOLE_HOST` on multi-org installs.** The alternative an operator
-    has without a console host is to treat "org admin" as equivalent to
-    console access and staff it accordingly. Per-tenant console hosts —
-    session-derived org resolution on the console host — are the follow-up
-    that would let a multi-org console host serve every tenant.
+    **1.0 verdict (decided, #1661; structural gap closed, #1688): closed
+    by configuration.** With `KILN_CONSOLE_HOST` set, a multi-org
+    deployment isolates every org's console. What remains is the
+    unconfigured deployment, which is warned about. Its alternative is to
+    treat "org admin" as equivalent to console access and staff it
+    accordingly. One edge stays by design: the sign-in and account routes
+    are shared (`KilnCMSWeb.Surface`), because members sign in on the site
+    for gated content. So a session someone creates *on a site host* is
+    same-origin with that org's code injection. It reaches the shared routes
+    only, never a console route, and it is a separate session from the
+    one on any console host.
 
 **Not on this list, but named by the 1.0 roadmap: `/api/ask` lets an anonymous
 caller drive LLM cost** (see *Other outbound calls* above). **1.0 verdict

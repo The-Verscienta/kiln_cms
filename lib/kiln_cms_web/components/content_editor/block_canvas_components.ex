@@ -15,6 +15,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
       block_member: 1,
       block_type_string: 1,
       item_row_maps: 1,
+      nested_field_value: 2,
       nested_fields_for: 1,
       to_int: 1
     ]
@@ -860,7 +861,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
         <span class="text-xs font-medium text-base-content/70">{label}</span>
         <input
           type="text"
-          value={@child[field] || ""}
+          value={nested_field_value(@child, field)}
           placeholder={label}
           phx-blur="col_update_child"
           phx-value-id={@block_id}

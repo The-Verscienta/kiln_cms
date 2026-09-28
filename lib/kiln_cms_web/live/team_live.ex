@@ -505,9 +505,11 @@ defmodule KilnCMSWeb.TeamLive do
     >
       <div class="space-y-8">
         <div>
-          <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
-            &larr; {gettext("All content")}
-          </.link>
+          <Layouts.console_crumb
+            current_user={@current_user}
+            current_org={@current_org}
+            active={:team}
+          />
           <h1 class="mt-1 text-2xl font-semibold">{gettext("Team")}</h1>
           <p class="text-sm text-base-content/70">
             {gettext(
@@ -576,9 +578,15 @@ defmodule KilnCMSWeb.TeamLive do
             <.button type="submit" variant="primary">{gettext("Add member")}</.button>
           </form>
 
-          <p :if={@members == [] and @site_admins == []} class="text-sm text-base-content/60">
-            {gettext("No members on this site yet.")}
-          </p>
+          <.empty_state
+            :if={@members == [] and @site_admins == []}
+            id="team-members-empty"
+            icon="hero-user-group"
+            title={gettext("No members on this site yet.")}
+            compact
+          >
+            {gettext("Add someone with the form above to give them a role here.")}
+          </.empty_state>
 
           <ul
             :if={@members != [] or @site_admins != []}
@@ -718,9 +726,15 @@ defmodule KilnCMSWeb.TeamLive do
             <.button type="submit" variant="primary">{gettext("Add role")}</.button>
           </.form>
 
-          <p :if={@roles == []} class="text-sm text-base-content/60">
-            {gettext("No custom roles yet — members use their tier and direct scope only.")}
-          </p>
+          <.empty_state
+            :if={@roles == []}
+            id="team-roles-empty"
+            icon="hero-identification"
+            title={gettext("No custom roles yet")}
+            compact
+          >
+            {gettext("Members use their tier and direct scope only.")}
+          </.empty_state>
 
           <ul :if={@roles != []} class="card divide-y divide-base-content/10 overflow-hidden">
             <li :for={role <- @roles} id={"role-#{role.id}"} class="p-4">

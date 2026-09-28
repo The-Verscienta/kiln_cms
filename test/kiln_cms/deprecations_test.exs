@@ -1,14 +1,16 @@
 defmodule KilnCMS.DeprecationsTest do
   @moduledoc """
-  The first use of the deprecation policy (#1538): each surface 0.12 deprecates
-  keeps working, and says so where someone will see it — the compiler for a
-  `use` option, the log for what the compiler never sees. `mix kiln.deprecations`
-  finds the data a 1.0 upgrade would strand.
+  What 0.12 deprecated (#1538) is gone at 1.0 (#1543), and what outlived it is
+  handled: a `use` option that no longer exists warns as unknown, a membership-
+  less account's `User.audiences` grants nothing until the post-deploy safety
+  net moves it onto a membership, and a job still queued in a pre-0.12 shape is
+  cancelled with a logged error instead of running or crash-looping.
 
-  The editor route aliases are covered in `KilnCMSWeb.EditorLiveTest`.
+  The removed editor route aliases are covered in `KilnCMSWeb.EditorLiveTest`.
   """
-  # async: false — `Oban.Job` rows and the node-wide warn-once table are shared.
+  # async: false — `Oban.Job` rows are shared.
   use KilnCMS.DataCase, async: false
+  use Oban.Testing, repo: KilnCMS.Repo
   # The tests that care capture the log themselves; the rest is noise.
   @moduletag :capture_log
 
@@ -18,6 +20,7 @@ defmodule KilnCMS.DeprecationsTest do
   require Ash.Query
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.LegacyAudiencesWorker
   alias KilnCMS.Accounts.OrgMembership
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
@@ -65,61 +68,60 @@ defmodule KilnCMS.DeprecationsTest do
     |> Enum.any?()
   end
 
-  describe "published?: on use KilnCMS.CMS.Content" do
-    test "warns at compile time, at the overlay's own use line" do
-      module = :"Elixir.KilnCMS.CMS.DeprecatedPublishedOpt#{System.unique_integer([:positive])}"
-
-      source = """
-      defmodule #{inspect(module)} do
-        use KilnCMS.CMS.Content,
-          type: :page,
-          table: "pages",
-          published?: true
+  defp compile_stderr(source, file) do
+    capture_io(:stderr, fn ->
+      # The warning is raised while the macro expands; whether the rest of a
+      # throwaway resource compiles is beside the point here.
+      try do
+        Code.compile_string(source, file)
+      rescue
+        _ -> :ok
       end
-      """
+    end)
+  end
+
+  describe "use KilnCMS.CMS.Content options" do
+    test "published?: is gone — it now warns as an unknown option, not a deprecation" do
+      module = :"Elixir.KilnCMS.CMS.RemovedPublishedOpt#{System.unique_integer([:positive])}"
 
       stderr =
-        capture_io(:stderr, fn ->
-          # The warning is raised while the macro expands; whether the rest of
-          # a throwaway resource compiles is beside the point here.
-          try do
-            Code.compile_string(source, "test/deprecated_published_opt.exs")
-          rescue
-            _ -> :ok
+        compile_stderr(
+          """
+          defmodule #{inspect(module)} do
+            use KilnCMS.CMS.Content,
+              type: :page,
+              table: "pages",
+              published?: true
           end
-        end)
+          """,
+          "test/removed_published_opt.exs"
+        )
 
-      assert stderr =~ "the `published?:` option to `use KilnCMS.CMS.Content` is deprecated"
-      assert stderr =~ "remove it. 1.0 removes the option."
-      assert stderr =~ "test/deprecated_published_opt.exs:2"
-      refute stderr =~ "unknown option"
+      refute :published? in KilnCMS.CMS.Content.use_options()
+      assert stderr =~ "unknown option(s) [:published?] to `use KilnCMS.CMS.Content` are ignored"
+      assert stderr =~ "2.0 makes an unknown option a compile error"
+      assert stderr =~ "test/removed_published_opt.exs:2"
+      refute stderr =~ "is deprecated"
     end
 
-    test "an unknown option warns too, naming it" do
+    test "an unknown option warns, naming it" do
       module = :"Elixir.KilnCMS.CMS.UnknownContentOpt#{System.unique_integer([:positive])}"
 
-      source = """
-      defmodule #{inspect(module)} do
-        use KilnCMS.CMS.Content,
-          type: :page,
-          table: "pages",
-          exerpt?: true
-      end
-      """
-
       stderr =
-        capture_io(:stderr, fn ->
-          try do
-            Code.compile_string(source, "test/unknown_content_opt.exs")
-          rescue
-            _ -> :ok
+        compile_stderr(
+          """
+          defmodule #{inspect(module)} do
+            use KilnCMS.CMS.Content,
+              type: :page,
+              table: "pages",
+              exerpt?: true
           end
-        end)
+          """,
+          "test/unknown_content_opt.exs"
+        )
 
       assert stderr =~ "unknown option(s) [:exerpt?] to `use KilnCMS.CMS.Content` are ignored"
-      assert stderr =~ "2.0 makes an unknown option a compile error"
       assert stderr =~ "test/unknown_content_opt.exs:2"
-      refute stderr =~ "the `published?:` option"
     end
 
     test "the accepted set is exactly the options the macro reads" do
@@ -136,38 +138,19 @@ defmodule KilnCMS.DeprecationsTest do
 
       assert read == MapSet.new(KilnCMS.CMS.Content.use_options())
     end
-
-    test "no core content type passes it" do
-      for module <- [KilnCMS.CMS.Page, KilnCMS.CMS.Post] do
-        source = module.module_info(:compile)[:source] |> to_string() |> File.read!()
-        refute source =~ "published?:", "#{inspect(module)} still passes published?:"
-      end
-    end
   end
 
-  describe "the legacy User.audiences fallback" do
-    test "still grants a membership-less account, and warns once per account" do
+  describe "the removed User.audiences fallback" do
+    test "a membership-less account's audiences grant nothing, and nothing is logged" do
       reader = user(%{audiences: [@gated]})
-      page = gated_page()
-
-      log = capture_log(fn -> assert can_read?(reader, page) end)
-      assert log =~ "Account #{reader.id} reads gated content through the deprecated"
-      assert log =~ "mix kiln.deprecations --migrate-audiences"
-
-      # Once per account per boot: the fallback runs on every policy check.
-      refute capture_log(fn -> assert can_read?(reader, page) end) =~ "deprecated"
-    end
-
-    test "stays quiet for an account the fallback grants nothing" do
-      reader = user(%{audiences: []})
       page = gated_page()
 
       log = capture_log(fn -> refute can_read?(reader, page) end)
-      refute log =~ "User.audiences fallback"
+      refute log =~ "User.audiences"
     end
 
-    test "stays quiet for a member" do
-      reader = user(%{audiences: [@gated]})
+    test "a member reads through the membership" do
+      reader = user(%{audiences: []})
 
       Ash.Seed.seed!(OrgMembership, %{
         organization_id: default_org_id(),
@@ -176,49 +159,34 @@ defmodule KilnCMS.DeprecationsTest do
         audiences: [@gated]
       })
 
-      page = gated_page()
-
-      log = capture_log(fn -> assert can_read?(reader, page) end)
-      refute log =~ "User.audiences fallback"
+      assert can_read?(reader, gated_page())
     end
   end
 
-  describe "report/0 and migrate_legacy_audiences/0" do
-    test "lists exactly the accounts on the fallback, and migration keeps their access" do
-      legacy = user(%{audiences: [@gated], role: :editor})
+  describe "the post-deploy safety net (LegacyAudiencesWorker)" do
+    test "moves an unaffiliated account onto a membership, restoring its access" do
+      # A viewer: an editor's tier would read the gated page with or without
+      # audiences.
+      legacy = user(%{audiences: [@gated], role: :viewer})
       _no_audiences = user(%{audiences: []})
-      member = user(%{audiences: [@gated]})
-
-      Ash.Seed.seed!(OrgMembership, %{
-        organization_id: default_org_id(),
-        user_id: member.id,
-        role: :viewer,
-        audiences: []
-      })
-
-      ids = Enum.map(Deprecations.report().legacy_audience_accounts, & &1.id)
-      assert legacy.id in ids
-      refute member.id in ids
-      assert length(ids) == 1
-
-      assert {:ok, [migrated]} = Deprecations.migrate_legacy_audiences()
-      assert migrated.id == legacy.id
-
-      membership =
-        Accounts.get_org_membership!(legacy.id, default_org_id(), authorize?: false)
-
-      assert membership.audiences == [@gated]
-      assert membership.role == :editor
-      assert Deprecations.report().legacy_audience_accounts == []
-
-      # Same access as before, now through the membership — and no warning.
       page = gated_page()
-      reloaded = Accounts.get_user!(legacy.id, authorize?: false)
-      log = capture_log(fn -> assert can_read?(reloaded, page) end)
-      refute log =~ "User.audiences fallback"
+
+      # After the upgrade and before the job: fail-closed, never wider.
+      refute can_read?(legacy, page)
+
+      log = capture_log(fn -> assert :ok = perform_job(LegacyAudiencesWorker, %{}) end)
+      assert log =~ "Moved 1 account(s) off the User.audiences fallback"
+
+      membership = Accounts.get_org_membership!(legacy.id, default_org_id(), authorize?: false)
+      assert membership.audiences == [@gated]
+      assert membership.role == :viewer
+
+      # A fresh process: `Scoping` memoizes affiliation per process.
+      assert Task.async(fn -> can_read?(legacy, page) end) |> Task.await()
+      assert Deprecations.report().legacy_audience_accounts == []
     end
 
-    test "migration carries a live temporary role, with its expiry" do
+    test "carries a live temporary role, with its expiry" do
       expires = DateTime.add(DateTime.utc_now(), 3600, :second)
 
       legacy =
@@ -229,14 +197,72 @@ defmodule KilnCMS.DeprecationsTest do
           granted_role_expires_at: expires
         })
 
-      assert {:ok, [_]} = Deprecations.migrate_legacy_audiences()
+      assert :ok = perform_job(LegacyAudiencesWorker, %{})
 
-      membership =
-        Accounts.get_org_membership!(legacy.id, default_org_id(), authorize?: false)
-
+      membership = Accounts.get_org_membership!(legacy.id, default_org_id(), authorize?: false)
       assert membership.role == :viewer
       assert membership.granted_role == :editor
       assert DateTime.compare(membership.granted_role_expires_at, expires) == :eq
+    end
+
+    test "is a no-op with nothing to migrate, and on a rerun" do
+      user(%{audiences: [@gated]})
+      assert :ok = perform_job(LegacyAudiencesWorker, %{})
+
+      log = capture_log(fn -> assert :ok = perform_job(LegacyAudiencesWorker, %{}) end)
+      refute log =~ "Moved"
+    end
+
+    test "never touches an account that already holds a membership" do
+      member = user(%{audiences: [@gated]})
+
+      Ash.Seed.seed!(OrgMembership, %{
+        organization_id: default_org_id(),
+        user_id: member.id,
+        role: :viewer,
+        audiences: []
+      })
+
+      assert :ok = perform_job(LegacyAudiencesWorker, %{})
+
+      assert Accounts.get_org_membership!(member.id, default_org_id(), authorize?: false).audiences ==
+               []
+    end
+
+    test "enqueue/0 queues one job however many nodes boot" do
+      assert :ok = LegacyAudiencesWorker.enqueue()
+      assert :ok = LegacyAudiencesWorker.enqueue()
+
+      assert [_one] =
+               Oban.Job
+               |> Ecto.Query.where(worker: "KilnCMS.Accounts.LegacyAudiencesWorker")
+               |> KilnCMS.Repo.all()
+    end
+
+    test "the boot enqueue is off in :test only" do
+      # Application boot happens OUTSIDE the sandbox; see the occurrence
+      # backfill's identical gate in `KilnCMS.Events.BackfillWorkerTest`.
+      refute Application.get_env(:kiln_cms, :legacy_audiences_migration_on_boot, true)
+    end
+  end
+
+  describe "report/0 and run_and_report/2 (mix kiln.deprecations)" do
+    test "lists exactly the accounts still on the fallback" do
+      legacy = user(%{audiences: [@gated], role: :editor})
+      member = user(%{audiences: [@gated]})
+
+      Ash.Seed.seed!(OrgMembership, %{
+        organization_id: default_org_id(),
+        user_id: member.id,
+        role: :viewer,
+        audiences: []
+      })
+
+      ids = Enum.map(Deprecations.report().legacy_audience_accounts, & &1.id)
+      assert ids == [legacy.id]
+
+      assert %{migrated: [migrated], failed: []} = Deprecations.migrate_legacy_audiences()
+      assert migrated.id == legacy.id
     end
 
     test "the report action shows a non-admin nothing" do
@@ -267,9 +293,7 @@ defmodule KilnCMS.DeprecationsTest do
       assert pre_ledger.id in ids
       refute current.id in ids
     end
-  end
 
-  describe "run_and_report/2 (mix kiln.deprecations)" do
     test "is :ok on a clean instance, and an error listing what is left otherwise" do
       assert :ok = Deprecations.run_and_report([], fn _ -> :ok end)
 
@@ -279,15 +303,15 @@ defmodule KilnCMS.DeprecationsTest do
 
       assert {:error, _} = Deprecations.run_and_report([], shell)
       printed = lines |> Agent.get(& &1) |> Enum.reverse() |> Enum.join("\n")
-      assert printed =~ "Accounts on the legacy User.audiences fallback: 1"
+      assert printed =~ "Accounts on the removed User.audiences fallback: 1"
       assert printed =~ to_string(legacy.email)
 
       assert :ok = Deprecations.run_and_report([migrate_audiences: true], shell)
     end
   end
 
-  describe "legacy Oban job argument shapes still run, and log" do
-    test "a newsletter send job without org_id fans out under the default org" do
+  describe "pre-0.12 Oban job argument shapes are cancelled, loudly" do
+    test "a newsletter send job without org_id does not fan out" do
       send =
         Ash.Seed.seed!(KilnCMS.Newsletter.NewsletterSend, %{
           org_id: default_org_id(),
@@ -299,36 +323,47 @@ defmodule KilnCMS.DeprecationsTest do
 
       log =
         capture_log(fn ->
-          assert :ok =
+          assert {:cancel, "legacy job arguments" <> _} =
                    KilnCMS.Newsletter.SendWorker.perform(%Oban.Job{
                      args: %{"newsletter_send_id" => send.id}
                    })
         end)
 
-      assert log =~ "KilnCMS.Newsletter.SendWorker job has no `org_id`"
-      assert log =~ "Let the queue drain before upgrading to 1.0"
+      assert log =~ "[error]"
+      assert log =~ "A KilnCMS.Newsletter.SendWorker job was cancelled"
+      assert log =~ ~s(keys ["newsletter_send_id"])
+      assert log =~ "Drain the queue before upgrading"
 
       assert KilnCMS.Newsletter.get_send!(send.id, authorize?: false, tenant: default_org_id()).status ==
-               :sent
+               :pending
     end
 
-    test "a newsletter mail job without org_id resolves under the default org" do
+    test "a newsletter mail job without org_id is cancelled without logging the ids" do
+      subscriber_id = Ash.UUID.generate()
+
       log =
         capture_log(fn ->
-          assert {:cancel, "newsletter send " <> _} =
+          assert {:cancel, "legacy job arguments" <> _} =
                    KilnCMS.Newsletter.MailWorker.perform(%Oban.Job{
                      args: %{
                        "newsletter_send_id" => Ash.UUID.generate(),
-                       "subscriber_id" => Ash.UUID.generate()
+                       "subscriber_id" => subscriber_id
                      }
                    })
         end)
 
-      assert log =~ "KilnCMS.Newsletter.MailWorker job has no `org_id`"
+      assert log =~ "A KilnCMS.Newsletter.MailWorker job was cancelled"
+      refute log =~ subscriber_id
     end
 
-    test "a webhook delivery job without org_id settles under the default org" do
-      Req.Test.stub(KilnCMS.Webhooks, fn conn -> Plug.Conn.send_resp(conn, 200, "{}") end)
+    test "a webhook delivery job without org_id is not delivered" do
+      test_pid = self()
+
+      Req.Test.stub(KilnCMS.Webhooks, fn conn ->
+        send(test_pid, :delivered)
+        Plug.Conn.send_resp(conn, 200, "{}")
+      end)
+
       endpoint = CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin())
 
       delivery =
@@ -339,7 +374,7 @@ defmodule KilnCMS.DeprecationsTest do
 
       log =
         capture_log(fn ->
-          assert :ok =
+          assert {:cancel, _} =
                    KilnCMS.Webhooks.DeliveryWorker.perform(%Oban.Job{
                      args: %{"delivery_id" => delivery.id},
                      attempt: 1,
@@ -347,11 +382,11 @@ defmodule KilnCMS.DeprecationsTest do
                    })
         end)
 
-      assert log =~ "KilnCMS.Webhooks.DeliveryWorker job has no `org_id`"
-      assert CMS.get_webhook_delivery!(delivery.id, authorize?: false).status == :succeeded
+      assert log =~ "A KilnCMS.Webhooks.DeliveryWorker job was cancelled"
+      refute_received :delivered
     end
 
-    test "a pre-ledger webhook job is still delivered" do
+    test "a pre-ledger webhook job is not delivered" do
       test_pid = self()
 
       Req.Test.stub(KilnCMS.Webhooks, fn conn ->
@@ -363,7 +398,7 @@ defmodule KilnCMS.DeprecationsTest do
 
       log =
         capture_log(fn ->
-          assert :ok =
+          assert {:cancel, _} =
                    KilnCMS.Webhooks.DeliveryWorker.perform(%Oban.Job{
                      args: %{
                        "endpoint_id" => endpoint.id,
@@ -373,8 +408,18 @@ defmodule KilnCMS.DeprecationsTest do
                    })
         end)
 
-      assert_received :delivered
-      assert log =~ "has the pre-ledger `endpoint_id` shape"
+      refute_received :delivered
+      assert log =~ ~s(keys ["endpoint_id", "event", "payload"])
+    end
+
+    test "run through Oban, the job ends cancelled rather than retrying" do
+      job =
+        %{"newsletter_send_id" => Ash.UUID.generate()}
+        |> KilnCMS.Newsletter.SendWorker.new()
+        |> Oban.insert!()
+
+      assert %{cancelled: 1} = Oban.drain_queue(queue: :newsletter)
+      assert KilnCMS.Repo.get!(Oban.Job, job.id).state == "cancelled"
     end
   end
 end

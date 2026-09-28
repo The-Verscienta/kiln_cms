@@ -323,7 +323,11 @@ defmodule KilnCMSWeb.MediaTransformControllerTest do
 
       conn =
         conn
-        |> log_in(signed_in_user(%{role: :viewer, audiences: [:member]}))
+        |> log_in(
+          %{role: :viewer}
+          |> signed_in_user()
+          |> KilnCMS.OrgFixtures.grant_audiences([:member])
+        )
         |> get("/media/#{item.id}/t/w_640,v_#{ImageTransform.version(item)}")
 
       assert conn.status == 200

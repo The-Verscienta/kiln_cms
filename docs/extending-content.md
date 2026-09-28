@@ -311,9 +311,9 @@ cycle. They're typed lazily at render time (via `KilnCMS.CMS.TypedBlocks`), so:
   (media enrichment, sanitization, schema.org nodes, ref edges — all recurse).
 - **Backward compatibility is trivial**: a document with no `columns` block never
   gains a nesting level, so the upcaster leaves flat documents byte-for-byte
-  untouched. (The legacy `columns` *discriminator* on the old flat
-  `KilnCMS.CMS.Block` still maps to `Custom` — only the new typed `_type:
-  "columns"` is a real container.)
+  untouched. (A stored block in the old flat, pre-typed shape — a write shape
+  1.0 refuses — whose `type` is `columns` is read as a typed `Columns`, children
+  and all, since #1537.)
 - **Nesting composes** (a column may itself hold a `columns` block); a depth
   guard on cast bounds hostile input, and the admin editor caps nesting well
   below it.

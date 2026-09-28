@@ -7,6 +7,9 @@ defmodule KilnCMSWeb.Tenant do
 
   A request's organization is derived from its **host**:
 
+    0. with `KILN_CONSOLE_HOST` set, a console host: the bare console host is
+       the default org's console, `acme.<console host>` is org `acme`'s
+       (#1688, `KilnCMSWeb.Plugs.ConsoleHost`),
     1. a subdomain of the configured base host (`acme.example.com` → org `acme`),
     2. else an exact custom domain (`www.acme.com`),
     3. else the **default org** (bare base host / `localhost` / IP / unknown) — so
@@ -457,10 +460,11 @@ defmodule KilnCMSWeb.Tenant do
       "admin's code injection (head/footer HTML) is then same-origin with the " <>
       "console and can act with the session of any editor who opens that site " <>
       "while signed in — a platform admin included (#1661). Set " <>
-      "KILN_CONSOLE_HOST to a host no organization controls and add it to " <>
-      "CHECK_ORIGINS (it serves the default organization's console only, for " <>
-      "now), or grant org admin only to people you would trust with the " <>
-      "console. See docs/code-injection.md."
+      "KILN_CONSOLE_HOST to a host no organization controls, under PHX_HOST " <>
+      "(e.g. console.<PHX_HOST>), and point it and *.<that host> at Kiln in DNS " <>
+      "and TLS: each organization's console then gets its own origin, " <>
+      "<slug>.<console host> (#1688). Or grant org admin only to people you " <>
+      "would trust with the console. See docs/code-injection.md."
   end
 
   @doc """
@@ -550,9 +554,11 @@ defmodule KilnCMSWeb.Tenant do
   # Whether strict matching refuses this host at all. Deliberately one predicate
   # across both unresolved cases: *which* hosts are refused is a policy question
   # with a single answer, and only what the caller is told about the refusal
-  # depends on why the lookup came back empty. The console host (#740) names no
-  # tenant by design; it is the default org's console and is never refused,
-  # strict or not — the same standing the canonical apex has.
+  # depends on why the lookup came back empty. The bare console host (#740) is
+  # the default org's console and is never refused, strict or not — the same
+  # standing the canonical apex has. An org's console host (`<slug>.<console
+  # host>`, #1688) is not exempt: one whose slug names no org is refused under
+  # strict matching like any other unknown host.
   defp refused?(host),
     do: strict_host?() and not canonical_host?(host) and not console_host?(host)
 
@@ -684,28 +690,49 @@ defmodule KilnCMSWeb.Tenant do
   # Not caching it was only half the fix: what the uncached `:error` then *means*
   # is `fetch_org/1`'s call, and until it was made the blip still refused the
   # request outright. See that function.
+  #
+  # Console hosts (#1688) are matched first: the bare console host is the
+  # default org's, as the apex is, and `<slug>.<console host>` is that org's
+  # console. First, because the console host is usually itself a subdomain of
+  # the base host, and would otherwise resolve as the org whose slug is its
+  # first label (`console`).
   defp resolve_known(host) do
-    if host == base_host() do
-      case read_degrading_exit(&Accounts.default_org/0) do
-        %Accounts.Organization{} = org -> org
-        nil -> nil
-        :error -> :error
-      end
-    else
-      case by_subdomain(host) do
-        %Accounts.Organization{} = org ->
-          org
+    console_label = KilnCMSWeb.Plugs.ConsoleHost.org_label(host)
 
-        :error ->
-          :error
+    cond do
+      host == base_host() or host == KilnCMSWeb.Plugs.ConsoleHost.console_host() ->
+        resolve_default()
 
-        _ ->
-          case by_custom_domain(host) do
-            %Accounts.Organization{} = org -> org
-            :error -> :error
-            _ -> nil
-          end
-      end
+      is_binary(console_label) ->
+        lookup(:slug, console_label)
+
+      true ->
+        resolve_site_host(host)
+    end
+  end
+
+  defp resolve_default do
+    case read_degrading_exit(&Accounts.default_org/0) do
+      %Accounts.Organization{} = org -> org
+      nil -> nil
+      :error -> :error
+    end
+  end
+
+  defp resolve_site_host(host) do
+    case by_subdomain(host) do
+      %Accounts.Organization{} = org ->
+        org
+
+      :error ->
+        :error
+
+      _ ->
+        case by_custom_domain(host) do
+          %Accounts.Organization{} = org -> org
+          :error -> :error
+          _ -> nil
+        end
     end
   end
 

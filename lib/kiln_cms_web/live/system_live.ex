@@ -173,9 +173,11 @@ defmodule KilnCMSWeb.SystemLive do
     >
       <div class="space-y-8">
         <div>
-          <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
-            &larr; {gettext("All content")}
-          </.link>
+          <Layouts.console_crumb
+            current_user={@current_user}
+            current_org={@current_org}
+            active={:system}
+          />
           <h1 class="mt-1 text-2xl font-semibold">{gettext("System")}</h1>
           <p class="text-sm text-base-content/70">
             {gettext("Which version of Kiln this site is running, and how to update it.")}
@@ -243,7 +245,7 @@ defmodule KilnCMSWeb.SystemLive do
 
           <p class="mt-2 text-sm text-warning-ink">
             {gettext(
-              "Set KILN_CONSOLE_HOST to a host no organization controls, add it to CHECK_ORIGINS, and restart. For now that host serves the default organization's console only. Otherwise, grant organization admin only to people you would trust with the console."
+              "Set KILN_CONSOLE_HOST to a host no organization controls, such as console under your main host, point it and every subdomain of it at Kiln in DNS and TLS, and restart. Each organization's console then gets its own host, its slug followed by the console host. Otherwise, grant organization admin only to people you would trust with the console."
             )}
           </p>
         </section>

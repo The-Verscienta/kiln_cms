@@ -57,7 +57,7 @@ defmodule KilnCMSWeb.ContentEditorConflictTest do
     editor = authed_user(:editor)
     page = CMS.create_page!(%{title: "Draft in flight", slug: slug()}, actor: editor)
 
-    {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/pages/#{page.id}")
+    {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
 
     # Typing schedules the debounce and puts the editor in `:saving`.
     lv |> form("#page-editor") |> render_change(%{"form" => %{"title" => "Still typing"}})
@@ -90,7 +90,7 @@ defmodule KilnCMSWeb.ContentEditorConflictTest do
     editor = authed_user(:editor)
     page = CMS.create_page!(%{title: "Shared draft", slug: slug()}, actor: editor)
 
-    {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/pages/#{page.id}")
+    {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
 
     # Someone else saves first, bumping lock_version out from under this editor.
     {:ok, _} = CMS.update_page(page, %{title: "Changed elsewhere"}, actor: editor)

@@ -61,7 +61,7 @@ defmodule KilnCMS.CMS.FieldGrantsTest do
       assert {:error, %Ash.Error.Invalid{}} =
                CMS.update_post(
                  post,
-                 %{block_tree: [%{"type" => "markdown", "text" => "hi"}]},
+                 %{block_tree: [%{"_type" => "heading", "text" => "hi", "level" => 2}]},
                  actor: title_only
                )
 
@@ -70,7 +70,7 @@ defmodule KilnCMS.CMS.FieldGrantsTest do
       assert {:ok, _} =
                CMS.update_post(
                  post,
-                 %{block_tree: [%{"type" => "markdown", "text" => "hi"}]},
+                 %{block_tree: [%{"_type" => "heading", "text" => "hi", "level" => 2}]},
                  actor: blocks_granted
                )
     end
@@ -199,7 +199,10 @@ defmodule KilnCMS.CMS.FieldGrantsTest do
       assert {:error, %Ash.Error.Invalid{} = error} =
                CMS.update_post(
                  post,
-                 %{excerpt: "New", block_tree: [%{"type" => "markdown", "text" => "hi"}]},
+                 %{
+                   excerpt: "New",
+                   block_tree: [%{"_type" => "heading", "text" => "hi", "level" => 2}]
+                 },
                  actor: editor
                )
 

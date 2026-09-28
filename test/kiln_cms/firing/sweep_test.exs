@@ -2,6 +2,8 @@ defmodule KilnCMS.Firing.SweepTest do
   @moduledoc "Re-fire sweep (#357): refresh every published document's artifacts."
   use KilnCMS.DataCase, async: true
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.CMS
   alias KilnCMS.Firing
   alias KilnCMS.Firing.{Engine, Sweep}
@@ -23,7 +25,11 @@ defmodule KilnCMS.Firing.SweepTest do
 
     published =
       CMS.create_page!(
-        %{title: "Old", slug: slug(), blocks: [%{type: :heading, content: "H", order: 0}]},
+        %{
+          title: "Old",
+          slug: slug(),
+          blocks: typed_blocks([%{type: :heading, content: "H", order: 0}])
+        },
         actor: actor
       )
 

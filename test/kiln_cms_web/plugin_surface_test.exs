@@ -102,7 +102,7 @@ defmodule KilnCMSWeb.PluginSurfaceTest do
         actor: editor
       )
 
-    {:ok, _lv, html} = conn |> log_in(editor) |> live(~p"/editor/pages/#{page.id}")
+    {:ok, _lv, html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
     assert html =~ "callout"
   end
 end

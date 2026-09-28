@@ -4,7 +4,9 @@ defmodule KilnCMS.Accounts.LegacyAffiliation do
 
   An account with **no memberships at all** is *unaffiliated*:
   `KilnCMS.Accounts.Scoping` gives it its standing `User.role` on the default
-  org, and the legacy `User.audiences` column everywhere. The moment it gains
+  org. (Until 1.0 it also read the `User.audiences` column everywhere; that
+  fallback was removed in #1543, and the column is what this module copies onto
+  the membership, so a legacy account's audiences survive.) The moment it gains
   its first `KilnCMS.Accounts.OrgMembership` — on any org — it becomes
   *affiliated*, and an affiliated account holds nothing on a site it is not a
   member of. So a first membership written naively demotes a legacy editor:
@@ -16,8 +18,10 @@ defmodule KilnCMS.Accounts.LegacyAffiliation do
   Every writer that may give an unaffiliated account its first membership calls
   `ensure_default_membership/2` **first**: `KilnCMS.Accounts.SiteAudiences` (the
   console's audience checkboxes, #1646) and `KilnCMS.Billing.Entitlements` (a
-  paid membership, #1649). The membership it writes grants on the default org
-  exactly what the fallback grants there today, so it is safe to write on its
+  paid membership, #1649). The post-deploy safety net
+  (`KilnCMS.Accounts.LegacyAudiencesWorker`) calls it for every unaffiliated
+  account still holding `User.audiences`. The membership it writes grants on the
+  default org what the account held there before 1.0, so it is safe to write on its
   own, before whatever membership the caller came to create:
 
     * `role` is the **standing** `User.role`, never

@@ -9,6 +9,8 @@ defmodule KilnCMSWeb.ContentEditorMoveBlocksTest do
   when the destination column was full; each test below pins one of those.
   """
   use KilnCMSWeb.ConnCase, async: true
+
+  import KilnCMS.TypedFixtures
   @moduletag :capture_log
 
   import Phoenix.LiveViewTest
@@ -66,7 +68,7 @@ defmodule KilnCMSWeb.ContentEditorMoveBlocksTest do
 
   defp open_editor(conn, page) do
     {:ok, lv, _html} =
-      conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+      conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
     lv
   end
@@ -96,7 +98,7 @@ defmodule KilnCMSWeb.ContentEditorMoveBlocksTest do
   describe "Move into columns" do
     test "is offered only once there is a columns block to move into", %{conn: conn} do
       image_id = Ash.UUID.generate()
-      page = draft_page(%{blocks: [image_block(image_id, media().id)]})
+      page = draft_page(%{blocks: typed_blocks([image_block(image_id, media().id)])})
       lv = open_editor(conn, page)
 
       refute has_element?(lv, "button[phx-click='nest_into_columns']")
@@ -112,7 +114,7 @@ defmodule KilnCMSWeb.ContentEditorMoveBlocksTest do
     test "carries every field and the block's id into the column", %{conn: conn} do
       image_id = Ash.UUID.generate()
       media = media()
-      page = draft_page(%{blocks: [image_block(image_id, media.id)]})
+      page = draft_page(%{blocks: typed_blocks([image_block(image_id, media.id)])})
       lv = open_editor(conn, page)
       cols_id = add_columns_block_at_start(lv)
 
@@ -139,7 +141,9 @@ defmodule KilnCMSWeb.ContentEditorMoveBlocksTest do
       heading_id = Ash.UUID.generate()
 
       page =
-        draft_page(%{blocks: [%{id: heading_id, type: :heading, content: "Stay put", order: 0}]})
+        draft_page(%{
+          blocks: typed_blocks([%{id: heading_id, type: :heading, content: "Stay put", order: 0}])
+        })
 
       lv = open_editor(conn, page)
       cols_id = add_columns_block_at_start(lv)
@@ -187,10 +191,11 @@ defmodule KilnCMSWeb.ContentEditorMoveBlocksTest do
 
       page =
         draft_page(%{
-          blocks: [
-            image_block(image_id, media.id),
-            %{id: after_id, type: :heading, content: "After", order: 1}
-          ]
+          blocks:
+            typed_blocks([
+              image_block(image_id, media.id),
+              %{id: after_id, type: :heading, content: "After", order: 1}
+            ])
         })
 
       lv = open_editor(conn, page)
@@ -219,7 +224,12 @@ defmodule KilnCMSWeb.ContentEditorMoveBlocksTest do
 
     test "rich text survives the round trip and a later keystroke", %{conn: conn} do
       rt_id = Ash.UUID.generate()
-      page = draft_page(%{blocks: [%{id: rt_id, type: :rich_text, content: "", order: 0}]})
+
+      page =
+        draft_page(%{
+          blocks: typed_blocks([%{id: rt_id, type: :rich_text, content: "", order: 0}])
+        })
+
       lv = open_editor(conn, page)
 
       # Prose typed in TipTap lives in `body` (Portable Text), which the form
@@ -244,7 +254,7 @@ defmodule KilnCMSWeb.ContentEditorMoveBlocksTest do
       |> render_click()
 
       # Nested, the prose is editable where the nested editor can reach it.
-      assert has_element?(lv, "input[phx-value-field='legacy_html'][value*='Hello columns']")
+      assert has_element?(lv, "input[phx-value-field='html'][value*='Hello columns']")
 
       lv
       |> element("button[phx-click='promote_child'][phx-value-child='#{rt_id}']")
@@ -283,7 +293,9 @@ defmodule KilnCMSWeb.ContentEditorMoveBlocksTest do
       heading_id = Ash.UUID.generate()
 
       page =
-        draft_page(%{blocks: [%{id: heading_id, type: :heading, content: "Alpha", order: 0}]})
+        draft_page(%{
+          blocks: typed_blocks([%{id: heading_id, type: :heading, content: "Alpha", order: 0}])
+        })
 
       lv = open_editor(conn, page)
 

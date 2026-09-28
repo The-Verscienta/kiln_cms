@@ -114,7 +114,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
         actor: admin
       )
 
-    {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/pages/#{page.id}")
+    {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/content/page/#{page.id}")
 
     assert html =~ "Custom fields"
     assert html =~ "Heel height"
@@ -168,7 +168,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
         actor: admin
       )
 
-    {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/pages/#{page.id}")
+    {:ok, _lv, html} = conn |> log_in(admin) |> live(~p"/editor/content/page/#{page.id}")
 
     assert html =~ "Store location"
     assert html =~ "custom_fields][store][lat]"
@@ -195,7 +195,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
         actor: admin
       )
 
-    {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/pages/#{page.id}")
+    {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/content/page/#{page.id}")
 
     assert html =~ "URL key"
     assert html =~ "readonly"

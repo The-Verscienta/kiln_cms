@@ -37,9 +37,6 @@ defmodule KilnCMS.Application do
       # `dev_routes` — so this is what actually reaches an operator. Silent
       # unless a calendar re-queried in the window.
       KilnCMS.CMS.CalendarRequeryMonitor,
-      # Owns the table that keeps a per-request deprecation warning to one line
-      # per account per boot (#1538). See `KilnCMS.Deprecations`.
-      KilnCMS.Deprecations,
       # Reclaim stale rate-limit buckets so an IP-rotating flood can't grow the
       # ETS table without bound (one row per `bucket:IP` otherwise lives forever).
       {KilnCMSWeb.RateLimit, clean_period: :timer.minutes(1), key_older_than: :timer.minutes(5)},
@@ -171,10 +168,26 @@ defmodule KilnCMS.Application do
       # the config-only warnings at the top of start/2.
       warn_if_strict_host_false_ignored()
       warn_if_console_shares_origin()
+      warn_if_console_host_outside_rp_id()
       warn_if_embed_lists_over_ceiling()
       warn_if_chain_unsigned()
+      warn_if_org_slugs_unreachable()
       enqueue_occurrence_backfill()
+      enqueue_legacy_audiences_migration()
       {:ok, pid}
+    end
+  end
+
+  # The upgrade safety net for the `User.audiences` fallback 1.0 removed
+  # (#1543): moves any account that still relied on it onto a membership, so an
+  # operator who skipped `mix kiln.deprecations --migrate-audiences` strands
+  # nobody. See `KilnCMS.Accounts.LegacyAudiencesWorker`. Deliberately no
+  # runtime env var to turn it off — it is access a paying reader already had.
+  # Off in `:test` and `:e2e` only, for the committed-`oban_jobs` reason
+  # `enqueue_occurrence_backfill/0` gives below.
+  defp enqueue_legacy_audiences_migration do
+    if Application.get_env(:kiln_cms, :legacy_audiences_migration_on_boot, true) do
+      KilnCMS.Accounts.LegacyAudiencesWorker.enqueue()
     end
   end
 
@@ -527,6 +540,25 @@ defmodule KilnCMS.Application do
     end
   end
 
+  # `KILN_CONSOLE_HOST` outside `PHX_HOST` (#1688): the browser refuses the
+  # passkeys' RP ID (the `PHX_HOST` host) on a console host that does not end
+  # in it, so nobody can sign in or enroll with a passkey there. Changing the RP
+  # ID would orphan every registered passkey, so this says so instead. Needs the
+  # endpoint's URL, hence after the tree is up.
+  defp warn_if_console_host_outside_rp_id do
+    if not KilnCMSWeb.Plugs.ConsoleHost.passkey_capable?() do
+      KilnCMS.Config.Report.warn(
+        "console_host_passkeys",
+        "KILN_CONSOLE_HOST (#{KilnCMSWeb.Plugs.ConsoleHost.console_host()}) is not " <>
+          "PHX_HOST or a subdomain of it, so passkeys cannot be used on the " <>
+          "console: their relying-party ID is the PHX_HOST host, and a browser " <>
+          "only accepts it on hosts under it. Editors can still sign in with a " <>
+          "password or SSO. Move the console host under PHX_HOST (for example " <>
+          "console.<PHX_HOST>) to use passkeys there. See docs/multi-tenancy.md."
+      )
+    end
+  end
+
   # An unset `EMBED_ORIGINS_LOCKED` caps form framing at `EMBED_ORIGINS` once a
   # second organization exists (#1618). A form or site-wide allowlist saved
   # before that, naming a site outside `EMBED_ORIGINS`, is clamped when served
@@ -537,6 +569,23 @@ defmodule KilnCMS.Application do
   defp warn_if_embed_lists_over_ceiling do
     if message = KilnCMS.Forms.EmbedCeiling.overreach_warning() do
       KilnCMS.Config.Report.warn("embed_ceiling", message)
+    end
+  end
+
+  # An org slug stored before slugs had to be DNS labels (#1710) may name a
+  # host no browser can send — `Acme`, when the lookup is downcased — so that
+  # site is unreachable at its subdomain, silently. Renaming a live tenant's
+  # host is the operator's call, so boot only says so; `mix kiln.org_slugs`
+  # lists the rows and downcases the ones where that is enough. `probe/2`: an
+  # advisory read that must not stop a node starting.
+  defp warn_if_org_slugs_unreachable do
+    report =
+      KilnCMS.Config.Report.probe(%{fixable: [], manual: []}, fn ->
+        KilnCMS.Accounts.OrgSlugAudit.report()
+      end)
+
+    if message = KilnCMS.Accounts.OrgSlugAudit.warning(report) do
+      KilnCMS.Config.Report.warn("org_slugs", message)
     end
   end
 

@@ -102,8 +102,18 @@ defmodule KilnCMS.Newsletter.Subscriber do
     end
 
     # Double opt-in: the subscriber clicked the confirmation link.
+    #
+    # Only a `:pending` row may be confirmed (#1690). A reader who unsubscribed
+    # keeps their old confirmation link in their inbox; clicking it must not
+    # quietly undo the unsubscribe — consent withdrawn is re-given by
+    # subscribing again, which mails a fresh link. Declared before the change,
+    # so it reads the row's current status, not the one being written.
     update :confirm do
       accept []
+
+      validate attribute_equals(:status, :pending),
+        message: "only a pending subscriber can be confirmed"
+
       change set_attribute(:status, :confirmed)
       change set_attribute(:confirmed_at, &DateTime.utc_now/0)
     end

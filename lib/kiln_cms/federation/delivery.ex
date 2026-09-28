@@ -59,13 +59,21 @@ defmodule KilnCMS.Federation.Delivery do
     end
   end
 
+  # The fan-out writes a ledger row per follower and the delivery worker
+  # re-reads and settles it (#1659), as `KilnCMS.SystemActor`. Narrowed to
+  # those: pruning the ledger is the scheduled trigger's job, and a system
+  # actor cannot delete a row that records whether a POST went out.
   policies do
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
     policy action_type([:create, :update, :destroy]) do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+
+      forbid_unless action([:create, :settle])
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

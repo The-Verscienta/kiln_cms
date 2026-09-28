@@ -83,7 +83,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
   defp blocks_legacy(record) do
     record.blocks
     |> KilnCMS.CMS.TypedBlocks.to_typed()
-    |> KilnCMS.LegacyBridge.to_legacy()
+    |> KilnCMS.LegacyView.blocks()
   end
 
   defp page_versions(page_id) do
@@ -389,36 +389,39 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
-  # Deprecated in 0.12, removed at 1.0 (#1538). They must keep working until
-  # then — mail already sent links here — and say so in the log on each visit.
-  describe "the deprecated /editor/pages|posts/:id aliases" do
-    test "still open the editor, and log the replacement route", %{conn: conn} do
-      page = draft_page(%{title: "Aliased page"})
-      post = draft_post(%{title: "Aliased post"})
-      conn = log_in(conn, authed_user(:editor))
+  # Deprecated in 0.12, removed at 1.0 (#1543). No longer editor routes: a 301
+  # to the generic route, for bookmarks and mail sent by older releases.
+  describe "the removed /editor/pages|posts/:id aliases" do
+    test "301 to /editor/content/:type/:id without mounting the editor", %{conn: conn} do
+      id = Ash.UUID.generate()
 
-      for {path, kind, title} <- [
-            {~p"/editor/pages/#{page.id}", "page", "Aliased page"},
-            {~p"/editor/posts/#{post.id}", "post", "Aliased post"}
+      for {path, target} <- [
+            {"/editor/pages/#{id}", "/editor/content/page/#{id}"},
+            {"/editor/posts/#{id}", "/editor/content/post/#{id}"}
           ] do
-        log =
-          ExUnit.CaptureLog.capture_log(fn ->
-            assert {:ok, _lv, html} = live(conn, path)
-            assert html =~ title
-          end)
-
-        assert log =~ "The /editor/#{kind}s/:id editor route is deprecated and 1.0 removes it"
-        assert log =~ "use /editor/content/#{kind}/:id"
+        conn = get(conn, path)
+        assert conn.status == 301
+        assert redirected_to(conn, 301) == target
       end
+    end
+
+    test "are no longer LiveView routes" do
+      live_paths =
+        for %{plug: Phoenix.LiveView.Plug, path: path} <-
+              Phoenix.Router.routes(KilnCMSWeb.Router),
+            do: path
+
+      refute "/editor/pages/:id" in live_paths
+      refute "/editor/posts/:id" in live_paths
     end
   end
 
-  describe "/editor/posts/:id (post editor)" do
+  describe "/editor/content/post/:id (post editor)" do
     test "saves an edited title and excerpt", %{conn: conn} do
       post = draft_post(%{title: "Old post"})
 
       {:ok, lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/post/#{post.id}")
 
       # The editor heading now shows the entry's own title (Theme A).
       assert html =~ "Old post"
@@ -438,7 +441,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       post = draft_post()
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:admin)) |> live(~p"/editor/posts/#{post.id}")
+        conn |> log_in(authed_user(:admin)) |> live(~p"/editor/content/post/#{post.id}")
 
       lv |> element("button", "Publish now") |> render_click()
 
@@ -449,7 +452,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       post = draft_post()
 
       {:ok, _lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/post/#{post.id}")
 
       assert html =~ "Submit for review"
       refute html =~ ">Publish<"
@@ -533,7 +536,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert list_html =~ ~s(phx-hook="LocalTime")
 
       {:ok, _lv, editor_html} =
-        build_conn() |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        build_conn() |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       assert editor_html =~ "Publishes"
       assert editor_html =~ ~s(id="scheduled-publish-badge")
@@ -556,7 +559,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{title: "Has fields"})
 
       {:ok, lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # The input is labelled via for/id (previously a bare sibling label).
       assert html =~ ~s(for="custom-field-level")
@@ -583,7 +586,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{title: "Old"})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # Editing queues the debounced autosave (#136) — the save line flips to
       # `pending` (it keeps the last save's stamp: no request exists yet, so
@@ -608,7 +611,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{title: "Has title"})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # Title is required — clearing it makes the autosave submit fail validation.
       lv |> form("#page-editor", form: %{title: ""}) |> render_change()
@@ -624,7 +627,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{title: "Live", state: :published})
 
       {:ok, lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # No autosave indicator for non-drafts.
       refute html =~ "Unsaved changes"
@@ -646,7 +649,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{title: "Live", state: :published})
 
       {:ok, lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       assert html =~ ~s(data-dirty="false")
 
@@ -690,7 +693,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{title: "Draft"})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # Several edit-then-autosave cycles, the way the debounce timer fires
       # between editor pauses.
@@ -710,7 +713,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{title: "Draft"})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # A run of autosaves collapses to one version.
       lv |> form("#page-editor", form: %{title: "Autosaved"}) |> render_change()
@@ -741,7 +744,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{title: "Guarded"})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # Unknown / garbled id — the LV survives and stays rendered.
       render_hook(lv, "move_block", %{"bid" => "no-such-id", "dir" => "up"})
@@ -751,10 +754,14 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
     test "an unknown remove_block id is a no-op, not a crash", %{conn: conn} do
       page =
-        draft_page(%{title: "Bounds", blocks: [%{type: :heading, content: "Keep", order: 0}]})
+        draft_page(%{
+          title: "Bounds",
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([%{type: :heading, content: "Keep", order: 0}])
+        })
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       render_hook(lv, "remove_block", %{"bid" => "no-such-id"})
       # The real block is untouched.
@@ -766,7 +773,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{title: "Picker"})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       render_hook(lv, "open_picker", %{"bid" => ""})
       assert render(lv) =~ "Picker"
@@ -775,10 +782,14 @@ defmodule KilnCMSWeb.EditorLiveTest do
     test "block events with no bid at all hit the fallback clauses, not a crash",
          %{conn: conn} do
       page =
-        draft_page(%{title: "NoBid", blocks: [%{type: :heading, content: "Only", order: 0}]})
+        draft_page(%{
+          title: "NoBid",
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([%{type: :heading, content: "Only", order: 0}])
+        })
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # Entirely missing params (a legacy block that reached the editor without a
       # stable id) — the catch-all no-op clauses keep the session alive.
@@ -801,16 +812,17 @@ defmodule KilnCMSWeb.EditorLiveTest do
     test "deleting by id removes the right block even after a reorder", %{conn: conn} do
       page =
         draft_page(%{
-          blocks: [
-            %{type: :heading, content: "Alpha", order: 0},
-            %{type: :heading, content: "Bravo", order: 1}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "Alpha", order: 0},
+              %{type: :heading, content: "Bravo", order: 1}
+            ])
         })
 
       [alpha, _bravo] = blocks_legacy(page)
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # A co-editor reorders (Bravo first now) — Alpha slides to position 1, but
       # its delete button still carries Alpha's stable id.
@@ -828,16 +840,17 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       page =
         draft_page(%{
-          blocks: [
-            %{type: :image, content: "", order: 0},
-            %{type: :image, content: "", order: 1}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :image, content: "", order: 0},
+              %{type: :image, content: "", order: 1}
+            ])
         })
 
       [img_a, img_b] = blocks_legacy(page)
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # A co-editor reorders (img_a slides to position 1), then fill img_a by its
       # stable id — positional addressing would have hit img_b.
@@ -864,7 +877,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, _lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       assert html =~ "No blocks yet"
     end
@@ -879,7 +892,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{title: "Tabbed"})
 
       {:ok, _lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       assert html =~ ~s(role="tablist")
       # Preview is the default panel.
@@ -893,7 +906,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{title: "Fields present"})
 
       {:ok, lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # Default tab is Preview, yet the Settings panel's inputs must still be
       # rendered (only CSS-hidden) — otherwise they'd drop from the form on save.
@@ -909,7 +922,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{title: "Switch"})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       html = render_hook(lv, "switch_inspector_tab", %{"tab" => "history"})
       assert html =~ ~s(aria-selected="true")
@@ -919,7 +932,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{title: "Guarded tab"})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       render_hook(lv, "switch_inspector_tab", %{"tab" => "bogus"})
       assert render(lv) =~ "Guarded tab"
@@ -929,7 +942,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{title: "SEO save"})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       render_hook(lv, "switch_inspector_tab", %{"tab" => "settings"})
       lv |> form("#page-editor", form: %{seo_title: "Findable"}) |> render_submit()
@@ -946,7 +959,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{title: "Chrome"})
 
       {:ok, _lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # The required marker (an aria-hidden "*") carries a "Required" tooltip.
       assert html =~ ~s(title="Required")
@@ -963,7 +976,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       post = draft_post(%{title: "Excerpted"})
 
       {:ok, _lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/post/#{post.id}")
 
       assert html =~ "A short summary shown in listings"
     end
@@ -1059,7 +1072,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page()
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       refute render(lv) =~ "editing"
     end
@@ -1077,12 +1090,12 @@ defmodule KilnCMSWeb.EditorLiveTest do
       local_b = user_b.email |> to_string() |> String.split("@") |> hd()
 
       {:ok, lv_a, _html} =
-        build_conn() |> log_in(user_a) |> live(~p"/editor/pages/#{page.id}")
+        build_conn() |> log_in(user_a) |> live(~p"/editor/content/page/#{page.id}")
 
       refute render(lv_a) =~ "editing"
 
       {:ok, _lv_b, _html} =
-        build_conn() |> log_in(user_b) |> live(~p"/editor/pages/#{page.id}")
+        build_conn() |> log_in(user_b) |> live(~p"/editor/content/page/#{page.id}")
 
       # lv_a receives the presence_diff and re-renders with both editors.
       html = render(lv_a)
@@ -1101,7 +1114,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{title: "FeatPage"})
 
       {:ok, lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       assert html =~ "Choose from library"
 
@@ -1118,10 +1131,14 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
     test "picking a library image sets the block's url and media_id", %{conn: conn} do
       media = Ash.Seed.seed!(MediaItem, %{filename: "x.jpg", url: "/uploads/x"})
-      page = draft_page(%{blocks: [%{type: :image, content: "", order: 0}]})
+
+      page =
+        draft_page(%{
+          blocks: KilnCMS.TypedFixtures.typed_blocks([%{type: :image, content: "", order: 0}])
+        })
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # Open the picker for the single image block (addressed by its stable id),
       # then pick the seeded image.
@@ -1140,10 +1157,13 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
     # Regression for #169: the picker is a labeled modal dialog with a focus trap.
     test "the picker exposes dialog semantics and a focus trap", %{conn: conn} do
-      page = draft_page(%{blocks: [%{type: :image, content: "", order: 0}]})
+      page =
+        draft_page(%{
+          blocks: KilnCMS.TypedFixtures.typed_blocks([%{type: :image, content: "", order: 0}])
+        })
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       picker =
         lv |> element("button[phx-click='open_picker']") |> render_click()
@@ -1156,10 +1176,13 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
 
     test "opens as a right-side drawer with a mode-aware title (Theme D)", %{conn: conn} do
-      page = draft_page(%{blocks: [%{type: :image, content: "", order: 0}]})
+      page =
+        draft_page(%{
+          blocks: KilnCMS.TypedFixtures.typed_blocks([%{type: :image, content: "", order: 0}])
+        })
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # Filling an existing image block → "Choose an image", anchored to the right.
       picker = lv |> element("button[phx-click='open_picker']") |> render_click()
@@ -1179,7 +1202,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       html = render(lv)
 
@@ -1200,7 +1223,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       refute has_element?(lv, "button[phx-click='remove_block']")
 
@@ -1215,7 +1238,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # `divider` has no required fields, so it round-trips through save unedited.
       lv
@@ -1236,16 +1259,17 @@ defmodule KilnCMSWeb.EditorLiveTest do
     setup %{conn: conn} do
       page =
         draft_page(%{
-          blocks: [
-            %{type: :heading, content: "A", order: 0},
-            %{type: :heading, content: "B", order: 1}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "A", order: 0},
+              %{type: :heading, content: "B", order: 1}
+            ])
         })
 
       [a, b] = blocks_legacy(page)
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       %{lv: lv, page: page, a: a, b: b}
     end
@@ -1340,16 +1364,17 @@ defmodule KilnCMSWeb.EditorLiveTest do
          %{conn: conn} do
       page =
         draft_page(%{
-          blocks: [
-            %{type: :heading, content: "A", order: 0},
-            %{type: :heading, content: "B", order: 1}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "A", order: 0},
+              %{type: :heading, content: "B", order: 1}
+            ])
         })
 
       [a, _b] = blocks_legacy(page)
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       render_hook(lv, "duplicate_block", %{"bid" => a.id})
       lv |> form("#page-editor") |> render_submit()
@@ -1365,10 +1390,14 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
 
     test "an unknown block id is a no-op", %{conn: conn} do
-      page = draft_page(%{blocks: [%{type: :heading, content: "Solo", order: 0}]})
+      page =
+        draft_page(%{
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([%{type: :heading, content: "Solo", order: 0}])
+        })
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       render_hook(lv, "duplicate_block", %{"bid" => "no-such-id"})
       lv |> form("#page-editor") |> render_submit()
@@ -1377,10 +1406,13 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
 
     test "each block's chrome wires a Duplicate control", %{conn: conn} do
-      page = draft_page(%{blocks: [%{type: :heading, content: "X", order: 0}]})
+      page =
+        draft_page(%{
+          blocks: KilnCMS.TypedFixtures.typed_blocks([%{type: :heading, content: "X", order: 0}])
+        })
 
       {:ok, _lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       assert html =~ ~s(phx-click="duplicate_block")
     end
@@ -1394,13 +1426,16 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page =
         draft_page(%{
           slug: "click-me",
-          blocks: [%{type: :heading, content: "Clickable", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "Clickable", order: 0}
+            ])
         })
 
       [block] = blocks_legacy(page)
 
       {:ok, _lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # The block still renders in the preview, now with a per-block Edit link that
       # focuses that block in the visual (in-context) editor.
@@ -1417,7 +1452,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # Reachable from the editor chrome (not a per-block button).
       lv |> element("button[phx-click='open_media_browser']") |> render_click()
@@ -1442,7 +1477,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       lv |> element("button[phx-click='open_media_browser']") |> render_click()
 
@@ -1465,7 +1500,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic)
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       lv_pid = lv.pid
       lv |> element(~s(input[name="form[title]"])) |> render_focus()
@@ -1480,7 +1515,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page()
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       topic = Presence.topic("page", page.id)
       {holder, :ok} = FieldLockHolder.hold(topic, "title")
@@ -1497,7 +1532,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page()
 
       {:ok, lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       refute html =~ "ring-warning"
 
@@ -1516,10 +1551,16 @@ defmodule KilnCMSWeb.EditorLiveTest do
     # title/slug/DSL inputs (the TipTap editor acquires on focus via its hook),
     # and the host carries `data-locked` so the hook makes the editor read-only.
     test "soft-locks a rich-text block while another session holds it", %{conn: conn} do
-      page = draft_page(%{blocks: [%{type: :rich_text, content: "<p>hi</p>", order: 0}]})
+      page =
+        draft_page(%{
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>hi</p>", order: 0}
+            ])
+        })
 
       {:ok, lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       refute html =~ "ring-warning"
       refute html =~ ~s(data-locked="true")
@@ -1543,7 +1584,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
          %{conn: conn} do
       page = draft_page()
       user = authed_user(:editor)
-      {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor/pages/#{page.id}")
+      {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor/content/page/#{page.id}")
 
       lv |> element(~s(input[name="form[title]"])) |> render_focus()
 
@@ -1560,7 +1601,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page()
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       topic = Presence.topic("page", page.id)
       {_holder, :ok} = FieldLockHolder.hold(topic, "title")
@@ -1594,7 +1635,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page()
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       refute render_click(lv, "ask_takeover", %{"field" => "title"}) =~ "takeover-dialog"
     end
@@ -1606,7 +1647,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic)
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       lv_pid = lv.pid
       {holder, :ok} = FieldLockHolder.hold(topic, "title")
@@ -1644,8 +1685,8 @@ defmodule KilnCMSWeb.EditorLiveTest do
       alice = authed_user(:editor, %{name: "Alice", id: low_uuid()})
       bob = authed_user(:editor, %{name: "Bob"})
 
-      {:ok, holder, _html} = conn |> log_in(alice) |> live(~p"/editor/pages/#{page.id}")
-      {:ok, taker, _html} = conn |> log_in(bob) |> live(~p"/editor/pages/#{page.id}")
+      {:ok, holder, _html} = conn |> log_in(alice) |> live(~p"/editor/content/page/#{page.id}")
+      {:ok, taker, _html} = conn |> log_in(bob) |> live(~p"/editor/content/page/#{page.id}")
       holder_pid = holder.pid
       taker_pid = taker.pid
 
@@ -1693,10 +1734,12 @@ defmodule KilnCMSWeb.EditorLiveTest do
       Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic)
 
       alice = authed_user(:editor, %{name: "Alice"})
-      {:ok, holder, _html} = conn |> log_in(alice) |> live(~p"/editor/pages/#{page.id}")
+      {:ok, holder, _html} = conn |> log_in(alice) |> live(~p"/editor/content/page/#{page.id}")
 
       {:ok, taker, _html} =
-        conn |> log_in(authed_user(:editor, %{name: "Bob"})) |> live(~p"/editor/pages/#{page.id}")
+        conn
+        |> log_in(authed_user(:editor, %{name: "Bob"}))
+        |> live(~p"/editor/content/page/#{page.id}")
 
       holder_pid = holder.pid
       holder |> element(~s(input[name="form[title]"])) |> render_focus()
@@ -1763,7 +1806,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page =
         draft_page(%{
           title: "PreviewTitle",
-          blocks: [%{type: :heading, content: "PreviewHeading", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "PreviewHeading", order: 0}
+            ])
         })
 
       {:ok, _lv, html} =
@@ -1798,7 +1844,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       KilnCMSWeb.Presence.track_preview(self(), "page", page.id)
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       lv |> form("#page-editor", form: %{title: "Broadcasted"}) |> render_change()
 
@@ -1812,7 +1858,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       Phoenix.PubSub.subscribe(KilnCMS.PubSub, PreviewLive.topic("page", page.id))
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       lv |> form("#page-editor", form: %{title: "Unheard"}) |> render_change()
 
@@ -1826,14 +1872,17 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page =
         draft_page(%{
           title: "RTPage",
-          blocks: [%{type: :rich_text, content: "<p>Pop-out RichText</p>", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>Pop-out RichText</p>", order: 0}
+            ])
         })
 
       Phoenix.PubSub.subscribe(KilnCMS.PubSub, PreviewLive.topic("page", page.id))
       KilnCMSWeb.Presence.track_preview(self(), "page", page.id)
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       lv |> form("#page-editor", form: %{title: "RTPage edited"}) |> render_change()
 
@@ -1872,12 +1921,12 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
-  describe "/editor/pages/:id (block editor)" do
+  describe "/editor/content/page/:id (block editor)" do
     test "saves an edited title", %{conn: conn} do
       page = draft_page(%{title: "Old title"})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       lv |> form("#page-editor", form: %{title: "New title"}) |> render_submit()
 
@@ -1888,7 +1937,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page()
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       lv |> element("button[phx-value-type='heading']") |> render_click()
 
@@ -1904,14 +1953,15 @@ defmodule KilnCMSWeb.EditorLiveTest do
     test "reorders blocks via the sortable hook and persists the new order", %{conn: conn} do
       page =
         draft_page(%{
-          blocks: [
-            %{type: :heading, content: "A", order: 0},
-            %{type: :rich_text, content: "B", order: 1}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "A", order: 0},
+              %{type: :rich_text, content: "B", order: 1}
+            ])
         })
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # Simulate the Sortable hook pushing the new order (B before A).
       render_hook(lv, "reorder", %{"order" => ["1", "0"]})
@@ -1929,16 +1979,17 @@ defmodule KilnCMSWeb.EditorLiveTest do
          %{conn: conn} do
       page =
         draft_page(%{
-          blocks: [
-            %{type: :heading, content: "Head", order: 0},
-            %{type: :rich_text, content: "<p>seed</p>", order: 1}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "Head", order: 0},
+              %{type: :rich_text, content: "<p>seed</p>", order: 1}
+            ])
         })
 
       [_head, rich] = blocks_legacy(page)
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # TipTap pushes its document keyed by the block's stable id (the RichText
       # hook does this on every edit) — the rich_text block is at index 1 here.
@@ -1974,14 +2025,15 @@ defmodule KilnCMSWeb.EditorLiveTest do
          %{conn: conn} do
       page =
         draft_page(%{
-          blocks: [
-            %{type: :rich_text, content: "<p>AAA</p>", order: 0},
-            %{type: :rich_text, content: "<p>BBB</p>", order: 1}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>AAA</p>", order: 0},
+              %{type: :rich_text, content: "<p>BBB</p>", order: 1}
+            ])
         })
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       render_hook(lv, "reorder", %{"order" => ["1", "0"]})
       lv |> form("#page-editor") |> render_submit()
@@ -1998,10 +2050,14 @@ defmodule KilnCMSWeb.EditorLiveTest do
       # save round-trips it. (The live editing itself is browser-verified.)
       page =
         draft_page(%{
-          blocks: [%{type: :rich_text, content: "<p>Hi <strong>there</strong></p>", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>Hi <strong>there</strong></p>", order: 0}
+            ])
         })
 
-      {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # The rich_text block renders the TipTap mount + hidden input, not a textarea.
       assert html =~ ~s(phx-hook="RichText")
@@ -2019,19 +2075,34 @@ defmodule KilnCMSWeb.EditorLiveTest do
     # browser-verified; here we assert the server-rendered wiring it depends on.)
     test "the rich_text host carries its block id and the unified slash hint",
          %{conn: conn} do
-      page = draft_page(%{blocks: [%{type: :rich_text, content: "<p>hi</p>", order: 0}]})
+      page =
+        draft_page(%{
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>hi</p>", order: 0}
+            ])
+        })
+
       [block] = blocks_legacy(page)
 
       {:ok, _lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       assert html =~ ~s(data-block-id="#{block.id}")
       assert html =~ "Type / to format this text or insert a block below."
     end
 
     test "the live preview reflects block content and updates on change", %{conn: conn} do
-      page = draft_page(%{blocks: [%{type: :heading, content: "Original Heading", order: 0}]})
-      {:ok, lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+      page =
+        draft_page(%{
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "Original Heading", order: 0}
+            ])
+        })
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # Preview renders the heading block through the typed serializers — i.e.
       # exactly what firing/delivery produces (Kiln v2 preview parity).
@@ -2049,7 +2120,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page()
 
       {:ok, _lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # Every registered typed block type is offered (incl. ones never in the old
       # hardcoded palette, e.g. `custom`).
@@ -2061,12 +2132,15 @@ defmodule KilnCMSWeb.EditorLiveTest do
     test "renders DSL-declared fields per block, gated by field-level policy", %{conn: conn} do
       page =
         draft_page(%{
-          blocks: [%{type: :quote, content: "Q", data: %{"citation" => "me"}, order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :quote, content: "Q", data: %{"citation" => "me"}, order: 0}
+            ])
         })
 
       # An editor sees the quote's text + citation, but NOT the admin-only featured flag.
       {:ok, _lv, editor_html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # Native union member fields: form[blocks][0][citation], etc.
       assert editor_html =~ "[citation]"
@@ -2074,7 +2148,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       # An admin additionally sees the featured field.
       {:ok, _lv, admin_html} =
-        build_conn() |> log_in(authed_user(:admin)) |> live(~p"/editor/pages/#{page.id}")
+        build_conn() |> log_in(authed_user(:admin)) |> live(~p"/editor/content/page/#{page.id}")
 
       assert admin_html =~ "[citation]"
       assert admin_html =~ "[featured]"
@@ -2084,7 +2158,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page()
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       lv
       |> form("#page-editor",
@@ -2112,7 +2186,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       CMS.update_page!(page, %{title: "Changed"}, actor: editor)
 
-      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/pages/#{page.id}")
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
       assert html =~ "Version history"
 
       [create_version | _] =
@@ -2133,7 +2207,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page()
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:admin)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:admin)) |> live(~p"/editor/content/page/#{page.id}")
 
       lv |> element("button", "Publish now") |> render_click()
 
@@ -2146,7 +2220,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page()
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       lv |> element("button", "Submit for review") |> render_click()
 
@@ -2161,7 +2235,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       post = draft_post()
 
       {:ok, _lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/post/#{post.id}")
 
       assert html =~ "Organization &amp; relationships"
       assert html =~ "Category"
@@ -2176,7 +2250,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       tag = Ash.Seed.seed!(Tag, %{name: "elixir", slug: "t-#{uniq()}"})
 
       {:ok, lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/post/#{post.id}")
 
       # The seeded taxonomy appears as options (the featured image is chosen
       # through the media picker modal rather than a <select> — see #154).
@@ -2200,7 +2274,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       post =
         CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [tag.id]}, actor: editor)
 
-      {:ok, _lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      {:ok, _lv, html} = conn |> log_in(editor) |> live(~p"/editor/content/post/#{post.id}")
 
       # The tag's checkbox is pre-checked even before the user touches the field
       # (so an untouched save won't wipe the link) — #153 replaced the <select>.
@@ -2231,7 +2305,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       Ash.Seed.seed!(Tag, %{name: "loosetag", slug: "t-#{uniq()}"})
 
       {:ok, _lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/post/#{post.id}")
 
       assert html =~ "PostThemes"
       assert html =~ "postonly"
@@ -2267,7 +2341,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       # An admin later narrows the group to pages only.
       CMS.update_tag_group!(group, %{content_types: ["page"]}, authorize?: false)
 
-      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/content/post/#{post.id}")
 
       # Still rendered, still checked — under the "Also attached" fallback.
       assert html =~ "Also attached"
@@ -2294,7 +2368,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       # Mount before any tag exists, so the mount-time `@tags` is empty and the
       # picker renders no `tag_ids` field at all.
-      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/post/#{post.id}")
 
       # A collaborator attaches a newly-created tag after this mount. Seed the
       # join row directly rather than through `add_tag_ids`: that would bump the
@@ -2356,7 +2430,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
           actor: editor
         )
 
-      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/post/#{post.id}")
 
       # Untick the orphan, keeping the other tag ticked.
       html =
@@ -2392,7 +2466,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       post =
         CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [keeper.id]}, actor: editor)
 
-      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/post/#{post.id}")
 
       latecomer = Ash.Seed.seed!(Tag, %{name: "latecomertag", slug: "t-#{uniq()}"})
 
@@ -2422,7 +2496,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
           actor: editor
         )
 
-      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/post/#{post.id}")
 
       lv |> form("#post-editor", form: %{tag_ids: [keeper.id]}) |> render_submit()
 
@@ -2434,7 +2508,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       Ash.Seed.seed!(Tag, %{name: "sometag", slug: "t-#{uniq()}"})
 
       {:ok, _lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/post/#{post.id}")
 
       assert html =~ "sometag"
       refute html =~ ~s(name="form[tag_ids][]" value="")
@@ -2451,7 +2525,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       post =
         CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [tag.id]}, actor: editor)
 
-      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/post/#{post.id}")
 
       # Not through `form/3`: LiveViewTest validates values against the rendered
       # inputs, and it now REFUSES `""` because no such input exists any more —
@@ -2476,7 +2550,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       post =
         CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [keeper.id]}, actor: editor)
 
-      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/post/#{post.id}")
 
       render_submit(lv, "save", %{
         "form" => %{
@@ -2529,7 +2603,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
         })
 
       {:ok, _lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/post/#{post.id}")
 
       assert html =~ "Ungrouped"
       assert html =~ "straytag"
@@ -2551,7 +2625,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       post =
         CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [tag.id]}, actor: editor)
 
-      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/content/post/#{post.id}")
 
       # The section holds the selection, so it mounts expanded.
       assert tag_section(html, "OpenThemes") =~ ~r/\sopen=/
@@ -2574,7 +2648,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       post = CMS.create_post!(%{title: "T", slug: "p-#{uniq()}"}, actor: editor)
 
-      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/content/post/#{post.id}")
 
       refute tag_section(html, "ShutThemes") =~ ~r/\sopen=/
 
@@ -2599,7 +2673,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
       post = CMS.create_post!(%{title: "T", slug: "p-#{uniq()}"}, actor: editor)
 
-      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/content/post/#{post.id}")
       refute tag_section(html, "SavedThemes") =~ ~r/\sopen=/
 
       # Tick it and let the autosave persist it — `assign_record/2` reloads the
@@ -2634,7 +2708,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       post = CMS.create_post!(%{title: "T", slug: "p-#{uniq()}"}, actor: editor)
 
       # Mount with nothing attached, so no "Also attached" section exists yet.
-      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/content/post/#{post.id}")
       refute html =~ "Also attached"
 
       # A collaborator attaches a tag from that page-only group. Seeded directly
@@ -2676,7 +2750,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       Ash.Seed.seed!(Tag, %{name: "pagetag", slug: "t-#{uniq()}", tag_group_id: group.id})
 
       {:ok, _lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/post/#{post.id}")
 
       assert html =~ "No tags are available on this content type"
       refute html =~ "No tags yet."
@@ -2715,7 +2789,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       # longer applies, so it lands in the rescue section.
       CMS.update_tag_group!(group, %{content_types: ["page"]}, authorize?: false)
 
-      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/content/post/#{post.id}")
       assert html =~ "Also attached"
       refute html =~ "No tags are available on this content type"
 
@@ -2734,7 +2808,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       post = draft_post()
 
       {:ok, _lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/post/#{post.id}")
 
       assert html =~ "No tags yet."
       refute html =~ "No tags are available on this content type"
@@ -2787,7 +2861,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       tag = Ash.Seed.seed!(Tag, %{name: "counted", slug: "t-#{uniq()}"})
       post = CMS.create_post!(%{title: "T", slug: "p-#{uniq()}"}, actor: editor)
 
-      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/content/post/#{post.id}")
       assert tag_section_summary(html, "Ungrouped") =~ "0 of 1"
 
       # Ticked but NOT saved: the count comes from the form, so it moves now.
@@ -2803,7 +2877,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       post =
         CMS.create_post!(%{title: "T", slug: "p-#{uniq()}", tag_ids: [tag.id]}, actor: editor)
 
-      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/posts/#{post.id}")
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/post/#{post.id}")
 
       # Unticking every box submits no `tag_ids` key at all. Since #638 that is
       # read against what the picker RENDERED, so it detaches — where before it
@@ -2818,7 +2892,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       other = draft_post(%{title: "SiblingPost"})
 
       {:ok, lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/posts/#{post.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/post/#{post.id}")
 
       assert html =~ "SiblingPost"
 
@@ -2987,7 +3061,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page =
         draft_page(%{
           title: "A11yPage",
-          blocks: [%{type: :rich_text, content: "<p>hi</p>", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>hi</p>", order: 0}
+            ])
         })
 
       {:ok, _lv, html} =
@@ -3006,7 +3083,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page =
         draft_page(%{
           title: "SlashPage",
-          blocks: [%{type: :rich_text, content: "<p>x</p>", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>x</p>", order: 0}
+            ])
         })
 
       {:ok, _lv, html} =
@@ -3023,10 +3103,18 @@ defmodule KilnCMSWeb.EditorLiveTest do
     # so the editor survives; a version bump changes it so it remounts).
     test "rich-text editors remount after a conflict reload", %{conn: conn} do
       editor = authed_user(:editor)
-      page = draft_page(%{blocks: [%{type: :rich_text, content: "<p>hi</p>", order: 0}]})
+
+      page =
+        draft_page(%{
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>hi</p>", order: 0}
+            ])
+        })
+
       [block] = blocks_legacy(page)
 
-      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/pages/#{page.id}")
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
       assert html =~ "rt-#{block.id}-v0"
 
       # Someone else saves first → this editor's save is stale → conflict.
@@ -3043,14 +3131,15 @@ defmodule KilnCMSWeb.EditorLiveTest do
     test "blocks can be reordered with keyboard move buttons", %{conn: conn} do
       page =
         draft_page(%{
-          blocks: [
-            %{type: :heading, content: "First", order: 0},
-            %{type: :heading, content: "Second", order: 1}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "First", order: 0},
+              %{type: :heading, content: "Second", order: 1}
+            ])
         })
 
       {:ok, lv, html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # Move-up on the first block is disabled; move-down is available. Blocks are
       # addressed by their stable id now, so target the first block's card by its
@@ -3111,7 +3200,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page =
         draft_page(%{
           title: "PrevPage",
-          blocks: [%{type: :heading, content: "PrevBlock", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "PrevBlock", order: 0}
+            ])
         })
 
       {:ok, _lv, html} =
@@ -3243,7 +3335,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       assert has_element?(lv, "button[data-inserter-item][phx-value-type='columns']")
     end
@@ -3252,7 +3344,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       add_columns_block(lv)
 
@@ -3275,7 +3367,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       add_columns_block(lv)
       lv |> form("#page-editor") |> render_submit()
@@ -3289,7 +3381,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       add_columns_block(lv)
       id = columns_block_id(lv)
@@ -3333,7 +3425,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       add_columns_block(lv)
       id = columns_block_id(lv)
@@ -3354,7 +3446,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       add_columns_block(lv)
       id = columns_block_id(lv)
@@ -3403,7 +3495,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       add_columns_block(lv)
 
@@ -3423,7 +3515,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       add_columns_block(lv)
       id = columns_block_id(lv)
@@ -3469,7 +3561,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       add_columns_block(lv)
       id = columns_block_id(lv)
@@ -3502,7 +3594,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       add_columns_block(lv)
       id = columns_block_id(lv)
@@ -3534,7 +3626,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       for type <- ~w(faq how_to claim) do
         assert has_element?(lv, "button[data-inserter-item][phx-value-type='#{type}']")
@@ -3545,7 +3637,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       lv
       |> element("#block-inserter button[data-inserter-item][phx-value-type='faq']")
@@ -3581,7 +3673,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       lv
       |> element("#block-inserter button[data-inserter-item][phx-value-type='faq']")
@@ -3610,7 +3702,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       lv
       |> element("#block-inserter button[data-inserter-item][phx-value-type='accordion']")
@@ -3646,7 +3738,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       [a, b] = for n <- 1..2, do: gallery_media(n)
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       lv
       |> element("#block-inserter button[data-inserter-item][phx-value-type='gallery']")
@@ -3684,7 +3776,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
         })
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       bid = gallery_block_id(lv)
 
@@ -3719,7 +3811,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
         })
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       render_hook(lv, "gallery_reorder", %{"bid" => gallery_block_id(lv), "order" => ["2", "0"]})
       lv |> form("#page-editor") |> render_submit()
@@ -3768,7 +3860,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
         })
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       bid = gallery_block_id(lv)
 
@@ -3803,7 +3895,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
         })
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # Two of these rows are identical maps. Deduping the *rows* rather than the
       # *indices* collapses them into one and then drops both from the tail, so a
@@ -3839,7 +3931,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
         })
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       bid = gallery_block_id(lv)
 
@@ -3861,7 +3953,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       lv
       |> element("#block-inserter button[data-inserter-item][phx-value-type='claim']")
@@ -3895,7 +3987,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{blocks: []})
 
       {:ok, lv, _html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       lv
       |> element("#block-inserter button[data-inserter-item][phx-value-type='how_to']")

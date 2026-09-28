@@ -338,23 +338,31 @@ The audience a reader holds is resolved **per organization**, from their
 |---|---|
 | member of this org | that membership's audiences |
 | member elsewhere, none here | `[]` — **fail-closed** |
-| no memberships at all (legacy / single-org) | the global `User.audiences` column — **deprecated**, removed at 1.0 (see below) |
+| no memberships at all | `[]` |
 | anonymous | `[]`, with no database lookup |
-
-The last row is deprecated in 0.12 and removed at 1.0 (#1538). Each account
-it grants something logs a warning once per boot. `mix kiln.deprecations`
-lists those accounts, and `mix kiln.deprecations --migrate-audiences` gives
-each one a membership on the default organization carrying its audiences and
-standing role (and any live temporary role, with its expiry), which is what
-the fallback grants there today. It is the same step the first paid membership
-and the console's audience checkboxes take (below). After that, a migrated
-account's audiences are edited on its membership, which is what the
-checkboxes on `/editor/accounts/:id` write.
 
 Fail-closed matters because the organization is resolved from a
 **client-controlled host**. Falling back to the global column for a foreign org
 would let a member of one site read another's gated content by switching hosts —
 the same reasoning the editorial scope axes already use.
+
+### The removed `User.audiences` fallback
+
+Until 1.0, an account with no memberships at all read the global
+`User.audiences` column on every org. 0.12 deprecated that fallback (#1538) and
+1.0 removed it (#1543). An account still relying on it is moved onto a
+membership on the default organization carrying its audiences and standing
+role (and any live temporary role, with its expiry) — what the fallback granted
+there — by `KilnCMS.Accounts.LegacyAudiencesWorker`, a background job queued on
+every boot. Until the job has run, such an account reads only public content:
+fail-closed, never wider. It is the same step the first paid membership and the
+console's audience checkboxes take (below), and `mix kiln.deprecations
+--migrate-audiences` runs it by hand; run that on 0.12 before upgrading and
+there is no gap at all. `mix kiln.deprecations` lists any account left.
+
+The column itself is kept. No access decision reads it, but it is the only
+record of what a legacy account held, and billing still writes the
+cross-organization union there. 2.0 may drop it.
 
 ### The first paid membership
 
@@ -362,14 +370,14 @@ The recompute gives a buyer a `:viewer` membership on each org they have paid on
 and hold none for. A reader is not an author, so the paid membership never
 raises a tier. It must not lower one either, and for an account with **no
 memberships at all** it would: that account's first membership makes it
-affiliated, which ends the no-membership fallback. A legacy editor buying on the
-default org would become a `:viewer` there; buying on another org would leave it
-with no tier and no audiences on the default org.
+affiliated, which ends its standing-role tier on the default org. A legacy editor
+buying on the default org would become a `:viewer` there; buying on another org
+would leave it with no tier on the default org.
 
 So before an account's first membership, the recompute gives it a default-org
 membership carrying its standing `User.role`, any live temporary role with its
-expiry, and its `User.audiences`. That is what the fallback grants it on the
-default org, so nothing it holds there changes, apart from the billing rule
+expiry, and its `User.audiences`. That is what it held on the default org before
+it had a membership, so nothing it holds there changes, apart from the billing rule
 above: a tier-claimed audience on that membership still lasts only as long as
 something entitles it. The paid `:viewer` membership follows. The console's
 audience checkboxes take the same step (below); both call

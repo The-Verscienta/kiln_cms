@@ -74,8 +74,13 @@ defmodule KilnCMS.Media.TransformTest do
     assert {:ok, _old} = Storage.fetch(key)
     assert {:ok, _new} = Storage.fetch(updated.storage_key)
 
-    # Variant regeneration is queued for the edited original.
-    assert_enqueued(worker: KilnCMS.Media.VariantWorker, args: %{media_item_id: item.id})
+    # Variant regeneration is queued for the edited original, under the item's
+    # own site (#1658) — a job without `org_id` used to be a silent no-op under
+    # strict tenancy.
+    assert_enqueued(
+      worker: KilnCMS.Media.VariantWorker,
+      args: %{media_item_id: item.id, org_id: item.org_id}
+    )
   end
 
   test "flips keep dimensions and mirror the focal point" do
@@ -98,7 +103,11 @@ defmodule KilnCMS.Media.TransformTest do
 
     assert updated.focal_x == 1.0
     assert updated.focal_y == 0.0
-    assert_enqueued(worker: KilnCMS.Media.VariantWorker, args: %{media_item_id: item.id})
+
+    assert_enqueued(
+      worker: KilnCMS.Media.VariantWorker,
+      args: %{media_item_id: item.id, org_id: item.org_id}
+    )
   end
 
   test "the regenerated card crop follows the stored focal point" do
@@ -107,7 +116,10 @@ defmodule KilnCMS.Media.TransformTest do
 
     # Run the worker inline: variants (incl. the focal-aware card) generate.
     assert :ok =
-             perform_job(KilnCMS.Media.VariantWorker, %{"media_item_id" => item.id})
+             perform_job(KilnCMS.Media.VariantWorker, %{
+               "media_item_id" => item.id,
+               "org_id" => item.org_id
+             })
 
     reloaded = CMS.get_media_item!(item.id, authorize?: false)
     assert %{"card" => %{"width" => 800, "height" => 450}} = reloaded.variants
@@ -116,5 +128,30 @@ defmodule KilnCMS.Media.TransformTest do
   test "a missing original is a graceful error" do
     item = media_item("does-not-exist.png")
     assert {:error, _} = Transform.apply(item, :rotate_left, authorize?: false)
+  end
+
+  test "moving the focal point through :update_metadata re-derives under the item's org (#1658)" do
+    item = media_item(stored_png(1200, 800), %{content_type: "image/png"})
+
+    CMS.update_media_item_metadata!(item, %{focal_x: 0.1, focal_y: 0.9}, authorize?: false)
+
+    assert_enqueued(
+      worker: KilnCMS.Media.VariantWorker,
+      args: %{media_item_id: item.id, org_id: item.org_id}
+    )
+  end
+
+  test "the job an edit enqueues produces variants when it runs (#1658)" do
+    # End to end through the enqueued args, not a hand-built job: the editor's
+    # job must carry the org the worker now requires, or it is cancelled.
+    item = media_item(stored_png(1200, 800))
+
+    assert {:ok, _updated} = Transform.apply(item, :flip_vertical, authorize?: false)
+
+    assert [%Oban.Job{args: args}] = all_enqueued(worker: KilnCMS.Media.VariantWorker)
+    assert args["org_id"] == item.org_id
+    assert :ok = perform_job(KilnCMS.Media.VariantWorker, args)
+
+    assert %{"thumb" => _} = CMS.get_media_item!(item.id, authorize?: false).variants
   end
 end

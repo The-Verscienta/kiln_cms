@@ -41,7 +41,7 @@ defmodule KilnCMS.Federation.DeliveryWorker do
   def perform(%Oban.Job{args: args, attempt: attempt, max_attempts: max_attempts}) do
     %{"org_id" => org_id, "delivery_id" => delivery_id} = args
 
-    case Ash.get(Delivery, delivery_id, authorize?: false, tenant: org_id) do
+    case Ash.get(Delivery, delivery_id, actor: Federation.system(), tenant: org_id) do
       {:ok, delivery} -> attempt(delivery, org_id, attempt, attempt >= max_attempts)
       # The ledger row was pruned out from under the job. Nothing to deliver and
       # nothing to record — succeeding is the honest outcome.
@@ -134,7 +134,7 @@ defmodule KilnCMS.Federation.DeliveryWorker do
       delivery,
       %{state: state, attempts: attempt, last_status: status, last_error: truncate(error)},
       action: :settle,
-      authorize?: false,
+      actor: Federation.system(),
       tenant: org_id
     )
   rescue
@@ -147,13 +147,13 @@ defmodule KilnCMS.Federation.DeliveryWorker do
 
   defp record_success(delivery, org_id) do
     with {:ok, follower} <- follower(delivery, org_id) do
-      Federation.record_follower_success(follower, authorize?: false, tenant: org_id)
+      Federation.record_follower_success(follower, actor: Federation.system(), tenant: org_id)
     end
 
     # The site's own "last federated" line (#967) — system-side, its own
     # action so no settings form can backdate it.
     with {:ok, settings} <- Federation.active_settings(org_id) do
-      Federation.record_site_delivery(settings, authorize?: false, tenant: org_id)
+      Federation.record_site_delivery(settings, actor: Federation.system(), tenant: org_id)
     end
 
     :ok
@@ -164,7 +164,10 @@ defmodule KilnCMS.Federation.DeliveryWorker do
   defp record_failure(delivery, org_id) do
     with {:ok, follower} <- follower(delivery, org_id),
          {:ok, updated} <-
-           Federation.record_follower_failure(follower, authorize?: false, tenant: org_id) do
+           Federation.record_follower_failure(follower,
+             actor: Federation.system(),
+             tenant: org_id
+           ) do
       drop_if_dead(updated, org_id)
     end
 
@@ -180,7 +183,7 @@ defmodule KilnCMS.Federation.DeliveryWorker do
           "#{follower.consecutive_failures} consecutive failures"
       )
 
-      Federation.destroy_follower(follower, authorize?: false, tenant: org_id)
+      Federation.destroy_follower(follower, actor: Federation.system(), tenant: org_id)
     end
 
     :ok
@@ -195,7 +198,7 @@ defmodule KilnCMS.Federation.DeliveryWorker do
   # than `Ash.get/3` so this stays on the code-interface contract AGENTS.md
   # sets; the list is bounded by the per-site follower ceiling.
   defp follower(%{follower_id: id}, org_id) do
-    case Federation.get_follower(id, authorize?: false, tenant: org_id) do
+    case Federation.get_follower(id, actor: Federation.system(), tenant: org_id) do
       {:ok, follower} -> {:ok, follower}
       _other -> :error
     end

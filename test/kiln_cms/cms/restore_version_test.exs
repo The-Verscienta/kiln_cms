@@ -6,6 +6,8 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
   """
   use KilnCMS.DataCase, async: true
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.CMS
   alias KilnCMS.CMS.VersionDiff
   alias KilnCMS.CMS.VersionFields
@@ -35,7 +37,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
         %{
           title: "Alpha",
           slug: slug(),
-          blocks: [%{type: :heading, content: "Original", order: 0}]
+          blocks: typed_blocks([%{type: :heading, content: "Original", order: 0}])
         },
         actor: admin
       )
@@ -43,7 +45,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
     page =
       CMS.update_page!(
         page,
-        %{title: "Beta", blocks: [%{type: :heading, content: "Changed", order: 0}]},
+        %{title: "Beta", blocks: typed_blocks([%{type: :heading, content: "Changed", order: 0}])},
         actor: admin
       )
 
@@ -60,7 +62,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
     assert [%{content: "Original"}] =
              restored.blocks
              |> KilnCMS.CMS.TypedBlocks.to_typed()
-             |> KilnCMS.LegacyBridge.to_legacy()
+             |> KilnCMS.LegacyView.blocks()
   end
 
   test "restoring to an intermediate version reconstructs that state" do
@@ -195,7 +197,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
       assert [%{content: "Original"}] =
                restored.blocks
                |> KilnCMS.CMS.TypedBlocks.to_typed()
-               |> KilnCMS.LegacyBridge.to_legacy()
+               |> KilnCMS.LegacyView.blocks()
 
       # The drift guard the issue asks for: a new restorable attribute has to
       # fail here rather than quietly ship a restore that skips it. The two
@@ -580,7 +582,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
     end
   end
 
-  defp block(content), do: [%{type: :heading, content: content, order: 0}]
+  defp block(content), do: typed_blocks([%{type: :heading, content: content, order: 0}])
 
   defp assert_refuses(page, version, field, admin) do
     assert {:error, error} =

@@ -8,6 +8,8 @@ defmodule KilnCMS.Search.HybridTest do
   # async: false — toggles the global `KilnCMS.Search` app env.
   use KilnCMS.DataCase, async: false
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.CMS
   alias KilnCMS.Search
 
@@ -670,7 +672,11 @@ defmodule KilnCMS.Search.HybridTest do
     alias KilnCMS.Search.BlockIndexer
 
     defp indexed_page(admin, title, blocks) do
-      page = CMS.create_page!(%{title: title, slug: slug(), blocks: blocks}, actor: admin)
+      page =
+        CMS.create_page!(%{title: title, slug: slug(), blocks: typed_blocks(blocks)},
+          actor: admin
+        )
+
       {:ok, _count} = BlockIndexer.reindex(page)
       page
     end
@@ -766,9 +772,10 @@ defmodule KilnCMS.Search.HybridTest do
           %{
             title: "Opening",
             slug: slug(),
-            blocks: [
-              %{type: :rich_text, content: "<p>quiet rivers and cold streams</p>", order: 0}
-            ]
+            blocks:
+              typed_blocks([
+                %{type: :rich_text, content: "<p>quiet rivers and cold streams</p>", order: 0}
+              ])
           },
           actor: admin
         )

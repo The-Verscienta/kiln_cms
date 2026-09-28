@@ -33,8 +33,10 @@ implied.
   applied by `KilnCMS.CMS.Checks.InAudience`): a member's
   `OrgMembership.audiences` for the site being served; `[]` for an actor
   affiliated elsewhere but not here (**fail-closed**, since the org comes from a
-  client-controlled host); the global `User.audiences` column only for accounts
-  with no memberships at all (pre-#336 data and single-org installs).
+  client-controlled host); `[]` for an account with no memberships at all. The
+  global `User.audiences` column is read by no policy: its fallback for
+  membership-less accounts was removed at 1.0 (#1543), and a post-deploy job
+  moves such accounts onto a default-org membership carrying it.
 - A published record is readable when its audience is `:public`, **or** its
   audience is one the reader holds *on that org*. Editors/admins see everything.
 
@@ -157,6 +159,11 @@ ever be authorized by an explicit clause below.
 | `Newsletter.Subscriber` | `read`, `link_member` **only** | `link_member` is the one write that may set `user_id`, and it is `forbid_if always()` for everyone. Narrowed the same way, so admin-only list management is untouched. |
 | `Newsletter.NewsletterSend` | `create` **only** | The "on publish → send the newsletter" automation (`Automation.RuleWorker`) records the campaign it queues (#1655). Before this the create ran `authorize?: false` for every caller, the console included, so the console's tier check was the only gate. Narrowed inside the blanket admin policy; reading the ledger and the fan-out's `mark_*`/`record_*` bookkeeping are unchanged. |
 | `Newsletter.SegmentMembership` | all | The join row between a subscriber and a tier segment. The sync genuinely reads, creates and destroys them as entitlements change, and the row carries nothing beyond the two ids. |
+| `Federation.Follower` | all (`read`, `deliverable`, `follow`, `record_failure`, `record_success`, `destroy`) | The follower list is kept by the system, not by a person (#1659): the inbox records a signed remote `Follow` (no Kiln user is behind it) and removes it on `Undo`, the fan-out reads who to deliver to, the delivery worker keeps the failure count and drops a dead follower, and a block removes the followers it covers. The tenant filter still applies. |
+| `Federation.Delivery` | `read`, `create`, `settle` **only** | The fan-out and the inbox's `Accept` write one ledger row per follower; the delivery worker re-reads and settles it. `destroy` is **not** admitted — the ledger is pruned by its AshOban trigger, and a system actor cannot erase the record of whether a POST went out. |
+| `Federation.Block` | `read` **only** | The inbox asks whether an actor or its instance is blocked before it records a `Follow`. Deciding what to block stays an admin act. |
+| `Federation.SiteFederation` | `read`, `record_delivery`, `enable`, `disable`, `rekey` **only** | Every federation path starts from the site's settings (`Federation.active_settings/2`); the delivery worker stamps "last federated"; and `mix kiln.federation` (`enable`, `disable`, `rekey`) is an operator at a shell on the host, the deployment's own authority. The settings form's `save` and `destroy` are not admitted — editing the site's public identity stays an admin act. Granted through `OrgSettings`' `system_actions:` option, which narrows inside the macro's read and write policies. |
+| `Federation.SeenSignature` | `record`, `expired`, `destroy` **only** | The inbound replay-nonce store: `HttpSignature` records a verified signature, `SeenSignatureSweeper` counts and deletes expired rows. The plain `read` is refused to everyone, the system actor included — nothing needs to list nonces. No person has any path to this table. |
 | `CMS.Page`, `CMS.Post`, `CMS.Entry` (content) | `reindex_search_text` and `set_embedding` **only**, named inside the `action_type([:create, :update])` policy | Two system-only actions on denormalized columns: the fragment-expanded search text (`Firing.Engine.fire/2`) and the document-level search vector (`Search.EmbeddingWorker`). Both accept no `:blocks` and both are ignored by PaperTrail. The grant sits inside the policy written for people, narrowed to those two actions by `forbid_unless action(...)` — see above for why that rather than a bypass. Keep the list short and every member system-only. Nothing else on the content resources admits the system actor: it holds no tier, so `EditableContentType` / `ReadableContentType` / `InAudience` all refuse it, and a system actor reads no content at all. |
 
 Legend: ✅ allowed · ❌ forbidden · 🔎 allowed but row-filtered (reads return only the rows the policy permits, never an error) · ⚙️ system-only (`authorize?: false`).
