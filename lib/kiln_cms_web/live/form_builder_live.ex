@@ -1183,7 +1183,9 @@ defmodule KilnCMSWeb.FormBuilderLive do
                 {ngettext(
                   "%{count} selected",
                   "%{count} selected",
-                  MapSet.size(@selected_submissions), count: MapSet.size(@selected_submissions))}
+                  MapSet.size(@selected_submissions),
+                  count: MapSet.size(@selected_submissions)
+                )}
               </span>
               <button
                 type="button"

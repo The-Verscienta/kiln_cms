@@ -54,6 +54,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Changed
+
+- **Console lists share one empty state; long settings pages get a table of
+  contents; screen crumbs point at their real parent.**
+  ([#1678](https://github.com/The-Verscienta/kiln_cms/issues/1678) · [#1680](https://github.com/The-Verscienta/kiln_cms/issues/1680) · [long form](docs/changelog/unreleased.md#console-lists-share-one-empty-state-long-settings-pages-get-a-table-of-contents))
+
 ## [0.12.0] - 2026-09-27
 
 Long form: [docs/changelog/v0.12.0.md](docs/changelog/v0.12.0.md) —
