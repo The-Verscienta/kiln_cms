@@ -1091,6 +1091,30 @@
 .ProseMirror h1 { font-size: 1.5rem; font-weight: 700; }
 .ProseMirror h2 { font-size: 1.25rem; font-weight: 600; }
 .ProseMirror h3 { font-size: 1.1rem; font-weight: 600; }
+/* An empty heading line (a slash-menu "Heading 2" never typed into, or one
+   whose text was deleted) otherwise renders as an ordinary blank line — yet
+   the accessibility and SEO panels flag it ("1 heading has no text — block
+   n"), and the author has nothing on screen to match that to. ProseMirror
+   renders an empty textblock as a lone trailing <br>, so that is the marker.
+   The label is the level, spelled like the toolbar's H1/H2/H3 buttons, so it
+   needs no translation. */
+.ProseMirror :is(h1, h2, h3, h4, h5, h6):has(> br.ProseMirror-trailingBreak:only-child) {
+  border-bottom: 1px dashed var(--color-base-300);
+}
+.ProseMirror :is(h1, h2, h3, h4, h5, h6):has(> br.ProseMirror-trailingBreak:only-child)::before {
+  float: right;
+  height: 0;
+  pointer-events: none;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: color-mix(in oklch, var(--color-base-content) 40%, transparent);
+}
+.ProseMirror h1:has(> br.ProseMirror-trailingBreak:only-child)::before { content: "H1"; }
+.ProseMirror h2:has(> br.ProseMirror-trailingBreak:only-child)::before { content: "H2"; }
+.ProseMirror h3:has(> br.ProseMirror-trailingBreak:only-child)::before { content: "H3"; }
+.ProseMirror h4:has(> br.ProseMirror-trailingBreak:only-child)::before { content: "H4"; }
+.ProseMirror h5:has(> br.ProseMirror-trailingBreak:only-child)::before { content: "H5"; }
+.ProseMirror h6:has(> br.ProseMirror-trailingBreak:only-child)::before { content: "H6"; }
 .ProseMirror ul { list-style: disc; padding-left: 1.5rem; }
 .ProseMirror ol { list-style: decimal; padding-left: 1.5rem; }
 .ProseMirror blockquote {
