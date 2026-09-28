@@ -110,6 +110,30 @@ defmodule KilnCMS.Release do
   end
 
   @doc """
+  `mix kiln.org_slugs` for a release (#1710): list the organizations whose
+  slug can't be a hostname, and optionally downcase the ones where that is
+  enough first.
+
+      bin/kiln_cms eval 'KilnCMS.Release.org_slugs()'
+      bin/kiln_cms eval 'KilnCMS.Release.org_slugs(fix: true)'
+
+  Returns `:ok` when every slug is a valid host label, `{:error, message}`
+  otherwise; see `KilnCMS.Accounts.OrgSlugAudit`.
+  """
+  @spec org_slugs(keyword()) :: :ok | {:error, String.t()}
+  def org_slugs(opts \\ []) do
+    load_app()
+
+    {:ok, result, _} =
+      Ecto.Migrator.with_repo(hd(repos()), fn _repo ->
+        KilnCMS.Accounts.OrgSlugAudit.run_and_report(opts, &IO.puts/1)
+      end)
+
+    with {:error, message} <- result, do: IO.puts(message)
+    result
+  end
+
+  @doc """
   Rewrite every block tree still stored in a legacy shape to the typed shape
   (#1537) — `mix kiln.blocks.backfill` for a release, which has no Mix:
 

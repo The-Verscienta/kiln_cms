@@ -128,6 +128,16 @@ optional `custom_domain`. The slug also names its console host when
 `KILN_CONSOLE_HOST` is set (`<slug>.<console host>`, below). Members are then managed per org at
 `/editor/team`.
 
+The slug is a hostname label, because it becomes one (#1710). It is trimmed
+and downcased on save (`Acme` is stored as `acme`), and then refused unless it
+is 1 to 63 of `a-z`, `0-9` and `-`, not starting or ending with `-`.
+`www`, `console`, `api` and `mail` are reserved, and so is the first label of
+`KILN_CONSOLE_HOST` when that host sits directly under `PHX_HOST`. A slug saved
+by an earlier release had no such rule. `mix kiln.org_slugs` lists the orgs whose slug
+can't be a hostname, and `--fix` downcases the ones where that alone is
+enough. In a release, run `bin/kiln_cms eval 'KilnCMS.Release.org_slugs()'`.
+Kiln also warns at boot while any are left.
+
 Creating the **second** org turns strict host matching on unless
 `TENANT_STRICT_HOST` is already `true` — and since 0.12 an explicit `false` does
 not stop it (see above) — so before you create it, make sure every host the

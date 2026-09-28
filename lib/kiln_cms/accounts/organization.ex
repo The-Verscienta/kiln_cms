@@ -6,9 +6,9 @@ defmodule KilnCMS.Accounts.Organization do
   Organizations are the **tenant registry**, so this resource is itself *not*
   multitenant: it is the list of tenants every other tenant-scoped resource is
   partitioned by (via an `org_id` attribute — Ash `:attribute` multitenancy).
-  A `slug` is the future subdomain and a `custom_domain` the future vanity host;
-  a request's tenant is resolved from one of them by the routing plug (a later
-  stacked PR).
+  A `slug` is the subdomain — a lowercase DNS label, see
+  `KilnCMS.Accounts.OrgSlug` — and a `custom_domain` the vanity host; a
+  request's tenant is resolved from one of them by `KilnCMSWeb.Tenant`.
 
   ## The default org (non-breaking rollout)
 
@@ -68,6 +68,14 @@ defmodule KilnCMS.Accounts.Organization do
 
     create :create do
       primary? true
+
+      # A slug is a DNS label, because it is one (#1710): `Acme` is stored as
+      # the `acme` a browser's host resolves to, and anything that can't be a
+      # host at all is refused. Normalize first, so the check sees what is
+      # stored.
+      change KilnCMS.Accounts.Changes.NormalizeOrgSlug
+      validate KilnCMS.Accounts.Validations.OrgSlugIsHostLabel
+
       # Enforce the staged-rollout invariant: no second org until the delivery
       # path threads a tenant (epic #336). The seeded default org is created by
       # the backfill migration, which bypasses this action.
@@ -94,7 +102,17 @@ defmodule KilnCMS.Accounts.Organization do
       change KilnCMS.Accounts.Changes.WarnEmbedOverreach
     end
 
-    update :update, primary?: true
+    update :update do
+      primary? true
+      # The slug change and check are plain Elixir over the changeset.
+      require_atomic? false
+
+      # As on create — but only when the slug is being set, so an org stored
+      # before the rule (#1710) can still be renamed or suspended without also
+      # moving its host. `mix kiln.org_slugs` lists and fixes those rows.
+      change KilnCMS.Accounts.Changes.NormalizeOrgSlug
+      validate KilnCMS.Accounts.Validations.OrgSlugIsHostLabel, where: [changing(:slug)]
+    end
 
     # Tenant resolution: fetch an org by its subdomain slug (used by the routing
     # plug in a later PR). Present now so the registry is queryable by key.
@@ -145,7 +163,8 @@ defmodule KilnCMS.Accounts.Organization do
       constraints: [max_length: KilnCMS.Limits.line()]
 
     # The subdomain label (`acme` → `acme.example.com`) — the primary tenant
-    # key. Unique across the install.
+    # key. Unique across the install. A DNS label, downcased on write (#1710):
+    # see `KilnCMS.Accounts.OrgSlug`.
     attribute :slug, :string,
       allow_nil?: false,
       public?: true,

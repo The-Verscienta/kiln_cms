@@ -7,21 +7,20 @@ carries the reasoning.
 
 ## Upgrade notes
 
-<a id="on-a-multi-org-deployment-with-kiln_console_host-set-add-console-host-to-dns"></a>
+<a id="run-mix-kilnorgslugs-to-find-organizations-whose-slug-cant-be-a-hostname"></a>
 
-- **On a multi-org deployment with `KILN_CONSOLE_HOST` set, add
-  `*.<console host>` to DNS and TLS before upgrading.** A console route on a
-  non-default organization's site now redirects to that organization's own
-  console host, `<slug>.<console host>`, instead of to the default
-  organization's console, where that organization's admins had no access.
-  That host has to resolve to Kiln and be covered by the certificate: a
-  certificate for `*.example.com` does not cover `acme.console.example.com`.
-  Anyone signed in on the bare console host signs in again on their
-  organization's console host. Single-org deployments and deployments without
-  `KILN_CONSOLE_HOST` are unaffected. If the console host is not under
-  `PHX_HOST`, Kiln now warns at boot that passkeys cannot work there, which was
-  already the case
-  ([#1688](https://github.com/The-Verscienta/kiln_cms/issues/1688)).
+- **Run `mix kiln.org_slugs` to find organizations whose slug can't be a hostname.**
+  A slug stored before this release may hold uppercase letters, underscores or
+  dots, and such an org has never been reachable at `<slug>.<base host>`. The
+  task lists every one and exits non-zero while any is left; in a release, run
+  `bin/kiln_cms eval 'KilnCMS.Release.org_slugs()'`. `--fix`
+  (`KilnCMS.Release.org_slugs(fix: true)`) downcases each slug where that
+  alone makes a valid label that no other org's slug downcases to, and logs
+  each rename. Nothing that worked stops working, because the subdomain was
+  unreachable before the fix. Every other row is listed for you to give a new
+  slug, and to move its DNS with it. The application also warns at boot while
+  any such slug is left
+  ([#1710](https://github.com/The-Verscienta/kiln_cms/issues/1710)).
 
 ## Breaking
 
@@ -219,6 +218,36 @@ carries the reasoning.
   ([#1544](https://github.com/The-Verscienta/kiln_cms/issues/1544)).
 
 ## Fixed
+
+<a id="an-organizations-slug-must-be-a-hostname-label-and-is-stored-lowercase"></a>
+
+- **An organization's slug must be a hostname label, and is stored lowercase.**
+  Tenant resolution downcases the request host and then matches the slug
+  exactly, but the slug had no format rule, so an org created as `Acme` or
+  `my_site` could never be reached at its subdomain. It could not be reached at
+  its console host `<slug>.<console host>` either. Creating or changing a
+  slug now trims and downcases it, then refuses anything that is not a DNS
+  label: 1 to 63 of `a-z`, `0-9` and `-`, not starting or ending with `-`. It
+  also refuses `www`, `console`, `api` and `mail`, and the first label of
+  `KILN_CONSOLE_HOST` when that host sits directly under the base host. An
+  existing slug is only checked when it is changed, so an org stored before
+  this rule can still be renamed or suspended
+  ([#1710](https://github.com/The-Verscienta/kiln_cms/issues/1710)).
+<a id="on-a-multi-org-deployment-with-kiln_console_host-set-add-console-host-to-dns"></a>
+
+- **On a multi-org deployment with `KILN_CONSOLE_HOST` set, add
+  `*.<console host>` to DNS and TLS before upgrading.** A console route on a
+  non-default organization's site now redirects to that organization's own
+  console host, `<slug>.<console host>`, instead of to the default
+  organization's console, where that organization's admins had no access.
+  That host has to resolve to Kiln and be covered by the certificate: a
+  certificate for `*.example.com` does not cover `acme.console.example.com`.
+  Anyone signed in on the bare console host signs in again on their
+  organization's console host. Single-org deployments and deployments without
+  `KILN_CONSOLE_HOST` are unaffected. If the console host is not under
+  `PHX_HOST`, Kiln now warns at boot that passkeys cannot work there, which was
+  already the case
+  ([#1688](https://github.com/The-Verscienta/kiln_cms/issues/1688)).
 
 <a id="unreadable-stored-blocks-no-longer-fail-delivery"></a>
 

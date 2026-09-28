@@ -40,6 +40,7 @@ defmodule KilnCMS.Config.ReportUsageTest do
       warn_if_console_host_outside_rp_id
       warn_if_embed_lists_over_ceiling
       warn_if_chain_unsigned
+      warn_if_org_slugs_unreachable
       warn_if_seo_drafting_egresses
       warn_if_assist_egresses
       warn_if_ask_egresses

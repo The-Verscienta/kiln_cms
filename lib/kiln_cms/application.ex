@@ -171,6 +171,7 @@ defmodule KilnCMS.Application do
       warn_if_console_host_outside_rp_id()
       warn_if_embed_lists_over_ceiling()
       warn_if_chain_unsigned()
+      warn_if_org_slugs_unreachable()
       enqueue_occurrence_backfill()
       enqueue_legacy_audiences_migration()
       {:ok, pid}
@@ -477,6 +478,23 @@ defmodule KilnCMS.Application do
   defp warn_if_embed_lists_over_ceiling do
     if message = KilnCMS.Forms.EmbedCeiling.overreach_warning() do
       KilnCMS.Config.Report.warn("embed_ceiling", message)
+    end
+  end
+
+  # An org slug stored before slugs had to be DNS labels (#1710) may name a
+  # host no browser can send — `Acme`, when the lookup is downcased — so that
+  # site is unreachable at its subdomain, silently. Renaming a live tenant's
+  # host is the operator's call, so boot only says so; `mix kiln.org_slugs`
+  # lists the rows and downcases the ones where that is enough. `probe/2`: an
+  # advisory read that must not stop a node starting.
+  defp warn_if_org_slugs_unreachable do
+    report =
+      KilnCMS.Config.Report.probe(%{fixable: [], manual: []}, fn ->
+        KilnCMS.Accounts.OrgSlugAudit.report()
+      end)
+
+    if message = KilnCMS.Accounts.OrgSlugAudit.warning(report) do
+      KilnCMS.Config.Report.warn("org_slugs", message)
     end
   end
 

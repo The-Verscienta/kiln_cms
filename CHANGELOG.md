@@ -56,6 +56,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Run `mix kiln.org_slugs` to find organizations whose slug can't be a hostname.**
+  ([#1710](https://github.com/The-Verscienta/kiln_cms/issues/1710) · [long form](docs/changelog/unreleased.md#run-mix-kilnorgslugs-to-find-organizations-whose-slug-cant-be-a-hostname))
+
 - **On a multi-org deployment with `KILN_CONSOLE_HOST` set, add
   `*.<console host>` to DNS and TLS before upgrading.**
   ([#1688](https://github.com/The-Verscienta/kiln_cms/issues/1688) · [long form](docs/changelog/unreleased.md#on-a-multi-org-deployment-with-kiln_console_host-set-add-console-host-to-dns))
@@ -124,6 +127,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#1544](https://github.com/The-Verscienta/kiln_cms/issues/1544) · [long form](docs/changelog/unreleased.md#the-release-images-latest-tag-moves-only-to-the-highest-final-release-and-from))
 
 ### Fixed
+
+- **An organization's slug must be a hostname label, and is stored lowercase.**
+  ([#1710](https://github.com/The-Verscienta/kiln_cms/issues/1710) · [long form](docs/changelog/unreleased.md#an-organizations-slug-must-be-a-hostname-label-and-is-stored-lowercase))
 
 - **A stored block of a type the build no longer has, or one that is not a
   block, no longer fails its page's delivery.**
