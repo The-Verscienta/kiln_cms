@@ -30,9 +30,6 @@ defmodule KilnCMS.CMS.Content do
       project-agnostic; list that domain in `:content_domains` (see
       `KilnCMS.CMS.ContentTypes`) so it is discovered everywhere.
     * `:excerpt?` — include an `excerpt` attribute (listings/feeds). Default `false`.
-    * `:published?` — **deprecated** in 0.12, removed at 1.0; warns at
-      compile time. Ignored: every type has the `:published` read
-      (published-only, newest first). Remove it.
     * `:dynamic?` — this resource is the shared **generic entry** tier backing
       admin-defined content types (decision D17, used only by
       `KilnCMS.CMS.Entry`). Adds a required `type_definition` relationship,
@@ -64,8 +61,7 @@ defmodule KilnCMS.CMS.Content do
     :slug_pattern,
     :alias_pattern,
     :seo_title_pattern,
-    :seo_description_pattern,
-    :published?
+    :seo_description_pattern
   ]
 
   @doc false
@@ -287,20 +283,6 @@ defmodule KilnCMS.CMS.Content do
 
     seo_description_pattern =
       opts |> Keyword.get(:seo_description_pattern) |> KilnCMS.Seo.Pattern.validate!()
-
-    # `published?:` is ignored: the `/published` feed (read + route + GraphQL
-    # query) is universal since the official client (#300) — every delivery
-    # consumer needs a server-side published-only index, not just the blog
-    # (#297). Deprecated in 0.12 and removed at 1.0 (#1538); until then it
-    # still compiles, with a warning at the overlay's own `use` line — an
-    # option has nowhere to hang `@deprecated`.
-    if Keyword.has_key?(opts, :published?) do
-      IO.warn(
-        "the `published?:` option to `use KilnCMS.CMS.Content` is deprecated and ignored " <>
-          "(every content type has the `:published` read); remove it. 1.0 removes the option.",
-        Macro.Env.stacktrace(__CALLER__)
-      )
-    end
 
     # Derive the per-type names from `type` by the project's naming convention.
     resource = __CALLER__.module
@@ -3263,7 +3245,8 @@ defmodule KilnCMS.CMS.Content do
         # Typed polymorphic block tree (Kiln v2 — decision D11). `BlockUnion`'s
         # cast is legacy-tolerant: legacy stored rows convert lazily on read and
         # legacy params still cast, so this flip needs no data migration. Rich-text
-        # HTML / media URLs are sanitized inside the cast (replacing SanitizeBlocks).
+        # HTML / media URLs are sanitized inside the cast (`TypedBlocks.sanitize_attrs/1`),
+        # the one write-path sanitizer — there is no separate save-time change.
         # Not `public?` — the auto JSON:API/GraphQL surface can't render a union of
         # embedded resources cleanly, and the v2 API surface is the *fired*
         # artifacts (`KilnCMS.Firing.Engine.read/3`), not the raw editable tree.

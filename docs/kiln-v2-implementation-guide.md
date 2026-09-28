@@ -204,7 +204,9 @@ each renderable to web/json/json-ld. No change yet to how `Page.blocks` is store
 > delivery and the previews still convert back to legacy at the boundary
 > (`TypedBlocks.to_legacy/1`). Retiring both — a backfill, a run of the upcast
 > path on a real corpus, and deprecating the bridge — is
-> [#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537).
+> [#1537](https://github.com/The-Verscienta/kiln_cms/issues/1537). The backfill and the deprecation
+> shipped in 0.12; 1.0 removed the bridge's write side and kept the read
+> (#1543): see `KilnCMS.CMS.TypedBlocks`.
 >
 > **Storage flip.** `Page.blocks`/`Post.blocks` are now typed as the
 > `Ash.Type.Union` (`BlockUnion`), so the typed representation is what every

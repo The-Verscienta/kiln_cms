@@ -474,7 +474,11 @@ defmodule PublishDocs do
   def upsert(req, kind, slug, title, html, create_attrs) do
     attrs = %{
       "title" => title,
-      "block_tree" => [%{"type" => "rich_text", "content" => html, "order" => 1}]
+      # A typed rich_text block: 1.0 refuses the legacy `type`/`content` write
+      # shape (#1543). The guide's HTML goes in `legacy_html` — exactly where
+      # the legacy shape put it — because its code blocks are what Portable
+      # Text cannot hold faithfully.
+      "block_tree" => [%{"_type" => "rich_text", "legacy_html" => html}]
     }
 
     with {:ok, existing} <- find(req, kind, slug),

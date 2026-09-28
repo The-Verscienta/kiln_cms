@@ -81,10 +81,10 @@ the router so preflights are answered before route matching).
 | Dev tools | `/dev/dashboard`, `/dev/mailbox`, `/admin`, `/gql/playground` | compile-gated off in prod | — |
 
 **`/ws/collab` is a prototype surface.** Its joins are refused unless
-`config :kiln_cms, :collab_prototype` is set, and that is set only in
-`config/dev.exs` and `config/test.exs` — so a production build carries the socket
-but accepts no CRDT session (#1324, and
-[collaborative-editing-spike.md](collaborative-editing-spike.md)). Everything
+`config :kiln_cms, :collab_prototype` is on, and it is on only in
+`config/dev.exs` and `config/test.exs` (`config/prod.exs` pins it `false`,
+#1660) — so a production build carries the socket but accepts no CRDT session
+(#1324, and [collaborative-editing-spike.md](collaborative-editing-spike.md)). Everything
 below about the collab room is modelled as if it were live, because that is the
 bar it has to clear before it can be enabled; it is not a live surface today.
 
@@ -595,7 +595,12 @@ build if a resource is ever registered without that authorizer.
   which is the only thing standing between an unpublished asset and the world.
   `Content-Disposition: attachment` + `nosniff` prevent the bucket being used to
   serve active content. S3/MinIO deployments serve media entirely outside the
-  app.
+  app. Accepted by design (security audit 2026-09-27, finding 15, #1666): a
+  public media URL is a capability URL. Gated documents and A/V live in
+  private storage, which has no static mount and is served only through the
+  policy-checked download and stream routes. Operator guidance is in
+  [media-pipeline.md](media-pipeline.md#public-media-urls-are-capability-urls)
+  and [deploy.md](deploy.md#public-media-is-readable-by-anyone-with-its-url).
 
 ### Webhooks (outbound)
 - **Gated content is delivered** — a content event carries the full block tree
@@ -764,7 +769,7 @@ the provider. See [sso.md](sso.md#per-site-providers).
 - **Reaching another site** — a site's provider never signs in an account with
   access anywhere else: a platform admin (standing or temporary), a member of
   any other organization at any tier, or a membership-less account whose global
-  role or legacy audiences reach beyond the site. Checked at every sign-in, in
+  role reaches beyond the site. Checked at every sign-in, in
   `KilnCMS.Accounts.SiteSso.Admission`. Kiln has no site-scoped session, so the
   guarantee is made at admission. **Accepted:** a session such a provider
   minted before the account later gained access elsewhere keeps working until

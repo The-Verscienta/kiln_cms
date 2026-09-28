@@ -103,7 +103,9 @@ defmodule KilnCMS.Media.Transform do
   end
 
   defp enqueue_variants(item) do
-    %{media_item_id: item.id} |> VariantWorker.new() |> Oban.insert!()
+    # Carry the item's org like every other enqueue site (#1658): the worker
+    # re-fetches under that tenant.
+    %{media_item_id: item.id, org_id: item.org_id} |> VariantWorker.new() |> Oban.insert!()
   end
 
   # Paths are server-built temp files (System.tmp_dir! + UUID), never user

@@ -383,4 +383,64 @@ defmodule KilnCMS.Automation.ActionConfigTest do
                })
     end
   end
+
+  describe "required_keys/2 — what the admin form marks required" do
+    test "is the unconditional list for a plain shape" do
+      assert ActionConfig.required_keys(:send_email, %{}) == ["to"]
+      assert ActionConfig.required_keys(:social_post, %{}) == ["provider"]
+      assert ActionConfig.required_keys(:reindex, %{}) == []
+    end
+
+    test "follows deliver_as on the intelligence reactions, exactly as the save does" do
+      assert ActionConfig.required_keys(:suggest_tags, %{}) == ["to"]
+      assert ActionConfig.required_keys(:suggest_tags, %{"deliver_as" => nil}) == ["to"]
+      assert ActionConfig.required_keys(:suggest_tags, %{"deliver_as" => "task"}) == ["assignee"]
+      assert ActionConfig.required_keys(:suggest_tags, %{"deliver_as" => "comment"}) == []
+    end
+
+    test "is empty for an action with no shape" do
+      assert ActionConfig.required_keys(nil, %{}) == []
+    end
+  end
+
+  describe "applicable?/3 — which fields the admin form shows" do
+    test "a deliver_as landing place's keys apply only when it is chosen" do
+      assert ActionConfig.applicable?(:suggest_tags, "to", %{})
+      refute ActionConfig.applicable?(:suggest_tags, "assignee", %{})
+      assert ActionConfig.applicable?(:suggest_tags, "assignee", %{"deliver_as" => "task"})
+      assert ActionConfig.applicable?(:suggest_tags, "due_in_days", %{"deliver_as" => "task"})
+      refute ActionConfig.applicable?(:suggest_tags, "to", %{"deliver_as" => "comment"})
+    end
+
+    test "keys outside the deliver_as axis always apply" do
+      assert ActionConfig.applicable?(:suggest_metadata, "allow_egress", %{"deliver_as" => "task"})
+
+      assert ActionConfig.applicable?(:suggest_tags, "deliver_as", %{"deliver_as" => "comment"})
+      assert ActionConfig.applicable?(:create_task, "due_in_days", %{})
+    end
+
+    test "every key a landing place requires is one it shows" do
+      for value <- ActionConfig.deliver_as_values(),
+          key <- ActionConfig.required_keys(:suggest_tags, %{"deliver_as" => value}) do
+        assert ActionConfig.applicable?(:suggest_tags, key, %{"deliver_as" => value})
+      end
+    end
+  end
+
+  describe "error vars" do
+    defp vars({:error, error}) do
+      error |> Ash.Error.to_error_class() |> Map.get(:errors) |> Enum.map(& &1.vars)
+    end
+
+    test "name the key and reason, so the form needn't parse the message" do
+      missing = create(%{trigger_event: :published, action: :send_email, config: %{}})
+      assert [[config_key: "to", reason: "missing"]] = vars(missing)
+
+      invalid =
+        create(%{trigger_event: :published, action: :send_email, config: %{"to" => "nope"}})
+
+      assert [[config_key: "to", reason: "invalid", detail: detail]] = vars(invalid)
+      assert detail == ~s(must be an email address, got "nope".)
+    end
+  end
 end

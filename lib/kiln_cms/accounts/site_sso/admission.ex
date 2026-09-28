@@ -43,8 +43,6 @@ defmodule KilnCMS.Accounts.SiteSso.Admission do
       (`KilnCMS.Accounts.RoleGrant.effective_role/1`);
     * holds an `OrgMembership` on any other organization, at any tier (a
       `:viewer` membership can still carry paid audiences);
-    * holds no memberships at all but has legacy `User.audiences` — those apply
-      on every org (`KilnCMS.Accounts.Scoping.audiences/2`);
     * holds no memberships at all and an `:editor` or `:admin` global role,
       when this site is not the default org — that role is a tier on the
       default org (`Scoping.effective_tier/2`'s legacy branch).
@@ -258,13 +256,11 @@ defmodule KilnCMS.Accounts.SiteSso.Admission do
   defp platform_admin?(user),
     do: user.role == :admin or RoleGrant.effective_role(user) == :admin
 
-  # A membership-less account's global columns: audiences apply on every org,
-  # and a global editor/admin role is a tier on the default org.
+  # A membership-less account's global editor/admin role is a tier on the
+  # default org. (Its `User.audiences` no longer grant anything anywhere: 1.0
+  # removed that fallback, #1543.)
   defp legacy_access_elsewhere?(user, org_id) do
-    audiences = user.audiences || []
-
-    audiences != [] or
-      (org_id != Accounts.default_org_id() and
-         RoleGrant.effective_role(user) in [:editor, :admin])
+    org_id != Accounts.default_org_id() and
+      RoleGrant.effective_role(user) in [:editor, :admin]
   end
 end

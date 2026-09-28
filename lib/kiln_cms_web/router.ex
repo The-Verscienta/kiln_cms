@@ -398,6 +398,13 @@ defmodule KilnCMSWeb.Router do
     post "/billing/checkout", BillingController, :checkout
     post "/billing/portal", BillingController, :portal
 
+    # The pre-generic editor URLs, removed at 1.0 (#1543): a 301 to
+    # `/editor/content/page|post/:id` for bookmarks and mail sent by older
+    # releases. Plain routes, outside the editor session: the target does the
+    # sign-in and the gate. Declared before the delivery catch-alls far below.
+    get "/editor/pages/:id", EditorAliasController, :page
+    get "/editor/posts/:id", EditorAliasController, :post
+
     # Authoring UIs — editors and admins only.
     ash_authentication_live_session :editor_routes,
       on_mount: [
@@ -444,13 +451,6 @@ defmodule KilnCMSWeb.Router do
       # precede it, or "new" would be read as an id.
       live "/editor/content/:type/new", ContentEditorLive, :new
       live "/editor/content/:type/:id", ContentEditorLive, :content
-      # DEPRECATED in 0.12, removed at 1.0 (#1538): the pre-generic aliases for
-      # `/editor/content/page/:id` and `/editor/content/post/:id`. A route can't
-      # carry `@deprecated`, so `ContentEditorLive` logs each visit through
-      # `KilnCMS.Deprecations` instead. Nothing in the core links here any more;
-      # they stay for bookmarks and links in mail already sent.
-      live "/editor/pages/:id", ContentEditorLive, :page
-      live "/editor/posts/:id", ContentEditorLive, :post
       live "/editor/preview/:kind/:id", PreviewLive, :show
       # In-context (front-end) editing on Kiln's own site (#354): renders the
       # page from the live draft with inline-editable text regions.

@@ -1,6 +1,8 @@
 defmodule KilnCMSWeb.PageControllerTest do
   use KilnCMSWeb.ConnCase
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.Accounts.User
 
   defp user(role) do
@@ -143,7 +145,10 @@ defmodule KilnCMSWeb.PageControllerTest do
         %{
           title: "Home",
           slug: "home",
-          blocks: [%{type: :heading, content: "Hours and location", data: %{"level" => 1}}]
+          blocks:
+            typed_blocks([
+              %{type: :heading, content: "Hours and location", data: %{"level" => 1}}
+            ])
         },
         actor: admin
       )

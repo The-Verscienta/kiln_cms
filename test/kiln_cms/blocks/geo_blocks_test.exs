@@ -163,33 +163,32 @@ defmodule KilnCMS.Blocks.GeoBlocksTest do
     end
   end
 
-  describe "legacy bridge round-trip" do
-    test "faq and how_to survive typed → legacy → typed" do
-      faq = %Faq{
-        id: Ash.UUID.generate(),
-        title: "T",
-        items: [%{"question" => "Q?", "answer" => "A."}]
-      }
-
-      how_to = %HowTo{
-        id: Ash.UUID.generate(),
-        name: "N",
-        description: "D",
-        steps: [%{"name" => "S", "text" => "T."}]
-      }
-
-      claim = %Claim{
-        id: Ash.UUID.generate(),
-        text: "C.",
-        source_title: "S",
-        source_url: "https://s.example",
-        rating: "True"
-      }
-
+  # The write side of the legacy bridge was removed at 1.0 (#1543); a stored
+  # pre-typed row is still read, and must come back whole.
+  describe "a stored legacy row reads as typed" do
+    test "faq, how_to and claim keep their fields" do
       [faq2, how_to2, claim2] =
-        [faq, how_to, claim]
-        |> KilnCMS.LegacyBridge.to_legacy()
-        |> KilnCMS.LegacyBridge.from_legacy()
+        KilnCMS.CMS.TypedBlocks.to_typed([
+          %{
+            "type" => "faq",
+            "content" => "T",
+            "data" => %{"items" => [%{"question" => "Q?", "answer" => "A."}]}
+          },
+          %{
+            "type" => "how_to",
+            "content" => "N",
+            "data" => %{"description" => "D", "steps" => [%{"name" => "S", "text" => "T."}]}
+          },
+          %{
+            "type" => "claim",
+            "content" => "C.",
+            "data" => %{
+              "source_title" => "S",
+              "source_url" => "https://s.example",
+              "rating" => "True"
+            }
+          }
+        ])
 
       assert %Faq{title: "T", items: [%{"question" => "Q?", "answer" => "A."}]} = faq2
 

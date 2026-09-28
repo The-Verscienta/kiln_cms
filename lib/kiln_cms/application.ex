@@ -37,9 +37,6 @@ defmodule KilnCMS.Application do
       # `dev_routes` — so this is what actually reaches an operator. Silent
       # unless a calendar re-queried in the window.
       KilnCMS.CMS.CalendarRequeryMonitor,
-      # Owns the table that keeps a per-request deprecation warning to one line
-      # per account per boot (#1538). See `KilnCMS.Deprecations`.
-      KilnCMS.Deprecations,
       # Reclaim stale rate-limit buckets so an IP-rotating flood can't grow the
       # ETS table without bound (one row per `bucket:IP` otherwise lives forever).
       {KilnCMSWeb.RateLimit, clean_period: :timer.minutes(1), key_older_than: :timer.minutes(5)},
@@ -175,7 +172,21 @@ defmodule KilnCMS.Application do
       warn_if_embed_lists_over_ceiling()
       warn_if_chain_unsigned()
       enqueue_occurrence_backfill()
+      enqueue_legacy_audiences_migration()
       {:ok, pid}
+    end
+  end
+
+  # The upgrade safety net for the `User.audiences` fallback 1.0 removed
+  # (#1543): moves any account that still relied on it onto a membership, so an
+  # operator who skipped `mix kiln.deprecations --migrate-audiences` strands
+  # nobody. See `KilnCMS.Accounts.LegacyAudiencesWorker`. Deliberately no
+  # runtime env var to turn it off — it is access a paying reader already had.
+  # Off in `:test` and `:e2e` only, for the committed-`oban_jobs` reason
+  # `enqueue_occurrence_backfill/0` gives below.
+  defp enqueue_legacy_audiences_migration do
+    if Application.get_env(:kiln_cms, :legacy_audiences_migration_on_boot, true) do
+      KilnCMS.Accounts.LegacyAudiencesWorker.enqueue()
     end
   end
 

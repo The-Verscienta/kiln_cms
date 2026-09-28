@@ -2058,7 +2058,14 @@ defmodule KilnCMSWeb.MediaLive do
           max: @max_trashed
         )}
       </p>
-      <p :if={@items == []} class="text-sm text-base-content/60">{gettext("Trash is empty.")}</p>
+      <.empty_state
+        :if={@items == []}
+        id="media-trash-empty"
+        icon="hero-trash"
+        title={gettext("Trash is empty.")}
+      >
+        {gettext("Deleted files wait here until you restore them or they are purged.")}
+      </.empty_state>
       <ul
         :if={@items != []}
         class="card divide-y divide-base-content/10 overflow-hidden"

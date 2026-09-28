@@ -62,6 +62,54 @@ defmodule KilnCMSWeb.NewsletterControllerTest do
       refute html =~ ~s(action="/newsletter/confirm/)
     end
 
+    test "POST on an already-confirmed link is idempotent (#1690)", %{conn: conn} do
+      sub = subscriber()
+      {:ok, confirmed} = Newsletter.confirm_subscriber(sub, authorize?: false)
+
+      conn = post(conn, ~p"/newsletter/confirm/#{sub.confirm_token}")
+
+      assert html_response(conn, 200) =~ "Subscription confirmed"
+      reloaded = reload(sub)
+      assert reloaded.status == :confirmed
+      # Not re-stamped: a second click is not a second consent.
+      assert reloaded.confirmed_at == confirmed.confirmed_at
+    end
+
+    # An unsubscribed reader still has the old confirmation email. Clicking it
+    # must not undo the unsubscribe (#1690).
+    test "an unsubscribed reader's old link changes nothing, on either verb", %{conn: conn} do
+      sub = subscriber()
+      {:ok, _} = Newsletter.unsubscribe_subscriber(sub, authorize?: false)
+
+      get_html = conn |> get(~p"/newsletter/confirm/#{sub.confirm_token}") |> html_response(200)
+      assert get_html =~ "This link is no longer valid"
+      assert get_html =~ "subscribe again"
+      # No button to press, and nothing that names the address or its status.
+      refute get_html =~ ~s(action="/newsletter/confirm/)
+      refute get_html =~ to_string(sub.email)
+      refute get_html =~ "unsubscribed"
+
+      post_html =
+        conn |> post(~p"/newsletter/confirm/#{sub.confirm_token}") |> html_response(200)
+
+      assert post_html =~ "This link is no longer valid"
+      refute post_html =~ "Subscription confirmed"
+
+      reloaded = reload(sub)
+      assert reloaded.status == :unsubscribed
+      assert reloaded.confirmed_at == nil
+    end
+
+    test "the :confirm action itself refuses a non-pending subscriber (#1690)" do
+      sub = subscriber()
+      {:ok, unsubscribed} = Newsletter.unsubscribe_subscriber(sub, authorize?: false)
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Newsletter.confirm_subscriber(unsubscribed, authorize?: false)
+
+      assert reload(sub).status == :unsubscribed
+    end
+
     test "an unrecognized token is refused on both verbs, changing nothing", %{conn: conn} do
       get_html = conn |> get(~p"/newsletter/confirm/nope-not-a-real-token") |> html_response(200)
       assert get_html =~ "not recognized"
@@ -162,6 +210,41 @@ defmodule KilnCMSWeb.NewsletterControllerTest do
 
       assert html_response(conn, 200) =~ "Check your inbox"
       refute find(email)
+    end
+
+    # The same predicate as public forms (`KilnCMS.Forms.honeypot_tripped?/1`):
+    # a whitespace-only or non-string value is a bot too (#1657).
+    for {label, value} <- [
+          {"whitespace-only", "   "},
+          {"list", ["http://spam.example"]},
+          {"map", %{"a" => "b"}}
+        ] do
+      test "a #{label} honeypot value also reports fake success and stores nothing",
+           %{conn: conn} do
+        email = address()
+
+        conn =
+          post(conn, ~p"/newsletter/subscribe", %{
+            "email" => email,
+            KilnCMS.Forms.honeypot_field() => unquote(Macro.escape(value))
+          })
+
+        assert html_response(conn, 200) =~ "Check your inbox"
+        refute find(email)
+      end
+    end
+
+    test "an empty honeypot (an untouched input) still subscribes", %{conn: conn} do
+      email = address()
+
+      conn =
+        post(conn, ~p"/newsletter/subscribe", %{
+          "email" => email,
+          KilnCMS.Forms.honeypot_field() => ""
+        })
+
+      assert html_response(conn, 200) =~ "Check your inbox"
+      assert find(email).status == :pending
     end
 
     test "a malformed address is rejected without a 500", %{conn: conn} do
