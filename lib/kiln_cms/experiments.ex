@@ -228,11 +228,24 @@ defmodule KilnCMS.Experiments do
       nil
   end
 
+  # Read as `system/0` (#1659), and with `authorize_with: :error`: under a
+  # filter policy a refused read answers `[]`, which here would mean "nothing
+  # is running" — every experiment on the site silently stops serving and
+  # stops counting, and nothing says so. With `:error` a lost grant raises
+  # into the rescue below instead, which serves the canonical document (the
+  # same answer, and the safe one) but LOGS it.
+  #
+  # The variants are part of the same read for the same reason. A running
+  # experiment whose variants came back `[]` would serve no arm
+  # (`Assignment.choose/2` answers `nil` for an empty list, so the canonical
+  # document again) and would convert nothing — but a PARTIAL list would
+  # re-bucket every keyed visitor onto the arms that survived, which is a
+  # mis-assignment rather than a safe default. Raising is what rules it out.
   defp load_running(org_id) do
     Experiment
     |> Ash.Query.for_read(:running)
     |> Ash.Query.load(:variants)
-    |> Ash.read!(authorize?: false, tenant: org_id)
+    |> Ash.read!(actor: system(), authorize_with: :error, tenant: org_id)
   rescue
     # Delivery must survive a database that cannot answer this. No experiments
     # is the safe answer: the canonical document is what gets served.
@@ -248,4 +261,49 @@ defmodule KilnCMS.Experiments do
   end
 
   defp config, do: Application.get_env(:kiln_cms, __MODULE__, [])
+
+  # See `with_actor/2`.
+  @actor_override {__MODULE__, :actor_override}
+
+  @doc """
+  The actor the experiment engine's own bookkeeping runs as (#1659): the
+  delivery path's running-set read and its impression and conversion
+  counters, the `:start` and variant-write guards, and the results panel's
+  read of the counters.
+
+  A `KilnCMS.SystemActor`, admitted by action name on `Experiment`, `Variant`
+  and `VariantDay` (see `docs/policy-matrix.md`, "The system actor"), rather
+  than `authorize?: false`, which would skip every policy on them.
+
+  `subsystem` is the provenance label only (see `KilnCMS.SystemActor`):
+  `mix kiln.experiment` passes `:operator`, and the grant is the same.
+  """
+  @spec system(atom()) :: KilnCMS.SystemActor.t() | nil
+  def system(subsystem \\ :experiments) do
+    case Process.get(@actor_override, :unset) do
+      :unset -> KilnCMS.SystemActor.new(subsystem)
+      actor -> actor
+    end
+  end
+
+  @doc false
+  # Test seam (#1659): run `fun` with `system/0` answering `actor` in this
+  # process. It exists so a test can take the grant away and prove that every
+  # read behind an assignment, a start guard or a result fails CLOSED rather
+  # than filtering to `[]`, which is how a refused read answers. Process-local,
+  # and nothing on a request path calls it; code that could call it could
+  # equally pass any actor it liked.
+  @spec with_actor(term(), (-> result)) :: result when result: term()
+  def with_actor(actor, fun) do
+    previous = Process.get(@actor_override, :unset)
+    Process.put(@actor_override, actor)
+
+    try do
+      fun.()
+    after
+      if previous == :unset,
+        do: Process.delete(@actor_override),
+        else: Process.put(@actor_override, previous)
+    end
+  end
 end

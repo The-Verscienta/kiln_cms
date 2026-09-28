@@ -123,9 +123,12 @@ defmodule KilnCMS.Experiments.Results do
   defp days_for(variant_ids, org_id) do
     require Ash.Query
 
+    # As the system (#1659), and failing closed: a refused read under a filter
+    # policy answers `[]`, which this module would fold into "0 served, 0
+    # converted" on every arm — a result that looks measured and is not.
     KilnCMS.Experiments.VariantDay
     |> Ash.Query.filter(variant_id in ^variant_ids)
-    |> Ash.read!(authorize?: false, tenant: org_id)
+    |> Ash.read!(actor: KilnCMS.Experiments.system(), authorize_with: :error, tenant: org_id)
     |> Enum.reduce(%{}, fn day, acc ->
       Map.update(acc, day.variant_id, {day.impressions, day.conversions}, fn {i, c} ->
         {i + day.impressions, c + day.conversions}

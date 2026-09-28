@@ -60,16 +60,27 @@ defmodule KilnCMS.Experiments.Changes.RequireVariants do
     end)
   end
 
+  # Both reads run as the system (#1659) with `authorize_with: :error`, because
+  # both back a decision whose permissive answer is `[]`. A refused variants
+  # read would at least refuse the start ("needs at least two variants") for
+  # the wrong reason; a refused running-set read would answer "nothing else is
+  # running here" and let a second experiment start on the same document. So
+  # a lost grant raises, and the start fails.
   defp load_variants(changeset, context) do
     KilnCMS.Experiments.list_variants!(
       query: [filter: [experiment_id: changeset.data.id]],
-      authorize?: false,
+      actor: KilnCMS.Experiments.system(),
+      authorize_with: :error,
       tenant: context.tenant
     )
   end
 
   defp already_running?(changeset, context) do
-    KilnCMS.Experiments.running_experiments!(authorize?: false, tenant: context.tenant)
+    KilnCMS.Experiments.running_experiments!(
+      actor: KilnCMS.Experiments.system(),
+      authorize_with: :error,
+      tenant: context.tenant
+    )
     |> Enum.any?(&(&1.document_id == changeset.data.document_id and &1.id != changeset.data.id))
   end
 end

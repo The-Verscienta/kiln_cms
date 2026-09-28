@@ -55,7 +55,15 @@ defmodule KilnCMS.Experiments.Changes.RefuseWhenRunning do
       Ash.Changeset.get_attribute(changeset, :experiment_id) ||
         Map.get(changeset.data, :experiment_id)
 
-    case KilnCMS.Experiments.get_experiment(id, authorize?: false, tenant: context.tenant) do
+    # As the system (#1659), whoever is writing the variant: the guard must see
+    # the parent to decide, and a refused read lands in `{:unreadable, id}`
+    # below — `authorize_with: :error` makes that a Forbidden rather than a
+    # not-found, and both refuse the write.
+    case KilnCMS.Experiments.get_experiment(id,
+           actor: KilnCMS.Experiments.system(),
+           authorize_with: :error,
+           tenant: context.tenant
+         ) do
       {:ok, %{state: state}} -> state
       _other -> {:unreadable, id}
     end
