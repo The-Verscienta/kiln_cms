@@ -36,22 +36,22 @@ defmodule KilnCMSWeb.AuthOverrides do
     end)
   end
 
-  @page_root "grid min-h-screen place-items-center bg-base-100 px-4"
-  @card_root "mx-auto w-full max-w-sm lg:max-w-md"
-  @title "text-2xl font-semibold tracking-tight text-base-content"
-  @form_btn """
-  mt-4 mb-4 w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-content
-  shadow-sm transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2
-  focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50
-  """
-  @field_label "block text-sm font-medium text-base-content mb-1"
-  @input """
-  w-full rounded-lg border border-base-content/15 bg-base-100 px-3 py-2 text-sm
-  transition focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20
-  """
-  @input_error @input <> " border-error/60 focus:border-error/60 focus:ring-error/20"
-  @muted "text-sm text-base-content/60"
-  @link "text-sm font-medium text-base-content underline decoration-base-content/30 hover:decoration-base-content"
+  # Kit classes, not bespoke utility stacks (#1681). Each control's *look* is a
+  # named rule in `assets/css/app.css` (`.btn`, `.field-*`, `.link`, `.auth-*`,
+  # see docs/design-language.md), so the library's pages, Kiln's own
+  # `/sign-in/verify` template and the console draw one button and one input.
+  # What stays a utility here is layout — margins, flex — as the design
+  # language says it should.
+  @page_root "auth-page"
+  @card_root "auth-card"
+  @title "auth-title"
+  @form_btn "btn btn-primary btn-block mt-4 mb-4"
+  @field_label "field-label"
+  @input "field-input"
+  @input_error "field-input field-input-error"
+  @muted "auth-muted"
+  @checkbox "field-checkbox"
+  @link "link text-sm font-medium text-base-content"
 
   override SignInLive do
     set :root_class, @page_root
@@ -177,7 +177,7 @@ defmodule KilnCMSWeb.AuthOverrides do
     set :input_debounce, 350
     set :remember_me_class, "mt-2 mb-2 flex items-center gap-2"
     set :remember_me_input_label, "Remember me"
-    set :checkbox_class, "rounded border-base-content/30"
+    set :checkbox_class, @checkbox
     set :checkbox_label_class, @muted
   end
 
@@ -243,24 +243,24 @@ defmodule KilnCMSWeb.AuthOverrides do
     set :input_debounce, 350
     set :remember_me_class, "mt-2 mb-2 flex items-center gap-2"
     set :remember_me_input_label, "Remember me"
-    set :checkbox_class, "rounded border-base-content/30"
+    set :checkbox_class, @checkbox
     set :checkbox_label_class, @muted
   end
 
   override Components.OAuth2 do
     set :root_class, "mt-2 mb-4 w-full"
 
-    set :link_class,
-        @form_btn <>
-          " border border-base-content/20 bg-transparent text-base-content hover:bg-base-200"
-
-    set :icon_class, "-ml-0.5 mr-2 h-4 w-4"
+    set :link_class, "btn btn-default btn-block mt-4 mb-4"
+    set :icon_class, "h-4 w-4"
     set :icon_src, nil
   end
 
+  # Apple's guidelines ask for a black (or white) button, so this one inverts
+  # the surface tokens rather than taking the ember fill — still token-driven,
+  # so it flips with the theme.
   override Components.Apple do
     set :root_class, "mt-2 mb-4 w-full"
-    set :link_class, @form_btn <> " bg-base-content/90"
+    set :link_class, "btn btn-block mt-4 mb-4 bg-base-content text-base-100 hover:opacity-90"
     set :icon_class, ""
   end
 end

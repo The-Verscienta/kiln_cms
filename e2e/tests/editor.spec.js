@@ -44,7 +44,7 @@ test.describe("editor journey", () => {
     await expect(page.locator("article:visible")).toContainText(body);
 
     // Explicit save, then publish (admin).
-    await page.getByRole("button", { name: /^save$/i }).click();
+    await page.getByRole("button", { name: /^save draft$/i }).click();
     await page.click('button[phx-click="workflow"][phx-value-action="publish"]');
     // Once published the workflow control flips to "Unpublish".
     await expect(
@@ -172,7 +172,7 @@ test.describe("editor journey", () => {
     // The 300ms rich_text_body push has landed once the preview pane renders
     // the linked prose (#1352: was a fixed 700ms sleep). Then save.
     await expect(page.locator("article:visible")).toContainText(linkText);
-    await page.getByRole("button", { name: /^save$/i }).click();
+    await page.getByRole("button", { name: /^save draft$/i }).click();
 
     // The regression: reloading re-seeds the editor from the *stored* Portable
     // Text, so the anchor here proves markDefs survived both directions.
@@ -584,7 +584,7 @@ test.describe("editor journey", () => {
     // So: save, re-mount the editor from the database, and read the control on
     // a fresh unfocused render. That can only pass if the browser actually sent
     // the change and the server actually stored it.
-    await page.getByRole("button", { name: /^save$/i }).click();
+    await page.getByRole("button", { name: /^save draft$/i }).click();
     await expect(page.getByText("Saved.")).toBeVisible();
     await page.reload();
 

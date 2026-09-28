@@ -235,7 +235,7 @@ async function fillSlug(page, slug) {
   }
 }
 
-// Press Save on the open draft and wait for the "Saved." flash (see above).
+// Press Save draft on the open draft and wait for the "Saved." flash (see above).
 //
 // Dismiss whatever flash is already showing first. A "Saved." left over from an
 // EARLIER save in the same LiveView session satisfies the assertion below the
@@ -253,7 +253,7 @@ async function save(page) {
     await flash.click();
     await base.expect(flash).toBeHidden();
   }
-  await page.getByRole("button", { name: /^save$/i }).click();
+  await page.getByRole("button", { name: /^save draft$/i }).click();
   await base.expect(flash).toContainText("Saved.");
 }
 
