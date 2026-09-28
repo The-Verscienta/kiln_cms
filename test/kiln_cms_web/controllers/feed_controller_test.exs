@@ -8,6 +8,8 @@ defmodule KilnCMSWeb.FeedControllerTest do
   # tests bust concurrently.
   use KilnCMSWeb.ConnCase, async: false
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.Cache
   alias KilnCMS.CMS
   alias KilnCMS.CMS.{Page, Post}
@@ -58,7 +60,7 @@ defmodule KilnCMSWeb.FeedControllerTest do
           title: "Real post #{n}",
           slug: "feed-real-#{n}",
           excerpt: "Real summary #{n}",
-          blocks: [%{type: :heading, content: body_text, order: 0}]
+          blocks: typed_blocks([%{type: :heading, content: body_text, order: 0}])
         },
         actor: admin()
       )

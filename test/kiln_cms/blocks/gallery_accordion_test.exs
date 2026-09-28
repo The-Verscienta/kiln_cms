@@ -177,16 +177,20 @@ defmodule KilnCMS.Blocks.GalleryAccordionTest do
     end
   end
 
-  describe "typed → legacy → typed round trip" do
+  # The write side of the legacy bridge was removed at 1.0 (#1543); a stored
+  # pre-typed row is still read, and must come back whole.
+  describe "a stored legacy row reads as typed" do
     test "a gallery keeps its images, layout and title" do
-      block =
-        gallery(
-          [%{"media_id" => "m1", "url" => "/a.jpg", "alt" => "A", "caption" => "C"}],
-          %{title: "Shots", layout: "masonry"}
-        )
+      stored = %{
+        "type" => "gallery",
+        "content" => "Shots",
+        "data" => %{
+          "layout" => "masonry",
+          "images" => [%{"media_id" => "m1", "url" => "/a.jpg", "alt" => "A", "caption" => "C"}]
+        }
+      }
 
-      assert [%Gallery{} = back] =
-               block |> List.wrap() |> KilnCMS.LegacyBridge.to_legacy() |> TypedBlocks.to_typed()
+      assert [%Gallery{} = back] = TypedBlocks.to_typed([stored])
 
       assert back.title == "Shots"
       assert back.layout == "masonry"
@@ -197,16 +201,23 @@ defmodule KilnCMS.Blocks.GalleryAccordionTest do
     end
 
     test "an accordion keeps its panels and first_open" do
-      block =
-        accordion([%{"title" => "T", "content" => "C"}], %{title: "Specs", first_open: true})
+      stored = fn first_open ->
+        %{
+          "type" => "accordion",
+          "content" => "Specs",
+          "data" => %{
+            "first_open" => first_open,
+            "panels" => [%{"title" => "T", "content" => "C"}]
+          }
+        }
+      end
 
-      assert [%Accordion{} = back] =
-               block |> List.wrap() |> KilnCMS.LegacyBridge.to_legacy() |> TypedBlocks.to_typed()
+      assert [%Accordion{} = back] = TypedBlocks.to_typed([stored.(true)])
 
       assert back.title == "Specs"
-      # A boolean has to survive the trip in both directions — it is written as a
-      # real boolean and read back from jsonb, and form params make it a string.
+      # jsonb holds a real boolean; a form-posted row holds the string.
       assert back.first_open == true
+      assert [%Accordion{first_open: true}] = TypedBlocks.to_typed([stored.("true")])
       assert Accordion.panels(back) == [%{"title" => "T", "content" => "C"}]
     end
   end

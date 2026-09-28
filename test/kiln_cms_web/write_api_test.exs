@@ -513,7 +513,10 @@ defmodule KilnCMSWeb.WriteApiTest do
       key = mint(owner, :read_write)
       s = slug()
 
-      blocks = [%{"type" => "rich_text", "content" => "<p>Hello body</p>", "order" => 1}]
+      blocks =
+        KilnCMS.TypedFixtures.typed_blocks([
+          %{"type" => "rich_text", "content" => "<p>Hello body</p>", "order" => 1}
+        ])
 
       assert {201, _} =
                post_json("/api/json/posts", %{title: "Body", slug: s, block_tree: blocks},

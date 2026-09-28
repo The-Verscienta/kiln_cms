@@ -1,9 +1,9 @@
 defmodule KilnCMS.CMS.TypedBlocksTest do
-  @moduledoc "Phase C — Ash.Type.Union typed storage (D11) + legacy↔typed bridge."
+  @moduledoc "Phase C — Ash.Type.Union typed storage (D11), and reading the legacy shape."
   use ExUnit.Case, async: true
 
   alias KilnCMS.Blocks
-  alias KilnCMS.CMS.{Block, BlockUnion, TypedBlocks}
+  alias KilnCMS.CMS.{BlockUnion, TypedBlocks}
 
   describe "BlockUnion (Ash.Type.Union)" do
     test "casts a tagged map to the matching typed block, wrapped in Ash.Union" do
@@ -44,19 +44,19 @@ defmodule KilnCMS.CMS.TypedBlocksTest do
     end
   end
 
-  describe "from_legacy/1 bridge" do
+  describe "reading a stored legacy block (to_typed/1 — the read-only fallback kept at 1.0)" do
     test "maps every legacy block type to a typed block (total)" do
       legacy = [
-        %Block{type: :heading, content: "Title", data: %{"level" => 1}, order: 0},
-        %Block{type: :rich_text, content: "<p>hi</p>", order: 1},
-        %Block{type: :image, content: "/x.png", data: %{"alt" => "x"}, order: 2},
-        %Block{type: :quote, content: "q", data: %{"citation" => "me"}, order: 3},
-        %Block{type: :embed, content: "https://x", order: 4},
-        %Block{type: :divider, order: 5},
-        %Block{type: :columns, data: %{"cols" => 2}, order: 6}
+        %{type: :heading, content: "Title", data: %{"level" => 1}, order: 0},
+        %{type: :rich_text, content: "<p>hi</p>", order: 1},
+        %{type: :image, content: "/x.png", data: %{"alt" => "x"}, order: 2},
+        %{type: :quote, content: "q", data: %{"citation" => "me"}, order: 3},
+        %{type: :embed, content: "https://x", order: 4},
+        %{type: :divider, order: 5},
+        %{type: :columns, data: %{"cols" => 2}, order: 6}
       ]
 
-      typed = KilnCMS.LegacyBridge.from_legacy(legacy)
+      typed = TypedBlocks.to_typed(legacy)
 
       assert [
                %Blocks.Heading{text: "Title", level: 1},
@@ -76,7 +76,7 @@ defmodule KilnCMS.CMS.TypedBlocksTest do
       child = %{"type" => "heading", "content" => "Left", "data" => %{"level" => 3}}
 
       assert [%Blocks.Columns{layout: "1-2", gap: "lg", columns: [%{"blocks" => [^child]}]}] =
-               KilnCMS.LegacyBridge.from_legacy([
+               TypedBlocks.to_typed([
                  %{
                    "type" => "columns",
                    "data" => %{
@@ -92,7 +92,7 @@ defmodule KilnCMS.CMS.TypedBlocksTest do
     # stored string was never an atom in this build.
     test "an unmapped legacy type keeps the name it was stored under" do
       assert [%Blocks.Custom{legacy_type: "never_an_atom_pricing_table_1537"}] =
-               KilnCMS.LegacyBridge.from_legacy([%{"type" => "never_an_atom_pricing_table_1537"}])
+               TypedBlocks.to_typed([%{"type" => "never_an_atom_pricing_table_1537"}])
     end
 
     test "legacy_loss/1: nothing, for a block the typed mapping holds whole" do
@@ -132,7 +132,7 @@ defmodule KilnCMS.CMS.TypedBlocksTest do
 
     test "preserves block ids and renders via the typed serializers" do
       [heading] =
-        KilnCMS.LegacyBridge.from_legacy([%Block{id: "abc", type: :heading, content: "T"}])
+        TypedBlocks.to_typed([%{id: "abc", type: :heading, content: "T"}])
 
       assert heading.id == "abc"
       assert heading |> Blocks.render(:web) |> IO.iodata_to_binary() == "<h2>T</h2>"
@@ -140,7 +140,7 @@ defmodule KilnCMS.CMS.TypedBlocksTest do
 
     test "tolerates nested string-keyed maps from jsonb" do
       typed =
-        KilnCMS.LegacyBridge.from_legacy([
+        TypedBlocks.to_typed([
           %{"type" => "heading", "content" => "Hi", "data" => %{"level" => 4}}
         ])
 
@@ -149,20 +149,63 @@ defmodule KilnCMS.CMS.TypedBlocksTest do
 
     test "a divider maps to the Divider block and renders as <hr/>" do
       assert [%Blocks.Divider{} = divider] =
-               KilnCMS.LegacyBridge.from_legacy([%Block{type: :divider}])
+               TypedBlocks.to_typed([%{type: :divider}])
 
       assert Blocks.render(divider, :web) |> IO.iodata_to_binary() == "<hr/>"
     end
   end
 
-  describe "to_legacy/1 round-trip" do
-    test "typed → legacy preserves the discriminator and payload" do
-      typed = [%Blocks.Heading{text: "T", level: 2}, %Blocks.Quote{text: "q", citation: "c"}]
+  # 0.12 deprecated the legacy shape as write input; 1.0 refuses it (#1543).
+  # Stored rows in it — a row the backfill refused, a version in history —
+  # still load.
+  describe "the legacy write shape, at 1.0" do
+    test "is refused on write, with an error that says what to send instead" do
+      for legacy <- [
+            %{type: :heading, content: "T", data: %{"level" => 2}},
+            %{"type" => "rich_text", "content" => "<p>x</p>"}
+          ] do
+        assert {:error, [message: message]} = Ash.Type.cast_input(BlockUnion, legacy)
+        assert message =~ "legacy `type`/`content`/`data` shape"
+        assert message =~ "`_type`"
 
-      assert [
-               %{type: :heading, content: "T", data: %{"level" => 2}},
-               %{type: :quote, content: "q", data: %{"citation" => "c"}}
-             ] = KilnCMS.LegacyBridge.to_legacy(typed)
+        assert {:error, _} = Ash.Type.cast_input({:array, BlockUnion}, [legacy])
+      end
+    end
+
+    # Reading a stored legacy row through the real load path — and every row
+    # the backfill refuses — is `KilnCMSWeb.LegacyBlockDeliveryTest`.
+    test "a stored legacy row still converts to the stored union envelope" do
+      assert %{
+               "type" => "heading",
+               "value" => %{"_type" => "heading", "text" => "T", "level" => 2}
+             } =
+               TypedBlocks.to_union_stored(%{
+                 "type" => "heading",
+                 "content" => "T",
+                 "data" => %{"level" => 2}
+               })
+    end
+
+    test "an unknown type or a non-block parks as custom on read, payload whole" do
+      assert %{
+               "type" => "custom",
+               "value" => %{"legacy_type" => "retired_widget", "data" => %{"size" => 3}}
+             } =
+               TypedBlocks.to_union_stored(%{
+                 "type" => "retired_widget",
+                 "value" => %{"_type" => "retired_widget", "size" => 3}
+               })
+
+      assert %{"type" => "custom", "value" => %{"data" => %{"nothing" => "here"}}} =
+               TypedBlocks.to_union_stored(%{"nothing" => "here"})
+    end
+
+    test "a stored union envelope is not mistaken for the legacy shape" do
+      assert {:ok, %Ash.Union{value: %Blocks.Heading{text: "T"}}} =
+               Ash.Type.cast_input(BlockUnion, %{
+                 "type" => "heading",
+                 "value" => %{"_type" => "heading", "text" => "T"}
+               })
     end
   end
 

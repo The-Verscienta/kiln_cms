@@ -28,7 +28,10 @@ defmodule KilnCMS.Firing.StaticExportTest do
           %{
             title: "Exported",
             slug: slug,
-            blocks: [%{type: :heading, content: "Edge", data: %{"level" => 1}, order: 0}]
+            blocks:
+              KilnCMS.TypedFixtures.typed_blocks([
+                %{type: :heading, content: "Edge", data: %{"level" => 1}, order: 0}
+              ])
           },
           attrs
         ),
@@ -185,7 +188,10 @@ defmodule KilnCMS.Firing.StaticExportTest do
           title: "Evil",
           slug: slug,
           locale: evil_locale,
-          blocks: [%{type: :heading, content: "x", data: %{"level" => 1}, order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "x", data: %{"level" => 1}, order: 0}
+            ])
         },
         actor: actor
       )

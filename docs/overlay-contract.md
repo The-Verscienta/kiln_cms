@@ -211,7 +211,7 @@ cross-organization union there. 2.0 may drop the column.
 
 | Deprecated | How you are told | Instead |
 |---|---|---|
-| The legacy block bridge: `TypedBlocks.to_legacy/1`, `from_legacy/1`, `RichText.legacy_html` and the legacy `KilnCMS.CMS.Block` write shape | `@deprecated` (compile warning) and the block JSON Schema | see `KilnCMS.CMS.TypedBlocks` |
+| The legacy block bridge — **removed at 1.0**: `TypedBlocks.to_legacy/1`, `from_legacy/1`, `KilnCMS.CMS.Block` and the legacy `type`/`content`/`data` write shape, which a write now refuses with a cast error. Stored rows in that shape are still read. `RichText.legacy_html` is **kept**, deprecated, as the fallback for HTML Portable Text cannot hold faithfully | a compile error for the functions and the module; a cast error for the write shape; `deprecated` in the block JSON Schema | `to_typed/1` in place of `from_legacy/1`; render from typed blocks; write the typed shape (`%{"_type" => "heading", "text" => …}`) |
 
 `mix kiln.deprecations` (in a release,
 `bin/kiln_cms eval 'KilnCMS.Release.deprecations()'`) exits non-zero while
@@ -275,10 +275,12 @@ Stated rather than discovered later.
   already-fired artifacts need re-firing (`mix kiln.refire_all`) after a
   block's shape changes.
 - **Rows written before the typed block storage are converted on read until
-  the backfill has run.** The tolerant cast that does it is scheduled for
-  removal at 1.0; version history is the exception, and keeps being read in
-  whatever shape it was written (it is hash-chained, so it is never
-  rewritten).
+  the backfill has run.** The tolerant read stays after 1.0 — for the rows the
+  backfill reports rather than rewrites, and for version history, which is
+  hash-chained and keeps being read in whatever shape it was written. A block
+  of a type this build no longer has, or an element that is not a block, reads
+  as a `custom` block carrying its payload, so delivery never fails on it. Only
+  the legacy *write* shape was removed at 1.0 (#1543).
 - **`to_markdown/1` on a block module is probed informally**, not declared on
   the renderer behaviour. Treat it as unstable until it is.
 - **The hand-rolled `@behaviour` path is fragile against additions, on every

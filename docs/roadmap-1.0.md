@@ -153,8 +153,14 @@ After 0.12, the covered list changes only by deprecation.
   which warns), the editor route aliases (now a `301` to the generic route),
   the `User.audiences` fallback (a job queued on every boot moves any account
   still relying on it onto a membership; the column is kept, unread, for 2.0 to
-  drop), and the pre-0.12 job shapes (cancelled with a logged error). Still to
-  go: the legacy block bridge.
+  drop), and the pre-0.12 job shapes (cancelled with a logged error).
+  The legacy block bridge's write side is gone: `to_legacy/1`,
+  `from_legacy/1`, `KilnCMS.CMS.Block` and the legacy write shape, and the
+  editor's nested column editor stores Portable Text instead of
+  `legacy_html`. The read side stays (refused backfill rows, version history),
+  and `RichText.legacy_html` stays as a fallback for HTML Portable
+  Text cannot hold — removing it would have destroyed the only faithful copy
+  of that prose.
 - `.github/SECURITY.md` names the supported release lines and the backport
   policy (#1544). Decided: only the latest minor is supported, and the
   previous minor gets security fixes for 90 days. Once a line is supported, `release.yml` can publish a floating

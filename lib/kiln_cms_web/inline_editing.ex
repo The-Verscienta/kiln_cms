@@ -78,7 +78,7 @@ defmodule KilnCMSWeb.InlineEditing do
     # Compatibility shim: a pre-round-trip client (stale tab across a deploy)
     # pushes rich text as an HTML string. It becomes Portable Text when that is
     # faithful; only HTML that would not survive the conversion goes to the
-    # deprecated `legacy_html` (#1537) — never letting the body cast degrade
+    # `legacy_html` fallback (kept at 1.0, #1543) — never letting the body cast degrade
     # it to [] and drop the edit.
     if is_binary(value) and String.starts_with?(String.trim_leading(value), "<") do
       put_html(block_inputs, index, value)

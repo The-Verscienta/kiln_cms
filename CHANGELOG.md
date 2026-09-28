@@ -56,11 +56,23 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Before upgrading to 1.0, run `mix kiln.blocks.backfill` on 0.12, and move any
+  code that writes legacy `type`/`content`/`data` blocks to the typed shape.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#before-upgrading-to-10-run-the-block-backfill))
+
 - **On 0.12, before `mix kiln.update --allow-major` to 1.0: run the block
   backfill and `mix kiln.deprecations --migrate-audiences`, and drain the queue.**
   ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#on-012-before-upgrading-to-10))
 
 ### Breaking
+
+- **Remove `TypedBlocks.to_legacy/1`, `TypedBlocks.from_legacy/1` and
+  `KilnCMS.CMS.Block`; use `to_typed/1` and render from typed blocks.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#remove-the-legacy-block-bridge-functions))
+
+- **Refuse a block written in the legacy `type`/`content`/`data` shape; stored
+  rows in that shape are still read.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#refuse-the-legacy-block-write-shape))
 
 - **Remove the `published?:` option on `use KilnCMS.CMS.Content`; passing it now
   warns as an unknown option.**
@@ -86,6 +98,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Keep `RichText.legacy_html` as a fallback instead of removing it;
+  the nested column editor now stores Portable Text.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#keep-legacy-html-as-a-fallback))
+
 - **Automation rules are set up with ordinary fields instead of a JSON box.**
   ([long form](docs/changelog/unreleased.md#automation-rules-are-set-up-with-ordinary-fields-instead-of-a-json-box))
 
@@ -99,6 +115,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#1544](https://github.com/The-Verscienta/kiln_cms/issues/1544) · [long form](docs/changelog/unreleased.md#the-release-images-latest-tag-moves-only-to-the-highest-final-release-and-from))
 
 ### Fixed
+
+- **A stored block of a type the build no longer has, or one that is not a
+  block, no longer fails its page's delivery.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#unreadable-stored-blocks-no-longer-fail-delivery))
 
 - **Edited images get new variants under strict tenancy, and a media job with no
   `org_id` is cancelled with a logged error instead of doing nothing silently.**

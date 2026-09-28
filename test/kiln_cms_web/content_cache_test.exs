@@ -7,6 +7,8 @@ defmodule KilnCMSWeb.ContentCacheTest do
   # concurrently-running tests.
   use KilnCMSWeb.ConnCase, async: false
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.Cache
   alias KilnCMS.CMS
   alias KilnCMS.CMS.MediaItem
@@ -99,9 +101,10 @@ defmodule KilnCMSWeb.ContentCacheTest do
 
     page =
       published_page("Media Page", %{
-        blocks: [
-          %{type: :image, content: "/uploads/orig", data: %{"media_id" => media.id}, order: 0}
-        ]
+        blocks:
+          typed_blocks([
+            %{type: :image, content: "/uploads/orig", data: %{"media_id" => media.id}, order: 0}
+          ])
       })
 
     # First request resolves + caches the media-enriched blocks.

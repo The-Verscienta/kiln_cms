@@ -1,32 +1,26 @@
 defmodule KilnCMS.CMS.TypedBlocks do
   @moduledoc """
-  Bridge between the legacy `KilnCMS.CMS.Block` storage and the Kiln v2 typed
-  block representation (decision D11 / Phase C).
+  The Kiln v2 typed block representation (decision D11): converting whatever is
+  stored or submitted into typed block structs and union input.
 
   `to_typed/1` is the canonical read-direction conversion that firing,
   rendering, search, history and embeddings use to obtain typed block structs
   from whatever is stored — typed or legacy. It is **total**: any legacy/unknown
   block maps to `KilnCMS.Blocks.Custom` so downstream serializers never crash
-  (decision A4). It keeps reading the legacy shape after 1.0, because version
-  history is hash-chained and never rewritten.
+  (decision A4). It keeps reading the pre-typed `type`/`content`/`data` shape:
+  version history is hash-chained and never rewritten, and
+  `mix kiln.blocks.backfill` (`KilnCMS.CMS.BlockBackfill`) reports, rather than
+  rewrites, a row it cannot convert without loss.
 
-  **The bridge is deprecated and is removed at 1.0 (#1537):**
+  **The write side of the legacy bridge was removed at 1.0 (#1543)**, after 0.12
+  deprecated it (#1537): `to_legacy/1`, `from_legacy/1` (use `to_typed/1`), the
+  the `KilnCMS.CMS.Block` embedded resource, and the legacy shape as write input —
+  `to_union_input/1` raises `LegacyInputError` for it, which `BlockUnion` turns
+  into a cast error. Write the typed shape (`%{"_type" => "heading", "text" =>
+  …}`).
 
-    * `to_legacy/1` — nothing in the core calls it any more. Delivery, the
-      previews and the in-context editor render from
-      `KilnCMSWeb.BlockComponents.view_blocks/1`, built from the typed blocks.
-    * `from_legacy/1` — use `to_typed/1`, which accepts the same input.
-    * the legacy `KilnCMS.CMS.Block` shape as **write input**
-      (`%{type: :heading, content: …, data: …}`) — `BlockUnion`'s cast still
-      converts it, until 1.0. Write the typed shape (`%{"_type" => "heading",
-      "text" => …}`).
-
-  `mix kiln.blocks.backfill` rewrites the rows still stored in the legacy
-  shape; see `KilnCMS.CMS.BlockBackfill`.
-
-  Legacy blocks arrive either as `%KilnCMS.CMS.Block{}` structs (top-level, atom
-  keys) or as plain maps with string keys (nested `children` from jsonb), so the
-  accessors tolerate both.
+  Stored legacy blocks are plain maps, atom- or string-keyed (nested `children`
+  come back from jsonb string-keyed), so the accessors tolerate both.
   """
 
   alias KilnCMS.Blocks.{Accordion, Claim, Columns, Custom, Divider, Embed, Faq, Form}
@@ -69,6 +63,28 @@ defmodule KilnCMS.CMS.TypedBlocks do
         kw when is_list(kw) -> "#{Keyword.get(kw, :field)}: #{Keyword.get(kw, :message)}"
         other -> inspect(other)
       end)
+    end
+  end
+
+  defmodule LegacyInputError do
+    @moduledoc """
+    Raised by `TypedBlocks.to_union_input/1` for a block written in the
+    pre-typed `Block` shape (`%{type: :heading, content: …, data:
+    …}`). 0.12 deprecated that write shape and 1.0 removed it (#1543); write
+    the typed shape (`%{"_type" => "heading", "text" => …}`) instead.
+
+    Rescued at every `KilnCMS.CMS.BlockUnion` cast entry point and turned into
+    an ordinary cast error, like `InvalidChildBlockError`. Stored rows in the
+    legacy shape are unaffected: the read direction still converts them.
+    """
+    defexception [:block]
+
+    @impl true
+    def message(%{block: block}) do
+      type = Map.get(block, :type) || Map.get(block, "type")
+
+      "a #{inspect(to_string(type))} block is in the legacy `type`/`content`/`data` shape, " <>
+        "which 1.0 no longer accepts (#1543); write the typed shape, tagged with `_type`"
     end
   end
 
@@ -168,6 +184,8 @@ defmodule KilnCMS.CMS.TypedBlocks do
   def to_union_input(nil), do: nil
 
   def to_union_input(value) do
+    if legacy_input?(value), do: raise(LegacyInputError, block: value)
+
     case typed_attrs(value) do
       {nil, _attrs} ->
         value
@@ -210,14 +228,54 @@ defmodule KilnCMS.CMS.TypedBlocks do
   def to_union_stored(nil), do: nil
 
   def to_union_stored(value) do
-    if stored_envelope?(value) do
-      value
-    else
-      case typed_attrs(value) do
-        {nil, _attrs} -> value
-        {name, attrs} -> %{"type" => name, "value" => drop_nils(attrs)}
+    envelope =
+      if stored_envelope?(value) do
+        value
+      else
+        case typed_attrs(value) do
+          {nil, _attrs} -> value
+          {name, attrs} -> %{"type" => name, "value" => drop_nils(attrs)}
+        end
       end
+
+    park_unreadable(envelope)
+  end
+
+  # Delivery must never crash on what is stored (decision A4, #1543). Two things
+  # the union cannot load used to raise out of every read of their row: a block
+  # of a type this build does not have — typically from a plugin since removed —
+  # and an element that is not a block at all. Both are rows the backfill
+  # refuses (`:unknown_type`, `:unrecognized`), so both stay at rest. On read
+  # each becomes a `custom` block carrying the payload whole, which renders as a
+  # marker comment; the row itself is not rewritten.
+  defp park_unreadable(%{"type" => type, "value" => %{}} = envelope)
+       when is_map_key(@type_atoms, type),
+       do: envelope
+
+  defp park_unreadable(%{"type" => type, "value" => %{} = attrs}) when is_binary(type),
+    do: custom_envelope(type, attrs)
+
+  defp park_unreadable(%{} = other), do: custom_envelope(nil, other)
+  defp park_unreadable(_not_a_map), do: custom_envelope(nil, %{})
+
+  defp uuid(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> uuid
+      :error -> nil
     end
+  end
+
+  defp custom_envelope(legacy_type, %{} = payload) do
+    %{
+      "type" => "custom",
+      "value" =>
+        drop_nils(%{
+          "_type" => "custom",
+          "id" => uuid(payload["id"]),
+          "legacy_type" => legacy_type,
+          "data" => Map.drop(payload, ["id", "_type", "_version"])
+        })
+    }
   end
 
   defp drop_nils(%{} = map), do: Map.reject(map, fn {_k, v} -> is_nil(v) end)
@@ -228,9 +286,6 @@ defmodule KilnCMS.CMS.TypedBlocks do
 
   defp typed_attrs(%mod{} = struct) when mod in @block_modules,
     do: {struct._type, attrs_of(struct)}
-
-  defp typed_attrs(%mod{} = struct) when mod == KilnCMS.CMS.Block,
-    do: struct |> one_from_legacy() |> typed_attrs()
 
   defp typed_attrs(%{} = map) do
     cond do
@@ -256,6 +311,17 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp stored_envelope?(_), do: false
 
   defp legacy_map?(%{} = map), do: not is_nil(get(map, :type))
+
+  # A write in the pre-typed `Block` shape (`type`/`content`/`data`),
+  # which 0.12 deprecated and 1.0 refuses (#1543). A struct or `%Ash.Union{}`
+  # never is one; neither is a typed map or a stored `type`/`value` envelope
+  # (what a paper-trail version holds, which a restore writes back).
+  defp legacy_input?(%_{}), do: false
+
+  defp legacy_input?(%{} = map),
+    do: not typed_map?(map) and not stored_envelope?(map) and legacy_map?(map)
+
+  defp legacy_input?(_other), do: false
 
   defp stringify(%{} = map), do: Map.new(map, fn {k, v} -> {to_string(k), v} end)
   defp stringify(_), do: %{}
@@ -515,15 +581,10 @@ defmodule KilnCMS.CMS.TypedBlocks do
   def input_map(%Ash.Union{value: value}), do: input_map(value)
   def input_map(%_{} = struct), do: struct |> attrs_of() |> drop_nils()
 
-  @doc "Convert a stored legacy block list into typed block structs."
-  @deprecated "Use KilnCMS.CMS.TypedBlocks.to_typed/1, which reads the legacy shape too (#1537); removed at 1.0"
-  @spec from_legacy([struct() | map()] | nil) :: [struct()]
-  def from_legacy(blocks) do
-    blocks
-    |> List.wrap()
-    |> Enum.map(&one_from_legacy/1)
-  end
-
+  # The read-only legacy reader: a pre-flip stored block map (`type`/`content`/
+  # `data`) as a typed struct. Reached only from the read direction —
+  # `to_typed/1` and `to_union_stored/1` — and from `legacy_loss/1`, which the
+  # backfill runs. A write in this shape is refused (`to_union_input/1`).
   defp one_from_legacy(block) do
     id = get(block, :id)
     type = block |> get(:type) |> to_type()
@@ -750,15 +811,9 @@ defmodule KilnCMS.CMS.TypedBlocks do
 
   defp scalar?(value), do: is_binary(value) or is_number(value) or is_boolean(value)
 
-  @doc "Best-effort reverse conversion back to legacy block maps."
-  @deprecated "Render from typed blocks instead, e.g. KilnCMSWeb.BlockComponents.view_blocks/1 (#1537); removed at 1.0"
-  @spec to_legacy([struct()] | nil) :: [map()]
-  def to_legacy(typed_blocks) do
-    typed_blocks
-    |> List.wrap()
-    |> Enum.map(&one_to_legacy/1)
-  end
-
+  # The typed → legacy direction, kept private for one reader: `legacy_loss/1`
+  # uses it as the round-trip oracle for what a rewrite would drop. The public
+  # `to_legacy/1` it used to back was removed at 1.0 (#1543).
   defp one_to_legacy(%Heading{} = b),
     do: %{type: :heading, content: b.text, data: %{"level" => b.level}, id: b.id}
 
@@ -864,16 +919,6 @@ defmodule KilnCMS.CMS.TypedBlocks do
 
   defp one_to_legacy(%Custom{} = b),
     do: %{type: to_type(b.legacy_type), content: b.content, data: b.data || %{}, id: b.id}
-
-  # Total fallback. Every preview surface (`preview_live`, `token_preview_live`,
-  # `release_preview_live`, the in-context editor, the editor's own pop-out
-  # preview) funnels through here, so a block type with no clause above is a
-  # crash on those pages rather than a missing block — and the set without one
-  # grows every time a block is added (`video`, `audio`, `file` and now
-  # `fragment` all lacked one). A content-free legacy block renders as nothing,
-  # which is what these surfaces should show for a block they can't project.
-  defp one_to_legacy(%_{} = block),
-    do: %{type: :custom, content: nil, data: %{}, id: Map.get(block, :id)}
 
   defp rich_text_content(%RichText{legacy_html: html}) when is_binary(html) and html != "",
     do: KilnCMS.HTMLSanitizer.sanitize_rich_text(html)
