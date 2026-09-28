@@ -87,6 +87,17 @@ defmodule KilnCMSWeb.SignInRateLimitTest do
   end
 
   describe "the per-IP charge on the action" do
+    # `:auth` counts in epoch-aligned windows (#1619). At the test config's 500
+    # per minute, spending the budget and then signing in can straddle a minute
+    # boundary: the address's budget resets mid-test, the "refused" attempts
+    # reach the account, and a correct password is locked out. A small budget in
+    # a window no test run straddles keeps every test inside one window.
+    setup do
+      restore_limits_on_exit()
+      put_limit(:auth, 5, :timer.hours(24 * 365 * 100))
+      :ok
+    end
+
     test "a spent address is refused, correct password included" do
       address = email()
       user!(address)
