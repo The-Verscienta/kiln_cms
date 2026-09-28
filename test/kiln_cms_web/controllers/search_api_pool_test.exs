@@ -1,7 +1,8 @@
 defmodule KilnCMSWeb.SearchApiPoolTest do
   @moduledoc """
-  How `GET /api/search` uses the database pool (#1712): one connection per
-  request, checked out once, and the analytics write off the request.
+  How `GET /api/search` uses the database pool (#1712): one query in flight
+  per request — so at most one connection — and the analytics write off the
+  request.
 
   Four connections per search — the old section fan-out — filled a
   10-connection pool with two and a half concurrent searches; the rest of the
@@ -39,9 +40,8 @@ defmodule KilnCMSWeb.SearchApiPoolTest do
   end
 
   # Every repo query made by this test process or by any process it started,
-  # as `{pid, source, checked_out?}` — `{:write, source}` for an INSERT (the
-  # analytics upsert). `checked_out?` is read in the querying
-  # process, so it says whether that query ran inside a `Repo.checkout`.
+  # as `{pid, source}` — `{:write, source}` for an INSERT (the analytics
+  # upsert).
   defp record_queries do
     test = self()
     handler = "sapool-#{System.unique_integer([:positive])}"
@@ -52,7 +52,7 @@ defmodule KilnCMSWeb.SearchApiPoolTest do
       fn _event, _measurements, meta, _config ->
         if self() == test or test in Process.get(:"$callers", []) do
           source = if write?(meta[:query]), do: {:write, meta[:source]}, else: meta[:source]
-          send(test, {:query, self(), source, KilnCMS.Repo.checked_out?()})
+          send(test, {:query, self(), source})
         end
       end,
       nil
@@ -66,14 +66,14 @@ defmodule KilnCMSWeb.SearchApiPoolTest do
 
   defp received_queries(acc \\ []) do
     receive do
-      {:query, pid, source, checked_out?} ->
-        received_queries([{pid, source, checked_out?} | acc])
+      {:query, pid, source} ->
+        received_queries([{pid, source} | acc])
     after
       0 -> Enum.reverse(acc)
     end
   end
 
-  test "a search runs every query on one connection, in the request's process", %{conn: conn} do
+  test "a search runs its queries one at a time, in the request's process", %{conn: conn} do
     word = "sapool#{System.unique_integer([:positive])}"
     published_page("About #{word}")
     record_queries()
@@ -82,16 +82,15 @@ defmodule KilnCMSWeb.SearchApiPoolTest do
     assert [_hit] = body["results"]["pages"]
 
     queries =
-      Enum.filter(received_queries(), fn {_pid, source, _} -> source in @search_sources end)
+      Enum.filter(received_queries(), fn {_pid, source} -> source in @search_sources end)
 
     # Enough of them that "all" means something: a leg per content type,
     # the taxonomy and media sections, the facets.
     assert length(queries) > 10
 
-    # None ran in a task — a task checks out a connection of its own — and
-    # every one ran inside the request's single checkout.
-    assert Enum.all?(queries, fn {pid, _source, _} -> pid == self() end), inspect(queries)
-    assert Enum.all?(queries, fn {_pid, _source, checked_out?} -> checked_out? end)
+    # Every one ran in the request's own process, so one after another: none
+    # in a task, which would hold a connection of its own alongside.
+    assert Enum.all?(queries, fn {pid, _source} -> pid == self() end), inspect(queries)
   end
 
   test "the legs read ids; whole rows are read once, for the hits kept" do
@@ -155,18 +154,18 @@ defmodule KilnCMSWeb.SearchApiPoolTest do
       )
 
       writes =
-        Enum.filter(received_queries(), fn {_pid, source, _} ->
+        Enum.filter(received_queries(), fn {_pid, source} ->
           source == {:write, "search_queries"}
         end)
 
       assert writes != []
-      assert Enum.all?(writes, fn {pid, _source, _} -> pid != self() end), inspect(writes)
+      assert Enum.all?(writes, fn {pid, _source} -> pid != self() end), inspect(writes)
     end
   end
 
-  describe "Search.with_connection/1" do
-    test "hands back what the function returns, on one checkout" do
-      assert Search.with_connection(fn -> KilnCMS.Repo.checked_out?() end) == true
+  describe "Search.unless_unavailable/1" do
+    test "hands back what the function returns" do
+      assert Search.unless_unavailable(fn -> :answered end) == :answered
     end
 
     test "a pool that dropped the checkout reads as unavailable, not a crash" do
@@ -175,12 +174,24 @@ defmodule KilnCMSWeb.SearchApiPoolTest do
               "connection not available and request was dropped from queue after 500ms"
       end
 
-      assert Search.with_connection(dropped) == {:error, :unavailable}
+      assert Search.unless_unavailable(dropped) == {:error, :unavailable}
+    end
+
+    test "so does the same error wrapped by Ash, as a read raises it" do
+      wrapped = fn ->
+        raise Ash.Error.to_error_class(
+                DBConnection.ConnectionError.exception(
+                  "connection not available and request was dropped from queue after 500ms"
+                )
+              )
+      end
+
+      assert Search.unless_unavailable(wrapped) == {:error, :unavailable}
     end
 
     test "any other error still raises" do
       assert_raise ArgumentError, "boom", fn ->
-        Search.with_connection(fn -> raise ArgumentError, "boom" end)
+        Search.unless_unavailable(fn -> raise ArgumentError, "boom" end)
       end
     end
   end

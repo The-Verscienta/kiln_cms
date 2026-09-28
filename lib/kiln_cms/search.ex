@@ -67,11 +67,10 @@ defmodule KilnCMS.Search do
   @doc """
   How many of `global/2`'s sections may run concurrently. Default 1.
 
-  At 1 the sections run one after another on **one** pooled connection,
-  checked out once for the whole sweep (one `Repo.checkout`), so a search
-  costs the pool one connection however many content types are registered.
-  Above 1 they fan out over that many tasks, each holding a connection of its
-  own for the duration of its queries.
+  At 1 the sections run one after another in the caller's process, so a
+  search has at most one query in flight — one pooled connection at a time,
+  however many content types are registered. Above 1 they fan out over that
+  many tasks, and a search can hold that many connections at once.
 
   The fan-out is faster for one search on an idle node and slower for every
   search on a busy one. It was the default (4) until #1712 measured it: four
@@ -1382,12 +1381,22 @@ defmodule KilnCMS.Search do
 
   # Sections are independent — no section's results affect another's — so
   # they *can* run concurrently, and did by default until #1712. They now run
-  # one after another on a single checked-out connection unless
-  # `section_concurrency/0` says otherwise, because the pool, not the
-  # database, is what a busy node runs out of: a sweep's sections are a few
-  # milliseconds of SQL each, and one connection doing them in turn costs less
-  # wall time under load than four connections waiting for each other's
-  # requests to finish. The numbers are in `docs/performance.md`.
+  # one after another in the caller's process unless `section_concurrency/0`
+  # says otherwise, because the pool, not the database, is what a busy node
+  # runs out of: a sweep's sections are a few milliseconds of SQL each, and
+  # one query at a time per search costs less wall time under load than four,
+  # queued behind each other's requests. The numbers are in
+  # `docs/performance.md`.
+  #
+  # Deliberately NOT inside one `Repo.checkout` for the sweep. That pins a
+  # connection across everything between the queries too — fusion, the
+  # reranker, and any `Cachex.fetch` a policy or registry lookup misses,
+  # whose fallback runs in Cachex's own process and needs a connection of
+  # its own. Measured under the benchmark (#1712): ten concurrent searches
+  # holding all ten connections while each waited on a cache fallback for an
+  # eleventh, until the pool dropped them — every request of the run a 503.
+  # Checked out per query, a search holds a connection only while Postgres
+  # is working for it.
   #
   # The sequential sweep has no per-section timeout: each query carries the
   # repo's own, and nothing runs in a task that could wedge on its own.
@@ -1408,7 +1417,7 @@ defmodule KilnCMS.Search do
   # name rather than as a bare exit.
   defp run_sections(sections) do
     case section_concurrency() do
-      1 -> KilnCMS.Repo.checkout(fn -> Map.new(sections, fn {key, run} -> {key, run.()} end) end)
+      1 -> Map.new(sections, fn {key, run} -> {key, run.()} end)
       concurrency -> run_sections_concurrently(sections, concurrency)
     end
   end
@@ -1608,21 +1617,21 @@ defmodule KilnCMS.Search do
   end
 
   @doc """
-  Run `fun` on one pooled connection, checked out once for the whole call —
-  how a search keeps to a single connection however many reads it issues.
-  Every `KilnCMS.Repo` query `fun` makes **in this process** reuses it; a
-  nested call reuses the outer checkout.
+  Run `fun`, answering `{:error, :unavailable}` instead of raising when a
+  query inside it could not reach the database — above all when the pool
+  dropped its checkout because the pool was saturated (`connection not
+  available and request was dropped from queue`), which is how a node under
+  more search traffic than its `POOL_SIZE` serves says so. A database that is
+  down reads the same way. Any other error raises.
 
-  The checkout is the one place a search waits for the pool, and when the pool
-  is saturated it is where the wait ends: the pool drops a request that has
-  queued too long, and this returns `{:error, :unavailable}` instead of
-  raising, so a caller can answer "try again" (`GET /api/search` answers
-  `503` with `Retry-After`) rather than crash. A database that is down reads
-  the same way. Any other error raises.
+  So a caller can answer "try again" — `GET /api/search` answers `503` with
+  `Retry-After` — rather than the `500` the error used to escape as (#1712).
+  Ash wraps a data-layer error in its own, so this reads the chain the way
+  `KilnCMS.Firing.Delivery.db_unavailable?/1` does, not the struct alone.
   """
-  @spec with_connection((-> result)) :: result | {:error, :unavailable} when result: term()
-  def with_connection(fun) when is_function(fun, 0) do
-    KilnCMS.Repo.checkout(fun)
+  @spec unless_unavailable((-> result)) :: result | {:error, :unavailable} when result: term()
+  def unless_unavailable(fun) when is_function(fun, 0) do
+    fun.()
   rescue
     error ->
       if KilnCMS.Firing.Delivery.db_unavailable?(error),

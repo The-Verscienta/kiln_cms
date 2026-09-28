@@ -61,7 +61,7 @@ defmodule KilnCMSWeb.SearchApiController do
   @suggest_below 3
 
   # Seconds a client is asked to wait after a `503` from a saturated pool. A
-  # search's hold on a connection is tens of milliseconds, so the pool turns
+  # search holds a connection for milliseconds at a time, so the pool turns
   # over many times a second; one second is enough to be past the burst that
   # filled it, without a client giving up on a search it could have had.
   @retry_after "1"
@@ -78,18 +78,15 @@ defmodule KilnCMSWeb.SearchApiController do
     end
   end
 
-  # One pooled connection for the whole request (`Search.with_connection/1`):
-  # the category lookup, the sweep, the "did you mean" and the facet counts
-  # all run on it in turn, so a search costs the pool one connection and
-  # waits for it once. That wait is where a saturated pool is felt, and it
-  # answers `503` + `Retry-After` — a search a client can retry — rather than
-  # the `500` a dropped checkout used to raise from somewhere inside the
-  # sweep (#1712). The analytics write happens after the connection is
-  # handed back, off the request (`Search.record_query_async/3`).
+  # A saturated pool drops a query's checkout rather than queue it forever,
+  # and that used to escape from whichever leg hit it as a `500`. It is
+  # answered `503` + `Retry-After` now — a search a client can retry (#1712).
+  # The analytics write happens off the request (`Search.record_query_async/3`),
+  # after the search has been answered.
   defp search(conn, query, locale, limit, params) do
     org_id = KilnCMSWeb.Tenant.current_org_id(conn)
 
-    case Search.with_connection(fn -> {:ok, run(query, locale, limit, params, org_id)} end) do
+    case Search.unless_unavailable(fn -> {:ok, run(query, locale, limit, params, org_id)} end) do
       {:ok, {payload, total}} ->
         Search.record_query_async(query, total, locale: locale, tenant: org_id)
         json(conn, payload)
