@@ -523,7 +523,11 @@ defmodule KilnCMSWeb.SettingsLive do
           </p>
         </div>
 
-        <.page_with_toc id="settings-toc" items={settings_toc(@push_available?)}>
+        <.page_with_toc
+          id="settings-toc"
+          items={settings_toc(@push_available?)}
+          class="max-w-4xl"
+        >
           <div class="space-y-6">
             <%!-- The sidebar preset — the same choice as the switch at the foot of
               the sidebar, and the same event (`KilnCMSWeb.NavPreset`), which
