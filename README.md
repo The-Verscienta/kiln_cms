@@ -41,6 +41,12 @@ want to run the core without a checkout:
 docker pull ghcr.io/the-verscienta/kiln_cms:latest   # linux/amd64
 ```
 
+`latest` is for trying it out. For a site you keep, pin the exact version
+(`:0.12.0`), or from 1.0 the floating major (`:1`) if you want patches and
+minor releases without editing the tag;
+[which tag to pin](docs/deploy-platforms.md#which-tag-to-pin) has the
+trade-offs.
+
 That image is the **project-agnostic core**. An overlay builds its own from the
 same [`Dockerfile`](https://github.com/The-Verscienta/kiln_cms/blob/main/Dockerfile)
 with `--build-arg PROJECT=<name>`.

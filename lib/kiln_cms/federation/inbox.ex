@@ -86,11 +86,18 @@ defmodule KilnCMS.Federation.Inbox do
   Verify and act on one inbound activity.
 
   `:ok` means "handled or deliberately ignored" — both answer 202.
-  `{:error, reason}` is an authentication failure and answers 401.
+  `{:error, :unavailable}` means the replay store could not record the
+  signature, so replay could not be ruled out: a transient failure, answered
+  503 so the sender retries (#1659).
+  `{:error, reason}` for any other reason is an authentication failure and
+  answers 401.
+
+  `opts[:nonce_actor]` replaces the actor the replay store is written as; a
+  test seam for proving the refusal path fails closed, never set in production.
   """
   @spec handle(map(), map(), [{String.t(), String.t()}], binary(), Ash.UUID.t(), keyword()) ::
-          :ok | {:error, String.t()}
-  def handle(settings, activity, headers, raw_body, org_id, _opts \\ []) do
+          :ok | {:error, String.t() | :unavailable}
+  def handle(settings, activity, headers, raw_body, org_id, opts \\ []) do
     identity = Actor.identity(settings)
 
     if needs_actor?(activity, identity) do
@@ -102,7 +109,7 @@ defmodule KilnCMS.Federation.Inbox do
            {:ok, key_id} <- HttpSignature.precheck(headers, raw_body),
            :ok <- check_key_names_actor(key_id, actor_uri),
            {:ok, remote} <- RemoteActor.fetch(actor_uri),
-           :ok <- verify(settings, remote, headers, raw_body) do
+           :ok <- verify(settings, remote, headers, raw_body, opts) do
         act(settings, activity, remote, org_id)
       end
     else
@@ -150,7 +157,7 @@ defmodule KilnCMS.Federation.Inbox do
   # replays against any other Kiln deployment by setting `Host:` to the original
   # target. Binding to the origin the actor id was minted under is what makes a
   # signature mean "for this site".
-  defp verify(settings, remote, headers, raw_body) do
+  defp verify(settings, remote, headers, raw_body, opts) do
     host = settings |> Actor.identity() |> Map.fetch!(:origin) |> Actor.host()
 
     with {:ok, key_id} <- HttpSignature.key_id(headers),
@@ -159,7 +166,9 @@ defmodule KilnCMS.Federation.Inbox do
          :ok <- HttpSignature.verify("post", inbox_path(), headers, raw_body, pem, host: host) do
       # Only a signature that verified is recorded — see `SeenSignature`. A
       # second arrival of the same one is a replay, whatever its `Date` says.
-      HttpSignature.record_seen(headers)
+      HttpSignature.record_seen(headers,
+        actor: Keyword.get(opts, :nonce_actor, Federation.system())
+      )
     else
       false -> {:error, "signature key does not belong to the sending actor"}
       nil -> {:error, "sending actor publishes no public key"}
@@ -265,17 +274,39 @@ defmodule KilnCMS.Federation.Inbox do
   # `one_per_actor` dedups an exact URI, so one attacker domain serving N actor
   # URLs is N rows — each one a delivery target on every publish, forever. The
   # ceiling is what stops a follower list from becoming an amplifier.
-  defp check_follower_ceiling(org_id) do
-    if Ash.count!(Follower, authorize?: false, tenant: org_id) < Federation.max_followers() do
-      :ok
+  #
+  # Fails CLOSED (#1659): a count that errors, or that the policy refuses,
+  # answers "at the ceiling". The probe read is load-bearing: a refused read
+  # under a filter policy is not an error but an empty set, so a lost grant
+  # would count 0 and switch the ceiling off without a word. `Ash.count/2`
+  # takes no `authorize_with:`, and `Ash.can/3` answers `true` (its queries
+  # run filtered) or `:maybe` here, so a one-row read with
+  # `authorize_with: :error` is what turns a refusal into an error.
+  @doc false
+  @spec check_follower_ceiling(Ash.UUID.t(), keyword()) :: :ok | {:error, String.t()}
+  def check_follower_ceiling(org_id, opts \\ []) do
+    actor = Keyword.get(opts, :actor, Federation.system())
+    probe = Follower |> Ash.Query.select([:id]) |> Ash.Query.limit(1)
+
+    with {:ok, _rows} <-
+           Ash.read(probe, actor: actor, tenant: org_id, authorize_with: :error),
+         {:ok, count} <- Ash.count(Follower, actor: actor, tenant: org_id) do
+      if count < Federation.max_followers(),
+        do: :ok,
+        else: {:error, "this site is at its follower ceiling"}
     else
-      {:error, "this site is at its follower ceiling"}
+      other ->
+        Logger.warning(
+          "Federation inbox could not count followers, refusing the follow: #{inspect(other)}"
+        )
+
+        {:error, "this site cannot confirm it is under its follower ceiling"}
     end
   end
 
   defp do_record_follow(activity, identity, remote, org_id) do
     case Federation.follow(remote.id, remote.inbox, %{shared_inbox_uri: remote.shared_inbox},
-           authorize?: false,
+           actor: Federation.system(),
            tenant: org_id
          ) do
       {:ok, follower} ->
@@ -290,8 +321,8 @@ defmodule KilnCMS.Federation.Inbox do
   defp unfollow(actor_uri, org_id) do
     Follower
     |> Ash.Query.filter(actor_uri == ^actor_uri)
-    |> Ash.read!(authorize?: false, tenant: org_id)
-    |> Enum.each(&Ash.destroy(&1, authorize?: false, tenant: org_id))
+    |> Ash.read!(actor: Federation.system(), tenant: org_id)
+    |> Enum.each(&Ash.destroy(&1, actor: Federation.system(), tenant: org_id))
 
     :ok
   rescue
@@ -313,7 +344,7 @@ defmodule KilnCMS.Federation.Inbox do
              activity_type: :accept,
              activity: accept
            },
-           authorize?: false,
+           actor: Federation.system(),
            tenant: org_id
          ) do
       {:ok, delivery} ->

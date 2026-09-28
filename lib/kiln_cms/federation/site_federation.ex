@@ -52,12 +52,20 @@ defmodule KilnCMS.Federation.SiteFederation do
   # federates is an admin act. `origin`, `username` and the keypair are all
   # absent from `accept`: identity is minted once by `:enable` and is not a
   # thing a settings form edits.
+  #
+  # `KilnCMS.SystemActor` (#1659) reads the row — every inbound and outbound
+  # federation path starts from `KilnCMS.Federation.active_settings/2` —
+  # stamps `:record_delivery` from the delivery worker, and runs the operator's
+  # `mix kiln.federation enable|disable|rekey`, where a shell on the host is the
+  # deployment's own authority. The settings form's `:save` and `:destroy` are
+  # not admitted: editing the site's public identity stays an admin act.
   use KilnCMS.CMS.OrgSettings,
     domain: KilnCMS.Federation,
     table: "site_federation",
     accept: [:enabled, :display_name, :summary],
     read: :editor,
-    update?: false
+    update?: false,
+    system_actions: [:read, :record_delivery, :enable, :disable, :rekey]
 
   actions do
     # Turn federation on, minting this site's permanent identity. Idempotent by

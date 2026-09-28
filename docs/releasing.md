@@ -129,11 +129,12 @@ people to pass the flag reflexively.
 6. **Watch the release image publish.** Pushing the tag starts
    [`.github/workflows/release.yml`](https://github.com/The-Verscienta/kiln_cms/blob/main/.github/workflows/release.yml),
    which builds the release image and pushes it to
-   `ghcr.io/the-verscienta/kiln_cms` as both `X.Y.Z` and `latest` (a release
-   candidate gets only its exact tag — see
-   [below](#cutting-a-release-candidate)), stamped with the commit and build
-   date. Nothing to run by hand; it authenticates as
-   `GITHUB_TOKEN`.
+   `ghcr.io/the-verscienta/kiln_cms` as `X.Y.Z` and `latest`, and from 1.0.0
+   also as the floating major `X` (`1`). It is stamped with the commit and
+   build date. A release candidate gets only its exact tag (see
+   [below](#cutting-a-release-candidate)), and so does a patch on an older
+   line (see [Patch releases and backports](#patch-releases-and-backports)).
+   Nothing to run by hand; it authenticates as `GITHUB_TOKEN`.
 
    The version bump in `mix.exs` invalidates the dep layer, but the build
    reads `main`'s cache for the rest: v0.9.0's took about nine minutes. Check
@@ -246,6 +247,121 @@ The client SDKs follow the same rule: a `client-js-vX.Y.Z-rc.N` tag publishes
 to npm under the `next` dist-tag rather than `latest`, and Hex never resolves
 a `kiln_client` pre-release unless a requirement names one.
 
+## Patch releases and backports
+
+[`.github/SECURITY.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/.github/SECURITY.md#supported-versions)
+sets the policy: the latest minor gets every fix, and the previous minor gets
+security fixes for 90 days from the release date of the minor that replaced
+it. The window applies within a major, from 1.0.0 on: `0.x` gets nothing
+after 1.0.0's release date, so there is no `0.12.x` backport once 1.0.0 is
+out. There are no long-lived maintenance branches. Each patch is cut from a
+short-lived branch off the line's newest tag, and the branch is deleted
+afterwards. v0.9.1 was the first patch cut this way.
+
+**When `main` will do.** A patch carries fixes only. If everything on `main`
+since the line's newest tag is a fix, cut the patch from `main` as in
+[Cutting a release](#cutting-a-release) and stop here. Otherwise, and always
+for the previous minor, use a branch:
+
+1. **Fix it on `main` first**, through a normal PR with its changelog entry.
+   A backport is a copy of a fix that has already been reviewed, never the
+   first place it lands.
+
+2. **Branch from the line's newest tag.** Name the branch after the version
+   you are cutting:
+
+   ```bash
+   git fetch --tags origin
+   git checkout -b release/v1.0.3 v1.0.2
+   git cherry-pick -x <fix commit>        # -m 1 if it is a merge commit
+   ```
+
+   `-x` records the source commit in the message. Expect conflicts in
+   `CHANGELOG.md` and `docs/changelog/unreleased.md` only: take the tag's
+   version of each, then add just this patch's entries and long-form blocks.
+
+3. **Get CI on the exact tree.** `ci.yml` runs on pushes to `main` and on pull
+   requests to any base, so push a base branch at the tag and open the release
+   branch as a PR against it. Title it "don't merge": it exists only for the
+   CI run.
+
+   ```bash
+   git push origin v1.0.2:refs/heads/release/v1.0.x
+   git push -u origin release/v1.0.3
+   gh pr create --base release/v1.0.x --title "v1.0.3 (CI only, don't merge)" --body "…"
+   ```
+
+4. **Cut it on the branch**: steps 2 to 4 of
+   [Cutting a release](#cutting-a-release), with a `## [1.0.3]` section,
+   `--condense`, and the `mix.exs` and API spec bump. For a patch on the
+   previous minor, leave the deploy templates and the README's version line
+   alone: they follow the latest line, and `main` owns them.
+
+5. **Tag the branch and push only the tag.**
+
+   ```bash
+   git tag v1.0.3
+   git push origin v1.0.3
+   ```
+
+   `release.yml` publishes the image as `1.0.3`. `latest` and the major tag
+   `1` move only if this is the highest final release overall (for `latest`)
+   or on its major (for `1`), so `1.0.3` pushed after `1.1.0` moves neither.
+   The run log's "Decide which floating tags move" step says why.
+   `scripts/release/floating_tags.sh` makes the call, and
+   `test/scripts/release_floating_tags_test.exs` covers it.
+
+6. **Publish the GitHub release without making it "latest"** if a newer line
+   exists:
+
+   ```bash
+   gh release create v1.0.3 --latest=false --title "v1.0.3" --notes "…"
+   ```
+
+   Say `--latest=false` explicitly. The releases API's default for a new
+   release is to make it latest, and `gh`'s own default is an automatic choice
+   that weighs creation date as well as version. Neither is safe to rely on
+   for an older line. Every deployed instance's update page (`Kiln.Updates`) asks
+   `releases/latest`, so a 1.1 instance would compare itself against `1.0.3`,
+   read itself as ahead, and report "up to date" while a `1.1.x` patch
+   existed. If that happens, run `gh release edit v1.1.1 --latest` on the
+   highest release.
+
+7. **Merge the branch back into `main` with a merge commit.** Open
+   `release/v1.0.3 → main` and merge it with **Create a merge commit**, never
+   squash or rebase. `mix kiln.update` refuses to move a pin to a release
+   that is missing commits the pin already has (it reads them as local
+   patches to the core). The cherry-picked commit has its own SHA, so until
+   the patch's tag is an ancestor of the newer release, a site on `v1.0.3` is
+   refused an update to `1.1.x`. On the merge-back, move the patch's changelog
+   entries into a `## [1.0.3]` section below the newer releases.
+
+   If the latest minor needs the same fix as a patch and `main` is not
+   releasable, cut `release/v1.1.1` from `v1.1.0` in the same way, and merge
+   `release/v1.0.3` into it **before** you tag `v1.1.1`. Then merge
+   `release/v1.1.1` back into `main`. `v1.0.3` is then an ancestor of
+   `v1.1.1`, and a site on `v1.0.3` can move straight to it.
+
+8. **Delete the branches**, `release/v1.0.3` and the CI base
+   `release/v1.0.x`. The tag keeps the history reachable.
+
+**What `mix kiln.update` does with a patch tag.** A plain update targets the
+highest final release, not the newest tag and not the newest on the pin's own
+line. A project pinned at `v1.0.2` after `v1.1.1` and `v1.0.3` exist is
+offered `v1.1.1`. A minor move needs no flag, and the Breaking and Upgrade
+notes print for every release in between. To take the backport and stay on
+the line:
+
+```bash
+mix kiln.update --to v1.0.3
+```
+
+A pin at `v1.0.3` is refused a move to `v1.1.0`, if `v1.1.0` was released
+before the fix: it does not have the fix, and the task reports the patch's
+commits as ones the target is missing. Move to the `1.1.x` patch that has
+the fix instead. `--force` skips the check, but only use it if the release
+notes say `1.1` was never affected.
+
 ## Updating a project to a release
 
 From inside the project's pinned Kiln checkout — `kiln/upstream`, `upstream/`,
@@ -269,6 +385,148 @@ newest, `--pre` to let a release candidate count as the newest, `--ref main`
 to deliberately track bleeding edge, `--allow-major` after
 reading the upgrade notes, and `--check --exit-code` to fail a CI job when a
 project has drifted behind upstream.
+
+## Migrations: expand, migrate, contract
+
+A rolling deploy runs two releases at once. The first new node migrates the
+database on boot, and the old release's nodes keep serving against the
+**new** schema until the load balancer has moved every request over. A
+migration is only safe if the release before it keeps working against it.
+From 1.0 every schema change follows this policy (#1716):
+
+1. **Expand.** Add tables and columns. A new column is nullable or has a
+   default, so the old release's inserts, which do not know it exists, still
+   succeed. Keep the old table or column in place.
+2. **Migrate.** Backfill in an Oban job or a release task, not in the
+   migration. From this release on, the code writes both shapes (or the new
+   one only) and reads the new one.
+3. **Contract.** Drop, rename or tighten only in a **later** release, once no
+   release that could still be running reads the old shape. That is at least
+   the release after the one that stopped reading it.
+
+The cases that come up:
+
+- **Renaming a column or table** takes two releases: add the new one and
+  backfill it (release N, which stops reading the old one), then drop the old
+  one (release N+1). A plain `rename` is a drop as far as the old release is
+  concerned.
+- **Changing a column's type** is a rename in disguise. Add a column of the
+  new type, backfill it, and drop the old one a release later.
+- **`NOT NULL`** needs either a default, which Postgres 11+ applies without
+  rewriting the table as long as the default is not volatile, or a backfill
+  release first. Tighten a column to `null: false` in the release after the
+  one whose code always sets it. The old release may still insert `NULL`
+  until then.
+- **Dropping a column** waits until the release that stopped reading it has
+  shipped. Ash selects every attribute, so the old release breaks the moment
+  the column is gone (`20260919191545_drop_webhook_plaintext_secret` is the
+  example that prompted this policy). Remove the attribute from the resource
+  in release N, then run `mix ash.codegen` for the drop in release N+1.
+- **An index on a large table** is built concurrently. A plain
+  `CREATE INDEX` takes a lock that blocks writes to the table for the whole
+  build. In a resource, use `custom_indexes do index [...], concurrently: true
+  end`. For the unique index behind an identity, run
+  `mix ash.codegen <name> --concurrent-indexes`. Either way codegen puts the
+  index in its own migration with `@disable_ddl_transaction true` and
+  `@disable_migration_lock true`, because Postgres refuses
+  `CREATE INDEX CONCURRENTLY` inside a transaction. An index on a table the
+  same migration creates needs none of this.
+
+### The check
+
+`mix kiln.migrations.check` runs on every pull request (the `build` job in
+`ci.yml`). It reads each migration the PR **adds**, under
+`priv/repo/migrations` and every overlay's `projects/*/priv/repo/migrations`,
+and only its forward direction (`up`/`change`). It fails on:
+
+| Flagged | Why |
+|---|---|
+| `drop table`, `rename table` (or a column) | the old release still reads the table or column |
+| `remove :col` | the old release still selects the column |
+| `modify` that changes the type | the old release reads the old type. The previous type comes from `from:` or the migration history. If it is unknown, the change is flagged too. |
+| `modify ... null: false`, or `add ... null: false` without `default:` on an existing table | the old release may still write `NULL`, or omit the column |
+| `execute` SQL containing `DROP TABLE/COLUMN/VIEW/SCHEMA/TYPE`, `RENAME`, `ALTER COLUMN ... TYPE` or `SET NOT NULL` | a heuristic that flags the statement for review. Dropping and re-creating a function or trigger is not flagged. |
+| a non-concurrent index on a table listed in `Mix.Tasks.Kiln.Migrations.Check.large_tables/0` | the build blocks writes |
+| `concurrently: true` without `@disable_ddl_transaction true` | the migration would fail at boot |
+
+The history is exempt. Only the diff against the base is judged, so
+`mix kiln.migrations.check --all` over today's history reports what the
+policy would have caught. On 0.12.0 that was 106 findings: 65 non-concurrent
+indexes on large tables, 34 `SET NOT NULL`s (most of them the #336
+multi-tenancy `org_id` backfill-then-tighten migrations), 4 dropped tables,
+2 `NOT NULL` columns added without a default, and the dropped webhook
+secret. Run it locally before pushing. It is stdlib-only, so it runs in a
+checkout with no `deps/`:
+
+```bash
+mix kiln.migrations.check                  # vs origin/main
+mix kiln.migrations.check --base v0.12.0   # vs another ref
+```
+
+**When the contract step is the point**, say so in the migration, on the
+line above the statement (or at the end of its first line):
+
+```elixir
+# kiln:contract-ok since v0.12.0 — 0.12.0 stopped reading webhook_endpoints.secret
+alter table(:webhook_endpoints) do
+  remove :secret
+end
+```
+
+The version names the **shipped** release that stopped reading the old
+shape, so it may not be newer than the version in `mix.exs`. The reason is
+required, and `--` works in place of the em dash. The marker covers the one
+statement it sits on. An `alter table` block counts as one statement, so a
+marker above it covers every op inside. For an index build that is safe for
+another reason, such as a table that is small everywhere, use
+`# kiln:lock-ok — <reason>`. A malformed marker is itself a failure. So is
+a marker that names an unshipped release, or one that excuses nothing.
+
+### What zero-downtime does and does not cover
+
+The policy makes the **schema** safe for two releases at once. Kiln's boot
+and probes already handle the rest of an ordinary rolling deploy
+([`deploy.md`](deploy.md), "What happens at boot" and "Health endpoints"):
+
+- **Migrate on boot, serialised.** Every node runs `bin/migrate` before it
+  serves. `Ecto.Migrator` holds a lock on `schema_migrations`, so the first
+  new node migrates and the rest wait. The lock does not block the old
+  release's queries.
+- **Readiness.** `/live` only answers once `bin/migrate` has finished and
+  the endpoint is up, and `/up` also requires the database. Pointing the
+  load balancer's readiness check at `/up` keeps a new node out of rotation
+  until it can serve.
+- **Graceful drain on `SIGTERM`.** The release stops its listener and gives
+  in-flight HTTP requests up to 15 s to finish (Bandit/Thousand Island's
+  `shutdown_timeout` default). Running Oban jobs get Oban's 15 s
+  `shutdown_grace_period`.
+
+It does **not** cover:
+
+- **LiveView and WebSocket sessions.** They are disconnected when their node
+  stops, and the client reconnects to a new node, which remounts the view.
+  LiveView's form recovery re-sends a form that has `phx-change`, and an open
+  GraphQL subscription must resubscribe.
+- **A job that outlives the grace period.** Oban kills it and leaves the row
+  in `executing`. Kiln configures no `Oban.Plugins.Lifeline`, so nothing moves
+  it back to `available`. It stays stuck until someone retries it by hand.
+- **Readiness does not flip before shutdown.** `/up` keeps answering 200
+  until the listener closes, so the load balancer should stop routing on
+  its own deregistration (Kubernetes removes the pod from the Service
+  endpoints on termination, but in parallel with the `SIGTERM`). A short
+  `preStop` sleep closes that race.
+- **Lock waits.** Kiln sets no `lock_timeout`, so a migration's
+  `ALTER TABLE` waits behind a long-running query, and every query on that
+  table queues behind the waiting migration. Deploy outside a heavy
+  export or report.
+- **A release that skips one.** Expand/contract assumes each release is
+  deployed in turn. Jumping from N-1 to N+1 runs N's expand and N+1's
+  contract in one boot while N-1 nodes are still serving. Deploy each
+  minor in sequence, or accept a short outage and stop the old nodes first.
+- **Single-instance deployments.** One container on one host (the Compose
+  reference deployment, or a platform with a disk attached) has no second
+  node to serve while the new one boots, so it drops traffic for the length
+  of the boot however compatible the migration is.
 
 ## Build stamping
 
