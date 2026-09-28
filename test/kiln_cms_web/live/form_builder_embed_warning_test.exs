@@ -77,7 +77,7 @@ defmodule KilnCMSWeb.FormBuilderEmbedWarningTest do
   defp embed_tab(conn, user, form) do
     {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor/forms/#{form.id}")
 
-    {lv, lv |> element(~s(nav button[phx-value-tab="embed"])) |> render_click()}
+    {lv, lv |> element(~s(#form-builder-tabs button[phx-value-tab="embed"])) |> render_click()}
   end
 
   test "the embed tab warns that cross-site embedding is off", %{conn: conn} do
@@ -258,7 +258,7 @@ defmodule KilnCMSWeb.FormBuilderEmbedWarningTest do
     form = form!(user, %{embed_origins: ["https://acme.test"]})
 
     {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor/forms/#{form.id}")
-    lv |> element(~s(nav button[phx-value-tab="general"])) |> render_click()
+    lv |> element(~s(#form-builder-tabs button[phx-value-tab="general"])) |> render_click()
 
     lv
     |> form(~s(section form[phx-submit="save_form"]), %{"form" => %{"name" => "Renamed"}})
