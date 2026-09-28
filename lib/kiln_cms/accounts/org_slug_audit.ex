@@ -83,7 +83,7 @@ defmodule KilnCMS.Accounts.OrgSlugAudit do
   Downcase the slug of every `:fixable` org in `report/0`, logging each one.
   Returns the renamed orgs, or the first org that could not be written.
   """
-  @spec fix() :: {:ok, [%Organization{}]} | {:error, {%Organization{}, term()}}
+  @spec fix() :: {:ok, [Organization.t()]} | {:error, {Organization.t(), term()}}
   def fix do
     report().fixable
     |> Enum.reduce_while({:ok, []}, fn %{org: org, fix: slug}, {:ok, done} ->
