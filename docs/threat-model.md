@@ -595,7 +595,12 @@ build if a resource is ever registered without that authorizer.
   which is the only thing standing between an unpublished asset and the world.
   `Content-Disposition: attachment` + `nosniff` prevent the bucket being used to
   serve active content. S3/MinIO deployments serve media entirely outside the
-  app.
+  app. Accepted by design (security audit 2026-09-27, finding 15, #1666): a
+  public media URL is a capability URL. Gated documents and A/V live in
+  private storage, which has no static mount and is served only through the
+  policy-checked download and stream routes. Operator guidance is in
+  [media-pipeline.md](media-pipeline.md#public-media-urls-are-capability-urls)
+  and [deploy.md](deploy.md#public-media-is-readable-by-anyone-with-its-url).
 
 ### Webhooks (outbound)
 - **Gated content is delivered** — a content event carries the full block tree

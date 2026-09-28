@@ -52,7 +52,7 @@ newsletter subscribe POST.
 | 12 | Low | Open | [#1657](https://github.com/The-Verscienta/kiln_cms/issues/1657) | Newsletter honeypot | Weaker than forms honeypot (whitespace passes). |
 | 13 | Low | Open | [#1658](https://github.com/The-Verscienta/kiln_cms/issues/1658) | Media workers | Missing `org_id` in legacy job args → `nil` tenant; fail-closed under default `strict_tenancy`. Align with `default_org_id()` like other workers. |
 | 14 | Info | Track | [#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) | `#1402` follow-up | 304 unexplained `authorize?: false` in non-web lib — ratchet holds; SystemActor migration incomplete. |
-| 15 | Info | — | [#1666](https://github.com/The-Verscienta/kiln_cms/issues/1666) | `/uploads/*` | Capability-URL residual; private storage correctly off Plug.Static. |
+| 15 | Info | **Documented** | [#1666](https://github.com/The-Verscienta/kiln_cms/issues/1666) | `/uploads/*` | Capability-URL residual; private storage correctly off Plug.Static. |
 
 **Tracking:** [#1667](https://github.com/The-Verscienta/kiln_cms/issues/1667). Collab prototype pin: [#1660](https://github.com/The-Verscienta/kiln_cms/issues/1660).
 
