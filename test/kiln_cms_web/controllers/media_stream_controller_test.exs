@@ -69,7 +69,9 @@ defmodule KilnCMSWeb.MediaStreamControllerTest do
   end
 
   defp editor, do: signed_in_user(%{role: :editor})
-  defp reader(audiences), do: signed_in_user(%{role: :viewer, audiences: audiences})
+  # Audiences are read off a membership since 1.0 (#1543), not the user column.
+  defp reader(audiences),
+    do: %{role: :viewer} |> signed_in_user() |> KilnCMS.OrgFixtures.grant_audiences(audiences)
 
   defp log_in(conn, user) do
     conn

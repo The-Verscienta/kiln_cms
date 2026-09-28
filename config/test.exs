@@ -8,6 +8,7 @@ config :kiln_cms, Oban, testing: :manual
 # warns when it does; leaving this on would make that warning fire on every run
 # and train away a signal that exists to catch real leakage.
 config :kiln_cms, :occurrence_backfill_on_boot, false
+config :kiln_cms, :legacy_audiences_migration_on_boot, false
 
 # Keep DNS checks and the port-25 preflight off the network in tests; explicit
 # `dns:`/`tcp:` opts in DnsCheck tests still override these.

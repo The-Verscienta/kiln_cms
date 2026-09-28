@@ -71,6 +71,16 @@ with {:ok, enabled?} <- Env.fetch("KILN_OCCURRENCE_BACKFILL_ON_BOOT") do
   config :kiln_cms, :occurrence_backfill_on_boot, enabled?
 end
 
+# ## Oban: rescuing jobs orphaned by a shutdown (#1718)
+#
+# Minutes a job may stay `executing` before Oban.Lifeline treats its node as
+# dead and makes it runnable again. Must exceed the longest legitimate job
+# (a backup: 2 h), or a live job runs twice. `false` turns rescuing off.
+# Validated in KilnCMS.Application — an unusable value warns and keeps 180.
+if rescue_after = System.get_env("KILN_OBAN_RESCUE_AFTER_MINUTES") do
+  config :kiln_cms, :oban_rescue_after_minutes, rescue_after
+end
+
 if user_agent = System.get_env("KILN_LINK_CHECK_USER_AGENT") do
   config :kiln_cms, KilnCMS.Links.External, user_agent: user_agent
 end

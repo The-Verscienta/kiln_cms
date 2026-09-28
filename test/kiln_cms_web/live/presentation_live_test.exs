@@ -55,7 +55,10 @@ defmodule KilnCMSWeb.PresentationLiveTest do
       %{
         title: "Live post",
         slug: "pl-#{System.unique_integer([:positive])}",
-        block_tree: [%{"type" => "heading", "content" => "Original heading", "order" => 1}]
+        block_tree:
+          KilnCMS.TypedFixtures.typed_blocks([
+            %{"type" => "heading", "content" => "Original heading", "order" => 1}
+          ])
       },
       actor: admin
     )
@@ -294,7 +297,10 @@ defmodule KilnCMSWeb.PresentationLiveTest do
           title: "English page",
           slug: shared,
           locale: "en",
-          block_tree: [%{"type" => "heading", "content" => "EN heading", "order" => 1}]
+          block_tree:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{"type" => "heading", "content" => "EN heading", "order" => 1}
+            ])
         },
         actor: admin
       )

@@ -21,6 +21,32 @@ defmodule KilnCMS.Media.IngestTest do
     })
   end
 
+  describe "job_tenant/2 (#1658)" do
+    import ExUnit.CaptureLog
+
+    test "a job's own org_id is its tenant, silently" do
+      org_id = Ash.UUID.generate()
+
+      assert capture_log(fn ->
+               assert Ingest.job_tenant(%{"org_id" => org_id}, __MODULE__) == {:ok, org_id}
+             end) == ""
+    end
+
+    test "a job without one is cancelled — never defaulted — with an error naming the worker" do
+      for args <- [%{"media_item_id" => "m1"}, %{"media_item_id" => "m1", "org_id" => nil}] do
+        log =
+          capture_log(fn ->
+            assert {:cancel, "job has no org_id"} =
+                     Ingest.job_tenant(args, KilnCMS.Media.AVWorker)
+          end)
+
+        assert log =~ "[error]"
+        assert log =~ "KilnCMS.Media.AVWorker"
+        assert log =~ ~s("m1")
+      end
+    end
+  end
+
   describe "store_url/2 refuses unsafe targets" do
     test "loopback" do
       assert {:error, {:unsafe_url, _}} = Ingest.store_url("http://localhost/pic.jpg")

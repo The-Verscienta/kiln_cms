@@ -2,6 +2,8 @@ defmodule KilnCMS.Firing.LlmMarkdownTest do
   @moduledoc "The :llm fired surface (#357): clean chunked Markdown for answer engines."
   use KilnCMS.DataCase, async: true
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.CMS
   alias KilnCMS.Firing.Engine
 
@@ -22,14 +24,15 @@ defmodule KilnCMS.Firing.LlmMarkdownTest do
         %{
           title: "Tea Basics",
           slug: "llm-#{System.unique_integer([:positive])}",
-          blocks: [
-            %{type: :heading, content: "Getting started", data: %{"level" => 2}, order: 0},
-            %{
-              type: :rich_text,
-              content: "<p>Steep the <strong>leaves</strong> gently.</p>",
-              order: 1
-            }
-          ]
+          blocks:
+            typed_blocks([
+              %{type: :heading, content: "Getting started", data: %{"level" => 2}, order: 0},
+              %{
+                type: :rich_text,
+                content: "<p>Steep the <strong>leaves</strong> gently.</p>",
+                order: 1
+              }
+            ])
         },
         actor: actor
       )

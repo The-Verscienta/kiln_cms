@@ -60,11 +60,121 @@ Every summary line below that was shortened links to its own entry there.
   migration; if it is interrupted, drop the invalid index and migrate again.**
   ([#1712](https://github.com/The-Verscienta/kiln_cms/issues/1712) · [long form](docs/changelog/unreleased.md#a-new-index-on-every-content-tables-titles-is-built-concurrently-by-the))
 
+- **Jobs already stuck `executing` from earlier deploys run again (or are
+  discarded) within a minute of upgrading.**
+  ([#1718](https://github.com/The-Verscienta/kiln_cms/issues/1718) · [long form](docs/changelog/unreleased.md#jobs-already-stuck-executing-from-earlier-deploys-run-again-or-are-discarded))
+
+- **Run `mix kiln.org_slugs` to find organizations whose slug can't be a hostname.**
+  ([#1710](https://github.com/The-Verscienta/kiln_cms/issues/1710) · [long form](docs/changelog/unreleased.md#run-mix-kilnorgslugs-to-find-organizations-whose-slug-cant-be-a-hostname))
+
+- **On a multi-org deployment with `KILN_CONSOLE_HOST` set, add
+  `*.<console host>` to DNS and TLS before upgrading.**
+  ([#1688](https://github.com/The-Verscienta/kiln_cms/issues/1688) · [long form](docs/changelog/unreleased.md#on-a-multi-org-deployment-with-kiln_console_host-set-add-console-host-to-dns))
+
+- **Before upgrading to 1.0, run `mix kiln.blocks.backfill` on 0.12, and move any
+  code that writes legacy `type`/`content`/`data` blocks to the typed shape.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#before-upgrading-to-10-run-the-block-backfill))
+
+- **On 0.12, before `mix kiln.update --allow-major` to 1.0: run the block
+  backfill and `mix kiln.deprecations --migrate-audiences`, and drain the queue.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#on-012-before-upgrading-to-10))
+
+### Breaking
+
+- **On a multi-org install with `KILN_CONSOLE_HOST` set, each non-default
+  org's console moves to `<slug>.<console host>`: add wildcard DNS and a
+  wildcard TLS certificate for `*.<console host>` before upgrading.**
+  ([#1688](https://github.com/The-Verscienta/kiln_cms/issues/1688) · [long form](docs/changelog/unreleased.md#on-a-multi-org-install-with-kiln_console_host-set-each-non-default-orgs-console))
+
+- **Remove `TypedBlocks.to_legacy/1`, `TypedBlocks.from_legacy/1` and
+  `KilnCMS.CMS.Block`; use `to_typed/1` and render from typed blocks.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#remove-the-legacy-block-bridge-functions))
+
+- **Refuse a block written in the legacy `type`/`content`/`data` shape; stored
+  rows in that shape are still read.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#refuse-the-legacy-block-write-shape))
+
+- **Remove the `published?:` option on `use KilnCMS.CMS.Content`; passing it now
+  warns as an unknown option.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#remove-the-published-option))
+
+- **Remove the `/editor/pages/:id` and `/editor/posts/:id` editor routes; each
+  now answers with a `301` to `/editor/content/page|post/:id`.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#remove-the-editor-route-aliases))
+
+- **Remove the `User.audiences` fallback for accounts with no membership; a job
+  on every boot moves such accounts onto a default-organization membership.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#remove-the-user-audiences-fallback))
+
+- **Stop running webhook and newsletter jobs queued in a pre-0.12 argument
+  shape; each is cancelled with an error in the log.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#stop-running-pre-012-job-shapes))
+
+### Added
+
+- **`mix kiln.migrations.check` fails a PR whose new migration breaks the
+  release still serving mid-deploy.**
+  ([#1716](https://github.com/The-Verscienta/kiln_cms/issues/1716) · [long form](docs/changelog/unreleased.md#mix-kilnmigrationscheck-gates-expand-contract))
+
+### Changed
+
+- **Keep `RichText.legacy_html` as a fallback instead of removing it;
+  the nested column editor now stores Portable Text.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#keep-legacy-html-as-a-fallback))
+
+- **Automation rules are set up with ordinary fields instead of a JSON box.**
+  ([long form](docs/changelog/unreleased.md#automation-rules-are-set-up-with-ordinary-fields-instead-of-a-json-box))
+
+- **Console lists share one empty state; long settings pages get a table of
+  contents; screen crumbs point at their real parent.**
+  ([#1678](https://github.com/The-Verscienta/kiln_cms/issues/1678) · [#1680](https://github.com/The-Verscienta/kiln_cms/issues/1680) · [long form](docs/changelog/unreleased.md#console-lists-share-one-empty-state-long-settings-pages-get-a-table-of-contents))
+
+- **The release image's `latest` tag moves only to the highest final release,
+  and from 1.0.0 a floating major tag (`1`) follows the highest final release of
+  its major.**
+  ([#1544](https://github.com/The-Verscienta/kiln_cms/issues/1544) · [long form](docs/changelog/unreleased.md#the-release-images-latest-tag-moves-only-to-the-highest-final-release-and-from))
+
 ### Fixed
 
 - **Search holds at most two pooled connections, and answers `503` rather than
   `500` when the pool is full.**
   ([#1712](https://github.com/The-Verscienta/kiln_cms/issues/1712) · [long form](docs/changelog/unreleased.md#search-holds-at-most-two-pooled-connections-and-answers-503-rather-than-500))
+
+- **A job killed by a deploy's shutdown is rescued after three hours instead of
+  staying `executing` for ever.**
+  ([#1718](https://github.com/The-Verscienta/kiln_cms/issues/1718) · [long form](docs/changelog/unreleased.md#a-job-killed-by-a-deploys-shutdown-is-rescued-after-three-hours-instead-of))
+
+- **An organization's slug must be a hostname label, and is stored lowercase.**
+  ([#1710](https://github.com/The-Verscienta/kiln_cms/issues/1710) · [long form](docs/changelog/unreleased.md#an-organizations-slug-must-be-a-hostname-label-and-is-stored-lowercase))
+
+- **A stored block of a type the build no longer has, or one that is not a
+  block, no longer fails its page's delivery.**
+  ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#unreadable-stored-blocks-no-longer-fail-delivery))
+
+- **Edited images get new variants under strict tenancy, and a media job with no
+  `org_id` is cancelled with a logged error instead of doing nothing silently.**
+  ([#1658](https://github.com/The-Verscienta/kiln_cms/issues/1658) · [long form](docs/changelog/unreleased.md#a-media-job-with-no-org-id-is-cancelled-not-silently-skipped))
+
+- **An old newsletter confirmation link no longer re-subscribes a reader who
+  unsubscribed.**
+  ([#1690](https://github.com/The-Verscienta/kiln_cms/issues/1690) · [long form](docs/changelog/unreleased.md#an-old-newsletter-confirmation-link-no-longer-re-subscribes))
+
+### Security
+
+- **`KILN_CONSOLE_HOST` now isolates every organization's console, each on its
+  own `<slug>.<console host>` origin.**
+  ([#1688](https://github.com/The-Verscienta/kiln_cms/issues/1688) · [long form](docs/changelog/unreleased.md#kiln_console_host-now-isolates-every-organizations-console-each-on-its-own))
+
+- **The newsletter sign-up honeypot and public forms trip on the same rule.**
+  ([#1657](https://github.com/The-Verscienta/kiln_cms/issues/1657) · [long form](docs/changelog/unreleased.md#newsletter-sign-up-honeypot-matches-forms))
+
+- **Federation runs under the policies.** 24 more internal writes and reads run
+  as scoped system actors; the replay check and follower ceiling fail closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#federation-runs-under-the-policies))
+
+- **`mint` 1.11.0 closes three advisories: HTTP/1 response smuggling and two
+  HTTP/2 client memory exhaustions (EEF-CVE-2026-91043 HIGH, -92103, -94194).**
+  ([#1722](https://github.com/The-Verscienta/kiln_cms/pull/1722) · [long form](docs/changelog/unreleased.md#mint-1110-closes-three-advisories-http1-response-smuggling-and-two-http2))
 
 ## [0.12.0] - 2026-09-27
 

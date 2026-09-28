@@ -74,7 +74,7 @@ defmodule KilnCMSWeb.CollabFragmentTest do
     [id_a, id_b] =
       CMS.get_page!(page.id, actor: editor).blocks |> Enum.map(& &1.value.id)
 
-    {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/pages/#{page.id}")
+    {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
 
     assert html =~ ~s(data-collab-fragment="block-#{id_a}")
     assert html =~ ~s(data-collab-fragment="block-#{id_b}")

@@ -28,12 +28,12 @@ defmodule KilnCMS.Firing.ReferencesTest do
 
   describe "extract/1" do
     test "pulls reference edges out of legacy ref blocks via the bridge" do
-      typed = KilnCMS.LegacyBridge.from_legacy([ref_block("abc123")])
+      typed = KilnCMS.CMS.TypedBlocks.to_typed([ref_block("abc123")])
       assert References.extract(typed) == [{:page, "abc123"}]
     end
 
     test "a document with no references yields no edges (tree walk suffices)" do
-      typed = KilnCMS.LegacyBridge.from_legacy([%{type: :heading, content: "x"}])
+      typed = KilnCMS.CMS.TypedBlocks.to_typed([%{type: :heading, content: "x"}])
       assert References.extract(typed) == []
     end
   end
@@ -45,7 +45,12 @@ defmodule KilnCMS.Firing.ReferencesTest do
       _target = CMS.publish_page!(target, actor: actor)
 
       referrer =
-        CMS.create_page!(%{title: "A", slug: slug(), blocks: [ref_block(target.id)]},
+        CMS.create_page!(
+          %{
+            title: "A",
+            slug: slug(),
+            blocks: KilnCMS.TypedFixtures.typed_blocks([ref_block(target.id)])
+          },
           actor: actor
         )
 
@@ -65,7 +70,12 @@ defmodule KilnCMS.Firing.ReferencesTest do
       target = CMS.publish_page!(target, actor: actor)
 
       referrer =
-        CMS.create_page!(%{title: "A", slug: slug(), blocks: [ref_block(target.id)]},
+        CMS.create_page!(
+          %{
+            title: "A",
+            slug: slug(),
+            blocks: KilnCMS.TypedFixtures.typed_blocks([ref_block(target.id)])
+          },
           actor: actor
         )
 
@@ -82,10 +92,23 @@ defmodule KilnCMS.Firing.ReferencesTest do
       actor = admin()
 
       b = CMS.create_page!(%{title: "B", slug: slug()}, actor: actor)
-      a = CMS.create_page!(%{title: "A", slug: slug(), blocks: [ref_block(b.id)]}, actor: actor)
+
+      a =
+        CMS.create_page!(
+          %{
+            title: "A",
+            slug: slug(),
+            blocks: KilnCMS.TypedFixtures.typed_blocks([ref_block(b.id)])
+          },
+          actor: actor
+        )
 
       # Make B reference A as well (the cycle), then publish both so edges exist.
-      b = CMS.update_page!(b, %{blocks: [ref_block(a.id)]}, actor: actor)
+      b =
+        CMS.update_page!(b, %{blocks: KilnCMS.TypedFixtures.typed_blocks([ref_block(a.id)])},
+          actor: actor
+        )
+
       b = CMS.publish_page!(b, actor: actor)
       _a = CMS.publish_page!(a, actor: actor)
       drain()

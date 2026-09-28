@@ -8,6 +8,15 @@ defmodule KilnCMS.Newsletter.SendWorker do
   triggering request never blocks on delivery and each recipient retries
   independently. Runs on the dedicated `:newsletter` queue so a large blast
   can't starve transactional `:mail`.
+
+  ## Safe to re-run
+
+  A second run of the same send — a retry after a crash part-way through the
+  fan-out, or a rescue by `Oban.Lifeline` after a deploy killed it (#1718) —
+  re-enqueues only the recipients the first run did not reach: `MailWorker`
+  is `unique` on `{newsletter_send_id, subscriber_id}` across every job
+  state, so a recipient who already has a job (queued, delivered, or
+  cancelled) is not mailed twice.
   """
   use Oban.Worker, queue: :newsletter, max_attempts: 3
 
@@ -15,12 +24,10 @@ defmodule KilnCMS.Newsletter.SendWorker do
   alias KilnCMS.Newsletter.MailWorker
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"newsletter_send_id" => send_id} = args}) do
+  def perform(%Oban.Job{args: %{"newsletter_send_id" => send_id, "org_id" => tenant}})
+      when is_binary(tenant) do
     # The enqueuer carries the campaign's org (newsletter.ex); under strict
-    # tenancy (#419) the send lookup itself needs it (default-org fallback for
-    # any legacy job that predates the arg; deprecated, #1538, and logged).
-    tenant = KilnCMS.Deprecations.job_org_id(args, __MODULE__)
-
+    # tenancy (#419) the send lookup itself needs it.
     case Newsletter.get_send!(send_id,
            authorize?: false,
            not_found_error?: false,
@@ -56,4 +63,10 @@ defmodule KilnCMS.Newsletter.SendWorker do
         :ok
     end
   end
+
+  # A job with no `org_id` was enqueued by a release before 0.12, which ran it
+  # against the default org with a deprecation warning. 1.0 removed that
+  # fallback (#1543): the job is cancelled with a logged error, never retried.
+  def perform(%Oban.Job{args: args}),
+    do: KilnCMS.Deprecations.cancel_legacy_job(__MODULE__, args)
 end

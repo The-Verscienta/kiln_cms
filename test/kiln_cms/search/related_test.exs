@@ -39,7 +39,10 @@ defmodule KilnCMS.Search.RelatedTest do
         %{
           title: Keyword.get(opts, :title, "Doc"),
           slug: slug(),
-          blocks: [%{type: :rich_text, content: "<p>#{text}</p>", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>#{text}</p>", order: 0}
+            ])
         },
         actor: actor
       )
@@ -100,7 +103,10 @@ defmodule KilnCMS.Search.RelatedTest do
       %{
         title: Keyword.get(opts, :title, "Doc"),
         slug: slug(),
-        blocks: [%{type: :rich_text, content: "<p>#{text}</p>", order: 0}]
+        blocks:
+          KilnCMS.TypedFixtures.typed_blocks([
+            %{type: :rich_text, content: "<p>#{text}</p>", order: 0}
+          ])
       },
       actor: actor
     )
@@ -193,9 +199,10 @@ defmodule KilnCMS.Search.RelatedTest do
           %{
             title: "Same",
             slug: slug(),
-            blocks: [
-              %{type: :rich_text, content: "<p>unique passage about kiln firing</p>", order: 0}
-            ]
+            blocks:
+              KilnCMS.TypedFixtures.typed_blocks([
+                %{type: :rich_text, content: "<p>unique passage about kiln firing</p>", order: 0}
+              ])
           },
           actor: actor
         )
@@ -597,7 +604,10 @@ defmodule KilnCMS.Search.RelatedTest do
         %{
           title: Keyword.get(opts, :title, "Doc"),
           slug: slug(),
-          blocks: [%{type: :rich_text, content: "<p>#{text}</p>", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>#{text}</p>", order: 0}
+            ])
         },
         actor: actor,
         tenant: org
@@ -634,11 +644,12 @@ defmodule KilnCMS.Search.RelatedTest do
           %{
             title: "Three blocks",
             slug: slug(),
-            blocks: [
-              %{type: :rich_text, content: "<p>first unique multiblock passage</p>", order: 0},
-              %{type: :rich_text, content: "<p>second unique multiblock passage</p>", order: 1},
-              %{type: :rich_text, content: "<p>third unique multiblock passage</p>", order: 2}
-            ]
+            blocks:
+              KilnCMS.TypedFixtures.typed_blocks([
+                %{type: :rich_text, content: "<p>first unique multiblock passage</p>", order: 0},
+                %{type: :rich_text, content: "<p>second unique multiblock passage</p>", order: 1},
+                %{type: :rich_text, content: "<p>third unique multiblock passage</p>", order: 2}
+              ])
           },
           actor: actor,
           tenant: org

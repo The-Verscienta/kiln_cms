@@ -213,7 +213,7 @@ if Code.ensure_loaded?(Igniter) do
     @doc false
     def resource_body(module, type, opts) do
       # Only `excerpt?`: `--published` adds an interface on the domain, and the
-      # `published?:` option it used to write here is deprecated (#1538).
+      # `published?:` option it used to write here was removed at 1.0 (#1543).
       flags =
         [{:excerpt?, opts[:excerpt]}]
         |> Enum.filter(&elem(&1, 1))

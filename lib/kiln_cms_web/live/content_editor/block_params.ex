@@ -537,7 +537,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockParams do
 
     case type do
       "heading" -> Map.merge(base, %{"text" => "", "level" => 2})
-      "rich_text" -> Map.merge(base, %{"legacy_html" => "", "body" => []})
+      "rich_text" -> Map.put(base, "body", [])
       "quote" -> Map.merge(base, %{"text" => "", "citation" => ""})
       "image" -> Map.merge(base, %{"url" => "", "alt" => ""})
       "embed" -> Map.merge(base, %{"url" => ""})
@@ -549,6 +549,19 @@ defmodule KilnCMSWeb.ContentEditor.BlockParams do
   # render, so an out-of-range value is harmless, but a non-integer would fail the
   # embedded cast).
   defp put_child_field(child, "level", value), do: Map.put(child, "level", to_int(value))
+
+  # A nested rich-text child's prose is typed as HTML and stored as Portable
+  # Text `body`. Only HTML that Portable Text cannot hold faithfully stays HTML,
+  # in `legacy_html` — the same rule as the inline editor's
+  # `KilnCMSWeb.InlineEditing.put_block_field/4` and the backfill — so an edit
+  # is never degraded. Before 1.0 this editor stored every nested rich-text
+  # child in `legacy_html` (#1543).
+  defp put_child_field(%{"_type" => "rich_text"} = child, "html", value) do
+    case KilnCMS.Blocks.PortableText.from_html_faithful(value) do
+      {:ok, body} -> child |> Map.put("body", body) |> Map.delete("legacy_html")
+      {:error, _reason} -> child |> Map.put("body", []) |> Map.put("legacy_html", value)
+    end
+  end
 
   # Only the fields this child's own editor renders. `field` arrives from a
   # client event, and a bare `Map.put/3` let one name a *structural* key:
@@ -642,16 +655,15 @@ defmodule KilnCMSWeb.ContentEditor.BlockParams do
   # media link, an embed's resolved card, a quote's admin-set `featured`), and a
   # fresh id on the way back orphaned the block's comment threads.
   #
-  # Rich text is the one reshape. The nested editor edits `legacy_html` only, so
-  # Portable Text becomes HTML on the way in — what `RichText.render/2`
-  # publishes either way — and HTML becomes Portable Text on the way out, where
-  # the canvas's TipTap editor reads `body`.
+  # Rich text crosses unchanged: both editors store Portable Text `body` (the
+  # nested one shows it as HTML, `nested_field_value/2`). A child stored before
+  # 1.0 with prose only in `legacy_html` is converted on the way out when the
+  # conversion is faithful, and otherwise keeps it, which still renders.
   def block_to_child(%{"_union_type" => type} = block) do
     block
     |> Map.delete("_union_type")
     |> Map.put("_type", type)
     |> Map.update("id", Ash.UUID.generate(), &(stable_id(&1) || Ash.UUID.generate()))
-    |> rich_text_to_child()
   end
 
   def child_to_block(%{"_type" => type} = child) do
@@ -661,18 +673,10 @@ defmodule KilnCMSWeb.ContentEditor.BlockParams do
     |> rich_text_to_block()
   end
 
-  defp rich_text_to_child(%{"_type" => "rich_text", "body" => [_ | _] = body} = child) do
-    child
-    |> Map.put("body", [])
-    |> Map.put("legacy_html", KilnCMS.Blocks.PortableText.to_html(body))
-  end
-
-  defp rich_text_to_child(child), do: child
-
   defp rich_text_to_block(%{"_union_type" => "rich_text", "legacy_html" => html} = block)
        when is_binary(html) and html != "" do
     # Only when the conversion is faithful and yields prose: HTML Portable Text
-    # cannot hold keeps its `legacy_html` (deprecated, #1537), which still
+    # cannot hold keeps its `legacy_html` (a read fallback since 1.0, #1543), which still
     # renders, rather than trading it for something the author did not write.
     case {block["body"], KilnCMS.Blocks.PortableText.from_html_faithful(html)} do
       {[_ | _], _} -> block
@@ -737,9 +741,27 @@ defmodule KilnCMSWeb.ContentEditor.BlockParams do
   # there reads a socket assign that does not exist and raises at render.
   def row_editor_type?(type), do: type in @row_editor_types
 
+  @doc """
+  The value a nested child's text input shows for `field`. Every field is the
+  child's own key except rich text's `"html"`, which is its Portable Text
+  `body` rendered to HTML — or, for a child stored before 1.0 with prose only in
+  `legacy_html`, that HTML (the read fallback, #1543).
+  """
+  def nested_field_value(%{"_type" => "rich_text"} = child, "html") do
+    case child["body"] do
+      [_ | _] = body -> KilnCMS.Blocks.PortableText.to_html(body)
+      _ -> child["legacy_html"] || ""
+    end
+  end
+
+  def nested_field_value(child, field), do: child[field] || ""
+
   # {field, placeholder} pairs for a nested child type's text inputs.
   def nested_fields_for("heading"), do: [{"text", gettext("Heading text")}]
-  def nested_fields_for("rich_text"), do: [{"legacy_html", gettext("HTML / text")}]
+  # Rich text is edited as HTML but stored as Portable Text `body` (see
+  # `put_child_field/3`): the nested editor no longer writes `legacy_html`,
+  # which 1.0 keeps only as a read fallback (#1543).
+  def nested_fields_for("rich_text"), do: [{"html", gettext("HTML / text")}]
 
   def nested_fields_for("quote"),
     do: [{"text", gettext("Quote")}, {"citation", gettext("Citation")}]

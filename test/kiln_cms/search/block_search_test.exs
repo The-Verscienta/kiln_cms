@@ -56,10 +56,19 @@ defmodule KilnCMS.Search.BlockSearchTest do
   end
 
   defp page_with_blocks(actor, blocks),
-    do: CMS.create_page!(%{title: "Doc", slug: slug(), blocks: blocks}, actor: actor)
+    do:
+      CMS.create_page!(
+        %{title: "Doc", slug: slug(), blocks: KilnCMS.TypedFixtures.typed_blocks(blocks)},
+        actor: actor
+      )
 
   defp page_with_blocks(actor, org, blocks),
-    do: CMS.create_page!(%{title: "Doc", slug: slug(), blocks: blocks}, actor: actor, tenant: org)
+    do:
+      CMS.create_page!(
+        %{title: "Doc", slug: slug(), blocks: KilnCMS.TypedFixtures.typed_blocks(blocks)},
+        actor: actor,
+        tenant: org
+      )
 
   describe "BlockIndexer.reindex/1" do
     test "embeds one row per non-empty block, keyed by block, deduped by hash" do
@@ -101,7 +110,10 @@ defmodule KilnCMS.Search.BlockSearchTest do
       trimmed =
         CMS.update_page!(
           page,
-          %{blocks: [%{type: :heading, content: "Otters", order: 0}]},
+          %{
+            blocks:
+              KilnCMS.TypedFixtures.typed_blocks([%{type: :heading, content: "Otters", order: 0}])
+          },
           actor: actor
         )
 
@@ -231,10 +243,11 @@ defmodule KilnCMS.Search.BlockSearchTest do
         CMS.update_page!(
           page,
           %{
-            blocks: [
-              %{type: :heading, content: "Otters rewritten", order: 0},
-              %{type: :rich_text, content: "<p>rewritten body</p>", order: 1}
-            ]
+            blocks:
+              KilnCMS.TypedFixtures.typed_blocks([
+                %{type: :heading, content: "Otters rewritten", order: 0},
+                %{type: :rich_text, content: "<p>rewritten body</p>", order: 1}
+              ])
           },
           actor: actor
         )
@@ -402,7 +415,10 @@ defmodule KilnCMS.Search.BlockSearchTest do
           %{
             title: "Entry with blocks",
             slug: slug(),
-            blocks: [%{type: :heading, content: "Indexed entry heading", order: 0}]
+            blocks:
+              KilnCMS.TypedFixtures.typed_blocks([
+                %{type: :heading, content: "Indexed entry heading", order: 0}
+              ])
           },
           actor: actor
         )

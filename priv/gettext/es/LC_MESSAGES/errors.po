@@ -38,6 +38,10 @@ msgstr "está reservado"
 msgid "is still associated with this entry"
 msgstr "todavía está asociado a esta entrada"
 
+## From KilnCMS.Accounts.OrgSlug.message/1 (#1710)
+msgid "must be 1 to 63 lowercase letters, digits or hyphens, and cannot start or end with a hyphen"
+msgstr "debe tener de 1 a 63 letras minúsculas, dígitos o guiones, y no puede empezar ni terminar con un guion"
+
 msgid "must be accepted"
 msgstr "debe ser aceptado"
 

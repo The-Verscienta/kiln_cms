@@ -2,6 +2,8 @@ defmodule KilnCMS.AskTest do
   @moduledoc "RAG retrieval + generation seam (issue #339)."
   use KilnCMS.DataCase, async: true
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.Ask
   alias KilnCMS.CMS
 
@@ -211,7 +213,7 @@ defmodule KilnCMS.AskTest do
           %{
             title: "The #{term} recipe card",
             slug: slug(),
-            blocks: [%{type: :rich_text, content: "<p>#{body}</p>", order: 0}]
+            blocks: typed_blocks([%{type: :rich_text, content: "<p>#{body}</p>", order: 0}])
           },
           actor: actor
         )

@@ -9,8 +9,22 @@ defmodule KilnCMS.Newsletter.MailWorker do
   suppression, and greylist-aware retry from the mail pipeline. Skips a
   subscriber who unsubscribed (or whose address hard-bounced) between fan-out
   and delivery.
+
+  `unique` on the `{send, subscriber}` pair, over every state and for as long
+  as the row exists, so a re-run of the fan-out (`SendWorker` retried, or
+  rescued after a deploy killed it — #1718) cannot mail anyone twice. The
+  pair is the job's whole identity: there is no legitimate second job for it.
   """
-  use Oban.Worker, queue: :newsletter, max_attempts: 8
+  use Oban.Worker,
+    queue: :newsletter,
+    max_attempts: 8,
+    unique: [
+      period: :infinity,
+      fields: [:worker, :args],
+      keys: [:newsletter_send_id, :subscriber_id],
+      states: :all
+    ]
+
   use KilnCMSWeb, :verified_routes
 
   import Swoosh.Email
@@ -20,13 +34,15 @@ defmodule KilnCMS.Newsletter.MailWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{
-        args: %{"newsletter_send_id" => send_id, "subscriber_id" => subscriber_id} = args
-      }) do
+        args: %{
+          "newsletter_send_id" => send_id,
+          "subscriber_id" => subscriber_id,
+          "org_id" => tenant
+        }
+      })
+      when is_binary(tenant) do
     # Strict tenancy (#419): the per-recipient job carries the campaign's org
-    # (enqueued by SendWorker); default-org fallback for any legacy job,
-    # deprecated (#1538) and logged.
-    tenant = KilnCMS.Deprecations.job_org_id(args, __MODULE__)
-
+    # (enqueued by SendWorker).
     send =
       Newsletter.get_send!(send_id, authorize?: false, not_found_error?: false, tenant: tenant)
 
@@ -55,6 +71,12 @@ defmodule KilnCMS.Newsletter.MailWorker do
         deliver(send, subscriber)
     end
   end
+
+  # A job with no `org_id` was enqueued by a release before 0.12, which ran it
+  # against the default org with a deprecation warning. 1.0 removed that
+  # fallback (#1543): the job is cancelled with a logged error, never retried.
+  def perform(%Oban.Job{args: args}),
+    do: KilnCMS.Deprecations.cancel_legacy_job(__MODULE__, args)
 
   @impl Oban.Worker
   def backoff(%Oban.Job{attempt: attempt}), do: Mail.backoff_seconds(attempt)

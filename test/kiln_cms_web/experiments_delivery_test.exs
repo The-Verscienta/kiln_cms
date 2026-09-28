@@ -9,6 +9,8 @@ defmodule KilnCMSWeb.ExperimentsDeliveryTest do
   """
   use KilnCMSWeb.ConnCase, async: false
 
+  import KilnCMS.TypedFixtures
+
   require Ash.Query
 
   alias KilnCMS.CMS
@@ -455,7 +457,10 @@ defmodule KilnCMSWeb.ExperimentsDeliveryTest do
 
     page =
       published_page(ctx.actor, %{
-        blocks: [%{type: :form, content: form.slug, data: %{"form_slug" => form.slug}, order: 0}]
+        blocks:
+          typed_blocks([
+            %{type: :form, content: form.slug, data: %{"form_slug" => form.slug}, order: 0}
+          ])
       })
 
     {experiment, control, treatment} =

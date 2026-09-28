@@ -187,7 +187,13 @@ defmodule KilnCMS.MixProject do
         # code-formatted references inside extras (CHANGELOG.md included), and
         # neither is a KilnCMS module ExDoc can resolve.
         ":sets.set/1",
-        "MapSet.t/1"
+        "MapSet.t/1",
+        # CHANGELOG history (0.12.0 and earlier) naming the legacy block bridge
+        # 1.0 removed (#1543). Historical entries describe the past and must not
+        # be rewritten to keep this passing.
+        "KilnCMS.CMS.TypedBlocks.to_legacy/1",
+        "KilnCMS.CMS.TypedBlocks.from_legacy/1",
+        "KilnCMS.CMS.Block"
       ],
       extras: extras(),
       # The committed API specs (`mix kiln.api.specs`) ship with the docs build,

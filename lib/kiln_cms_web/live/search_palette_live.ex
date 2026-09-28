@@ -157,9 +157,14 @@ defmodule KilnCMSWeb.SearchPaletteLive do
           <% end %>
         </p>
 
-        <p :if={@searched and @count == 0} class="text-sm text-base-content/70">
-          {gettext("No results for “%{query}”.", query: @query)}
-        </p>
+        <.empty_state
+          :if={@searched and @count == 0}
+          id="search-empty"
+          icon="hero-magnifying-glass"
+          title={gettext("No results for “%{query}”.", query: @query)}
+        >
+          {gettext("Try fewer or different words, or a screen name such as “webhooks”.")}
+        </.empty_state>
 
         <div :if={@count > 0} class="space-y-6">
           <%!-- Screens lead (#1319): a match on a destination is an unambiguous

@@ -32,20 +32,20 @@ defmodule KilnCMS.Billing.Entitlements do
 
   ## Two columns, deliberately
 
-  `User.audiences` receives the cross-org **union**, because the content read
-  policy reads `^actor(:audiences)` off that global column today. Each of the
-  user's `KilnCMS.Accounts.OrgMembership` rows receives its own org's **exact**
-  set, so a follow-up change can move the policy onto the per-org value without a
-  data migration. Until that lands, a membership in one org does widen the global
-  union — see `docs/memberships.md`.
+  Each of the user's `KilnCMS.Accounts.OrgMembership` rows receives its own
+  org's **exact** set — the value `KilnCMS.Accounts.Scoping.audiences/2` reads.
+  `User.audiences` receives the cross-org **union**, which no access decision
+  reads since 1.0 removed the membership-less fallback (#1543); it is kept as a
+  record (the GDPR export reports it) and 2.0 may drop it — see
+  `docs/memberships.md`.
 
   ## A legacy account's first membership
 
   A paid membership is a `:viewer` membership, but paying must never cost an
   account the tier it already holds (#1649). An account with **no memberships at
-  all** reads its standing `User.role` on the default org and `User.audiences`
-  everywhere; its first membership would make it *affiliated* and take both away
-  wherever it is not a member. So before creating the first one, the recompute
+  all** reads its standing `User.role` on the default org; its first membership
+  would make it *affiliated* and take that away wherever it is not a member. So
+  before creating the first one, the recompute
   gives it a default-org membership carrying its standing role, any live
   temporary role and its audiences —
   `KilnCMS.Accounts.LegacyAffiliation.ensure_default_membership/2`, the same step
@@ -203,19 +203,19 @@ defmodule KilnCMS.Billing.Entitlements do
   end
 
   # A paying reader must never lose authoring access by paying (#1649). An
-  # account with no memberships at all holds its standing role on the default org
-  # and its legacy audiences everywhere; its first membership would make it
-  # affiliated — a `:viewer` on the default org, or `:foreign_org` there with no
-  # tier and no audiences. So before creating one, carry it onto the default org
-  # first, with its `User.audiences`; `sync_existing/3` then settles the
+  # account with no memberships at all holds its standing role on the default
+  # org; its first membership would make it affiliated — a `:viewer` on the
+  # default org, or `:foreign_org` there with no tier. So before creating one,
+  # carry it onto the default org first, with its `User.audiences` (what it held
+  # before 1.0 removed the fallback, #1543); `sync_existing/3` then settles the
   # billing-managed part of that set like any other membership's, so what
   # survives there is its admin-owned audiences plus what it bought on the
   # default org.
   defp affiliate_legacy(user, memberships, by_org) do
     if LegacyAffiliation.unaffiliated?(memberships) and map_size(by_org) > 0 do
       # `authorize?: false`: the same system write as every other one in this
-      # module (see the moduledoc), and it grants on the default org exactly what
-      # the unaffiliated fallback already grants there.
+      # module (see the moduledoc), and it grants on the default org what the
+      # account held there before it had a membership.
       with {:ok, membership} <-
              LegacyAffiliation.ensure_default_membership(user, authorize?: false),
            do: {:ok, [membership]}

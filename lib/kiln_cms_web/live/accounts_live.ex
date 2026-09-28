@@ -28,8 +28,8 @@ defmodule KilnCMSWeb.AccountsLive do
 
   The audience checkboxes edit the account's `OrgMembership` on the site the
   page is served from — the value `KilnCMS.Accounts.Scoping.audiences/2` reads —
-  and never the global `User.audiences` column, which only the deprecated
-  no-membership fallback reads (#1646). An account with no membership here gets
+  and never the global `User.audiences` column, which no access decision reads
+  since 1.0 removed the no-membership fallback (#1646, #1543). An account with no membership here gets
   one on the first save; `KilnCMS.Accounts.SiteAudiences` says with what role.
   """
   use KilnCMSWeb, :live_view
@@ -145,8 +145,9 @@ defmodule KilnCMSWeb.AccountsLive do
   # --- one account -----------------------------------------------------------
 
   # The standing platform role. Only the role: `:manage_access` also accepts
-  # `audiences`, but that is the global column only the deprecated no-membership
-  # fallback reads, so the console no longer writes it (#1646).
+  # `audiences`, but that is the global column no access decision reads since
+  # 1.0 removed the no-membership fallback, so the console no longer writes it
+  # (#1646, #1543).
   def handle_event("save_access", %{"access" => params}, socket) when is_map(params) do
     %{actor: actor, account: account} = socket.assigns
 
@@ -520,9 +521,11 @@ defmodule KilnCMSWeb.AccountsLive do
     ~H"""
     <div class="space-y-6">
       <div>
-        <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
-          &larr; {gettext("All content")}
-        </.link>
+        <Layouts.console_crumb
+          current_user={@current_user}
+          current_org={@current_org}
+          active={:accounts}
+        />
         <h1 class="mt-1 text-2xl font-semibold">{gettext("Accounts")}</h1>
         <p class="text-sm text-base-content/70">
           {gettext(
@@ -731,7 +734,7 @@ defmodule KilnCMSWeb.AccountsLive do
         </p>
         <p :if={@source == :legacy} class="mt-2 text-sm text-warning-ink" id="audiences-source">
           {gettext(
-            "This account belongs to no site yet, so these come from its account-wide audiences, which 1.0 stops reading. Saving gives it a membership here that carries them."
+            "This account belongs to no site yet. These are its account-wide audiences, which no longer grant anything on their own: the next deploy moves them onto a membership on the default site, and saving gives it one here that carries them now."
           )}
         </p>
         <p :if={@source == :none} class="mt-2 text-sm text-base-content/70" id="audiences-source">

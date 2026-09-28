@@ -41,7 +41,10 @@ defmodule KilnCMS.CMS.CommentNotificationTest do
       %{
         title: title,
         slug: "cmt-#{System.unique_integer([:positive])}",
-        blocks: [%{type: :heading, content: "Body", data: %{"level" => 2}, order: 0}]
+        blocks:
+          KilnCMS.TypedFixtures.typed_blocks([
+            %{type: :heading, content: "Body", data: %{"level" => 2}, order: 0}
+          ])
       },
       actor: author
     )

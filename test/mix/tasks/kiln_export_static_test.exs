@@ -11,6 +11,8 @@ defmodule Mix.Tasks.Kiln.Export.StaticTest do
   """
   use KilnCMS.DataCase, async: false
 
+  import KilnCMS.TypedFixtures
+
   import ExUnit.CaptureIO
 
   alias KilnCMS.CMS
@@ -43,7 +45,8 @@ defmodule Mix.Tasks.Kiln.Export.StaticTest do
         %{
           title: "Exported",
           slug: slug,
-          blocks: [%{type: :heading, content: "Edge", data: %{"level" => 1}, order: 0}]
+          blocks:
+            typed_blocks([%{type: :heading, content: "Edge", data: %{"level" => 1}, order: 0}])
         },
         actor: actor,
         tenant: tenant

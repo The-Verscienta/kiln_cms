@@ -7,6 +7,8 @@ defmodule KilnCMS.CMS.LocaleSearchTest do
   """
   use KilnCMS.DataCase, async: true
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.CMS
 
   defp admin do
@@ -74,7 +76,8 @@ defmodule KilnCMS.CMS.LocaleSearchTest do
         %{
           title: "Dairy products",
           slug: slug(),
-          blocks: [%{type: :rich_text, content: "<p>A note about #{term}.</p>", order: 0}]
+          blocks:
+            typed_blocks([%{type: :rich_text, content: "<p>A note about #{term}.</p>", order: 0}])
         },
         actor: admin
       )

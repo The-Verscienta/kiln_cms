@@ -32,6 +32,18 @@ defmodule KilnCMS.Social.Composer do
 
   @ellipsis "…"
 
+  # The `{{placeholder}}` names a rule's `template` interpolates, in the order
+  # `rendered_text/6` replaces them.
+  @template_tokens ~w(title excerpt type url)
+
+  @doc """
+  The `{{placeholder}}` names a social post `template` interpolates.
+
+  Public so the admin form offers exactly these as insert chips.
+  """
+  @spec template_tokens() :: [String.t()]
+  def template_tokens, do: @template_tokens
+
   @doc """
   Compose the announcement text for `record` at `url`, within `max_length`.
 
@@ -93,11 +105,12 @@ defmodule KilnCMS.Social.Composer do
   # not fit, the tail is what is lost — including, if they put it last, the URL.
   # That is their call to make; the default shape is the one that protects it.
   defp rendered_text(template, title, excerpt, type, url, max_length) do
-    template
-    |> String.replace("{{title}}", title || "")
-    |> String.replace("{{excerpt}}", excerpt || "")
-    |> String.replace("{{type}}", type)
-    |> String.replace("{{url}}", url)
+    values = %{"title" => title || "", "excerpt" => excerpt || "", "type" => type, "url" => url}
+
+    # In `@template_tokens` order, which is the order these were always
+    # replaced in — a title containing "{{url}}" expands exactly as it did.
+    @template_tokens
+    |> Enum.reduce(template, &String.replace(&2, "{{#{&1}}}", Map.fetch!(values, &1)))
     |> clean()
     |> Kernel.||("")
     |> truncate(max_length)

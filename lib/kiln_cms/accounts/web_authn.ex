@@ -40,6 +40,7 @@ defmodule KilnCMS.Accounts.WebAuthn do
       user_verification: "required",
       attestation: "none"
     )
+    |> verify_origins()
   end
 
   @doc """
@@ -113,6 +114,7 @@ defmodule KilnCMS.Accounts.WebAuthn do
       user_verification: "required",
       allow_credentials: []
     )
+    |> verify_origins()
   end
 
   @doc "The client-side `navigator.credentials.get/1` options for `challenge`."
@@ -235,7 +237,9 @@ defmodule KilnCMS.Accounts.WebAuthn do
   def take_challenge(_nonce), do: nil
 
   # Relying-party identity from the endpoint's canonical URL — passkeys are
-  # scoped to this host (subdomain-site setups authenticate on the main host).
+  # scoped to this host. Ceremonies run on the main host and, with
+  # `KILN_CONSOLE_HOST` set, on the console hosts (`origin_allowed?/2`); tenant
+  # site hosts authenticate on one of those.
   # The WebAuthn origin is scheme://host[:port] with NO path and no default
   # port — the browser's clientDataJSON origin is compared by exact string, so
   # a URL config carrying a path or an explicit :443 would fail every
@@ -255,6 +259,55 @@ defmodule KilnCMS.Accounts.WebAuthn do
   end
 
   defp rp_id, do: URI.parse(KilnCMSWeb.Endpoint.url()).host
+
+  @doc """
+  Wax's `origin_verify_fun`: whether the browser-reported `client_origin` of a
+  ceremony is one Kiln runs passkey ceremonies on (#1688).
+
+  The challenge's own origin (the canonical `PHX_HOST` one) always is. So is a
+  console host — `KILN_CONSOLE_HOST` or an org's `<slug>.<console host>`, see
+  `KilnCMSWeb.Plugs.ConsoleHost` — reached with the canonical scheme and port:
+  the console is where editors sign in and enroll once a console host is set,
+  and until this, every ceremony there failed Wax's exact-origin match. The RP
+  ID does not change, so no registered passkey is orphaned; the browser itself
+  refuses the RP ID on a console host outside it
+  (`ConsoleHost.passkey_capable?/0`).
+
+  Tenant **site** hosts are deliberately not accepted. The RP ID is their
+  parent domain too, so the browser would hand an org admin's code injection
+  an assertion for it; accepting that origin is what would make it usable.
+  """
+  @spec origin_allowed?(String.t(), String.t() | [String.t()]) :: boolean()
+  def origin_allowed?(client_origin, challenge_origin) when is_binary(client_origin) do
+    Wax.origins_match?(client_origin, challenge_origin) or console_origin?(client_origin)
+  end
+
+  # Set on the struct rather than passed as an option: Wax reads
+  # `:origin_verify_fun` from its options, but its `Wax.opt()` type omits it,
+  # so passing it there makes Dialyzer judge both challenge builders as never
+  # returning.
+  defp verify_origins(%Wax.Challenge{} = challenge),
+    do: %{challenge | origin_verify_fun: {__MODULE__, :origin_allowed?, []}}
+
+  defp console_origin?(client_origin) do
+    client = URI.parse(client_origin)
+
+    client.path in [nil, ""] and is_nil(client.query) and
+      client_origin == console_origin_for(client.host) and
+      KilnCMSWeb.Plugs.ConsoleHost.console_host_name?(client.host)
+  end
+
+  # The canonical origin with its host swapped for `host` — what a browser on
+  # that console host reports, if it reached it over the canonical scheme and
+  # port. Built the way `origin/0` is, so a default port is never spelled out.
+  defp console_origin_for(host) when is_binary(host) do
+    origin()
+    |> URI.parse()
+    |> Map.put(:host, host)
+    |> URI.to_string()
+  end
+
+  defp console_origin_for(_host), do: nil
 
   defp verifier do
     :kiln_cms
