@@ -159,7 +159,6 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
     "lib/kiln_cms/governance/checkpoint.ex" => 8,
     "lib/kiln_cms/history.ex" => 5,
     "lib/kiln_cms/links/check_worker.ex" => 2,
-    "lib/kiln_cms/links/internal.ex" => 1,
     "lib/kiln_cms/links/report.ex" => 2,
     "lib/kiln_cms/links/settings.ex" => 2,
     "lib/kiln_cms/links/sweep.ex" => 5,

@@ -47,6 +47,15 @@ defmodule KilnCMS.Links.Internal do
   deleted one. To an editor those are opposite problems — "publish the draft"
   versus "this link is wrong" — so this looks in every state and says which.
 
+  ## It reads as the editor
+
+  "Every state" is every state *the caller may read*. Targets are looked up
+  with the caller's `actor`, under the content read policies, so an editor whose
+  content-type or audience scope does not cover a target gets `:missing` for it,
+  exactly as if it did not exist. Reading with `authorize?: false` would turn the
+  panel into an oracle: type a guessed path, learn that a draft exists there and
+  what state it is in (#1659).
+
   ## A redirect is not a broken link
 
   A published rename leaves a `KilnCMS.CMS.Redirect` behind and delivery serves
@@ -88,6 +97,9 @@ defmodule KilnCMS.Links.Internal do
           | :unknown
           | :external
 
+  @typedoc "Who is asking: the editor whose document holds the links, or `nil`."
+  @type actor :: Ash.Resource.record() | nil
+
   @doc """
   Resolve every path in `paths` as `%{path => resolution}`.
 
@@ -98,9 +110,13 @@ defmodule KilnCMS.Links.Internal do
   `locale` and `org_id` scope the lookup as a request would. **`org_id` is a
   uuid**, not an `Organization` — it reaches a Cachex key, where a struct raises
   on `String.Chars`.
+
+  `actor` is who the verdicts are for — see "It reads as the editor" above. A
+  target `actor` may not read resolves as if it were absent.
   """
-  @spec resolve_all([String.t()], String.t(), Ash.UUID.t()) :: %{String.t() => resolution()}
-  def resolve_all(paths, locale, org_id) do
+  @spec resolve_all([String.t()], String.t(), Ash.UUID.t(), actor()) ::
+          %{String.t() => resolution()}
+  def resolve_all(paths, locale, org_id, actor) do
     paths = paths |> List.wrap() |> Enum.filter(&is_binary/1) |> Enum.uniq()
 
     lookups =
@@ -108,7 +124,7 @@ defmodule KilnCMS.Links.Internal do
       |> Enum.filter(&internal?/1)
       |> Enum.map(&normalize/1)
       |> Enum.uniq()
-      |> Map.new(&{&1, lookup_path(&1, locale, org_id)})
+      |> Map.new(&{&1, lookup_path(&1, locale, org_id, actor)})
 
     Map.new(paths, fn path ->
       {path, if(internal?(path), do: Map.fetch!(lookups, normalize(path)), else: :external)}
@@ -116,17 +132,17 @@ defmodule KilnCMS.Links.Internal do
   end
 
   @doc "Resolve one path. See `t:resolution/0`."
-  @spec resolve(String.t(), String.t(), Ash.UUID.t()) :: resolution()
-  def resolve(path, locale, org_id) when is_binary(path) do
+  @spec resolve(String.t(), String.t(), Ash.UUID.t(), actor()) :: resolution()
+  def resolve(path, locale, org_id, actor) when is_binary(path) do
     # Classified BEFORE normalizing: normalization drops the query and fragment,
     # so a bare `#anchor` would otherwise become `/` and be resolved against the
     # home page. A same-page anchor is not a link to another document.
     if internal?(path),
-      do: path |> normalize() |> lookup_path(locale, org_id),
+      do: path |> normalize() |> lookup_path(locale, org_id, actor),
       else: :external
   end
 
-  def resolve(_path, _locale, _org_id), do: :external
+  def resolve(_path, _locale, _org_id, _actor), do: :external
 
   @doc """
   Whether `resolution` is something to tell the author about.
@@ -139,7 +155,7 @@ defmodule KilnCMS.Links.Internal do
   def problem?({:unpublished, _state}), do: true
   def problem?(_resolution), do: false
 
-  defp lookup_path(path, locale, org_id) do
+  defp lookup_path(path, locale, org_id, actor) do
     # `Plugs.SetLocale` strips a leading supported-locale segment before the
     # router sees the path, and every hreflang link and locale switcher emits
     # exactly that shape — so an author copying a live URL gets one. Without
@@ -148,17 +164,18 @@ defmodule KilnCMS.Links.Internal do
 
     case owned_namespace(path, org_id) do
       {:content, ct, slug} ->
-        lookup(ct, slug, locale, org_id) || alias_or_redirect(path, locale, org_id) || :missing
+        lookup(ct, slug, locale, org_id, actor) || alias_or_redirect(path, locale, org_id, actor) ||
+          :missing
 
       :not_ours ->
-        alias_or_redirect(path, locale, org_id) || :unknown
+        alias_or_redirect(path, locale, org_id, actor) || :unknown
     end
   end
 
   # Only a positive hit counts outside a namespace we own — the router serves
   # plenty this module knows nothing about.
-  defp alias_or_redirect(path, locale, org_id) do
-    by_alias(path, locale, org_id) || redirect(path, locale, org_id)
+  defp alias_or_redirect(path, locale, org_id, actor) do
+    by_alias(path, locale, org_id, actor) || redirect(path, locale, org_id)
   end
 
   # `/<prefix>/<slug>` where the prefix names a content type is ours, and that
@@ -223,19 +240,20 @@ defmodule KilnCMS.Links.Internal do
   # "gone". Retried in the default locale exactly as delivery retries
   # (`ContentController.localized/2`) — without it, a partially translated site
   # reports every link in a translated document as broken.
-  defp lookup(ct, slug, locale, org_id) do
-    do_lookup(ct, slug, locale, org_id) || default_locale_retry(ct, slug, locale, org_id)
+  defp lookup(ct, slug, locale, org_id, actor) do
+    do_lookup(ct, slug, locale, org_id, actor) ||
+      default_locale_retry(ct, slug, locale, org_id, actor)
   end
 
-  defp default_locale_retry(ct, slug, locale, org_id) do
+  defp default_locale_retry(ct, slug, locale, org_id, actor) do
     default = I18n.default_locale()
-    if locale == default, do: nil, else: do_lookup(ct, slug, default, org_id)
+    if locale == default, do: nil, else: do_lookup(ct, slug, default, org_id, actor)
   end
 
-  defp do_lookup(ct, slug, locale, org_id) do
+  defp do_lookup(ct, slug, locale, org_id, actor) do
     case filter_for(Slugs.storage_resource(ct), ct, slug, locale) do
       nil -> nil
-      query -> query |> Ash.Query.select([:state]) |> read_state(org_id)
+      query -> query |> Ash.Query.select([:state]) |> read_state(org_id, actor)
     end
   end
 
@@ -259,30 +277,37 @@ defmodule KilnCMS.Links.Internal do
 
   # The multi-segment alias fallback (#485), in every state and with the same
   # default-locale retry.
-  defp by_alias(path, locale, org_id) do
+  defp by_alias(path, locale, org_id, actor) do
     default = I18n.default_locale()
 
     Enum.find_value(alias_resources(), fn resource ->
-      alias_state(resource, path, locale, org_id) ||
-        if(locale != default, do: alias_state(resource, path, default, org_id))
+      alias_state(resource, path, locale, org_id, actor) ||
+        if(locale != default, do: alias_state(resource, path, default, org_id, actor))
     end)
   end
 
-  defp alias_state(resource, path, locale, org_id) do
+  defp alias_state(resource, path, locale, org_id, actor) do
     resource
     |> Ash.Query.filter(path_alias == ^path and locale == ^locale)
     |> Ash.Query.select([:state])
-    |> read_state(org_id)
+    |> read_state(org_id, actor)
   end
 
   # An error says nothing about the link, so it must not become a verdict — a
   # transient database blip would otherwise fill an author's panel with errors
   # about links that are perfectly fine. Same for a multi-match.
-  defp read_state(query, org_id) do
-    case Ash.read_one(query, authorize?: false, tenant: org_id) do
+  #
+  # Read as `actor`, so the content read policies decide what exists: they are
+  # filter checks (state, audience, password) plus a type-scope check on the
+  # actor, none of which needs a selected field, so `select([:state])` is safe.
+  # A target they hide comes back `nil` — the same answer as no row — and a
+  # refusal is treated the same way rather than as a failed lookup.
+  defp read_state(query, org_id, actor) do
+    case Ash.read_one(query, actor: actor, tenant: org_id) do
       {:ok, %{state: :published}} -> :published
       {:ok, %{state: state}} -> {:unpublished, state}
       {:ok, nil} -> nil
+      {:error, %Ash.Error.Forbidden{}} -> nil
       {:error, reason} -> log_and_skip(reason)
     end
   end

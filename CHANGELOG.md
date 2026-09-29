@@ -177,6 +177,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Security
 
+- **The editor's link advisory no longer reveals content the editor cannot read.**
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#the-editors-link-advisory-no-longer-reveals-content-the-editor-cannot-read))
+
 - **`KILN_CONSOLE_HOST` now isolates every organization's console, each on its
   own `<slug>.<console host>` origin.**
   ([#1688](https://github.com/The-Verscienta/kiln_cms/issues/1688) · [long form](docs/changelog/unreleased.md#kiln_console_host-now-isolates-every-organizations-console-each-on-its-own))
