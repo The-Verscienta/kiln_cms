@@ -2438,6 +2438,11 @@ msgstr ""
 msgid "Block"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Block actions"
+msgstr ""
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Block actor"
@@ -2483,6 +2488,7 @@ msgstr ""
 msgid "Blocked. Matching followers were removed."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/system_live.ex
@@ -4806,6 +4812,11 @@ msgstr ""
 msgid "Document"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Document body as Markdown"
+msgstr ""
+
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "Document fields"
@@ -5090,6 +5101,16 @@ msgstr ""
 msgid "Edit URL"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Edit as"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Edit block %{n} on the page"
+msgstr ""
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Edit field %{label}"
@@ -5123,6 +5144,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Edit this block on the page"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Edit this document's blocks as Markdown"
 msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -6611,7 +6637,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/inspector_preview_component.ex
 #, elixir-autogen, elixir-format
-msgid "Hover a block and click Edit to change it on the page."
+msgid "Hover a block and click Edit, or Tab to it, to change it on the page."
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
@@ -7305,6 +7331,11 @@ msgstr ""
 msgid "Light"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Lines like <!-- kiln:block gallery … --> stand for blocks Markdown can't express; move or delete them like any line."
+msgstr ""
+
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #, elixir-autogen, elixir-format
 msgid "Link"
@@ -7562,6 +7593,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/inbox_live.ex
 #, elixir-autogen, elixir-format
 msgid "Mark unread"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Markdown"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/markdown_import.ex
@@ -9330,6 +9366,11 @@ msgstr ""
 msgid "Page %{page}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Page actions"
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/content_controller.ex
 #: lib/kiln_cms_web/controllers/error_html/404.html.heex
 #, elixir-autogen, elixir-format
@@ -9446,6 +9487,11 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Past its unpublish date and still published"
 msgstr "Past its unpublish date and still published"
+
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Paste or write Markdown. It becomes blocks as you type — switch back to Blocks to see them."
+msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -10148,7 +10194,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
-msgid "Rebuild the page"
+msgid "Rebuild the page and search"
 msgstr ""
 
 #: lib/kiln_cms_web/live/social_live.ex
@@ -10299,7 +10345,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
-msgid "Regenerate the published page from the latest content."
+msgid "Regenerate the published page and its search entry from the latest content."
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/preview.ex
@@ -12311,6 +12357,11 @@ msgstr ""
 msgid "Someone else saved this page. Duplicating copies their version, not what you see. Continue?"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Someone is editing a block right now. Try the Markdown view again once they're done."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/form_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Something needs fixing"
@@ -13185,6 +13236,11 @@ msgstr ""
 msgid "That tier no longer exists."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "That's more Markdown than one document can hold (the limit is %{size} MB)."
+msgstr ""
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "The AI account and models this site's AI features use."
@@ -14042,6 +14098,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "This release is nearly full (%{count} of %{cap})."
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "This rule would never run: only tasks are assigned or go overdue, and tasks are never published or updated. Pick “Tasks” for a task event, or a content type for the others."
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live.ex
@@ -15595,6 +15656,7 @@ msgstr ""
 msgid "You need admin access to view that page."
 msgstr ""
 
+#: lib/kiln_cms_web/live/link_report_live.ex
 #: lib/kiln_cms_web/live_user_auth.ex
 #, elixir-autogen, elixir-format
 msgid "You need editor access to view that page."
@@ -15802,6 +15864,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
 msgid "a minute"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "a segment that no longer exists"
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
@@ -16477,6 +16544,11 @@ msgstr ""
 msgid "one keyword or phrase per line"
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "one segment"
+msgstr ""
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "or URL"
@@ -16530,7 +16602,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
-msgid "rebuild the page"
+msgid "rebuild the page and its search entry"
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -16630,7 +16702,17 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
+msgid "send the newsletter to a segment that no longer exists"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/wording.ex
+#, elixir-autogen, elixir-format
 msgid "send the newsletter to all subscribers"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/wording.ex
+#, elixir-autogen, elixir-format
+msgid "send the newsletter to one segment"
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex

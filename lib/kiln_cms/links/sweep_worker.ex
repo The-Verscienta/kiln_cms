@@ -27,13 +27,31 @@ defmodule KilnCMS.Links.SweepWorker do
   alias KilnCMS.Links.Sweep
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: args}) do
-    args |> org_ids() |> Enum.each(&sweep/1)
+  # One site on demand ("Check now"): a raise fails the job where it shows.
+  def perform(%Oban.Job{args: %{"org_id" => org_id}}) when is_binary(org_id) do
+    sweep(org_id)
     :ok
   end
 
-  defp org_ids(%{"org_id" => org_id}) when is_binary(org_id), do: [org_id]
-  defp org_ids(_args), do: Settings.enabled_org_ids()
+  # The nightly run over every site. One site's raise (a refused grant fails
+  # closed by raising, #1659) is logged and the rest still run: with
+  # `max_attempts: 1`, letting it end the job would leave every later site
+  # unswept until the next night.
+  def perform(%Oban.Job{}) do
+    Enum.each(Settings.enabled_org_ids(), fn org_id ->
+      try do
+        sweep(org_id)
+      rescue
+        error ->
+          Logger.error(
+            "link check: sweep of #{org_id} failed: " <>
+              Exception.format(:error, error, __STACKTRACE__)
+          )
+      end
+    end)
+
+    :ok
+  end
 
   defp sweep(org_id) do
     if Settings.enabled?(org_id) do

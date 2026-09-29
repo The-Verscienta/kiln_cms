@@ -17,7 +17,6 @@ defmodule KilnCMSWeb.FormBuilderLive do
   alias KilnCMS.CMS.FormField
   alias KilnCMS.Forms.Autoresponder
   alias KilnCMS.Forms.EmbedPolicy
-  alias Phoenix.LiveView.ColocatedHook
 
   import KilnCMSWeb.BlockComponents, only: [public_form_field: 1, field_width_class: 1]
 
@@ -578,38 +577,12 @@ defmodule KilnCMSWeb.FormBuilderLive do
           </a>
         </div>
 
-        <script :type={ColocatedHook} name=".TabKeys">
-          // The WAI-ARIA tabs keyboard model on a server-driven tablist:
-          // Left/Right move to the neighbouring tab (wrapping), Home/End to the
-          // ends, and the tab is activated as it is focused. Tab itself leaves
-          // the list — only the selected tab is in the tab order (tabindex=0).
-          export default {
-            mounted() {
-              this.el.addEventListener("keydown", e => {
-                const tabs = Array.from(this.el.querySelectorAll('[role="tab"]'))
-                const i = tabs.indexOf(document.activeElement)
-                if (i === -1) return
-                const next = {
-                  ArrowRight: (i + 1) % tabs.length,
-                  ArrowLeft: (i - 1 + tabs.length) % tabs.length,
-                  Home: 0,
-                  End: tabs.length - 1,
-                }[e.key]
-                if (next === undefined) return
-                e.preventDefault()
-                tabs[next].focus()
-                tabs[next].click()
-              })
-            },
-          }
-        </script>
-
         <div
           id="form-builder-tabs"
           class="tabs flex-wrap"
           role="tablist"
           aria-label={gettext("Form sections")}
-          phx-hook=".TabKeys"
+          phx-hook="TabKeys"
         >
           <button
             :for={tab <- [:fields, :general, :notifications, :confirmations, :embed, :entries]}

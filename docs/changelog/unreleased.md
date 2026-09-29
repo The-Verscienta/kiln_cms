@@ -183,6 +183,22 @@ carries the reasoning.
 
 ## Added
 
+<a id="editor-markdown-view"></a>
+
+- **The content editor has a Blocks | Markdown switch.** Markdown shows the
+  document's blocks as one Markdown text: prose keeps its headings, lists,
+  marks, links, code and tables (`PortableText.to_markdown/1`, the new reverse
+  of `KilnCMS.Markdown`), and headings, dividers and plain images become their
+  Markdown. A block Markdown can't express (a gallery, a form, columns, a
+  media-library image) becomes a placeholder line,
+  `<!-- kiln:block gallery <id> -->`, that stands for it unchanged and can be
+  moved or deleted like any line. Whatever is pasted or typed is parsed as you
+  go, through the same converter as paste, `.md` import and the API's
+  `body_markdown`, so the preview, autosave and Save all see it, and switching
+  back shows the blocks. Switching back without an edit leaves every block
+  exactly as it was. An edit re-parses the text, so prose between placeholders
+  becomes one rich-text block.
+
 <a id="on-012-before-upgrading-to-10"></a>
 
 - **On 0.12, before `mix kiln.update --allow-major` to 1.0: run the block
@@ -246,7 +262,50 @@ carries the reasoning.
   tag floating on it would go quiet
   ([#1544](https://github.com/The-Verscienta/kiln_cms/issues/1544)).
 
+<a id="the-content-editors-chrome-is-on-the-component-kit"></a>
+
+- **The content editor's chrome is on the component kit: the inspector is a
+  keyboard-driven tab strip, and block controls show on focus and on touch.**
+  The inspector's Preview / Settings / History switch is the kit `.tabs` with
+  the ARIA tabs pattern the Form Builder got in #1680: each tab names the
+  panel it controls, the panels are `tabpanel`s, only the selected tab is in
+  the Tab order, and Left/Right/Home/End move between tabs. The keys come from
+  one shared `TabKeys` hook (`assets/js/tab_keys.js`) that both screens use.
+  A block's move, duplicate and remove controls are kit ghost buttons with the
+  kit focus ring. They still fade in on hover and on keyboard focus, and now
+  also while you work inside the block and always on a touch screen, which
+  has no hover. The live preview's "Edit" jump was `display: none` until
+  hovered, so the keyboard could not reach it. It is now faded out instead,
+  which keeps it in the Tab order. The page actions are grouped: Preview,
+  Side-by-side and Visual keep their words, and Media library, Copy preview
+  link and Duplicate fold to icons below very wide screens, keeping their
+  names for screen readers. "Add block", the block filter, gallery fields and
+  the column controls use kit classes too. The accessibility chip and grade
+  pill use the `*-ink` text tokens; "Needs work" was 1.38:1 in dark mode.
+  "Save draft" and "Publish now" keep their names and places. Saving,
+  autosave, the working copy and conflict handling are unchanged. The
+  design language no longer promises device-width preview modes, which the
+  editor never had
+  ([#1679](https://github.com/The-Verscienta/kiln_cms/issues/1679)).
+
 ## Fixed
+
+<a id="per-type-semantic-search-ranks-a-record-the-query-names-first"></a>
+
+- **Per-type semantic search ranks a record the query names first, however
+  long the record.** The `semantic-search` JSON:API routes, the GraphQL
+  semantic lists and `CMS.semantic_search_*` already exempted a record the
+  query names (by title, or by a field flagged as a name) from
+  `semantic_max_distance`, but still sorted it at its distance rank. A
+  record's one vector is embedded from its whole text, so a long record sits
+  far from a bare-name query, below short records whose names merely sound
+  alike: Verscienta measured 14 of 602 acupuncture points missing the top 10
+  for their own name, the best-documented ones. Named records now come first,
+  nearest first among themselves, as the title leg already does in hybrid
+  search. No re-embed is needed. A query that names something is no longer
+  served by the HNSW index (the distance no longer leads the `ORDER BY`);
+  one that names nothing is unchanged.
+  ([#1746](https://github.com/The-Verscienta/kiln_cms/pull/1746))
 
 <a id="a-seo-or-accessibility-finding-below-a-fragment-names-and-jumps-to-the-right"></a>
 
@@ -438,7 +497,10 @@ carries the reasoning.
   being built, the form shows it as one sentence, such as "When Post content
   is published, email team@example.com." The rules list shows that sentence
   in place of `post.published → send_email`, and a rule saved with no name is
-  named by it.
+  named by it — and stays named by it through later edits, until someone types
+  a name of their own. A task event scoped to a content type (a rule that
+  could never fire) is called out in the builder instead of being worded as if
+  it worked.
 
 <a id="the-automation-builder-offers-ready-made-recipes-and-a-preview-on-real-content"></a>
 
@@ -507,6 +569,35 @@ carries the reasoning.
   `authorize_with: :error`; a refusal or a failed count is treated as "at the
   ceiling", and the follow is refused and logged. Honest senders see no
   difference unless the nonce store is down. (#1659)
+
+<a id="the-link-checker-runs-under-the-policies"></a>
+
+- **The link checker runs under the policies.** The outbound link sweep, the
+  per-URL check worker and the reader of the "check outbound links" switch
+  reached `ExternalLink` and `SiteLinkCheck` through `authorize?: false`. They
+  now run as `KilnCMS.Links.system/0`, a `KilnCMS.SystemActor`, and each
+  resource admits it by action name: the occurrence rows' `read`, `observe`,
+  `record_check` and `destroy`, and the switch's `read` and `record_sweep` (not
+  the settings form's `save`, so turning checking on stays an admin act). The
+  broken-link report at `/editor/links` now reads as the editor viewing it.
+
+  The reads that back a decision fail closed. The check worker's
+  failure-count read, which drives the retry-before-flagging counter, runs
+  with `authorize_with: :error`, and a refusal writes no verdict instead of
+  reading as "no rows". The sweep's due-URL read raises instead of queueing
+  nothing. A refused `observe` aborts the sweep before its prune, which would
+  otherwise delete every row along with its failure count. The switch read
+  logs a refusal and resolves it to "off". A viewer the report's policy
+  refuses gets an error, not an empty "nothing is broken" page.
+
+  Content reads stay `authorize?: false`, each with a written reason: the
+  sweep's scan of published documents, the internal checker's target-state
+  lookup, oEmbed's document reads and the related-links keyword search. A
+  system-actor grant on content would be a standing read over the whole
+  corpus, drafts included. oEmbed's `:set_oembed_metadata` write also stays:
+  it writes the block tree, and the content resource admits the system actor
+  only to actions that accept no `:blocks`. The `mix kiln.authz.check` backlog
+  drops by 16 sites and seven files. (#1659)
 
 <a id="mix-kilnmigrationscheck-gates-expand-contract"></a>
 

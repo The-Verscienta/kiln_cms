@@ -30,7 +30,14 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownImport do
   import Phoenix.LiveView, only: [attach_hook: 4, put_flash: 3]
 
   import KilnCMSWeb.ContentEditor.BlockParams,
-    only: [blocks_count: 1, full_blocks_input: 1, inject_rich_bodies: 2]
+    only: [
+      add_blocks: 2,
+      full_blocks_input: 1,
+      html_block_params: 1,
+      inject_rich_bodies: 2,
+      remove_all_blocks: 1,
+      writable?: 1
+    ]
 
   alias KilnCMS.Markdown
   alias Phoenix.LiveView.ColocatedHook
@@ -88,8 +95,6 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownImport do
     do: {:halt, assign(socket, :markdown_import, nil)}
 
   defp on_event(_event, _params, socket), do: {:cont, socket}
-
-  defp writable?(socket), do: socket.assigns[:may_write?] == true
 
   defp receive_file(socket, %{"too_large" => _}), do: too_large(socket)
 
@@ -177,12 +182,8 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownImport do
   defp do_apply(socket, pending, mode) do
     replace? = mode == "replace"
     base = if replace?, do: remove_all_blocks(socket.assigns.form), else: socket.assigns.form
-    added = Enum.map(pending.blocks, &block_params/1)
-
-    form =
-      Enum.reduce(added, base, fn params, form ->
-        AshPhoenix.Form.add_form(form, form.name <> "[blocks]", params: params)
-      end)
+    added = Enum.map(pending.blocks, &html_block_params/1)
+    form = add_blocks(base, added)
 
     # Each imported prose body is registered as its block's pending body: a
     # rich-text block's DOM carries no body field, so the server-held copy is
@@ -241,23 +242,6 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownImport do
   defp slug_target(%{"title" => _}), do: ["form", "title"]
   defp slug_target(_chosen), do: nil
 
-  defp remove_all_blocks(form) do
-    case blocks_count(form) do
-      0 ->
-        form
-
-      count ->
-        Enum.reduce((count - 1)..0//-1, form, fn index, acc ->
-          AshPhoenix.Form.remove_form(acc, "#{acc.name}[blocks][#{index}]")
-        end)
-    end
-  end
-
-  # `KilnCMS.Blocks.Html`'s `%{"type", "value"}` input shape → the editor's
-  # union sub-form params, with the stable id every editor block carries.
-  defp block_params(%{"type" => type, "value" => value}),
-    do: Map.merge(value, %{"_union_type" => type, "id" => Ash.UUID.generate()})
-
   # ── Components ────────────────────────────────────────────────────────────
 
   @doc """
@@ -276,7 +260,7 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownImport do
       class="btn btn-sm btn-ghost"
       title={gettext("Replace or extend this document's blocks with a Markdown (.md) file")}
     >
-      <.icon name="hero-document-arrow-up" class="mr-1 size-4" />{gettext("Import Markdown")}
+      <.icon name="hero-document-arrow-up" class="size-4" />{gettext("Import Markdown")}
     </button>
     """
   end

@@ -222,11 +222,7 @@ defmodule KilnCMSWeb.AutomationLive.Preview do
     assigns =
       assigns
       |> assign(:newsletter, newsletter)
-      |> assign(
-        :audience,
-        get_in(assigns.names, [:segments, newsletter.segment_id]) ||
-          gettext("all confirmed subscribers")
-      )
+      |> assign(:audience, audience(newsletter.segment_id, Map.get(assigns.names, :segments)))
 
     ~H"""
     <p class="font-medium">
@@ -287,6 +283,17 @@ defmodule KilnCMSWeb.AutomationLive.Preview do
     <p class="text-base-content/70">{@reason}</p>
     """
   end
+
+  # Worded as `Wording.summary/2` words it: a missing `segment_id` means
+  # everyone, but one that doesn't resolve is a deleted segment (the send is
+  # refused) or pickers not loaded yet — neither is "all subscribers".
+  defp audience(nil, _segments), do: gettext("all confirmed subscribers")
+
+  defp audience(id, %{} = segments) when is_map_key(segments, id),
+    do: Map.fetch!(segments, id)
+
+  defp audience(_id, %{}), do: gettext("a segment that no longer exists")
+  defp audience(_id, _segments), do: gettext("one segment")
 
   defp skip_reason(:non_default_locale),
     do: gettext("Newsletters follow the default-language version, and this is a translation.")

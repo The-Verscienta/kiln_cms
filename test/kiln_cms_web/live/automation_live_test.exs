@@ -306,6 +306,34 @@ defmodule KilnCMSWeb.AutomationLiveTest do
       assert_no_email_sent()
     end
 
+    test "try it never tells a stale-segment newsletter it reaches everyone", %{conn: conn} do
+      admin = authed_user(:admin)
+      conn = log_in(conn, admin)
+
+      page =
+        CMS.create_page!(
+          %{title: "Lighthouse", slug: "lighthouse-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+      view |> element("#rule_try_it button", "Try it on real content") |> render_click()
+
+      # A deleted segment: the real send is refused. Saying "all confirmed
+      # subscribers" would describe the opposite of what happens.
+      render_change(view, "validate", %{
+        "rule" => %{
+          "action" => "newsletter",
+          "trigger_event" => "published",
+          "config" => %{"segment_id" => Ash.UUID.generate()}
+        },
+        "preview_record" => "page:#{page.id}"
+      })
+
+      assert has_element?(view, "#rule_preview_effects", "a segment that no longer exists")
+      refute has_element?(view, "#rule_preview_effects", "all confirmed subscribers")
+    end
+
     test "try it: task events can't be tried on content", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/editor/automation")
       view |> element("#rule_try_it button", "Try it on real content") |> render_click()
@@ -404,6 +432,157 @@ defmodule KilnCMSWeb.AutomationLiveTest do
              |> render()
              |> String.split("ed@example.com")
              |> length() == 2
+    end
+
+    test "a failed save leaves a blank name blank, so it still follows the rule", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+
+      # "Send to" forgotten: the save is refused.
+      view
+      |> form("#new-rule-form",
+        rule: %{name: "", trigger_event: "published", action: "send_email"}
+      )
+      |> render_submit()
+
+      assert Automation.list_rules!(authorize?: false) == []
+      assert has_element?(view, "#rule_config_to-error", "This is required.")
+
+      # The sentence was not frozen into the input by the refused save.
+      assert has_element?(view, ~s(#rule_name[value=""]))
+
+      refute has_element?(
+               view,
+               ~s(#rule_name[value="When any content is published, send an email."])
+             )
+
+      view
+      |> form("#new-rule-form",
+        rule: %{
+          name: "",
+          trigger_event: "published",
+          action: "send_email",
+          config: %{to: "ed@example.com"}
+        }
+      )
+      |> render_submit()
+
+      assert [rule] = Automation.list_rules!(authorize?: false)
+      assert rule.name == "When any content is published, email ed@example.com."
+    end
+
+    test "a sentence cut to fit the name is still not said twice", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+      topic = String.duplicate("t", KilnCMS.Limits.line())
+      view |> form("#new-rule-form", rule: %{action: "broadcast"}) |> render_change()
+
+      view
+      |> form("#new-rule-form", rule: %{name: "", action: "broadcast", config: %{topic: topic}})
+      |> render_submit()
+
+      assert [rule] = Automation.list_rules!(authorize?: false)
+      assert String.length(rule.name) == KilnCMS.Limits.line()
+      refute has_element?(view, "#rule-#{rule.id} p.text-sm")
+    end
+
+    test "a cleared name is never flagged required", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+
+      view |> form("#new-rule-form", rule: %{name: "Draft"}) |> render_change()
+      view |> form("#new-rule-form", rule: %{name: ""}) |> render_change()
+
+      refute has_element?(view, "#rule_name-error")
+      assert has_element?(view, ~s(#rule_name[value=""]))
+    end
+
+    test "an auto-named rule keeps following its sentence when edited", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+
+      view
+      |> form("#new-rule-form",
+        rule: %{
+          name: "",
+          trigger_event: "published",
+          action: "send_email",
+          config: %{to: "ed@example.com"}
+        }
+      )
+      |> render_submit()
+
+      assert [rule] = Automation.list_rules!(authorize?: false)
+      view |> element("#rule-#{rule.id} button", "Edit") |> render_click()
+
+      # Its name is its sentence, so the field shows blank with the sentence
+      # as the placeholder — not a frozen copy to save back unchanged.
+      assert has_element?(view, ~s(#rule_#{rule.id}_name[value=""]))
+
+      view
+      |> form("#edit-rule-#{rule.id}",
+        rule: %{action: "invalidate_cache", trigger_event: "updated"}
+      )
+      |> render_submit()
+
+      assert {:ok, %{name: "When any content is updated, clear the cache."}} =
+               Automation.get_rule(rule.id, authorize?: false)
+
+      # A name someone typed is theirs, and stays through an edit.
+      view |> element("#rule-#{rule.id} button", "Edit") |> render_click()
+      view |> form("#edit-rule-#{rule.id}", rule: %{name: "Cache buster"}) |> render_submit()
+      view |> element("#rule-#{rule.id} button", "Edit") |> render_click()
+
+      view
+      |> form("#edit-rule-#{rule.id}", rule: %{trigger_event: "published"})
+      |> render_submit()
+
+      assert {:ok, %{name: "Cache buster"}} = Automation.get_rule(rule.id, authorize?: false)
+    end
+
+    test "a scope a trigger can never fire for is called out", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+      refute has_element?(view, "#rule_scope_warning")
+
+      view
+      |> form("#new-rule-form", rule: %{content_type: "post", trigger_event: "assigned"})
+      |> render_change()
+
+      assert has_element?(view, "#rule_scope_warning", "This rule would never run")
+
+      assert has_element?(
+               view,
+               "#rule_summary",
+               "When #{type_label("post")} content is assigned,"
+             )
+
+      view
+      |> form("#new-rule-form", rule: %{content_type: "task", trigger_event: "assigned"})
+      |> render_change()
+
+      refute has_element?(view, "#rule_scope_warning")
+    end
+
+    test "a refused reaction says why", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+
+      # Not a card on the page — a tampered post, or a reaction removed from
+      # `Rule` while the page was open.
+      view
+      |> element("#new-rule-form")
+      |> render_submit(%{
+        rule: %{name: "x", trigger_event: "published", action: "no_such_action"}
+      })
+
+      assert Automation.list_rules!(authorize?: false) == []
+      assert has_element?(view, "#rule_action-error")
+    end
+
+    test "the sentence describes the submit button, not a live region", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+
+      assert has_element?(
+               view,
+               ~s(#new-rule-form button[type="submit"][aria-describedby="rule_summary"])
+             )
+
+      refute has_element?(view, "#rule_summary[aria-live]")
     end
 
     test "the settings are generated from the enforcing table", %{conn: conn} do

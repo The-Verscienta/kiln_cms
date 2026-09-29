@@ -20,7 +20,8 @@ defmodule KilnCMSWeb.AutomationLive.Wording do
   alias KilnCMS.Automation.Rule
 
   # Verbs that only ever fire for editorial tasks (`task.assigned`,
-  # `task.overdue`): a rule on one reads "a task", whatever it's scoped to.
+  # `task.overdue`). Unscoped, a rule on one reads "a task"; scoped to a real
+  # content type it can never fire, and `dead_scope?/2` says so.
   @task_triggers [:assigned, :overdue]
 
   @doc """
@@ -62,6 +63,31 @@ defmodule KilnCMSWeb.AutomationLive.Wording do
   end
 
   defp health?(trigger), do: trigger in [:health_overdue, :health_expired]
+
+  @doc """
+  The trigger an untouched event select shows: its first option, which is the
+  first of `trigger_options/0`'s first group — not necessarily the first of
+  `Rule.triggers/0`.
+  """
+  @spec default_trigger() :: atom()
+  def default_trigger do
+    [{_group, [{_label, trigger} | _]} | _] = trigger_options()
+    trigger
+  end
+
+  @doc """
+  Whether `trigger` scoped to `content_type` can never fire.
+
+  Task events are dispatched as `task.<verb>` and `Rule.matching` compares the
+  type exactly, so a task verb scoped to a content type — or a content verb
+  scoped to "task" — is a rule that saves, lists as enabled, and never runs.
+  """
+  @spec dead_scope?(atom() | nil, String.t() | nil) :: boolean()
+  def dead_scope?(trigger, content_type) when trigger in @task_triggers,
+    do: content_type not in [nil, "", "task"]
+
+  def dead_scope?(nil, _content_type), do: false
+  def dead_scope?(_trigger, content_type), do: content_type == "task"
 
   @doc """
   One reaction card: `%{label, description, icon, group}`, or `nil` for a
@@ -153,8 +179,9 @@ defmodule KilnCMSWeb.AutomationLive.Wording do
 
   def action(:reindex),
     do: %{
-      label: gettext("Rebuild the page"),
-      description: gettext("Regenerate the published page from the latest content."),
+      label: gettext("Rebuild the page and search"),
+      description:
+        gettext("Regenerate the published page and its search entry from the latest content."),
       icon: "hero-arrow-path-rounded-square",
       group: :site
     }
@@ -212,8 +239,11 @@ defmodule KilnCMSWeb.AutomationLive.Wording do
   `rule` is anything with `:trigger_event`, `:content_type`, `:action` and
   `:config` (a `Rule`, or the builder's draft). `names` resolves ids to what
   an admin calls them — `%{types: %{"post" => "Post"}, users: %{id => name},
-  segments: %{id => name}}` — and an id it can't resolve is left out of the
-  sentence rather than shown raw.
+  segments: %{id => name}, providers: %{"bluesky" => "Bluesky"}}` — and an id
+  it can't resolve is never shown raw. A `segments` map that is absent (the
+  pickers not loaded yet) means "can't tell"; one that is present and lacks
+  the id means the segment is gone — neither reads as "all subscribers",
+  which is who a missing `segment_id` means.
   """
   @spec summary(map(), map()) :: String.t()
   def summary(rule, names \\ %{}) do
@@ -228,7 +258,22 @@ defmodule KilnCMSWeb.AutomationLive.Wording do
     )
   end
 
-  defp subject(_type, trigger, _names) when trigger in @task_triggers, do: gettext("a task")
+  @doc """
+  The name a rule saved with a blank name gets: its sentence, cut to what
+  the `name` attribute holds. A rule whose name equals this is treated as
+  unnamed — the builder shows its name field blank, so the name keeps
+  following the rule when it is edited.
+  """
+  @spec default_name(map(), map()) :: String.t()
+  def default_name(rule, names \\ %{}),
+    do: rule |> summary(names) |> String.slice(0, KilnCMS.Limits.line())
+
+  # Scoped to a content type, a task verb says so ("When Post content is
+  # assigned") rather than "a task": the rule never fires, and the sentence
+  # must not read as if it would.
+  defp subject(type, trigger, _names) when trigger in @task_triggers and type in [nil, ""],
+    do: gettext("a task")
+
   defp subject(type, _trigger, _names) when type in [nil, ""], do: gettext("any content")
   defp subject("task", _trigger, _names), do: gettext("a task")
 
@@ -242,14 +287,26 @@ defmodule KilnCMSWeb.AutomationLive.Wording do
   defp reaction(:send_email, _config, _names), do: gettext("send an email")
 
   defp reaction(:newsletter, config, names) do
-    case name(names, :segments, config["segment_id"]) do
-      nil -> gettext("send the newsletter to all subscribers")
-      segment -> gettext("send the newsletter to %{segment}", segment: segment)
+    case {config["segment_id"], Map.get(names, :segments)} do
+      {nil, _segments} ->
+        gettext("send the newsletter to all subscribers")
+
+      {id, %{} = segments} when is_map_key(segments, id) ->
+        gettext("send the newsletter to %{segment}", segment: Map.fetch!(segments, id))
+
+      # A deleted segment: the send is refused, so this reaches nobody.
+      {_id, %{}} ->
+        gettext("send the newsletter to a segment that no longer exists")
+
+      {_id, nil} ->
+        gettext("send the newsletter to one segment")
     end
   end
 
-  defp reaction(:social_post, %{"provider" => provider}, _names),
-    do: gettext("post to %{network}", network: Phoenix.Naming.humanize(provider))
+  defp reaction(:social_post, %{"provider" => provider}, names) do
+    network = name(names, :providers, provider) || Phoenix.Naming.humanize(provider)
+    gettext("post to %{network}", network: network)
+  end
 
   defp reaction(:social_post, _config, _names), do: gettext("post to social media")
 
@@ -258,7 +315,7 @@ defmodule KilnCMSWeb.AutomationLive.Wording do
 
   defp reaction(:create_task, _config, _names), do: gettext("create a task for the author")
   defp reaction(:invalidate_cache, _config, _names), do: gettext("clear the cache")
-  defp reaction(:reindex, _config, _names), do: gettext("rebuild the page")
+  defp reaction(:reindex, _config, _names), do: gettext("rebuild the page and its search entry")
 
   defp reaction(action, config, names)
        when action in [:flag_duplicates, :suggest_tags, :suggest_links, :suggest_metadata] do

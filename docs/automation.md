@@ -17,13 +17,45 @@ on top.
 
 ## Using it
 
-Manage rules at **`/editor/automation`** (admin-only). A rule is:
+Manage rules at **`/editor/automation`** (admin-only). Above the builder,
+**Start from a recipe** offers common rules ready-made ("Email me when
+something is published", "Create a task when content goes stale", "Announce
+new posts on social media", …). A recipe only fills in the builder: you finish
+what it can't know (which network, whose inbox) and add the rule as usual, and
+nothing is saved until you do (`KilnCMSWeb.AutomationLive.Recipes`).
 
-- **When** — a lifecycle trigger: `published`, `unpublished`, `updated`,
-  `in_review`, `returned_to_draft`, `assigned`, `overdue`, or the freshness
-  pair `health_overdue` / `health_expired`.
-- **Content type** — a specific type (`post`, a dynamic type's name) or *any*.
-- **Do** — one reaction (below), configured with a small JSON `config`.
+The builder is numbered steps:
+
+1. **When this happens** — a content type (`post`, a dynamic type's name,
+   *Tasks*, or *any*) and an event, grouped as editorial changes
+   (`published`, `unpublished`, `updated`, `in_review`, `returned_to_draft`),
+   tasks (`assigned`, `overdue`) and content health (`health_overdue` /
+   `health_expired`). A task event scoped to a content type — or a content
+   event scoped to *Tasks* — can never fire, and the builder says so.
+2. **Do this** — one reaction (below), picked from cards grouped as *Notify
+   people*, *Review & follow-up* and *Keep the site fresh*.
+3. **Set it up** — the reaction's settings, as ordinary fields generated from
+   the `config` table below (`KilnCMSWeb.AutomationLive.ConfigFields`). API
+   clients and seeds still write `config` as JSON.
+4. **Name it** — optional. While you build, the form reads the rule back as
+   one sentence ("When Post content is published, email team@example.com.");
+   a rule saved with no name is named by that sentence, and keeps following
+   it when the rule is edited until you type a name of your own. The rules
+   list shows each rule's sentence under its name.
+5. **Try it** — optional, on both the add and the edit form. Pick a recent
+   piece of content and the builder shows what the rule would do to it: the
+   email with its subject and body rendered, the social post text and how many
+   accounts would post it, the task with its assignee, due date and note — or
+   why nothing would happen (an open review task already covers it, a
+   newsletter skips translations, nobody can hold the task). It follows the
+   rule as you edit it and sends, posts and saves nothing. The effects come
+   from `KilnCMS.Automation.RuleWorker.preview/4`, which sits beside the real
+   reaction and shares its templating, defaults and checks, and the event
+   payload from that event's own builder — so `create_task` on a *publish*
+   honestly previews "nobody to assign": only the health events carry the
+   author. The four intelligence reactions are described, not run: running
+   them costs what the rule costs, and `suggest_metadata` may send the page
+   off-site.
 
 ### Reactions
 

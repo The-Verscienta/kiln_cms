@@ -38,6 +38,7 @@ defmodule KilnCMSWeb.AutomationLive do
        |> assign(:page_title, gettext("Automation"))
        |> assign(:type_options, type_options(org))
        |> assign(:config_options, config_options(socket, actor, org))
+       |> assign_names()
        |> assign(:edit, nil)
        |> assign(:recipe, nil)
        |> assign(:preview, @no_preview)
@@ -53,7 +54,7 @@ defmodule KilnCMSWeb.AutomationLive do
 
   @impl true
   def handle_event("validate", %{"rule" => params} = all, socket) when is_map(params) do
-    params = prepare_params(params)
+    params = prepare_params(params, socket.assigns.names)
 
     {:noreply,
      socket
@@ -74,7 +75,7 @@ defmodule KilnCMSWeb.AutomationLive do
   end
 
   def handle_event("create", %{"rule" => params}, socket) when is_map(params) do
-    case submit(socket.assigns.form, params, names(socket.assigns)) do
+    case submit(socket.assigns.form, params, socket.assigns.names) do
       {:ok, _rule} ->
         {:noreply,
          socket
@@ -102,7 +103,7 @@ defmodule KilnCMSWeb.AutomationLive do
         form =
           socket.assigns.actor
           |> create_form(socket.assigns.current_org)
-          |> AshPhoenix.Form.validate(prepare_params(recipe.params))
+          |> AshPhoenix.Form.validate(prepare_params(recipe.params, socket.assigns.names))
 
         {:noreply,
          socket
@@ -134,7 +135,11 @@ defmodule KilnCMSWeb.AutomationLive do
   def handle_event("validate_edit", %{"rule" => params} = all, socket) when is_map(params) do
     edit = %{
       socket.assigns.edit
-      | form: AshPhoenix.Form.validate(socket.assigns.edit.form, prepare_params(params))
+      | form:
+          AshPhoenix.Form.validate(
+            socket.assigns.edit.form,
+            prepare_params(params, socket.assigns.names)
+          )
     }
 
     {:noreply,
@@ -144,7 +149,7 @@ defmodule KilnCMSWeb.AutomationLive do
   end
 
   def handle_event("save_edit", %{"rule" => params}, socket) when is_map(params) do
-    case submit(socket.assigns.edit.form, params, names(socket.assigns)) do
+    case submit(socket.assigns.edit.form, params, socket.assigns.names) do
       {:ok, _rule} ->
         {:noreply,
          socket |> assign(:edit, nil) |> load_rules() |> put_flash(:info, gettext("Saved."))}
@@ -220,39 +225,45 @@ defmodule KilnCMSWeb.AutomationLive do
     |> to_form()
   end
 
-  defp submit(form, params, names) do
-    params = params |> prepare_params() |> name_from_summary(names)
-    AshPhoenix.Form.submit(form, params: params)
-  end
+  defp submit(form, params, names),
+    do: AshPhoenix.Form.submit(form, params: prepare_params(params, names))
 
+  # The settings inputs post strings under `rule[config]`; `ConfigFields.coerce/2`
+  # makes them the typed map the selected action accepts. An action with no
+  # settings (`reindex`, say) posts no config at all, which becomes `%{}`.
+  #
   # The name is optional in the builder: left blank, the rule is named by the
-  # sentence it reads as — the same one the form previewed as its placeholder.
-  # Only on submit: filling it on a change would put the sentence into the
-  # input, where it would stop following the trigger and action it describes.
-  defp name_from_summary(params, names) do
-    if blank?(params["name"]) do
-      summary = Wording.summary(draft_from_params(params), names)
-      Map.put(params, "name", String.slice(summary, 0, KilnCMS.Limits.line()))
-    else
-      params
-    end
+  # sentence it reads as (`Wording.default_name/2`). The fill runs on every
+  # change as well as on submit, so a blank name is never flagged "required";
+  # and the name field renders blank whenever its value is that sentence
+  # (`name_value/2`), so a failed save or an edit never freezes the sentence
+  # into the input — it keeps following the trigger and action it describes.
+  defp prepare_params(params, names) do
+    action = parse_action(params["action"])
+    params = Map.put(params, "config", ConfigFields.coerce(action, params["config"] || %{}))
+
+    if blank?(params["name"]),
+      do: Map.put(params, "name", Wording.default_name(draft_from_params(params), names)),
+      else: params
   end
 
+  # The same draft `draft/1` reads off a form, read off posted params.
   defp draft_from_params(params) do
     %{
-      trigger_event: parse_trigger(params["trigger_event"]),
+      trigger_event: parse_trigger(params["trigger_event"]) || Wording.default_trigger(),
       content_type: params["content_type"],
-      action: parse_action(params["action"]),
+      action: parse_action(params["action"]) || List.first(Rule.action_kinds()),
       config: params["config"]
     }
   end
 
   # The draft rule the form currently describes. An untouched form has no
-  # trigger or action yet, while its controls already show the first of
-  # each — so fall back to those, like `selected_action/1`.
+  # trigger or action yet, while its controls already show a choice — the
+  # event select its first option, the cards the one `selected_action/1`
+  # checks — so fall back to those.
   defp draft(form) do
     %{
-      trigger_event: parse_trigger(form[:trigger_event].value) || List.first(Rule.triggers()),
+      trigger_event: parse_trigger(form[:trigger_event].value) || Wording.default_trigger(),
       content_type: form[:content_type].value,
       action: selected_action(form),
       config: if(is_map(form[:config].value), do: form[:config].value, else: %{})
@@ -260,13 +271,42 @@ defmodule KilnCMSWeb.AutomationLive do
   end
 
   # What `Wording.summary/2` needs to say a rule in an admin's words: content
-  # type labels, and the people and segments the pickers offer.
-  defp names(%{type_options: types, config_options: options}) do
-    %{
+  # type labels, and the people, segments and networks the pickers offer.
+  # Both inputs are set once in `mount/3`, so this is too — built in
+  # `render/1` it would count as changed on every render and re-send the whole
+  # rules list on each keystroke. `segments` stays `nil` until the pickers
+  # load (the disconnected render), which `Wording` reads as "can't tell"
+  # rather than "no such segment".
+  defp assign_names(%{assigns: %{type_options: types, config_options: options}} = socket) do
+    assign(socket, :names, %{
       types: for({label, value} <- types, value != "", into: %{}, do: {value, label}),
-      users: Map.new(Map.get(options, :users, []), fn {label, id} -> {id, label} end),
-      segments: Map.new(Map.get(options, :segments, []), fn {label, id} -> {id, label} end)
-    }
+      users: label_map(options[:users]),
+      segments: options[:segments] && label_map(options[:segments]),
+      providers: label_map(options[:providers])
+    })
+  end
+
+  defp label_map(nil), do: %{}
+  defp label_map(options), do: Map.new(options, fn {label, value} -> {value, label} end)
+
+  # The name field's value: blank when the form's name is just the sentence
+  # the rule reads as, so the placeholder shows it and it keeps following.
+  defp name_value(form, default_name) do
+    case form[:name].value do
+      ^default_name -> ""
+      value -> value
+    end
+  end
+
+  # Each rule with the sentence it reads as, or `nil` when its name already
+  # is that sentence (so the list doesn't say it twice). Only re-run when
+  # `@rules` changes — `@names` is fixed after mount.
+  defp rule_rows(rules, names) do
+    for rule <- rules do
+      sentence = Wording.summary(rule, names)
+      same? = rule.name == String.slice(sentence, 0, KilnCMS.Limits.line())
+      {rule, if(same?, do: nil, else: sentence)}
+    end
   end
 
   defp blank?(value), do: not is_binary(value) or String.trim(value) == ""
@@ -331,14 +371,6 @@ defmodule KilnCMSWeb.AutomationLive do
     }
   end
 
-  # The settings inputs post strings under `rule[config]`; `ConfigFields.coerce/2`
-  # makes them the typed map the selected action accepts. An action with no
-  # settings (`reindex`, say) posts no config at all, which becomes `%{}`.
-  defp prepare_params(params) do
-    action = parse_action(params["action"])
-    Map.put(params, "config", ConfigFields.coerce(action, params["config"] || %{}))
-  end
-
   # Option lists for the settings form's pickers — the same assignee roster the
   # content editor's task picker offers (`Shared.assignable_users/1`). Loaded on
   # the connected mount only: the static render is replaced as soon as the
@@ -369,9 +401,8 @@ defmodule KilnCMSWeb.AutomationLive do
       [{gettext("Tasks"), "task"}]
   end
 
-  # An untouched form has no `action` value yet, while the select already shows
-  # its first option — so fall back to that rather than describing a reaction
-  # the admin isn't looking at.
+  # An untouched form has no `action` value yet; the cards check this one, so
+  # the sentence describes the reaction the admin is looking at.
   defp selected_action(form),
     do: parse_action(form[:action].value) || List.first(Rule.action_kinds())
 
@@ -389,8 +420,6 @@ defmodule KilnCMSWeb.AutomationLive do
 
   @impl true
   def render(assigns) do
-    assigns = assign(assigns, :names, names(assigns))
-
     ~H"""
     <Layouts.console
       flash={@flash}
@@ -446,7 +475,9 @@ defmodule KilnCMSWeb.AutomationLive do
               names={@names}
               preview={@preview}
             />
-            <.button type="submit" variant="primary">{gettext("Add rule")}</.button>
+            <.button type="submit" variant="primary" aria-describedby="rule_summary">
+              {gettext("Add rule")}
+            </.button>
           </.form>
         </section>
 
@@ -462,7 +493,11 @@ defmodule KilnCMSWeb.AutomationLive do
           </.empty_state>
 
           <ul :if={@rules != []} class="card divide-y divide-base-content/10 overflow-hidden">
-            <li :for={rule <- @rules} id={"rule-#{rule.id}"} class="p-4">
+            <li
+              :for={{rule, sentence} <- rule_rows(@rules, @names)}
+              id={"rule-#{rule.id}"}
+              class="p-4"
+            >
               <div :if={!editing?(@edit, rule.id)} class="flex items-start justify-between gap-4">
                 <div class="min-w-0 space-y-1">
                   <div class="flex items-center gap-2">
@@ -473,12 +508,7 @@ defmodule KilnCMSWeb.AutomationLive do
                     ]} />
                     <span class="font-medium">{rule.name}</span>
                   </div>
-                  <p
-                    :if={rule_summary(rule, @names) != rule.name}
-                    class="text-sm text-base-content/70"
-                  >
-                    {rule_summary(rule, @names)}
-                  </p>
+                  <p :if={sentence} class="text-sm text-base-content/70">{sentence}</p>
                   <p :if={rule.description} class="text-xs text-base-content/60">
                     {rule.description}
                   </p>
@@ -541,7 +571,13 @@ defmodule KilnCMSWeb.AutomationLive do
                   {gettext("Enabled")}
                 </label>
                 <div class="flex gap-2">
-                  <.button type="submit" variant="primary">{gettext("Save")}</.button>
+                  <.button
+                    type="submit"
+                    variant="primary"
+                    aria-describedby={"#{@edit.form.id}_summary"}
+                  >
+                    {gettext("Save")}
+                  </.button>
                   <button type="button" phx-click="cancel_edit" class="btn btn-sm btn-default">
                     {gettext("Cancel")}
                   </button>
@@ -554,8 +590,6 @@ defmodule KilnCMSWeb.AutomationLive do
     </Layouts.console>
     """
   end
-
-  defp rule_summary(rule, names), do: Wording.summary(rule, names)
 
   attr :recipes, :list, required: true
   attr :open, :boolean, required: true
@@ -609,17 +643,22 @@ defmodule KilnCMSWeb.AutomationLive do
   attr :preview_target, :string, default: "create", doc: "which builder: create or edit"
 
   # The builder as four numbered steps — when, do what, how, and what to call
-  # it — ending on the sentence the rule will read as. The sentence is live:
-  # every change re-renders it, so the admin reads back what they built before
-  # saving it.
+  # it — ending on the sentence the rule will read as. The sentence follows
+  # every change, so the admin reads back what they built before saving it.
+  # It is not an `aria-live` region — it would re-announce on every keystroke
+  # of "Send to" — but the submit button's description, read at the moment
+  # it matters.
   defp rule_fields(assigns) do
     draft = draft(assigns.form)
+    summary = Wording.summary(draft, assigns.names)
 
     assigns =
       assigns
       |> assign(:draft, draft)
       |> assign(:selected_action, draft.action)
-      |> assign(:summary, Wording.summary(draft, assigns.names))
+      |> assign(:summary, summary)
+      |> assign(:name_value, name_value(assigns.form, Wording.default_name(draft, assigns.names)))
+      |> assign(:dead_scope?, Wording.dead_scope?(draft.trigger_event, draft.content_type))
 
     ~H"""
     <ol class="space-y-6">
@@ -638,10 +677,31 @@ defmodule KilnCMSWeb.AutomationLive do
             options={Wording.trigger_options()}
           />
         </div>
+        <p
+          :if={@dead_scope?}
+          id={"#{@form.id}_scope_warning"}
+          class="flex items-start gap-2 text-sm text-warning-ink"
+        >
+          <.icon name="hero-exclamation-triangle" class="mt-0.5 size-4 shrink-0" />
+          {gettext(
+            "This rule would never run: only tasks are assigned or go overdue, and tasks are never published or updated. Pick “Tasks” for a task event, or a content type for the others."
+          )}
+        </p>
       </.step>
 
       <.step number={2} title={gettext("Do this")}>
         <.action_cards form={@form} selected={@selected_action} />
+        <%!-- The cards replaced a select that showed these; a refused value
+             (a tampered post, a reaction removed mid-session) says why. --%>
+        <div :if={@form[:action].errors != []} id={"#{@form.id}_action-error"}>
+          <p
+            :for={msg <- Enum.map(@form[:action].errors, &translate_error/1)}
+            class="flex items-center gap-2 text-sm text-error"
+          >
+            <.icon name="hero-exclamation-circle" class="size-5" />
+            {msg}
+          </p>
+        </div>
       </.step>
 
       <.step number={3} title={gettext("Set it up")}>
@@ -655,7 +715,6 @@ defmodule KilnCMSWeb.AutomationLive do
       <.step number={4} title={gettext("Name it")}>
         <div
           id={"#{@form.id}_summary"}
-          aria-live="polite"
           class="mb-3 flex items-start gap-3 rounded-lg border border-base-content/10 bg-base-200/50 p-3 text-sm"
         >
           <.icon name="hero-bolt" class="mt-0.5 size-4 shrink-0 text-base-content/60" />
@@ -663,6 +722,7 @@ defmodule KilnCMSWeb.AutomationLive do
         </div>
         <.input
           field={@form[:name]}
+          value={@name_value}
           label={gettext("Name")}
           placeholder={@summary}
           hint={gettext("Optional. Left blank, the rule is named by the sentence above.")}
@@ -738,10 +798,12 @@ defmodule KilnCMSWeb.AutomationLive do
             prompt={gettext("Choose a piece of content")}
             options={@preview.options}
           />
+          <%!-- Not `aria-live`, for the reason the rule's sentence isn't: it
+               re-renders on every keystroke in the builder, and a live region
+               would read the whole preview out each time. --%>
           <div
             :if={@preview.effects}
             id={"#{@form.id}_preview_effects"}
-            aria-live="polite"
             class="rounded-md bg-base-200/40 p-3"
           >
             <p class="mb-2 text-xs font-medium text-base-content/60">
