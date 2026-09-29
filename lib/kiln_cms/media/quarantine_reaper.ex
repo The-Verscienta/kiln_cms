@@ -17,14 +17,16 @@ defmodule KilnCMS.Media.QuarantineReaper do
   generous on purpose — an hour of retries with backoff is nowhere near it —
   because the failure it exists for is "stuck", not "slow", and reaping a
   strip that is still legitimately retrying would be the worse mistake.
-  Tenant-less read across every org, since the reaper is the system's, then
-  each row is purged under its own tenant.
+  One cross-org read (`CMS.list_expired_quarantined_media`, a `multitenancy
+  :bypass` action — a tenant-less read of the primary action is refused under
+  strict tenancy), then each row is purged under its own tenant. Both run as
+  `KilnCMS.Media.system/0` (#1659), which may purge an item only while it is
+  quarantined.
   """
   use Oban.Worker, queue: :media, max_attempts: 1, unique: [period: 3_000]
 
-  alias KilnCMS.{CMS, Storage}
+  alias KilnCMS.{CMS, Media, Storage}
 
-  require Ash.Query
   require Logger
 
   @max_age_hours 24
@@ -47,9 +49,10 @@ defmodule KilnCMS.Media.QuarantineReaper do
   def run do
     cutoff = DateTime.add(DateTime.utc_now(), -max_age_hours() * 3600, :second)
 
-    KilnCMS.CMS.MediaItem
-    |> Ash.Query.filter(quarantined == true and inserted_at < ^cutoff)
-    |> Ash.read!(authorize?: false)
+    # `authorize_with: :error`: a refused scan would filter to "nothing is
+    # stuck", and the reaper would report a clean sweep for ever. It raises.
+    cutoff
+    |> CMS.list_expired_quarantined_media!(actor: Media.system(), authorize_with: :error)
     |> Enum.count(&reap/1)
   end
 
@@ -61,7 +64,7 @@ defmodule KilnCMS.Media.QuarantineReaper do
 
     Storage.delete_private(item.storage_key, item)
 
-    case CMS.purge_media_item(item, authorize?: false, tenant: item.org_id) do
+    case CMS.purge_media_item(item, actor: Media.system(), tenant: item.org_id) do
       :ok ->
         true
 

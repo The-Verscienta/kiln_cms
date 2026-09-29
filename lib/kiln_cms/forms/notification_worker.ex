@@ -9,7 +9,7 @@ defmodule KilnCMS.Forms.NotificationWorker do
 
   import Swoosh.Email
 
-  alias KilnCMS.{CMS, Mail}
+  alias KilnCMS.{CMS, Forms, Mail}
 
   @impl Oban.Worker
   def perform(%Oban.Job{id: id, args: %{"form_id" => form_id, "data" => data} = args}) do
@@ -17,7 +17,11 @@ defmodule KilnCMS.Forms.NotificationWorker do
     # carry none — a nil tenant reads globally, finding the row by its unique id.
     tenant = args["org_id"] || KilnCMS.Accounts.default_org_id()
 
-    case CMS.get_form(form_id, authorize?: false, tenant: tenant) do
+    # As the form pipeline's system actor, `authorize_with: :error` (#1659): a
+    # refused read would filter to "form deleted" and the submission's
+    # notification would silently never go out. A refusal fails the job,
+    # which retries.
+    case CMS.get_form(form_id, actor: Forms.system(), authorize_with: :error, tenant: tenant) do
       {:ok, %{notify_email: to} = form} when is_binary(to) and to != "" ->
         new()
         |> from(Application.fetch_env!(:kiln_cms, :email_from))
@@ -27,6 +31,9 @@ defmodule KilnCMS.Forms.NotificationWorker do
         |> Mail.ensure_message_id("form-#{id}")
         # Through the site's own relay when it has one (#1322).
         |> Mail.deliver_for_worker(org_id: tenant)
+
+      {:error, %Ash.Error.Forbidden{} = error} ->
+        {:error, error}
 
       # Form deleted or notifications switched off since — nothing to send.
       _ ->
