@@ -28,10 +28,10 @@ defmodule Kiln.Advisory.Checks.InternalLinks do
   ## `:n_a` when nobody resolved anything
 
   Resolution is a query per path, so it happens in the caller
-  (`KilnCMS.Links.Internal.resolve_all/3`) and arrives as a context fact. A
-  caller that did not do that work gets `:n_a` rather than a clean bill of
-  health — see `Kiln.Advisory.Context` on why a check must not invent an answer
-  from a missing fact. A document with no internal links is also `:n_a`: there
+  (`KilnCMS.Links.Internal.resolve_all/4`, as the editor) and arrives as a
+  context fact. A caller that did not do that work gets `:n_a` rather than a
+  clean bill of health — see `Kiln.Advisory.Context` on why a check must not
+  invent an answer from a missing fact. A document with no internal links is also `:n_a`: there
   is nothing to judge, and reporting a pass would flatter it.
   """
   use Kiln.Advisory
