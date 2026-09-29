@@ -420,6 +420,19 @@ carries the reasoning.
 
 ## Security
 
+<a id="the-editors-link-advisory-no-longer-reveals-content-the-editor-cannot-read"></a>
+
+- **The editor's link advisory no longer reveals content the editor cannot
+  read.** To tell an author whether a same-origin link's target is published,
+  `KilnCMS.Links.Internal` looked the target up with authorization off. An
+  editor whose content-type scope did not cover a type could type a guessed
+  path into a link and learn from the advisory that a draft existed there, and
+  in which state. The lookup now runs as the editor, under the content read
+  policies, so a target they may not read is reported as missing, the same
+  answer as no target at all. `resolve/3` and `resolve_all/3` take the actor
+  as a fourth argument
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659)).
+
 <a id="kiln_console_host-now-isolates-every-organizations-console-each-on-its-own"></a>
 
 - **`KILN_CONSOLE_HOST` now isolates every organization's console, each on its
@@ -879,10 +892,10 @@ carries the reasoning.
   refuses gets an error, not an empty "nothing is broken" page.
 
   Content reads stay `authorize?: false`, each with a written reason: the
-  sweep's scan of published documents, the internal checker's target-state
-  lookup, oEmbed's document reads and the related-links keyword search. A
-  system-actor grant on content would be a standing read over the whole
-  corpus, drafts included. oEmbed's `:set_oembed_metadata` write also stays:
+  sweep's scan of published documents, oEmbed's document reads and the
+  related-links keyword search. A system-actor grant on content would be a
+  standing read over the whole corpus, drafts included. The internal checker's
+  target-state lookup reads as the editor instead (see Security). oEmbed's `:set_oembed_metadata` write also stays:
   it writes the block tree, and the content resource admits the system actor
   only to actions that accept no `:blocks`. The `mix kiln.authz.check` backlog
   drops by 16 sites and seven files. (#1659)
