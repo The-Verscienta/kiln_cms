@@ -56,6 +56,11 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Upgrading revokes nothing by itself: if an account changed or reset its
+  password on an earlier release because it may have leaked, do it again (or
+  use *Sign out everywhere*).**
+  ([#734](https://github.com/The-Verscienta/kiln_cms/issues/734) · [long form](docs/changelog/unreleased.md#password-rotation-upgrade-revokes-nothing-retroactively))
+
 - **A new index on every content table's titles is built `CONCURRENTLY` by the
   migration; if it is interrupted, drop the invalid index and migrate again.**
   ([#1712](https://github.com/The-Verscienta/kiln_cms/issues/1712) · [long form](docs/changelog/unreleased.md#a-new-index-on-every-content-tables-titles-is-built-concurrently-by-the))
@@ -192,6 +197,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#1690](https://github.com/The-Verscienta/kiln_cms/issues/1690) · [long form](docs/changelog/unreleased.md#an-old-newsletter-confirmation-link-no-longer-re-subscribes))
 
 ### Security
+
+- **Changing or resetting a password now signs out every other session and
+  remember-me cookie.** Before, both kept working for up to 30 days.
+  ([#734](https://github.com/The-Verscienta/kiln_cms/issues/734) · [#1637](https://github.com/The-Verscienta/kiln_cms/issues/1637) · [long form](docs/changelog/unreleased.md#password-rotation-revokes-every-session))
 
 - **The editor's link advisory no longer reveals content the editor cannot read.**
   ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#the-editors-link-advisory-no-longer-reveals-content-the-editor-cannot-read))

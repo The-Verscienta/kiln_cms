@@ -100,7 +100,8 @@ build if a resource is ever registered without that authorizer.
 - **Authentication** — AshAuthentication: password (bcrypt), magic link (which
   deliberately does not self-provision), API keys, and optional OIDC SSO; plus
   TOTP 2FA and Wax-based passkeys/WebAuthn. Short-lived JWTs with a token store,
-  and `log_out_everywhere` on password change.
+  and every stored token revoked on a password change or reset
+  (`KilnCMS.Accounts.Changes.RevokeAllTokens`, #734).
 - **Authorization** — per-resource `policies`, field policies hiding `role` and
   author PII, a `state == :published` filter as the public-read boundary, the
   orthogonal audience axis, granular per-type and per-field editor grants, and
@@ -291,9 +292,18 @@ build if a resource is ever registered without that authorizer.
   *Residual:* signing out revokes only the token in the browser doing it, so a
   cookie copied elsewhere keeps working until it expires — or until something
   revokes every stored token for the account. Two things do: a password change
-  (`log_out_everywhere` with `apply_on_password_change? true` on
-  `KilnCMS.Accounts.User`, since #734), and an administrator's *Sign out
-  everywhere* on the account's page under `/editor/accounts`. An account holder
+  or reset, and an administrator's *Sign out everywhere* on the account's page
+  under `/editor/accounts`. The password actions do it through an explicit
+  `KilnCMS.Accounts.Changes.RevokeAllTokens`, inside the write's transaction —
+  the password is not changed if the revocation fails. Not through
+  `log_out_everywhere`'s `apply_on_password_change? true`, which
+  `KilnCMS.Accounts.User` declares but which never fired: its change is gated
+  on `hashed_password` being *touched*, evaluated when the changeset is built,
+  and both actions write the hash in a `before_action`. Until 1.0 that made
+  this control a claim rather than a fact, which is how an earlier revision of
+  this page came to say it held "since #734" (fixed properly in #734's reopen,
+  with the socket half in #1637). The session on the device that changed the
+  password is revoked too; the settings page sends the user to sign in again. An account holder
   has no self-service "sign out other devices" affordance short of changing
   their password.
 
@@ -434,8 +444,8 @@ build if a resource is ever registered without that authorizer.
     release only ever moves a row *off* the hold purpose, and that predicate is
     in the UPDATE's own WHERE rather than checked against the row the caller
     read, so a revocation landing mid-release is not overwritten rather than
-    merely usually surviving. `log_out_everywhere` (password change) and account
-    erasure sweep every row a subject owns, held ones included; sign-out revokes
+    merely usually surviving. A password change or reset (`RevokeAllTokens`, #734)
+    and account erasure sweep every row a subject owns, held ones included; sign-out revokes
     only the token held in that session, which a browser waiting at the code
     prompt does not have.
 

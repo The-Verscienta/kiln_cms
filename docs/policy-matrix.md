@@ -429,6 +429,14 @@ Every visitor to a demo is the same shared account. See
 interaction bypass, and the nightly expunge trigger to the AshOban one. There are
 no caller-facing token actions.
 
+That includes the revocation a password change or reset runs (#734):
+`KilnCMS.Accounts.Changes.RevokeAllTokens` reaches `User.log_out_everywhere` →
+`Token.revoke_all_stored_for_subject` through `AshAuthentication.Strategy.action/4`,
+which marks the call as AshAuthentication's own, so both resources' interaction
+bypasses admit it — no `authorize?: false`, and no system-actor grant. That
+matters for the anonymous half: `:reset_password_with_token` has no actor at
+all, only the emailed reset token its validation checks.
+
 Three actions are ours rather than AshAuthentication's, and all three are
 `forbid_if always()` — no actor may reach any of them:
 
