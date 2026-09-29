@@ -1094,27 +1094,28 @@
 /* An empty heading line (a slash-menu "Heading 2" never typed into, or one
    whose text was deleted) otherwise renders as an ordinary blank line — yet
    the accessibility and SEO panels flag it ("1 heading has no text — block
-   n"), and the author has nothing on screen to match that to. ProseMirror
-   renders an empty textblock as a lone trailing <br>, so that is the marker.
-   The label is the level, spelled like the toolbar's H1/H2/H3 buttons, so it
-   needs no translation. */
-.ProseMirror :is(h1, h2, h3, h4, h5, h6):has(> br.ProseMirror-trailingBreak:only-child) {
-  border-bottom: 1px dashed var(--color-base-300);
+   n"). empty_headings.js marks such a heading with the advisory's own test;
+   this draws it: a dashed rule and the level, spelled like the toolbar's
+   H1/H2/H3 buttons, so it needs no translation. Every top-level heading
+   carries the 1px rule (transparent) so nothing below moves when it shows or
+   goes. The label floats right so the caret stays put, and its empty alt
+   text keeps a screen reader from reading "H2" as the heading's text. */
+.ProseMirror > :is(h1, h2, h3, h4, h5, h6) {
+  border-bottom: 1px dashed transparent;
 }
-.ProseMirror :is(h1, h2, h3, h4, h5, h6):has(> br.ProseMirror-trailingBreak:only-child)::before {
+.ProseMirror > .is-empty-heading {
+  border-bottom-color: color-mix(in oklch, var(--color-base-content) 55%, transparent);
+}
+.ProseMirror > .is-empty-heading::before {
+  content: "H" attr(data-level);
+  content: "H" attr(data-level) / "";
   float: right;
   height: 0;
   pointer-events: none;
   font-size: 0.75rem;
   font-weight: 500;
-  color: color-mix(in oklch, var(--color-base-content) 40%, transparent);
+  color: color-mix(in oklch, var(--color-base-content) 70%, transparent);
 }
-.ProseMirror h1:has(> br.ProseMirror-trailingBreak:only-child)::before { content: "H1"; }
-.ProseMirror h2:has(> br.ProseMirror-trailingBreak:only-child)::before { content: "H2"; }
-.ProseMirror h3:has(> br.ProseMirror-trailingBreak:only-child)::before { content: "H3"; }
-.ProseMirror h4:has(> br.ProseMirror-trailingBreak:only-child)::before { content: "H4"; }
-.ProseMirror h5:has(> br.ProseMirror-trailingBreak:only-child)::before { content: "H5"; }
-.ProseMirror h6:has(> br.ProseMirror-trailingBreak:only-child)::before { content: "H6"; }
 .ProseMirror ul { list-style: disc; padding-left: 1.5rem; }
 .ProseMirror ol { list-style: decimal; padding-left: 1.5rem; }
 .ProseMirror blockquote {
