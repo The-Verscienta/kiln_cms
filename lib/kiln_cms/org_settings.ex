@@ -29,10 +29,17 @@ defmodule KilnCMS.OrgSettings do
 
   ## Usage
 
+      actor = KilnCMS.OrgSettings.system(:branding)
+
       KilnCMS.OrgSettings.resolve(org_id,
         cache_key: KilnCMS.Cache.branding_key(org_id),
         ttl: @ttl,
-        read: &KilnCMS.CMS.list_site_branding(tenant: &1, authorize?: false),
+        read:
+          &KilnCMS.CMS.list_site_branding(
+            tenant: &1,
+            actor: actor,
+            authorize_with: :error
+          ),
         build: &build/1,
         fallback: &defaults/0,
         label: "branding"
@@ -41,9 +48,62 @@ defmodule KilnCMS.OrgSettings do
   `read` is the code-interface list for the resource, called with the org id;
   it returns `{:ok, rows}` or `{:error, _}` (or raises). `build` receives the
   row or `nil`. `label` names the setting in the degrade log line.
+
+  ## Who the row is read as (#1659)
+
+  The page renders for anonymous visitors, so there is no request actor to read
+  the row as. Each resolver reads it as `system/1`, a `KilnCMS.SystemActor`
+  that the resource admits for `read` (a `:public` row admits everyone; an
+  `:admin` or `:editor` one names the system actor through `OrgSettings`'
+  `system_actions:` option).
+
+  Take the actor in the caller, before `resolve/2`, and close over it in
+  `read`: a cache miss runs `read` on a Cachex courier process, where the
+  `with_actor/2` test seam (process-local) does not reach.
+
+  **With `authorize_with: :error`, always.** A refused read filters to "no
+  row", and "no row" is `build.(nil)`, the operator config, which is *cached*
+  for the whole TTL. For `Feeds` that is exactly the wider disclosure `:fallback`
+  exists to avoid. A refusal that raises is an infrastructure failure instead:
+  logged, not cached, and answered with the fallback.
   """
 
   require Logger
+
+  # See `with_actor/2`.
+  @actor_override {__MODULE__, :actor_override}
+
+  @doc """
+  The actor a per-org settings resolver reads its row as (#1659): a
+  `KilnCMS.SystemActor` labelled with the resolver's `subsystem`.
+  """
+  @spec system(atom()) :: KilnCMS.SystemActor.t() | nil
+  def system(subsystem) when is_atom(subsystem) do
+    case Process.get(@actor_override, :unset) do
+      :unset -> KilnCMS.SystemActor.new(subsystem)
+      actor -> actor
+    end
+  end
+
+  @doc false
+  # Test seam (#1659): run `fun` with `system/1` answering `actor` in this
+  # process, so a test can take the grant away and prove each resolver fails
+  # CLOSED to its fallback instead of caching the operator config.
+  # Process-local, and nothing on a request path calls it; code that could call
+  # it could equally pass any actor it liked.
+  @spec with_actor(term(), (-> result)) :: result when result: term()
+  def with_actor(actor, fun) do
+    previous = Process.get(@actor_override, :unset)
+    Process.put(@actor_override, actor)
+
+    try do
+      fun.()
+    after
+      if previous == :unset,
+        do: Process.delete(@actor_override),
+        else: Process.put(@actor_override, previous)
+    end
+  end
 
   @type opts :: [
           cache_key: term(),
@@ -85,10 +145,10 @@ defmodule KilnCMS.OrgSettings do
     end
   end
 
-  # A system read: the row is read tenant-scoped with no actor, because the
-  # layout renders for anonymous visitors and skipping the authorizer keeps the
-  # cache-miss path cheap. Returns the row, `nil` when the site has none, or
-  # `:error` on an infrastructure failure (which must NOT be cached).
+  # A system read, tenant-scoped, as the caller's `read` function spells it
+  # (see "Who the row is read as"). Returns the row, `nil` when the site has
+  # none, or `:error` on an infrastructure failure or a refusal (which must NOT
+  # be cached).
   defp row(org_id, opts) do
     read = Keyword.fetch!(opts, :read)
 

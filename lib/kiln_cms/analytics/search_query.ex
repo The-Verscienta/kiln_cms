@@ -108,10 +108,13 @@ defmodule KilnCMS.Analytics.SearchQuery do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
-    # Recorded only by the system (`authorize?: false`); never by an external
-    # caller.
+    # Recorded only by the system, never by an external caller:
+    # `KilnCMS.Search.record_query/3` writes as a `KilnCMS.SystemActor`
+    # (#1659), admitted for `record` by name so a create action added later is
+    # not admitted by default.
     policy action_type(:create) do
-      forbid_if always()
+      forbid_unless action(:record)
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

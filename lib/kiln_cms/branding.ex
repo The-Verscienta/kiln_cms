@@ -97,14 +97,23 @@ defmodule KilnCMS.Branding do
     # One read-and-degrade rule for every per-org settings resolver (#1080):
     # a transient failure degrades to the operator defaults for one request
     # rather than for the whole TTL, and "no row" is cached as `build(nil)`.
+    # The actor is taken here, in the caller, because a cache miss runs
+    # `read` on a Cachex courier process (see `KilnCMS.OrgSettings`).
+    actor = KilnCMS.OrgSettings.system(:branding)
+
     KilnCMS.OrgSettings.resolve(org_id,
       cache_key: KilnCMS.Cache.branding_key(org_id),
       ttl: @ttl,
-      # A system read: the row is world-readable by policy, but the layout
-      # renders for anonymous visitors with no actor, and skipping the
-      # authorizer keeps the cache-miss path cheap. Tenant-scoped, so strict
-      # tenancy is satisfied.
-      read: &KilnCMS.CMS.list_site_branding(tenant: &1, authorize?: false),
+      # A system read (#1659): the layout renders for anonymous visitors with
+      # no actor. The row is world-readable by policy, so the system actor
+      # needs no grant of its own; `authorize_with: :error` keeps a later,
+      # narrower read policy from turning a refusal into a cached "no row".
+      read:
+        &KilnCMS.CMS.list_site_branding(
+          tenant: &1,
+          actor: actor,
+          authorize_with: :error
+        ),
       build: &build/1,
       fallback: &defaults/0,
       label: "branding"

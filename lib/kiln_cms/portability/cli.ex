@@ -35,6 +35,7 @@ defmodule KilnCMS.Portability.CLI do
   end
 
   defp resolve_actor!(nil) do
+    # authorize?: false — this finds the actor, so there is none yet; a system User grant reads every account
     case Accounts.list_users!(authorize?: false, query: [filter: [role: :admin], limit: 1]) do
       [admin | _] ->
         admin
@@ -49,6 +50,7 @@ defmodule KilnCMS.Portability.CLI do
   end
 
   defp resolve_actor!(email) do
+    # authorize?: false — the operator's --actor lookup, before any actor exists (same reason as above)
     case Accounts.list_users!(authorize?: false, query: [filter: [email: email], limit: 1]) do
       [user | _] -> user
       [] -> Mix.raise("No user with email #{email}")
@@ -58,6 +60,7 @@ defmodule KilnCMS.Portability.CLI do
   defp resolve_org!(nil), do: Accounts.default_org_id()
 
   defp resolve_org!(slug) do
+    # authorize?: false — the operator's --org lookup at a shell on the host, before any actor exists
     case Accounts.list_organizations!(authorize?: false, query: [filter: [slug: slug], limit: 1]) do
       [org | _] -> org.id
       [] -> Mix.raise("No organization with slug #{slug}")

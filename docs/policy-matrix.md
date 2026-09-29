@@ -148,7 +148,7 @@ ever be authorized by an explicit clause below.
 | `Search.TagEmbedding` | `read`, `for_tags`, `nearest`, `upsert`, `destroy` | Same shape, for tag-name vectors: written by `TagEmbeddingWorker` and `Search.Related`, read by `Search.Related` only. |
 | `CMS.MediaDerivative` | all (`read`, `for_item`, `record`, `destroy`) | The bookkeeping row behind each cached on-the-fly image transform (`/media/:id/t/…`). `Media.Derivatives` is its only reader and writer: it counts an item's rows against the per-item budget, prunes the ones cut from a replaced original or around a moved focal point, and lists them for a purge. No person — admin included — reads or writes a row, and there is no API surface. Who may *see* a transform is decided on the `MediaItem`, by the transform controller's ordinary policy-checked read. |
 | `Accounts.ThrottleCounter` | `prune` **only** | The shared auth budgets' counter table (#1619). The scheduled prune deletes closed windows; the actor is admitted so an operator or a test can run it by hand. The budgets are charged by `Accounts.ThrottleStore` in raw SQL before anyone is authenticated, so no action serves that path. `read` is forbidden to everyone, admin included: a count per hashed key is an oracle nobody needs. |
-| `Automation.Rule` | `read` **only** | `KilnCMS.Automation.RuleWorker` re-reads the rule it was enqueued for. Authoring a rule is still admin-only — the grant is narrowed to reads inside the existing `policy always()` with `forbid_unless action_type(:read)`. |
+| `Automation.Rule` | `read` **only** | `KilnCMS.Automation.RuleWorker` re-reads the rule it was enqueued for, and `Automation.dispatch/3` matches an event against the site's rules; that match fails closed (`authorize_with: :error`), so a refused read fails the dispatch job rather than dropping every rule. Authoring a rule is still admin-only — the grant is narrowed to reads inside the existing `policy always()` with `forbid_unless action_type(:read)`. |
 | `Social.Account` | `read`, `enabled_for_provider` **only** | The announcer lists a provider's enabled accounts for a publish. Minting, editing or deleting the credentials for a site's public voice stays an admin act, narrowed the same way. |
 | `CMS.Comment` | `create`, `read` | An editorial-intelligence reaction posts its findings as a document-level comment (#946) on a thread it must be able to read. No `author_id` is stamped — the actor has no `:id` — so `created_by_rule_id` carries the provenance. `update` is **not** admitted: automation posts, it does not edit what anyone said. |
 | `CMS.Task` | `create`, `read` | The same reaction assigns findings as a task, and the lifecycle sweep probes for an open review before opening another. `AssigneeIsEditor` still vets the assignee (validations run whatever the actor is) and `creator_id` stays unstamped. `update` is **not** admitted: automation opens tasks, it does not complete them. |
@@ -164,6 +164,10 @@ ever be authorized by an explicit clause below.
 | `Federation.Block` | `read` **only** | The inbox asks whether an actor or its instance is blocked before it records a `Follow`. Deciding what to block stays an admin act. |
 | `Federation.SiteFederation` | `read`, `record_delivery`, `enable`, `disable`, `rekey` **only** | Every federation path starts from the site's settings (`Federation.active_settings/2`); the delivery worker stamps "last federated"; and `mix kiln.federation` (`enable`, `disable`, `rekey`) is an operator at a shell on the host, the deployment's own authority. The settings form's `save` and `destroy` are not admitted — editing the site's public identity stays an admin act. Granted through `OrgSettings`' `system_actions:` option, which narrows inside the macro's read and write policies. |
 | `Federation.SeenSignature` | `record`, `expired`, `destroy` **only** | The inbound replay-nonce store: `HttpSignature` records a verified signature, `SeenSignatureSweeper` counts and deletes expired rows. The plain `read` is refused to everyone, the system actor included — nothing needs to list nonces. No person has any path to this table. |
+| `History.DocumentEvent` | `for_document`, `by_actor`, `append`, `anonymize_actor` **only** | The block-level event log (#1659). The History API appends an event with the next per-document sequence number, folds one document's events for time-travel, and GDPR erasure redacts one user's events (a bulk update authorizes its query as a read, hence `by_actor`). The plain `read` is not admitted: nothing lists the whole log. No person, admin included, may append or rewrite an event. Every read fails closed (`authorize_with: :error`, `authorize_query_with: :error` on the erasure): a refused sequence read would hand out a number already taken, a refused fold would render an empty document, and a refused erasure would erase nothing and report success. |
+| `CMS.FeedSettings` | `read` **only** | `KilnCMS.Feeds` resolves a site's syndication policy for anonymous feed readers (#1659). A refused read would be "no row", the operator config, cached for the TTL, which can turn full content on for a site that switched it off, so the read fails closed to `Feeds.unavailable/0`, uncached. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
+| `CMS.SiteCompliance` | `read` **only** | `Compliance.Settings` resolves a site's claim-checking rules and publish gate for the editor panel and the publish path (#1659). Fails closed to `Settings.unavailable/0`, uncached, for the same reason as `FeedSettings`. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
+| `Analytics.SearchQuery` | `record` **only** | `Search.record_query/3` counts a search, usually an anonymous visitor's (#1659). No person may record one (an admin still can, through the admin bypass above the policy), and the system may not read or purge the counters; the nightly purge is the AshOban trigger's own. |
 | `CMS.Page`, `CMS.Post`, `CMS.Entry` (content) | `reindex_search_text` and `set_embedding` **only**, named inside the `action_type([:create, :update])` policy | Two system-only actions on denormalized columns: the fragment-expanded search text (`Firing.Engine.fire/2`) and the document-level search vector (`Search.EmbeddingWorker`). Both accept no `:blocks` and both are ignored by PaperTrail. The grant sits inside the policy written for people, narrowed to those two actions by `forbid_unless action(...)` — see above for why that rather than a bypass. Keep the list short and every member system-only. Nothing else on the content resources admits the system actor: it holds no tier, so `EditableContentType` / `ReadableContentType` / `InAudience` all refuse it, and a system actor reads no content at all. |
 
 Legend: ✅ allowed · ❌ forbidden · 🔎 allowed but row-filtered (reads return only the rows the policy permits, never an error) · ⚙️ system-only (`authorize?: false`).
@@ -329,6 +333,8 @@ reads them with `authorize?: false`.
 `record` is `forbid_if always()` for every role — view/search counts are written
 only by the **system** delivery path (`authorize?: false`). Reading aggregates is
 editor/admin only (privacy-first: no per-user data is stored anyway).
+`SearchQuery`'s `record` is written as a system actor instead (#1659), admitted
+by name; see [The system actor](#the-system-actor).
 
 ## Accounts — `User`, `Token`
 
@@ -726,11 +732,12 @@ there is deliberately no destroy. The publish pipeline writes anchors as the
 
 | Action | admin | editor | viewer | anonymous |
 |--------|:-----:|:------:|:------:|:---------:|
-| read (`read`, `for_document`) | ✅ | ✅ | ❌ | ❌ |
-| `append`, `anonymize_actor` | ⚙️ | ⚙️ | ⚙️ | ⚙️ |
+| read (`read`, `for_document`, `by_actor`) | ✅ | ✅ | ❌ | ❌ |
+| `append`, `anonymize_actor` | ❌ | ❌ | ❌ | ❌ |
 
-Writes are `forbid_if always()` for every role — the event log is append-only
-through the History API as the system, and has no destroy action at all.
+Writes are refused to every role, admin included — the event log is
+append-only through the History API, which writes as `History.system/0` (see
+[The system actor](#the-system-actor)), and has no destroy action at all.
 
 ## Automation & newsletter
 

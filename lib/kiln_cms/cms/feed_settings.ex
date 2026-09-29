@@ -26,11 +26,13 @@ defmodule KilnCMS.CMS.FeedSettings do
   # The shared one-row-per-org shape comes from `KilnCMS.CMS.OrgSettings`
   # (#1080). Never delivered as a document the way branding is: the resolved
   # policy reaches the delivery path through `KilnCMS.Feeds`, which reads it as
-  # a system read. So no public read here.
+  # `KilnCMS.OrgSettings.system(:feeds)` (#1659). So no public read here: the
+  # system actor is admitted for `read` only, and writing stays an admin act.
   use KilnCMS.CMS.OrgSettings,
     table: "feed_settings",
     accept: [:excluded_types, :full_content_types],
     read: :admin,
+    system_actions: [:read],
     admin_columns: [:excluded_types, :full_content_types, :updated_at]
 
   # A ceiling on how many type names one list may carry. Comfortably above any

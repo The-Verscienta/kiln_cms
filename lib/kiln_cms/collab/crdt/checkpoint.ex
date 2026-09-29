@@ -51,6 +51,7 @@ defmodule KilnCMS.Collab.Crdt.Checkpoint do
   def write_back("collab:" <> rest, doc, tenant) do
     with [kind, id] <- String.split(rest, ":", parts: 2),
          ct when not is_nil(ct) <- ContentTypes.get(kind, tenant),
+         # authorize?: false — the channel authorized this doc at join (#655); no system content read
          {:ok, %{state: :draft} = record} <-
            ContentTypes.get_record(ct, id, authorize?: false, tenant: tenant) do
       current = Enum.map(record.blocks, &TypedBlocks.input_map/1)
@@ -105,6 +106,7 @@ defmodule KilnCMS.Collab.Crdt.Checkpoint do
 
   defp save(record, blocks_input) do
     record
+    # authorize?: false — shared doc, no single editor to act as; a system autosave grant writes any draft
     |> Ash.Changeset.for_update(:autosave, %{blocks: blocks_input},
       authorize?: false,
       tenant: record.org_id
@@ -124,6 +126,7 @@ defmodule KilnCMS.Collab.Crdt.Checkpoint do
   # saying WHICH refusal it was — the two have opposite meanings and used to
   # share one `info` line claiming the content was "already persisted".
   defp skipped(record, error) do
+    # authorize?: false — re-reads the row just refused, only to word the log line below
     case Ash.reload(record, authorize?: false, tenant: record.org_id) do
       {:ok, %{state: state}} when state != :draft ->
         Logger.warning(
