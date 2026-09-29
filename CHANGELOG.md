@@ -200,6 +200,11 @@ Every summary line below that was shortened links to its own entry there.
   as scoped system actors; the replay check and follower ceiling fail closed.
   ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#federation-runs-under-the-policies))
 
+- **The governance audit chain runs under the policies.** Anchors, checkpoints
+  and the entitlement trail are read and written as a scoped system actor, and
+  every one of those reads fails closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#the-governance-audit-chain-runs-under-the-policies))
+
 - **The link checker runs under the policies.** 16 more internal sites run as
   a scoped system actor or carry a written reason; the counter reads fail closed.
   ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#the-link-checker-runs-under-the-policies))

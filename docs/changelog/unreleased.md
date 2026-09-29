@@ -548,6 +548,33 @@ carries the reasoning.
   ceiling", and the follow is refused and logged. Honest senders see no
   difference unless the nonce store is down. (#1659)
 
+<a id="the-governance-audit-chain-runs-under-the-policies"></a>
+
+- **The governance audit chain runs under the policies.** The anchor chain,
+  the checkpoint worker and the governance dashboard reached `HistoryAnchor`,
+  `ChainCheckpoint`, `ChainCheckpointEntry` and `MembershipEvent` through
+  `authorize?: false`. They now run as `KilnCMS.Governance.system/0`, a
+  `KilnCMS.SystemActor`, and each resource admits it by action name inside its
+  existing admin-only policy: an anchor's `create` and per-document
+  `for_content` (not the plain read), every checkpoint action by name (so a
+  later `destroy` is not admitted by default), and an entry's `create`,
+  `for_content` and `for_checkpoint` (not the plain read). The sites that read
+  content, `Accounts.User` names, consents or version rows keep their bypass,
+  now with a written reason: a standing system grant over any of those would
+  be wider than the one dashboard it serves. The `mix kiln.authz.check`
+  backlog drops by 24 sites and four files.
+
+  Every one of the migrated reads now fails **closed**. A refused read filters
+  to `[]`, and here `[]` always meant the permissive answer: "never anchored",
+  "never witnessed" (which is what a truncation wants to look like), "no
+  unwitnessed checkpoints" (a witness outage shown as healthy), "no earlier
+  checkpoint" (the chain restarting at 1), or an empty entitlement trail. They
+  run with `authorize_with: :error`, so a lost grant raises instead: the
+  witness lookup reports the document `:unreadable` and the verdict floors to
+  `:unverifiable`, and the anchor hook logs and mints nothing rather than a
+  chain restarted from scratch. No behaviour changes while the grants are in
+  place. (#1659)
+
 <a id="the-link-checker-runs-under-the-policies"></a>
 
 - **The link checker runs under the policies.** The outbound link sweep, the
