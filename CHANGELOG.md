@@ -112,6 +112,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **The content editor has a Blocks | Markdown switch: edit the body as
+  Markdown, and it comes back as blocks.**
+  ([long form](docs/changelog/unreleased.md#editor-markdown-view))
+
 - **`mix kiln.migrations.check` fails a PR whose new migration breaks the
   release still serving mid-deploy.**
   ([#1716](https://github.com/The-Verscienta/kiln_cms/issues/1716) · [long form](docs/changelog/unreleased.md#mix-kilnmigrationscheck-gates-expand-contract))
