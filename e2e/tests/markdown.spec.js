@@ -2,7 +2,8 @@
 // Markdown in the content editor: pasted into a rich-text block it lands as
 // structure — with Undo and "Paste as plain text" one click away — and a
 // `.md` file imported through "Import Markdown" lands as typed blocks plus the
-// title it names, which a Save persists.
+// title it names, which a Save persists. The Blocks | Markdown switch shows
+// the body as Markdown, and what is pasted there comes back as blocks.
 const {
   test,
   expect,
@@ -123,6 +124,80 @@ test.describe("markdown", () => {
       await expect(page.locator('input[name$="[title]"]')).toHaveValue(title);
       await expect(page.locator('[phx-hook="RichText"] .ProseMirror').first()).toContainText(
         "Intro from the file.",
+      );
+    } finally {
+      await deleteContentById(page, "page", id);
+    }
+  });
+
+  test("the Markdown view turns pasted Markdown into blocks on the way back", async ({ page }) => {
+    const id = await newDraftPage(page);
+    try {
+      await page.getByRole("button", { name: "Markdown", exact: true }).click();
+      const source = page.locator("#markdown-mode-source");
+      await expect(source).toBeVisible();
+      await expect(page.locator("#blocks-sortable")).toBeHidden();
+
+      await source.fill("## From Markdown\n\n- one\n- **two**\n\n| A | B |\n|---|---|\n| 1 | 2 |\n");
+      // Straight to Blocks, inside the debounce: the blur sends the text first.
+      await page.getByRole("button", { name: "Blocks", exact: true }).click();
+      await expect(source).toHaveCount(0);
+
+      const prose = page.locator('[phx-hook="RichText"] .ProseMirror').first();
+      await expect(prose.locator("h2")).toHaveText("From Markdown");
+      await expect(prose.locator("li")).toHaveCount(2);
+      await expect(prose.locator("strong")).toHaveText("two");
+      await expect(prose.locator("table")).toHaveCount(1);
+
+      await save(page);
+      await page.reload();
+      await expect(page.locator('[phx-hook="RichText"] .ProseMirror').first().locator("h2")).toHaveText(
+        "From Markdown",
+      );
+
+      // And back out: the saved blocks read as the same Markdown.
+      await page.getByRole("button", { name: "Markdown", exact: true }).click();
+      await expect(page.locator("#markdown-mode-source")).toHaveValue(/^## From Markdown\n\n- one\n- \*\*two\*\*/);
+    } finally {
+      await deleteContentById(page, "page", id);
+    }
+  });
+
+  test("switches back and forth, keeping the edits made on either side", async ({ page }) => {
+    const id = await newDraftPage(page);
+    const markdownButton = page.getByRole("button", { name: "Markdown", exact: true });
+    const blocksButton = page.getByRole("button", { name: "Blocks", exact: true });
+    const source = page.locator("#markdown-mode-source");
+    const prose = page.locator('[phx-hook="RichText"] .ProseMirror').first();
+
+    try {
+      // Blocks → Markdown straight after typing: the switch flushes the block.
+      await addBlock(page, "rich_text");
+      await prose.click();
+      await page.keyboard.type("Typed in a block");
+      await markdownButton.click();
+      await expect(source).toHaveValue("Typed in a block\n");
+
+      // Markdown → Blocks with an edit.
+      await source.fill("Typed in a block\n\n## Added in Markdown\n");
+      await blocksButton.click();
+      await expect(prose.locator("h2")).toHaveText("Added in Markdown");
+
+      // An edit in the block editor, then Markdown again: it shows both.
+      await prose.locator("h2").click();
+      await page.keyboard.press("End");
+      await page.keyboard.type(" and blocks");
+      await markdownButton.click();
+      await expect(source).toHaveValue("Typed in a block\n\n## Added in Markdown and blocks\n");
+
+      // And back once more, then persisted.
+      await source.fill("Typed in a block\n\n## Added in Markdown and blocks\n\n- a list\n");
+      await blocksButton.click();
+      await expect(prose.locator("li")).toHaveText("a list");
+      await save(page);
+      await page.reload();
+      await expect(page.locator('[phx-hook="RichText"] .ProseMirror').first().locator("li")).toHaveText(
+        "a list",
       );
     } finally {
       await deleteContentById(page, "page", id);

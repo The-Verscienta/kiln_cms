@@ -31,6 +31,12 @@ defmodule KilnCMS.Accounts.Changes.EvictRoleMembers do
   end
 
   defp evict_members(role_id, reason) do
+    # `authorize?: false`: the eviction must reach EVERY member of the role,
+    # whoever narrowed it. A policy-filtered read (the editing admin's, or a
+    # system actor's) that missed a row would leave that member's socket on
+    # the old grant with nothing logged — the fail-open this change exists to
+    # prevent. A system grant would also be a standing read over every org's
+    # memberships, wider than this one role (the #1402 argument).
     OrgMembership
     |> Ash.Query.filter(role_id == ^role_id)
     |> Ash.Query.select([:user_id])

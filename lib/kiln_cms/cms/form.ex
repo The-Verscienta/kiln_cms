@@ -74,9 +74,16 @@ defmodule KilnCMS.CMS.Form do
 
     # Anonymous visitors may read *active* forms (that's what renders them
     # publicly); everything else form-shaped is for editors and up.
+    #
+    # The notification and autoresponder workers re-read the form a submission
+    # was queued for — active or not — as `KilnCMS.Forms.system/0` (#1659).
+    # Admitted by name to the plain `read`, never a `bypass`, so a read
+    # action added later is not admitted by default.
     policy action_type(:read) do
       authorize_if action(:active_by_slug)
       authorize_if KilnCMS.CMS.Checks.OrgEditor
+      forbid_unless action(:read)
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
     # Building forms is an admin concern (like webhooks / field definitions).

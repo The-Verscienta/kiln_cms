@@ -42,6 +42,8 @@ defmodule KilnCMS.Social do
   """
   use Ash.Domain
 
+  require Logger
+
   resources do
     resource KilnCMS.Social.Account do
       define :list_accounts, action: :read
@@ -72,12 +74,66 @@ defmodule KilnCMS.Social do
   """
   @spec configured?(Ash.UUID.t()) :: boolean()
   def configured?(org_id) do
+    # Read as `system/0` (#1659). A refused read would filter to `[]`, which
+    # reads as "not configured": the same answer this gives when it cannot
+    # tell, and the safe one here (a missing announcement is the side the
+    # module fails on; see "At most once" above). `authorize_with: :error`
+    # does not change the answer. It makes a lost grant a raise, which is
+    # never cached, and which the rescue below LOGS instead of passing
+    # silently.
     KilnCMS.Cache.fetch(KilnCMS.Cache.social_accounts_key(org_id), :timer.minutes(5), fn ->
-      list_accounts!(authorize?: false, tenant: org_id)
+      list_accounts!(actor: system(), authorize_with: :error, tenant: org_id)
       |> Enum.any?(& &1.enabled)
     end)
   rescue
-    _ -> false
+    error ->
+      Logger.error(
+        "Social accounts for org #{org_id} could not be read, not announcing: " <>
+          Exception.message(error)
+      )
+
+      false
+  end
+
+  # See `with_actor/2`.
+  @actor_override {__MODULE__, :actor_override}
+
+  @doc """
+  The actor social auto-posting runs as (#1659): `configured?/1`'s account
+  read and `KilnCMS.Social.Announcer`'s ledger claim and settlement.
+
+  A `KilnCMS.SystemActor`, admitted by action name on `Social.Account` (the
+  reads and `record_post`) and `Social.Post` (`claim` and the four settling
+  updates); see `docs/policy-matrix.md`, "The system actor". It may not mint,
+  edit or delete an account's credentials, nor read or delete a ledger row.
+  """
+  @spec system() :: KilnCMS.SystemActor.t() | nil
+  def system do
+    case Process.get(@actor_override, :unset) do
+      :unset -> KilnCMS.SystemActor.new(:social)
+      actor -> actor
+    end
+  end
+
+  @doc false
+  # Test seam (#1659): run `fun` with `system/0` answering `actor` in this
+  # process, so a test can take the grant away and prove that a refused claim
+  # posts nothing. Process-local, and nothing on a request path calls it; code
+  # that could call it could equally pass any actor it liked. (A read inside
+  # `KilnCMS.Cache.fetch/3` runs in Cachex's courier process and does not see
+  # the override; disable the cache to exercise one.)
+  @spec with_actor(term(), (-> result)) :: result when result: term()
+  def with_actor(actor, fun) do
+    previous = Process.get(@actor_override, :unset)
+    Process.put(@actor_override, actor)
+
+    try do
+      fun.()
+    after
+      if previous == :unset,
+        do: Process.delete(@actor_override),
+        else: Process.put(@actor_override, previous)
+    end
   end
 
   @doc "Drop the cached answer for `configured?/1` — called on any account write."
@@ -108,6 +164,10 @@ defmodule KilnCMS.Social do
   """
   @spec canonical_url(struct()) :: String.t()
   def canonical_url(record) do
+    # `authorize?: false` kept (#1659): one organization by primary key, for
+    # its public base URL. Admitting the system actor on `Organization`'s read
+    # policy would be a standing read of every site on the deployment, far
+    # wider than this lookup of the record's own org.
     org = KilnCMS.Accounts.get_organization!(record.org_id, authorize?: false)
     base = KilnCMSWeb.Tenant.base_url(org)
 

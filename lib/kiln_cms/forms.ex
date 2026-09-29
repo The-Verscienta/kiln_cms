@@ -25,10 +25,22 @@ defmodule KilnCMS.Forms do
 
   Rate limiting happens at the controller (`KilnCMSWeb.RateLimit`, `:form`
   bucket) so the transient IP never reaches this module.
+
+  ## Who the pipeline runs as
+
+  A visitor has no actor, so everything the pipeline does past the policy-
+  checked `get_active/2` runs as `system/0` (#1659): a `KilnCMS.SystemActor`
+  admitted by name to `Form`'s `read`, `FormField`'s `for_form`,
+  `FormSubmission`'s `create` and `SiteEmbedSettings`' `read` — see
+  `docs/policy-matrix.md`, "The system actor". It cannot edit or delete a
+  form, or read a submission back.
   """
 
   alias KilnCMS.CMS
   alias KilnCMS.Forms.Autoresponder
+
+  # See `with_actor/2`.
+  @actor_override {__MODULE__, :actor_override}
 
   @honeypot_field "website"
   @rendered_at_field "_kiln_rendered_at"
@@ -39,6 +51,42 @@ defmodule KilnCMS.Forms do
   # can't be replayed indefinitely — not a security boundary (nothing sensitive
   # rides in it, just a millisecond timestamp), only a sanity window.
   @rendered_at_max_age :timer.hours(24)
+
+  @doc """
+  The actor the form pipeline runs as: the submission write and the field
+  read behind it, the notification and autoresponder workers' re-reads, the
+  autoresponder-template validation's field read and the embed route's
+  per-site default (`KilnCMS.Forms.EmbedPolicy`). See "Who the pipeline runs
+  as" above.
+  """
+  @spec system() :: KilnCMS.SystemActor.t() | nil
+  def system do
+    case Process.get(@actor_override, :unset) do
+      :unset -> KilnCMS.SystemActor.new(:forms)
+      actor -> actor
+    end
+  end
+
+  @doc false
+  # Test seam (#1659): run `fun` with `system/0` answering `actor` in this
+  # process. It exists so a test can take the grant away and prove that the
+  # reads the pipeline decides on fail CLOSED rather than filtering to
+  # "nothing", which is how a refused read answers. Process-local, and nothing
+  # on a request path calls it; code that could call it could equally pass
+  # any actor it liked.
+  @spec with_actor(term(), (-> result)) :: result when result: term()
+  def with_actor(actor, fun) do
+    previous = Process.get(@actor_override, :unset)
+    Process.put(@actor_override, actor)
+
+    try do
+      fun.()
+    after
+      if previous == :unset,
+        do: Process.delete(@actor_override),
+        else: Process.put(@actor_override, previous)
+    end
+  end
 
   @doc "The honeypot input name rendered into public forms."
   @spec honeypot_field() :: String.t()
@@ -171,7 +219,14 @@ defmodule KilnCMS.Forms do
   end
 
   defp fields(%{fields: fields}) when is_list(fields), do: fields
-  defp fields(form), do: CMS.form_fields_for!(form.id, authorize?: false, tenant: form.org_id)
+
+  # `authorize_with: :error` (#1659): the field list is what the submission is
+  # validated against. A refused read filtering to `[]` would accept any
+  # submission — every required field skipped, every value dropped — and store
+  # it empty. A refusal raises instead.
+  defp fields(form) do
+    CMS.form_fields_for!(form.id, actor: system(), authorize_with: :error, tenant: form.org_id)
+  end
 
   defp record(form, form_fields, data, params, opts) do
     # Every write here is scoped to the form's own site (epic #336): the
@@ -184,7 +239,7 @@ defmodule KilnCMS.Forms do
           locale: Keyword.get(opts, :locale),
           fill_time_ms: fill_time_ms(Map.get(params, @rendered_at_field))
         },
-        authorize?: false,
+        actor: system(),
         tenant: form.org_id
       )
 

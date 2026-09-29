@@ -131,7 +131,7 @@ defmodule KilnCMS.Mail do
     # address wastes retries and signals spamminess. An admin clears the
     # suppression from /editor/mail (a site's own list, from /editor/site-mail)
     # to resume.
-    |> Enum.reject(fn {_name, address} -> suppressed?(address, org_id: org_id) end)
+    |> Enum.reject(fn {_name, address} -> suppressed_or_unreadable?(address, org_id) end)
     |> Enum.each(fn recipient ->
       email
       |> serialize(recipient)
@@ -259,22 +259,51 @@ defmodule KilnCMS.Mail do
   def suppressed?(address, opts \\ []) do
     # Bang variants return the record or nil directly; the non-bang ones wrap
     # it in `{:ok, _}`, which would read as "always suppressed".
-    # `authorize?: false`: the delivery pipeline asks as the system, with no
-    # actor, and learns only a boolean.
-    instance = get_suppressed_recipient!(address, authorize?: false, not_found_error?: false)
+    #
+    # Asked as `system/0` (#1659), with `authorize_with: :error`. A refused
+    # read would otherwise filter to "no row", which is "not suppressed": a
+    # lost grant would quietly resume mail to every address that ever hard
+    # bounced, which is exactly the spam signal the list exists to stop. With
+    # `:error` it raises instead, so this function never answers "not
+    # suppressed" unless the list was actually read.
+    instance =
+      get_suppressed_recipient!(address,
+        actor: system(),
+        authorize_with: :error,
+        not_found_error?: false
+      )
 
     not is_nil(instance) or site_suppressed?(address, Keyword.get(opts, :org_id))
+  end
+
+  # `enqueue!/2`'s filter. A suppression list that cannot be read is treated
+  # as naming the address: the recipient is dropped and the drop is LOGGED.
+  # Not sending is the closed side (#1659); raising instead would fail the
+  # caller's own action (a registration, a password reset) over a mail-side
+  # fault. `KilnCMS.Newsletter.MailWorker` calls `suppressed?/2` directly and
+  # lets the raise retry the job, which is the closed side there.
+  defp suppressed_or_unreadable?(address, org_id) do
+    suppressed?(address, org_id: org_id)
+  rescue
+    error in Ash.Error.Forbidden ->
+      Logger.error(
+        "Suppression list unreadable, not sending to one recipient" <>
+          if(org_id, do: " for org #{org_id}", else: "") <> ": " <> Exception.message(error)
+      )
+
+      true
   end
 
   defp site_suppressed?(_address, nil), do: false
 
   defp site_suppressed?(address, org_id) do
-    # `authorize?: false`: the pipeline's system lookup, as above; `tenant:`
-    # keeps it to this one site's list.
+    # The pipeline's system lookup, failing closed as above; `tenant:` keeps
+    # it to this one site's list.
     record =
       get_site_suppressed_recipient!(address,
         tenant: org_id,
-        authorize?: false,
+        actor: system(),
+        authorize_with: :error,
         not_found_error?: false
       )
 
@@ -288,19 +317,31 @@ defmodule KilnCMS.Mail do
   # raise is swallowed.
   defp suppress_recipients(email, reason, relay, org_id) do
     Enum.each(email.to, fn {_name, address} ->
-      _ = suppress_one(%{email: address, reason: reason}, relay, org_id)
+      case suppress_one(%{email: address, reason: reason}, relay, org_id) do
+        {:ok, _record} ->
+          :ok
+
+        # Best-effort, but not silent: an address that should have been
+        # suppressed and was not will be mailed again.
+        {:error, error} ->
+          Logger.error(
+            "Hard bounce not recorded on the #{relay} suppression list: " <>
+              Exception.message(error)
+          )
+      end
     end)
   rescue
     _error -> :ok
   end
 
-  # `authorize?: false`: only the pipeline writes either list, on a relay's
-  # reject naming the recipient — no caller may (both forbid `:suppress`).
-  defp suppress_one(attrs, :operator, _org_id), do: suppress_recipient(attrs, authorize?: false)
+  # Written as `system/0` (#1659): only the pipeline writes the site list, on
+  # its relay's reject naming the recipient (no person may `:suppress` there);
+  # the instance list admits the platform admin as well.
+  defp suppress_one(attrs, :operator, _org_id),
+    do: suppress_recipient(attrs, actor: system())
 
-  # `authorize?: false`: the same system write, to the site's own list only.
   defp suppress_one(attrs, :site, org_id) when is_binary(org_id),
-    do: suppress_site_recipient(attrs, tenant: org_id, authorize?: false)
+    do: suppress_site_recipient(attrs, tenant: org_id, actor: system())
 
   @doc """
   Deliver an email from inside an Oban worker, translating the outcome into
@@ -439,15 +480,21 @@ defmodule KilnCMS.Mail do
   ## Mail settings / DKIM
 
   @doc """
-  The settings singleton, or nil before first use. A system read
-  (`authorize?: false`): the admin-only policy guards the UI path, while the
-  delivery pipeline and DNS checks read config actorlessly.
+  The settings singleton, or nil before first use. Read as `system/0`
+  (#1659): the platform-admin policy guards the UI path, while the delivery
+  pipeline and DNS checks read config with no actor of their own.
+
+  Raises `Ash.Error.Forbidden` if the grant is ever lost, rather than
+  answering `nil`: `nil` means "not set up yet", and `dkim_config/0` would
+  read it as "no DKIM key" and send every message unsigned.
   """
   @spec get_settings() :: KilnCMS.Mail.Settings.t() | nil
   def get_settings do
     # The row is a singleton (unique `singleton` column), so a bare read
-    # returns at most one record.
-    case list_settings!(authorize?: false) do
+    # returns at most one record. `Settings` admits this actor for `:read` and
+    # `:init` only; the write path to the DKIM key reference and relay
+    # config stays platform-admin.
+    case list_settings!(actor: system(), authorize_with: :error) do
       [settings | _rest] -> settings
       [] -> nil
     end
@@ -460,7 +507,10 @@ defmodule KilnCMS.Mail do
   end
 
   defp create_settings! do
-    init_settings!(%{}, authorize?: false)
+    # As `system/0` (#1659), admitted for `:init` by name. `:init` accepts no
+    # attributes: it inserts the empty singleton, which the identity makes a
+    # no-op on a race. Nothing caller-supplied reaches it.
+    init_settings!(%{}, actor: system())
   rescue
     # Lost a concurrent-creation race on the singleton identity: the row
     # exists now, so read it.
@@ -797,4 +847,46 @@ defmodule KilnCMS.Mail do
     do: Enum.any?(term, &has_marker?(&1, markers))
 
   defp has_marker?(_term, _markers), do: false
+
+  # See `with_actor/2`.
+  @actor_override {__MODULE__, :actor_override}
+
+  @doc """
+  The actor the mail pipeline runs as (#1659): the settings singleton's read
+  and first-use insert, and both suppression lists' lookups and writes.
+
+  A `KilnCMS.SystemActor`, admitted by action name on `Mail.Settings` (`read`,
+  `init`), `Mail.SuppressedRecipient` and `Mail.SiteSuppressedRecipient`
+  (`read`, `suppress`); see `docs/policy-matrix.md`, "The system actor". It
+  may not edit the settings (the DKIM key, the server IP) nor clear a
+  suppression.
+  """
+  @spec system() :: KilnCMS.SystemActor.t() | nil
+  def system do
+    case Process.get(@actor_override, :unset) do
+      :unset -> KilnCMS.SystemActor.new(:mail)
+      actor -> actor
+    end
+  end
+
+  @doc false
+  # Test seam (#1659): run `fun` with `system/0` answering `actor` in this
+  # process, so a test can take the grant away and prove that a suppression
+  # lookup fails CLOSED (the recipient is not mailed) and that a settings read
+  # raises rather than reading as "no DKIM key". Process-local, and nothing on
+  # a request path calls it; code that could call it could equally pass any
+  # actor it liked.
+  @spec with_actor(term(), (-> result)) :: result when result: term()
+  def with_actor(actor, fun) do
+    previous = Process.get(@actor_override, :unset)
+    Process.put(@actor_override, actor)
+
+    try do
+      fun.()
+    after
+      if previous == :unset,
+        do: Process.delete(@actor_override),
+        else: Process.put(@actor_override, previous)
+    end
+  end
 end

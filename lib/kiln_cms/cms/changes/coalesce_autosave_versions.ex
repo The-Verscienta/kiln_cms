@@ -42,8 +42,10 @@ defmodule KilnCMS.CMS.Changes.CoalesceAutosaveVersions do
   unchanged.
 
   Runs in `after_transaction` (so the just-written version row exists before we
-  coalesce) and as a system caller (`authorize?: false`) since version
-  update/destroy is otherwise forbidden by `KilnCMS.CMS.VersionPolicies`.
+  coalesce). The two reads that pick the rows run as the saving editor (#1659),
+  failing closed; the rewrite and the deletes run as a trusted system caller
+  (`authorize?: false`) since version update/destroy is forbidden to every
+  actor by `KilnCMS.CMS.VersionPolicies` — see `coalesce/2`.
   """
   use Ash.Resource.Change
 
@@ -60,11 +62,11 @@ defmodule KilnCMS.CMS.Changes.CoalesceAutosaveVersions do
   @autosave_actions [:autosave, :save_working_copy]
 
   @impl true
-  def change(changeset, _opts, _context) do
+  def change(changeset, _opts, context) do
     Ash.Changeset.after_transaction(changeset, fn _changeset, result ->
       case result do
         {:ok, record} ->
-          coalesce(record)
+          coalesce(record, context)
           result
 
         _ ->
@@ -73,10 +75,22 @@ defmodule KilnCMS.CMS.Changes.CoalesceAutosaveVersions do
     end)
   end
 
-  defp coalesce(record) do
+  defp coalesce(record, context) do
     version_module = Module.concat(record.__struct__, Version)
 
-    case coalescible_versions(version_module, record) do
+    # The rows are chosen as the saving editor, who may read this history (#332
+    # scopes it like the document). FAIL CLOSED (#1659): `authorize_with:
+    # :error` on both reads. A refused read filters rather than raising, and a
+    # refused *manual-boundary* read would answer "no manual version", which
+    # widens the run to autosaves on the far side of a manual save — rows this
+    # would then delete. A refusal raises into the rescue below instead, and
+    # the version rows are kept.
+    read_opts =
+      context
+      |> Ash.Context.to_opts()
+      |> Keyword.merge(tenant: record.org_id, authorize_with: :error)
+
+    case coalescible_versions(version_module, record, read_opts) do
       # Nothing to collapse: a single (or zero) unanchored trailing autosave.
       versions when length(versions) <= 1 ->
         :ok
@@ -89,12 +103,19 @@ defmodule KilnCMS.CMS.Changes.CoalesceAutosaveVersions do
         # `VersionSnapshot` is what will do the replaying.
         merged = KilnCMS.CMS.VersionSnapshot.merge(versions)
 
+        # `authorize?: false` for the write and the deletes, justified: version
+        # rows are the editorial history, and `VersionPolicies` refuses update
+        # and destroy to EVERY actor, the system actor included. Admitting a
+        # `SystemActor` there would be a standing grant to rewrite and delete
+        # history for every system caller; this change is the one writer, and
+        # the rows it touches were chosen above under the editor's own read.
         Ash.update!(keep, %{changes: merged},
           action: :update,
           authorize?: false,
           tenant: record.org_id
         )
 
+        # `authorize?: false`: the same justification as the rewrite above.
         Enum.each(
           superseded,
           &Ash.destroy!(&1, action: :destroy, authorize?: false, tenant: record.org_id)
@@ -121,7 +142,7 @@ defmodule KilnCMS.CMS.Changes.CoalesceAutosaveVersions do
   # Sorted on `(version_inserted_at, id)` — the key the chain folds on — so
   # "the newest" means the same row here and there when two saves land in the
   # same microsecond.
-  defp coalescible_versions(version_module, record) do
+  defp coalescible_versions(version_module, record, read_opts) do
     case Chain.anchored_boundary(record) do
       # The boundary could not be read, so which rows are anchored is unknown.
       # Coalescing the wrong ones is unrecoverable and skipping is not, so this
@@ -135,27 +156,27 @@ defmodule KilnCMS.CMS.Changes.CoalesceAutosaveVersions do
           version_source_id == ^record.id and version_action_name in ^@autosave_actions
         )
         |> Ash.Query.sort(version_inserted_at: :asc, id: :asc)
-        |> after_latest_manual(version_module, record)
+        |> after_latest_manual(version_module, record, read_opts)
         |> Chain.after_anchored(boundary)
-        |> Ash.read!(authorize?: false, tenant: record.org_id)
+        |> Ash.read!(read_opts)
     end
   end
 
-  defp after_latest_manual(query, version_module, record) do
-    case latest_manual_version_timestamp(version_module, record.id, record.org_id) do
+  defp after_latest_manual(query, version_module, record, read_opts) do
+    case latest_manual_version_timestamp(version_module, record.id, read_opts) do
       nil -> query
       boundary -> Ash.Query.filter(query, version_inserted_at > ^boundary)
     end
   end
 
-  defp latest_manual_version_timestamp(version_module, source_id, org_id) do
+  defp latest_manual_version_timestamp(version_module, source_id, read_opts) do
     version_module
     |> Ash.Query.filter(
       version_source_id == ^source_id and version_action_name not in ^@autosave_actions
     )
     |> Ash.Query.sort(version_inserted_at: :desc)
     |> Ash.Query.limit(1)
-    |> Ash.read_one!(authorize?: false, tenant: org_id)
+    |> Ash.read_one!(read_opts)
     |> case do
       nil -> nil
       version -> version.version_inserted_at

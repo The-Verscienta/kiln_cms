@@ -42,6 +42,12 @@ defmodule KilnCMS.CMS.Validations.AssigneeIsEditor do
     end
   end
 
+  # System read (`authorize?: false`), kept on purpose (#1659). The caller is an
+  # editor assigning a task to SOMEONE ELSE, and `User` is readable only by its
+  # owner, so a caller-actor read would refuse every assignee but themselves. A
+  # system grant on `User` would be a standing read of every account on the
+  # deployment, for one primary-key lookup. The bypass also cannot fail open:
+  # it cannot be refused, and any miss or error below is a rejection.
   defp editor_or_admin?(user_id, changeset) do
     case Ash.get(User, user_id, authorize?: false) do
       {:ok, user} -> Scoping.effective_tier(user, changeset) in [:editor, :admin]

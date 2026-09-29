@@ -278,6 +278,12 @@ defmodule KilnCMS.Links.Internal do
   # An error says nothing about the link, so it must not become a verdict — a
   # transient database blip would otherwise fill an author's panel with errors
   # about links that are perfectly fine. Same for a multi-match.
+  #
+  # A content read, so it keeps `authorize?: false` (#1659, the #1402
+  # content-read argument): a system-actor grant on content's read policy
+  # would be a standing read over the whole corpus, drafts included. It is
+  # tenant-scoped, selects only `state`, and exists to tell an editor whether
+  # a target is published.
   defp read_state(query, org_id) do
     case Ash.read_one(query, authorize?: false, tenant: org_id) do
       {:ok, %{state: :published}} -> :published

@@ -9,7 +9,8 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   cleaned map of JSON-native values (dates as ISO-8601 strings) so the jsonb
   column round-trips cleanly. Types beyond the built-ins dispatch to their
   registered `Kiln.FieldType`'s `cast/2` (see `KilnCMS.CMS.FieldTypes`). Definitions are
-  read with `authorize?: false` (registry metadata, not user data).
+  read as `KilnCMS.CMS.Bookkeeping.system/0` (registry metadata, not user data),
+  failing closed; `:media`/`:reference` targets are resolved as the caller.
 
   ## Partial updates merge; the payload is not the whole record
 
@@ -94,10 +95,10 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   alias Ash.Error.Changes.InvalidAttribute
 
   @impl true
-  def change(changeset, _opts, _context) do
+  def change(changeset, _opts, context) do
     if changeset.action_type == :create or
          Ash.Changeset.changing_attribute?(changeset, :custom_fields) do
-      apply_definitions(changeset, merge_base(changeset), mode(changeset))
+      apply_definitions(changeset, merge_base(changeset), mode(changeset), context)
     else
       # An update that never mentions `custom_fields` still has to refresh
       # computed fields: their inputs are the *document* — a retitled page
@@ -129,8 +130,8 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   valid when it was written — nor reinstate one, which is the whole point of
   #710.
   """
-  @spec apply_restored(Ash.Changeset.t()) :: Ash.Changeset.t()
-  def apply_restored(changeset), do: apply_definitions(changeset, %{}, :drop)
+  @spec apply_restored(Ash.Changeset.t(), Ash.Resource.Change.Context.t()) :: Ash.Changeset.t()
+  def apply_restored(changeset, context), do: apply_definitions(changeset, %{}, :drop, context)
 
   # How this write treats a supplied `custom_fields` key no `FieldDefinition`
   # declares: `:strict` (the default) refuses it; `:drop` discards it with a
@@ -147,18 +148,24 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # absent fields fall to their defaults (empty base). On update we carry the
   # stored values forward, so a field the caller didn't mention is preserved
   # rather than dropped by the full-map rewrite. A restore passes `%{}` directly
-  # (see `apply_restored/1`).
+  # (see `apply_restored/2`).
   defp merge_base(%{action_type: :create}), do: %{}
   defp merge_base(changeset), do: stringify_keys(changeset.data.custom_fields || %{})
 
-  defp apply_definitions(changeset, existing, mode) do
+  defp apply_definitions(changeset, existing, mode, context) do
     defs = definitions_for(changeset)
 
     # The writing org (epic #336). `:media`/`:reference` fields resolve a snapshot
     # by id under this tenant, so a value pointing at another site's media/content
     # simply won't resolve (nil under `global?: true` → a validation error rather
     # than a cross-org leak). Tenant-less writes (default org) resolve as before.
-    tenant = changeset.to_tenant
+    #
+    # And as the CALLER (#1659): the snapshot copies the target's title, slug,
+    # url and alt text into this record, so resolving it under a bypass let an
+    # editor who may not read a draft learn its title by referencing its id. A
+    # target the caller cannot read resolves like a missing one — a validation
+    # error, never a write.
+    read_opts = context |> Ash.Context.to_opts() |> Keyword.put(:tenant, changeset.to_tenant)
 
     supplied = stringify_keys(Ash.Changeset.get_attribute(changeset, :custom_fields) || %{})
 
@@ -168,7 +175,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     {computed, editable} = Enum.split_with(defs, &(&1.field_type == :computed))
 
     {cleaned, errors} =
-      Enum.reduce(editable, {%{}, []}, &accumulate(&1, supplied, existing, tenant, &2))
+      Enum.reduce(editable, {%{}, []}, &accumulate(&1, supplied, existing, read_opts, &2))
 
     {cleaned, errors} = apply_computed(computed, changeset, cleaned, errors)
 
@@ -309,22 +316,31 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # nil while the entry is still invalid means simply no custom fields yet).
   # Read under the writing org (epic #336) so a record only ever sees its own
   # site's field schema.
+  #
+  # As `KilnCMS.CMS.Bookkeeping.system/0` (#1659), not as the caller: this runs
+  # on EVERY content update (the computed-field refresh), so its caller is
+  # whoever wrote — an editor, the AshOban scheduler, a firing or search
+  # worker. `FieldDefinition` admits the system actor to read (registry
+  # metadata, not user data).
+  #
+  # FAIL CLOSED: `authorize_with: :error`. A refused read filters to `[]`, and
+  # the cleaned map is folded out of the definitions — so "no definitions"
+  # would drop every stored value on the record, skip every `required`, and
+  # refuse every key the caller sent. A refusal raises instead.
   defp definitions_for(%{resource: resource} = changeset) do
-    tenant = changeset.to_tenant
+    opts = [
+      actor: KilnCMS.CMS.Bookkeeping.system(),
+      authorize_with: :error,
+      tenant: changeset.to_tenant
+    ]
 
     if function_exported?(resource, :__kiln_dynamic_entry__, 0) do
       case Ash.Changeset.get_attribute(changeset, :type_definition_id) do
-        nil ->
-          []
-
-        id ->
-          KilnCMS.CMS.field_definitions_for_definition!(id, authorize?: false, tenant: tenant)
+        nil -> []
+        id -> KilnCMS.CMS.field_definitions_for_definition!(id, opts)
       end
     else
-      KilnCMS.CMS.field_definitions_for!(resource.__kiln_content_type__(),
-        authorize?: false,
-        tenant: tenant
-      )
+      KilnCMS.CMS.field_definitions_for!(resource.__kiln_content_type__(), opts)
     end
   end
 
@@ -332,10 +348,10 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # Three-way per key: a field the caller *supplied* is coerced/cleared; a field
   # they omitted keeps its `existing` stored value (the merge); a field with
   # neither falls to its default (fresh field / create).
-  defp accumulate(def, supplied, existing, tenant, {cleaned, errors}) do
+  defp accumulate(def, supplied, existing, read_opts, {cleaned, errors}) do
     cond do
       Map.has_key?(supplied, def.name) ->
-        fold(resolve(def, Map.get(supplied, def.name), tenant), def, cleaned, errors)
+        fold(resolve(def, Map.get(supplied, def.name), read_opts), def, cleaned, errors)
 
       Map.has_key?(existing, def.name) ->
         # Untouched by this write: keep the stored (already-coerced) value as-is.
@@ -345,7 +361,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
         {Map.put(cleaned, def.name, Map.get(existing, def.name)), errors}
 
       true ->
-        fold(resolve(def, nil, tenant), def, cleaned, errors)
+        fold(resolve(def, nil, read_opts), def, cleaned, errors)
     end
   end
 
@@ -357,14 +373,14 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   # The coerced value for a definition from a supplied `raw` (or its default):
   # `:skip` when blank-and-optional, or an error when blank-and-required.
-  defp resolve(def, raw, tenant) do
+  defp resolve(def, raw, read_opts) do
     blank? = &blank_for?(def, &1)
     raw = if blank?.(raw), do: def.default, else: raw
 
     cond do
       blank?.(raw) and def.required -> {:error, "is required"}
       blank?.(raw) -> :skip
-      true -> coerce(raw, def, tenant)
+      true -> coerce(raw, def, read_opts)
     end
   end
 
@@ -395,15 +411,15 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   end
 
   # Tenant-aware dispatch: only `:media`/`:reference` resolve records (and so need
-  # the writing tenant); every other field type coerces purely from its value, so
-  # it delegates to the type-only `coerce/2` below.
-  defp coerce(value, %{field_type: :media} = def, tenant),
-    do: coerce_media(value, def, tenant)
+  # the writing tenant and actor); every other field type coerces purely from its
+  # value, so it delegates to the type-only `coerce/2` below.
+  defp coerce(value, %{field_type: :media} = def, read_opts),
+    do: coerce_media(value, def, read_opts)
 
-  defp coerce(value, %{field_type: :reference} = def, tenant),
-    do: coerce_reference(value, def, tenant)
+  defp coerce(value, %{field_type: :reference} = def, read_opts),
+    do: coerce_reference(value, def, read_opts)
 
-  defp coerce(value, def, _tenant), do: coerce(value, def)
+  defp coerce(value, def, _read_opts), do: coerce(value, def)
 
   # --- coercion to JSON-native values ----------------------------------------
 
@@ -486,9 +502,9 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # take. Re-saving refreshes the snapshot. Accepts a previously stored map too
   # (API writers may round-trip the stored shape). Scoped to the writing tenant
   # so a media reference can't point across sites (epic #336).
-  defp coerce_media(value, _def, tenant) do
+  defp coerce_media(value, _def, read_opts) do
     with {:ok, id} <- extract_id(value),
-         {:ok, media} <- KilnCMS.CMS.get_media_item(id, authorize?: false, tenant: tenant) do
+         {:ok, media} <- KilnCMS.CMS.get_media_item(id, read_opts) do
       {:ok, %{"id" => media.id, "url" => media.url, "alt" => media.alt}}
     else
       _ -> {:error, "must be an existing media item"}
@@ -501,11 +517,10 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # consumers fetch fresh content with; slug/title are display labels that may
   # go stale until the next save. Scoped to the writing tenant so a reference
   # can't point across sites (epic #336).
-  defp coerce_reference(value, %{target_type: target}, tenant) do
+  defp coerce_reference(value, %{target_type: target}, read_opts) do
     with {:ok, id} <- extract_id(value),
          ct when not is_nil(ct) <- KilnCMS.CMS.ContentTypes.get(target),
-         {:ok, record} <-
-           KilnCMS.CMS.ContentTypes.get_record(ct, id, authorize?: false, tenant: tenant) do
+         {:ok, record} <- KilnCMS.CMS.ContentTypes.get_record(ct, id, read_opts) do
       {:ok,
        %{"id" => record.id, "type" => target, "slug" => record.slug, "title" => record.title}}
     else

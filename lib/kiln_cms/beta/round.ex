@@ -15,6 +15,19 @@ defmodule KilnCMS.Beta.Round do
   Everything is **idempotent** by natural key (email / slug), so re-running a
   round label mid-round adds the seats that are missing without disturbing the
   ones that are working.
+
+  ## Why the bypasses stay (#1659)
+
+  This is an operator tool run from `mix kiln.beta.round`, with no signed-in
+  actor. Its account steps — find a seat by email, move its role, revoke its
+  tokens, resolve the publisher — act on `KilnCMS.Accounts.User`, whose reads
+  are self-only and whose role write is a platform admin's. A system-actor
+  grant for them would be a standing power over every account on the
+  deployment, far wider than a beta round (the #1402 argument), so they keep
+  `authorize?: false`, each with its reason at the call site. They cannot be
+  refused, so none of them can mistake a refusal for "no such account" and
+  mint a duplicate seat. The seed-content writes already run as the seat's own
+  actor.
   """
 
   alias KilnCMS.Accounts
@@ -150,6 +163,9 @@ defmodule KilnCMS.Beta.Round do
   # `log_out_everywhere` add-on that `apply_on_password_change?` hangs off.
   # Both are re-run explicitly below.
   defp seat(email, role, facilitator?, reset?) do
+    # `authorize?: false`: a `User` read by email is self-only (see the
+    # moduledoc); an existence check that could be filtered would read a
+    # refusal as "no account" and try to create a duplicate.
     case Accounts.get_user_by_email(email, not_found_error?: false, authorize?: false) do
       {:ok, nil} ->
         password = generate_password()
@@ -196,6 +212,9 @@ defmodule KilnCMS.Beta.Round do
   # drops the live sockets that authorized under the old role.
   defp ensure_role(%{role: role} = user, role), do: user
 
+  # `authorize?: false`: `:manage_access` is a platform admin's, and this
+  # operator tool has no signed-in actor. The action itself still runs, so its
+  # `EvictSessions` change drops the demoted account's live sockets.
   defp ensure_role(user, role),
     do: Accounts.manage_user_access!(user, %{role: role}, authorize?: false)
 
@@ -215,6 +234,8 @@ defmodule KilnCMS.Beta.Round do
 
     user = Ash.Seed.update!(user, %{hashed_password: Bcrypt.hash_pwd_salt(password)})
 
+    # `authorize?: false`: the AshAuthentication add-on's own action, run by
+    # hand for the one account whose password this operator just replaced.
     User
     |> Ash.ActionInput.for_action(:log_out_everywhere, %{user: user})
     |> Ash.run_action!(authorize?: false)
@@ -229,10 +250,14 @@ defmodule KilnCMS.Beta.Round do
     |> Enum.find(&(&1.role == :admin))
     |> case do
       nil -> nil
+      # `authorize?: false`: loads the seat this round just provisioned, to act
+      # AS it (a `User` read is self-only; see the moduledoc).
       %{email: email} -> Accounts.get_user_by_email!(email, authorize?: false)
     end
   end
 
+  # `authorize?: false`: same as `publisher/1` — the seat's own record, loaded
+  # so the seeding below runs under that seat's policies.
   defp actor_for(%{email: email}), do: Accounts.get_user_by_email!(email, authorize?: false)
 
   # 16 bytes of `:crypto.strong_rand_bytes/1`, url64-encoded. Comfortably past
@@ -410,6 +435,11 @@ defmodule KilnCMS.Beta.Round do
   # draft and recover it from trash, so a re-run that only consulted the live
   # read would find nothing, try to create, and die on the unique constraint
   # halfway through the round.
+  #
+  # `authorize?: false`: a content read, under the #1402 content-read argument
+  # (a system grant would be a standing read of every draft). It is an
+  # existence check that must not be filtered: a refused read answering `[]`
+  # would send the round into the unique-constraint crash described above.
   defp exists?(lister, trashed_lister, slug, tenant) do
     query = [query: [filter: [slug: slug]], authorize?: false, tenant: tenant]
 

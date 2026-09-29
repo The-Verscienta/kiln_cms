@@ -11,7 +11,7 @@ defmodule KilnCMS.Forms.AutoresponderWorker do
 
   import Swoosh.Email
 
-  alias KilnCMS.CMS
+  alias KilnCMS.{CMS, Forms}
   alias KilnCMS.Forms.Autoresponder
   alias KilnCMS.Mail
 
@@ -24,9 +24,15 @@ defmodule KilnCMS.Forms.AutoresponderWorker do
     # reasoning as NotificationWorker's re-fetch.
     tenant = args["org_id"] || KilnCMS.Accounts.default_org_id()
 
-    case CMS.get_form(form_id, authorize?: false, tenant: tenant) do
+    # As the form pipeline's system actor, `authorize_with: :error` (#1659): a
+    # refused read would filter to "form deleted" (or "no fields", which
+    # renders every `[field:…]` token empty) and the visitor's confirmation
+    # would silently never go out. A refusal fails the job, which retries.
+    opts = [actor: Forms.system(), authorize_with: :error, tenant: tenant]
+
+    case CMS.get_form(form_id, opts) do
       {:ok, %{autoresponder_enabled: true} = form} ->
-        fields = CMS.form_fields_for!(form_id, authorize?: false, tenant: tenant)
+        fields = CMS.form_fields_for!(form_id, opts)
         {subject, body} = Autoresponder.render(form, fields, data)
 
         new()
@@ -37,6 +43,9 @@ defmodule KilnCMS.Forms.AutoresponderWorker do
         |> Mail.ensure_message_id("form-autoresponder-#{id}")
         # Through the site's own relay when it has one (#1322).
         |> Mail.deliver_for_worker(org_id: tenant)
+
+      {:error, %Ash.Error.Forbidden{} = error} ->
+        {:error, error}
 
       # Form deleted or the autoresponder switched off since it was queued —
       # nothing to send. (Not an error: the visitor's submission still

@@ -20,7 +20,7 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
   use Ash.Resource.Change
 
   @impl true
-  def change(changeset, _opts, _context) do
+  def change(changeset, _opts, context) do
     changeset
     |> Ash.Changeset.after_action(fn _changeset, record ->
       # The type registry, sitemap and llms.txt are all per-org (#336): bust the
@@ -32,7 +32,7 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
       {:ok, record}
     end)
     |> Ash.Changeset.after_transaction(&bust_feeds/2)
-    |> Ash.Changeset.after_transaction(&enqueue_seo_refire/2)
+    |> Ash.Changeset.after_transaction(&enqueue_seo_refire(&1, &2, context))
   end
 
   # Re-fire every published document of a type whose SEO pattern changed (#1135).
@@ -41,7 +41,7 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
   # here never fails the type save. `FieldDefinition` name changes are handled
   # separately — `[field:<name>]` in a pattern resolves off custom_fields, so a
   # rename there also needs a re-fire, but only when the name itself changed.
-  defp enqueue_seo_refire(changeset, {:ok, record} = result) do
+  defp enqueue_seo_refire(changeset, {:ok, record} = result, context) do
     cond do
       # TypeDefinition — check the two pattern attributes
       Map.has_key?(record, :seo_title_pattern) or Map.has_key?(record, :seo_description_pattern) ->
@@ -60,12 +60,19 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
           type =
             cond do
               not is_nil(Map.get(record, :type_definition_id)) ->
-                # Dynamic type — look up its name via the definition id
-                case KilnCMS.CMS.get_type_definition(record.type_definition_id,
-                       authorize?: false,
-                       tenant: record.org_id
+                # Dynamic type — look up its name via the definition id, as the
+                # admin who renamed the field (#1659). FAIL CLOSED: a refusal
+                # must not read as "no such type" and skip the re-fire, leaving
+                # every document's `[field:…]` SEO tokens stale; it raises into
+                # the rescue below, which logs it.
+                case KilnCMS.CMS.get_type_definition(
+                       record.type_definition_id,
+                       context
+                       |> Ash.Context.to_opts()
+                       |> Keyword.merge(tenant: record.org_id, authorize_with: :error)
                      ) do
                   {:ok, type_def} -> type_def.name
+                  {:error, %Ash.Error.Forbidden{} = error} -> raise error
                   _ -> nil
                 end
 
@@ -91,7 +98,7 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
       result
   end
 
-  defp enqueue_seo_refire(_changeset, other), do: other
+  defp enqueue_seo_refire(_changeset, other, _context), do: other
 
   # The feed *documents* (#719). `has_published_feed` is the other half of
   # `KilnCMS.Feeds.syndicated?/2`: turning it off stops `/recipes/feed.xml`

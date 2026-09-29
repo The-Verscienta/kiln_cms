@@ -139,9 +139,13 @@ defmodule KilnCMS.CMS.FormSubmission do
     end
 
     # Submission contents are visitor-provided data — admin eyes only. The
-    # accept pipeline writes with authorize?: false after validating.
+    # accept pipeline (`KilnCMS.Forms.submit/3`) writes, after validating, as
+    # `KilnCMS.Forms.system/0` (#1659): admitted to `:create` alone, so the
+    # system can record a submission but never read, re-mark or delete one.
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+      forbid_unless action(:create)
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

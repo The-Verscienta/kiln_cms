@@ -23,53 +23,79 @@ defmodule KilnCMS.Experiments.Changes.RequireVariants do
   @impl true
   def change(changeset, _opts, context) do
     Ash.Changeset.before_action(changeset, fn changeset ->
-      variants = load_variants(changeset, context)
-
-      cond do
-        length(variants) < 2 ->
-          Ash.Changeset.add_error(changeset,
-            field: :variants,
-            message: "an experiment needs at least two variants to be a test"
-          )
-
-        Enum.sum_by(variants, & &1.weight) <= 0 ->
-          Ash.Changeset.add_error(changeset,
-            field: :variants,
-            message:
-              "an experiment whose weights sum to zero serves no arm at all; " <>
-                "give at least one variant a weight above zero"
-          )
-
-        Enum.count(variants, & &1.control) != 1 ->
-          Ash.Changeset.add_error(changeset,
-            field: :variants,
-            message: "an experiment needs exactly one control variant"
-          )
-
-        already_running?(changeset, context) ->
-          Ash.Changeset.add_error(changeset,
-            field: :document_id,
-            message:
-              "another experiment is already running on this document; " <>
-                "two overlapping patches make both results uninterpretable"
-          )
-
-        true ->
-          changeset
+      with {:ok, variants} <- load_variants(changeset, context),
+           {:ok, running} <- load_running(context) do
+        check(changeset, variants, running)
+      else
+        # A refused read (#1659) is the caller's Forbidden, returned rather
+        # than raised so `start_experiment/2` keeps its `{:error, _}` contract.
+        {:error, error} -> Ash.Changeset.add_error(changeset, error)
       end
     end)
   end
 
+  defp check(changeset, variants, running) do
+    cond do
+      length(variants) < 2 ->
+        Ash.Changeset.add_error(changeset,
+          field: :variants,
+          message: "an experiment needs at least two variants to be a test"
+        )
+
+      Enum.sum_by(variants, & &1.weight) <= 0 ->
+        Ash.Changeset.add_error(changeset,
+          field: :variants,
+          message:
+            "an experiment whose weights sum to zero serves no arm at all; " <>
+              "give at least one variant a weight above zero"
+        )
+
+      Enum.count(variants, & &1.control) != 1 ->
+        Ash.Changeset.add_error(changeset,
+          field: :variants,
+          message: "an experiment needs exactly one control variant"
+        )
+
+      already_running?(changeset, running) ->
+        Ash.Changeset.add_error(changeset,
+          field: :document_id,
+          message:
+            "another experiment is already running on this document; " <>
+              "two overlapping patches make both results uninterpretable"
+        )
+
+      true ->
+        changeset
+    end
+  end
+
+  # Both reads run as the system (#1659) with `authorize_with: :error`, because
+  # both back a decision whose permissive answer is `[]`. A refused variants
+  # read would at least refuse the start ("needs at least two variants") for
+  # the wrong reason; a refused running-set read would answer "nothing else is
+  # running here" and let a second experiment start on the same document. So
+  # a lost grant is an error, and the start fails.
   defp load_variants(changeset, context) do
-    KilnCMS.Experiments.list_variants!(
+    KilnCMS.Experiments.list_variants(
       query: [filter: [experiment_id: changeset.data.id]],
-      authorize?: false,
+      actor: KilnCMS.Experiments.system(),
+      authorize_with: :error,
       tenant: context.tenant
     )
   end
 
-  defp already_running?(changeset, context) do
-    KilnCMS.Experiments.running_experiments!(authorize?: false, tenant: context.tenant)
-    |> Enum.any?(&(&1.document_id == changeset.data.document_id and &1.id != changeset.data.id))
+  defp load_running(context) do
+    KilnCMS.Experiments.running_experiments(
+      actor: KilnCMS.Experiments.system(),
+      authorize_with: :error,
+      tenant: context.tenant
+    )
+  end
+
+  defp already_running?(changeset, running) do
+    Enum.any?(
+      running,
+      &(&1.document_id == changeset.data.document_id and &1.id != changeset.data.id)
+    )
   end
 end

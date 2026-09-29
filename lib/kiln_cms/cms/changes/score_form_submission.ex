@@ -6,10 +6,15 @@ defmodule KilnCMS.CMS.Changes.ScoreFormSubmission do
   `Kiln.Forms.SpamCheck.threshold/0` — otherwise `:new`.
 
   Resolves the org's disallowed-keyword list (`KilnCMS.CMS.FormSpamSettings`)
-  itself, `authorize?: false`: this runs on every public, anonymous
-  submission — there is no actor to authorize an admin-only settings read
-  against, the same reasoning `KilnCMS.CMS.Validations.RequiredConsent` gives
-  for reading consents as the system.
+  itself, as `KilnCMS.CMS.Bookkeeping.system/0` (#1659): this runs on every
+  public, anonymous submission — there is no actor to authorize an admin-only
+  settings read against. `FormSpamSettings` admits the system actor to `read`
+  alone.
+
+  The read fails CLOSED. A refused read filters to "no settings row", and an
+  error used to answer `[]` too — either way the keyword check silently
+  stopped flagging anything. A refusal or a read error now raises, so the
+  submission is refused rather than stored unscored.
   """
   use Ash.Resource.Change
 
@@ -43,9 +48,14 @@ defmodule KilnCMS.CMS.Changes.ScoreFormSubmission do
   defp keywords(nil), do: []
 
   defp keywords(tenant) do
-    case CMS.list_form_spam_settings(tenant: tenant, authorize?: false) do
-      {:ok, [%{keywords: keywords} | _]} -> keywords
-      _ -> []
+    CMS.list_form_spam_settings!(
+      actor: KilnCMS.CMS.Bookkeeping.system(),
+      authorize_with: :error,
+      tenant: tenant
+    )
+    |> case do
+      [%{keywords: keywords} | _] -> keywords
+      [] -> []
     end
   end
 end
