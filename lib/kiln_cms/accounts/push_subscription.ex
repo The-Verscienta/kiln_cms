@@ -150,7 +150,8 @@ defmodule KilnCMS.Accounts.PushSubscription do
     end
 
     # A browser registers its own device: the row's `user_id` must be the
-    # actor's (a platform admin is the one exception, through the bypass above). The upsert still moves a row another account held on the same
+    # actor's (a platform admin is the one exception, through the bypass
+    # above). The upsert still moves a row another account held on the same
     # endpoint — the moduledoc's "second subscription is the true owner".
     policy action(:subscribe) do
       authorize_if relating_to_actor(:user)
