@@ -147,6 +147,8 @@ ever be authorized by an explicit clause below.
 | `Search.BlockEmbedding` | `read`, `for_document`, `nearest`, `upsert`, `destroy` | The per-block semantic index. `Search.BlockIndexer` is the only writer it has ever had — rows are derived from the document's own block tree — and `BlockSearch` / `Search.Related` are its only readers. Whether a *caller* may see a hit is decided one tier up, when the matching document is hydrated under their own authorization. |
 | `Search.TagEmbedding` | `read`, `for_tags`, `nearest`, `upsert`, `destroy` | Same shape, for tag-name vectors: written by `TagEmbeddingWorker` and `Search.Related`, read by `Search.Related` only. |
 | `CMS.MediaDerivative` | all (`read`, `for_item`, `record`, `destroy`) | The bookkeeping row behind each cached on-the-fly image transform (`/media/:id/t/…`). `Media.Derivatives` is its only reader and writer: it counts an item's rows against the per-item budget, prunes the ones cut from a replaced original or around a moved focal point, and lists them for a purge. No person — admin included — reads or writes a row, and there is no API surface. Who may *see* a transform is decided on the `MediaItem`, by the transform controller's ordinary policy-checked read. |
+| `CMS.MediaItem` | `read` **only**, named inside the `action_type(:read)` policy | The alt-text publish gate (`Validations.MediaAltText`) asks which of a document's media ids are marked `decorative`. It also runs for `publish_scheduled`, whose caller is the AshOban scheduler with no actor, so it cannot read as the caller. Narrowed by `forbid_unless action(:read)`: through `library` or `search` it reads only what a stranger may (public, not quarantined), `trashed` stays admin-only, and it has no write. A refusal fails the publish closed ("alt text could not be checked"), never "not decorative". |
+| `CMS.Consent` | `for_content` **only** | The required-consent publish gate (`Validations.RequiredConsent`) lists one document's consents, for the same reason (the scheduler has no actor). It may not record a consent or list them all. A refusal fails the publish closed ("consents could not be checked"), never "nothing required". |
 | `CMS.MediaItem` | `read`, `quarantine_expired`, `record_processing`, `release_quarantine`, and `purge` of a **quarantined** item only | The media pipeline, as `Media.system/0` (#1659). `VariantWorker`, `AVWorker` and `AVStripWorker` re-read the item they were enqueued for (quarantined or gated included) with `authorize_with: :error`, so a refused read fails the job rather than reading as "gone" — which for the strip would leave the upload quarantined until the reaper deleted it. The derived fields (dimensions, duration, variants, `variant_failures`) are written through `record_processing`, never `update`, so the grant cannot gate an item or touch its tags or editor fields; the strip releases through `release_quarantine`. `QuarantineReaper` scans every site through `quarantine_expired` (a `multitenancy :bypass` read, admitted to the system actor **alone** by a policy above the admin bypass) and purges; the strip purges an upload it refuses. `purge` is admitted only while `quarantined == true`: a released item may be in use, and deleting it stays an admin act. The regeneration scan reads with `authorize_with: :error` too. Not admitted: `update`, `update_metadata`, the soft `destroy`, `trashed`, `restore`, `increment_downloads`. |
 | `CMS.Form` | `read` **only** | The form pipeline, as `Forms.system/0` (#1659). `NotificationWorker` and `AutoresponderWorker` re-read the form a submission was queued for, active or not, with `authorize_with: :error`: a refused read would filter to "form deleted" and the mail would silently never go out, so it fails the job instead. Building, editing or deleting a form stays admin-only. |
 | `CMS.FormField` | `for_form` **only** | The submission is validated against the form's fields; `AutoresponderWorker` and the autoresponder-template validation (`Forms.Autoresponder.definitions_for_form/4`, which a seed or template instantiation reaches with no editor session) read them too. Every one runs with `authorize_with: :error`: a refused read filtering to `[]` would accept a submission with every required field skipped and every value dropped. |
@@ -271,6 +273,10 @@ managed through `manage_relationship` on the content resources).
 
 Media is world-readable because published content embeds it (featured images,
 inline assets).
+
+The alt-text publish gate (`Validations.MediaAltText`) reads the `decorative`
+flag as the **system actor**, through the plain `read` only (#1659); see
+[The system actor](#the-system-actor).
 
 The pipeline's own actions — `record_processing`, `release_quarantine` and
 the cross-site `quarantine_expired` scan — are not an editor's. The first two
@@ -749,6 +755,10 @@ write route exists on either surface.
 
 There is no `update` action — consent records are corrected by recording a new
 one, not by editing history.
+
+The publish gate (`Validations.RequiredConsent`) reads a document's consents as
+the **system actor**, through `for_content` only (#1659); see
+[The system actor](#the-system-actor).
 
 `HistoryAnchor` — every action (`read`, `for_content`, `create`) is admin-only;
 there is deliberately no destroy. The publish pipeline writes anchors, and the

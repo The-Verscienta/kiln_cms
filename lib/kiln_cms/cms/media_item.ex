@@ -533,11 +533,16 @@ defmodule KilnCMS.CMS.MediaItem do
     # private blob before it did. Written into the policy, not a UI filter,
     # because the JSON:API and GraphQL surfaces read through this too.
     #
-    # The media pipeline (`KilnCMS.Media.system/0`, #1659) re-reads the item a
-    # worker was enqueued for, quarantined or gated included, and the reaper
-    # scans for stale quarantines. Admitted with `authorize_if`, never a
-    # `bypass`, and narrowed by name so a read action added later is not
-    # admitted by default.
+    # The system actor reads `read` and `quarantine_expired`, nothing else
+    # (#1659). The media pipeline (`KilnCMS.Media.system/0`) re-reads the item
+    # a worker was enqueued for, quarantined or gated included, and the reaper
+    # scans for stale quarantines. The publish gate `Validations.MediaAltText`
+    # asks which of a document's media ids are marked decorative, and it also
+    # runs for `:publish_scheduled`, whose caller (the AshOban scheduler) has no
+    # actor. Admitted with `authorize_if`, never a `bypass`, and narrowed by
+    # name so a read action added later is not admitted by default: through
+    # `library` or `search` it reads only what a stranger may, and `trashed`
+    # stays admin-only (below).
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
       authorize_if expr(^ref(:audience) == :public and ^ref(:quarantined) == false)

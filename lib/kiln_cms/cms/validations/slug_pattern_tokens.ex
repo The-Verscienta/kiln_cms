@@ -26,18 +26,23 @@ defmodule KilnCMS.CMS.Validations.SlugPatternTokens do
   use Ash.Resource.Validation
 
   alias KilnCMS.CMS.Slugs
+  alias KilnCMS.CMS.Validations.Lookup
   alias KilnCMS.Slug.Pattern
 
   @impl true
-  def validate(changeset, _opts, _context) do
-    with :ok <- check(changeset, :slug_pattern, :slug) do
-      check(changeset, :alias_pattern, :alias)
+  def validate(changeset, _opts, context) do
+    with :ok <- check(changeset, context, :slug_pattern, :slug) do
+      check(changeset, context, :alias_pattern, :alias)
     end
   end
 
-  defp check(changeset, field, usage) do
+  defp check(changeset, context, field, usage) do
     pattern = Ash.Changeset.get_attribute(changeset, field)
-    opts = [usage: usage, extra_definitions: extra_definitions(changeset, pattern, usage)]
+
+    opts = [
+      usage: usage,
+      extra_definitions: extra_definitions(changeset, context, pattern, usage)
+    ]
 
     case Pattern.validate(pattern, opts) do
       :ok -> :ok
@@ -48,22 +53,28 @@ defmodule KilnCMS.CMS.Validations.SlugPatternTokens do
   # Only when the built-ins come up short — see the moduledoc. On a CREATE the
   # type has no field definitions yet, so this is an empty read; that is the
   # ordering constraint stated above rather than something to work around.
-  defp extra_definitions(changeset, pattern, usage) do
+  defp extra_definitions(changeset, context, pattern, usage) do
     case Pattern.unknown_tokens(pattern, usage) do
-      [] -> []
-      _unknown -> changeset |> type_field_definitions() |> Slugs.type_token_definitions()
+      [] ->
+        []
+
+      _unknown ->
+        changeset |> type_field_definitions(context) |> Slugs.type_token_definitions()
     end
   end
 
-  defp type_field_definitions(changeset) do
+  # As the caller (#1659): editing a type's patterns is admin work, and an admin
+  # reads every field definition. A refused read cannot widen the vocabulary —
+  # it narrows it to the built-ins, so the unknown token is rejected.
+  defp type_field_definitions(changeset, context) do
     case Ash.Changeset.get_data(changeset, :id) do
       nil ->
         []
 
       id ->
-        KilnCMS.CMS.field_definitions_for_definition!(id,
-          authorize?: false,
-          tenant: changeset.to_tenant
+        KilnCMS.CMS.field_definitions_for_definition!(
+          id,
+          Lookup.as_caller(context, changeset.to_tenant)
         )
     end
   rescue
