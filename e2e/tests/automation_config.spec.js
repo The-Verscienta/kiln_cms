@@ -75,4 +75,66 @@ test.describe("automation rule settings", () => {
       animations: "disabled",
     });
   });
+
+  test("a recipe fills the builder, and the gallery keeps the admin's fold", async ({ page }, testInfo) => {
+    const gallery = page.locator("details#recipes");
+    const isOpen = () => gallery.evaluate(el => el.open);
+
+    // The server renders the gallery open only while the site has no rules,
+    // and the shared e2e database may or may not have some. Either way, the
+    // admin's own open/fold must survive a re-render that doesn't change the
+    // server's default. Opening it and then picking a recipe covers "server
+    // says folded"; folding it and then changing the form covers "server
+    // says open".
+    if (!(await isOpen())) await gallery.locator("summary").click();
+
+    await page.locator("#recipe-task-when-stale").click();
+    await expect(page.locator("#recipe-banner")).toContainText("Create a task when content goes stale");
+    await expect(page.locator("#rule_action_create_task")).toBeChecked();
+    await expect(page.locator("#rule_summary")).toContainText(
+      "When any content is past its review date, create a task for the author."
+    );
+    expect(await isOpen()).toBe(true);
+
+    await page.locator("details#recipes").screenshot({
+      path: testInfo.outputPath("automation-recipes.png"),
+      animations: "disabled",
+    });
+
+    await gallery.locator("summary").click();
+    expect(await isOpen()).toBe(false);
+    await page.locator("#rule_content_type").selectOption({ index: 1 });
+    await expect(page.locator("#rule_summary")).not.toContainText("any content");
+    expect(await isOpen()).toBe(false);
+  });
+
+  test("try it renders the email the rule would send, in a sandboxed frame", async ({ page }, testInfo) => {
+    const cspViolations = [];
+    page.on("console", msg => {
+      if (/Content Security Policy/i.test(msg.text())) cspViolations.push(msg.text());
+    });
+
+    await form(page).getByText("Send an email", { exact: true }).click();
+    await page.locator("#rule_config_to").fill("team@example.com");
+    await page.getByRole("button", { name: "Try it on real content" }).click();
+
+    const picker = page.locator("#rule_preview_record");
+    await expect(picker).toBeVisible();
+    await picker.selectOption({ index: 1 });
+
+    const effects = page.locator("#rule_preview_effects");
+    await expect(effects).toContainText("Email to team@example.com");
+    await expect(effects).toContainText("Subject: Kiln automation:");
+
+    // The default body names the event; the frame must actually render it.
+    const frame = effects.locator("iframe");
+    await expect(frame).toHaveAttribute("sandbox", "");
+    await expect(page.frameLocator("#rule_preview_effects iframe").locator("body")).toContainText("emitted");
+    expect(cspViolations).toEqual([]);
+
+    await page.locator("#rule_try_it").screenshot({
+      path: testInfo.outputPath("automation-try-it.png"),
+      animations: "disabled",
+    });
+  });
 });
