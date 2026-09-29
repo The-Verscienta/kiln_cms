@@ -548,6 +548,37 @@ carries the reasoning.
   ceiling", and the follow is refused and logged. Honest senders see no
   difference unless the nonce store is down. (#1659)
 
+<a id="content-experiments-run-under-the-policies"></a>
+
+- **Content experiments run under the policies.** The delivery path (the
+  running-set read and the impression and conversion counters), the `:start`
+  and variant-write guards, the results panel and `mix kiln.experiment` reached
+  `Experiment`, `Variant` and `VariantDay` through `authorize?: false`. All but
+  the results panel now run as `KilnCMS.Experiments.system/0` (the mix task labels itself
+  `:operator`), and each resource admits it by action name inside its existing
+  admin write policy: experiments' reads plus `create`, `start` and `conclude`
+  (not `update`, `archive` or `destroy`); variants' reads plus `create` (not
+  re-weighting or removal); and the two counters plus a read on `VariantDay`
+  (not `destroy`, so a system caller cannot erase a result). Promotion now
+  loads the winning variant, and the results panel reads the counters, as the
+  editor instead of bypassing.
+
+  Every read behind a decision passes `authorize_with: :error` (and an
+  experiment's variants load with `authorize_read_with :error`), because a
+  refused read would otherwise answer `[]`, the permissive answer each time:
+  "nothing is running" (every experiment silently stops serving and counting),
+  "no other experiment on this document" (a second one starts), "0 served, 0
+  converted" on every arm, and "No experiments on this site" from the mix task.
+  A lost grant is now an error (`:start` returns `Forbidden`). Delivery still
+  never fails a page: it serves the canonical document, as it always did when
+  the experiment layer could not answer, and now logs why — and no longer
+  caches that failure as "nothing is running" for five minutes; a refused
+  counter write is logged too, instead of swallowed. Content and form lookups
+  in `Health` and `GoalConfigured` stay bypasses with their reason written
+  down (the #1402 content-read argument).
+  The funnel lookups stay in the backlog for the analytics batch. The
+  `mix kiln.authz.check` backlog drops by 19 sites and six files. (#1659)
+
 <a id="the-governance-audit-chain-runs-under-the-policies"></a>
 
 - **The governance audit chain runs under the policies.** The anchor chain,
