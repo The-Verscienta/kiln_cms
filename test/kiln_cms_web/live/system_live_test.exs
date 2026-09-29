@@ -66,6 +66,22 @@ defmodule KilnCMSWeb.SystemLiveTest do
     end)
   end
 
+  # The newest *final* release a running build can be "up to date" with.
+  # `releases/latest` never returns a pre-release, so while the running build
+  # is a candidate (`1.0.0-rc.1`) the newest release upstream reports is an
+  # older final one, and stubbing the running version itself would be a
+  # response GitHub cannot send (`Kiln.Updates` refuses it as `:prerelease`).
+  defp newest_release do
+    v = Version.parse!(Kiln.Version.version())
+
+    cond do
+      v.pre == [] -> to_string(v)
+      v.patch > 0 -> "#{v.major}.#{v.minor}.#{v.patch - 1}"
+      v.minor > 0 -> "#{v.major}.#{v.minor - 1}.0"
+      true -> "#{v.major - 1}.0.0"
+    end
+  end
+
   defp newer_tag do
     parsed = Version.parse!(Kiln.Version.version())
     "v#{parsed.major}.#{parsed.minor + 1}.0"
@@ -151,7 +167,7 @@ defmodule KilnCMSWeb.SystemLiveTest do
     end
 
     test "reports up to date when running the newest release", %{conn: conn} do
-      stub_release("v#{Kiln.Version.version()}")
+      stub_release("v#{newest_release()}")
 
       {:ok, lv, _html} = live(conn, ~p"/editor/system")
       html = render_async(lv, 2_000)
@@ -202,7 +218,7 @@ defmodule KilnCMSWeb.SystemLiveTest do
     end
 
     test "check now re-queries upstream, bypassing the cache", %{conn: conn} do
-      stub_release("v#{Kiln.Version.version()}")
+      stub_release("v#{newest_release()}")
 
       {:ok, lv, _html} = live(conn, ~p"/editor/system")
       assert render_async(lv, 2_000) =~ "Up to date"
@@ -252,7 +268,7 @@ defmodule KilnCMSWeb.SystemLiveTest do
 
   describe "flushing the delivery cache (#483)" do
     setup do
-      stub_release(Kiln.Version.version())
+      stub_release(newest_release())
       :ok
     end
 

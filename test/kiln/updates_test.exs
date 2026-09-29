@@ -37,6 +37,22 @@ defmodule Kiln.UpdatesTest do
 
   defp current_version, do: Kiln.Version.version()
 
+  # The newest *final* release a running build can be "up to date" with.
+  # `releases/latest` never returns a pre-release, so while the running build
+  # is a candidate (`1.0.0-rc.1`) the newest release upstream reports is an
+  # older final one, and stubbing the running version itself would be a
+  # response GitHub cannot send (`Kiln.Updates` refuses it as `:prerelease`).
+  defp newest_release do
+    v = Version.parse!(Kiln.Version.version())
+
+    cond do
+      v.pre == [] -> to_string(v)
+      v.patch > 0 -> "#{v.major}.#{v.minor}.#{v.patch - 1}"
+      v.minor > 0 -> "#{v.major}.#{v.minor - 1}.0"
+      true -> "#{v.major - 1}.0.0"
+    end
+  end
+
   defp bump(version, part) do
     parsed = Version.parse!(version)
 
@@ -68,7 +84,7 @@ defmodule Kiln.UpdatesTest do
 
   describe "check/1 when not behind" do
     test "reports current on an exact match" do
-      stub_release("v#{current_version()}")
+      stub_release("v#{newest_release()}")
 
       assert {:ok, :current} = Updates.check()
     end
@@ -125,7 +141,7 @@ defmodule Kiln.UpdatesTest do
 
       Req.Test.stub(Updates, fn conn ->
         send(test_pid, {:requested, conn.request_path})
-        Req.Test.json(conn, %{"tag_name" => "v#{current_version()}"})
+        Req.Test.json(conn, %{"tag_name" => "v#{newest_release()}"})
       end)
 
       assert {:ok, :current} = Updates.check()
@@ -327,7 +343,7 @@ defmodule Kiln.UpdatesTest do
       stub_release("v#{bump(current_version(), :minor)}")
       assert {:ok, {:behind, _}} = Updates.check()
 
-      stub_release("v#{current_version()}")
+      stub_release("v#{newest_release()}")
       assert {:ok, :current} = Updates.check(force: true)
     end
 
@@ -345,7 +361,7 @@ defmodule Kiln.UpdatesTest do
     # Regression: "Check now" issued an unthrottled request per click, so a
     # scripted client could spend the hourly budget in seconds.
     test "throttles repeated forced checks to the cached answer" do
-      stub_release("v#{current_version()}")
+      stub_release("v#{newest_release()}")
       assert {:ok, :current} = Updates.check(force: true)
 
       # A second force inside the floor must serve the cache, not re-request.
