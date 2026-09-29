@@ -3,7 +3,9 @@ defmodule KilnCMSWeb.ContentEditorMarkdownTest do
   Markdown in the content editor (`KilnCMSWeb.ContentEditor.MarkdownImport`):
   a paste into a rich-text block is answered with the TipTap document to
   insert, and a `.md` import is held for confirmation, then lands as typed
-  blocks (plus the title/slug the file supplies) that a Save persists.
+  blocks (plus the title/slug the file supplies) that a Save persists. The
+  Markdown view (`KilnCMSWeb.ContentEditor.MarkdownMode`) writes the blocks out
+  as Markdown and turns edited text back into blocks.
   """
   use KilnCMSWeb.ConnCase, async: true
 
@@ -208,5 +210,147 @@ defmodule KilnCMSWeb.ContentEditorMarkdownTest do
 
       refute has_element?(lv, "#markdown-import-dialog")
     end
+  end
+
+  describe "Markdown view" do
+    defp enter(lv), do: lv |> element("#editor-mode-markdown") |> render_click()
+
+    defp type_markdown(lv, text),
+      do: lv |> element("#markdown-mode-source") |> render_change(%{"markdown_source" => text})
+
+    defp source(lv) do
+      lv
+      |> element("#markdown-mode-source")
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.text()
+    end
+
+    defp rich(text), do: %{"_type" => "rich_text", "body" => PortableText.from_html(text)}
+
+    test "writes prose as Markdown and blocks it can't express as placeholders", %{conn: conn} do
+      {lv, page} =
+        open(conn, [
+          %{"_type" => "heading", "text" => "Intro", "level" => 2},
+          rich("<p>Hello <strong>world</strong></p><ul><li>one</li></ul>"),
+          %{"_type" => "quote", "text" => "Said so", "citation" => "Someone"}
+        ])
+
+      enter(lv)
+      refute has_element?(lv, "#markdown-import-button")
+
+      [_heading, _prose, quote] = saved(page).blocks
+
+      assert source(lv) ==
+               "## Intro\n\nHello **world**\n\n- one\n\n<!-- kiln:block quote #{quote.value.id} -->\n"
+    end
+
+    test "edited Markdown becomes the blocks a Save persists; a placeholder keeps its block",
+         %{conn: conn} do
+      {lv, page} =
+        open(conn, [
+          rich("<p>Old prose.</p>"),
+          %{"_type" => "quote", "text" => "Said so", "citation" => "Someone"}
+        ])
+
+      [_prose, quote] = saved(page).blocks
+      enter(lv)
+
+      type_markdown(lv, """
+      <!-- kiln:block quote #{quote.value.id} -->
+
+      ## New section
+
+      Pasted *prose*.
+
+      ---
+
+      ![A map](https://img.example.com/map.png "The map")
+      """)
+
+      # Leaving the view shows the blocks the text now says.
+      lv |> element("#editor-mode-blocks") |> render_click()
+      refute has_element?(lv, "#markdown-mode-source")
+      save(lv)
+
+      stored = saved(page)
+      assert types(stored) == ["quote", "rich_text", "image"]
+
+      [kept, prose, image] = stored.blocks
+
+      assert {kept.value.id, kept.value.text, kept.value.citation} ==
+               {quote.value.id, "Said so", "Someone"}
+
+      assert [%{"style" => "h2"}, %{"style" => "normal"}, %{"_type" => "hr"}] = prose.value.body
+      assert image.value.caption == "The map"
+    end
+
+    test "switching back without an edit leaves every block as it was", %{conn: conn} do
+      {lv, page} =
+        open(conn, [
+          %{"_type" => "heading", "text" => "Title-ish", "level" => 3},
+          rich("<p>Kept <em>as is</em>.</p>")
+        ])
+
+      before = saved(page).blocks
+      enter(lv)
+
+      # An edit and its undo: back to the text the view wrote.
+      original = source(lv)
+      type_markdown(lv, original <> "\nMore.\n")
+      type_markdown(lv, original)
+
+      lv |> element("#editor-mode-blocks") |> render_click()
+      save(lv)
+
+      after_ = saved(page).blocks
+      assert types(saved(page)) == ["heading", "rich_text"]
+      assert Enum.map(after_, & &1.value.id) == Enum.map(before, & &1.value.id)
+      assert Enum.map(after_, &prose_or_text/1) == Enum.map(before, &prose_or_text/1)
+    end
+
+    test "a placeholder that is deleted drops its block", %{conn: conn} do
+      {lv, page} = open(conn, [%{"_type" => "quote", "text" => "Gone", "citation" => nil}])
+
+      enter(lv)
+      type_markdown(lv, "Only prose now.")
+      save(lv)
+
+      assert Enum.map(saved(page).blocks, &prose/1) == ["Only prose now."]
+    end
+
+    test "a peer's lock on a block keeps the view from rewriting the blocks", %{conn: conn} do
+      {lv, page} = open(conn, [rich("<p>Theirs.</p>")])
+
+      send(
+        lv.pid,
+        {:field_locks, "editing:page:#{page.id}",
+         %{
+           "form[blocks][0][body]" => %{
+             pid: spawn(fn -> :ok end),
+             user_id: "peer",
+             name: "Peer",
+             since: DateTime.utc_now(),
+             last_active: DateTime.utc_now()
+           }
+         }}
+      )
+
+      assert enter(lv) =~ "Someone is editing a block right now."
+      refute has_element?(lv, "#markdown-mode-source")
+    end
+
+    test "leaving after an edit remounts the rich-text editors", %{conn: conn} do
+      {lv, _page} = open(conn, [rich("<p>Before.</p>")])
+
+      enter(lv)
+      type_markdown(lv, "After.")
+      lv |> element("#editor-mode-blocks") |> render_click()
+
+      assert has_element?(lv, ~s([phx-hook="RichText"][id$="-m1"]))
+    end
+
+    defp prose_or_text(%Ash.Union{value: %{text: text}}), do: text
+    defp prose_or_text(block), do: prose(block)
   end
 end

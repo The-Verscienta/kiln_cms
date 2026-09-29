@@ -183,6 +183,22 @@ carries the reasoning.
 
 ## Added
 
+<a id="editor-markdown-view"></a>
+
+- **The content editor has a Blocks | Markdown switch.** Markdown shows the
+  document's blocks as one Markdown text: prose keeps its headings, lists,
+  marks, links, code and tables (`PortableText.to_markdown/1`, the new reverse
+  of `KilnCMS.Markdown`), and headings, dividers and plain images become their
+  Markdown. A block Markdown can't express (a gallery, a form, columns, a
+  media-library image) becomes a placeholder line,
+  `<!-- kiln:block gallery <id> -->`, that stands for it unchanged and can be
+  moved or deleted like any line. Whatever is pasted or typed is parsed as you
+  go, through the same converter as paste, `.md` import and the API's
+  `body_markdown`, so the preview, autosave and Save all see it, and switching
+  back shows the blocks. Switching back without an edit leaves every block
+  exactly as it was. An edit re-parses the text, so prose between placeholders
+  becomes one rich-text block.
+
 <a id="on-012-before-upgrading-to-10"></a>
 
 - **On 0.12, before `mix kiln.update --allow-major` to 1.0: run the block
@@ -273,6 +289,23 @@ carries the reasoning.
   ([#1679](https://github.com/The-Verscienta/kiln_cms/issues/1679)).
 
 ## Fixed
+
+<a id="per-type-semantic-search-ranks-a-record-the-query-names-first"></a>
+
+- **Per-type semantic search ranks a record the query names first, however
+  long the record.** The `semantic-search` JSON:API routes, the GraphQL
+  semantic lists and `CMS.semantic_search_*` already exempted a record the
+  query names (by title, or by a field flagged as a name) from
+  `semantic_max_distance`, but still sorted it at its distance rank. A
+  record's one vector is embedded from its whole text, so a long record sits
+  far from a bare-name query, below short records whose names merely sound
+  alike: Verscienta measured 14 of 602 acupuncture points missing the top 10
+  for their own name, the best-documented ones. Named records now come first,
+  nearest first among themselves, as the title leg already does in hybrid
+  search. No re-embed is needed. A query that names something is no longer
+  served by the HNSW index (the distance no longer leads the `ORDER BY`);
+  one that names nothing is unchanged.
+  ([#1746](https://github.com/The-Verscienta/kiln_cms/pull/1746))
 
 <a id="a-seo-or-accessibility-finding-below-a-fragment-names-and-jumps-to-the-right"></a>
 
@@ -510,6 +543,35 @@ carries the reasoning.
   `authorize_with: :error`; a refusal or a failed count is treated as "at the
   ceiling", and the follow is refused and logged. Honest senders see no
   difference unless the nonce store is down. (#1659)
+
+<a id="the-link-checker-runs-under-the-policies"></a>
+
+- **The link checker runs under the policies.** The outbound link sweep, the
+  per-URL check worker and the reader of the "check outbound links" switch
+  reached `ExternalLink` and `SiteLinkCheck` through `authorize?: false`. They
+  now run as `KilnCMS.Links.system/0`, a `KilnCMS.SystemActor`, and each
+  resource admits it by action name: the occurrence rows' `read`, `observe`,
+  `record_check` and `destroy`, and the switch's `read` and `record_sweep` (not
+  the settings form's `save`, so turning checking on stays an admin act). The
+  broken-link report at `/editor/links` now reads as the editor viewing it.
+
+  The reads that back a decision fail closed. The check worker's
+  failure-count read, which drives the retry-before-flagging counter, runs
+  with `authorize_with: :error`, and a refusal writes no verdict instead of
+  reading as "no rows". The sweep's due-URL read raises instead of queueing
+  nothing. A refused `observe` aborts the sweep before its prune, which would
+  otherwise delete every row along with its failure count. The switch read
+  logs a refusal and resolves it to "off". A viewer the report's policy
+  refuses gets an error, not an empty "nothing is broken" page.
+
+  Content reads stay `authorize?: false`, each with a written reason: the
+  sweep's scan of published documents, oEmbed's document reads and the
+  related-links keyword search. A system-actor grant on content would be a
+  standing read over the whole corpus, drafts included. The internal checker's
+  target-state lookup reads as the editor instead (see Security). oEmbed's `:set_oembed_metadata` write also stays:
+  it writes the block tree, and the content resource admits the system actor
+  only to actions that accept no `:blocks`. The `mix kiln.authz.check` backlog
+  drops by 16 sites and seven files. (#1659)
 
 <a id="mix-kilnmigrationscheck-gates-expand-contract"></a>
 
