@@ -32,13 +32,15 @@ defmodule KilnCMS.Links.InternalTest do
     CMS.create_post!(Map.merge(%{title: "T", slug: slug()}, attrs), actor: admin)
   end
 
-  defp resolve(path, org), do: Internal.resolve(path, @locale, org)
+  # As an admin, who reads every state: most of these tests are about paths,
+  # not permissions. What a narrower reader sees is its own describe below.
+  defp resolve(path, org, actor), do: Internal.resolve(path, @locale, org, actor)
 
   describe "a flat /prefix/slug path" do
     test "a published post resolves", %{admin: admin, org: org} do
       p = %{slug: slug()} |> post(admin) |> then(&CMS.publish_post!(&1, actor: admin))
 
-      assert resolve("/blog/#{p.slug}", org) == :published
+      assert resolve("/blog/#{p.slug}", org, admin) == :published
     end
 
     test "a draft is unpublished, not missing", %{admin: admin, org: org} do
@@ -47,25 +49,26 @@ defmodule KilnCMS.Links.InternalTest do
       # Delivery cannot tell these apart — both 404 — but they need opposite
       # actions. Collapsing them sends an editor hunting for a typo in a link
       # that is perfectly correct.
-      assert resolve("/blog/#{p.slug}", org) == {:unpublished, :draft}
+      assert resolve("/blog/#{p.slug}", org, admin) == {:unpublished, :draft}
     end
 
     test "an archived post is unpublished, and names the state", %{admin: admin, org: org} do
       p = %{slug: slug()} |> post(admin) |> then(&CMS.publish_post!(&1, actor: admin))
       CMS.archive_post!(p, actor: admin)
 
-      assert {:unpublished, :archived} = resolve("/blog/#{p.slug}", org)
+      assert {:unpublished, :archived} = resolve("/blog/#{p.slug}", org, admin)
     end
 
-    test "an unknown slug under a known prefix is missing", %{org: org} do
-      assert resolve("/blog/nothing-here-#{System.unique_integer([:positive])}", org) == :missing
+    test "an unknown slug under a known prefix is missing", %{admin: admin, org: org} do
+      assert resolve("/blog/nothing-here-#{System.unique_integer([:positive])}", org, admin) ==
+               :missing
     end
 
-    test "an unknown prefix is UNKNOWN, not missing", %{org: org} do
+    test "an unknown prefix is UNKNOWN, not missing", %{admin: admin, org: org} do
       # The prefix names no content type, so this is not a namespace we own —
       # it could be a plugin route, a static page, anything. Calling it broken
       # is the false positive that makes a link checker useless.
-      assert resolve("/nope/whatever", org) == :unknown
+      assert resolve("/nope/whatever", org, admin) == :unknown
     end
   end
 
@@ -73,21 +76,21 @@ defmodule KilnCMS.Links.InternalTest do
   # grades a whole document Poor — so a single "read more on our blog" link
   # would have marked every page on the site as failing.
   describe "paths the router serves that this module does not own" do
-    test "the home page, section indexes and static routes are unknown", %{org: org} do
+    test "the home page, section indexes and static routes are unknown", %{admin: admin, org: org} do
       for path <- ["/", "/blog", "/search", "/developers", "/feed.xml", "/uploads/a.png"] do
-        assert resolve(path, org) == :unknown, "expected #{path} to be :unknown"
+        assert resolve(path, org, admin) == :unknown, "expected #{path} to be :unknown"
       end
     end
 
-    test "a single segment is never called missing, even unrecognised", %{org: org} do
+    test "a single segment is never called missing, even unrecognised", %{admin: admin, org: org} do
       # `/about` is as likely a plugin route or a static page as a root-served
       # document, and a wrong `:missing` costs far more than a missed one.
-      assert resolve("/about-#{System.unique_integer([:positive])}", org) == :unknown
+      assert resolve("/about-#{System.unique_integer([:positive])}", org, admin) == :unknown
     end
 
     test "a deep path with no alias is unknown — deep paths are redirect sources",
-         %{org: org} do
-      assert resolve("/2019/05/an-old-post", org) == :unknown
+         %{admin: admin, org: org} do
+      assert resolve("/2019/05/an-old-post", org, admin) == :unknown
     end
   end
 
@@ -98,8 +101,8 @@ defmodule KilnCMS.Links.InternalTest do
       # Every hreflang link and the locale switcher emit exactly this shape, so
       # an author copying a live URL gets one. Splitting it into three segments
       # and finding nothing would report it broken.
-      assert resolve("/en/blog/#{p.slug}", org) == :published
-      assert resolve("/fr/blog/#{p.slug}", org) == :published
+      assert resolve("/en/blog/#{p.slug}", org, admin) == :published
+      assert resolve("/fr/blog/#{p.slug}", org, admin) == :published
     end
 
     test "a link written in another locale falls back to the default", %{admin: admin, org: org} do
@@ -108,7 +111,7 @@ defmodule KilnCMS.Links.InternalTest do
       # Delivery retries in the default locale when a localized lookup misses
       # (`ContentController.localized/2`). Without the same retry, every link in
       # a translated document on a partially translated site reads as broken.
-      assert Internal.resolve("/blog/#{p.slug}", "fr", org) == :published
+      assert Internal.resolve("/blog/#{p.slug}", "fr", org, admin) == :published
     end
   end
 
@@ -117,9 +120,9 @@ defmodule KilnCMS.Links.InternalTest do
       p = %{slug: slug()} |> post(admin) |> then(&CMS.publish_post!(&1, actor: admin))
 
       # An anchor into a page that exists is not a broken link.
-      assert resolve("/blog/#{p.slug}#section", org) == :published
-      assert resolve("/blog/#{p.slug}?utm=x", org) == :published
-      assert resolve("/blog/#{p.slug}/", org) == :published
+      assert resolve("/blog/#{p.slug}#section", org, admin) == :published
+      assert resolve("/blog/#{p.slug}?utm=x", org, admin) == :published
+      assert resolve("/blog/#{p.slug}/", org, admin) == :published
     end
 
     test "resolve_all keys by the caller's paths, not the normalized ones",
@@ -128,7 +131,7 @@ defmodule KilnCMS.Links.InternalTest do
       path = "/blog/#{p.slug}"
       variants = [path, path <> "#a", path <> "?b=1"]
 
-      resolved = Internal.resolve_all(variants, @locale, org)
+      resolved = Internal.resolve_all(variants, @locale, org, admin)
 
       # Every path the caller passed is a key it can look up. Keying on the
       # normalized form would hand back a map whose keys the caller does not
@@ -146,7 +149,8 @@ defmodule KilnCMS.Links.InternalTest do
             "/nope-#{System.unique_integer([:positive])}"
           ],
           @locale,
-          org
+          org,
+          nil
         )
 
       assert resolved["https://example.com/x"] == :external
@@ -157,9 +161,9 @@ defmodule KilnCMS.Links.InternalTest do
 
   describe "what is not an internal path" do
     test "an absolute URL is external, never resolved against our content", %{org: org} do
-      assert resolve("https://example.com/blog/x", org) == :external
-      assert resolve("mailto:a@example.com", org) == :external
-      assert resolve("#anchor-only", org) == :external
+      assert resolve("https://example.com/blog/x", org, nil) == :external
+      assert resolve("mailto:a@example.com", org, nil) == :external
+      assert resolve("#anchor-only", org, nil) == :external
     end
 
     test "a protocol-relative URL is external, not a path", %{org: org} do
@@ -167,8 +171,8 @@ defmodule KilnCMS.Links.InternalTest do
       # it as a path is how a checker starts resolving other people's hostnames
       # against its own content — and would report someone else's site as a
       # broken link on yours.
-      assert resolve("//evil.example/blog/x", org) == :external
-      assert resolve("//evil.example", org) == :external
+      assert resolve("//evil.example/blog/x", org, nil) == :external
+      assert resolve("//evil.example", org, nil) == :external
     end
   end
 
@@ -196,8 +200,8 @@ defmodule KilnCMS.Links.InternalTest do
       # alone resolves one type's URL against another's content — dialyzer
       # caught the original attempt matching a `:name` key the descriptor has
       # never had, which would have silently done exactly that.
-      assert resolve("/#{one}/#{shared}", org) == :published
-      assert resolve("/#{two}/#{shared}", org) == :missing
+      assert resolve("/#{one}/#{shared}", org, admin) == :published
+      assert resolve("/#{two}/#{shared}", org, admin) == :missing
     end
   end
 
@@ -210,8 +214,60 @@ defmodule KilnCMS.Links.InternalTest do
       # A published rename leaves a Redirect behind and delivery serves a 301.
       # Reporting that would flag a working feature as a fault, which is the
       # fastest way to make an advisory panel something authors ignore.
-      assert resolve("/blog/#{original}", org) == :redirected
-      refute Internal.problem?(resolve("/blog/#{original}", org))
+      assert resolve("/blog/#{original}", org, admin) == :redirected
+      refute Internal.problem?(resolve("/blog/#{original}", org, admin))
+    end
+  end
+
+  # The advisory runs on the editor's own request, so it answers only what that
+  # editor may read. Looking in every state as the system would tell a scoped
+  # editor that a draft exists at a guessed path, and what state it is in.
+  describe "it reads as the caller" do
+    setup do
+      restricted =
+        Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+          email: "links-restricted-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+          confirmed_at: DateTime.utc_now(),
+          role: :editor,
+          # Granular RBAC (#332): drafts in "page" only, published posts as
+          # any signed-in reader sees them.
+          readable_types: ["page"]
+        })
+
+      %{restricted: restricted}
+    end
+
+    test "a draft outside the editor's read scope is missing, not unpublished",
+         %{admin: admin, org: org, restricted: restricted} do
+      p = post(%{slug: slug()}, admin)
+
+      assert resolve("/blog/#{p.slug}", org, admin) == {:unpublished, :draft}
+      assert resolve("/blog/#{p.slug}", org, restricted) == :missing
+    end
+
+    test "published content outside the scope still resolves",
+         %{admin: admin, org: org, restricted: restricted} do
+      p = %{slug: slug()} |> post(admin) |> then(&CMS.publish_post!(&1, actor: admin))
+
+      # The scope narrows editorial visibility only; a published post is one
+      # this editor could open on the site, so its link is fine.
+      assert resolve("/blog/#{p.slug}", org, restricted) == :published
+    end
+
+    test "resolve_all hides the same targets", %{admin: admin, org: org, restricted: restricted} do
+      draft = post(%{slug: slug()}, admin)
+      path = "/blog/#{draft.slug}"
+
+      assert Internal.resolve_all([path], @locale, org, restricted) == %{path => :missing}
+    end
+
+    test "with no actor, only public published content exists", %{admin: admin, org: org} do
+      draft = post(%{slug: slug()}, admin)
+      live = %{slug: slug()} |> post(admin) |> then(&CMS.publish_post!(&1, actor: admin))
+
+      assert resolve("/blog/#{draft.slug}", org, nil) == :missing
+      assert resolve("/blog/#{live.slug}", org, nil) == :published
     end
   end
 
