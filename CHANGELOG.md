@@ -266,6 +266,11 @@ Every summary line below that was shortened links to its own entry there.
   a scoped system actor or carry a written reason; the counter reads fail closed.
   ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#the-link-checker-runs-under-the-policies))
 
+- **The newsletter send pipeline runs under the policies, which empties the
+  authz backlog.** A refused subscriber or campaign read now retries instead
+  of mailing nobody and marking the campaign sent.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#the-newsletter-send-pipeline-runs-under-the-policies-which-empties-the-authz-backlog))
+
 - **`mint` 1.11.0 closes three advisories: HTTP/1 response smuggling and two
   HTTP/2 client memory exhaustions (EEF-CVE-2026-91043 HIGH, -92103, -94194).**
   ([#1722](https://github.com/The-Verscienta/kiln_cms/pull/1722) · [long form](docs/changelog/unreleased.md#mint-1110-closes-three-advisories-http1-response-smuggling-and-two-http2))

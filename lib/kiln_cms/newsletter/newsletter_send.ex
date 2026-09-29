@@ -89,9 +89,24 @@ defmodule KilnCMS.Newsletter.NewsletterSend do
 
       # "On publish → send the newsletter" automation (#376) creates the
       # campaign as `%KilnCMS.SystemActor{subsystem: :automation}` (#1655) —
-      # `:create` only, narrowed inside the admin policy rather than a bypass
-      # (#1402). Reading or rewriting the ledger stays an admin act.
-      forbid_unless action(:create)
+      # `:create`, narrowed inside the admin policy rather than a bypass
+      # (#1402).
+      #
+      # The send pipeline (`SendWorker`, `MailWorker`) runs as
+      # `KilnCMS.Newsletter.system/0` (#1659): it re-reads the campaign it was
+      # enqueued for and keeps its bookkeeping (`mark_sending`, `mark_sent`,
+      # and the per-recipient `record_sent` / `record_failed` counters). It
+      # may NOT `destroy` a campaign (the record of what went out, and the
+      # automation dedupe key) nor `mark_failed` one; those stay admin acts.
+      forbid_unless action([
+                      :create,
+                      :read,
+                      :mark_sending,
+                      :mark_sent,
+                      :record_sent,
+                      :record_failed
+                    ])
+
       authorize_if KilnCMS.Checks.SystemActor
     end
   end

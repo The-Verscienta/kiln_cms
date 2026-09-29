@@ -981,6 +981,36 @@ carries the reasoning.
   only to actions that accept no `:blocks`. The `mix kiln.authz.check` backlog
   drops by 16 sites and seven files. (#1659)
 
+<a id="the-newsletter-send-pipeline-runs-under-the-policies-which-empties-the-authz-backlog"></a>
+
+- **The newsletter send pipeline runs under the policies, which empties the
+  authz backlog.** The fan-out worker and the per-recipient mail worker
+  reached `NewsletterSend` and `Subscriber` through `authorize?: false`. They
+  now run as `KilnCMS.Newsletter.system/0`, a `KilnCMS.SystemActor` labelled
+  `:newsletter` (the tier sync already ran as one), and each resource admits
+  it by action name: the campaign's `read`, `mark_sending`, `mark_sent`,
+  `record_sent` and `record_failed` (not `mark_failed` or `destroy`), and the
+  subscriber's `read` and `confirmed` (no consent change). The send guard in
+  `Newsletter.send_as_newsletter/2` reads the target segment as the sender, the
+  same actor the campaign is created under, so an actor who may not see the
+  segment gets a Forbidden rather than "that segment no longer exists".
+
+  Each read that decides who is mailed fails closed. Before, a refused
+  subscriber list read as "no subscribers": the fan-out stamped zero
+  recipients and marked the campaign `:sent` having mailed nobody, with no way
+  to send it again. A refused campaign or subscriber read in the mail worker
+  cancelled the recipient's job as "not found", and the job's uniqueness meant
+  that recipient was never mailed. All three now log and retry. A per-recipient
+  counter write that fails after delivery is logged instead of failing the
+  job, so Oban does not mail the same person twice to correct a tally.
+
+  The federation announce worker's document load stays `authorize?: false`,
+  now with its reason written down: a `Delete` must find a record that is no
+  longer published, and a system grant on content would read every draft.
+  That was the last of the backlog: `mix kiln.authz.check` now holds every
+  file under `lib/` to zero unexplained `authorize?: false`. The backlog map
+  stays in place, empty, so a new one fails the check. (#1659)
+
 <a id="mix-kilnmigrationscheck-gates-expand-contract"></a>
 
 - **`mix kiln.migrations.check` fails a PR whose new migration breaks the
