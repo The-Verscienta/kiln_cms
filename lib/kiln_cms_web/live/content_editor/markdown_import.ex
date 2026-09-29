@@ -30,7 +30,7 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownImport do
   import Phoenix.LiveView, only: [attach_hook: 4, put_flash: 3]
 
   import KilnCMSWeb.ContentEditor.BlockParams,
-    only: [blocks_count: 1, full_blocks_input: 1, inject_rich_bodies: 2]
+    only: [full_blocks_input: 1, inject_rich_bodies: 2, remove_all_blocks: 1]
 
   alias KilnCMS.Markdown
   alias Phoenix.LiveView.ColocatedHook
@@ -240,18 +240,6 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownImport do
   defp slug_target(%{"slug" => _}), do: ["form", "slug"]
   defp slug_target(%{"title" => _}), do: ["form", "title"]
   defp slug_target(_chosen), do: nil
-
-  defp remove_all_blocks(form) do
-    case blocks_count(form) do
-      0 ->
-        form
-
-      count ->
-        Enum.reduce((count - 1)..0//-1, form, fn index, acc ->
-          AshPhoenix.Form.remove_form(acc, "#{acc.name}[blocks][#{index}]")
-        end)
-    end
-  end
 
   # `KilnCMS.Blocks.Html`'s `%{"type", "value"}` input shape → the editor's
   # union sub-form params, with the stable id every editor block carries.

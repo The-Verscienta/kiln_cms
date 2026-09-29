@@ -2443,6 +2443,7 @@ msgstr "Bloquée — %{reason}"
 msgid "Blocked. Matching followers were removed."
 msgstr "Bloqué. Les abonnés correspondants ont été supprimés."
 
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/system_live.ex
@@ -4715,6 +4716,11 @@ msgstr "Exécuter"
 msgid "Document"
 msgstr "Document"
 
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Document body as Markdown"
+msgstr "Corps du document en Markdown"
+
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "Document fields"
@@ -4989,6 +4995,11 @@ msgstr "Modifier : %{kind}"
 msgid "Edit URL"
 msgstr "Modifier l'URL"
 
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Edit as"
+msgstr "Modifier en"
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Edit field %{label}"
@@ -5023,6 +5034,11 @@ msgstr "Modifier ce bloc dans l'éditeur complet"
 #, elixir-autogen, elixir-format
 msgid "Edit this block on the page"
 msgstr "Modifier ce bloc sur la page"
+
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Edit this document's blocks as Markdown"
+msgstr "Modifier les blocs de ce document en Markdown"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -7148,6 +7164,11 @@ msgstr "Bibliothèque (%{count})"
 msgid "Light"
 msgstr "Clair"
 
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Lines like <!-- kiln:block gallery … --> stand for blocks Markdown can't express; move or delete them like any line."
+msgstr "Les lignes comme <!-- kiln:block gallery … --> représentent des blocs que Markdown ne peut pas exprimer ; déplacez-les ou supprimez-les comme n’importe quelle ligne."
+
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #, elixir-autogen, elixir-format
 msgid "Link"
@@ -7391,6 +7412,11 @@ msgstr "Marquer comme révisé"
 #, elixir-autogen, elixir-format
 msgid "Mark unread"
 msgstr "Marquer comme non lu"
+
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Markdown"
+msgstr "Markdown"
 
 #: lib/kiln_cms_web/live/content_editor/markdown_import.ex
 #, elixir-autogen, elixir-format
@@ -9229,6 +9255,11 @@ msgstr "Mot de passe changé."
 #, elixir-autogen, elixir-format
 msgid "Past its unpublish date and still published"
 msgstr "Sa date de dépublication est passée et il est toujours publié"
+
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Paste or write Markdown. It becomes blocks as you type — switch back to Blocks to see them."
+msgstr "Collez ou écrivez du Markdown. Il devient des blocs au fil de la saisie — revenez à Blocs pour les voir."
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -12839,6 +12870,11 @@ msgstr "Ce lien de connexion a expiré. Recommencez."
 #, elixir-autogen, elixir-format
 msgid "That tier no longer exists."
 msgstr "Ce niveau n'existe plus."
+
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "That's more Markdown than one document can hold (the limit is %{size} MB)."
+msgstr "C’est plus de Markdown qu’un document ne peut en contenir (la limite est de %{size} Mo)."
 
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format

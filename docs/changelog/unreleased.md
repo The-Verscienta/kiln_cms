@@ -183,6 +183,22 @@ carries the reasoning.
 
 ## Added
 
+<a id="editor-markdown-view"></a>
+
+- **The content editor has a Blocks | Markdown switch.** Markdown shows the
+  document's blocks as one Markdown text: prose keeps its headings, lists,
+  marks, links, code and tables (`PortableText.to_markdown/1`, the new reverse
+  of `KilnCMS.Markdown`), and headings, dividers and plain images become their
+  Markdown. A block Markdown can't express (a gallery, a form, columns, a
+  media-library image) becomes a placeholder line,
+  `<!-- kiln:block gallery <id> -->`, that stands for it unchanged and can be
+  moved or deleted like any line. Whatever is pasted or typed is parsed as you
+  go, through the same converter as paste, `.md` import and the API's
+  `body_markdown`, so the preview, autosave and Save all see it, and switching
+  back shows the blocks. Switching back without an edit leaves every block
+  exactly as it was. An edit re-parses the text, so prose between placeholders
+  becomes one rich-text block.
+
 <a id="on-012-before-upgrading-to-10"></a>
 
 - **On 0.12, before `mix kiln.update --allow-major` to 1.0: run the block

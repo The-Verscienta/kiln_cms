@@ -145,6 +145,21 @@ defmodule KilnCMSWeb.ContentEditor.BlockParams do
   defp ash_form(%Phoenix.HTML.Form{source: %AshPhoenix.Form{} = source}), do: source
   defp ash_form(%AshPhoenix.Form{} = form), do: form
 
+  # Every block sub-form removed, last first (removing by index shifts the rest).
+  # The `.md` import's "replace" and the Markdown view both rebuild the canvas
+  # from nothing this way.
+  def remove_all_blocks(form) do
+    case blocks_count(form) do
+      0 ->
+        form
+
+      count ->
+        Enum.reduce((count - 1)..0//-1, form, fn index, acc ->
+          AshPhoenix.Form.remove_form(acc, "#{acc.name}[blocks][#{index}]")
+        end)
+    end
+  end
+
   # The complete current block set as a list of union input maps (string keys,
   # `_union_type` discriminator, stable `id`), read from the live sub-forms. This
   # is the payload a caller merges a targeted edit into so that validating it
