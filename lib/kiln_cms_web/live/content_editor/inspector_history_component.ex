@@ -10,14 +10,17 @@ defmodule KilnCMSWeb.ContentEditor.InspectorHistoryComponent do
   use KilnCMSWeb, :live_component
 
   import KilnCMSWeb.ContentEditor.InspectorComponents,
-    only: [compare_toggle: 1, inspector_section: 1]
+    only: [compare_toggle: 1, inspector_panel_attrs: 1, inspector_section: 1]
 
   import KilnCMSWeb.ContentEditor.Shared, only: [version_label: 1]
 
   @impl true
   def render(assigns) do
     ~H"""
-    <div class={["space-y-4", @inspector_tab != :history && "hidden"]}>
+    <div
+      class={["space-y-4", @inspector_tab != :history && "hidden"]}
+      {inspector_panel_attrs(:history)}
+    >
       <.inspector_section :if={length(@translations) > 1} title={gettext("Translations")}>
         <ul class="space-y-2">
           <li

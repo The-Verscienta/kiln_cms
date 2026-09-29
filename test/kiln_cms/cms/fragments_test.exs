@@ -52,6 +52,36 @@ defmodule KilnCMS.CMS.FragmentsTest do
     assert labels(expanded) == ["Before", "Shared", "After"]
   end
 
+  test "expand_indexed/3 pairs every block with its top-level host index" do
+    shared =
+      page(%{
+        blocks: [
+          %{"_type" => "heading", "text" => "One"},
+          %{"_type" => "heading", "text" => "Two"}
+        ]
+      })
+
+    blocks = [
+      %{"_type" => "heading", "text" => "Before"},
+      fragment_block(shared),
+      %{"_type" => "heading", "text" => "After"}
+    ]
+
+    indexed = blocks |> TypedBlocks.to_typed() |> Fragments.expand_indexed(org_id())
+
+    assert Enum.map(indexed, fn {block, index} -> {block.text, index} end) ==
+             [{"Before", 0}, {"One", 1}, {"Two", 1}, {"After", 2}]
+
+    # Dropping the indexes is exactly `expand/3`.
+    assert Enum.map(indexed, &elem(&1, 0)) == expand(blocks)
+  end
+
+  test "expand_indexed/3 on a tree with no fragments is a plain with_index" do
+    typed = TypedBlocks.to_typed([%{"_type" => "heading", "text" => "Only"}])
+
+    assert Fragments.expand_indexed(typed, org_id()) == Enum.with_index(typed)
+  end
+
   test "a tree with no fragments comes back untouched" do
     blocks = [%{"_type" => "heading", "text" => "Only"}]
 
