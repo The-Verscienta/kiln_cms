@@ -118,21 +118,21 @@ test.describe("automation rule settings", () => {
     await page.locator("#rule_config_to").fill("team@example.com");
     await page.getByRole("button", { name: "Try it on real content" }).click();
 
-    const picker = page.locator("#preview_record");
+    const picker = page.locator("#rule_preview_record");
     await expect(picker).toBeVisible();
     await picker.selectOption({ index: 1 });
 
-    const effects = page.locator("#preview-effects");
+    const effects = page.locator("#rule_preview_effects");
     await expect(effects).toContainText("Email to team@example.com");
     await expect(effects).toContainText("Subject: Kiln automation:");
 
     // The default body names the event; the frame must actually render it.
     const frame = effects.locator("iframe");
     await expect(frame).toHaveAttribute("sandbox", "");
-    await expect(page.frameLocator("#preview-effects iframe").locator("body")).toContainText("emitted");
+    await expect(page.frameLocator("#rule_preview_effects iframe").locator("body")).toContainText("emitted");
     expect(cspViolations).toEqual([]);
 
-    await page.locator("#try-it").screenshot({
+    await page.locator("#rule_try_it").screenshot({
       path: testInfo.outputPath("automation-try-it.png"),
       animations: "disabled",
     });

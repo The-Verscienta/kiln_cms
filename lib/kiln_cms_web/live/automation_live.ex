@@ -58,11 +58,19 @@ defmodule KilnCMSWeb.AutomationLive do
     {:noreply,
      socket
      |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
-     |> refresh_preview(all["preview_record"])}
+     |> refresh_preview(:create, all["preview_record"])}
   end
 
-  def handle_event("open_preview", _params, socket) do
-    {:noreply, socket |> assign(:preview, %{@no_preview | options: []}) |> refresh_preview(nil)}
+  # `target` says which builder's panel was opened: the add form's, or the
+  # edit form's — each has its own, since both can be on the page at once.
+  def handle_event("open_preview", %{"target" => target}, socket)
+      when target in ["create", "edit"] do
+    target = String.to_existing_atom(target)
+
+    {:noreply,
+     socket
+     |> put_preview(target, %{@no_preview | options: []})
+     |> refresh_preview(target, nil)}
   end
 
   def handle_event("create", %{"rule" => params}, socket) when is_map(params) do
@@ -100,7 +108,7 @@ defmodule KilnCMSWeb.AutomationLive do
          socket
          |> assign(:form, form)
          |> assign(:recipe, recipe)
-         |> refresh_preview(socket.assigns.preview.value)}
+         |> refresh_preview(:create, socket.assigns.preview.value)}
     end
   end
 
@@ -109,26 +117,30 @@ defmodule KilnCMSWeb.AutomationLive do
      socket
      |> assign(:form, create_form(socket.assigns.actor, socket.assigns.current_org))
      |> assign(:recipe, nil)
-     |> refresh_preview(socket.assigns.preview.value)}
+     |> refresh_preview(:create, socket.assigns.preview.value)}
   end
 
   def handle_event("edit", %{"id" => id}, socket) when is_binary(id) do
     {:noreply,
      assign(socket, :edit, %{
        id: id,
-       form: edit_form(id, socket.assigns.actor, socket.assigns.current_org)
+       form: edit_form(id, socket.assigns.actor, socket.assigns.current_org),
+       preview: @no_preview
      })}
   end
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
 
-  def handle_event("validate_edit", %{"rule" => params}, socket) when is_map(params) do
+  def handle_event("validate_edit", %{"rule" => params} = all, socket) when is_map(params) do
     edit = %{
       socket.assigns.edit
       | form: AshPhoenix.Form.validate(socket.assigns.edit.form, prepare_params(params))
     }
 
-    {:noreply, assign(socket, :edit, edit)}
+    {:noreply,
+     socket
+     |> assign(:edit, edit)
+     |> refresh_preview(:edit, all["preview_record"])}
   end
 
   def handle_event("save_edit", %{"rule" => params}, socket) when is_map(params) do
@@ -262,10 +274,15 @@ defmodule KilnCMSWeb.AutomationLive do
   # Re-lists the documents when the rule's content-type scope changes, re-reads
   # the picked one only when the pick changes, and recomputes the effects from
   # the draft every time — the preview follows the rule as it is edited.
-  defp refresh_preview(%{assigns: %{preview: %{options: nil}}} = socket, _value), do: socket
+  defp refresh_preview(socket, target, value) do
+    case builder(socket, target) do
+      {_form, %{options: nil}} -> socket
+      {form, preview} -> put_preview(socket, target, refreshed(socket, form, preview, value))
+    end
+  end
 
-  defp refresh_preview(socket, value) do
-    %{actor: actor, current_org: org, form: form, preview: preview} = socket.assigns
+  defp refreshed(socket, form, preview, value) do
+    %{actor: actor, current_org: org} = socket.assigns
     draft = draft(form)
     scope = draft.content_type
 
@@ -291,8 +308,21 @@ defmodule KilnCMSWeb.AutomationLive do
         _ -> nil
       end
 
-    assign(socket, :preview, %{preview | value: value, loaded: loaded, effects: effects})
+    %{preview | value: value, loaded: loaded, effects: effects}
   end
+
+  # The form and "Try it" state of one builder: the add form's live at the top
+  # level, an open edit form's inside `@edit`.
+  defp builder(socket, :create), do: {socket.assigns.form, socket.assigns.preview}
+  defp builder(%{assigns: %{edit: %{form: form, preview: preview}}}, :edit), do: {form, preview}
+  defp builder(_socket, :edit), do: {nil, %{options: nil}}
+
+  defp put_preview(socket, :create, preview), do: assign(socket, :preview, preview)
+
+  defp put_preview(%{assigns: %{edit: %{} = edit}} = socket, :edit, preview),
+    do: assign(socket, :edit, %{edit | preview: preview})
+
+  defp put_preview(socket, :edit, _preview), do: socket
 
   defp recipe_context(%{current_user: user, type_options: types}) do
     %{
@@ -496,6 +526,8 @@ defmodule KilnCMSWeb.AutomationLive do
                   type_options={@type_options}
                   config_options={@config_options}
                   names={@names}
+                  preview={@edit.preview}
+                  preview_target="edit"
                 />
                 <label class="flex items-center gap-2 text-sm">
                   <input type="hidden" name="rule[enabled]" value="false" />
@@ -573,7 +605,8 @@ defmodule KilnCMSWeb.AutomationLive do
   attr :type_options, :list, required: true
   attr :config_options, :map, required: true
   attr :names, :map, required: true
-  attr :preview, :map, default: nil, doc: "the \"Try it\" state; the add form only"
+  attr :preview, :map, default: nil, doc: "the builder's \"Try it\" state"
+  attr :preview_target, :string, default: "create", doc: "which builder: create or edit"
 
   # The builder as four numbered steps — when, do what, how, and what to call
   # it — ending on the sentence the rule will read as. The sentence is live:
@@ -642,12 +675,20 @@ defmodule KilnCMSWeb.AutomationLive do
       </.step>
 
       <.step :if={@preview} number={5} title={gettext("Try it (optional)")}>
-        <.try_it preview={@preview} draft={@draft} names={@names} />
+        <.try_it
+          form={@form}
+          target={@preview_target}
+          preview={@preview}
+          draft={@draft}
+          names={@names}
+        />
       </.step>
     </ol>
     """
   end
 
+  attr :form, :any, required: true
+  attr :target, :string, required: true
   attr :preview, :map, required: true
   attr :draft, :map, required: true
   attr :names, :map, required: true
@@ -658,9 +699,19 @@ defmodule KilnCMSWeb.AutomationLive do
   # is ever submitted as part of the rule.
   defp try_it(assigns) do
     ~H"""
-    <div id="try-it" class="space-y-3 rounded-lg border border-dashed border-base-content/20 p-3">
+    <%!-- Ids from the form's own: the add form and an edit form can both be
+         on the page, each with a panel. --%>
+    <div
+      id={"#{@form.id}_try_it"}
+      class="space-y-3 rounded-lg border border-dashed border-base-content/20 p-3"
+    >
       <div :if={is_nil(@preview.options)} class="flex flex-wrap items-center gap-3">
-        <button type="button" phx-click="open_preview" class="btn btn-sm btn-default">
+        <button
+          type="button"
+          phx-click="open_preview"
+          phx-value-target={@target}
+          class="btn btn-sm btn-default"
+        >
           <.icon name="hero-eye" class="size-4" /> {gettext("Try it on real content")}
         </button>
         <span class="text-xs text-base-content/60">
@@ -680,7 +731,7 @@ defmodule KilnCMSWeb.AutomationLive do
           <.input
             :if={@preview.options != []}
             type="select"
-            id="preview_record"
+            id={"#{@form.id}_preview_record"}
             name="preview_record"
             value={@preview.value}
             label={gettext("Try it on")}
@@ -689,7 +740,7 @@ defmodule KilnCMSWeb.AutomationLive do
           />
           <div
             :if={@preview.effects}
-            id="preview-effects"
+            id={"#{@form.id}_preview_effects"}
             aria-live="polite"
             class="rounded-md bg-base-200/40 p-3"
           >
