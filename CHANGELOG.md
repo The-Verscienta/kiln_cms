@@ -116,6 +116,10 @@ Every summary line below that was shortened links to its own entry there.
   release still serving mid-deploy.**
   ([#1716](https://github.com/The-Verscienta/kiln_cms/issues/1716) · [long form](docs/changelog/unreleased.md#mix-kilnmigrationscheck-gates-expand-contract))
 
+- **Rich-text blocks turn lists into real lists: typed with "•" or "1)", pasted
+  as bullet characters (a PDF, an email), or pasted from Word with nesting kept.**
+  ([#1729](https://github.com/The-Verscienta/kiln_cms/pull/1729))
+
 ### Changed
 
 - **Keep `RichText.legacy_html` as a fallback instead of removing it;
@@ -139,6 +143,10 @@ Every summary line below that was shortened links to its own entry there.
 - **An empty heading line in a rich-text block is now visible in the editor —
   dashed, labelled with its level — so the "heading has no text" finding has
   something on screen to point at.** ([#1728](https://github.com/The-Verscienta/kiln_cms/pull/1728))
+
+- **An SEO or accessibility finding below a fragment names, and jumps to, the
+  right block.**
+  ([#1731](https://github.com/The-Verscienta/kiln_cms/pull/1731) · [long form](docs/changelog/unreleased.md#a-seo-or-accessibility-finding-below-a-fragment-names-and-jumps-to-the-right))
 
 - **Search holds at most two pooled connections, and answers `503` rather than
   `500` when the pool is full.**

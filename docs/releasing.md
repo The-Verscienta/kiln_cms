@@ -507,9 +507,12 @@ It does **not** cover:
   stops, and the client reconnects to a new node, which remounts the view.
   LiveView's form recovery re-sends a form that has `phx-change`, and an open
   GraphQL subscription must resubscribe.
-- **A job that outlives the grace period.** Oban kills it and leaves the row
-  in `executing`. Kiln configures no `Oban.Plugins.Lifeline`, so nothing moves
-  it back to `available`. It stays stuck until someone retries it by hand.
+- **A job that outlives the grace period, until it is rescued.** Oban kills
+  it and leaves the row in `executing`. `Oban.Lifeline` moves it back to
+  `available` (or `discarded` once its attempts are spent) after
+  `KILN_OBAN_RESCUE_AFTER_MINUTES`, 180 by default, so the job runs again
+  from the start, not where it stopped. Which jobs are safe to re-run is in
+  [Jobs interrupted by a deploy](deploy.md#jobs-interrupted-by-a-deploy).
 - **Readiness does not flip before shutdown.** `/up` keeps answering 200
   until the listener closes, so the load balancer should stop routing on
   its own deregistration (Kubernetes removes the pod from the Service
