@@ -66,15 +66,17 @@ defmodule KilnCMS.Media.AVStripWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"media_item_id" => id} = args}) do
-    tenant = args["org_id"]
+    # The item's site (epic #336); a job without `org_id` is cancelled with a
+    # logged error (#1658).
+    with {:ok, tenant} <- Ingest.job_tenant(args, __MODULE__) do
+      case CMS.get_media_item(id, authorize?: false, tenant: tenant) do
+        {:ok, %{quarantined: true, storage_key: key} = item} when is_binary(key) ->
+          strip(item, key, args, tenant)
 
-    case CMS.get_media_item(id, authorize?: false, tenant: tenant) do
-      {:ok, %{quarantined: true, storage_key: key} = item} when is_binary(key) ->
-        strip(item, key, args, tenant)
-
-      # Gone, or already released — a retried job after success, say.
-      _other ->
-        :ok
+        # Gone, or already released — a retried job after success, say.
+        _other ->
+          :ok
+      end
     end
   end
 

@@ -70,7 +70,10 @@ defmodule KilnCMSWeb.ContentEditorCompareTest do
           title: "Original title",
           slug: slug(),
           seo_description: "The original description, long enough to diff word by word.",
-          blocks: [%{type: :heading, content: "Kept heading", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "Kept heading", order: 0}
+            ])
         },
         actor: actor
       )
@@ -133,10 +136,11 @@ defmodule KilnCMSWeb.ContentEditorCompareTest do
         %{
           title: "Blocks",
           slug: slug(),
-          blocks: [
-            %{type: :heading, content: "First", order: 0},
-            %{type: :heading, content: "Second", order: 1}
-          ]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "First", order: 0},
+              %{type: :heading, content: "Second", order: 1}
+            ])
         },
         actor: editor
       )

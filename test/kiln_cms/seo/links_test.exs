@@ -41,7 +41,10 @@ defmodule KilnCMS.Seo.LinksTest do
           %{
             title: Keyword.get(opts, :title, "Doc"),
             slug: "links-#{System.unique_integer([:positive])}",
-            blocks: [%{type: :rich_text, content: "<p>#{text}</p>", order: 0}]
+            blocks:
+              KilnCMS.TypedFixtures.typed_blocks([
+                %{type: :rich_text, content: "<p>#{text}</p>", order: 0}
+              ])
           },
           Keyword.get(opts, :attrs, %{})
         ),
@@ -340,9 +343,10 @@ defmodule KilnCMS.Seo.LinksTest do
           %{
             title: "Foreign kiln firing",
             slug: "links-foreign-#{System.unique_integer([:positive])}",
-            blocks: [
-              %{type: :rich_text, content: "<p>a thorough guide to kiln firing</p>", order: 0}
-            ]
+            blocks:
+              KilnCMS.TypedFixtures.typed_blocks([
+                %{type: :rich_text, content: "<p>a thorough guide to kiln firing</p>", order: 0}
+              ])
           },
           actor: actor,
           tenant: other_org

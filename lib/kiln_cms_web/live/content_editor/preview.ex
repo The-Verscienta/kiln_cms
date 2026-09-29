@@ -31,15 +31,15 @@ defmodule KilnCMSWeb.ContentEditor.Preview do
   # go stale when a new block-mutating event is added, and hashing is ~1ms
   # against the 40ms it saves when the author is only editing scalar fields.
   def refresh_preview(socket) do
-    typed =
+    indexed =
       socket.assigns.form
       |> preview_block_maps()
       |> KilnCMS.CMS.TypedBlocks.to_typed()
       |> expand_fragments(socket)
 
     socket
-    |> refresh_preview_html(typed)
-    |> refresh_body_stats(typed)
+    |> refresh_preview_html(Enum.map(indexed, &elem(&1, 0)))
+    |> refresh_body_stats(indexed)
     |> refresh_seo_report()
   end
 
@@ -52,6 +52,12 @@ defmodule KilnCMSWeb.ContentEditor.Preview do
   # embedded — the same cost every publish already pays in
   # `KilnCMS.Firing.Engine.fire/2`.
   #
+  # Expanded WITH each block's top-level index: a fragment becomes 0..N blocks,
+  # so a position in the expanded list is not the form index the editor's cards
+  # carry (`id="block-N"`). Advisory findings report against the host index —
+  # inlined content against the fragment's own card — or a fragment above a
+  # flagged block would label it wrong and jump to the wrong card.
+  #
   # Expanded with the record's OWN audience, mirroring `Engine.host_audiences/1`
   # exactly: a `:member` document's preview must not show a wider-audience
   # fragment than delivery will ever grant it, or the author sees text a
@@ -59,7 +65,7 @@ defmodule KilnCMSWeb.ContentEditor.Preview do
   defp expand_fragments(typed, socket) do
     record = socket.assigns.record
 
-    KilnCMS.CMS.Fragments.expand(typed, record.org_id,
+    KilnCMS.CMS.Fragments.expand_indexed(typed, record.org_id,
       audiences: KilnCMS.Firing.Engine.host_audiences(record),
       ancestry: [{KilnCMS.Firing.Engine.public_type(record), record.id}]
     )
@@ -82,7 +88,7 @@ defmodule KilnCMSWeb.ContentEditor.Preview do
     end
   end
 
-  defp refresh_body_stats(socket, typed) do
+  defp refresh_body_stats(socket, indexed) do
     # This site's settings, not the deployment's (#857) — resolved here rather
     # than at mount so an admin turning the panel on, or editing the site's
     # phrase list, reaches an editor session already open. `Settings.for_org/1`
@@ -94,12 +100,12 @@ defmodule KilnCMSWeb.ContentEditor.Preview do
     # rules) while an editor session is open would otherwise leave that session
     # showing the previous scan — or no panel at all — until the author
     # happened to touch the body.
-    digest = :erlang.phash2({typed, settings})
+    digest = :erlang.phash2({indexed, settings})
 
     if digest == socket.assigns[:seo_body_digest] do
       socket
     else
-      body = Kiln.Advisory.Body.from_typed(typed)
+      body = Kiln.Advisory.Body.from_indexed(indexed)
 
       socket
       |> assign(:seo_body_digest, digest)
@@ -292,8 +298,9 @@ defmodule KilnCMSWeb.ContentEditor.Preview do
   # Inline preview rendered through the **same typed serializers that firing
   # uses** (Kiln v2) — what you preview is exactly what publishes/delivers. Full
   # block maps (incl. `data`/`children`) go through the legacy→typed bridge and
-  # the per-block `render(:web)`. Rich-text HTML is sanitized first (mirroring the
-  # save-time `SanitizeBlocks` change), so the rendered output is safe.
+  # the per-block `render(:web)`. Rich-text HTML is sanitized first
+  # (`sanitize_preview_block/1`, the same `HTMLSanitizer.sanitize_rich_text/1` the
+  # `BlockUnion` cast applies on save), so the rendered output is safe.
   # sobelow_skip ["XSS.Raw"]
   # A `{block_id, safe_html}` per block, so the Preview tab can wrap each block
   # individually and offer a per-block "edit on the page" jump (Theme C). The id is

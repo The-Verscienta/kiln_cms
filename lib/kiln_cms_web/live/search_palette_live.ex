@@ -76,7 +76,9 @@ defmodule KilnCMSWeb.SearchPaletteLive do
           length(results.pages) + length(results.posts) + length(results.entries) +
             length(results.media)
 
-        record_query_async(query, total, socket.assigns.current_org)
+        # Off the LiveView's process, so a debounced keystroke doesn't block
+        # on the write; lands in the current site (epic #336).
+        Search.record_query_async(query, total, tenant: socket.assigns.current_org)
 
         socket
         |> assign(:query, query)
@@ -86,30 +88,6 @@ defmodule KilnCMSWeb.SearchPaletteLive do
       end
 
     {:noreply, socket}
-  end
-
-  # Record the search for analytics off the LiveView's process so a debounced
-  # keystroke doesn't block on the DB write. Best-effort and bounded by the
-  # shared Task.Supervisor's max_children (drops under load); failures swallowed.
-  # `:async_analytics` is off under test so the write stays on the test's SQL
-  # sandbox connection rather than leaking from a detached task.
-  defp record_query_async(query, total, org) do
-    if Application.get_env(:kiln_cms, :async_analytics, true) do
-      Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn ->
-        record_query(query, total, org)
-      end)
-    else
-      record_query(query, total, org)
-    end
-
-    :ok
-  end
-
-  # The recorded query lands in the current site (epic #336).
-  defp record_query(query, total, org) do
-    Search.record_query(query, total, tenant: org)
-  rescue
-    _ -> :ok
   end
 
   defp result_count(%{
@@ -179,9 +157,14 @@ defmodule KilnCMSWeb.SearchPaletteLive do
           <% end %>
         </p>
 
-        <p :if={@searched and @count == 0} class="text-sm text-base-content/70">
-          {gettext("No results for “%{query}”.", query: @query)}
-        </p>
+        <.empty_state
+          :if={@searched and @count == 0}
+          id="search-empty"
+          icon="hero-magnifying-glass"
+          title={gettext("No results for “%{query}”.", query: @query)}
+        >
+          {gettext("Try fewer or different words, or a screen name such as “webhooks”.")}
+        </.empty_state>
 
         <div :if={@count > 0} class="space-y-6">
           <%!-- Screens lead (#1319): a match on a destination is an unambiguous

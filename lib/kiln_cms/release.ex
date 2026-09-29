@@ -85,9 +85,9 @@ defmodule KilnCMS.Release do
   end
 
   @doc """
-  `mix kiln.deprecations` for a release (#1538): report the accounts and queued
-  jobs that still depend on a surface 1.0 removes, and optionally move the
-  accounts onto a membership first.
+  `mix kiln.deprecations` for a release (#1538, #1543): report the accounts and
+  queued jobs still holding data only a removed surface read, and optionally
+  move the accounts onto a membership first.
 
       bin/kiln_cms eval 'KilnCMS.Release.deprecations()'
       bin/kiln_cms eval 'KilnCMS.Release.deprecations(migrate_audiences: true)'
@@ -103,6 +103,30 @@ defmodule KilnCMS.Release do
     {:ok, result, _} =
       Ecto.Migrator.with_repo(hd(repos()), fn _repo ->
         KilnCMS.Deprecations.run_and_report(opts, &IO.puts/1)
+      end)
+
+    with {:error, message} <- result, do: IO.puts(message)
+    result
+  end
+
+  @doc """
+  `mix kiln.org_slugs` for a release (#1710): list the organizations whose
+  slug can't be a hostname, and optionally downcase the ones where that is
+  enough first.
+
+      bin/kiln_cms eval 'KilnCMS.Release.org_slugs()'
+      bin/kiln_cms eval 'KilnCMS.Release.org_slugs(fix: true)'
+
+  Returns `:ok` when every slug is a valid host label, `{:error, message}`
+  otherwise; see `KilnCMS.Accounts.OrgSlugAudit`.
+  """
+  @spec org_slugs(keyword()) :: :ok | {:error, String.t()}
+  def org_slugs(opts \\ []) do
+    load_app()
+
+    {:ok, result, _} =
+      Ecto.Migrator.with_repo(hd(repos()), fn _repo ->
+        KilnCMS.Accounts.OrgSlugAudit.run_and_report(opts, &IO.puts/1)
       end)
 
     with {:error, message} <- result, do: IO.puts(message)

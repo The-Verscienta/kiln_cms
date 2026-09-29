@@ -149,7 +149,12 @@ for {kind, title, slug, state, days_ahead, blocks} <- content do
       IO.puts("  #{kind} #{slug} already exists")
 
     [] ->
-      blocks = blocks |> Enum.with_index() |> Enum.map(fn {b, i} -> Map.put_new(b, :order, i) end)
+      # Written above in the short legacy shape; 1.0 refuses that as write input
+      # (#1543), so convert it the way a stored legacy row is read.
+      blocks =
+        blocks
+        |> KilnCMS.CMS.TypedBlocks.to_typed()
+        |> Enum.map(&KilnCMS.CMS.TypedBlocks.input_map/1)
       attrs = %{title: title, slug: slug, blocks: blocks}
 
       record =

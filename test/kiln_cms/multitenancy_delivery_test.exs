@@ -36,7 +36,10 @@ defmodule KilnCMS.MultitenancyDeliveryTest do
         %{
           title: title,
           slug: slug,
-          blocks: [%{type: :rich_text, content: "<p>#{title}</p>", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>#{title}</p>", order: 0}
+            ])
         },
         tenant: org,
         authorize?: false
@@ -93,7 +96,10 @@ defmodule KilnCMS.MultitenancyDeliveryTest do
           %{
             title: "Legacy",
             slug: slug,
-            blocks: [%{type: :rich_text, content: "<p>x</p>", order: 0}]
+            blocks:
+              KilnCMS.TypedFixtures.typed_blocks([
+                %{type: :rich_text, content: "<p>x</p>", order: 0}
+              ])
           },
           authorize?: false
         )

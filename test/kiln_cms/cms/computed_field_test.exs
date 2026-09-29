@@ -6,6 +6,8 @@ defmodule KilnCMS.CMS.ComputedFieldTest do
   """
   use KilnCMS.DataCase, async: true
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.CMS
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldTypes
@@ -38,7 +40,7 @@ defmodule KilnCMS.CMS.ComputedFieldTest do
     )
   end
 
-  defp blocks(text), do: [%{type: :rich_text, content: "<p>#{text}</p>", order: 0}]
+  defp blocks(text), do: typed_blocks([%{type: :rich_text, content: "<p>#{text}</p>", order: 0}])
 
   describe "registration and definition-time validation" do
     test "it registers as a field type without being a core one" do

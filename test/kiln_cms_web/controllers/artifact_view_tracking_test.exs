@@ -10,6 +10,8 @@ defmodule KilnCMSWeb.ArtifactViewTrackingTest do
   """
   use KilnCMSWeb.ConnCase, async: true
 
+  import KilnCMS.TypedFixtures
+
   alias KilnCMS.Analytics
   alias KilnCMS.CMS
 
@@ -31,7 +33,8 @@ defmodule KilnCMSWeb.ArtifactViewTrackingTest do
         %{
           title: "Counted",
           slug: slug,
-          blocks: [%{type: :heading, content: "Hi", data: %{"level" => 1}, order: 0}]
+          blocks:
+            typed_blocks([%{type: :heading, content: "Hi", data: %{"level" => 1}, order: 0}])
         },
         actor: actor
       )

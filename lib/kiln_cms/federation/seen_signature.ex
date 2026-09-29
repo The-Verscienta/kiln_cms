@@ -57,10 +57,14 @@ defmodule KilnCMS.Federation.SeenSignature do
   end
 
   policies do
-    # System-only in every direction: the inbox writes and the sweeper deletes,
-    # both with `authorize?: false`; nothing user-facing reads a nonce table.
+    # System-only in every direction (#1659): `HttpSignature` records a
+    # verified signature and `SeenSignatureSweeper` counts and deletes the
+    # expired ones, both as `KilnCMS.SystemActor`. Nothing — the system actor
+    # included — reads the table through the plain `:read`: nothing user-facing
+    # reads a nonce table, and the sweep only ever needs `:expired`.
     policy always() do
-      forbid_if always()
+      forbid_unless action([:record, :expired, :destroy])
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

@@ -33,13 +33,13 @@ end
 
 # ## The console/delivery origin split (#740)
 #
-# KILN_CONSOLE_HOST=console.example.com serves the editor console ONLY on that
-# host and never serves tenant content there, so any script that runs on a
-# tenant's public site is cross-origin to the console (its cookies are not
-# attached, its DOM is not reachable). Unset (the default), console and site
-# share an origin as before. Add the console host to CHECK_ORIGINS. Org
-# resolution is still host-derived, so the console host is the DEFAULT org's
-# console — right for a single-org deployment; see docs/multi-tenancy.md.
+# KILN_CONSOLE_HOST=console.example.com serves the editor console ONLY on
+# console hosts and never serves tenant content there, so script on a tenant's
+# public site is cross-origin to every console. The bare host is the DEFAULT
+# org's console; <slug>.console.example.com is each other org's (#1688), so
+# DNS and TLS need the host and its wildcard. Keep it under PHX_HOST, or
+# passkeys cannot work there. Unset (the default), console and site share an
+# origin as before. See docs/multi-tenancy.md and docs/decisions/0011-*.
 if console_host = System.get_env("KILN_CONSOLE_HOST") do
   config :kiln_cms, :console_host, console_host
 end

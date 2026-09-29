@@ -540,6 +540,59 @@ defmodule KilnCMSWeb.ContentEditorSeoTest do
       assert html =~ ~s(data-block-type="image")
     end
 
+    # A fragment expands to 0..N blocks for the analysis, but the editor shows
+    # it as ONE card — so findings must carry the form index, not the position
+    # in the expanded list, or everything below a fragment jumps to the wrong
+    # card.
+    test "a fragment above a flagged block does not shift its index", %{conn: conn} do
+      editor = authed_user(:editor)
+      admin = authed_user(:admin)
+
+      shared =
+        CMS.create_page!(
+          %{
+            title: "Shared pair",
+            slug: "shared-pair-#{System.unique_integer([:positive])}",
+            blocks: [
+              %{"_type" => "heading", "level" => 2, "text" => "Shared one"},
+              %{"_type" => "heading", "level" => 2, "text" => "Shared two"}
+            ]
+          },
+          actor: admin
+        )
+        |> then(&CMS.publish_page!(&1, %{}, actor: admin))
+
+      empty_h2 = %{
+        "_type" => "rich_text",
+        "body" => [%{"_type" => "block", "style" => "h2", "children" => [%{"text" => ""}]}]
+      }
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Fragment above",
+            slug: "fragment-above-#{System.unique_integer([:positive])}",
+            blocks: [
+              %{"_type" => "fragment", "ref" => %{"type" => "page", "id" => shared.id}},
+              %{"_type" => "heading", "level" => 2, "text" => "Host heading"},
+              empty_h2
+            ]
+          },
+          actor: editor
+        )
+
+      {lv, html} = open_editor(conn, editor, page)
+      stats = :sys.get_state(lv.pid).socket.assigns.seo_body_stats
+
+      assert stats.empty_headings == [2]
+      # Headings inlined from the fragment point at the fragment's own card.
+      assert Enum.map(stats.headings, & &1.index) == [0, 0, 1]
+
+      assert html =~ ~s(href="#block-2")
+      assert html =~ ~s(id="block-2" data-sort-id="2")
+      refute html =~ ~s(href="#block-3")
+    end
+
     test "a field-level finding names its field, and an example phrase rides along", %{
       conn: conn
     } do

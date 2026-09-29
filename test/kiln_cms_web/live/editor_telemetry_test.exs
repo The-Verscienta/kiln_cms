@@ -80,7 +80,7 @@ defmodule KilnCMSWeb.EditorTelemetryTest do
     page = draft_page(%{title: "Old"})
 
     {:ok, lv, _html} =
-      conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+      conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
     lv |> form("#page-editor", form: %{title: "Saved title"}) |> render_submit()
 
@@ -98,7 +98,7 @@ defmodule KilnCMSWeb.EditorTelemetryTest do
     page = draft_page(%{title: "Old"})
 
     {:ok, lv, _html} =
-      conn |> log_in(authed_user(:editor)) |> live(~p"/editor/pages/#{page.id}")
+      conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
     lv |> form("#page-editor", form: %{title: "Autosaved"}) |> render_change()
     send(lv.pid, :autosave)
@@ -115,7 +115,7 @@ defmodule KilnCMSWeb.EditorTelemetryTest do
     page = draft_page()
 
     {:ok, lv, _html} =
-      conn |> log_in(authed_user(:admin)) |> live(~p"/editor/pages/#{page.id}")
+      conn |> log_in(authed_user(:admin)) |> live(~p"/editor/content/page/#{page.id}")
 
     lv |> element("button", "Publish now") |> render_click()
 

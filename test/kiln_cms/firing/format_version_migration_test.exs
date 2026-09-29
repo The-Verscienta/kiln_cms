@@ -45,7 +45,10 @@ defmodule KilnCMS.Firing.FormatVersionMigrationTest do
         %{
           title: "Fired",
           slug: "fv-#{System.unique_integer([:positive])}",
-          blocks: [%{type: :heading, content: "Welcome", data: %{"level" => 1}, order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :heading, content: "Welcome", data: %{"level" => 1}, order: 0}
+            ])
         },
         actor: actor
       )

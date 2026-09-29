@@ -25,7 +25,12 @@ defmodule KilnCMS.CMS.ReadingTimeTest do
     body = Enum.map_join(1..max(count, 1), " ", &"word#{&1}")
 
     blocks =
-      if count == 0, do: [], else: [%{type: :rich_text, content: "<p>#{body}</p>", order: 0}]
+      if count == 0,
+        do: [],
+        else:
+          KilnCMS.TypedFixtures.typed_blocks([
+            %{type: :rich_text, content: "<p>#{body}</p>", order: 0}
+          ])
 
     CMS.create_page!(
       %{title: "Reading", slug: "rt-#{System.unique_integer([:positive])}", blocks: blocks},

@@ -10,6 +10,7 @@
 // click from what they meant.
 import {Extension} from "@tiptap/core"
 import {Plugin, PluginKey} from "@tiptap/pm/state"
+import {normalizeBullets} from "./list_detect"
 
 // Mirror of `KilnCMS.Markdown.max_bytes/0`. Past it the server refuses, so a
 // paste that size goes in as plain text without the round trip.
@@ -243,7 +244,9 @@ export function markdownPaste(hook) {
         if (byteLength(text) > MAX_BYTES) return plain()
 
         const timer = setTimeout(plain, REPLY_TIMEOUT_MS)
-        hook.pushEvent("markdown_paste", {text}, reply => {
+        // "• item" isn't Markdown; "- item" is. The notice's "Paste as plain
+        // text" still puts back `text` exactly as copied.
+        hook.pushEvent("markdown_paste", {text: normalizeBullets(text)}, reply => {
           clearTimeout(timer)
           if (settled) return
           const content = reply && reply.doc && reply.doc.content

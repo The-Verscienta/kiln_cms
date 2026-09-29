@@ -44,7 +44,10 @@ defmodule KilnCMSWeb.VisualEditingControllerTest do
       %{
         title: "Live title",
         slug: slug(),
-        block_tree: [%{"type" => "heading", "content" => "A heading", "order" => 1}]
+        block_tree:
+          KilnCMS.TypedFixtures.typed_blocks([
+            %{"type" => "heading", "content" => "A heading", "order" => 1}
+          ])
       },
       actor: admin
     )
@@ -327,7 +330,10 @@ defmodule KilnCMSWeb.VisualEditingControllerTest do
           %{
             title: "Other-site post",
             slug: slug(),
-            block_tree: [%{"type" => "heading", "content" => "A heading", "order" => 1}]
+            block_tree:
+              KilnCMS.TypedFixtures.typed_blocks([
+                %{"type" => "heading", "content" => "A heading", "order" => 1}
+              ])
           },
           actor: user(:admin),
           tenant: org
@@ -364,7 +370,10 @@ defmodule KilnCMSWeb.VisualEditingControllerTest do
         %{
           title: "Other-site post",
           slug: the_slug,
-          block_tree: [%{"type" => "heading", "content" => "A heading", "order" => 1}]
+          block_tree:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{"type" => "heading", "content" => "A heading", "order" => 1}
+            ])
         },
         actor: admin,
         tenant: org

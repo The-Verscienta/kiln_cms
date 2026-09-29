@@ -37,9 +37,6 @@ defmodule KilnCMS.Application do
       # `dev_routes` — so this is what actually reaches an operator. Silent
       # unless a calendar re-queried in the window.
       KilnCMS.CMS.CalendarRequeryMonitor,
-      # Owns the table that keeps a per-request deprecation warning to one line
-      # per account per boot (#1538). See `KilnCMS.Deprecations`.
-      KilnCMS.Deprecations,
       # Reclaim stale rate-limit buckets so an IP-rotating flood can't grow the
       # ETS table without bound (one row per `bucket:IP` otherwise lives forever).
       {KilnCMSWeb.RateLimit, clean_period: :timer.minutes(1), key_older_than: :timer.minutes(5)},
@@ -171,10 +168,26 @@ defmodule KilnCMS.Application do
       # the config-only warnings at the top of start/2.
       warn_if_strict_host_false_ignored()
       warn_if_console_shares_origin()
+      warn_if_console_host_outside_rp_id()
       warn_if_embed_lists_over_ceiling()
       warn_if_chain_unsigned()
+      warn_if_org_slugs_unreachable()
       enqueue_occurrence_backfill()
+      enqueue_legacy_audiences_migration()
       {:ok, pid}
+    end
+  end
+
+  # The upgrade safety net for the `User.audiences` fallback 1.0 removed
+  # (#1543): moves any account that still relied on it onto a membership, so an
+  # operator who skipped `mix kiln.deprecations --migrate-audiences` strands
+  # nobody. See `KilnCMS.Accounts.LegacyAudiencesWorker`. Deliberately no
+  # runtime env var to turn it off — it is access a paying reader already had.
+  # Off in `:test` and `:e2e` only, for the committed-`oban_jobs` reason
+  # `enqueue_occurrence_backfill/0` gives below.
+  defp enqueue_legacy_audiences_migration do
+    if Application.get_env(:kiln_cms, :legacy_audiences_migration_on_boot, true) do
+      KilnCMS.Accounts.LegacyAudiencesWorker.enqueue()
     end
   end
 
@@ -205,14 +218,105 @@ defmodule KilnCMS.Application do
 
   # The core Oban config with plugin queues merged in (D18) — plugins declare
   # queues in code (`oban_queues/0`) instead of editing the host's config.
-  defp oban_config do
+  #
+  # Public (`@doc false`) only so a test can assert the assembled plugin list:
+  # the crontab and the Lifeline rescuer are both injected here, and under
+  # `testing: :manual` Oban starts no plugins at all — so an injector rewrite
+  # that dropped the other's plugin would pass every other test.
+  @doc false
+  def oban_config do
     Application.fetch_env!(:kiln_cms, Oban)
     |> Keyword.update(:queues, Kiln.Plugins.oban_queues(), fn queues ->
       Keyword.merge(Kiln.Plugins.oban_queues(), queues)
     end)
-    |> Keyword.update(:plugins, [], &with_cron_entries/1)
+    |> Keyword.update(:plugins, [], &(&1 |> with_cron_entries() |> with_lifeline()))
     |> with_demo_queue()
   end
+
+  # Rescue jobs orphaned in `executing` (#1718). A node stopped mid-deploy
+  # gives its running jobs `shutdown_grace_period` (15 s) and then kills them;
+  # the row stays `executing` for ever — never retried, never discarded, and
+  # under `unique` it blocks every later enqueue of the same job.
+  # `Oban.Lifeline` moves such a row back to `available` (or to `discarded`
+  # once `max_attempts` is spent) after `rescue_after`.
+  #
+  # The rescuer is purely time-based: it cannot tell an orphan from a job that
+  # is genuinely still running, so `rescue_after` must exceed the longest
+  # legitimate run or a live job executes twice. The ceiling today is
+  # `KilnCMS.Backups.Worker.timeout/1` (2 h); the default is 3 h, and
+  # `test/kiln_cms/oban_lifeline_test.exs` fails if any worker's `timeout/1`
+  # grows past it. See docs/deploy.md ("Jobs interrupted by a deploy").
+  #
+  # Injected here rather than written into `config :kiln_cms, Oban` for the
+  # crontab's #608 reason: `KILN_OBAN_RESCUE_AFTER_MINUTES` sets a flat key. A
+  # Lifeline already in the list (Oban Pro's, say) is left alone.
+  defp with_lifeline(plugins) do
+    cond do
+      Enum.any?(plugins, &lifeline?/1) ->
+        plugins
+
+      rescue_after = oban_rescue_after() ->
+        plugins ++ [{Oban.Lifeline, rescue_after: rescue_after}]
+
+      true ->
+        plugins
+    end
+  end
+
+  defp lifeline?({module, _opts}), do: lifeline?(module)
+  defp lifeline?(module) when is_atom(module), do: String.ends_with?(inspect(module), "Lifeline")
+  defp lifeline?(_plugin), do: false
+
+  @default_rescue_after_minutes 180
+
+  @doc false
+  # The rescue window in milliseconds, or `nil` when rescuing is switched off
+  # (`KILN_OBAN_RESCUE_AFTER_MINUTES=false`). Like a cron expression, a bad
+  # value costs the setting, never the boot: Oban validates plugin options with
+  # a raise out of `Oban.Config.new/1`, which would take the whole supervision
+  # tree down over a typo in an env var. A bad value keeps the default rather
+  # than switching rescuing off — stranded jobs are the failure being fixed.
+  @spec oban_rescue_after() :: pos_integer() | nil
+  def oban_rescue_after do
+    configured =
+      Application.get_env(
+        :kiln_cms,
+        :oban_rescue_after_minutes,
+        @default_rescue_after_minutes
+      )
+
+    case parse_rescue_minutes(configured) do
+      {:ok, minutes} ->
+        :timer.minutes(minutes)
+
+      :off ->
+        nil
+
+      :error ->
+        IO.puts(
+          :standard_error,
+          "KILN_OBAN_RESCUE_AFTER_MINUTES=#{inspect(configured)} is not a positive whole " <>
+            "number of minutes - using the default of #{@default_rescue_after_minutes}. See #1718."
+        )
+
+        :timer.minutes(@default_rescue_after_minutes)
+    end
+  end
+
+  defp parse_rescue_minutes(minutes) when is_integer(minutes) and minutes > 0, do: {:ok, minutes}
+  defp parse_rescue_minutes(off) when off in [false, nil], do: :off
+
+  defp parse_rescue_minutes(raw) when is_binary(raw) do
+    trimmed = raw |> String.trim() |> String.downcase()
+
+    case Integer.parse(trimmed) do
+      _ when trimmed in ~w(false off no) -> :off
+      {minutes, ""} when minutes > 0 -> {:ok, minutes}
+      _ -> :error
+    end
+  end
+
+  defp parse_rescue_minutes(_other), do: :error
 
   # The demo reset's own queue (`KilnCMS.Demo.ResetWorker`), started only in
   # demo mode so no other deployment runs an idle producer for it. One worker:
@@ -436,6 +540,25 @@ defmodule KilnCMS.Application do
     end
   end
 
+  # `KILN_CONSOLE_HOST` outside `PHX_HOST` (#1688): the browser refuses the
+  # passkeys' RP ID (the `PHX_HOST` host) on a console host that does not end
+  # in it, so nobody can sign in or enroll with a passkey there. Changing the RP
+  # ID would orphan every registered passkey, so this says so instead. Needs the
+  # endpoint's URL, hence after the tree is up.
+  defp warn_if_console_host_outside_rp_id do
+    if not KilnCMSWeb.Plugs.ConsoleHost.passkey_capable?() do
+      KilnCMS.Config.Report.warn(
+        "console_host_passkeys",
+        "KILN_CONSOLE_HOST (#{KilnCMSWeb.Plugs.ConsoleHost.console_host()}) is not " <>
+          "PHX_HOST or a subdomain of it, so passkeys cannot be used on the " <>
+          "console: their relying-party ID is the PHX_HOST host, and a browser " <>
+          "only accepts it on hosts under it. Editors can still sign in with a " <>
+          "password or SSO. Move the console host under PHX_HOST (for example " <>
+          "console.<PHX_HOST>) to use passkeys there. See docs/multi-tenancy.md."
+      )
+    end
+  end
+
   # An unset `EMBED_ORIGINS_LOCKED` caps form framing at `EMBED_ORIGINS` once a
   # second organization exists (#1618). A form or site-wide allowlist saved
   # before that, naming a site outside `EMBED_ORIGINS`, is clamped when served
@@ -446,6 +569,23 @@ defmodule KilnCMS.Application do
   defp warn_if_embed_lists_over_ceiling do
     if message = KilnCMS.Forms.EmbedCeiling.overreach_warning() do
       KilnCMS.Config.Report.warn("embed_ceiling", message)
+    end
+  end
+
+  # An org slug stored before slugs had to be DNS labels (#1710) may name a
+  # host no browser can send — `Acme`, when the lookup is downcased — so that
+  # site is unreachable at its subdomain, silently. Renaming a live tenant's
+  # host is the operator's call, so boot only says so; `mix kiln.org_slugs`
+  # lists the rows and downcases the ones where that is enough. `probe/2`: an
+  # advisory read that must not stop a node starting.
+  defp warn_if_org_slugs_unreachable do
+    report =
+      KilnCMS.Config.Report.probe(%{fixable: [], manual: []}, fn ->
+        KilnCMS.Accounts.OrgSlugAudit.report()
+      end)
+
+    if message = KilnCMS.Accounts.OrgSlugAudit.warning(report) do
+      KilnCMS.Config.Report.warn("org_slugs", message)
     end
   end
 

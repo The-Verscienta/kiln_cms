@@ -10,10 +10,11 @@ defmodule KilnCMS.CMS.BlockBackfill do
 
   `blocks` has been `{:array, KilnCMS.CMS.BlockUnion}` since the storage flip,
   but the flip shipped with no data migration: `BlockUnion`'s cast is
-  legacy-tolerant, so a row nobody has saved since still holds the old
-  `KilnCMS.CMS.Block` maps and is converted on **every read**. This pass does
-  that conversion once, on disk, so the tolerant read path can be retired at
-  1.0 without anything left depending on it.
+  legacy-tolerant on read, so a row nobody has saved since still holds the old
+  pre-typed `Block` maps and is converted on **every read**. This pass does
+  that conversion once, on disk. The tolerant read path stays after 1.0 for
+  what this pass reports rather than rewrites, and for version history; the
+  legacy *write* shape was removed at 1.0 (#1543).
 
   ## What counts as legacy
 
@@ -21,7 +22,7 @@ defmodule KilnCMS.CMS.BlockBackfill do
   `working_blocks` on every content resource — pages, posts, dynamic entries
   and every overlay type):
 
-    * `:legacy_block` — a pre-flip `KilnCMS.CMS.Block` map (`"type"`,
+    * `:legacy_block` — a pre-flip `Block` map (`"type"`,
       `"content"`, `"data"`), converted through the same mapping every read
       uses (`KilnCMS.CMS.TypedBlocks`).
     * `:parked_custom` — a legacy block whose `type` has no typed block. It is
@@ -89,7 +90,9 @@ defmodule KilnCMS.CMS.BlockBackfill do
   the per-document governance hash chain (`KilnCMS.Governance.Chain`), so
   rewriting one would break verification of every anchor after it. History is
   read through `KilnCMS.CMS.TypedBlocks.to_typed/1`, which keeps reading the
-  legacy shape, and a restore writes through the ordinary cast.
+  legacy shape, and a restore upcasts a legacy snapshot through it before
+  writing (`KilnCMS.CMS.Changes.RestoreVersion`), since the write cast refuses
+  the legacy shape.
 
   The editor's crash-recovery `draft_snapshot`, likewise: it holds form
   params, not stored blocks, and any save clears it.

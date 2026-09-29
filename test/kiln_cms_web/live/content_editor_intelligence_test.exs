@@ -67,7 +67,10 @@ defmodule KilnCMSWeb.ContentEditorIntelligenceTest do
         %{
           title: Keyword.get(opts, :title, "Doc"),
           slug: slug(),
-          blocks: [%{type: :rich_text, content: "<p>#{text}</p>", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>#{text}</p>", order: 0}
+            ])
         },
         actor: actor
       )
@@ -190,7 +193,10 @@ defmodule KilnCMSWeb.ContentEditorIntelligenceTest do
         %{
           title: "Same",
           slug: slug(),
-          blocks: [%{type: :rich_text, content: "<p>brewing green tea slowly</p>", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>brewing green tea slowly</p>", order: 0}
+            ])
         },
         actor: actor
       )
@@ -240,7 +246,10 @@ defmodule KilnCMSWeb.ContentEditorIntelligenceTest do
         %{
           title: "Same #{uniq}",
           slug: slug(),
-          blocks: [%{type: :rich_text, content: "<p>#{text}</p>", order: 0}]
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{type: :rich_text, content: "<p>#{text}</p>", order: 0}
+            ])
         },
         actor: actor
       )

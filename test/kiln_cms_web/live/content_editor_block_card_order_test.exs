@@ -87,7 +87,7 @@ defmodule KilnCMSWeb.ContentEditorBlockCardOrderTest do
     page = draft_page()
 
     {:ok, lv, _html} =
-      conn |> log_in(authed_editor()) |> live(~p"/editor/pages/#{page.id}")
+      conn |> log_in(authed_editor()) |> live(~p"/editor/content/page/#{page.id}")
 
     render_hook(lv, "add_block", %{"type" => "rich_text"})
     added = render(lv)

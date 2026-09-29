@@ -213,7 +213,11 @@ defmodule KilnCMS.StrictTenancyTest do
 
     page =
       CMS.create_page!(
-        %{title: "Delegated", slug: slug(), blocks: [%{type: :heading, content: "H", order: 0}]},
+        %{
+          title: "Delegated",
+          slug: slug(),
+          blocks: KilnCMS.TypedFixtures.typed_blocks([%{type: :heading, content: "H", order: 0}])
+        },
         actor: actor,
         tenant: org_id()
       )
@@ -235,7 +239,11 @@ defmodule KilnCMS.StrictTenancyTest do
 
     page =
       CMS.create_page!(
-        %{title: "Sweep me", slug: slug(), blocks: [%{type: :heading, content: "H", order: 0}]},
+        %{
+          title: "Sweep me",
+          slug: slug(),
+          blocks: KilnCMS.TypedFixtures.typed_blocks([%{type: :heading, content: "H", order: 0}])
+        },
         actor: actor,
         tenant: org_id()
       )

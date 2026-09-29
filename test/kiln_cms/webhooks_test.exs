@@ -448,7 +448,7 @@ defmodule KilnCMS.WebhooksTest do
           %{
             title: "Narrow",
             slug: slug(),
-            block_tree: [%{"type" => "heading", "content" => "Body"}]
+            block_tree: [%{"_type" => "heading", "text" => "Body", "level" => 2}]
           },
           actor: admin
         )
