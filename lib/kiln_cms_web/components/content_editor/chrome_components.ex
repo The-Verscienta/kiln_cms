@@ -117,7 +117,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
             class="inline-flex items-center gap-1 text-xs text-base-content/60"
             title={gettext("Reading time is an estimate at %{wpm} words per minute.", wpm: @wpm)}
           >
-            <.icon name="hero-clock" class="size-3.5" />
+            <.icon name="hero-book-open" class="size-3.5" />
             {ngettext("%{count} word", "%{count} words", @word_count, count: @word_count)} &middot; {ngettext(
               "%{count} min read",
               "%{count} min read",
@@ -211,9 +211,9 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
   # Traffic-light vocabulary, shared with the grade pill in the panel
   # (`KilnCMSWeb.AdvisoryComponents`) so the chip and the section it scrolls to
   # can never disagree about what colour this document is.
-  defp a11y_chip_class(:good), do: "bg-success/15 text-success hover:bg-success/25"
-  defp a11y_chip_class(:ok), do: "bg-warning/20 text-warning-content hover:bg-warning/30"
-  defp a11y_chip_class(:poor), do: "bg-error/12 text-error hover:bg-error/20"
+  defp a11y_chip_class(:good), do: "bg-success/15 text-success-ink hover:bg-success/25"
+  defp a11y_chip_class(:ok), do: "bg-warning/20 text-warning-ink hover:bg-warning/30"
+  defp a11y_chip_class(:poor), do: "bg-error/12 text-error-ink hover:bg-error/20"
 
   defp a11y_chip_icon(:good), do: "hero-check-circle"
   defp a11y_chip_icon(_grade), do: "hero-exclamation-circle"
@@ -267,7 +267,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
       assign(assigns, others: others, roster: roster, count: length(assigns.editors))
 
     ~H"""
-    <div :if={@others != []} class="mt-2 flex items-center gap-2">
+    <div :if={@others != []} class="flex items-center gap-2">
       <div class="flex">
         <span
           :for={e <- @roster}

@@ -2398,6 +2398,11 @@ msgstr "La facturation n'est pas encore configurée. Tant que les deux secrets n
 msgid "Block"
 msgstr "Bloc"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Block actions"
+msgstr "Actions du bloc"
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Block actor"
@@ -4989,6 +4994,11 @@ msgstr "Modifier : %{kind}"
 msgid "Edit URL"
 msgstr "Modifier l'URL"
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Edit block %{n} on the page"
+msgstr "Modifier le bloc %{n} sur la page"
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Edit field %{label}"
@@ -6469,8 +6479,8 @@ msgstr "Hôte ou URI de l'acteur"
 
 #: lib/kiln_cms_web/live/content_editor/inspector_preview_component.ex
 #, elixir-autogen, elixir-format
-msgid "Hover a block and click Edit to change it on the page."
-msgstr "Survolez un bloc et cliquez sur Modifier pour le changer sur la page."
+msgid "Hover a block and click Edit, or Tab to it, to change it on the page."
+msgstr "Survolez un bloc et cliquez sur Modifier, ou atteignez-le avec Tab, pour le changer sur la page."
 
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
@@ -9117,6 +9127,11 @@ msgstr "Envoyer une charge utile signée (POST) à des services externes lorsque
 #, elixir-autogen, elixir-format
 msgid "Page %{page}"
 msgstr "Page %{page}"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Page actions"
+msgstr "Actions de la page"
 
 #: lib/kiln_cms_web/controllers/content_controller.ex
 #: lib/kiln_cms_web/controllers/error_html/404.html.heex
