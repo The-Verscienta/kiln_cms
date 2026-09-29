@@ -31,7 +31,7 @@ defmodule KilnCMS.Newsletter do
       define :confirm_subscriber, action: :confirm
       define :unsubscribe_subscriber, action: :unsubscribe
       define :confirmed_subscribers, action: :confirmed, args: [{:optional, :segment_id}]
-      # System-only (`authorize?: false`) — driven by billing, see TierSync.
+      # System-only (`system/0`) — driven by billing, see TierSync.
       define :link_member_subscriber, action: :link_member, args: [:user_id]
       define :resubscribe_subscriber, action: :resubscribe
       define :subscribers_for_user, action: :for_user, args: [:user_id]
@@ -43,7 +43,7 @@ defmodule KilnCMS.Newsletter do
       define :get_segment, action: :read, get_by: [:id]
       define :update_segment, action: :update
       define :destroy_segment, action: :destroy
-      # System-only (`authorize?: false`) — the tier-backed lifecycle.
+      # System-only (`system/0`) — the tier-backed lifecycle.
       define :create_tier_segment, action: :for_tier, args: [:tier_id, :audience]
       define :sync_managed_segment, action: :sync_managed
     end
@@ -68,6 +68,31 @@ defmodule KilnCMS.Newsletter do
   end
 
   @doc """
+  The actor the newsletter's own machinery runs as (#1659): a
+  `KilnCMS.SystemActor` labelled `:newsletter`.
+
+  Two callers use it. The send pipeline (`SendWorker`, `MailWorker`) reads
+  the campaign and its confirmed subscribers and keeps the campaign's
+  counters; `TierSync` keeps tier-backed segments and their members in step
+  with billing. Each resource admits it by action name (see
+  `docs/policy-matrix.md`, "The system actor"): on `NewsletterSend` the read
+  and the fan-out bookkeeping, never `destroy` or `mark_failed`; on
+  `Subscriber` the reads (`read`, `confirmed`) and `link_member`, never a
+  consent change.
+  """
+  @spec system() :: KilnCMS.SystemActor.t() | nil
+  def system, do: KilnCMS.SystemActor.resolve(:newsletter)
+
+  @doc false
+  # Test seam (#1659): run `fun` with `system/0` answering `actor` in this
+  # process, so a test can take the grant away and prove the send pipeline's
+  # reads fail CLOSED: a refused subscriber list must retry, never fan out to
+  # nobody and mark the campaign sent. Process-local; nothing on a request
+  # path calls it.
+  @spec with_actor(term(), (-> result)) :: result when result: term()
+  def with_actor(actor, fun), do: KilnCMS.SystemActor.with_override(:newsletter, actor, fun)
+
+  @doc """
   Send a published document to subscribers as a newsletter.
 
   `document` is a published content struct (typically a post). Options:
@@ -85,7 +110,8 @@ defmodule KilnCMS.Newsletter do
 
   Returns `{:ok, %NewsletterSend{}}` once the campaign is queued, or
   `{:error, reason}` when the document isn't safe to send (`:not_published`,
-  `%Ash.Error.Forbidden{}` when the actor may not create the campaign,
+  `%Ash.Error.Forbidden{}` when the actor may not create the campaign or read
+  the segment it names,
   `:gated` — a non-public audience with no entitled tier segment targeted,
   `:no_such_segment`, or `:not_fired` when no `:web` artifact exists yet).
 
@@ -97,7 +123,7 @@ defmodule KilnCMS.Newsletter do
   def send_as_newsletter(document, opts \\ []) do
     automation = opts[:automation]
 
-    with {:ok, segment} <- resolve_segment(opts[:segment_id], document.org_id),
+    with {:ok, segment} <- resolve_segment(opts[:segment_id], document.org_id, opts[:actor]),
          :ok <- ensure_sendable(document, segment),
          {:ok, _html} <- artifact_html(document) do
       # Ledger row + fan-out job commit in ONE transaction (Oban jobs are
@@ -222,15 +248,29 @@ defmodule KilnCMS.Newsletter do
   defp ensure_sendable(%{state: :published}, _segment), do: {:error, :gated}
   defp ensure_sendable(_document, _segment), do: {:error, :not_published}
 
-  # The send guard needs the segment itself, not just its id. Read as the system:
-  # authorization already happened at the LiveView/automation layer, matching the
-  # rest of this funnel.
-  defp resolve_segment(nil, _org_id), do: {:ok, nil}
+  # The send guard needs the segment itself, not just its id. Read as the
+  # SENDER (#1659), the same actor the campaign is created under: an admin of
+  # the site from the console, or the automation's system actor, which
+  # `Segment` admits for `:read`. It used to be `authorize?: false`, which let
+  # an actor who could not see the segment still have its tier audience
+  # decide whether gated content went out.
+  #
+  # `authorize_with: :error`, because a refused read under the filter answers
+  # `nil`, and `nil` is "no such segment". Refused is not absent: the caller
+  # gets the Forbidden, and the automation worker retries on it rather than
+  # reading a lost grant as a deleted segment. Either way nothing is sent.
+  defp resolve_segment(nil, _org_id, _actor), do: {:ok, nil}
 
-  defp resolve_segment(segment_id, org_id) do
-    case get_segment(segment_id, authorize?: false, tenant: org_id, not_found_error?: false) do
+  defp resolve_segment(segment_id, org_id, actor) do
+    case get_segment(segment_id,
+           actor: actor,
+           authorize_with: :error,
+           tenant: org_id,
+           not_found_error?: false
+         ) do
       {:ok, nil} -> {:error, :no_such_segment}
       {:ok, segment} -> {:ok, segment}
+      {:error, %Ash.Error.Forbidden{} = error} -> {:error, error}
       {:error, _reason} -> {:error, :no_such_segment}
     end
   end

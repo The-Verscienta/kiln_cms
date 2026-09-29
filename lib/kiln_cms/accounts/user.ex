@@ -27,6 +27,16 @@ defmodule KilnCMS.Accounts.User do
 
   authentication do
     add_ons do
+      # NOT what revokes tokens on a password change (#734). The flag hangs its
+      # change off `Changing(:hashed_password, touching?: true)`, evaluated when
+      # the changeset is built, and both password actions below write the hash
+      # in a `before_action` (`HashPasswordChange`) — so the condition never
+      # holds on them. They declare `KilnCMS.Accounts.Changes.RevokeAllTokens`
+      # explicitly instead; that is the control, and this flag stays only to
+      # cover any future plain update that takes `hashed_password` as input.
+      # The add-on itself is still load-bearing: it defines the
+      # `:log_out_everywhere` action that change (and the admin "Sign out
+      # everywhere") runs.
       log_out_everywhere do
         apply_on_password_change? true
       end
@@ -407,10 +417,23 @@ defmodule KilnCMS.Accounts.User do
 
       change {AshAuthentication.Strategy.Password.HashPasswordChange, strategy_name: :password}
 
-      # `log_out_everywhere` above revokes stored tokens; this drops the live
-      # sockets that would otherwise keep working until reconnect (#675 pattern,
-      # same pairing as admin "sign out everywhere").
-      change {KilnCMS.Accounts.Changes.EvictSessions, reason: :password_changed}
+      # Revokes every stored token the account holds — every session, the
+      # remember-me cookie, a sign-in held at the code prompt — in this
+      # transaction, failing the change if it cannot (#734). Not the
+      # `log_out_everywhere` flag above, which never fires here; see its comment.
+      #
+      # That includes the session on the device making the change: a LiveView
+      # cannot write a cookie to re-issue one, and the rotation is exactly the
+      # moment the old password stops being evidence of who is holding a
+      # session. The settings page sends the user to sign in again.
+      change KilnCMS.Accounts.Changes.RevokeAllTokens
+
+      # And drops the live sockets, which authorized once at connect and would
+      # otherwise keep working with no token behind them (#675 pattern, same
+      # pairing as admin "sign out everywhere"). After the commit, so a
+      # reconnect cannot beat the revocation.
+      change {KilnCMS.Accounts.Changes.EvictSessions,
+              reason: :password_changed, after_commit?: true}
     end
 
     read :sign_in_with_password do
@@ -723,8 +746,23 @@ defmodule KilnCMS.Accounts.User do
       # Hashes the provided password
       change AshAuthentication.Strategy.Password.HashPasswordChange
 
+      # Revokes every stored token the account holds, in this transaction, or
+      # fails the reset (#734). A reset is the "someone else may have my
+      # password" path, so it is the one that most needs it. MUST stay above
+      # `GenerateTokenChange`: `after_action` hooks run in declaration order,
+      # and the session this reset signs the user into is minted there — after
+      # the sweep, so it survives it.
+      change KilnCMS.Accounts.Changes.RevokeAllTokens
+
       # Generates an authentication token for the user
       change AshAuthentication.GenerateTokenChange
+
+      # Drops every live socket the account has open (#1637): revoking the
+      # tokens stops new connections, not the LiveViews already mounted.
+      # `:change_password` has had this since #1652; the reset path — the one an
+      # owner reaches for when an attacker is already in — did not.
+      change {KilnCMS.Accounts.Changes.EvictSessions,
+              reason: :password_reset, after_commit?: true}
 
       # Holding the emailed reset token proves the account is yours, so it
       # releases the per-account sign-in budget (#478) — otherwise the remedy

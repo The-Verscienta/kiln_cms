@@ -225,23 +225,20 @@ defmodule KilnCMS.NewsletterTest do
       assert campaigns() == []
     end
 
-    test "the system actor's grant is :create alone — it cannot read the ledger" do
+    # The grant widened in #1659 (the send pipeline reads the campaign and
+    # keeps its counters as `Newsletter.system/0`); what a system actor may
+    # still never do to the ledger is pinned in
+    # `KilnCMS.Newsletter.SystemActorAuthorizationTest`.
+    test "the system actor cannot erase or fail a campaign" do
       actor = admin()
       post = published_post(actor, "Readable #{slug()}")
       assert {:ok, send} = Newsletter.send_as_newsletter(post, actor: actor)
+      system = KilnCMS.SystemActor.new(:automation)
 
-      # A refused read may be `{:ok, []}` (filter policy) or Forbidden; either
-      # way the row must not come back.
-      visible =
-        case Newsletter.list_sends(
-               actor: KilnCMS.SystemActor.new(:automation),
-               tenant: KilnCMS.Accounts.default_org_id()
-             ) do
-          {:ok, rows} -> rows
-          {:error, %Ash.Error.Forbidden{}} -> []
-        end
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Newsletter.mark_failed(send, actor: system, tenant: send.org_id)
 
-      refute Enum.any?(visible, &(&1.id == send.id))
+      refute Ash.can?({send, :destroy}, system, tenant: send.org_id)
     end
 
     test "an admin's send records who sent it" do

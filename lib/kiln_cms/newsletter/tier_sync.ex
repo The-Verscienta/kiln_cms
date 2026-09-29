@@ -68,7 +68,7 @@ defmodule KilnCMS.Newsletter.TierSync do
   alias KilnCMS.Newsletter
 
   # See "How this sync is authorized" above.
-  defp system_actor, do: KilnCMS.SystemActor.new(:newsletter)
+  defp system_actor, do: Newsletter.system()
 
   @doc """
   Reconcile one person's tier-segment membership within one organization.

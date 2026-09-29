@@ -96,6 +96,10 @@ defmodule KilnCMS.Federation.AnnounceWorker do
   # strangers' timelines with no summary at all — irrevocably, since an Announce
   # is not re-sent when the pattern is noticed.
   defp load(%{resource: resource}, document_id, org_id) when not is_nil(resource) do
+    # authorize?: false — a content read (#1402): a `Delete` must find a record
+    # that is no longer published (and sends only its id), and every other
+    # verb must pass `public_to_anonymous?/1` above; a system grant on content
+    # would be a standing read of every draft.
     case Ash.get(resource, document_id,
            authorize?: false,
            tenant: org_id,

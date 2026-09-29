@@ -514,7 +514,7 @@ defmodule Mix.Tasks.Kiln.Authz.CheckTest do
   end
 
   describe "problems/2 — the #1402 ratchet" do
-    # `run/1` scans all of `lib/` against a 129-entry backlog, so the ratchet
+    # `run/1` scans all of `lib/` against the real (now empty) backlog, so the ratchet
     # arithmetic is driven here against a two-entry one instead. It is worth
     # pinning directly: wrong in the permissive direction, a ratchet passes
     # forever and nobody finds out.
@@ -564,10 +564,18 @@ defmodule Mix.Tasks.Kiln.Authz.CheckTest do
       end
     end
 
-    test "it is the only thing standing between the gate and all of lib/" do
-      # Guards the guard: if the backlog were empty the ratchet tests above
-      # would still pass while the real gate checked nothing new.
-      assert map_size(Check.backlog()) > 0
+    test "it is empty: every file under lib/ is held to zero (#1659)" do
+      # The migration finished. An entry added back would be an exemption, and
+      # "no entry may be added" is the rule; this pins it.
+      assert Check.backlog() == %{}
+    end
+
+    test "with the backlog empty, one unexplained site anywhere fails the scan" do
+      # Guards the guard: an empty backlog must mean "nothing allowed", not
+      # "nothing checked".
+      assert [message] = Check.problems(%{"lib/anywhere.ex" => 1})
+      assert message =~ "lib/anywhere.ex: 1 unexplained"
+      assert message =~ "0 allowed."
     end
   end
 end

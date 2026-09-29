@@ -75,8 +75,9 @@ The things an operator would hit in their first months of running Kiln.
   - its experimental row leaves out the Bumblebee reranker and GraphQL
     subscriptions
   - `KilnCMS.CMS.BlockUnion`'s moduledoc predates the storage flip
-  - the threat model still says a password change doesn't revoke tokens
-    (#734 fixed that)
+  - the threat model claimed a password change revokes tokens "since #734"; it
+    did not until #734 was reopened and fixed for 1.0 (the declared
+    `apply_on_password_change?` flag never fired on either password action)
   - `docs/observability.md` calls referrers and funnels unbuilt
   - `docs/beta-testing.md` has an unchecked box for a label that exists
 - **Prepare beta round 1.** The exit bar is decided (#1533, below); line up

@@ -179,18 +179,20 @@ defmodule KilnCMSWeb.SettingsLiveTest do
       {:ok, lv, html} = conn |> log_in(user) |> live(~p"/editor/settings")
       assert html =~ "Change password"
 
-      saved =
-        lv
-        |> form("#password-form",
-          user: %{
-            "current_password" => @password,
-            "password" => "newpassword789",
-            "password_confirmation" => "newpassword789"
-          }
-        )
-        |> render_submit()
+      lv
+      |> form("#password-form",
+        user: %{
+          "current_password" => @password,
+          "password" => "newpassword789",
+          "password_confirmation" => "newpassword789"
+        }
+      )
+      |> render_submit()
 
-      assert saved =~ "Password changed"
+      # The change revokes this session too (#734), so the page sends the user
+      # to sign in again — `KilnCMSWeb.PasswordRotationTest` covers why.
+      flash = assert_redirect(lv, ~p"/sign-in")
+      assert flash["info"] =~ "Password changed"
 
       # The new password now authenticates.
       strategy = AshAuthentication.Info.strategy!(User, :password)

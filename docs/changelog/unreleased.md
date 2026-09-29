@@ -7,6 +7,21 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="password-rotation-upgrade-revokes-nothing-retroactively"></a>
+
+- **Upgrading revokes nothing by itself: if an account changed or reset its
+  password on an earlier release because it may have leaked, do it again (or
+  use *Sign out everywhere*).** The fix above applies to password changes made
+  after the upgrade. A session or remember-me cookie issued before a password
+  change on an earlier release was never revoked, and stays valid until it
+  expires, which is up to 30 days for a remember-me cookie. For an account
+  whose credential you think leaked, change or reset its password again on
+  this release. An administrator can also use *Sign out everywhere* on the
+  account's page under `/editor/accounts`, which has always revoked every
+  token. Users who change their password in settings are now signed out on
+  that device too, and asked to sign in again
+  ([#734](https://github.com/The-Verscienta/kiln_cms/issues/734)).
+
 <a id="a-new-index-on-every-content-tables-titles-is-built-concurrently-by-the"></a>
 
 - **A new index on every content table's titles is built `CONCURRENTLY` by
@@ -311,6 +326,21 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="mix-kiln-gen-content-from-works-under-strict-tenancy"></a>
+
+- **`mix kiln.gen.content --from` works under strict tenancy, and takes
+  `--org SLUG`.** The generator read the dynamic type's `TypeDefinition` with
+  no tenant. The fail-open test build answered that read, but production
+  compiles strict tenancy and refused it, so promoting a dynamic type failed
+  there. It now reads in the organization `--org SLUG` names, or the default
+  org when the option is left out, still as the operator under
+  `TypeDefinition`'s read-only grant. An unknown slug, or a type that org
+  does not define, stops the task with a message naming it; any other
+  failed read raises as itself rather than posing as a missing type. Type
+  definitions are per-site, so `--org` also picks between two sites that
+  each define a type of the same name.
+  ([#1743](https://github.com/The-Verscienta/kiln_cms/issues/1743))
+
 <a id="per-type-semantic-search-ranks-a-record-the-query-names-first"></a>
 
 - **Per-type semantic search ranks a record the query names first, however
@@ -440,6 +470,41 @@ carries the reasoning.
   ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543))
 
 ## Security
+
+<a id="password-rotation-revokes-every-session"></a>
+
+- **Changing or resetting a password now signs out every other session and
+  remember-me cookie.** `KilnCMS.Accounts.User` has long declared
+  `log_out_everywhere apply_on_password_change? true`, and the docs treated
+  that as the control. It never fired. AshAuthentication hangs its change on
+  `hashed_password` being *touched*, and checks that when the changeset is
+  built. Both password actions, `:change_password` and
+  `:reset_password_with_token`, write the hash later, in a `before_action`, so
+  the check always saw it untouched. Every session JWT, and the 30-day
+  remember-me cookie, of whoever held the old password kept signing them in,
+  as the external auth review for #1536 confirmed. Both actions now declare
+  `KilnCMS.Accounts.Changes.RevokeAllTokens`. It runs the add-on's own
+  `log_out_everywhere` action inside the write's transaction, through
+  AshAuthentication's interaction bypass, so it needs neither
+  `authorize?: false` nor a system actor. It fails closed: if the revocation
+  cannot be written, the password is not changed either. Every stored token
+  the account holds is revoked. That covers every session, the remember-me
+  cookie, pending confirmation and magic-link tokens, and a sign-in parked at
+  the two-factor prompt (#742), because a reset means the old password may be
+  someone else's. The reset also signs the resetting browser in, and that
+  session is minted after the sweep, so it survives it. The reset now evicts
+  the account's live sockets too, as `:change_password` already did
+  ([#1637](https://github.com/The-Verscienta/kiln_cms/issues/1637)), so a
+  console already open on another device is disconnected, and its reconnect
+  finds no token to mount on. Both evictions now broadcast after the commit
+  (`EvictSessions`' new `after_commit?: true`), so a fast reconnect cannot
+  read the token before its revocation lands. One behaviour change: the
+  device that changes its password in settings is signed out too. A
+  LiveView cannot write the cookie a re-issued session would need, and after
+  a rotation the old password no longer proves who holds a session. The
+  settings page now says "Password changed. Sign in again with your new
+  password." and goes to `/sign-in`
+  ([#734](https://github.com/The-Verscienta/kiln_cms/issues/734)).
 
 <a id="the-editors-link-advisory-no-longer-reveals-content-the-editor-cannot-read"></a>
 
@@ -1001,6 +1066,36 @@ carries the reasoning.
   it writes the block tree, and the content resource admits the system actor
   only to actions that accept no `:blocks`. The `mix kiln.authz.check` backlog
   drops by 16 sites and seven files. (#1659)
+
+<a id="the-newsletter-send-pipeline-runs-under-the-policies-which-empties-the-authz-backlog"></a>
+
+- **The newsletter send pipeline runs under the policies, which empties the
+  authz backlog.** The fan-out worker and the per-recipient mail worker
+  reached `NewsletterSend` and `Subscriber` through `authorize?: false`. They
+  now run as `KilnCMS.Newsletter.system/0`, a `KilnCMS.SystemActor` labelled
+  `:newsletter` (the tier sync already ran as one), and each resource admits
+  it by action name: the campaign's `read`, `mark_sending`, `mark_sent`,
+  `record_sent` and `record_failed` (not `mark_failed` or `destroy`), and the
+  subscriber's `read` and `confirmed` (no consent change). The send guard in
+  `Newsletter.send_as_newsletter/2` reads the target segment as the sender, the
+  same actor the campaign is created under, so an actor who may not see the
+  segment gets a Forbidden rather than "that segment no longer exists".
+
+  Each read that decides who is mailed fails closed. Before, a refused
+  subscriber list read as "no subscribers": the fan-out stamped zero
+  recipients and marked the campaign `:sent` having mailed nobody, with no way
+  to send it again. A refused campaign or subscriber read in the mail worker
+  cancelled the recipient's job as "not found", and the job's uniqueness meant
+  that recipient was never mailed. All three now log and retry. A per-recipient
+  counter write that fails after delivery is logged instead of failing the
+  job, so Oban does not mail the same person twice to correct a tally.
+
+  The federation announce worker's document load stays `authorize?: false`,
+  now with its reason written down: a `Delete` must find a record that is no
+  longer published, and a system grant on content would read every draft.
+  That was the last of the backlog: `mix kiln.authz.check` now holds every
+  file under `lib/` to zero unexplained `authorize?: false`. The backlog map
+  stays in place, empty, so a new one fails the check. (#1659)
 
 <a id="mix-kilnmigrationscheck-gates-expand-contract"></a>
 
