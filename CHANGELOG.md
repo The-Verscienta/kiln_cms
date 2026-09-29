@@ -211,6 +211,11 @@ Every summary line below that was shortened links to its own entry there.
   as scoped system actors; the replay check and follower ceiling fail closed.
   ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#federation-runs-under-the-policies))
 
+- **Notifications and Web Push run under the policies.** The task digest, a
+  comment thread's recipients and push delivery run as scoped system actors;
+  their lookups fail closed and a lost grant is logged, never a silent drop.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#notifications-and-web-push-run-under-the-policies))
+
 - **Funnel lookups and the operator mix tasks run under the policies.** Funnel
   reads fail closed; the remaining mix-task bypasses each say why.
   ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#funnel-lookups-and-the-operator-mix-tasks-run-under-the-policies))

@@ -72,6 +72,10 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
   defp block_line(_content_type, _content_id, _org_id, nil), do: ""
 
   defp block_line(content_type, content_id, org_id, block_id) do
+    # `authorize?: false`: a content read, kept as a bypass under the #1402
+    # content-read argument — a standing system grant on content would hand
+    # system code the whole corpus, drafts included, for one block's type. The
+    # projection above is why it is safe: ids and types, no field values.
     case ContentTypes.get_record(content_type, content_id,
            authorize?: false,
            tenant: org_id,
@@ -126,6 +130,9 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
   end
 
   defp content_title(content_type, content_id, org_id) do
+    # `authorize?: false`: a content read (the #1402 content-read argument —
+    # see `block_line/4`), selecting the title only, for a recipient the task
+    # already decided.
     case ContentTypes.get_record(content_type, content_id,
            authorize?: false,
            tenant: org_id,

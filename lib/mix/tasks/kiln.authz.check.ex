@@ -76,13 +76,7 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
     "lib/kiln_cms/federation/announce_worker.ex" => 1,
     "lib/kiln_cms/newsletter.ex" => 1,
     "lib/kiln_cms/newsletter/mail_worker.ex" => 4,
-    "lib/kiln_cms/newsletter/send_worker.ex" => 4,
-    "lib/kiln_cms/notifications.ex" => 7,
-    "lib/kiln_cms/notifications/task_digest_worker.ex" => 3,
-    "lib/kiln_cms/notifications/task_mail_worker.ex" => 2,
-    "lib/kiln_cms/notifications/tasks.ex" => 1,
-    "lib/kiln_cms/push.ex" => 3,
-    "lib/kiln_cms/push/worker.ex" => 2
+    "lib/kiln_cms/newsletter/send_worker.ex" => 4
   }
   @window 12
   @justification ~r/authorize\?|bypass/i

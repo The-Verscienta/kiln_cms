@@ -106,6 +106,31 @@ defmodule KilnCMS.Notifications do
   def topic(user_id) when is_binary(user_id), do: "notifications:user:#{user_id}"
 
   @doc """
+  The actor the notifier's own reads and bookkeeping run as (#1659): a comment
+  thread's participants, and the task digest's reads and its
+  "already notified" stamp.
+
+  A `KilnCMS.SystemActor` labelled `:notifications`, admitted by name on
+  `CMS.Comment` and `CMS.Task` (see `docs/policy-matrix.md`, "The system
+  actor"), rather than `authorize?: false`, which would skip every policy on
+  them. Reads of `Accounts.User`, `Accounts.OrgMembership` and content keep
+  their bypass, each with its reason at the call site: a standing system grant
+  over any of those would be wider than the one recipient list it serves (the
+  #1402 argument).
+  """
+  @spec system() :: KilnCMS.SystemActor.t() | nil
+  def system, do: KilnCMS.SystemActor.resolve(:notifications)
+
+  @doc false
+  # Test seam (#1659): run `fun` with `system/0` answering `actor` in this
+  # process, so a test can take the grant away and prove the migrated reads
+  # fail CLOSED (raise) rather than filtering to `[]`, which is how a refused
+  # read answers. Process-local, and nothing on a request path calls it; code
+  # that could call it could equally pass any actor it liked.
+  @spec with_actor(term(), (-> result)) :: result when result: term()
+  def with_actor(actor, fun), do: KilnCMS.SystemActor.with_override(:notifications, actor, fun)
+
+  @doc """
   How many unread notifications `user` has on `org` — the bell's badge and the
   inbox's unread tab.
 
@@ -122,8 +147,16 @@ defmodule KilnCMS.Notifications do
     |> Ash.Query.unset(:sort)
     |> Ash.count(actor: user, tenant: org)
     |> case do
-      {:ok, count} -> count
-      _error -> 0
+      {:ok, count} ->
+        count
+
+      # Zero, deliberately (#1659): this is the reader's own inbox, read under
+      # their own actor with no grant that can be lost — a refusal only ever
+      # means "not your rows", where zero is the right answer. A failed query
+      # still hides nothing: the inbox lists the rows, and this is logged.
+      {:error, error} ->
+        Logger.warning("unread notification count failed: #{Exception.message(error)}")
+        0
     end
   end
 
@@ -303,13 +336,17 @@ defmodule KilnCMS.Notifications do
     mentioned = comment |> mentioned_users(record) |> reject_actor(actor)
     mentioned_ids = MapSet.new(mentioned, & &1.id)
 
-    Enum.each(mentioned, &enqueue_comment(:comment_mention, &1, comment, record, actor))
+    # Every recipient is resolved before anyone is notified: the thread read
+    # fails closed (#1659), and a raise mid-fan-out would reach the mentioned
+    # and silently skip the thread and the author.
+    audience =
+      comment
+      |> thread_audience(record)
+      |> reject_actor(actor)
+      |> Enum.reject(&MapSet.member?(mentioned_ids, &1.id))
 
-    comment
-    |> thread_audience(record)
-    |> reject_actor(actor)
-    |> Enum.reject(&MapSet.member?(mentioned_ids, &1.id))
-    |> Enum.each(&enqueue_comment(event, &1, comment, record, actor))
+    Enum.each(mentioned, &enqueue_comment(:comment_mention, &1, comment, record, actor))
+    Enum.each(audience, &enqueue_comment(event, &1, comment, record, actor))
   end
 
   # Never tell someone what they just did — and it is the ACTOR who did it, not
@@ -361,6 +398,8 @@ defmodule KilnCMS.Notifications do
       thread_participants(comment)
       |> Enum.map(& &1.author_id)
 
+    # `authorize?: false`: an `Accounts.User` read (self-only policy) — a system
+    # grant there would cover every account on the deployment, for one name.
     author = record |> Ash.load!(:author, authorize?: false) |> Map.get(:author)
 
     [author_id(author) | participants]
@@ -371,12 +410,16 @@ defmodule KilnCMS.Notifications do
     |> Enum.filter(&wants?(&1, :comment))
   end
 
+  # As `system/0`, which `CMS.Comment` admits for reads (#1659). Fails CLOSED:
+  # a refused read would filter to `[]` and silently drop every participant,
+  # so a lost grant raises instead, and `NotifyComment` logs it.
   defp thread_participants(comment) do
     KilnCMS.CMS.Comment.thread_comments!(
       comment.content_type,
       comment.content_id,
       comment.block_id,
-      authorize?: false,
+      actor: system(),
+      authorize_with: :error,
       tenant: comment.org_id
     )
   end
@@ -384,6 +427,7 @@ defmodule KilnCMS.Notifications do
   defp author_id(%{id: id}), do: id
   defp author_id(_author), do: nil
 
+  # `authorize?: false`: an `Accounts.User` read — see `thread_audience/2`.
   defp user_by_id(id) do
     case Ash.get(User, id, authorize?: false) do
       {:ok, user} -> user
@@ -423,10 +467,14 @@ defmodule KilnCMS.Notifications do
   def mention_roster(org) do
     org_id = KilnCMS.Accounts.org_id(org)
 
+    # `authorize?: false` on the membership and user reads below: both
+    # policies are self-only, and a system grant on either would be a standing
+    # read of the deployment's whole account graph — wider than this roster.
     members = KilnCMS.Accounts.list_memberships_for_org!(org_id, authorize?: false)
     member_ids = MapSet.new(members, & &1.user_id)
     assigned_ids = assigned_user_ids()
 
+    # `authorize?: false`: the user read — see the membership read above.
     User
     |> Ash.read!(authorize?: false)
     |> Enum.filter(fn user ->
@@ -447,6 +495,7 @@ defmodule KilnCMS.Notifications do
   # the later `member?/2`.
   defp assigned_user_ids, do: MapSet.new(assigned_ids())
 
+  # `authorize?: false`: a membership read — see `mention_roster/1`.
   defp assigned_ids do
     KilnCMS.Accounts.OrgMembership
     |> Ash.read!(authorize?: false)
@@ -507,6 +556,7 @@ defmodule KilnCMS.Notifications do
   # Author-targeted events (`:published`, `:returned_to_draft`) load the author
   # and notify them unless they've muted that event for their account.
   defp notify_author(record, event, actor) do
+    # `authorize?: false`: an `Accounts.User` read — see `thread_audience/2`.
     author = record |> Ash.load!(:author, authorize?: false) |> Map.get(:author)
 
     if author && wants?(author, event) do

@@ -604,6 +604,41 @@ carries the reasoning.
   ceiling", and the follow is refused and logged. Honest senders see no
   difference unless the nonce store is down. (#1659)
 
+<a id="notifications-and-web-push-run-under-the-policies"></a>
+
+- **Notifications and Web Push run under the policies.** The notifier and the
+  push pipeline reached `CMS.Task`, `CMS.Comment` and
+  `Accounts.PushSubscription` through `authorize?: false`. They now run as
+  `KilnCMS.Notifications.system/0` and `KilnCMS.Push.system/0`, both
+  `KilnCMS.SystemActor`s, and each resource admits them by action name: the
+  task digest's reads and its "`task.overdue` already fired" stamp (named
+  inside `Task`'s update policy, so the actor still cannot complete or edit a
+  task), a comment thread's participants (the existing `Comment` read grant),
+  and push delivery's `for_users`, `read`, `touch_delivered` and `destroy`
+  (not the settings list or the key-rotation sweep). A browser now registers
+  its push subscription as the signed-in user, and `subscribe` admits only a
+  row whose `user_id` is the actor's own, where before it was bypassed. Reads
+  of `Accounts.User`, `OrgMembership` and content keep their bypass, each with
+  a written reason. The `mix kiln.authz.check` backlog drops by 18 sites and
+  six files.
+
+  The lookups that decide who hears about something now fail **closed**. A
+  refused read filters to `[]`, which here meant "nothing due", "nobody on the
+  thread" or "no devices": the notification was dropped and nothing said so.
+  They run with `authorize_with: :error`. The digest job fails where Oban
+  shows it, the comment notifier logs, the push sender logs the refusal
+  (`notify/2` still never raises into the editorial action), and the push
+  worker returns an error for Oban to retry instead of treating the device as
+  gone. The overdue stamp is the digest's dedupe, so it is now an atomic claim
+  (a second run's stamp of the same task is refused) written in one
+  transaction with the event's dispatch: both commit or neither does. A stamp
+  that cannot be written leaves the task for the next run instead of re-firing
+  the event every day. One org's failure no longer stops the others, and a
+  retried digest job does not mail the same digest twice. The unread badge still counts a failed read as zero, since
+  it is the reader's own inbox under their own actor, but the failure is now
+  logged. Apart from `subscribe` and the stamp order, nothing changes while
+  the grants are in place. (#1659)
+
 <a id="funnel-lookups-and-the-operator-mix-tasks-run-under-the-policies"></a>
 
 - **Funnel lookups and the operator mix tasks run under the policies.** The
