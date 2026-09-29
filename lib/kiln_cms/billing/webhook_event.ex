@@ -114,13 +114,23 @@ defmodule KilnCMS.Billing.WebhookEvent do
     # Instance-wide resource with no `multitenancy` block, so the gate is the
     # global role — an `OrgAdmin` check would resolve a tenant-less subject to the
     # default org (the `KilnCMS.Mail.Settings` hazard).
+    #
+    # The webhook worker re-reads its event by id as the billing system actor
+    # (#1659), narrowed to the plain `:read`: listing (`:recent`), dedupe
+    # lookups (`:by_event_id`) and the retention read stay platform-admin.
     policy action_type(:read) do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
+      forbid_unless action(:read)
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
-    # Written only by the receiver and worker, both `authorize?: false`.
+    # Closed to every person. The receiver records an event `authorize?: false`
+    # (a webhook has no actor; the provider's HMAC is the grant). The worker's
+    # claim and settle steps are the system actor's, by name (#1659); it may
+    # not `:receive` an event or `:destroy` one.
     policy action_type([:create, :update, :destroy]) do
-      forbid_if always()
+      forbid_unless action([:claim, :mark_processed, :mark_ignored, :mark_failed])
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

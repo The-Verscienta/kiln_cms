@@ -128,7 +128,7 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
     end
 
     # A delivery got through: the endpoint is healthy again (system action,
-    # called by the delivery pipeline with authorize?: false).
+    # called by the delivery pipeline as `KilnCMS.Webhooks.system/0`).
     update :record_delivery_success do
       change set_attribute(:consecutive_failures, 0)
       change set_attribute(:auto_disabled_at, nil)
@@ -156,17 +156,27 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   end
 
   policies do
-    # Webhook configuration is admin-only. The delivery pipeline reads endpoints
-    # with `authorize?: false` as a system job.
+    # Webhook configuration is admin-only.
+    #
+    # The delivery pipeline (`KilnCMS.Webhooks.system/0`, #1659) reads endpoints
+    # (the dispatch scan and the worker's lookup) and keeps their health
+    # counters. It may NOT create, edit or delete one: minting a destination
+    # for the site's content, or re-pointing one, stays an admin act. Narrowed
+    # inside this policy rather than in a second one, because Ash ANDs
+    # policies (a second could not lift this one's refusal) and widening this
+    # one outright would hand system code the endpoint's write path.
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+
+      forbid_unless action([:read, :record_delivery_success, :record_delivery_failure])
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 
   # Multi-tenancy (epic #336): an endpoint belongs to one site, so a publish only
   # dispatches to its own org's endpoints. `global?: true` keeps the tenant
-  # optional; the dispatch scan (`KilnCMS.Webhooks.dispatch`, `authorize?: false`)
-  # is scoped to the publishing record's org.
+  # optional; the dispatch scan (`KilnCMS.Webhooks.dispatch`, as the system
+  # actor) is scoped to the publishing record's org.
   multitenancy do
     strategy :attribute
     attribute :org_id

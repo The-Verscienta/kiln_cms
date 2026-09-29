@@ -41,6 +41,8 @@ defmodule KilnCMS.Forms.EmbedPolicy do
   alias KilnCMS.CMS.SiteEmbedSettings
   alias KilnCMS.Forms.EmbedCeiling
 
+  require Logger
+
   @doc """
   This org's configured default, or `nil` when it has none (no row, or a row
   whose `embed_origins` is itself `nil`) — the same "fall through to the next
@@ -49,18 +51,35 @@ defmodule KilnCMS.Forms.EmbedPolicy do
   Takes an org id; `nil` in (no tenant to ask) answers `nil` without a query,
   the same "nothing to speak for" rule `Embed.own_origins(nil)` follows one
   rung up.
+
+  A row that cannot be read answers `[]` — framing closed to every other
+  site — never `nil`: falling through to `EMBED_ORIGINS` would hand a site
+  that had narrowed its default the deployment's wider one (#1659).
   """
   @spec org_default(Ash.UUID.t() | nil) :: [String.t()] | nil
   def org_default(nil), do: nil
 
+  # As the form pipeline's system actor (#1659), with `authorize_with: :error`:
+  # a refused read would filter to "no row", which reads as "inherit
+  # `EMBED_ORIGINS`" — wider than a site default of `[]` it may be hiding.
   def org_default(org_id) do
     SiteEmbedSettings
     |> Ash.Query.limit(1)
-    |> Ash.read_one(authorize?: false, tenant: org_id)
+    |> Ash.read_one(actor: KilnCMS.Forms.system(), authorize_with: :error, tenant: org_id)
     |> case do
-      {:ok, %SiteEmbedSettings{embed_origins: origins}} when is_list(origins) -> origins
-      {:ok, _no_row_or_unset} -> nil
-      {:error, _reason} -> nil
+      {:ok, %SiteEmbedSettings{embed_origins: origins}} when is_list(origins) ->
+        origins
+
+      {:ok, _no_row_or_unset} ->
+        nil
+
+      {:error, reason} ->
+        Logger.warning(
+          "embed policy: could not read #{org_id}'s embed default, closing framing: " <>
+            inspect(reason)
+        )
+
+        []
     end
   end
 

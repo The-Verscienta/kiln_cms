@@ -20,11 +20,13 @@ defmodule KilnCMS.Billing.WebhooksTest do
       below it trust an identifier alone. A regression that reordered them would
       still resolve most events correctly, so the tests below pin the order
       directly rather than inferring it.
-    * **`resolve/1` flattens every failure to `:unresolvable`.** Its `with` only
-      matches `{:ignored, _}`, so `:ambiguous_customer` — the deliberate refusal
-      to guess between two tiers — is indistinguishable from "nothing matched"
-      at the call site. The log line is the only place that distinction survives,
-      so the ambiguity tests assert on it there.
+    * **`resolve/1` flattens every "nothing we hold" to `:unresolvable`.** Its
+      `with` only matches `{:ignored, _}`, so `:ambiguous_customer` — the
+      deliberate refusal to guess between two tiers — is indistinguishable from
+      "nothing matched" at the call site. The log line is the only place that
+      distinction survives, so the ambiguity tests assert on it there. (A
+      *refused* read is the one exception: it comes back as an error so the
+      worker retries — see `KilnCMS.Billing.SystemActorAuthorizationTest`.)
 
   Two branches are deliberately left uncovered, both for the same reason — no
   honest test reaches them, and faking one would be worse than the gap:
