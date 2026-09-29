@@ -32,6 +32,7 @@ import {initAdvisoryJump} from "./advisory_jump"
 import {initRevealSection} from "./reveal_section"
 import {FlashAutoDismiss} from "./flash_auto_dismiss"
 import {SavedTicker} from "./saved_ticker"
+import {TabKeys} from "./tab_keys"
 import {BodyImageUploader} from "./body_image_uploader"
 import {watchLiveness} from "./liveness"
 
@@ -52,6 +53,8 @@ const Hooks = {
     mounted() { setSearchKbdCue(this.el) },
   },
   SavedTicker,
+  // Arrow/Home/End keys on a kit `.tabs` tablist — see assets/js/tab_keys.js.
+  TabKeys,
   BodyImageUploader,
   FocusTrap,
   // Info flashes close themselves after a few seconds — see

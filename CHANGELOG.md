@@ -138,7 +138,19 @@ Every summary line below that was shortened links to its own entry there.
   its major.**
   ([#1544](https://github.com/The-Verscienta/kiln_cms/issues/1544) · [long form](docs/changelog/unreleased.md#the-release-images-latest-tag-moves-only-to-the-highest-final-release-and-from))
 
+- **The content editor's chrome is on the component kit: the inspector is a
+  keyboard-driven tab strip, and block controls show on focus and on touch.**
+  ([#1679](https://github.com/The-Verscienta/kiln_cms/issues/1679) · [long form](docs/changelog/unreleased.md#the-content-editors-chrome-is-on-the-component-kit))
+
 ### Fixed
+
+- **An empty heading line in a rich-text block is now visible in the editor —
+  dashed, labelled with its level — so the "heading has no text" finding has
+  something on screen to point at.** ([#1728](https://github.com/The-Verscienta/kiln_cms/pull/1728))
+
+- **An SEO or accessibility finding below a fragment names, and jumps to, the
+  right block.**
+  ([#1731](https://github.com/The-Verscienta/kiln_cms/pull/1731) · [long form](docs/changelog/unreleased.md#a-seo-or-accessibility-finding-below-a-fragment-names-and-jumps-to-the-right))
 
 - **Search holds at most two pooled connections, and answers `503` rather than
   `500` when the pool is full.**

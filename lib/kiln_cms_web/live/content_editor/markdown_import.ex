@@ -276,7 +276,7 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownImport do
       class="btn btn-sm btn-ghost"
       title={gettext("Replace or extend this document's blocks with a Markdown (.md) file")}
     >
-      <.icon name="hero-document-arrow-up" class="mr-1 size-4" />{gettext("Import Markdown")}
+      <.icon name="hero-document-arrow-up" class="size-4" />{gettext("Import Markdown")}
     </button>
     """
   end
