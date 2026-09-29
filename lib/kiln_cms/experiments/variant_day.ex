@@ -67,7 +67,7 @@ defmodule KilnCMS.Experiments.VariantDay do
   # Written by delivery and by the form submission path, both of which run as
   # `KilnCMS.Experiments.system/0` (#1659): the two counters and nothing else.
   # `destroy` is not admitted — a system caller cannot erase a result. Read by
-  # the results panel and `mix kiln.experiment show`.
+  # `mix kiln.experiment show` (the results panel reads as the viewing editor).
   policies do
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor

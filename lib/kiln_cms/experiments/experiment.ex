@@ -240,6 +240,11 @@ defmodule KilnCMS.Experiments.Experiment do
     has_many :variants, KilnCMS.Experiments.Variant do
       destination_attribute :experiment_id
       public? true
+      # A refused variants load raises instead of answering `[]` (#1659):
+      # `authorize_with: :error` on the parent read does not reach a
+      # relationship load, and every surface that loads the arms (delivery's
+      # running set, `mix kiln.experiment`) would read `[]` as "no arms".
+      authorize_read_with :error
     end
   end
 

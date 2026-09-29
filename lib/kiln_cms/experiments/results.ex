@@ -63,12 +63,12 @@ defmodule KilnCMS.Experiments.Results do
 
   @doc """
   Summarize `experiment` (variants loaded) from its stored counters, read as
-  the system under `org_id`.
+  `actor` — the editor viewing the panel — under `org_id`.
   """
-  @spec summarize(KilnCMS.Experiments.Experiment.t(), Ash.UUID.t()) :: summary()
-  def summarize(experiment, org_id) do
+  @spec summarize(KilnCMS.Experiments.Experiment.t(), Ash.UUID.t(), term()) :: summary()
+  def summarize(experiment, org_id, actor) do
     variants = experiment.variants |> List.wrap() |> Enum.reject(&match?(%Ash.NotLoaded{}, &1))
-    days = days_for(Enum.map(variants, & &1.id), org_id)
+    days = days_for(Enum.map(variants, & &1.id), org_id, actor)
 
     rows =
       variants
@@ -118,17 +118,18 @@ defmodule KilnCMS.Experiments.Results do
 
   # One read for the whole experiment: `%{variant_id => {impressions, conversions}}`.
   # `VariantDay` has no `belongs_to :variant` (see its moduledoc), so by ids.
-  defp days_for([], _org_id), do: %{}
+  defp days_for([], _org_id, _actor), do: %{}
 
-  defp days_for(variant_ids, org_id) do
-    require Ash.Query
-
-    # As the system (#1659), and failing closed: a refused read under a filter
+  defp days_for(variant_ids, org_id, actor) do
+    # As the viewer (#1659), and failing closed: a refused read under a filter
     # policy answers `[]`, which this module would fold into "0 served, 0
     # converted" on every arm — a result that looks measured and is not.
-    KilnCMS.Experiments.VariantDay
-    |> Ash.Query.filter(variant_id in ^variant_ids)
-    |> Ash.read!(actor: KilnCMS.Experiments.system(), authorize_with: :error, tenant: org_id)
+    Experiments.list_variant_days!(
+      query: [filter: [variant_id: [in: variant_ids]]],
+      actor: actor,
+      authorize_with: :error,
+      tenant: org_id
+    )
     |> Enum.reduce(%{}, fn day, acc ->
       Map.update(acc, day.variant_id, {day.impressions, day.conversions}, fn {i, c} ->
         {i + day.impressions, c + day.conversions}

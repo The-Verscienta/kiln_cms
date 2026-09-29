@@ -62,6 +62,7 @@ defmodule KilnCMS.Experiments do
       define :get_experiment, action: :read, get_by: [:id]
       define :running_experiments, action: :running
       define :create_experiment, action: :create
+      define :update_experiment, action: :update
       define :start_experiment, action: :start
       define :conclude_experiment, action: :conclude, args: [:winner_variant_id]
       define :archive_experiment, action: :archive
@@ -79,6 +80,7 @@ defmodule KilnCMS.Experiments do
       define :list_variant_days, action: :read
       define :record_impression, action: :record_impression, args: [:variant_id]
       define :record_conversion, action: :record_conversion, args: [:variant_id]
+      define :destroy_variant_day, action: :destroy
     end
   end
 
@@ -116,9 +118,13 @@ defmodule KilnCMS.Experiments do
   @doc "Every running experiment for a site, variants loaded. Cached."
   @spec running(Ash.UUID.t()) :: [Experiment.t()]
   def running(org_id) do
+    # `|| []` for the reason `funnel_targets/1` gives: the loader answers `nil`
+    # on a failed read, the one value the cache declines to keep, so a refused
+    # or failed read is retried (and logged) on the next call rather than
+    # committed as "nothing is running" for the full TTL.
     KilnCMS.Cache.fetch(KilnCMS.Cache.experiments_key(org_id), @cache_ttl, fn ->
       load_running(org_id)
-    end)
+    end) || []
   end
 
   @doc """
@@ -235,20 +241,26 @@ defmodule KilnCMS.Experiments do
   # into the rescue below instead, which serves the canonical document (the
   # same answer, and the safe one) but LOGS it.
   #
-  # The variants are part of the same read for the same reason. A running
-  # experiment whose variants came back `[]` would serve no arm
-  # (`Assignment.choose/2` answers `nil` for an empty list, so the canonical
-  # document again) and would convert nothing — but a PARTIAL list would
-  # re-bucket every keyed visitor onto the arms that survived, which is a
-  # mis-assignment rather than a safe default. Raising is what rules it out.
+  # The variants fail closed for the same reason. A running experiment whose
+  # variants came back `[]` would serve no arm (`Assignment.choose/2` answers
+  # `nil` for an empty list, so the canonical document again) and would convert
+  # nothing — and a PARTIAL list would re-bucket every keyed visitor onto the
+  # arms that survived, which is a mis-assignment rather than a safe default.
+  # `authorize_with:` does not reach a relationship load, so it is
+  # `Experiment`'s `has_many :variants` that sets `authorize_read_with :error`.
   defp load_running(org_id) do
-    Experiment
-    |> Ash.Query.for_read(:running)
-    |> Ash.Query.load(:variants)
-    |> Ash.read!(actor: system(), authorize_with: :error, tenant: org_id)
+    running_experiments!(
+      query: [load: :variants],
+      actor: system(),
+      authorize_with: :error,
+      tenant: org_id
+    )
   rescue
     # Delivery must survive a database that cannot answer this. No experiments
     # is the safe answer: the canonical document is what gets served.
+    #
+    # `nil`, not `[]`, so the failure is NOT committed to the cache — see
+    # `running/1`.
     #
     # Logged rather than swallowed silently, because "no experiments" and
     # "every experiment on the site stopped serving" look identical from
@@ -257,19 +269,15 @@ defmodule KilnCMS.Experiments do
     # every OTHER experiment down with it, and without this line nothing says so.
     error ->
       Logger.warning("Experiments.running/1 could not read: #{Exception.message(error)}")
-      []
+      nil
   end
 
   defp config, do: Application.get_env(:kiln_cms, __MODULE__, [])
 
-  # See `with_actor/2`.
-  @actor_override {__MODULE__, :actor_override}
-
   @doc """
   The actor the experiment engine's own bookkeeping runs as (#1659): the
   delivery path's running-set read and its impression and conversion
-  counters, the `:start` and variant-write guards, and the results panel's
-  read of the counters.
+  counters, and the `:start` and variant-write guards.
 
   A `KilnCMS.SystemActor`, admitted by action name on `Experiment`, `Variant`
   and `VariantDay` (see `docs/policy-matrix.md`, "The system actor"), rather
@@ -280,30 +288,38 @@ defmodule KilnCMS.Experiments do
   """
   @spec system(atom()) :: KilnCMS.SystemActor.t() | nil
   def system(subsystem \\ :experiments) do
-    case Process.get(@actor_override, :unset) do
-      :unset -> KilnCMS.SystemActor.new(subsystem)
-      actor -> actor
+    case Keyword.fetch(config(), :system_actor_override) do
+      {:ok, actor} -> actor
+      :error -> KilnCMS.SystemActor.new(subsystem)
     end
   end
 
   @doc false
-  # Test seam (#1659): run `fun` with `system/0` answering `actor` in this
-  # process. It exists so a test can take the grant away and prove that every
-  # read behind an assignment, a start guard or a result fails CLOSED rather
-  # than filtering to `[]`, which is how a refused read answers. Process-local,
-  # and nothing on a request path calls it; code that could call it could
-  # equally pass any actor it liked.
+  # Test seam (#1659): run `fun` with `system/0` answering `actor`. It exists
+  # so a test can take the grant away and prove that every read behind an
+  # assignment, a start guard or a result fails CLOSED rather than filtering
+  # to `[]`, which is how a refused read answers. Application env rather than
+  # the process dictionary, so the override reaches the cache's courier
+  # process and the counters' task — the production shape — and is therefore
+  # VM-global: only an `async: false` test may call it. Nothing on a request
+  # path calls it; code that could call it could equally pass any actor it
+  # liked.
   @spec with_actor(term(), (-> result)) :: result when result: term()
   def with_actor(actor, fun) do
-    previous = Process.get(@actor_override, :unset)
-    Process.put(@actor_override, actor)
+    original = Application.get_env(:kiln_cms, __MODULE__)
+
+    Application.put_env(
+      :kiln_cms,
+      __MODULE__,
+      Keyword.put(config(), :system_actor_override, actor)
+    )
 
     try do
       fun.()
     after
-      if previous == :unset,
-        do: Process.delete(@actor_override),
-        else: Process.put(@actor_override, previous)
+      if is_nil(original),
+        do: Application.delete_env(:kiln_cms, __MODULE__),
+        else: Application.put_env(:kiln_cms, __MODULE__, original)
     end
   end
 end

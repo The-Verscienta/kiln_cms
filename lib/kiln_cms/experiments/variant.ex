@@ -88,7 +88,7 @@ defmodule KilnCMS.Experiments.Variant do
   # The system actor (#1659) reads variants — they are the arms delivery
   # assigns between and the `:start` guard counts — and may `create` one, for
   # `mix kiln.experiment variant`. Not `update` or `destroy`: re-weighting or
-  # removing an arm is an editor's decision (and refused anyway once running).
+  # removing an arm is an admin's decision (and refused anyway once running).
   policies do
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor

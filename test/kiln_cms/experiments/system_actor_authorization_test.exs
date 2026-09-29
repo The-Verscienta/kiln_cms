@@ -1,8 +1,8 @@
 defmodule KilnCMS.Experiments.SystemActorAuthorizationTest do
   @moduledoc """
   What the experiment engine's own bookkeeping is *authorized* to do, now that
-  delivery, the `:start` and variant-write guards, the results panel and
-  `mix kiln.experiment` run as `KilnCMS.Experiments.system/0` instead of
+  delivery, the `:start` and variant-write guards and `mix kiln.experiment`
+  run as `KilnCMS.Experiments.system/0` instead of
   `authorize?: false` (#1659, batch 5).
 
   Two halves, and both are the point:
@@ -88,12 +88,6 @@ defmodule KilnCMS.Experiments.SystemActorAuthorizationTest do
 
   defp ids(rows), do: Enum.map(rows, & &1.id)
 
-  defp without_cache do
-    original = Application.get_env(:kiln_cms, KilnCMS.Cache, [])
-    Application.put_env(:kiln_cms, KilnCMS.Cache, Keyword.put(original, :enabled, false))
-    on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Cache, original) end)
-  end
-
   test "system/0 is a system actor labelled :experiments; the task labels itself :operator" do
     assert %SystemActor{subsystem: :experiments} = Experiments.system()
     assert %SystemActor{subsystem: :operator} = Experiments.system(:operator)
@@ -147,12 +141,10 @@ defmodule KilnCMS.Experiments.SystemActorAuthorizationTest do
       experiment = draft(ctx.org_id, ctx.admin)
 
       assert {:error, %Ash.Error.Forbidden{}} =
-               experiment
-               |> Ash.Changeset.for_update(:update, %{name: "renamed"},
+               Experiments.update_experiment(experiment, %{name: "renamed"},
                  actor: system(),
                  tenant: ctx.org_id
                )
-               |> Ash.update()
 
       assert {:error, %Ash.Error.Forbidden{}} =
                Experiments.archive_experiment(experiment, actor: system(), tenant: ctx.org_id)
@@ -239,9 +231,7 @@ defmodule KilnCMS.Experiments.SystemActorAuthorizationTest do
       row = Experiments.record_impression!(variant_id, actor: system(), tenant: ctx.org_id)
 
       assert {:error, %Ash.Error.Forbidden{}} =
-               row
-               |> Ash.Changeset.for_destroy(:destroy, %{}, actor: system(), tenant: ctx.org_id)
-               |> Ash.destroy()
+               Experiments.destroy_variant_day(row, actor: system(), tenant: ctx.org_id)
 
       assert {:error, %Ash.Error.Forbidden{}} =
                Experiments.record_impression(variant_id, actor: user(:editor), tenant: ctx.org_id)
@@ -266,10 +256,9 @@ defmodule KilnCMS.Experiments.SystemActorAuthorizationTest do
                )
 
       # Without it: the running-set read raises (not `[]`) into the rescue,
-      # which serves the canonical document and says why. The cache is off for
-      # this half, because `Cachex.fetch/3` runs the loader in its own courier
-      # process, where the process-local `with_actor/2` override is not seen.
-      without_cache()
+      # which serves the canonical document and says why. The cache stays ON —
+      # the loader runs in the courier process, the production shape.
+      KilnCMS.Cache.bust_experiments(ctx.org_id)
 
       log =
         capture_log(fn ->
@@ -278,6 +267,10 @@ defmodule KilnCMS.Experiments.SystemActorAuthorizationTest do
         end)
 
       assert log =~ "Experiments.running/1 could not read"
+
+      # And the failure was not cached as "nothing is running": with the grant
+      # back, the very next request serves the arm again.
+      assert %{id: ^served} = Delivery.assign_keyed("page", doc, "visitor-1")
     end
 
     test "a refused counter write is logged, not swallowed", ctx do
@@ -303,16 +296,14 @@ defmodule KilnCMS.Experiments.SystemActorAuthorizationTest do
                )
     end
 
-    test "`:start` raises Forbidden, not a plausible-looking validation error", ctx do
+    test "`:start` is refused as Forbidden, not a plausible-looking validation error", ctx do
       experiment = ctx.org_id |> draft(ctx.admin) |> with_arms(ctx.org_id)
 
-      # Raised out of the `before_action`, so it surfaces as an exception
-      # rather than an `{:error, _}` — loud, which is the point.
-      assert_raise Ash.Error.Forbidden, fn ->
-        Experiments.with_actor(nil, fn ->
-          Experiments.start_experiment(experiment, actor: ctx.admin, tenant: ctx.org_id)
-        end)
-      end
+      # Returned, not raised, so `start_experiment/2` keeps its tuple contract.
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Experiments.with_actor(nil, fn ->
+                 Experiments.start_experiment(experiment, actor: ctx.admin, tenant: ctx.org_id)
+               end)
 
       assert {:ok, %{state: :running}} =
                Experiments.start_experiment(experiment, actor: ctx.admin, tenant: ctx.org_id)
@@ -346,10 +337,11 @@ defmodule KilnCMS.Experiments.SystemActorAuthorizationTest do
           tenant: ctx.org_id
         )
 
-      assert Results.summarize(loaded, ctx.org_id).total_impressions == 1
+      assert Results.summarize(loaded, ctx.org_id, ctx.admin).total_impressions == 1
 
+      # Read as the viewer: one who may not read the counters gets a raise.
       assert_raise Ash.Error.Forbidden, fn ->
-        Experiments.with_actor(nil, fn -> Results.summarize(loaded, ctx.org_id) end)
+        Results.summarize(loaded, ctx.org_id, user(:viewer))
       end
     end
 
