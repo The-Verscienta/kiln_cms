@@ -13,9 +13,13 @@ defmodule KilnCMS.CMS.Changes.RouteToBlockThread do
   block groups into its own one document-level thread, via `:for_document`
   instead of `:for_block`.
 
-  Reads the existing comments (`authorize?: false` — routing is not a read
-  the caller needs their own grant for) rather than trusting anything from the
-  request. Two concurrent first comments on a brand-new block (or document)
+  Reads the existing comments as the commenter (#1659) — every actor who may
+  create a comment may read the thread it joins: an editor, or automation's
+  system actor — rather than trusting anything from the request. The read
+  uses `authorize_with: :error`: a refused read would filter to "no comments
+  yet" and start a second root on a thread that already has one.
+
+  Two concurrent first comments on a brand-new block (or document)
   could each see none yet and both become roots — for a human typing, rare
   and low-stakes enough that a partial unique index felt like overkill. #946
   changed the odds: one trigger event can fan out several intelligence
@@ -73,11 +77,11 @@ defmodule KilnCMS.CMS.Changes.RouteToBlockThread do
   alias KilnCMS.Repo
 
   @impl true
-  def change(changeset, _opts, _context) do
-    Ash.Changeset.before_action(changeset, &route/1)
+  def change(changeset, _opts, context) do
+    Ash.Changeset.before_action(changeset, &route(&1, context))
   end
 
-  defp route(changeset) do
+  defp route(changeset, context) do
     content_type = Ash.Changeset.get_attribute(changeset, :content_type)
     content_id = Ash.Changeset.get_attribute(changeset, :content_id)
     block_id = Ash.Changeset.get_attribute(changeset, :block_id)
@@ -85,7 +89,7 @@ defmodule KilnCMS.CMS.Changes.RouteToBlockThread do
     # Only the document-level race needs serializing — see the moduledoc.
     if is_nil(block_id), do: lock_thread(changeset.tenant, content_type, content_id)
 
-    existing_comments(content_type, content_id, block_id, changeset.tenant)
+    existing_comments(content_type, content_id, block_id, changeset.tenant, context)
     |> case do
       [] ->
         changeset
@@ -133,10 +137,12 @@ defmodule KilnCMS.CMS.Changes.RouteToBlockThread do
     :ok
   end
 
-  defp existing_comments(content_type, content_id, block_id, tenant) do
-    Comment.thread_comments!(content_type, content_id, block_id,
-      authorize?: false,
-      tenant: tenant
-    )
+  defp existing_comments(content_type, content_id, block_id, tenant, context) do
+    opts =
+      context
+      |> Ash.Context.to_opts()
+      |> Keyword.merge(tenant: tenant, authorize_with: :error)
+
+    Comment.thread_comments!(content_type, content_id, block_id, opts)
   end
 end

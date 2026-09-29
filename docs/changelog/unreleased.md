@@ -498,6 +498,40 @@ carries the reasoning.
   ceiling", and the follow is refused and logged. Honest senders see no
   difference unless the nonce store is down. (#1659)
 
+<a id="the-cmss-own-bookkeeping-runs-under-the-policies"></a>
+
+- **The CMS's own bookkeeping runs under the policies.** The changes behind a
+  publish, an unpublish, a rename, a restore, an autosave, a comment, a
+  release archive and a form submission reached `Task`, the content resources,
+  `Redirect`, `FormSpamSettings`, `FieldDefinition`, the version history and
+  more through `authorize?: false`. Where the caller is entitled they now run
+  as the caller: the comment thread lookup, the release-item cancel, the
+  version history a restore folds, the autosave rows it coalesces, and a
+  custom field's media or content reference, so an editor can no longer learn
+  a draft's title they may not read by referencing its id. Where the write is
+  the action's consequence rather than the caller's they run as
+  `KilnCMS.CMS.Bookkeeping.system/0`: completing a record's open tasks
+  (`Task` admits it to `:complete` only), pointing `published_version_id`
+  (content admits it to `:set_published_version_id` only), writing a
+  rename's 301 (`Redirect` admits `:create` and `:destroy`), reading the
+  field registry, and reading the spam keywords (`FormSpamSettings`, `read`
+  only). Six sites keep `authorize?: false` with a written reason: the
+  version-row rewrite and prune (no actor may update or delete history), the
+  publish-version lookup, and three content reads that never leave the change.
+  The `mix kiln.authz.check` backlog drops by 26 sites and 15 files.
+
+  The reads a write depends on now fail closed. A refused field-registry
+  read used to filter to "no definitions", and the cleaned map is folded out
+  of the definitions: a partial `custom_fields` write would have silently
+  stored `{}`. A refused manual-boundary read in autosave coalescing would have
+  answered "no manual save" and deleted autosaves on its far side. A refused
+  thread read would have started a second root; a refused pending-items read
+  would have archived a release with its items still reserving their content;
+  a refused spam-keyword read (or a read error) scored a submission as if the
+  site had no keywords. Each now raises, fails the write, or keeps the rows. A
+  published rename whose 301 cannot be written now fails instead of vacating
+  the URL. (#1659)
+
 <a id="mix-kilnmigrationscheck-gates-expand-contract"></a>
 
 - **`mix kiln.migrations.check` fails a PR whose new migration breaks the

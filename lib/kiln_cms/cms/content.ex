@@ -3206,11 +3206,15 @@ defmodule KilnCMS.CMS.Content do
           #     (`KilnCMS.Firing.Engine.fire/2`).
           #   * `:set_embedding` — writes the document-level search vector
           #     (`KilnCMS.Search.EmbeddingWorker`).
+          #   * `:set_published_version_id` — points the record at the
+          #     version its publish just wrote, or clears it on unpublish
+          #     (`Changes.RecordPublishedVersion` / `ClearPublishedVersion`,
+          #     as `KilnCMS.CMS.Bookkeeping.system/0`, #1659).
           #
-          # Both accept no `:blocks`, both are ignored by PaperTrail, and
-          # neither has a caller that is a person. Keep the list that way: an
-          # action anyone else calls does not belong in it.
-          forbid_unless action([:reindex_search_text, :set_embedding])
+          # None accepts `:blocks`, all are ignored by PaperTrail, and none
+          # has a caller that is a person. Keep the list that way: an action
+          # anyone else calls does not belong in it.
+          forbid_unless action([:reindex_search_text, :set_embedding, :set_published_version_id])
           authorize_if KilnCMS.Checks.SystemActor
         end
 

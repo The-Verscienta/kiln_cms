@@ -6,6 +6,10 @@ defmodule KilnCMS.CMS.Changes.RecordPublishedVersion do
   Runs in `after_transaction` so the PaperTrail version row exists before we
   look it up. The live record remains the editable source of truth; the
   referenced version is the frozen public snapshot auditors can diff against.
+
+  The pointer is written as `KilnCMS.CMS.Bookkeeping.system/0` (#1659), which
+  the content policy admits to `:set_published_version_id` alone: the publish
+  that triggers it may be the AshOban scheduler's, with no person behind it.
   """
   use Ash.Resource.Change
 
@@ -39,7 +43,7 @@ defmodule KilnCMS.CMS.Changes.RecordPublishedVersion do
         {:ok, %{} = version} ->
           Ash.update(record, %{published_version_id: version.id},
             action: :set_published_version_id,
-            authorize?: false,
+            actor: KilnCMS.CMS.Bookkeeping.system(),
             tenant: record.org_id
           )
 
@@ -56,6 +60,12 @@ defmodule KilnCMS.CMS.Changes.RecordPublishedVersion do
     result
   end
 
+  # `authorize?: false`, justified (#1402's version-history argument): version
+  # rows ARE the editorial history, and a `SystemActor` read grant on them would
+  # hand every system caller all of it. This reads one row — the publish
+  # version PaperTrail wrote for this very action — and only its id leaves here.
+  # It cannot be refused, so it cannot answer "no version" and leave the pointer
+  # stale.
   defp latest_publish_version(version_module, source_id, org_id) do
     version_module
     |> Ash.Query.filter(
@@ -63,6 +73,7 @@ defmodule KilnCMS.CMS.Changes.RecordPublishedVersion do
     )
     |> Ash.Query.sort(version_inserted_at: :desc)
     |> Ash.Query.limit(1)
+    # `authorize?: false` — the version-history read justified above.
     |> Ash.read_one(authorize?: false, tenant: org_id)
   end
 end
