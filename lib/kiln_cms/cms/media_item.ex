@@ -346,12 +346,36 @@ defmodule KilnCMS.CMS.MediaItem do
     # deferred strip has run and the stripped blob is at the item's public key.
     # Also carries the stripped size, for the same reason the synchronous path
     # records the stripped copy's size rather than the upload's. Never in
-    # `default_accept`; `forbid_if always()` below, so only `authorize?: false`
-    # from the worker reaches it.
+    # `default_accept`; the policy below admits only `KilnCMS.Media.system/0`
+    # (#1659) to it.
     update :release_quarantine do
       accept [:byte_size]
       require_atomic? false
       change set_attribute(:quarantined, false)
+    end
+
+    # System-only (#1659): what `KilnCMS.Media.VariantWorker` and
+    # `KilnCMS.Media.AVWorker` derive from an upload — dimensions, duration,
+    # the variant/poster map and the formats an encoder refused. Its own action
+    # rather than `:update` so the pipeline's grant cannot reach `:audience`
+    # (gating relocates the blob), the tags or the editor's fields.
+    update :record_processing do
+      accept [:width, :height, :duration_seconds, :variants, :variant_failures]
+      # Not atomic: `MigrateMediaStorage`'s `on: [:update]` hook applies to
+      # every update-type action (see `:increment_downloads`).
+      require_atomic? false
+    end
+
+    # The quarantined rows `KilnCMS.Media.QuarantineReaper` removes: every
+    # site's, older than `cutoff`. Cross-org by nature, so it is one of the
+    # sanctioned `multitenancy :bypass` reads; a tenant-less read of the
+    # primary `:read` is refused under strict tenancy (#419), which is how the
+    # reaper had been failing in production. Admitted to
+    # `KilnCMS.Media.system/0` alone, by a policy above the admin bypass.
+    read :quarantine_expired do
+      argument :cutoff, :utc_datetime_usec, allow_nil?: false
+      multitenancy :bypass
+      filter expr(quarantined == true and inserted_at < ^arg(:cutoff))
     end
 
     # Permanent hard delete (bypasses archival). The caller is responsible for
@@ -468,6 +492,13 @@ defmodule KilnCMS.CMS.MediaItem do
   end
 
   policies do
+    # The reaper's cross-org scan (#1659) is the media pipeline's alone. Above
+    # the admin bypass on purpose: an admin of one site must not list every
+    # site's quarantined uploads through it.
+    policy action(:quarantine_expired) do
+      authorize_if KilnCMS.Checks.SystemActor
+    end
+
     # Read-scoped API keys can never write media, and no key may delete it —
     # before the admin bypass so a key on an admin account can't skip it
     # (mirrors the content policy; see Checks.ApiKeyWithoutWriteAccess).
@@ -501,22 +532,45 @@ defmodule KilnCMS.CMS.MediaItem do
     # moment the strip finished, and hand an audience-holder the unstripped
     # private blob before it did. Written into the policy, not a UI filter,
     # because the JSON:API and GraphQL surfaces read through this too.
+    #
+    # The system actor reads `read` and `quarantine_expired`, nothing else
+    # (#1659). The media pipeline (`KilnCMS.Media.system/0`) re-reads the item
+    # a worker was enqueued for, quarantined or gated included, and the reaper
+    # scans for stale quarantines. The publish gate `Validations.MediaAltText`
+    # asks which of a document's media ids are marked decorative, and it also
+    # runs for `:publish_scheduled`, whose caller (the AshOban scheduler) has no
+    # actor. Admitted with `authorize_if`, never a `bypass`, and narrowed by
+    # name so a read action added later is not admitted by default: through
+    # `library` or `search` it reads only what a stranger may, and `trashed`
+    # stays admin-only (below).
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
       authorize_if expr(^ref(:audience) == :public and ^ref(:quarantined) == false)
       authorize_if KilnCMS.CMS.Checks.MediaInAudience
+      forbid_unless action([:read, :quarantine_expired])
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
     # Uploading and editing media metadata is reserved for editors (and admins
-    # via the bypass above).
+    # via the bypass above). The media pipeline writes only its two own
+    # actions, never `:update` (which can gate an item) or `:update_metadata`.
     policy action_type([:create, :update]) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
+      forbid_unless action([:record_processing, :release_quarantine])
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
     # Deletes are admin-only (allowed by the bypass; denied here for all other
     # roles). Covers both the soft `:destroy` and the permanent `:purge`.
+    #
+    # One exception (#1659): the media pipeline may `:purge` an item that is
+    # still **quarantined** — an A/V upload whose strip refused it, or one the
+    # reaper found stuck. Never a released item: those are in the library, may
+    # be referenced by content, and deleting them stays an admin act.
     policy action_type(:destroy) do
-      forbid_if always()
+      forbid_unless action(:purge)
+      forbid_unless KilnCMS.Checks.SystemActor
+      authorize_if expr(quarantined == true)
     end
 
     # Trash browsing and restore are admin-only too (mirrors delete).
@@ -532,11 +586,12 @@ defmodule KilnCMS.CMS.MediaItem do
       forbid_if always()
     end
 
-    # Releasing a quarantine is the strip worker's act alone (`authorize?:
-    # false`, #1122): an editor who could release one would be publishing an
-    # unstripped upload.
-    policy action([:release_quarantine]) do
-      forbid_if always()
+    # Releasing a quarantine is the strip worker's act alone (#1122), as
+    # `KilnCMS.Media.system/0` (#1659): an editor who could release one would
+    # be publishing an unstripped upload. Recording what the pipeline derived
+    # is likewise the pipeline's (an editor edits through `:update`).
+    policy action([:release_quarantine, :record_processing]) do
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

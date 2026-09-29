@@ -64,15 +64,21 @@ defmodule KilnCMS.Experiments.VariantDay do
     end
   end
 
+  # Written by delivery and by the form submission path, both of which run as
+  # `KilnCMS.Experiments.system/0` (#1659): the two counters and nothing else.
+  # `destroy` is not admitted — a system caller cannot erase a result. Read by
+  # `mix kiln.experiment show` (the results panel reads as the viewing editor).
   policies do
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
-    # Written by delivery and by the form submission path, both of which run as
-    # the system with no actor — the same posture `ViewTracking` takes.
     policy action_type([:create, :update, :destroy]) do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+
+      forbid_unless action([:record_impression, :record_conversion])
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

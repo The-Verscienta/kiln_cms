@@ -55,7 +55,7 @@ defmodule KilnCMS.Experiments.Promotion do
           {:ok, struct()} | {:error, error()}
   def promote(experiment, opts) do
     with :ok <- concluded?(experiment),
-         {:ok, winner} <- winner(experiment),
+         {:ok, winner} <- winner(experiment, opts),
          :ok <- not_control?(winner),
          {:ok, descriptor} <- descriptor(experiment, opts),
          {:ok, record} <- document(descriptor, experiment, opts) do
@@ -94,19 +94,21 @@ defmodule KilnCMS.Experiments.Promotion do
   defp concluded?(%{state: :concluded}), do: :ok
   defp concluded?(_experiment), do: {:error, :not_concluded}
 
-  defp winner(%{winner_variant_id: nil}), do: {:error, :no_winner}
+  defp winner(%{winner_variant_id: nil}, _opts), do: {:error, :no_winner}
 
-  defp winner(%{winner_variant_id: id, variants: variants}) when is_list(variants) do
+  defp winner(%{winner_variant_id: id, variants: variants}, _opts) when is_list(variants) do
     case Enum.find(variants, &(&1.id == id)) do
       nil -> {:error, :winner_missing}
       variant -> {:ok, variant}
     end
   end
 
-  defp winner(experiment) do
-    # Variants not loaded on the struct handed in: load them.
-    case Ash.load(experiment, :variants, authorize?: false) do
-      {:ok, loaded} -> winner(loaded)
+  defp winner(experiment, opts) do
+    # Variants not loaded on the struct handed in: load them, as the promoting
+    # editor like every other read here (#1659). An actor who cannot read the
+    # variants gets `:winner_missing` — refused, never a guess.
+    case Ash.load(experiment, :variants, Keyword.take(opts, [:actor, :tenant])) do
+      {:ok, loaded} -> winner(loaded, opts)
       _ -> {:error, :winner_missing}
     end
   end

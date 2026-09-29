@@ -23,6 +23,19 @@ defmodule KilnCMS.Search.SemanticSearchTest do
     end
   end
 
+  # Two orthogonal vectors: a bare name (one word) lands on one, anything
+  # longer on the other — the shape of a short query against a long record,
+  # where the record's name is a few tokens among hundreds.
+  defmodule SoundAlikeEmbedder do
+    @behaviour KilnCMS.Search.Embedder
+
+    @impl true
+    def embed(text) do
+      hot = if String.contains?(String.trim(text), " "), do: 1, else: 0
+      {:ok, for(i <- 0..383, do: if(i == hot, do: 1.0, else: 0.0))}
+    end
+  end
+
   defp put_search_env(overrides) do
     base = Application.get_env(:kiln_cms, KilnCMS.Search, [])
     Application.put_env(:kiln_cms, KilnCMS.Search, Keyword.merge(base, overrides))
@@ -365,6 +378,47 @@ defmodule KilnCMS.Search.SemanticSearchTest do
 
       ids = "Alpha" |> CMS.semantic_search_pages!(actor: admin) |> Enum.map(& &1.id)
       assert ids == [alpha.id]
+    end
+
+    test "a record the query names ranks first, however far its vector sits" do
+      # Verscienta's report (2026-09-28): a well-documented acupuncture point
+      # searched by its own name ("Shenmen") came back below short records
+      # whose names merely sound alike, because a long record's one vector is
+      # dominated by its body. The title leg already vouched for it; it was
+      # kept past the floor but still sorted at its distance rank.
+      put_search_env(embedder: SoundAlikeEmbedder)
+      admin = admin()
+
+      named =
+        CMS.create_page!(
+          %{
+            title: "Shenmen",
+            slug: slug(),
+            seo_description: "Heart 7, on the wrist crease: calms the spirit."
+          },
+          actor: admin
+        )
+
+      decoys =
+        for title <- ["Qimen", "Shenmai", "Jinmen"],
+            do: CMS.create_page!(%{title: title, slug: slug()}, actor: admin)
+
+      embed_all!([named | decoys])
+
+      # No floor: the decoys are all nearer (distance 0 against 1).
+      ids = "Shenmen" |> CMS.semantic_search_pages!(actor: admin) |> Enum.map(& &1.id)
+      assert hd(ids) == named.id
+      assert Enum.sort(tl(ids)) == Enum.sort(Enum.map(decoys, & &1.id))
+
+      # With a floor the decoys pass and the named record is exempt from it.
+      put_search_env(semantic_max_distance: 0.5)
+      ids = "Shenmen" |> CMS.semantic_search_pages!(actor: admin) |> Enum.map(& &1.id)
+      assert hd(ids) == named.id
+      assert length(ids) == 4
+
+      # A query naming nothing keeps plain distance order.
+      ids = "Qimen" |> CMS.semantic_search_pages!(actor: admin) |> Enum.map(& &1.id)
+      refute named.id in ids
     end
 
     test "the floor reaches the hybrid search's semantic leg" do

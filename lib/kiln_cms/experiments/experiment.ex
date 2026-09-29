@@ -136,15 +136,26 @@ defmodule KilnCMS.Experiments.Experiment do
     end
   end
 
+  # The system actor (#1659, `KilnCMS.Experiments.system/0` and the operator's
+  # `mix kiln.experiment`) reads experiments — delivery's running set, the
+  # `:start` and variant-write guards — and may `create`, `start` and
+  # `conclude` one, the three verbs the mix task exposes. It may not `update`,
+  # `archive` or `destroy`: nothing in the system edits or erases an
+  # experiment, and an operator at a shell has never been able to.
   policies do
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
     # Running an experiment changes what visitors see and costs the page its
-    # shared cache. That is an admin decision.
+    # shared cache. That is an admin decision — or an operator's, at a shell
+    # on the host.
     policy action_type([:create, :update, :destroy]) do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+
+      forbid_unless action([:create, :start, :conclude])
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 
@@ -229,6 +240,11 @@ defmodule KilnCMS.Experiments.Experiment do
     has_many :variants, KilnCMS.Experiments.Variant do
       destination_attribute :experiment_id
       public? true
+      # A refused variants load raises instead of answering `[]` (#1659):
+      # `authorize_with: :error` on the parent read does not reach a
+      # relationship load, and every surface that loads the arms (delivery's
+      # running set, `mix kiln.experiment`) would read `[]` as "no arms".
+      authorize_read_with :error
     end
   end
 

@@ -101,7 +101,11 @@ defmodule KilnCMS.Social.Account do
       # way (Ash ANDs policies, so a second one could not lift this one's
       # refusal, and widening this one outright would hand system code the
       # credentials' write path).
-      forbid_unless action_type(:read)
+      #
+      # `record_post` is the one write admitted (#1659): the announcer stamps
+      # "last posted" on the account it just posted as. It accepts no
+      # attributes, so it cannot touch the credentials.
+      forbid_unless action([:read, :enabled_for_provider, :record_post])
       authorize_if KilnCMS.Checks.SystemActor
     end
   end

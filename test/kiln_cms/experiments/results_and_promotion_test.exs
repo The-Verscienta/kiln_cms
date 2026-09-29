@@ -59,7 +59,7 @@ defmodule KilnCMS.Experiments.ResultsAndPromotionTest do
         tenant: org_id
       )
 
-  describe "Results.summarize/2" do
+  describe "Results.summarize/3" do
     test "totals per variant, control first, with rates", %{org_id: org_id, actor: actor} do
       page = page!(actor)
 
@@ -69,7 +69,7 @@ defmodule KilnCMS.Experiments.ResultsAndPromotionTest do
       record!(control.id, org_id, 4, 1)
       record!(treatment.id, org_id, 5, 2)
 
-      summary = Results.summarize(loaded(experiment, org_id), org_id)
+      summary = Results.summarize(loaded(experiment, org_id), org_id, actor)
 
       assert [
                %{variant: %{id: c}, impressions: 4, conversions: 1, rate: 0.25},
@@ -96,7 +96,7 @@ defmodule KilnCMS.Experiments.ResultsAndPromotionTest do
       record!(control.id, org_id, 9, 0)
       record!(treatment.id, org_id, 50, 40)
 
-      summary = Results.summarize(loaded(experiment, org_id), org_id)
+      summary = Results.summarize(loaded(experiment, org_id), org_id, actor)
       assert summary.floor == 10
       refute summary.decidable?
       assert summary.leader == nil
@@ -115,13 +115,13 @@ defmodule KilnCMS.Experiments.ResultsAndPromotionTest do
       record!(control.id, org_id, 10, 1)
       record!(treatment.id, org_id, 10, 3)
 
-      summary = Results.summarize(loaded(experiment, org_id), org_id)
+      summary = Results.summarize(loaded(experiment, org_id), org_id, actor)
       assert summary.decidable?
       assert summary.leader.id == treatment.id
 
       # Tie: two more conversions on the control.
       record!(control.id, org_id, 0, 2)
-      assert Results.summarize(loaded(experiment, org_id), org_id).leader == nil
+      assert Results.summarize(loaded(experiment, org_id), org_id, actor).leader == nil
     end
 
     test "an anomalous arm (conversions > impressions) is flagged and never leads", %{
@@ -137,7 +137,7 @@ defmodule KilnCMS.Experiments.ResultsAndPromotionTest do
       record!(control.id, org_id, 5, 1)
       record!(treatment.id, org_id, 1, 3)
 
-      summary = Results.summarize(loaded(experiment, org_id), org_id)
+      summary = Results.summarize(loaded(experiment, org_id), org_id, actor)
       [_control_row, treatment_row] = summary.rows
       assert {:conversions_exceed_impressions, _} = treatment_row.anomaly
       assert summary.leader.id == control.id
@@ -157,7 +157,7 @@ defmodule KilnCMS.Experiments.ResultsAndPromotionTest do
         authorize?: false
       )
 
-      summary = Results.summarize(loaded(experiment, org_id), org_id)
+      summary = Results.summarize(loaded(experiment, org_id), org_id, actor)
       assert {:goal_form_missing, _sentence} = summary.blocked
     end
 

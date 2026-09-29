@@ -86,7 +86,12 @@ defmodule KilnCMS.Social.Announcer do
       url: url
     }
 
-    case Social.claim_post(attrs, authorize?: false, tenant: record.org_id) do
+    # Claimed as `Social.system/0` (#1659). A refused claim is an
+    # `Ash.Error.Forbidden`, which falls through to `other` below: nothing is
+    # posted, and the rule worker logs the error. It must never be read as
+    # "already announced", which is why the dedupe arm matches the unique
+    # index by name and nothing broader.
+    case Social.claim_post(attrs, actor: Social.system(), tenant: record.org_id) do
       {:ok, post} ->
         {:ok, post}
 
@@ -128,15 +133,21 @@ defmodule KilnCMS.Social.Announcer do
 
     case module.post(account, announcement) do
       {:ok, %{id: id} = result} ->
-        Social.record_account_post(account, authorize?: false, tenant: account.org_id)
+        account
+        |> Social.record_account_post(actor: Social.system(), tenant: account.org_id)
+        |> log_unrecorded(post, "the account's last-posted stamp")
 
-        Social.succeed_post(post, %{remote_id: id, remote_url: result[:url]},
-          authorize?: false,
+        post
+        |> Social.succeed_post(%{remote_id: id, remote_url: result[:url]},
+          actor: Social.system(),
           tenant: post.org_id
         )
+        |> log_unrecorded(post, "the success")
 
       {:error, {:failed, reason}} ->
-        Social.fail_post(post, %{error: reason}, authorize?: false, tenant: post.org_id)
+        post
+        |> Social.fail_post(%{error: reason}, actor: Social.system(), tenant: post.org_id)
+        |> log_unrecorded(post, "the failure")
 
       # Ambiguous: the post may exist. Recorded and left alone — see the ledger's
       # moduledoc for why this is never retried.
@@ -146,15 +157,34 @@ defmodule KilnCMS.Social.Announcer do
             "did not resolve — recorded as unknown, not retried"
         )
 
-        Social.unresolved_post(post, %{error: "no confirmation from provider"},
-          authorize?: false,
+        post
+        |> Social.unresolved_post(%{error: "no confirmation from provider"},
+          actor: Social.system(),
           tenant: post.org_id
         )
+        |> log_unrecorded(post, "the unknown outcome")
     end
   end
 
   defp skip(post, reason) do
-    Social.skip_post(post, %{error: reason}, authorize?: false, tenant: post.org_id)
+    post
+    |> Social.skip_post(%{error: reason}, actor: Social.system(), tenant: post.org_id)
+    |> log_unrecorded(post, "the skip")
+  end
+
+  # The settling writes run as `Social.system/0` (#1659). One that fails leaves
+  # the row `:claimed`, which still holds the dedupe key, so nothing can post
+  # twice; but the ledger no longer says what happened, so say it here. The
+  # result is passed through unchanged.
+  defp log_unrecorded({:ok, _record} = ok, _post, _what), do: ok
+
+  defp log_unrecorded({:error, error} = failed, post, what) do
+    Logger.error(
+      "Social post #{post.id} (#{post.content_type}/#{post.content_id}): " <>
+        "#{what} not recorded on the ledger: " <> Exception.message(error)
+    )
+
+    failed
   end
 
   defp refusal(record) do

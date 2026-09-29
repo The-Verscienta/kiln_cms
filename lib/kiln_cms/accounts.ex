@@ -9,6 +9,8 @@ defmodule KilnCMS.Accounts do
   use Ash.Domain,
     otp_app: :kiln_cms
 
+  require Logger
+
   resources do
     resource KilnCMS.Accounts.Token do
       # The actions on this resource that are ours rather than
@@ -193,6 +195,55 @@ defmodule KilnCMS.Accounts do
     end
   end
 
+  # See `with_actor/2`.
+  @actor_override {__MODULE__, :actor_override}
+
+  @doc """
+  The actor the accounts domain's own system reads run as (#1402, #1659): the
+  tenant list behind every all-orgs sweep (`list_org_ids/0`), the default-org
+  fallback (`default_org/0`) and the paid-membership half of a data-subject
+  export (`export_user_data/1`).
+
+  A `KilnCMS.SystemActor` labelled `:accounts`, admitted by name on
+  `Accounts.Organization` for the plain `read` only and already admitted on
+  `Billing.Membership`'s reads (see `docs/policy-matrix.md`, "The system
+  actor"), rather than `authorize?: false`, which would skip every policy on
+  them.
+
+  The pre-auth flows (sign-in, second factor, passkeys, SSO, the `/setup`
+  wizard) keep their justified bypass: there is no actor yet, and a grant over
+  `Accounts.User` or `Accounts.Token` to every system caller would be wider than
+  any one of those call sites.
+  """
+  @spec system() :: KilnCMS.SystemActor.t() | term()
+  def system do
+    case Process.get(@actor_override, :unset) do
+      :unset -> KilnCMS.SystemActor.new(:accounts)
+      actor -> actor
+    end
+  end
+
+  @doc false
+  # Test seam (#1659): run `fun` with `system/0` answering `actor` in this
+  # process, so a test can take the grant away and prove the migrated reads
+  # fail CLOSED (raise or `:error`) rather than filtering to `[]` or `nil`,
+  # which is how a refused read answers. Process-local, and nothing on a
+  # request path calls it; code that could call it could equally pass any
+  # actor it liked.
+  @spec with_actor(term(), (-> result)) :: result when result: term()
+  def with_actor(actor, fun) do
+    previous = Process.get(@actor_override, :unset)
+    Process.put(@actor_override, actor)
+
+    try do
+      fun.()
+    after
+      if previous == :unset,
+        do: Process.delete(@actor_override),
+        else: Process.put(@actor_override, previous)
+    end
+  end
+
   @doc """
   The id of the default organization (epic #336).
 
@@ -228,22 +279,30 @@ defmodule KilnCMS.Accounts do
   @doc """
   Every organization id (#419 strict-tenancy prep) — the tenant list for
   cross-org iteration: AshOban scheduler scans (`KilnCMS.Accounts.ListOrgIds`)
-  and deliberate all-orgs sweeps (GDPR actor erasure). System-level read.
+  and deliberate all-orgs sweeps (GDPR actor erasure). System-level read, run
+  as `system/0`.
+
+  Raises when the read is refused rather than answering `[]`: every caller
+  iterates the result, so an empty list would turn a lost grant into erasure,
+  audit verification and every scheduled sweep silently doing nothing and
+  reporting success.
   """
   @spec list_org_ids() :: [Ash.UUID.t()]
   def list_org_ids do
-    list_organizations!(authorize?: false, query: [select: [:id]])
+    list_organizations!(actor: system(), authorize_with: :error, query: [select: [:id]])
     |> Enum.map(& &1.id)
   end
 
   @doc """
   The default organization struct (epic #336). Loaded by id; used as the tenant
   fallback when a request's host doesn't resolve to a specific org. Returns `nil`
-  only if the seed row is missing (it's created by the backfill migration).
+  only if the seed row is missing (it's created by the backfill migration), and
+  `:error` on any other failure — a refused read included, so a lost grant is
+  never mistaken for a missing seed row. Read as `system/0`.
   """
   @spec default_org() :: KilnCMS.Accounts.Organization.t() | nil | :error
   def default_org do
-    case get_organization(default_org_id(), authorize?: false) do
+    case get_organization(default_org_id(), actor: system(), authorize_with: :error) do
       {:ok, %KilnCMS.Accounts.Organization{} = org} -> org
       {:ok, nil} -> nil
       {:error, error} -> if not_found?(error), do: nil, else: :error
@@ -295,9 +354,14 @@ defmodule KilnCMS.Accounts do
   # A data-subject export is inherently cross-organization — the request arrives
   # on one host, but the person may hold memberships on several sites — so this
   # reads with `multitenancy :bypass` (the sanctioned exception) rather than the
-  # request's tenant.
+  # request's tenant. Read as `system/0`, which `Billing.Membership` admits for
+  # reads; `authorize_with: :error` so a refusal is an error that says so in
+  # the log, not an empty list that reads as "no memberships".
   defp membership_export(user) do
-    case KilnCMS.Billing.memberships_for_export(user.id, authorize?: false) do
+    case KilnCMS.Billing.memberships_for_export(user.id,
+           actor: system(),
+           authorize_with: :error
+         ) do
       {:ok, memberships} ->
         Enum.map(memberships, fn membership ->
           %{
@@ -313,7 +377,12 @@ defmodule KilnCMS.Accounts do
           }
         end)
 
-      _error ->
+      {:error, error} ->
+        Logger.error(
+          "data-subject export could not read memberships for #{user.id}: " <>
+            Exception.message(error)
+        )
+
         []
     end
   end
@@ -327,6 +396,9 @@ defmodule KilnCMS.Accounts do
   """
   @spec actor_from_api_key(String.t()) :: {:ok, KilnCMS.Accounts.User.t()} | :error
   def actor_from_api_key(key) when is_binary(key) do
+    # `authorize?: false`: a pre-auth read — the key IS the credential being
+    # verified, so there is no actor yet; AshAuthentication's sign-in
+    # preparation (the same one the HTTP `ApiKeyAuth` plug runs) is the grant.
     KilnCMS.Accounts.User
     |> Ash.Query.for_read(:sign_in_with_api_key, %{api_key: key})
     |> Ash.read_one(authorize?: false)

@@ -20,13 +20,14 @@ defmodule KilnCMS.CMS.Validations.ReleaseOpenForEdit do
 
   alias Ash.Error.Changes.InvalidChanges
   alias KilnCMS.CMS.ContentRelease
+  alias KilnCMS.CMS.Validations.Lookup
 
   @impl true
-  def validate(changeset, _opts, _context) do
+  def validate(changeset, _opts, context) do
     release_id =
       Ash.Changeset.get_attribute(changeset, :release_id) || Map.get(changeset.data, :release_id)
 
-    case release(release_id, changeset.tenant) do
+    case release(release_id, changeset.tenant, context) do
       {:ok, %{state: state}} ->
         if state in ContentRelease.editable_states() do
           :ok
@@ -37,6 +38,11 @@ defmodule KilnCMS.CMS.Validations.ReleaseOpenForEdit do
              message: "release is no longer open for changes"
            )}
         end
+
+      # Refused to this caller: the write is refused as Forbidden, which is
+      # what the action's own policy would have said about this caller.
+      {:error, %Ash.Error.Forbidden{} = forbidden} ->
+        {:error, forbidden}
 
       # Unreadable in this tenant. The `belongs_to` FK is on `content_releases`
       # alone and carries no org column, so a release belonging to ANOTHER org
@@ -50,6 +56,11 @@ defmodule KilnCMS.CMS.Validations.ReleaseOpenForEdit do
     end
   end
 
-  defp release(nil, _tenant), do: :error
-  defp release(id, tenant), do: KilnCMS.CMS.get_release(id, authorize?: false, tenant: tenant)
+  defp release(nil, _tenant, _context), do: :error
+
+  # As the caller (#1659): composing a release needs `OrgEditor`, and so does
+  # reading one, so the caller can always see the release it is adding to. A
+  # refusal is returned as the Forbidden it is: refused, never let through.
+  defp release(id, tenant, context),
+    do: KilnCMS.CMS.get_release(id, Lookup.as_caller(context, tenant))
 end

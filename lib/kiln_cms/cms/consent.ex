@@ -69,9 +69,16 @@ defmodule KilnCMS.CMS.Consent do
 
   policies do
     # Recording and reading consent is an editorial action (editors + admins).
+    #
+    # The system actor reads one document's consents, and nothing else (#1659):
+    # the publish gate (`Validations.RequiredConsent`) also runs for
+    # `:publish_scheduled`, whose caller is the AshOban scheduler with no
+    # actor. It may not record a consent, nor list them all.
     policy action_type([:create, :read]) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+      forbid_unless action(:for_content)
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
     # Deletion is admin-only (compliance records shouldn't be casually removed).
@@ -82,7 +89,7 @@ defmodule KilnCMS.CMS.Consent do
 
   # Multi-tenancy (epic #336): a consent belongs to the same site as the content
   # it clears. `global?: true` keeps the tenant optional; the publish-gate read
-  # (`Validations.RequiredConsent`, `authorize?: false`) inherits the content
+  # (`Validations.RequiredConsent`, as the system actor) inherits the content
   # changeset's tenant, so a consent only clears content on its own site.
   multitenancy do
     strategy :attribute

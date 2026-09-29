@@ -135,8 +135,7 @@ defmodule KilnCMS.CMS.Content do
     with true <- KilnCMS.Search.semantic?(),
          {:ok, vector} <- query_vector(query) do
       query
-      |> Ash.Query.sort([{:semantic_distance, {%{query_vector: vector}, :asc}}])
-      |> semantic_floor(vector)
+      |> rank_and_floor(vector)
       |> cap_unbounded()
     else
       # Disabled, or the query couldn't be embedded — no semantic results.
@@ -157,54 +156,98 @@ defmodule KilnCMS.CMS.Content do
   # A caller that fuses this leg with others (`KilnCMS.Search.hybrid/3`, and
   # `semantic_neighbours/3` measuring for it) asks for the floor to be left
   # to it — `semantic_floor: :caller` in the query context — and gets every
-  # row with its distance loaded instead. Why the floor belongs after fusion
-  # is on `KilnCMS.Search.semantic_max_distance/0`.
+  # row by distance, with the distance loaded, instead. Why the floor belongs
+  # after fusion is on `KilnCMS.Search.semantic_max_distance/0`.
   #
   # The per-type semantic actions — the `semantic-search` JSON:API routes,
-  # the GraphQL lists, `CMS.semantic_search_*` — have no fusion to leave it
-  # to, so they apply the floor here, with the exemption the title and alias
-  # legs give hybrid search: a row the query names — by title, or by a field
-  # flagged as a name — is kept whatever its distance. Those legs
-  # (`:search_title`, `:search_alias`) are asked which rows they vouch for
-  # and the ids are OR-ed into the floor, in the same query,
-  # so the action stays a plain paginated, countable read — a fused list
-  # would have neither a keyset nor a count — and a vouched row still sorts
-  # at its distance rank. A row vouched only by the keyword, any-term or fuzzy
-  # legs is still floored here; those legs are fusion's, not this action's.
+  # the GraphQL lists, `CMS.semantic_search_*` — have no fusion to do this
+  # for them, so they take two things from the title and alias legs
+  # (`:search_title`, `:search_alias`) here: the rows the query names — by
+  # title, or by a field flagged as a name — rank FIRST, nearest first among
+  # themselves, and are kept whatever their distance when the floor is on.
+  # A row vouched only by the keyword, any-term or fuzzy legs is ranked and
+  # floored by distance alone; those legs are fusion's, not this action's.
   #
-  # It happens in a `before_action`, not in the prepare: preparations run
-  # when the query is *built*, and the title read is a database round trip
-  # that belongs to the read, not to constructing it.
-  defp semantic_floor(%{context: %{semantic_floor: :caller}} = query, vector) do
-    Ash.Query.load(query, semantic_distance: %{query_vector: vector})
+  # Ranking them first is hybrid's title-leg rule ("a query that contains a
+  # record's title verbatim should surface that record, full stop"), which
+  # this action was missing: exempting a named row from the floor but leaving
+  # it at its distance rank still lost it. A record's one vector is embedded
+  # from its whole `search_text`, so on a long record the name is a few
+  # tokens among hundreds, and a bare-name query sits nearer every short
+  # record whose name merely sounds alike. Verscienta measured it on 602
+  # acupuncture points (2026-09-28): 14 missed the top 10 for their own name,
+  # and they were the best-documented, most-searched points.
+  #
+  # The named ids are OR-ed into the floor and put in front of the sort in
+  # the same query, so the action stays a plain paginated, countable read —
+  # a fused list would have neither a keyset nor a count.
+  #
+  # The cost: with a named row in front, `ORDER BY` no longer starts with the
+  # distance, so the HNSW index cannot serve it and Postgres computes the
+  # distance for every row the filters admit. Only when the query names
+  # something — a query that names nothing keeps the index-served plan. The
+  # keyset shape follows: a cursor from a page that named something only
+  # fits the next page while the query still names the same set of rows.
+  #
+  # The title and alias reads run HERE, when the query is built, not in a
+  # `before_action`: the sort has to be final by then. Ash picks the
+  # calculations it selects for keyset cursors from the sort as it stands
+  # before any hook runs, so a sort key added in a hook orders the rows but
+  # never reaches the cursor, and the next page is refused. Both legs are
+  # answered from the title-lexemes GIN index (#1712), and this prepare
+  # already embeds the query at build time, which costs far more.
+  defp rank_and_floor(%{context: %{semantic_floor: :caller}} = query, vector) do
+    query
+    |> Ash.Query.sort([{:semantic_distance, {%{query_vector: vector}, :asc}}])
+    |> Ash.Query.load(semantic_distance: %{query_vector: vector})
   end
 
-  defp semantic_floor(query, vector) do
-    case KilnCMS.Search.semantic_max_distance() do
-      nil ->
-        query
+  defp rank_and_floor(query, vector) do
+    named = named_ids(query)
 
-      max_distance ->
-        Ash.Query.before_action(query, fn query ->
-          vouched = named_ids(query)
+    query
+    |> Ash.Query.sort(
+      named_first(named) ++ [{:semantic_distance, {%{query_vector: vector}, :asc}}]
+    )
+    |> semantic_floor(vector, named, KilnCMS.Search.semantic_max_distance())
+  end
 
-          Ash.Query.filter(
-            query,
-            semantic_distance(query_vector: ^vector) <= ^max_distance or id in ^vouched
-          )
-        end)
-    end
+  defp named_first([]), do: []
+  defp named_first(named), do: [{:named_by_query, {%{ids: named}, :desc}}]
+
+  defp semantic_floor(query, _vector, _named, nil), do: query
+
+  defp semantic_floor(query, vector, [], max_distance) do
+    Ash.Query.filter(query, semantic_distance(query_vector: ^vector) <= ^max_distance)
+  end
+
+  defp semantic_floor(query, vector, named, max_distance) do
+    Ash.Query.filter(
+      query,
+      semantic_distance(query_vector: ^vector) <= ^max_distance or id in ^named
+    )
   end
 
   # The ids the title leg and the alias leg return for this query — the
   # records the query names, by title or by a flagged name field — under this
   # tenant and these facets: the same arguments the semantic action was
   # given, restricted to the ones each leg takes. Read as the system: the ids
-  # only widen an exemption, and every row the semantic action returns still
-  # passes its own read policy, so nothing an actor may not see is reachable
-  # through them. Both legs are bounded (`cap_unbounded/2`), so this is at
+  # only widen an exemption and reorder rows, and every row the semantic
+  # action returns still passes its own read policy, so nothing an actor
+  # may not see is reachable through them. Both legs are bounded (`cap_unbounded/2`), so this is at
   # most 100 ids.
-  defp named_ids(%{resource: resource} = query) do
+  #
+  # A query built without its tenant, on a resource that requires one, names
+  # nothing rather than raising at build time: the read itself decides
+  # whether a tenant arrives in time. Every per-type caller — the JSON:API
+  # and GraphQL routes, the code interface — sets it before `for_read`.
+  defp named_ids(%{resource: resource, tenant: nil} = query) do
+    if Ash.Resource.Info.multitenancy_global?(resource), do: read_named_ids(query), else: []
+  end
+
+  defp named_ids(query), do: read_named_ids(query)
+
+  defp read_named_ids(%{resource: resource} = query) do
     Enum.flat_map([:search_title, :search_alias], fn action ->
       arg_names =
         resource
@@ -218,6 +261,7 @@ defmodule KilnCMS.CMS.Content do
       |> Ash.read!(tenant: query.tenant, authorize?: false)
       |> Enum.map(& &1.id)
     end)
+    |> Enum.uniq()
   end
 
   # A caller running this leg across many resources can embed the query once
@@ -3866,6 +3910,13 @@ defmodule KilnCMS.CMS.Content do
         # the longest — most specific — title the query contains ranks first.
         # Internal.
         calculate :title_length, :integer, expr(string_length(^ref(:title)))
+
+        # Whether this row is one of `ids` — the rows the query names, by
+        # title or by a flagged name field. Ranks them ahead of the distance
+        # sort in the `:search_semantic` action. Internal (sorting only).
+        calculate :named_by_query, :boolean, expr(^ref(:id) in ^arg(:ids)) do
+          argument :ids, {:array, :uuid}, allow_nil?: false
+        end
 
         # Cosine distance (pgvector `<=>`) between a row's embedding and the
         # query vector — smaller is more similar. Used to order the

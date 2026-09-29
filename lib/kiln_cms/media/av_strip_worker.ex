@@ -53,7 +53,7 @@ defmodule KilnCMS.Media.AVStripWorker do
   """
   use Oban.Worker, queue: :media, max_attempts: 5
 
-  alias KilnCMS.{AVProcessor, CMS, Storage}
+  alias KilnCMS.{AVProcessor, CMS, Media, Storage}
   alias KilnCMS.Media.Ingest
 
   require Logger
@@ -69,9 +69,21 @@ defmodule KilnCMS.Media.AVStripWorker do
     # The item's site (epic #336); a job without `org_id` is cancelled with a
     # logged error (#1658).
     with {:ok, tenant} <- Ingest.job_tenant(args, __MODULE__) do
-      case CMS.get_media_item(id, authorize?: false, tenant: tenant) do
+      # As the media pipeline's system actor (#1659), and `authorize_with:
+      # :error`: a quarantined row is readable by editors and the pipeline
+      # only, so a refused read would filter to "gone" — and a job that
+      # answered that with `:ok` would leave the upload quarantined until the
+      # reaper deleted it. A refusal fails the job instead.
+      case CMS.get_media_item(id, actor: Media.system(), authorize_with: :error, tenant: tenant) do
         {:ok, %{quarantined: true, storage_key: key} = item} when is_binary(key) ->
           strip(item, key, args, tenant)
+
+        {:error, %Ash.Error.Forbidden{} = error} ->
+          Logger.error(
+            "Deferred metadata strip for media #{id}: refused a read: #{inspect(error)}"
+          )
+
+          {:error, error}
 
         # Gone, or already released — a retried job after success, say.
         _other ->
@@ -199,7 +211,19 @@ defmodule KilnCMS.Media.AVStripWorker do
     )
 
     Storage.delete_private(key, item)
-    CMS.purge_media_item(item, authorize?: false, tenant: tenant)
+
+    # The pipeline may purge an item only while it is quarantined (#1659),
+    # which this one still is. A failure leaves a blob-less quarantined row,
+    # which the reaper takes; it is logged rather than retried, because a
+    # retry would find the private blob gone and could not strip again.
+    case CMS.purge_media_item(item, actor: Media.system(), tenant: tenant) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error("Refused media #{item.id} could not be purged: #{inspect(reason)}")
+    end
+
     broadcast(item.id)
     :ok
   end
@@ -207,9 +231,7 @@ defmodule KilnCMS.Media.AVStripWorker do
   defp release(item, byte_size, tenant) do
     attrs = if byte_size, do: %{byte_size: byte_size}, else: %{}
 
-    item
-    |> Ash.Changeset.for_update(:release_quarantine, attrs, authorize?: false, tenant: tenant)
-    |> Ash.update()
+    CMS.release_media_quarantine(item, attrs, actor: Media.system(), tenant: tenant)
   end
 
   defp download(item, key, ext) do
