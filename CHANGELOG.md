@@ -138,11 +138,19 @@ Every summary line below that was shortened links to its own entry there.
   its major.**
   ([#1544](https://github.com/The-Verscienta/kiln_cms/issues/1544) · [long form](docs/changelog/unreleased.md#the-release-images-latest-tag-moves-only-to-the-highest-final-release-and-from))
 
+- **The content editor's chrome is on the component kit: the inspector is a
+  keyboard-driven tab strip, and block controls show on focus and on touch.**
+  ([#1679](https://github.com/The-Verscienta/kiln_cms/issues/1679) · [long form](docs/changelog/unreleased.md#the-content-editors-chrome-is-on-the-component-kit))
+
 ### Fixed
 
 - **Per-type semantic search ranks a record the query names first, however long
   the record.**
   ([#1746](https://github.com/The-Verscienta/kiln_cms/pull/1746) · [long form](docs/changelog/unreleased.md#per-type-semantic-search-ranks-a-record-the-query-names-first))
+
+- **An empty heading line in a rich-text block is now visible in the editor —
+  dashed, labelled with its level — so the "heading has no text" finding has
+  something on screen to point at.** ([#1728](https://github.com/The-Verscienta/kiln_cms/pull/1728))
 
 - **An SEO or accessibility finding below a fragment names, and jumps to, the
   right block.**

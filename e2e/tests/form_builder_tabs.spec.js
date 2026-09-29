@@ -3,8 +3,9 @@
 // The Form Builder's section switcher (#1680) is a kit `.tabs` tablist with
 // the WAI-ARIA keyboard model: Left/Right move (wrapping), Home/End jump, the
 // tab activates as it is focused, and only the selected tab is in the Tab
-// order. The keys live in a colocated hook, which LiveViewTest cannot run —
-// this is the only place they are exercised.
+// order. The keys live in a JS hook (assets/js/tab_keys.js, shared with the
+// content editor's inspector rail), which LiveViewTest cannot run — this spec
+// and editor_inspector_tabs.spec.js are where they are exercised.
 const { test, expect, signInAsAdmin, waitForLiveConnected } = require("./fixtures");
 
 test("form builder tabs follow the ARIA tabs keyboard model", async ({ page }) => {

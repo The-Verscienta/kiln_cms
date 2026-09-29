@@ -49,7 +49,7 @@ Prior design audits: closed July 2026 usability epic (see project plan) and
 | 16 | Medium | **Fixed** | — | `account_live` empty membership | CTA outside `empty_state` `:action` |
 | 17 | Medium | **Fixed** | — | `app.css` `.tab` / reduced-motion | Missing `:focus-visible`; expanded `prefers-reduced-motion` for kit transitions/pulses |
 | 18 | Medium | Open | [#1678](https://github.com/The-Verscienta/kiln_cms/issues/1678) | Lists empties (trash, taxonomy, inbox, search…) | Still inline `<p>` vs `<.empty_state>` |
-| 19 | Medium | Open | [#1679](https://github.com/The-Verscienta/kiln_cms/issues/1679) | Content editor density | Header action strip, inspector tabs vs `.tabs`, hover-only block chrome, device preview gap |
+| 19 | Medium | **Fixed** | [#1679](https://github.com/The-Verscienta/kiln_cms/issues/1679) | Content editor density | Header action strip, inspector tabs vs `.tabs`, hover-only block chrome, device preview gap |
 | 20 | Medium | Open | [#1680](https://github.com/The-Verscienta/kiln_cms/issues/1680) | Settings density | Your settings / Mail long scroll without TOC; Form Builder kit drift; “← All content” crumbs on Team/Webhooks/Mail |
 | 21 | Medium | **Fixed** — verify | [#1681](https://github.com/The-Verscienta/kiln_cms/issues/1681) | AuthOverrides / passkey CTA / setup brand | Bespoke utilities; JS-injected passkey; setup unbranded. Kit `.btn`/`.field-*`/`.auth-*` classes; passkey server-rendered hidden + `PasskeySignIn` hook; `Layouts.auth_brand/1` on setup |
 | 22 | Medium | Open | [#1682](https://github.com/The-Verscienta/kiln_cms/issues/1682) | Delivery chrome | Preview ≠ live `public-*` hooks; header `aria-label`; locale-aware error links; mobile header wrap |

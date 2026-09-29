@@ -32,7 +32,10 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class={["space-y-4", @inspector_tab != :settings && "hidden"]}>
+    <div
+      class={["space-y-4", @inspector_tab != :settings && "hidden"]}
+      {inspector_panel_attrs(:settings)}
+    >
       <%!-- URL — first in Settings, and its own section rather than part of
               "SEO & scheduling": it is the setting a writer reaches for most
               (the line under the title links straight here), and that section

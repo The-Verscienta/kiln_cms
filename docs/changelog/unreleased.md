@@ -246,6 +246,32 @@ carries the reasoning.
   tag floating on it would go quiet
   ([#1544](https://github.com/The-Verscienta/kiln_cms/issues/1544)).
 
+<a id="the-content-editors-chrome-is-on-the-component-kit"></a>
+
+- **The content editor's chrome is on the component kit: the inspector is a
+  keyboard-driven tab strip, and block controls show on focus and on touch.**
+  The inspector's Preview / Settings / History switch is the kit `.tabs` with
+  the ARIA tabs pattern the Form Builder got in #1680: each tab names the
+  panel it controls, the panels are `tabpanel`s, only the selected tab is in
+  the Tab order, and Left/Right/Home/End move between tabs. The keys come from
+  one shared `TabKeys` hook (`assets/js/tab_keys.js`) that both screens use.
+  A block's move, duplicate and remove controls are kit ghost buttons with the
+  kit focus ring. They still fade in on hover and on keyboard focus, and now
+  also while you work inside the block and always on a touch screen, which
+  has no hover. The live preview's "Edit" jump was `display: none` until
+  hovered, so the keyboard could not reach it. It is now faded out instead,
+  which keeps it in the Tab order. The page actions are grouped: Preview,
+  Side-by-side and Visual keep their words, and Media library, Copy preview
+  link and Duplicate fold to icons below very wide screens, keeping their
+  names for screen readers. "Add block", the block filter, gallery fields and
+  the column controls use kit classes too. The accessibility chip and grade
+  pill use the `*-ink` text tokens; "Needs work" was 1.38:1 in dark mode.
+  "Save draft" and "Publish now" keep their names and places. Saving,
+  autosave, the working copy and conflict handling are unchanged. The
+  design language no longer promises device-width preview modes, which the
+  editor never had
+  ([#1679](https://github.com/The-Verscienta/kiln_cms/issues/1679)).
+
 ## Fixed
 
 <a id="per-type-semantic-search-ranks-a-record-the-query-names-first"></a>
