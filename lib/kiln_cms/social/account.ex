@@ -95,7 +95,9 @@ defmodule KilnCMS.Social.Account do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
 
       # `KilnCMS.Automation.RuleWorker` lists a provider's enabled accounts to
-      # announce a publish on them (#1402). READ only: minting, editing or
+      # announce a publish on them (#1402), and the announcer
+      # (`KilnCMS.Social.system/0`) reads the account it posts as. READ only:
+      # minting, editing or
       # deleting the credentials for a site's public voice is an admin act, and
       # narrowing here rather than adding a second policy is what keeps it that
       # way (Ash ANDs policies, so a second one could not lift this one's
@@ -105,8 +107,14 @@ defmodule KilnCMS.Social.Account do
       # `record_post` is the one write admitted (#1659): the announcer stamps
       # "last posted" on the account it just posted as. It accepts no
       # attributes, so it cannot touch the credentials.
+      #
+      # Each caller is admitted to its own actions only (#1747).
       forbid_unless action([:read, :enabled_for_provider, :record_post])
-      authorize_if KilnCMS.Checks.SystemActor
+
+      authorize_if {KilnCMS.Checks.SystemActor,
+                    subsystem: :automation, action: :enabled_for_provider}
+
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :social, action: [:read, :record_post]}
     end
   end
 

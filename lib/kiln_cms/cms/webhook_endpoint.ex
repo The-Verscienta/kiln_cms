@@ -169,7 +169,7 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
 
       forbid_unless action([:read, :record_delivery_success, :record_delivery_failure])
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :webhooks}
     end
   end
 

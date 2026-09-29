@@ -32,7 +32,7 @@ defmodule KilnCMS.CMS.FeedSettings do
     table: "feed_settings",
     accept: [:excluded_types, :full_content_types],
     read: :admin,
-    system_actions: [:read],
+    system_actions: [read: :feeds],
     admin_columns: [:excluded_types, :full_content_types, :updated_at]
 
   # A ceiling on how many type names one list may carry. Comfortably above any

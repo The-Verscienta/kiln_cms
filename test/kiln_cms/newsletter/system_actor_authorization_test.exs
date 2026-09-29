@@ -354,4 +354,89 @@ defmodule KilnCMS.Newsletter.SystemActorAuthorizationTest do
                Newsletter.send_as_newsletter(post, segment_id: Ash.UUID.generate(), actor: admin)
     end
   end
+
+  # #1747: each grant names the subsystem whose code makes the call, so the
+  # automation (which opens a campaign) and the send pipeline (which works it)
+  # are two actors, not one. Every other label is refused everything.
+  describe "each subsystem gets only its own newsletter actions (#1747)" do
+    @send_pipeline [:read, :mark_sending, :mark_sent, :record_sent, :record_failed]
+    @outsiders [:automation, :mail, :billing, :notifications, :operator]
+
+    defp can?(subject, label, org_id),
+      do: Ash.can?(subject, KilnCMS.SystemActor.new(label), tenant: org_id)
+
+    test "the send pipeline's actions are :newsletter's alone" do
+      %{send: send} = campaign()
+
+      for action <- @send_pipeline do
+        assert can?({send, action}, :newsletter, send.org_id),
+               "NewsletterSend #{inspect(action)} refused :newsletter"
+
+        for label <- @outsiders do
+          refute can?({send, action}, label, send.org_id),
+                 "NewsletterSend #{inspect(action)} admitted #{inspect(label)}"
+        end
+      end
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Newsletter.mark_sending(send, %{total_recipients: 1},
+                 actor: KilnCMS.SystemActor.new(:automation),
+                 tenant: send.org_id
+               )
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Newsletter.get_send(send.id,
+                 actor: KilnCMS.SystemActor.new(:automation),
+                 authorize_with: :error,
+                 tenant: send.org_id
+               )
+
+      assert reload(send).status == :pending
+    end
+
+    test "opening a campaign is :automation's alone" do
+      post = published_post(user(:admin))
+
+      assert {:ok, _send} =
+               Newsletter.send_as_newsletter(post, actor: KilnCMS.SystemActor.new(:automation))
+
+      for label <- [:newsletter | @outsiders -- [:automation]] do
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 Newsletter.send_as_newsletter(post, actor: KilnCMS.SystemActor.new(label)),
+               "#{inspect(label)} opened a campaign"
+      end
+    end
+
+    test "the subscriber reads are :newsletter's alone" do
+      %{sub: sub, send: send} = campaign()
+
+      for label <- @outsiders do
+        opts = [
+          actor: KilnCMS.SystemActor.new(label),
+          authorize_with: :error,
+          tenant: send.org_id
+        ]
+
+        assert {:error, %Ash.Error.Forbidden{}} = Newsletter.confirmed_subscribers(nil, opts),
+               "#{inspect(label)} read the confirmed list"
+
+        assert {:error, %Ash.Error.Forbidden{}} = Newsletter.get_subscriber(sub.id, opts),
+               "#{inspect(label)} read a subscriber"
+      end
+    end
+
+    test "the automation reads a segment, and nothing of its tier lifecycle" do
+      admin = user(:admin)
+      segment = Newsletter.create_segment!(%{name: "SAB12", slug: slug()}, actor: admin)
+      org_id = segment.org_id
+
+      assert can?({segment, :read}, :automation, org_id)
+      refute can?({segment, :sync_managed}, :automation, org_id)
+      refute can?({KilnCMS.Newsletter.Segment, :for_tier}, :automation, org_id)
+
+      for label <- @outsiders -- [:automation] do
+        refute can?({segment, :read}, label, org_id), "#{inspect(label)} read a segment"
+      end
+    end
+  end
 end

@@ -62,7 +62,7 @@ defmodule KilnCMS.History.DocumentEvent do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
       authorize_if KilnCMS.CMS.Checks.OrgEditor
       forbid_unless action([:for_document, :by_actor])
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :history}
     end
 
     # Writes (the append, and actor anonymization) only ever run through the
@@ -70,12 +70,12 @@ defmodule KilnCMS.History.DocumentEvent do
     # person, admin included, may write to or rewrite the event log.
     policy action_type(:create) do
       forbid_unless action(:append)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :history}
     end
 
     policy action_type(:update) do
       forbid_unless action(:anonymize_actor)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :history}
     end
   end
 

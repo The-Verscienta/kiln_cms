@@ -106,7 +106,7 @@ defmodule KilnCMS.CMS.ChainCheckpoint do
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
       forbid_unless action([:recent, :unwitnessed, :create, :record_publication])
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :governance}
     end
   end
 

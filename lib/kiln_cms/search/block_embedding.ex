@@ -128,7 +128,7 @@ defmodule KilnCMS.Search.BlockEmbedding do
     # editors and up — and since #1402 the system half says so here rather than
     # reaching around the block with `authorize?: false`.
     policy action_type(:read) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :search}
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
@@ -137,7 +137,7 @@ defmodule KilnCMS.Search.BlockEmbedding do
     # destroyed when a block goes away. `authorize_if` rather than `bypass`, so
     # a policy added here later applies to the indexer too (#1402).
     policy action_type([:create, :update, :destroy]) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :search}
       forbid_if always()
     end
   end

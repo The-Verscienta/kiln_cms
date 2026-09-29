@@ -145,7 +145,7 @@ defmodule KilnCMS.Experiments.Experiment do
   policies do
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: [:experiments, :operator]}
     end
 
     # Running an experiment changes what visitors see and costs the page its
@@ -155,7 +155,7 @@ defmodule KilnCMS.Experiments.Experiment do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
 
       forbid_unless action([:create, :start, :conclude])
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :operator}
     end
   end
 

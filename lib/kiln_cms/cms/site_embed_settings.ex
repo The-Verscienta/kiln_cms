@@ -45,7 +45,7 @@ defmodule KilnCMS.CMS.SiteEmbedSettings do
     accept: [:embed_origins],
     read: :admin,
     admin_columns: [:embed_origins, :updated_at],
-    system_actions: [:read]
+    system_actions: [read: :forms]
 
   validations do
     # Same predicate `Form.embed_origins` uses — this list is concatenated

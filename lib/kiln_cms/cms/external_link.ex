@@ -106,7 +106,7 @@ defmodule KilnCMS.CMS.ExternalLink do
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
       forbid_unless action(:read)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :links}
     end
 
     # Nothing writes these by hand. The sweep (`:observe`, the prune's
@@ -117,7 +117,7 @@ defmodule KilnCMS.CMS.ExternalLink do
     policy action_type([:create, :update, :destroy]) do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
       forbid_unless action([:observe, :record_check, :destroy])
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :links}
     end
   end
 

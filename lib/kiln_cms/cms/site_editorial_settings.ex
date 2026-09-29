@@ -50,7 +50,7 @@ defmodule KilnCMS.CMS.SiteEditorialSettings do
     accept: [:auto_complete_tasks_on_publish, :editors_can_publish],
     read: :editor,
     update?: false,
-    system_actions: [:read]
+    system_actions: [read: :cms_settings]
 
   attributes do
     # `true` is what #501 shipped unconditionally. See the moduledoc on why this

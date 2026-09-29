@@ -227,7 +227,7 @@ defmodule KilnCMS.Billing.Membership do
     # actor with no `:id`, and `user_id` is `allow_nil? false`, so that clause
     # matches no row for a system actor.
     policy action_type(:read) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: [:accounts, :billing, :newsletter]}
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
       authorize_if expr(user_id == ^actor(:id))
     end
@@ -249,7 +249,7 @@ defmodule KilnCMS.Billing.Membership do
     # admin included — and the system actor is now named here (#1402) instead
     # of reaching around the block with `authorize?: false`.
     policy action([:apply_provider_state, :anonymize]) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :billing}
       forbid_if always()
     end
   end

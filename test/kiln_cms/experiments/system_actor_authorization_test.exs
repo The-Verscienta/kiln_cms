@@ -49,6 +49,10 @@ defmodule KilnCMS.Experiments.SystemActorAuthorizationTest do
   defp uniq, do: System.unique_integer([:positive])
   defp system, do: Experiments.system()
 
+  # `mix kiln.experiment` (#1747): the writes and the results read are the
+  # operator's alone, not delivery's.
+  defp operator, do: Experiments.system(:operator)
+
   defp user(role) do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
       email: "xsa-#{role}-#{uniq()}@example.com",
@@ -124,17 +128,39 @@ defmodule KilnCMS.Experiments.SystemActorAuthorizationTest do
             document_id: doc.id,
             goal_form_id: ExperimentFixtures.goal_form!(ctx.org_id).id
           },
-          actor: system(),
+          actor: operator(),
           tenant: ctx.org_id
         )
 
       with_arms(created, ctx.org_id)
 
       assert {:ok, %{state: :running} = started} =
-               Experiments.start_experiment(created, actor: system(), tenant: ctx.org_id)
+               Experiments.start_experiment(created, actor: operator(), tenant: ctx.org_id)
 
       assert {:ok, %{state: :concluded}} =
-               Experiments.conclude_experiment(started, nil, actor: system(), tenant: ctx.org_id)
+               Experiments.conclude_experiment(started, nil,
+                 actor: operator(),
+                 tenant: ctx.org_id
+               )
+    end
+
+    test "delivery's actor may not create, start or conclude one", ctx do
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Experiments.create_experiment(
+                 %{
+                   name: "xsa-dlv-#{uniq()}",
+                   content_type: "page",
+                   document_id: page(ctx.admin).id,
+                   goal_form_id: ExperimentFixtures.goal_form!(ctx.org_id).id
+                 },
+                 actor: system(),
+                 tenant: ctx.org_id
+               )
+
+      armed = ctx.org_id |> draft(ctx.admin) |> with_arms(ctx.org_id)
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Experiments.start_experiment(armed, actor: system(), tenant: ctx.org_id)
     end
 
     test "the system may not edit, archive or delete an experiment", ctx do
@@ -182,7 +208,7 @@ defmodule KilnCMS.Experiments.SystemActorAuthorizationTest do
       variant =
         Experiments.create_variant!(
           %{experiment_id: experiment.id, name: "Sys", control: true},
-          actor: system(),
+          actor: operator(),
           tenant: ctx.org_id
         )
 
@@ -221,7 +247,7 @@ defmodule KilnCMS.Experiments.SystemActorAuthorizationTest do
       assert [%{impressions: 1, conversions: 1}] =
                Experiments.list_variant_days!(
                  query: [filter: [variant_id: variant_id]],
-                 actor: system(),
+                 actor: operator(),
                  tenant: ctx.org_id
                )
     end
@@ -251,7 +277,7 @@ defmodule KilnCMS.Experiments.SystemActorAuthorizationTest do
       assert [%{impressions: 1}] =
                Experiments.list_variant_days!(
                  query: [filter: [variant_id: treatment.id]],
-                 actor: system(),
+                 actor: operator(),
                  tenant: ctx.org_id
                )
 
@@ -291,7 +317,7 @@ defmodule KilnCMS.Experiments.SystemActorAuthorizationTest do
       assert [] =
                Experiments.list_variant_days!(
                  query: [filter: [variant_id: treatment.id]],
-                 actor: system(),
+                 actor: operator(),
                  tenant: ctx.org_id
                )
     end

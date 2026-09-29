@@ -59,13 +59,21 @@ defmodule KilnCMS.Federation.SiteFederation do
   # `mix kiln.federation enable|disable|rekey`, where a shell on the host is the
   # deployment's own authority. The settings form's `:save` and `:destroy` are
   # not admitted: editing the site's public identity stays an admin act.
+  # The federation paths (`KilnCMS.Federation.system/0`) read and stamp; only
+  # the operator's mix task switches federation or rotates the key (#1747).
   use KilnCMS.CMS.OrgSettings,
     domain: KilnCMS.Federation,
     table: "site_federation",
     accept: [:enabled, :display_name, :summary],
     read: :editor,
     update?: false,
-    system_actions: [:read, :record_delivery, :enable, :disable, :rekey]
+    system_actions: [
+      read: [:federation, :operator],
+      record_delivery: :federation,
+      enable: :operator,
+      disable: :operator,
+      rekey: :operator
+    ]
 
   actions do
     # Turn federation on, minting this site's permanent identity. Idempotent by

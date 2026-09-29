@@ -145,7 +145,7 @@ defmodule KilnCMS.CMS.FormSubmission do
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
       forbid_unless action(:create)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :forms}
     end
   end
 

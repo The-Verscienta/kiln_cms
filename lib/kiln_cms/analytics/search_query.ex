@@ -114,7 +114,7 @@ defmodule KilnCMS.Analytics.SearchQuery do
     # not admitted by default.
     policy action_type(:create) do
       forbid_unless action(:record)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :search}
     end
   end
 

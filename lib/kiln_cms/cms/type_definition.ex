@@ -174,7 +174,9 @@ defmodule KilnCMS.CMS.TypeDefinition do
     # the same, now written down. It is read-only — definitions are still
     # admin-only to write, through the bypass above.
     policy action_type(:read) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor,
+                    subsystem: [:cms_registry, :firing, :operator, :promotion]}
+
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 

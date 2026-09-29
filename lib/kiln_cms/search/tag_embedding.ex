@@ -136,12 +136,12 @@ defmodule KilnCMS.Search.TagEmbedding do
     # #1402: the system reader and the system writer are named here instead of
     # bypassing the block.
     policy action_type(:read) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :search}
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
     policy action_type([:create, :update, :destroy]) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :search}
       forbid_if always()
     end
   end

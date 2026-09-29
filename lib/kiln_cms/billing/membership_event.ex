@@ -99,7 +99,7 @@ defmodule KilnCMS.Billing.MembershipEvent do
     end
 
     policy action_type(:read) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: [:billing, :governance]}
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
@@ -110,7 +110,7 @@ defmodule KilnCMS.Billing.MembershipEvent do
     # GDPR erasure (`:anonymize_actor`), both of which now say so here (#1402)
     # rather than bypassing the block.
     policy action_type([:create, :update]) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :billing}
       forbid_if always()
     end
   end

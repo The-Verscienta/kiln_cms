@@ -99,7 +99,7 @@ defmodule KilnCMS.CMS.FormField do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
       authorize_if expr(form.active == true)
       forbid_unless action(:for_form)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :forms}
     end
 
     policy action_type([:create, :update, :destroy]) do

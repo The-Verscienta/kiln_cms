@@ -415,7 +415,7 @@ defmodule KilnCMS.CMS.ContentRelease do
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
       forbid_unless action(:read)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :releases}
     end
 
     # Composing a release is editor work.
@@ -432,7 +432,7 @@ defmodule KilnCMS.CMS.ContentRelease do
       # release is not stuck `:publishing` forever. Only `:abandon`: shipping
       # or scheduling stays an admin's decision.
       forbid_unless action(:abandon)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :releases}
     end
 
     # The go-live and rollback outcome writes. No person may call these — a
@@ -440,7 +440,7 @@ defmodule KilnCMS.CMS.ContentRelease do
     # what the missing admin bypass above prevents — so only the release
     # worker's system actor is admitted.
     policy action([:mark_published, :mark_failed, :mark_rolled_back, :mark_rollback_failed]) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :releases}
     end
 
     # Closing out is editor work UNTIL the release is somebody else's decision.

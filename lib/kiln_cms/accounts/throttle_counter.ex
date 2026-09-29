@@ -94,7 +94,7 @@ defmodule KilnCMS.Accounts.ThrottleCounter do
     end
 
     policy action(:prune) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :operator}
     end
 
     # Nobody reads a counter. A row names nothing on its own, but "this key was

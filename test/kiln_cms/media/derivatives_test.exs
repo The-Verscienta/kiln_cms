@@ -80,7 +80,7 @@ defmodule KilnCMS.Media.DerivativesTest do
 
   defp rows(item) do
     CMS.list_media_derivatives!(item.id,
-      actor: SystemActor.new(:test),
+      actor: SystemActor.new(:media_transforms),
       tenant: item.org_id
     )
   end

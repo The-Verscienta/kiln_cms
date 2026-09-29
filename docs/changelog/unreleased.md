@@ -1136,3 +1136,35 @@ carries the reasoning.
   import aim at hosts an operator or editor supplies, so a hostile origin is
   reachable. `mint` is transitive only, so this is a one-line `mix.lock`
   change.
+
+<a id="each-system-actor-grant-now-names-the-subsystems-it-admits"></a>
+
+- **Each system-actor grant now names the subsystems it admits.**
+  `KilnCMS.Checks.SystemActor` matched any `%KilnCMS.SystemActor{}`, and the
+  actor's `subsystem` was a label for logs. Since #1659 moved ~300 internal
+  call sites under the policies, each with its own subsystem actor, a grant
+  written for one worker was usable by all of them. Admitting publishing to
+  `Task :complete` also let the automation worker complete anyone's task, and
+  #1659 had to relax the test that said it could not. The check now takes a
+  required `subsystem:` option (an atom or a list), and a clause without one
+  fails the build. An optional `action:` narrows a clause when two actions in
+  it have different callers. `OrgSettings`' `system_actions:` is now a keyword
+  list of action to subsystems (`[read: :feeds]`); the old bare list fails the
+  build too. Every grant was tagged from its call sites, found both by grep
+  and by recording every admission during a full test run: a write goes only
+  to the subsystem that calls it, and a read clause names every subsystem that
+  reads through it. `docs/policy-matrix.md` gives each row a Subsystems
+  column. The new `KilnCMS.SystemActorScopeTest` asks Ash, for every action on
+  every granting resource and every subsystem label in the source, whether
+  that label is admitted, and fails unless the answer is exactly the row.
+  Widening a grant, dropping `action:`, narrowing one or moving a clause above
+  its `forbid_unless` each turns it red. `CMS.Bookkeeping` and
+  `CMS.Housekeeping` stay separate subsystems, because their grants barely
+  overlap. The automation-cannot-complete-tasks refusal is restored.
+  `mix kiln.experiment`'s writes, `mix kiln.federation`'s switches and the
+  auth-throttle `prune` are the operator's alone. On `NewsletterSend` the
+  automation may only open a campaign (and read the segment its rule names),
+  and the send pipeline (`:newsletter`) may only read and work one. No
+  user-visible behaviour
+  changes: every caller keeps exactly the actions it already made
+  ([#1747](https://github.com/The-Verscienta/kiln_cms/issues/1747)).

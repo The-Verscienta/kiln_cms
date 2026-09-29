@@ -106,7 +106,7 @@ defmodule KilnCMS.Newsletter.Segment do
     # to everyone including admins, and `KilnCMS.Newsletter.TierSync` is named
     # here (#1402) instead of reaching around the block.
     policy action([:for_tier, :sync_managed]) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :newsletter}
       forbid_if always()
     end
 
@@ -117,8 +117,13 @@ defmodule KilnCMS.Newsletter.Segment do
       # blanket admin policy applies to those two actions too, and to the read
       # `TierSync` makes to find the segments it manages. Narrowed here rather
       # than widened — managing a segment by hand stays an admin act.
+      #
+      # The "send as newsletter" automation also reads the segment its rule
+      # names, as the sender (`Newsletter.send_as_newsletter/2`, #1659) — the
+      # `:read` only (#1747), never the tier lifecycle.
       forbid_unless action([:read, :for_tier, :sync_managed])
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :newsletter}
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :automation, action: :read}
     end
   end
 

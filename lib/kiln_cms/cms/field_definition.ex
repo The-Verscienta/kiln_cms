@@ -162,7 +162,9 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # (`KilnCMS.Firing.CustomFields`). Read-only — defining a field stays admin,
     # through the policy below and the bypass above.
     policy action_type(:read) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor,
+                    subsystem: [:cms_bookkeeping, :cms_registry, :events, :firing, :schema_export]}
+
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 

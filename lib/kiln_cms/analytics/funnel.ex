@@ -58,7 +58,7 @@ defmodule KilnCMS.Analytics.Funnel do
       # resolving `--goal-funnel SLUG`. The primary `read` only — see
       # `KilnCMS.Analytics.system/1`.
       forbid_unless action(:read)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: [:experiments, :operator]}
     end
 
     # Defining funnels is an admin concern (like webhooks / forms).

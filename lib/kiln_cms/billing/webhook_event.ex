@@ -121,7 +121,7 @@ defmodule KilnCMS.Billing.WebhookEvent do
     policy action_type(:read) do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
       forbid_unless action(:read)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :billing}
     end
 
     # Closed to every person. The receiver records an event `authorize?: false`
@@ -130,7 +130,7 @@ defmodule KilnCMS.Billing.WebhookEvent do
     # not `:receive` an event or `:destroy` one.
     policy action_type([:create, :update, :destroy]) do
       forbid_unless action([:claim, :mark_processed, :mark_ignored, :mark_failed])
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :billing}
     end
   end
 

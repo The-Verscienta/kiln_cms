@@ -236,10 +236,12 @@ defmodule KilnCMS.Automation.RuleWorkerAuthorizationTest do
                )
     end
 
-    # `:complete` IS admitted since #1659 — a publish completes the record's
-    # open tasks as `CMS.Bookkeeping.system/0`, and the check matches any
-    # system actor — so the line is now drawn at editing and reopening.
-    test "it may not edit or reopen anyone's task" do
+    # `:complete` is admitted to publishing's bookkeeping actor
+    # (`CMS.Bookkeeping.system/0`, #1659), and to it alone: the grant names its
+    # subsystem (#1747), so automation, which opens tasks, still cannot close
+    # one. #1659 had to relax this test while the check matched any system
+    # actor.
+    test "it may not complete, edit or reopen anyone's task" do
       document = page()
       editor = user(:editor)
 
@@ -254,6 +256,9 @@ defmodule KilnCMS.Automation.RuleWorkerAuthorizationTest do
           actor: editor,
           tenant: org_id()
         )
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.complete_task(task, actor: system(), tenant: org_id())
 
       assert {:error, %Ash.Error.Forbidden{}} =
                CMS.update_task(task, %{note: "rewritten"}, actor: system(), tenant: org_id())

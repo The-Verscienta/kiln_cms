@@ -59,7 +59,7 @@ defmodule KilnCMS.Firing.SyncExposure do
     # which runs as the system actor. `authorize_if` rather than a bypass — see
     # `KilnCMS.Checks.SystemActor`.
     policy always() do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :sync}
       forbid_if always()
     end
   end

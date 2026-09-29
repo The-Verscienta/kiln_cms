@@ -39,7 +39,7 @@ defmodule KilnCMS.CMS.SiteLinkCheck do
     accept: [:external_enabled],
     read: :editor,
     update?: false,
-    system_actions: [:read, :record_sweep]
+    system_actions: [read: :links, record_sweep: :links]
 
   actions do
     # Written by `KilnCMS.Links.Sweep` when a run finishes, as the system

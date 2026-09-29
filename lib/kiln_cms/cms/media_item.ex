@@ -496,7 +496,7 @@ defmodule KilnCMS.CMS.MediaItem do
     # the admin bypass on purpose: an admin of one site must not list every
     # site's quarantined uploads through it.
     policy action(:quarantine_expired) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :media}
     end
 
     # Read-scoped API keys can never write media, and no key may delete it —
@@ -548,7 +548,7 @@ defmodule KilnCMS.CMS.MediaItem do
       authorize_if expr(^ref(:audience) == :public and ^ref(:quarantined) == false)
       authorize_if KilnCMS.CMS.Checks.MediaInAudience
       forbid_unless action([:read, :quarantine_expired])
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: [:media, :publish_gate]}
     end
 
     # Uploading and editing media metadata is reserved for editors (and admins
@@ -557,7 +557,7 @@ defmodule KilnCMS.CMS.MediaItem do
     policy action_type([:create, :update]) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
       forbid_unless action([:record_processing, :release_quarantine])
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :media}
     end
 
     # Deletes are admin-only (allowed by the bypass; denied here for all other
@@ -569,7 +569,7 @@ defmodule KilnCMS.CMS.MediaItem do
     # be referenced by content, and deleting them stays an admin act.
     policy action_type(:destroy) do
       forbid_unless action(:purge)
-      forbid_unless KilnCMS.Checks.SystemActor
+      forbid_unless {KilnCMS.Checks.SystemActor, subsystem: :media}
       authorize_if expr(quarantined == true)
     end
 
@@ -591,7 +591,7 @@ defmodule KilnCMS.CMS.MediaItem do
     # be publishing an unstripped upload. Recording what the pipeline derived
     # is likewise the pipeline's (an editor edits through `:update`).
     policy action([:release_quarantine, :record_processing]) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :media}
     end
   end
 

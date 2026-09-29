@@ -22,7 +22,7 @@ defmodule KilnCMS.CMS.FormSpamSettings do
     accept: [:keywords],
     read: :admin,
     admin_columns: [:keywords, :updated_at],
-    system_actions: [:read]
+    system_actions: [read: :cms_bookkeeping]
 
   attributes do
     # Case-insensitive substring matches against every free-text field value

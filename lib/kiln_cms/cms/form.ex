@@ -83,7 +83,7 @@ defmodule KilnCMS.CMS.Form do
       authorize_if action(:active_by_slug)
       authorize_if KilnCMS.CMS.Checks.OrgEditor
       forbid_unless action(:read)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :forms}
     end
 
     # Building forms is an admin concern (like webhooks / field definitions).

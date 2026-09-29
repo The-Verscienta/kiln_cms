@@ -78,7 +78,7 @@ defmodule KilnCMS.CMS.Consent do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
       forbid_unless action(:for_content)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :publish_gate}
     end
 
     # Deletion is admin-only (compliance records shouldn't be casually removed).

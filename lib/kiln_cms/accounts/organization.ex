@@ -151,7 +151,7 @@ defmodule KilnCMS.Accounts.Organization do
     policy action_type(:read) do
       authorize_if expr(exists(memberships, user_id == ^actor(:id)))
       forbid_unless action(:read)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :accounts}
     end
 
     # Provisioning/managing tenants is admin-only (covered by the bypass; explicit

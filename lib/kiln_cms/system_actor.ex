@@ -49,12 +49,14 @@ defmodule KilnCMS.SystemActor do
   `KilnCMS.Checks.SystemActor` clause. `test/kiln_cms/system_actor_test.exs`
   pins that.
 
-  `subsystem` is provenance, not permission: a label naming the caller, so an
-  actor in a log line, a telemetry span or an `Ash.Error.Forbidden` says which
-  worker was running. The check matches **any** system actor rather than a
-  named one — scope belongs to the resource and action that admit it, and
-  encoding the caller's identity a second time in the policy would let the two
-  drift apart.
+  `subsystem` names the caller, and since #1747 it is part of the grant: every
+  `KilnCMS.Checks.SystemActor` clause lists the subsystems it admits, so a
+  worker is authorized for what *its* code calls and nothing another worker
+  needed. The same label is what a log line, a telemetry span or an
+  `Ash.Error.Forbidden` shows, so a refusal names the worker that was running.
+  That the grant and the matrix row agree is a test
+  (`KilnCMS.SystemActorScopeTest`), so writing the caller down twice cannot
+  drift silently.
 
   ## Tenancy
 
@@ -73,9 +75,11 @@ defmodule KilnCMS.SystemActor do
   A system actor labelled with the subsystem running it.
 
   The label is free-form on purpose: an allowlist here would be a second
-  roster to keep in sync with the one that matters, which is the set of
-  resources whose policies admit `KilnCMS.Checks.SystemActor` (enumerated in
-  `docs/policy-matrix.md` and enforced by `KilnCMS.PolicyCoverageTest`).
+  roster to keep in sync with the one that matters, which is the subsystems
+  the `KilnCMS.Checks.SystemActor` clauses name (enumerated in
+  `docs/policy-matrix.md` and enforced by `KilnCMS.PolicyCoverageTest` and
+  `KilnCMS.SystemActorScopeTest`). A label no clause names is admitted
+  nowhere.
 
       iex> KilnCMS.SystemActor.new(:firing)
       %KilnCMS.SystemActor{subsystem: :firing}

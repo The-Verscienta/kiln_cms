@@ -25,9 +25,16 @@ defmodule KilnCMS.CMS.Housekeeping do
   something passes `authorize_with: :error`, so a refusal raises rather than
   filtering to "nothing".
 
-  `KilnCMS.Checks.SystemActor` matches *any* system actor — the label is
-  provenance only — so `system/1` takes the caller's subsystem label rather
-  than inventing one per module.
+  `system/1` takes the caller's subsystem label rather than inventing one for
+  this module, and the label is the grant (#1747): each clause of
+  `KilnCMS.Checks.SystemActor` names the subsystems it admits. The labels here
+  hold unrelated grants — `:releases` writes a release's outcome,
+  `:cms_registry` and `:promotion` read the field and type registry,
+  `:cms_settings` reads one settings row — so they stay distinct rather than
+  folding into one CMS actor, and stay distinct from
+  `KilnCMS.CMS.Bookkeeping`'s `:cms_bookkeeping`, whose writes (completing
+  tasks, pointing a record at its published version, redirects) none of them
+  may make.
   """
 
   # See `with_actor/2`.

@@ -152,7 +152,7 @@ defmodule KilnCMS.Billing.Settings do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
 
       forbid_unless action([:read, :init])
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :billing}
     end
   end
 

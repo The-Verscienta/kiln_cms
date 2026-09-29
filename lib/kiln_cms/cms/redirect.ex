@@ -68,7 +68,7 @@ defmodule KilnCMS.CMS.Redirect do
     policy action_type([:create, :update]) do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
       forbid_unless action(:create)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :cms_bookkeeping}
     end
 
     # Deleting is admin work too — except for the rows the content editor
@@ -80,7 +80,7 @@ defmodule KilnCMS.CMS.Redirect do
     # redirect squatting on the path a rename just made live again.
     policy action_type(:destroy) do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :cms_bookkeeping}
       authorize_if KilnCMS.CMS.Checks.WritesRedirectTarget
     end
   end
