@@ -440,6 +440,17 @@ carries the reasoning.
   in place of `post.published → send_email`, and a rule saved with no name is
   named by it.
 
+<a id="the-automation-builder-offers-ready-made-recipes"></a>
+
+- **The automation builder offers ready-made recipes.** Above the builder,
+  "Start from a recipe" lists six common rules, among them "Email me when
+  something is published" (addressed to the admin), "Create a task when
+  content goes stale" and "Announce new posts on social media". Picking one
+  fills in the form without saving anything. The admin reviews it, fills in
+  what the recipe can't know (such as which network), and adds the rule as
+  usual. The gallery is open while a site has no rules and folded once it has
+  some.
+
 <a id="console-lists-share-one-empty-state-long-settings-pages-get-a-table-of-contents"></a>
 
 - **Console lists share one empty state; long settings pages get a table of

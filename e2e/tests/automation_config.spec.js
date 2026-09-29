@@ -75,4 +75,36 @@ test.describe("automation rule settings", () => {
       animations: "disabled",
     });
   });
+
+  test("a recipe fills the builder, and the gallery keeps the admin's fold", async ({ page }, testInfo) => {
+    const gallery = page.locator("details#recipes");
+    const isOpen = () => gallery.evaluate(el => el.open);
+
+    // The server renders the gallery open only while the site has no rules,
+    // and the shared e2e database may or may not have some. Either way, the
+    // admin's own open/fold must survive a re-render that doesn't change the
+    // server's default. Opening it and then picking a recipe covers "server
+    // says folded"; folding it and then changing the form covers "server
+    // says open".
+    if (!(await isOpen())) await gallery.locator("summary").click();
+
+    await page.locator("#recipe-task-when-stale").click();
+    await expect(page.locator("#recipe-banner")).toContainText("Create a task when content goes stale");
+    await expect(page.locator("#rule_action_create_task")).toBeChecked();
+    await expect(page.locator("#rule_summary")).toContainText(
+      "When any content is past its review date, create a task for the author."
+    );
+    expect(await isOpen()).toBe(true);
+
+    await page.locator("details#recipes").screenshot({
+      path: testInfo.outputPath("automation-recipes.png"),
+      animations: "disabled",
+    });
+
+    await gallery.locator("summary").click();
+    expect(await isOpen()).toBe(false);
+    await page.locator("#rule_content_type").selectOption({ index: 1 });
+    await expect(page.locator("#rule_summary")).not.toContainText("any content");
+    expect(await isOpen()).toBe(false);
+  });
 });

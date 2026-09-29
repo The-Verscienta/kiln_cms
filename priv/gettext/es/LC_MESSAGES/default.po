@@ -1057,6 +1057,11 @@ msgstr "Una dirección mailto: o una URL https:// en la que los servicios push p
 msgid "A media library"
 msgstr "Una biblioteca de medios"
 
+#: lib/kiln_cms_web/live/automation_live/recipes.ex
+#, elixir-autogen, elixir-format
+msgid "A note in your inbox each time content goes live."
+msgstr "Una nota en tu bandeja cada vez que se publica contenido."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A number that can have decimals. For a weight, a measurement or a score."
@@ -1962,6 +1967,11 @@ msgstr "Anclado a"
 msgid "Announce it on Bluesky or Mastodon."
 msgstr "Anúncialo en Bluesky o Mastodon."
 
+#: lib/kiln_cms_web/live/automation_live/recipes.ex
+#, elixir-autogen, elixir-format
+msgid "Announce new posts on social media"
+msgstr "Anunciar las nuevas entradas en redes sociales"
+
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Announce published content on Bluesky or Mastodon. Add an account here, then add an Automation rule with the \"Social post\" reaction."
@@ -2794,6 +2804,11 @@ msgstr "Cambiar esto no mueve nada. Los archivos ya subidos se quedan donde se g
 msgid "Check again"
 msgstr "Comprobar de nuevo"
 
+#: lib/kiln_cms_web/live/automation_live/recipes.ex
+#, elixir-autogen, elixir-format
+msgid "Check for near-duplicates at review"
+msgstr "Buscar casi duplicados al revisar"
+
 #: lib/kiln_cms_web/live/link_report_live.ex
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -3029,6 +3044,11 @@ msgstr "Limpiar filtros"
 #, elixir-autogen, elixir-format
 msgid "Clear the cache"
 msgstr "Vaciar la caché"
+
+#: lib/kiln_cms_web/live/automation_live/recipes.ex
+#, elixir-autogen, elixir-format
+msgid "Clear the cache whenever published content changes."
+msgstr "Vacía la caché cada vez que cambia el contenido publicado."
 
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
@@ -3950,6 +3970,11 @@ msgstr "Crear una clave"
 #, elixir-autogen, elixir-format
 msgid "Create a task"
 msgstr "Crear una tarea"
+
+#: lib/kiln_cms_web/live/automation_live/recipes.ex
+#, elixir-autogen, elixir-format
+msgid "Create a task when content goes stale"
+msgstr "Crear una tarea cuando el contenido se queda anticuado"
 
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -5184,6 +5209,11 @@ msgstr "Envía una nota sobre el cambio a una dirección."
 #, elixir-autogen, elixir-format
 msgid "Email domains"
 msgstr "Dominios de correo"
+
+#: lib/kiln_cms_web/live/automation_live/recipes.ex
+#, elixir-autogen, elixir-format
+msgid "Email me when something is published"
+msgstr "Enviarme un correo cuando se publique algo"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -6910,6 +6940,11 @@ msgstr "Solo yo — publicar directamente"
 msgid "KILN_CONSOLE_HOST is unset, so the editor console answers on each organization's own host. Code an organization's admin adds to their site's head or footer runs on the same origin as the console, and can act as any editor who opens that site while signed in — a platform admin included."
 msgstr "KILN_CONSOLE_HOST no está definido, así que la consola de edición responde en el host propio de cada organización. El código que el administrador de una organización añade a la cabecera o al pie de su sitio se ejecuta en el mismo origen que la consola, y puede actuar como cualquier editor que abra ese sitio con la sesión iniciada, incluido un administrador de la plataforma."
 
+#: lib/kiln_cms_web/live/automation_live/recipes.ex
+#, elixir-autogen, elixir-format
+msgid "Keep the live site current"
+msgstr "Mantener al día el sitio publicado"
+
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
 msgid "Keep the site fresh"
@@ -7116,6 +7151,11 @@ msgstr "Últimas entradas."
 #, elixir-autogen, elixir-format
 msgid "Layout"
 msgstr "Diseño"
+
+#: lib/kiln_cms_web/live/automation_live/recipes.ex
+#, elixir-autogen, elixir-format
+msgid "Leave a comment when a draft covers ground already covered."
+msgstr "Deja un comentario cuando un borrador trata algo ya cubierto."
 
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #, elixir-autogen, elixir-format
@@ -7380,6 +7420,11 @@ msgstr "Nombre interno"
 #, elixir-autogen, elixir-format
 msgid "Mail"
 msgstr "Correo"
+
+#: lib/kiln_cms_web/live/automation_live/recipes.ex
+#, elixir-autogen, elixir-format
+msgid "Mail each published post as a newsletter."
+msgstr "Envía cada entrada publicada como boletín."
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
@@ -9317,6 +9362,11 @@ msgstr "Contraseña (otra vez)"
 msgid "Password changed."
 msgstr "Contraseña cambiada."
 
+#: lib/kiln_cms_web/live/automation_live/recipes.ex
+#, elixir-autogen, elixir-format
+msgid "Past its review date? It lands in the author's task list."
+msgstr "¿Pasó su fecha de revisión? Va a la lista de tareas del autor."
+
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "Past its unpublish date and still published"
@@ -9461,6 +9511,11 @@ msgstr "Elige primero un lanzamiento."
 msgid "Pick at least one content type."
 msgstr "Elija al menos un tipo de contenido."
 
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Pick one to fill in the form below — nothing is saved until you add the rule."
+msgstr "Elige una para rellenar el formulario de abajo; no se guarda nada hasta que añadas la regla."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Picture with alt text and caption"
@@ -9557,6 +9612,11 @@ msgstr "Texto de la publicación"
 #, elixir-autogen, elixir-format
 msgid "Post to"
 msgstr "Publicar en"
+
+#: lib/kiln_cms_web/live/automation_live/recipes.ex
+#, elixir-autogen, elixir-format
+msgid "Post to Bluesky or Mastodon when a post is published."
+msgstr "Publica en Bluesky o Mastodon cuando se publica una entrada."
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
@@ -11563,6 +11623,11 @@ msgstr "Envía contenido como XLIFF 2.0 y aplica el archivo que vuelve. Marca fi
 msgid "Send findings as"
 msgstr "Enviar los hallazgos como"
 
+#: lib/kiln_cms_web/live/automation_live/recipes.ex
+#, elixir-autogen, elixir-format
+msgid "Send new posts to subscribers"
+msgstr "Enviar las nuevas entradas a los suscriptores"
+
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
 msgid "Send newsletter"
@@ -12244,10 +12309,25 @@ msgstr "Iniciar"
 msgid "Start a discussion on this block"
 msgstr "Iniciar un debate en este bloque"
 
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Start from a recipe"
+msgstr "Empezar con una receta"
+
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Start over"
+msgstr "Empezar de nuevo"
+
 #: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
 #, elixir-autogen, elixir-format
 msgid "Start sending newsletters to %{email}?"
 msgstr "¿Empezar a enviar boletines a %{email}?"
+
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Started from “%{recipe}”. Change anything you like, then add the rule."
+msgstr "Empezaste con «%{recipe}». Cambia lo que quieras y luego añade la regla."
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/federation_live.ex

@@ -14,6 +14,7 @@ defmodule KilnCMSWeb.AutomationLive do
   alias KilnCMS.Newsletter
   alias KilnCMS.Social.Account
   alias KilnCMSWeb.AutomationLive.ConfigFields
+  alias KilnCMSWeb.AutomationLive.Recipes
   alias KilnCMSWeb.AutomationLive.Wording
   alias KilnCMSWeb.ContentEditor.Shared
 
@@ -30,6 +31,7 @@ defmodule KilnCMSWeb.AutomationLive do
        |> assign(:type_options, type_options(org))
        |> assign(:config_options, config_options(socket, actor, org))
        |> assign(:edit, nil)
+       |> assign(:recipe, nil)
        |> assign(:form, create_form(actor, org))
        |> load_rules()}
     else
@@ -52,12 +54,39 @@ defmodule KilnCMSWeb.AutomationLive do
         {:noreply,
          socket
          |> assign(:form, create_form(socket.assigns.actor, socket.assigns.current_org))
+         |> assign(:recipe, nil)
          |> load_rules()
          |> put_flash(:info, gettext("Rule added."))}
 
       {:error, form} ->
         {:noreply, assign(socket, :form, form)}
     end
+  end
+
+  # A recipe fills a fresh builder; it saves nothing. The settings a recipe
+  # leaves for the admin to choose (which network, which segment) aren't
+  # flagged red: `ConfigFields` holds its errors until the first save attempt,
+  # and a filled builder hasn't had one.
+  def handle_event("use_recipe", %{"id" => id}, socket) when is_binary(id) do
+    case Recipes.get(id, recipe_context(socket.assigns)) do
+      nil ->
+        {:noreply, socket}
+
+      recipe ->
+        form =
+          socket.assigns.actor
+          |> create_form(socket.assigns.current_org)
+          |> AshPhoenix.Form.validate(prepare_params(recipe.params))
+
+        {:noreply, socket |> assign(:form, form) |> assign(:recipe, recipe)}
+    end
+  end
+
+  def handle_event("clear_recipe", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:form, create_form(socket.assigns.actor, socket.assigns.current_org))
+     |> assign(:recipe, nil)}
   end
 
   def handle_event("edit", %{"id" => id}, socket) when is_binary(id) do
@@ -207,6 +236,13 @@ defmodule KilnCMSWeb.AutomationLive do
 
   defp blank?(value), do: not is_binary(value) or String.trim(value) == ""
 
+  defp recipe_context(%{current_user: user, type_options: types}) do
+    %{
+      email: user.email && to_string(user.email),
+      types: for({_label, value} <- types, value != "", do: value)
+    }
+  end
+
   # The settings inputs post strings under `rule[config]`; `ConfigFields.coerce/2`
   # makes them the typed map the selected action accepts. An action with no
   # settings (`reindex`, say) posts no config at all, which becomes `%{}`.
@@ -290,6 +326,8 @@ defmodule KilnCMSWeb.AutomationLive do
           </p>
         </div>
 
+        <.recipes recipes={Recipes.all(recipe_context(assigns))} open={@rules == []} />
+
         <section class="space-y-4">
           <h2 class="text-lg font-medium">{gettext("Add a rule")}</h2>
           <.form
@@ -299,6 +337,20 @@ defmodule KilnCMSWeb.AutomationLive do
             phx-submit="create"
             class="card card-pad space-y-4"
           >
+            <div
+              :if={@recipe}
+              id="recipe-banner"
+              class="flex items-center justify-between gap-3 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm"
+            >
+              <span>
+                {gettext("Started from “%{recipe}”. Change anything you like, then add the rule.",
+                  recipe: @recipe.title
+                )}
+              </span>
+              <button type="button" phx-click="clear_recipe" class="btn btn-sm btn-ghost shrink-0">
+                {gettext("Start over")}
+              </button>
+            </div>
             <.rule_fields
               form={@form}
               type_options={@type_options}
@@ -413,6 +465,50 @@ defmodule KilnCMSWeb.AutomationLive do
   end
 
   defp rule_summary(rule, names), do: Wording.summary(rule, names)
+
+  attr :recipes, :list, required: true
+  attr :open, :boolean, required: true
+
+  # The gallery of ready-made rules. Open while the site has no rules — the
+  # moment a starting point helps most — and folded away once it has some,
+  # still one click from reach.
+  defp recipes(assigns) do
+    ~H"""
+    <%!-- `open` is only re-sent when `@open` itself changes (the site's first
+         rule folds it), so an admin's own open/fold survives the re-renders
+         in between — picking a recipe included. --%>
+    <details id="recipes" class="group space-y-3" open={@open}>
+      <summary class="flex cursor-pointer list-none items-center gap-2 text-lg font-medium">
+        <.icon
+          name="hero-chevron-right"
+          class="size-4 text-base-content/60 transition-transform group-open:rotate-90"
+        />
+        {gettext("Start from a recipe")}
+      </summary>
+      <p class="text-sm text-base-content/70">
+        {gettext("Pick one to fill in the form below — nothing is saved until you add the rule.")}
+      </p>
+      <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        <button
+          :for={recipe <- @recipes}
+          type="button"
+          id={"recipe-#{recipe.id}"}
+          phx-click="use_recipe"
+          phx-value-id={recipe.id}
+          class="flex items-start gap-3 rounded-lg border border-base-content/15 bg-base-100 p-3 text-left transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          <span class="flex size-8 shrink-0 items-center justify-center rounded-md bg-base-200 text-base-content/70">
+            <.icon name={recipe.icon} class="size-4" />
+          </span>
+          <span class="min-w-0">
+            <span class="block text-sm font-medium">{recipe.title}</span>
+            <span class="block text-xs text-base-content/60">{recipe.description}</span>
+          </span>
+        </button>
+      </div>
+    </details>
+    """
+  end
 
   attr :form, :any, required: true
   attr :type_options, :list, required: true
