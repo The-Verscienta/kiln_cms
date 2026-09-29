@@ -9,15 +9,16 @@ defmodule KilnCMSWeb.ContentEditor.InspectorPreviewComponent do
 
   use KilnCMSWeb, :live_component
 
-  import KilnCMSWeb.ContentEditor.InspectorComponents, only: [preview_article: 1]
+  import KilnCMSWeb.ContentEditor.InspectorComponents,
+    only: [preview_article: 1, inspector_panel_attrs: 1]
 
   @impl true
   def render(assigns) do
     ~H"""
-    <div class={[@inspector_tab != :preview && "hidden"]}>
+    <div class={[@inspector_tab != :preview && "hidden"]} {inspector_panel_attrs(:preview)}>
       <p :if={@preview_html != []} class="mb-2 flex items-center gap-1.5 text-xs text-base-content/50">
         <.icon name="hero-cursor-arrow-rays" class="size-3.5" />
-        {gettext("Hover a block and click Edit to change it on the page.")}
+        {gettext("Hover a block and click Edit, or Tab to it, to change it on the page.")}
       </p>
       <%!-- Rendered with or without blocks: the title publishes too, so a
             titled draft with no blocks yet still previews as itself. --%>

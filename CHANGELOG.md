@@ -138,6 +138,10 @@ Every summary line below that was shortened links to its own entry there.
   its major.**
   ([#1544](https://github.com/The-Verscienta/kiln_cms/issues/1544) · [long form](docs/changelog/unreleased.md#the-release-images-latest-tag-moves-only-to-the-highest-final-release-and-from))
 
+- **The content editor's chrome is on the component kit: the inspector is a
+  keyboard-driven tab strip, and block controls show on focus and on touch.**
+  ([#1679](https://github.com/The-Verscienta/kiln_cms/issues/1679) · [long form](docs/changelog/unreleased.md#the-content-editors-chrome-is-on-the-component-kit))
+
 ### Fixed
 
 - **An SEO or accessibility finding below a fragment names, and jumps to, the
