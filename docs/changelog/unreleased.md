@@ -523,10 +523,12 @@ carries the reasoning.
   shows it, the comment notifier logs, the push sender logs the refusal
   (`notify/2` still never raises into the editorial action), and the push
   worker returns an error for Oban to retry instead of treating the device as
-  gone. The overdue stamp is the digest's dedupe, so it is now written before
-  the event fires, and the event fires only once it has landed. A stamp that
-  cannot be written leaves the task for the next run instead of re-firing the
-  event every day. The unread badge still counts a failed read as zero, since
+  gone. The overdue stamp is the digest's dedupe, so it is now an atomic claim
+  (a second run's stamp of the same task is refused) written in one
+  transaction with the event's dispatch: both commit or neither does. A stamp
+  that cannot be written leaves the task for the next run instead of re-firing
+  the event every day. One org's failure no longer stops the others, and a
+  retried digest job does not mail the same digest twice. The unread badge still counts a failed read as zero, since
   it is the reader's own inbox under their own actor, but the failure is now
   logged. Apart from `subscribe` and the stamp order, nothing changes while
   the grants are in place. (#1659)

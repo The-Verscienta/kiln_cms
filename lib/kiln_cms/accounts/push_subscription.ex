@@ -141,15 +141,16 @@ defmodule KilnCMS.Accounts.PushSubscription do
       authorize_if KilnCMS.Checks.SystemActor
     end
 
-    # The system actor prunes a device its push service reported gone.
+    # The system actor prunes a device its push service reported gone, and the
+    # site-key rotation sweeps a rotated key's devices. `:destroy` is the only
+    # destroy action; a second one must be named here before system code gets it.
     policy action_type(:destroy) do
       authorize_if expr(user_id == ^actor(:id))
-      forbid_unless action(:destroy)
       authorize_if KilnCMS.Checks.SystemActor
     end
 
     # A browser registers its own device: the row's `user_id` must be the
-    # actor's. The upsert still moves a row another account held on the same
+    # actor's (a platform admin is the one exception, through the bypass above). The upsert still moves a row another account held on the same
     # endpoint — the moduledoc's "second subscription is the true owner".
     policy action(:subscribe) do
       authorize_if relating_to_actor(:user)

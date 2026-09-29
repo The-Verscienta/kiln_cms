@@ -24,10 +24,15 @@ defmodule KilnCMS.Notifications.TaskDigestWorker do
   stop; both reads use `authorize_with: :error`, so a lost grant fails the job
   where Oban shows it instead.
 
-  The stamp is the dedupe, so it is written **before** the `task.overdue`
-  event fires, and the event fires only if the stamp landed. A stamp that
-  cannot be written leaves the task unmarked for tomorrow's run rather than
-  firing an event this run has no way to remember firing.
+  The stamp is the dedupe: it and the `task.overdue` dispatch run in one
+  transaction, stamp first, so they commit together or not at all. A dispatch
+  that raises rolls the stamp back and the retry fires it again; a stamp that
+  is refused (or that another run already wrote — the action only stamps an
+  unstamped row) fires nothing and leaves the task for tomorrow's run.
+
+  One org's failure does not stop the others: every org is attempted, and the
+  job fails afterwards if any did. Digest mails are unique per recipient and
+  content for the day, so the retry re-sends none that already went out.
   """
   use Oban.Worker, queue: :mail, max_attempts: 3
 
@@ -46,14 +51,24 @@ defmodule KilnCMS.Notifications.TaskDigestWorker do
     today = Date.utc_today()
     horizon = Date.add(today, @digest_window_days)
 
-    Enum.each(Accounts.list_org_ids(), &run_for_org(&1, today, horizon))
+    failed = Enum.reject(Accounts.list_org_ids(), &run_for_org(&1, horizon))
+
+    if failed != [] do
+      raise "task digest failed for orgs: #{Enum.join(failed, ", ")}"
+    end
 
     :ok
   end
 
-  defp run_for_org(org_id, today, horizon) do
+  # True when the org ran clean; a failure is logged and the next org still runs.
+  defp run_for_org(org_id, horizon) do
     send_digests(org_id, horizon)
-    fire_overdue_events(org_id, today)
+    fire_overdue_events(org_id)
+    true
+  rescue
+    error ->
+      Logger.error("task digest failed for org #{org_id}: #{Exception.message(error)}")
+      false
   end
 
   @doc false
@@ -90,7 +105,9 @@ defmodule KilnCMS.Notifications.TaskDigestWorker do
             }
           end)
       }
-      |> TaskMailWorker.new()
+      # Unique for the day: a retry of this job (an org after this one failed)
+      # must not mail the same digest twice.
+      |> TaskMailWorker.new(unique: [period: 20 * 60 * 60, fields: [:worker, :args]])
       |> Oban.insert!()
     end
   end
@@ -98,23 +115,43 @@ defmodule KilnCMS.Notifications.TaskDigestWorker do
   defp enqueue_digest([], _org_id), do: :ok
 
   @doc false
-  @spec fire_overdue_events(String.t(), Date.t()) :: :ok
-  def fire_overdue_events(org_id, _today) do
+  @spec fire_overdue_events(String.t()) :: :ok
+  def fire_overdue_events(org_id) do
     system = Notifications.system()
 
     CMS.list_newly_overdue_tasks!(actor: system, authorize_with: :error, tenant: org_id)
-    |> Enum.each(fn task ->
-      # Stamp first, fire second — see the moduledoc.
-      case CMS.mark_task_overdue_notified(task, %{}, actor: system, tenant: org_id) do
-        {:ok, _task} ->
+    |> Enum.each(&stamp_and_fire(&1, system, org_id))
+  end
+
+  # Stamp and fire in one transaction — see the moduledoc. The dispatch only
+  # enqueues jobs, and Oban inserts through the same repo, so a raise in it
+  # rolls the stamp back with everything it enqueued. The stamp's own Ash
+  # notifications are sent once the transaction has committed.
+  defp stamp_and_fire(task, system, org_id) do
+    KilnCMS.Repo.transaction(fn ->
+      case CMS.mark_task_overdue_notified(task, %{},
+             actor: system,
+             tenant: org_id,
+             return_notifications?: true
+           ) do
+        {:ok, _task, notifications} ->
           TaskNotifications.dispatch_overdue(task)
+          notifications
 
         {:error, error} ->
-          Logger.error(
-            "task.overdue not fired for task #{task.id}: could not record it as notified: " <>
-              Exception.message(error)
-          )
+          KilnCMS.Repo.rollback(error)
       end
     end)
+    |> case do
+      {:ok, notifications} ->
+        Ash.Notifier.notify(notifications)
+        :ok
+
+      {:error, error} ->
+        Logger.error(
+          "task.overdue not fired for task #{task.id}: could not record it as notified: " <>
+            Exception.message(error)
+        )
+    end
   end
 end

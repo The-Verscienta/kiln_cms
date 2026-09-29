@@ -173,14 +173,29 @@ defmodule KilnCMS.CMS.Task do
       change set_attribute(:overdue_notified_on, nil)
     end
 
-    # System action: the digest worker stamps this after dispatching a
-    # `task.overdue` automation event, so the same task doesn't re-fire that
-    # event every day it stays overdue (the email digest, by contrast, is
-    # SUPPOSED to repeat daily — see `KilnCMS.Notifications.TaskDigestWorker`).
+    # System action: the digest worker's claim on a `task.overdue` event, so
+    # the same task doesn't re-fire that event every day it stays overdue (the
+    # email digest, by contrast, is SUPPOSED to repeat daily — see
+    # `KilnCMS.Notifications.TaskDigestWorker`). Written in the same
+    # transaction as the dispatch, and atomic: the check reads the row in the
+    # UPDATE itself, so of two runs that both read the task as newly overdue,
+    # the second is refused rather than firing again (#1659).
     update :mark_overdue_notified do
       accept []
-      require_atomic? false
-      change set_attribute(:overdue_notified_on, &Date.utc_today/0)
+
+      change atomic_update(
+               :overdue_notified_on,
+               expr(
+                 if is_nil(overdue_notified_on) do
+                   today()
+                 else
+                   error(Ash.Error.Changes.InvalidAttribute, %{
+                     field: :overdue_notified_on,
+                     message: "task.overdue already claimed for this task"
+                   })
+                 end
+               )
+             )
     end
 
     read :for_content do
@@ -284,8 +299,9 @@ defmodule KilnCMS.CMS.Task do
     # findings as a task (#946) and probes for an open lifecycle review before
     # creating another. `AssigneeIsEditor` still vets the assignee — validations
     # run whatever the actor is — and `creator_id` stays unstamped, since the
-    # actor has no `:id`: `created_by_rule_id` is the provenance. `update` is
-    # NOT admitted: automation opens tasks, it does not complete them.
+    # actor has no `:id`: `created_by_rule_id` is the provenance. Of the
+    # updates, only the digest's overdue stamp is admitted (the policy below):
+    # automation opens tasks, it does not complete them.
     policy action_type([:create, :read]) do
       authorize_if KilnCMS.Checks.SystemActor
       authorize_if KilnCMS.CMS.Checks.OrgEditor
@@ -395,9 +411,9 @@ defmodule KilnCMS.CMS.Task do
       public? true
     end
 
-    # Set once the digest worker has dispatched a `task.overdue` automation
-    # event for this task, so it fires once rather than once per day — see
-    # `:mark_overdue_notified`. Cleared on reassignment/due-date change/reopen.
+    # Set when the digest worker claims the `task.overdue` event for this task,
+    # in the same transaction as its dispatch, so it fires once rather than
+    # once per day — see `:mark_overdue_notified`. Cleared on reassignment/due-date change/reopen.
     attribute :overdue_notified_on, :date do
       writable? false
       public? false

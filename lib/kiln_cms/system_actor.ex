@@ -83,4 +83,36 @@ defmodule KilnCMS.SystemActor do
   @spec new(atom()) :: t()
   def new(subsystem) when is_atom(subsystem) and not is_nil(subsystem),
     do: %__MODULE__{subsystem: subsystem}
+
+  @doc false
+  # The actor `subsystem` runs as: `new(subsystem)`, unless a test has swapped
+  # it for this process with `with_override/3` (#1659).
+  @spec current(atom()) :: t() | nil
+  def current(subsystem) do
+    case Process.get({__MODULE__, :override, subsystem}, :unset) do
+      :unset -> new(subsystem)
+      actor -> actor
+    end
+  end
+
+  @doc false
+  # Test seam (#1659): run `fun` with `current(subsystem)` answering `actor` in
+  # this process, so a test can take a subsystem's grant away and prove its
+  # reads fail CLOSED rather than filtering to `[]`. Process-local, and
+  # nothing on a request path calls it; code that could call it could equally
+  # pass any actor it liked.
+  @spec with_override(atom(), term(), (-> result)) :: result when result: term()
+  def with_override(subsystem, actor, fun) do
+    key = {__MODULE__, :override, subsystem}
+    previous = Process.get(key, :unset)
+    Process.put(key, actor)
+
+    try do
+      fun.()
+    after
+      if previous == :unset,
+        do: Process.delete(key),
+        else: Process.put(key, previous)
+    end
+  end
 end

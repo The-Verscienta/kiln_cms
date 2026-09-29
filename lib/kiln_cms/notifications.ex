@@ -105,9 +105,6 @@ defmodule KilnCMS.Notifications do
   @spec topic(String.t()) :: String.t()
   def topic(user_id) when is_binary(user_id), do: "notifications:user:#{user_id}"
 
-  # See `with_actor/2`.
-  @actor_override {__MODULE__, :actor_override}
-
   @doc """
   The actor the notifier's own reads and bookkeeping run as (#1659): a comment
   thread's participants, and the task digest's reads and its
@@ -122,12 +119,7 @@ defmodule KilnCMS.Notifications do
   #1402 argument).
   """
   @spec system() :: KilnCMS.SystemActor.t() | nil
-  def system do
-    case Process.get(@actor_override, :unset) do
-      :unset -> KilnCMS.SystemActor.new(:notifications)
-      actor -> actor
-    end
-  end
+  def system, do: KilnCMS.SystemActor.current(:notifications)
 
   @doc false
   # Test seam (#1659): run `fun` with `system/0` answering `actor` in this
@@ -136,18 +128,7 @@ defmodule KilnCMS.Notifications do
   # read answers. Process-local, and nothing on a request path calls it; code
   # that could call it could equally pass any actor it liked.
   @spec with_actor(term(), (-> result)) :: result when result: term()
-  def with_actor(actor, fun) do
-    previous = Process.get(@actor_override, :unset)
-    Process.put(@actor_override, actor)
-
-    try do
-      fun.()
-    after
-      if previous == :unset,
-        do: Process.delete(@actor_override),
-        else: Process.put(@actor_override, previous)
-    end
-  end
+  def with_actor(actor, fun), do: KilnCMS.SystemActor.with_override(:notifications, actor, fun)
 
   @doc """
   How many unread notifications `user` has on `org` — the bell's badge and the
@@ -355,13 +336,17 @@ defmodule KilnCMS.Notifications do
     mentioned = comment |> mentioned_users(record) |> reject_actor(actor)
     mentioned_ids = MapSet.new(mentioned, & &1.id)
 
-    Enum.each(mentioned, &enqueue_comment(:comment_mention, &1, comment, record, actor))
+    # Every recipient is resolved before anyone is notified: the thread read
+    # fails closed (#1659), and a raise mid-fan-out would reach the mentioned
+    # and silently skip the thread and the author.
+    audience =
+      comment
+      |> thread_audience(record)
+      |> reject_actor(actor)
+      |> Enum.reject(&MapSet.member?(mentioned_ids, &1.id))
 
-    comment
-    |> thread_audience(record)
-    |> reject_actor(actor)
-    |> Enum.reject(&MapSet.member?(mentioned_ids, &1.id))
-    |> Enum.each(&enqueue_comment(event, &1, comment, record, actor))
+    Enum.each(mentioned, &enqueue_comment(:comment_mention, &1, comment, record, actor))
+    Enum.each(audience, &enqueue_comment(event, &1, comment, record, actor))
   end
 
   # Never tell someone what they just did — and it is the ACTOR who did it, not

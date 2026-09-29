@@ -38,10 +38,11 @@ defmodule KilnCMS.CMS.Changes.DropVapidSubscriptions do
     # filter (this org, this key) is the whole grant.
     subscriptions = Accounts.push_subscriptions_bound_to_key!(org_id, key, authorize?: false)
 
-    Enum.each(subscriptions, fn subscription ->
-      # `authorize?: false`: each row came from the scoped read above; the
-      # destroy policy (owner only) would refuse the rotating admin.
-      Accounts.remove_push_subscription!(subscription, authorize?: false)
-    end)
+    # As `Push.system/0`, which the destroy policy admits (#1659): each row
+    # came from the scoped read above, and the rotating admin does not own it.
+    Enum.each(
+      subscriptions,
+      &Accounts.remove_push_subscription!(&1, actor: KilnCMS.Push.system())
+    )
   end
 end

@@ -105,6 +105,17 @@ defmodule KilnCMS.Notifications.SystemActorAuthorizationTest do
       refute is_nil(stamped.overdue_notified_on)
     end
 
+    test "the stamp is a claim: a second run's stamp of the same task is refused" do
+      task = overdue_task()
+      system = Notifications.system()
+
+      # Both runs read the task before either stamped it.
+      assert {:ok, _} = CMS.mark_task_overdue_notified(task, %{}, actor: system, tenant: tenant())
+
+      assert {:error, _} =
+               CMS.mark_task_overdue_notified(task, %{}, actor: system, tenant: tenant())
+    end
+
     test "…and no other update: it cannot complete, reopen or edit a task" do
       task = overdue_task()
       system = Notifications.system()
@@ -113,15 +124,25 @@ defmodule KilnCMS.Notifications.SystemActorAuthorizationTest do
                CMS.complete_task(task, %{}, actor: system, tenant: tenant())
 
       assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.reopen_task(task, %{}, actor: system, tenant: tenant())
+
+      assert {:error, %Ash.Error.Forbidden{}} =
                CMS.update_task(task, %{note: "rewritten"}, actor: system, tenant: tenant())
     end
 
     test "with the grant gone, the digest fails the job instead of finding nothing to do" do
       _task = overdue_task()
 
-      assert_raise Ash.Error.Forbidden, fn ->
-        Notifications.with_actor(nil, fn -> TaskDigestWorker.perform(%Oban.Job{args: %{}}) end)
-      end
+      log =
+        capture_log(fn ->
+          assert_raise RuntimeError, ~r/task digest failed for orgs/, fn ->
+            Notifications.with_actor(nil, fn ->
+              TaskDigestWorker.perform(%Oban.Job{args: %{}})
+            end)
+          end
+        end)
+
+      assert log =~ "Forbidden"
     end
 
     # Each read on its own: run in order, the first raise would hide a second
@@ -141,7 +162,7 @@ defmodule KilnCMS.Notifications.SystemActorAuthorizationTest do
 
       assert_raise Ash.Error.Forbidden, fn ->
         Notifications.with_actor(nil, fn ->
-          TaskDigestWorker.fire_overdue_events(tenant(), today())
+          TaskDigestWorker.fire_overdue_events(tenant())
         end)
       end
     end
@@ -224,7 +245,7 @@ defmodule KilnCMS.Notifications.SystemActorAuthorizationTest do
     end
 
     defp reload(subscription),
-      do: Ash.get!(Accounts.PushSubscription, subscription.id, authorize?: false)
+      do: Accounts.get_push_subscription!(subscription.id, authorize?: false)
 
     defp stub(status),
       do: Req.Test.stub(KilnCMS.Push, fn conn -> Plug.Conn.send_resp(conn, status, "") end)
@@ -355,8 +376,11 @@ defmodule KilnCMS.Notifications.SystemActorAuthorizationTest do
 
       capture_log(fn -> assert :ok = Worker.perform(job(subscription)) end)
 
-      assert {:error, _gone} =
-               Ash.get(Accounts.PushSubscription, subscription.id, authorize?: false)
+      assert {:ok, nil} =
+               Accounts.get_push_subscription(subscription.id,
+                 authorize?: false,
+                 not_found_error?: false
+               )
     end
 
     test "with the grant gone, the worker errors (and retries) rather than dropping the push" do

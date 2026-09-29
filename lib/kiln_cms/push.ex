@@ -82,9 +82,6 @@ defmodule KilnCMS.Push do
   # actually fire rather than being unreachable behind this truncation.
   @label_bytes 60
 
-  # See `with_actor/2`.
-  @actor_override {__MODULE__, :actor_override}
-
   @doc """
   The actor push delivery runs as: a `KilnCMS.SystemActor` labelled `:push`,
   admitted on `Accounts.PushSubscription` for `read`, `for_users`,
@@ -92,30 +89,14 @@ defmodule KilnCMS.Push do
   system actor").
   """
   @spec system() :: KilnCMS.SystemActor.t() | nil
-  def system do
-    case Process.get(@actor_override, :unset) do
-      :unset -> KilnCMS.SystemActor.new(:push)
-      actor -> actor
-    end
-  end
+  def system, do: KilnCMS.SystemActor.current(:push)
 
   @doc false
   # Test seam (#1659): run `fun` with `system/0` answering `actor` in this
   # process, so a test can take the grant away and prove the subscription
   # lookups fail closed. Process-local; nothing on a request path calls it.
   @spec with_actor(term(), (-> result)) :: result when result: term()
-  def with_actor(actor, fun) do
-    previous = Process.get(@actor_override, :unset)
-    Process.put(@actor_override, actor)
-
-    try do
-      fun.()
-    after
-      if previous == :unset,
-        do: Process.delete(@actor_override),
-        else: Process.put(@actor_override, previous)
-    end
-  end
+  def with_actor(actor, fun), do: KilnCMS.SystemActor.with_override(:push, actor, fun)
 
   @doc "Can a browser on the site `org` subscribe to push?"
   @spec enabled?(term()) :: boolean()
