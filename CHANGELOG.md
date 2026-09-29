@@ -144,6 +144,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **An empty heading line in a rich-text block is now visible in the editor —
+  dashed, labelled with its level — so the "heading has no text" finding has
+  something on screen to point at.** ([#1728](https://github.com/The-Verscienta/kiln_cms/pull/1728))
+
 - **An SEO or accessibility finding below a fragment names, and jumps to, the
   right block.**
   ([#1731](https://github.com/The-Verscienta/kiln_cms/pull/1731) · [long form](docs/changelog/unreleased.md#a-seo-or-accessibility-finding-below-a-fragment-names-and-jumps-to-the-right))
