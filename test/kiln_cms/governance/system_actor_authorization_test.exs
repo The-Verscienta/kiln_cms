@@ -118,11 +118,11 @@ defmodule KilnCMS.Governance.SystemActorAuthorizationTest do
       page = published_page()
       editor = user(:editor)
 
-      assert [] =
-               CMS.list_history_anchors_for!("page", page.id,
-                 actor: editor,
-                 tenant: page.org_id
-               )
+      # The interface fails closed, so a refused read raises rather than
+      # answering `[]`.
+      assert_raise Ash.Error.Forbidden, fn ->
+        CMS.list_history_anchors_for!("page", page.id, actor: editor, tenant: page.org_id)
+      end
 
       assert {:error, %Ash.Error.Forbidden{}} =
                CMS.create_history_anchor(
@@ -166,10 +166,7 @@ defmodule KilnCMS.Governance.SystemActorAuthorizationTest do
       assert checkpoint.id in ids(Checkpoint.unwitnessed(page.org_id))
 
       assert {:ok, %{id: id}} =
-               Ash.get(CMS.ChainCheckpoint, checkpoint.id,
-                 actor: system(),
-                 tenant: page.org_id
-               )
+               CMS.get_chain_checkpoint(checkpoint.id, actor: system(), tenant: page.org_id)
 
       assert id == checkpoint.id
     end
@@ -218,6 +215,16 @@ defmodule KilnCMS.Governance.SystemActorAuthorizationTest do
                )
     end
 
+    test "a checkpoint's plain read is not admitted, not even to the system actor",
+         %{page: page} do
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Ash.read(CMS.ChainCheckpoint,
+                 actor: system(),
+                 tenant: page.org_id,
+                 authorize_with: :error
+               )
+    end
+
     test "an entry's plain read is not admitted, not even to the system actor",
          %{page: page} do
       assert {:error, %Ash.Error.Forbidden{}} =
@@ -230,18 +237,23 @@ defmodule KilnCMS.Governance.SystemActorAuthorizationTest do
 
     test "a person below admin reads nothing", %{page: page, checkpoint: checkpoint} do
       editor = user(:editor)
+      opts = [actor: editor, tenant: page.org_id]
 
-      assert [] = CMS.list_chain_checkpoints!(actor: editor, tenant: page.org_id)
-      assert [] = CMS.list_unwitnessed_checkpoints!(actor: editor, tenant: page.org_id)
+      # Every read interface fails closed: refused raises, never `[]`.
+      assert_raise Ash.Error.Forbidden, fn -> CMS.list_chain_checkpoints!(opts) end
+      assert_raise Ash.Error.Forbidden, fn -> CMS.list_unwitnessed_checkpoints!(opts) end
 
-      assert [] =
-               CMS.list_checkpoint_entries_in!(checkpoint.id, actor: editor, tenant: page.org_id)
+      assert_raise Ash.Error.Forbidden, fn ->
+        CMS.get_chain_checkpoint!(checkpoint.id, opts)
+      end
 
-      assert [] =
-               CMS.list_checkpoint_entries_for!("page", page.id,
-                 actor: editor,
-                 tenant: page.org_id
-               )
+      assert_raise Ash.Error.Forbidden, fn ->
+        CMS.list_checkpoint_entries_in!(checkpoint.id, opts)
+      end
+
+      assert_raise Ash.Error.Forbidden, fn ->
+        CMS.list_checkpoint_entries_for!("page", page.id, opts)
+      end
 
       assert {:error, %Ash.Error.Forbidden{}} =
                CMS.record_checkpoint_publication(checkpoint, %{witness_error: "x"},

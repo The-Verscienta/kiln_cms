@@ -555,7 +555,8 @@ defmodule KilnCMS.Governance.Checkpoint do
 
   # ── reading ───────────────────────────────────────────────────────────────
   #
-  # Every read below runs as `system/0` with `authorize_with: :error` (#1659).
+  # Every read below runs as `system/0` through a `KilnCMS.CMS` interface that
+  # defaults to `authorize_with: :error` (#1659).
   # Each one backs a decision that a refused read, which filters to `[]`, would
   # answer the permissive way without saying so:
   #
@@ -583,12 +584,7 @@ defmodule KilnCMS.Governance.Checkpoint do
   def recent(org_id, limit \\ nil) do
     query = if limit, do: [limit: limit], else: []
 
-    CMS.list_chain_checkpoints!(
-      actor: system(),
-      authorize_with: :error,
-      tenant: org_id,
-      query: query
-    )
+    CMS.list_chain_checkpoints!(actor: system(), tenant: org_id, query: query)
   end
 
   @doc """
@@ -605,12 +601,7 @@ defmodule KilnCMS.Governance.Checkpoint do
   def unwitnessed(org_id, limit \\ nil) do
     query = if limit, do: [limit: limit], else: []
 
-    CMS.list_unwitnessed_checkpoints!(
-      actor: system(),
-      authorize_with: :error,
-      tenant: org_id,
-      query: query
-    )
+    CMS.list_unwitnessed_checkpoints!(actor: system(), tenant: org_id, query: query)
   end
 
   @doc """
@@ -626,11 +617,7 @@ defmodule KilnCMS.Governance.Checkpoint do
   @spec entries(struct(), Ash.UUID.t()) :: [struct()]
   def entries(checkpoint, org_id) do
     checkpoint.id
-    |> CMS.list_checkpoint_entries_in!(
-      actor: system(),
-      authorize_with: :error,
-      tenant: org_id
-    )
+    |> CMS.list_checkpoint_entries_in!(actor: system(), tenant: org_id)
     |> Enum.sort_by(&{&1.resource_type, &1.source_id})
   end
 
@@ -687,7 +674,6 @@ defmodule KilnCMS.Governance.Checkpoint do
   defp latest_entry(type, source_id, org_id) do
     CMS.list_checkpoint_entries_for!(type, source_id,
       actor: system(),
-      authorize_with: :error,
       tenant: org_id,
       query: [limit: 1]
     )
@@ -697,22 +683,24 @@ defmodule KilnCMS.Governance.Checkpoint do
   # Three checks, and each one closes a way of forging the other two. See the
   # module docs.
   defp attest(entry, org_id) do
-    case Ash.get(CMS.ChainCheckpoint, entry.checkpoint_id,
+    case CMS.get_chain_checkpoint(entry.checkpoint_id,
            actor: system(),
-           authorize_with: :error,
            tenant: org_id,
            not_found_error?: false
          ) do
       {:ok, %{} = checkpoint} ->
         attest_against(entry, checkpoint, org_id)
 
-      # Not found, or a read that failed. `authorize_with: :error` puts a
-      # refused grant in the second group rather than in `{:ok, nil}`, and
-      # either way the verdict stays red rather than reading as witnessed.
-      _ ->
+      {:ok, nil} ->
         {:tampered,
          "checkpoint entry #{entry.id} names checkpoint #{entry.checkpoint_id}, " <>
            "which no longer exists"}
+
+      # A refused or failed read is not a missing row. Raised, so
+      # `witnessed_head/3`'s rescue answers `:unreadable` (floored to
+      # `:unverifiable`) — an unreadable table is not evidence of tampering.
+      {:error, error} ->
+        raise Ash.Error.to_error_class(error)
     end
   end
 

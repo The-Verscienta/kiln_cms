@@ -100,10 +100,12 @@ defmodule KilnCMS.CMS.ChainCheckpoint do
     # resource. The checkpoint worker mints, publishes and re-reads checkpoints
     # as `KilnCMS.Governance.system/0` (#1659), named action by action inside
     # this policy rather than granted by a bypass, so an action added later
-    # (a `destroy`, say) is not admitted by default.
+    # (a `destroy`, say) is not admitted by default. The plain `read` is not
+    # admitted: verification loads a checkpoint through `get_chain_checkpoint`,
+    # which is `:recent` with a `get_by`.
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
-      forbid_unless action([:read, :recent, :unwitnessed, :create, :record_publication])
+      forbid_unless action([:recent, :unwitnessed, :create, :record_publication])
       authorize_if KilnCMS.Checks.SystemActor
     end
   end

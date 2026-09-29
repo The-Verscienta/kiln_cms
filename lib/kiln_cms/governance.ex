@@ -27,8 +27,10 @@ defmodule KilnCMS.Governance do
     * **consents and version rows** are the compliance and editorial history
       itself (the `PointInTime` argument).
 
-  Each of those is tenant-scoped and reached only from the admin-gated
-  dashboard.
+  Content, consent and version-row reads are tenant-scoped. `Accounts.User` is
+  global, so those two reads take no tenant: they are bounded only by the ids
+  on this org's own event and version rows. All of them are reached only from
+  the admin-gated dashboard.
   """
   require Ash.Query
 
@@ -107,6 +109,9 @@ defmodule KilnCMS.Governance do
   """
   @spec entitlement_index(Ash.UUID.t(), pos_integer()) :: [map()]
   def entitlement_index(org_id, limit \\ 100) do
+    # Not `Billing.recent_membership_events!/1`: `:recent` prepares its own
+    # `limit: 100`, and preparations run after an interface's `query:` options,
+    # so the caller's `limit` would be ignored. Limiting after `for_read` wins.
     events =
       KilnCMS.Billing.MembershipEvent
       |> Ash.Query.for_read(:recent, %{}, actor: system(), tenant: org_id)
@@ -161,10 +166,15 @@ defmodule KilnCMS.Governance do
       %{}
     else
       # Tier names are public (`MembershipTier`'s read policy is
-      # `authorize_if always()`), so this read needs no grant of its own.
-      KilnCMS.Billing.MembershipTier
-      |> Ash.Query.filter(id in ^ids)
-      |> Ash.read!(actor: system(), tenant: org_id)
+      # `authorize_if always()`), so this read needs no grant of its own. It
+      # still fails closed: if that policy is ever tightened, a refused read
+      # raises rather than blanking every tier on the trail.
+      KilnCMS.Billing.list_tiers!(
+        actor: system(),
+        authorize_with: :error,
+        tenant: org_id,
+        query: [filter: [id: [in: ids]]]
+      )
       |> Map.new(&{&1.id, &1.name})
     end
   end

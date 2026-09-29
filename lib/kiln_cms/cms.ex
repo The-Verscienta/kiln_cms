@@ -674,9 +674,19 @@ defmodule KilnCMS.CMS do
 
     # Signed, append-only anchors over a document's version history (#356,
     # tamper-evident half). Minted on publish; see KilnCMS.Governance.Chain.
+    #
+    # Every governance read below fails CLOSED by default (#1659):
+    # `authorize_with: :error` is set on the interface, not at each call site, so
+    # a refused read raises instead of filtering to `[]`, which would read as
+    # "never anchored", "never witnessed" or "nothing waiting". A caller that
+    # really wants row filtering must pass `authorize_with: :filter` and say why.
     resource KilnCMS.CMS.HistoryAnchor do
       define :create_history_anchor, action: :create
-      define :list_history_anchors_for, action: :for_content, args: [:resource_type, :source_id]
+
+      define :list_history_anchors_for,
+        action: :for_content,
+        args: [:resource_type, :source_id],
+        default_options: [authorize_with: :error]
     end
 
     # Org-wide, signed commitments to every document's head anchor (#666) — the
@@ -684,8 +694,22 @@ defmodule KilnCMS.CMS do
     # by KilnCMS.Governance.CheckpointWorker; see KilnCMS.Governance.Checkpoint.
     resource KilnCMS.CMS.ChainCheckpoint do
       define :create_chain_checkpoint, action: :create
-      define :list_chain_checkpoints, action: :recent
-      define :list_unwitnessed_checkpoints, action: :unwitnessed
+
+      define :list_chain_checkpoints,
+        action: :recent,
+        default_options: [authorize_with: :error]
+
+      # The checkpoint an entry names. On `:recent` rather than the primary
+      # `:read`, so the system actor's grant need not include the plain read.
+      define :get_chain_checkpoint,
+        action: :recent,
+        get_by: [:id],
+        default_options: [authorize_with: :error]
+
+      define :list_unwitnessed_checkpoints,
+        action: :unwitnessed,
+        default_options: [authorize_with: :error]
+
       define :record_checkpoint_publication, action: :record_publication
     end
 
@@ -694,9 +718,13 @@ defmodule KilnCMS.CMS do
 
       define :list_checkpoint_entries_for,
         action: :for_content,
-        args: [:resource_type, :source_id]
+        args: [:resource_type, :source_id],
+        default_options: [authorize_with: :error]
 
-      define :list_checkpoint_entries_in, action: :for_checkpoint, args: [:checkpoint_id]
+      define :list_checkpoint_entries_in,
+        action: :for_checkpoint,
+        args: [:checkpoint_id],
+        default_options: [authorize_with: :error]
     end
 
     # Admin-defined public forms (contact/signup/…) + their submissions.

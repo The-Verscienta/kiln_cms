@@ -469,12 +469,12 @@ defmodule KilnCMS.Governance.Chain do
     #
     # Fails closed (#1659): a refused read would filter to `[]`, the promotion
     # would re-key nothing, and the moved document's anchors would be left
-    # behind under the old type. `authorize_with: :error` raises instead, and
-    # the promotion's transaction rolls the move back.
+    # behind under the old type. The interface defaults to
+    # `authorize_with: :error` (`KilnCMS.CMS`), so it raises instead, and the
+    # promotion's transaction rolls the move back.
     anchors =
       CMS.list_history_anchors_for!(old_type, source_id,
         actor: KilnCMS.Governance.system(),
-        authorize_with: :error,
         tenant: org_id,
         query: [sort: [sequence: :asc]]
       )
@@ -1856,11 +1856,11 @@ defmodule KilnCMS.Governance.Chain do
     # Fails closed (#1659). Every answer this module gives starts here, and a
     # refused read would filter to `[]`, which is "never anchored": verification
     # would have no baseline to compare against, and the next mint would restart
-    # the chain at position 1 with no predecessor link. `authorize_with: :error`
-    # raises instead, so a lost grant is an error, not a clean-looking chain.
+    # the chain at position 1 with no predecessor link. The interface defaults to
+    # `authorize_with: :error` (`KilnCMS.CMS`), so a lost grant raises: an
+    # error, not a clean-looking chain.
     CMS.list_history_anchors_for!(type, source_id,
       actor: KilnCMS.Governance.system(),
-      authorize_with: :error,
       tenant: org_id,
       query: query
     )
