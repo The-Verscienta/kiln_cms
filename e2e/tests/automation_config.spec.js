@@ -107,4 +107,34 @@ test.describe("automation rule settings", () => {
     await expect(page.locator("#rule_summary")).not.toContainText("any content");
     expect(await isOpen()).toBe(false);
   });
+
+  test("try it renders the email the rule would send, in a sandboxed frame", async ({ page }, testInfo) => {
+    const cspViolations = [];
+    page.on("console", msg => {
+      if (/Content Security Policy/i.test(msg.text())) cspViolations.push(msg.text());
+    });
+
+    await form(page).getByText("Send an email", { exact: true }).click();
+    await page.locator("#rule_config_to").fill("team@example.com");
+    await page.getByRole("button", { name: "Try it on real content" }).click();
+
+    const picker = page.locator("#preview_record");
+    await expect(picker).toBeVisible();
+    await picker.selectOption({ index: 1 });
+
+    const effects = page.locator("#preview-effects");
+    await expect(effects).toContainText("Email to team@example.com");
+    await expect(effects).toContainText("Subject: Kiln automation:");
+
+    // The default body names the event; the frame must actually render it.
+    const frame = effects.locator("iframe");
+    await expect(frame).toHaveAttribute("sandbox", "");
+    await expect(page.frameLocator("#preview-effects iframe").locator("body")).toContainText("emitted");
+    expect(cspViolations).toEqual([]);
+
+    await page.locator("#try-it").screenshot({
+      path: testInfo.outputPath("automation-try-it.png"),
+      animations: "disabled",
+    });
+  });
 });

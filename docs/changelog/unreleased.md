@@ -440,9 +440,10 @@ carries the reasoning.
   in place of `post.published → send_email`, and a rule saved with no name is
   named by it.
 
-<a id="the-automation-builder-offers-ready-made-recipes"></a>
+<a id="the-automation-builder-offers-ready-made-recipes-and-a-preview-on-real-content"></a>
 
-- **The automation builder offers ready-made recipes.** Above the builder,
+- **The automation builder offers ready-made recipes and a preview on real
+  content.** Above the builder,
   "Start from a recipe" lists six common rules, among them "Email me when
   something is published" (addressed to the admin), "Create a task when
   content goes stale" and "Announce new posts on social media". Picking one
@@ -450,6 +451,16 @@ carries the reasoning.
   what the recipe can't know (such as which network), and adds the rule as
   usual. The gallery is open while a site has no rules and folded once it has
   some.
+
+  A final "Try it" step picks a recent piece of content and shows what the
+  rule would do to it: the email with its subject and body rendered, the
+  social post text and how many accounts would post it, the task with its
+  assignee, due date and note, or why nothing would happen (an open review
+  task already covers it, a newsletter would skip a translation). The preview
+  follows the rule as it is edited. It uses the same templating, defaults and
+  checks as the real reaction (`RuleWorker.preview/4`) and sends, posts and
+  saves nothing. The four AI reactions are described rather than run, since
+  running them costs what the rule costs and may send the page off-site.
 
 <a id="console-lists-share-one-empty-state-long-settings-pages-get-a-table-of-contents"></a>
 

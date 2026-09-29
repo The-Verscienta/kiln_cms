@@ -5,12 +5,14 @@ defmodule KilnCMSWeb.AutomationLiveTest do
   @moduletag :capture_log
 
   import Phoenix.LiveViewTest
+  import Swoosh.TestAssertions
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.User
   alias KilnCMS.Automation
   alias KilnCMS.Automation.Rule
   alias KilnCMS.Automation.Validations.ActionConfig
+  alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMSWeb.AutomationLive.ConfigFields
   alias KilnCMSWeb.AutomationLive.Recipes
@@ -205,6 +207,69 @@ defmodule KilnCMSWeb.AutomationLiveTest do
 
       refute has_element?(view, "#recipe-banner")
       assert has_element?(view, ~s(input#rule_action_send_email[checked]))
+    end
+
+    test "try it: picks a real page and shows what the rule would do, doing none of it",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      conn = log_in(conn, admin)
+
+      page =
+        CMS.create_page!(
+          %{title: "Tide tables", slug: "tide-tables-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+      refute has_element?(view, "#preview_record")
+
+      view |> element("#try-it button", "Try it on real content") |> render_click()
+      assert has_element?(view, ~s(#preview_record option[value="page:#{page.id}"]))
+
+      view
+      |> form("#new-rule-form",
+        rule: %{action: "send_email", config: %{to: "ed@example.com", subject: "Live: {{title}}"}},
+        preview_record: "page:#{page.id}"
+      )
+      |> render_change()
+
+      assert has_element?(view, "#preview-effects", "Email to ed@example.com")
+      assert has_element?(view, "#preview-effects", "Subject: Live: Tide tables")
+
+      # It follows the rule as it's edited.
+      view
+      |> form("#new-rule-form", rule: %{action: "reindex"}, preview_record: "page:#{page.id}")
+      |> render_change()
+
+      assert has_element?(view, "#preview-effects", "Regenerate this page's published version.")
+
+      # A preview: nothing sent, nothing saved.
+      assert_no_email_sent()
+      assert Automation.list_rules!(authorize?: false) == []
+    end
+
+    test "try it: task events can't be tried on content", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+      view |> element("#try-it button", "Try it on real content") |> render_click()
+
+      view |> form("#new-rule-form", rule: %{trigger_event: "assigned"}) |> render_change()
+
+      assert has_element?(view, "#try-it", "Task events can't be tried on a piece of content.")
+      refute has_element?(view, "#preview_record")
+    end
+
+    test "try it: a forged pick previews nothing and breaks nothing", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+      view |> element("#try-it button", "Try it on real content") |> render_click()
+
+      for forged <- ["page:#{Ash.UUID.generate()}", "nope", "page:not-a-uuid", "../etc:1"] do
+        render_change(view, "validate", %{
+          "rule" => %{"action" => "send_email", "trigger_event" => "published"},
+          "preview_record" => forged
+        })
+
+        refute has_element?(view, "#preview-effects")
+      end
     end
 
     test "every reaction is a card that says what it does", %{conn: conn} do

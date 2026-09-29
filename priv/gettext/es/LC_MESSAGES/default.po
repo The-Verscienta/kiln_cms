@@ -1092,6 +1092,11 @@ msgstr "Cada contenido pertenece a una sola categoría."
 msgid "A point on a map: latitude, longitude and zoom. For a shop, a venue or where a photo was taken."
 msgstr "Un punto en el mapa: latitud, longitud y zoom. Para una tienda, un local o el lugar donde se tomó una foto."
 
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "A preview. Nothing is sent, posted or saved."
+msgstr "Una vista previa. No se envía, publica ni guarda nada."
+
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "A publishing calendar"
@@ -1146,6 +1151,11 @@ msgstr "Un envío cuyo texto contenga cualquiera de estas palabras o frases se p
 #, elixir-autogen, elixir-format
 msgid "A takeover stops that mid-sentence: the field turns read-only on their side, and a note there says who took it."
 msgstr "Tomar el control lo interrumpe a media frase: el campo pasa a solo lectura en su lado y una nota allí indica quién lo tomó."
+
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "A task for %{person}, due %{date}"
+msgstr "Una tarea para %{person}, con vencimiento el %{date}"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -1929,6 +1939,11 @@ msgstr "Una exportación se limita a %{max} registros — %{over} filas seleccio
 msgid "An image or file from the media library. For a hero image, a logo or a PDF."
 msgstr "Una imagen o un archivo de la biblioteca de medios. Para una imagen principal, un logotipo o un PDF."
 
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "An open review task already covers this content."
+msgstr "Una tarea de revisión abierta ya cubre este contenido."
+
 #: lib/kiln_cms_web/controllers/error_html/500.html.heex
 #, elixir-autogen, elixir-format
 msgid "An unexpected error occurred on our side. It has been recorded — please try again in a moment."
@@ -2553,6 +2568,11 @@ msgstr "Difundir un evento interno"
 msgid "Broadcast channel"
 msgstr "Canal de difusión"
 
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "Broadcast “%{event}” on the internal channel %{topic}."
+msgstr "Difundir «%{event}» en el canal interno %{topic}."
+
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "Broken links"
@@ -2882,10 +2902,20 @@ msgstr "Elegir un archivo"
 msgid "Choose a network"
 msgstr "Elige una red"
 
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "Choose a network under “Post to” to see the post."
+msgstr "Elige una red en «Publicar en» para ver la publicación."
+
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #, elixir-autogen, elixir-format
 msgid "Choose a person"
 msgstr "Elige una persona"
+
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose a piece of content"
+msgstr "Elige un contenido"
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
@@ -3049,6 +3079,11 @@ msgstr "Vaciar la caché"
 #, elixir-autogen, elixir-format
 msgid "Clear the cache whenever published content changes."
 msgstr "Vacía la caché cada vez que cambia el contenido publicado."
+
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "Clear this page's cached copy, the sitemap and llms.txt."
+msgstr "Vaciar la copia en caché de esta página, el mapa del sitio y llms.txt."
 
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
@@ -5205,6 +5240,11 @@ msgstr "Correo electrónico"
 msgid "Email a note about the change to an address."
 msgstr "Envía una nota sobre el cambio a una dirección."
 
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "Email body preview"
+msgstr "Vista previa del cuerpo del correo"
+
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Email domains"
@@ -5229,6 +5269,16 @@ msgstr "Correo o nombre"
 #, elixir-autogen, elixir-format
 msgid "Email the submitter a confirmation"
 msgstr "Enviar un correo de confirmación al remitente"
+
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "Email to %{to}"
+msgstr "Correo a %{to}"
+
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "Email — add an address under “Send to”"
+msgstr "Correo: añade una dirección en «Enviar a»"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -7897,6 +7947,11 @@ msgstr "Requiere atención"
 msgid "Needs work"
 msgstr "Mejorable"
 
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "Neither the author nor the fallback assignee is an editor, so nobody could hold the task."
+msgstr "Ni el autor ni el responsable de respaldo es editor, así que nadie podría asumir la tarea."
+
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Network"
@@ -8002,10 +8057,20 @@ msgstr "Boletín"
 msgid "Newsletter queued for delivery."
 msgstr "Boletín puesto en cola para su envío."
 
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "Newsletter “%{subject}” to %{audience}"
+msgstr "Boletín «%{subject}» para %{audience}"
+
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "Newsletters"
 msgstr "Boletines"
+
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "Newsletters follow the default-language version, and this is a translation."
+msgstr "Los boletines siguen la versión en el idioma predeterminado, y esto es una traducción."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
@@ -8226,6 +8291,11 @@ msgstr "Ningún documento coincide con “%{query}”."
 #, elixir-autogen, elixir-format
 msgid "No documents yet — upload a PDF in the"
 msgstr "Aún no hay documentos: sube un PDF en la"
+
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "No enabled %{network} account — nothing would be posted. It would read:"
+msgstr "No hay ninguna cuenta de %{network} activada: no se publicaría nada. Diría:"
 
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
@@ -8735,6 +8805,11 @@ msgstr "No hay nada que configurar: esta acción se ejecuta en cuanto se activa 
 #, elixir-autogen, elixir-format
 msgid "Nothing unread."
 msgstr "Nada sin leer."
+
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing would happen."
+msgstr "No pasaría nada."
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -9613,6 +9688,13 @@ msgstr "Texto de la publicación"
 msgid "Post to"
 msgstr "Publicar en"
 
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "Post to %{count} %{network} account:"
+msgid_plural "Post to %{count} %{network} accounts:"
+msgstr[0] "Publicar en %{count} cuenta de %{network}:"
+msgstr[1] "Publicar en %{count} cuentas de %{network}:"
+
 #: lib/kiln_cms_web/live/automation_live/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "Post to Bluesky or Mastodon when a post is published."
@@ -10219,6 +10301,11 @@ msgstr "Regenerar también los slugs definidos manualmente"
 #, elixir-autogen, elixir-format
 msgid "Regenerate the published page from the latest content."
 msgstr "Regenera la página publicada con el contenido más reciente."
+
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "Regenerate this page's published version."
+msgstr "Regenerar la versión publicada de esta página."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -11022,6 +11109,11 @@ msgstr "Ejecuta una reacción cuando se publique, actualice o despublique conten
 msgid "Run it on your own servers"
 msgstr "Ejecútelo en sus propios servidores"
 
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "Run the analysis on this content and deliver what it finds. A preview doesn't run it: it costs what the real rule costs, and may send the page to an outside AI provider."
+msgstr "Ejecutar el análisis sobre este contenido y entregar lo que encuentre. La vista previa no lo ejecuta: cuesta lo mismo que la regla real y puede enviar la página a un proveedor de IA externo."
+
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
@@ -11492,6 +11584,11 @@ msgstr "Ver planes"
 #, elixir-autogen, elixir-format
 msgid "See what goes live when, and drag an item to reschedule it."
 msgstr "Vea qué se publica y cuándo, y arrastre un elemento para reprogramarlo."
+
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "See what this rule would do. Nothing is sent or saved."
+msgstr "Mira lo que haría esta regla. No se envía ni se guarda nada."
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
@@ -12469,6 +12566,11 @@ msgstr "Asunto (opcional: por defecto, el título de la entrada)"
 msgid "Subject line"
 msgstr "Asunto"
 
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "Subject: %{subject}"
+msgstr "Asunto: %{subject}"
+
 #: lib/kiln_cms_web/components/block_components.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -12734,6 +12836,11 @@ msgstr "Tarea creada en este bloque."
 #, elixir-autogen, elixir-format
 msgid "Task due"
 msgstr "Tarea vencida"
+
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Task events can't be tried on a piece of content."
+msgstr "Los eventos de tareas no se pueden probar con un contenido."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -13637,6 +13744,11 @@ msgstr "Hay un problema con tu envío"
 msgid "There isn't enough content yet to suggest metadata from."
 msgstr "Todavía no hay suficiente contenido para deducir metadatos."
 
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "There's no content of this type to try it on yet."
+msgstr "Aún no hay contenido de este tipo con el que probarla."
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "These addresses hard-bounced and are skipped on future sends. Remove one to let it receive mail again."
@@ -13871,6 +13983,11 @@ msgstr "Este enlace ya no es válido"
 msgid "This member already holds the highest tier on this site."
 msgstr "Este miembro ya tiene el nivel más alto en este sitio."
 
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "This one couldn't be previewed. The rule itself is unaffected."
+msgstr "No se pudo generar la vista previa. La regla no se ve afectada."
+
 #: lib/kiln_cms_web/controllers/content_html/teaser.html.heex
 #, elixir-autogen, elixir-format
 msgid "This one's for members"
@@ -13926,6 +14043,11 @@ msgstr "Este lanzamiento está lleno. Publícalo o mueve algunos elementos a otr
 #, elixir-autogen, elixir-format
 msgid "This release is nearly full (%{count} of %{cap})."
 msgstr "Este lanzamiento está casi lleno (%{count} de %{cap})."
+
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "This rule would:"
+msgstr "Esta regla:"
 
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
@@ -14273,6 +14395,21 @@ msgstr "Reintentar"
 #, elixir-autogen, elixir-format
 msgid "Try fewer or different words, or a screen name such as “webhooks”."
 msgstr "Prueba con menos palabras o con otras, o con el nombre de una pantalla como «webhooks»."
+
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Try it (optional)"
+msgstr "Pruébala (opcional)"
+
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Try it on"
+msgstr "Probar con"
+
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "Try it on real content"
+msgstr "Probar con contenido real"
 
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -15692,10 +15829,20 @@ msgstr "se añade justo antes de </body>"
 msgid "added just before </head>"
 msgstr "se añade justo antes de </head>"
 
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "all confirmed subscribers"
+msgstr "todos los suscriptores confirmados"
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "already in that state — will be skipped"
 msgstr "ya está en ese estado: se omitirá"
+
+#: lib/kiln_cms_web/live/automation_live/preview.ex
+#, elixir-autogen, elixir-format
+msgid "an editor"
+msgstr "un editor"
 
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format

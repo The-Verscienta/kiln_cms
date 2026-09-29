@@ -133,8 +133,9 @@ Every summary line below that was shortened links to its own entry there.
   sentence.**
   ([long form](docs/changelog/unreleased.md#the-automation-builder-reads-as-steps-and-says-each-rule-back-as-a-sentence))
 
-- **The automation builder offers ready-made recipes.**
-  ([long form](docs/changelog/unreleased.md#the-automation-builder-offers-ready-made-recipes))
+- **The automation builder offers ready-made recipes and a preview on real
+  content.**
+  ([long form](docs/changelog/unreleased.md#the-automation-builder-offers-ready-made-recipes-and-a-preview-on-real-content))
 
 - **Console lists share one empty state; long settings pages get a table of
   contents; screen crumbs point at their real parent.**

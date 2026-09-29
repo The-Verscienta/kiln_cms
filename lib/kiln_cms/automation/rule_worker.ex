@@ -154,16 +154,19 @@ defmodule KilnCMS.Automation.RuleWorker do
     send_rule_email(
       config,
       org_id,
-      render(config["subject"] || "Kiln automation: {{title}}", event, payload, :text),
-      render(config["body"] || default_body(), event, payload, :html)
+      email_subject(config, event, payload),
+      email_body(config, event, payload)
     )
   end
 
   defp run(%{action: :broadcast, config: config}, event, payload) do
     # Namespace the admin-supplied topic so a rule can't broadcast onto an
     # internal topic (e.g. "content_preview:…") and crash unrelated subscribers.
-    topic = "automation:" <> (config["topic"] || "automation")
-    Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic, {:automation_event, event, payload})
+    Phoenix.PubSub.broadcast(
+      KilnCMS.PubSub,
+      broadcast_topic(config),
+      {:automation_event, event, payload}
+    )
   end
 
   defp run(%{action: :invalidate_cache, org_id: org_id}, event, payload) do
@@ -1032,6 +1035,136 @@ defmodule KilnCMS.Automation.RuleWorker do
   defp default_body do
     "<p>The content <strong>{{title}}</strong> ({{type}}) emitted <em>{{event}}</em>.</p>"
   end
+
+  # Shared by `run/3` and `preview/4`, so the preview renders the mail the
+  # reaction sends and not a copy of it.
+  defp email_subject(config, event, payload),
+    do: render(config["subject"] || "Kiln automation: {{title}}", event, payload, :text)
+
+  defp email_body(config, event, payload),
+    do: render(config["body"] || default_body(), event, payload, :html)
+
+  defp broadcast_topic(config), do: "automation:" <> (config["topic"] || "automation")
+
+  # ── preview ──────────────────────────────────────────────────────────────
+
+  @typedoc """
+  One thing a rule would do, as `preview/4` describes it. Nothing in it has
+  happened: no mail is sent, no post made, no task written.
+  """
+  @type effect ::
+          {:email, %{to: String.t() | nil, subject: String.t(), body_html: String.t()}}
+          | {:broadcast, %{topic: String.t(), event: String.t()}}
+          | {:newsletter, %{subject: String.t(), segment_id: String.t() | nil}}
+          | {:social,
+             %{provider: String.t() | nil, accounts: non_neg_integer(), text: String.t() | nil}}
+          | {:task, %{assignee_id: String.t(), due_on: Date.t(), note: String.t()}}
+          | {:invalidate_cache, %{type: String.t() | nil, slug: String.t() | nil}}
+          | {:reindex, %{}}
+          | {:analysis, %{action: atom(), deliver_as: String.t()}}
+          | {:skipped, atom()}
+
+  @doc """
+  What `rule` would do if `event` fired for `record` — computed by the same
+  templating, defaults and assignee rules `perform/1` uses, with every side
+  effect left out.
+
+  `rule` is anything with `:action`, `:config` and `:org_id` (the builder's
+  unsaved draft included); `payload` is the event payload as the job would
+  carry it, JSON-shaped (`KilnCMS.CMS.ContentSerializer.to_map/1`, round-
+  tripped). `record` is the loaded document, which the social composer needs.
+
+  Deliberately not previewed: the four intelligence reactions report
+  `{:analysis, …}` without running — a similarity search or a model call on
+  every keystroke in the builder would spend what the rule spends, and
+  `suggest_metadata` may send the page off-site.
+
+  Sits beside `run/3` so a change to what a reaction does is made next to
+  the description of it.
+  """
+  @spec preview(map(), String.t(), map(), struct()) :: [effect()]
+  def preview(%{action: :send_email, config: config}, event, payload, _record) do
+    [
+      {:email,
+       %{
+         to: config["to"],
+         subject: email_subject(config, event, payload),
+         body_html: email_body(config, event, payload)
+       }}
+    ]
+  end
+
+  def preview(%{action: :broadcast, config: config}, event, _payload, _record),
+    do: [{:broadcast, %{topic: broadcast_topic(config), event: event}}]
+
+  def preview(%{action: :invalidate_cache}, event, payload, _record),
+    do: [{:invalidate_cache, %{type: event_type(event), slug: payload["slug"]}}]
+
+  def preview(%{action: :reindex}, _event, _payload, _record), do: [{:reindex, %{}}]
+
+  def preview(%{action: :newsletter, config: config}, event, _payload, record) do
+    case default_locale_only(record, event) do
+      :ok ->
+        [
+          {:newsletter,
+           %{subject: config["subject"] || record.title, segment_id: config["segment_id"]}}
+        ]
+
+      _skipped ->
+        [{:skipped, :non_default_locale}]
+    end
+  end
+
+  def preview(%{action: :social_post, config: config, org_id: org_id}, _event, _payload, record) do
+    provider = social_provider(config)
+
+    accounts =
+      if provider,
+        do:
+          KilnCMS.Social.accounts_for_provider!(provider, actor: system_actor(), tenant: org_id),
+        else: []
+
+    module = provider && KilnCMS.Social.Announcer.provider_module(provider)
+
+    text =
+      module &&
+        KilnCMS.Social.Composer.compose(
+          record,
+          KilnCMS.Social.canonical_url(record),
+          module.max_length(),
+          config["template"]
+        )
+
+    [
+      {:social,
+       %{provider: provider && to_string(provider), accounts: length(accounts), text: text}}
+    ]
+  end
+
+  def preview(%{action: :create_task, config: config, org_id: org_id}, event, payload, _record) do
+    # The same two guards `run/3` applies, in its order: an open review task
+    # already carries this content, or nobody can hold one.
+    with [] <- open_lifecycle_tasks(event_type(event), payload["id"], org_id),
+         {:ok, assignee_id} <- task_assignee(config, payload, org_id) do
+      [
+        {:task,
+         %{
+           assignee_id: assignee_id,
+           due_on: Date.add(Date.utc_today(), task_due_in_days(config)),
+           note: task_note(config, event, payload)
+         }}
+      ]
+    else
+      [_ | _] -> [{:skipped, :task_already_open}]
+      :error -> [{:skipped, :no_assignee}]
+    end
+  end
+
+  def preview(%{action: action, config: config}, _event, _payload, _record)
+      when action in [:flag_duplicates, :suggest_tags, :suggest_links, :suggest_metadata],
+      do: [{:analysis, %{action: action, deliver_as: config["deliver_as"] || "email"}}]
+
+  def preview(_rule, _event, _payload, _record), do: [{:skipped, :unknown_action}]
 
   @template_tokens ~w(title slug id type event)
 
