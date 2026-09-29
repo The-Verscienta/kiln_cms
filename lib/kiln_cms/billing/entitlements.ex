@@ -104,8 +104,7 @@ defmodule KilnCMS.Billing.Entitlements do
       preserved = Enum.reject(before, &(&1 in managed))
       desired = normalize(preserved ++ granted)
 
-      with {:ok, _user} <- write_user(user, before, desired),
-           :ok <- write_org_memberships(user, managed, by_org) do
+      with :ok <- persist(user, before, desired, managed, by_org) do
         {:ok,
          %{
            before: before,
@@ -116,6 +115,57 @@ defmodule KilnCMS.Billing.Entitlements do
       end
     end
   end
+
+  @doc false
+  # Every write of one recompute, all or nothing. Public only so a test can
+  # hand it an entitlement map the database will refuse (a missing org) and
+  # prove nothing half-applies; `recompute/1` is the only caller.
+  #
+  # A failed write used to be dropped — `create_missing/4` answered `:ok` to
+  # its own error — so a paying reader could be left without the per-org
+  # audience that `Scoping.audiences/2` actually reads, with `User.audiences`
+  # already rewritten beside it. Now any failed write rolls back the others
+  # and the recompute returns the error, so the membership transition around
+  # it rolls back too and Oban retries (#1659). Inside that transition's
+  # transaction this joins it; called on its own it is its own transaction.
+  @spec persist(Ash.Resource.record(), [atom()], [atom()], [atom()], %{
+          optional(Ash.UUID.t()) => [atom()]
+        }) :: :ok | {:error, term()}
+  def persist(user, before, desired, managed, by_org) do
+    KilnCMS.Repo.transaction(fn ->
+      with {:ok, _user} <- write_user(user, before, desired),
+           :ok <- write_org_memberships(user, managed, by_org) do
+        :ok
+      else
+        {:error, reason} -> KilnCMS.Repo.rollback(reason)
+      end
+    end)
+    |> case do
+      {:ok, :ok} ->
+        :ok
+
+      {:error, reason} ->
+        # Logged here, once, rather than at each write: a write that fails
+        # inside the database rolls back by throwing straight to this
+        # transaction, past any `{:error, _}` arm below it.
+        Logger.error(
+          "billing: entitlement recompute for user #{user.id} rolled back for a retry; " <>
+            "could not write the org membership on org #{inspect(failed_org(reason))}: " <>
+            inspect(reason)
+        )
+
+        {:error, reason}
+    end
+  end
+
+  # The org whose membership write failed, when the error carries it.
+  defp failed_org(%Ash.Changeset{resource: Accounts.OrgMembership} = changeset),
+    do:
+      Ash.Changeset.get_attribute(changeset, :organization_id) ||
+        changeset.data.organization_id
+
+  defp failed_org(%{changeset: %Ash.Changeset{} = changeset}), do: failed_org(changeset)
+  defp failed_org(_reason), do: nil
 
   @doc """
   The audiences billing owns: every audience claimed by any tier on the instance.
@@ -225,11 +275,21 @@ defmodule KilnCMS.Billing.Entitlements do
     # A bypass cannot be refused, so this cannot come back `[]` for want of a
     # grant — `[]` here really means "no memberships" (the legacy branch below).
     with {:ok, memberships} <- Accounts.list_memberships_for_user(user.id, authorize?: false),
-         {:ok, memberships} <- affiliate_legacy(user, memberships, by_org) do
-      Enum.each(memberships, &sync_existing(&1, managed, by_org))
+         {:ok, memberships} <- affiliate_legacy(user, memberships, by_org),
+         :ok <- each_ok(memberships, &sync_existing(&1, managed, by_org)) do
       create_missing(user.id, memberships, managed, by_org)
-      :ok
     end
+  end
+
+  # Stops at the first failed write and returns it. The transaction in
+  # `persist/5` undoes the ones before it.
+  defp each_ok(items, fun) do
+    Enum.reduce_while(items, :ok, fn item, :ok ->
+      case fun.(item) do
+        :ok -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
   end
 
   # A paying reader must never lose authoring access by paying (#1649). An
@@ -264,20 +324,27 @@ defmodule KilnCMS.Billing.Entitlements do
       # grant would be a standing write over every account's role and audiences
       # on every org (#1402). Only the audiences column is written, and only the
       # billing-managed part of it changes.
-      Accounts.update_org_membership(membership, %{audiences: desired}, authorize?: false)
+      case Accounts.update_org_membership(membership, %{audiences: desired}, authorize?: false) do
+        {:ok, _membership} -> :ok
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      :ok
     end
   end
 
   # An upsert that changes nothing on conflict: a concurrent recompute for the
   # same user may have created the row since `memberships` was read, and the
   # unique violation a plain insert would hit aborts the whole transition's
-  # transaction. The row comes back either way and is synced like an existing one.
+  # transaction. The row comes back either way (`{:ok, _}`, not an error) and is
+  # synced like an existing one. Any OTHER failure is an error: the reader paid
+  # on this org and would be left without its audience.
   defp create_missing(user_id, memberships, managed, by_org) do
     existing = MapSet.new(memberships, & &1.organization_id)
 
     by_org
     |> Enum.reject(fn {org_id, _audiences} -> MapSet.member?(existing, org_id) end)
-    |> Enum.each(fn {org_id, audiences} ->
+    |> each_ok(fn {org_id, audiences} ->
       # `authorize?: false`, same reason as `sync_existing/3`: always a
       # `:viewer` row for `user_id`, and an upsert that changes nothing on
       # conflict, so it can never overwrite a role.
@@ -295,7 +362,7 @@ defmodule KilnCMS.Billing.Entitlements do
              upsert_fields: []
            ) do
         {:ok, membership} -> sync_existing(membership, managed, by_org)
-        {:error, _reason} -> :ok
+        {:error, reason} -> {:error, reason}
       end
     end)
   end

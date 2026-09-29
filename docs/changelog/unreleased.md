@@ -495,6 +495,16 @@ carries the reasoning.
   claim retries instead of cancelling as "already claimed", and the settle
   stamps, whose results were discarded, now log when they fail.
 
+  The recompute's own writes are now all or nothing. A failed write of a
+  per-org membership used to be dropped: `create_missing` answered `:ok` to
+  its own error, and the sync of an existing row ignored its result. That
+  could leave a payer's `User.audiences` rewritten while the org membership
+  that access actually reads never got the audience. Every write of one
+  recompute now runs in one transaction. Any failure rolls the others back,
+  is logged with the user and org ids, and fails the membership transition,
+  so Oban retries it. A concurrent recompute's row is still not an error:
+  the upsert that meets it succeeds and changes nothing.
+
   The `User` and `OrgMembership` reads and writes in the recompute, and the
   account and content steps in `mix kiln.beta.round`, keep `authorize?: false`
   with a written reason. A system grant over either would be a standing power
