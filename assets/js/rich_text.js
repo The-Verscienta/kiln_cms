@@ -26,6 +26,7 @@ import TableHeader from "@tiptap/extension-table-header"
 import TableCell from "@tiptap/extension-table-cell"
 import {markdownPaste} from "./markdown_paste"
 import {ListDetect} from "./list_detect"
+import {EmptyHeadings} from "./empty_headings"
 
 // Tables (#475): StarterKit doesn't include them, so every editor mount adds
 // this set. Column resizing stays off in v1 — colwidths wouldn't survive the
@@ -777,7 +778,7 @@ export function mount(hook) {
   } else {
     buildEditor(
       hook,
-      [StarterKit, ...LINK_EXTENSIONS, ...TABLE_EXTENSIONS, ListDetect, ...bodyImageExtensions(hook)],
+      [StarterKit, ...LINK_EXTENSIONS, ...TABLE_EXTENSIONS, ListDetect, EmptyHeadings, ...bodyImageExtensions(hook)],
       hook.el.dataset.content || ""
     )
   }
@@ -809,6 +810,7 @@ async function mountCollab(hook, {token, topic, fragment}) {
     ...LINK_EXTENSIONS,
     ...TABLE_EXTENSIONS,
     ListDetect,
+    EmptyHeadings,
     ...bodyImageExtensions(hook),
     Collaboration.configure({document: handle.doc, field: fragment}),
     // Remote carets labeled with each collaborator's initials, in the same
@@ -844,7 +846,7 @@ export function mountInline(hook) {
 
   const editor = new Editor({
     element: hook.el,
-    extensions: [StarterKit, ...LINK_EXTENSIONS, ...TABLE_EXTENSIONS, ListDetect],
+    extensions: [StarterKit, ...LINK_EXTENSIONS, ...TABLE_EXTENSIONS, ListDetect, EmptyHeadings],
     content: seed,
     editorProps: {
       attributes: {

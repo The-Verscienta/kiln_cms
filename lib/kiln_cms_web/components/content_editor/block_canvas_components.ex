@@ -58,11 +58,11 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
         aria-haspopup="listbox"
         aria-expanded="false"
         aria-controls={"#{@id}-list"}
-        class="inline-flex items-center gap-1.5 rounded border border-base-content/20 px-3 py-1.5 text-sm hover:bg-base-200"
+        class="btn btn-sm btn-default"
       >
         <.icon name="hero-plus" class="size-4" />
         {gettext("Add block")}
-        <kbd class="ml-1 rounded border border-base-content/20 px-1.5 text-xs opacity-60">/</kbd>
+        <kbd class="kbd">/</kbd>
       </button>
       <button
         :if={@compact}
@@ -95,7 +95,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
             aria-expanded="true"
             aria-controls={"#{@id}-list"}
             placeholder={gettext("Filter blocks…")}
-            class="w-full rounded border border-base-content/20 bg-base-100 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+            class="field-input px-2 py-1 text-sm"
           />
         </div>
 
@@ -313,7 +313,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
           phx-value-field={@field}
           phx-value-item={i}
           aria-label={gettext("Remove row")}
-          class="mt-1 text-base-content/60 hover:text-error"
+          class="btn btn-ghost btn-sm mt-1 p-0.5 hover:text-error"
         >
           <.icon name="hero-x-mark" class="size-4" />
         </button>
@@ -326,7 +326,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
         phx-value-field={@field}
         class="btn btn-sm btn-default"
       >
-        <.icon name="hero-plus" class="mr-1 size-4" />{@add_label}
+        <.icon name="hero-plus" class="size-4" />{@add_label}
       </button>
     </div>
     """
@@ -414,7 +414,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
           phx-value-field="media"
           class="btn btn-sm btn-default"
         >
-          <.icon name="hero-film" class="mr-1 size-4" />{gettext("Choose video")}
+          <.icon name="hero-film" class="size-4" />{gettext("Choose video")}
         </button>
         <button
           type="button"
@@ -423,12 +423,12 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
           phx-value-field="poster"
           class="btn btn-sm btn-default"
         >
-          <.icon name="hero-photo" class="mr-1 size-4" />{if @bf[:poster_media_id].value in [
-                                                               nil,
-                                                               ""
-                                                             ],
-                                                             do: gettext("Add poster"),
-                                                             else: gettext("Change poster")}
+          <.icon name="hero-photo" class="size-4" />{if @bf[:poster_media_id].value in [
+                                                          nil,
+                                                          ""
+                                                        ],
+                                                        do: gettext("Add poster"),
+                                                        else: gettext("Change poster")}
         </button>
         <button
           type="button"
@@ -437,12 +437,12 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
           phx-value-field="captions"
           class="btn btn-sm btn-default"
         >
-          <.icon name="hero-language" class="mr-1 size-4" />{if @bf[:captions_media_id].value in [
-                                                                  nil,
-                                                                  ""
-                                                                ],
-                                                                do: gettext("Add captions"),
-                                                                else: gettext("Change captions")}
+          <.icon name="hero-language" class="size-4" />{if @bf[:captions_media_id].value in [
+                                                             nil,
+                                                             ""
+                                                           ],
+                                                           do: gettext("Add captions"),
+                                                           else: gettext("Change captions")}
         </button>
       </div>
 
@@ -519,7 +519,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
           phx-value-field="media"
           class="btn btn-sm btn-default"
         >
-          <.icon name="hero-musical-note" class="mr-1 size-4" />{gettext("Choose audio")}
+          <.icon name="hero-musical-note" class="size-4" />{gettext("Choose audio")}
         </button>
       </div>
 
@@ -602,7 +602,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
               placeholder={gettext("Alt text — leave blank only if decorative")}
               aria-label={gettext("Alt text")}
               phx-debounce="300"
-              class="w-full rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
+              class="field-input px-2 py-1 text-sm"
             />
             <input
               type="text"
@@ -611,7 +611,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
               placeholder={gettext("Caption (optional)")}
               aria-label={gettext("Caption")}
               phx-debounce="300"
-              class="w-full rounded border border-base-content/20 bg-transparent px-2 py-1 text-sm"
+              class="field-input px-2 py-1 text-sm"
             />
           </div>
 
@@ -624,7 +624,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
               phx-value-dir="up"
               disabled={i == 0}
               aria-label={gettext("Move image up")}
-              class="text-base-content/60 hover:text-base-content disabled:opacity-30"
+              class="btn btn-ghost btn-sm p-0.5"
             >
               <.icon name="hero-chevron-up" class="size-4" />
             </button>
@@ -636,7 +636,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
               phx-value-dir="down"
               disabled={i == length(@images) - 1}
               aria-label={gettext("Move image down")}
-              class="text-base-content/60 hover:text-base-content disabled:opacity-30"
+              class="btn btn-ghost btn-sm p-0.5"
             >
               <.icon name="hero-chevron-down" class="size-4" />
             </button>
@@ -646,7 +646,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
               phx-value-bid={@bid}
               phx-value-item={i}
               aria-label={gettext("Remove image")}
-              class="mt-1 text-base-content/60 hover:text-error"
+              class="btn btn-ghost btn-sm mt-1 p-0.5 hover:text-error"
             >
               <.icon name="hero-x-mark" class="size-4" />
             </button>
@@ -664,7 +664,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
         phx-value-bid={@bid}
         class="btn btn-sm btn-default"
       >
-        <.icon name="hero-photo" class="mr-1 size-4" />{gettext("Add images")}
+        <.icon name="hero-photo" class="size-4" />{gettext("Add images")}
       </button>
     </div>
     """
@@ -741,7 +741,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
           phx-value-id={@block_id}
           class="btn btn-sm btn-default"
         >
-          <.icon name="hero-plus" class="mr-1 size-4" />{gettext("Add column")}
+          <.icon name="hero-plus" class="size-4" />{gettext("Add column")}
         </button>
       </div>
 
@@ -768,7 +768,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
               phx-value-col={ci}
               data-confirm={gettext("Remove this column and its blocks?")}
               aria-label={gettext("Remove column")}
-              class="text-base-content/50 hover:text-error"
+              class="btn btn-ghost btn-sm p-0.5 hover:text-error"
             >
               <.icon name="hero-x-mark" class="size-4" />
             </button>
@@ -801,7 +801,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
                     phx-value-child={child["id"]}
                     aria-label={gettext("Move to canvas")}
                     title={gettext("Move to canvas")}
-                    class="text-base-content/50 hover:text-base-content"
+                    class="btn btn-ghost btn-sm p-0.5"
                   >
                     <.icon name="hero-arrow-left-start-on-rectangle" class="size-4" />
                   </button>
@@ -811,7 +811,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
                     phx-value-id={@block_id}
                     phx-value-child={child["id"]}
                     aria-label={gettext("Remove block")}
-                    class="text-base-content/50 hover:text-error"
+                    class="btn btn-ghost btn-sm p-0.5 hover:text-error"
                   >
                     <.icon name="hero-trash" class="size-4" />
                   </button>
@@ -829,7 +829,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
               phx-value-id={@block_id}
               phx-value-col={ci}
               phx-value-type={type}
-              class="rounded bg-base-200 px-2 py-1 text-xs hover:bg-base-300"
+              class="btn btn-sm btn-default px-2 py-1 text-xs"
             >
               + {dsl_label(type)}
             </button>
