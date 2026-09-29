@@ -22,10 +22,12 @@ are the ones editorial automation already uses.
 
 2. **Add a rule** at `/editor/automation`:
 
-   * **When** `published` (optionally scoped to one content type)
-   * **Do** `social_post`
-   * Config: `{"provider": "bluesky"}` or `{"provider": "mastodon"}`, plus an
-     optional `"template"`.
+   * **When this happens:** *is published* (optionally scoped to one content
+     type)
+   * **Do this:** *Post to social media*
+   * **Set it up:** pick the network under *Post to*; *Post text* is an
+     optional template. (Over the API, `config` is `{"provider": "bluesky"}`
+     or `{"provider": "mastodon"}`, plus an optional `"template"`.)
 
 ## What gets posted
 
