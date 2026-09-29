@@ -151,21 +151,57 @@ defmodule KilnCMS.CMS.Fragments do
     blocks = List.wrap(typed_blocks)
 
     if any_fragment?(blocks) do
-      # `:ancestry` seeds the cycle guard with the document being expanded, so a
-      # page embedding *itself* doesn't inline its own body a second time before
-      # the guard catches it one level down.
-      ancestry = opts |> Keyword.get(:ancestry, []) |> List.wrap()
-
-      key = {__MODULE__, make_ref()}
-      Process.put(key, %{targets: %{}, fetches: 0, emitted: 0})
-
-      try do
-        do_expand(blocks, org_id, Keyword.put(opts, :memo, key), ancestry, 0)
-      after
-        Process.delete(key)
-      end
+      with_memo(opts, &do_expand(blocks, org_id, &1, &2, 0))
     else
       blocks
+    end
+  end
+
+  @doc """
+  Like `expand/3`, but pairs every emitted block with the index of the
+  **top-level** block it came from.
+
+  An inlined fragment turns one host block into zero or more, so a position in
+  the expanded list no longer names a block the editor can scroll to. The
+  content editor's advisory findings ("block 3 has an empty heading") are
+  attributed through this instead: content inlined from a fragment reports
+  against the fragment's own card, and every block after it keeps its host
+  index. Dropping the indexes yields exactly `expand/3`'s list — one expansion
+  with one shared cache and node budget, not one per block.
+  """
+  @spec expand_indexed([struct()], Ash.UUID.t(), keyword()) :: [{struct(), non_neg_integer()}]
+  def expand_indexed(typed_blocks, org_id, opts \\ []) do
+    blocks = typed_blocks |> List.wrap() |> Enum.with_index()
+
+    if blocks |> Enum.map(&elem(&1, 0)) |> any_fragment?() do
+      with_memo(
+        opts,
+        &Enum.flat_map(blocks, fn indexed -> emit_indexed(indexed, org_id, &1, &2) end)
+      )
+    else
+      blocks
+    end
+  end
+
+  defp emit_indexed({block, index}, org_id, opts, ancestry) do
+    block |> emit(org_id, opts, ancestry, 0) |> Enum.map(&{&1, index})
+  end
+
+  # One per-call memo (target cache, fetch count, node budget) around `fun`.
+  #
+  # `:ancestry` seeds the cycle guard with the document being expanded, so a
+  # page embedding *itself* doesn't inline its own body a second time before
+  # the guard catches it one level down.
+  defp with_memo(opts, fun) do
+    ancestry = opts |> Keyword.get(:ancestry, []) |> List.wrap()
+
+    key = {__MODULE__, make_ref()}
+    Process.put(key, %{targets: %{}, fetches: 0, emitted: 0})
+
+    try do
+      fun.(Keyword.put(opts, :memo, key), ancestry)
+    after
+      Process.delete(key)
     end
   end
 

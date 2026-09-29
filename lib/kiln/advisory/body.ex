@@ -100,9 +100,21 @@ defmodule Kiln.Advisory.Body do
   keystroke.
   """
   @spec from_typed([struct()]) :: t()
-  def from_typed(typed) when is_list(typed) do
-    text = BlockText.to_text(typed)
-    walked = Enum.reduce(Enum.with_index(typed), empty_walk(), &walk_top_level/2)
+  def from_typed(typed) when is_list(typed), do: typed |> Enum.with_index() |> from_indexed()
+
+  @doc """
+  Like `from_typed/1`, but every block carries the index its findings report
+  against, as `{block, index}`.
+
+  For a list that is no longer one-to-one with the editor's cards: after
+  `KilnCMS.CMS.Fragments.expand_indexed/3` inlines a fragment, the blocks it
+  produced share the fragment's index and the blocks after it keep their own.
+  Positions in the expanded list would name the wrong card.
+  """
+  @spec from_indexed([{struct(), non_neg_integer()}]) :: t()
+  def from_indexed(indexed) when is_list(indexed) do
+    text = indexed |> Enum.map(&elem(&1, 0)) |> BlockText.to_text()
+    walked = Enum.reduce(indexed, empty_walk(), &walk_top_level/2)
 
     # Every accumulator is built by prepending, so each is reversed exactly once
     # here to restore document order.
