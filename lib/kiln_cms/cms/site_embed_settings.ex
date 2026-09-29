@@ -36,11 +36,16 @@ defmodule KilnCMS.CMS.SiteEmbedSettings do
   # The shared one-row-per-org shape comes from `KilnCMS.CMS.OrgSettings`
   # (#1080). Never delivered — this is the operator-facing half of a framing
   # policy, not content; no public read, unlike SiteBranding/SiteCodeInjection.
+  #
+  # The embed route reads it on a visitor's request as `KilnCMS.Forms.system/0`
+  # (#1659): `system_actions:` admits exactly `read`, never `:save`, so setting
+  # the default stays an admin act.
   use KilnCMS.CMS.OrgSettings,
     table: "site_embed_settings",
     accept: [:embed_origins],
     read: :admin,
-    admin_columns: [:embed_origins, :updated_at]
+    admin_columns: [:embed_origins, :updated_at],
+    system_actions: [:read]
 
   validations do
     # Same predicate `Form.embed_origins` uses — this list is concatenated

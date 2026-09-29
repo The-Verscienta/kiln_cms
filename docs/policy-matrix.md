@@ -147,6 +147,11 @@ ever be authorized by an explicit clause below.
 | `Search.BlockEmbedding` | `read`, `for_document`, `nearest`, `upsert`, `destroy` | The per-block semantic index. `Search.BlockIndexer` is the only writer it has ever had — rows are derived from the document's own block tree — and `BlockSearch` / `Search.Related` are its only readers. Whether a *caller* may see a hit is decided one tier up, when the matching document is hydrated under their own authorization. |
 | `Search.TagEmbedding` | `read`, `for_tags`, `nearest`, `upsert`, `destroy` | Same shape, for tag-name vectors: written by `TagEmbeddingWorker` and `Search.Related`, read by `Search.Related` only. |
 | `CMS.MediaDerivative` | all (`read`, `for_item`, `record`, `destroy`) | The bookkeeping row behind each cached on-the-fly image transform (`/media/:id/t/…`). `Media.Derivatives` is its only reader and writer: it counts an item's rows against the per-item budget, prunes the ones cut from a replaced original or around a moved focal point, and lists them for a purge. No person — admin included — reads or writes a row, and there is no API surface. Who may *see* a transform is decided on the `MediaItem`, by the transform controller's ordinary policy-checked read. |
+| `CMS.MediaItem` | `read`, `quarantine_expired`, `record_processing`, `release_quarantine`, and `purge` of a **quarantined** item only | The media pipeline, as `Media.system/0` (#1659). `VariantWorker`, `AVWorker` and `AVStripWorker` re-read the item they were enqueued for (quarantined or gated included) with `authorize_with: :error`, so a refused read fails the job rather than reading as "gone" — which for the strip would leave the upload quarantined until the reaper deleted it. The derived fields (dimensions, duration, variants, `variant_failures`) are written through `record_processing`, never `update`, so the grant cannot gate an item or touch its tags or editor fields; the strip releases through `release_quarantine`. `QuarantineReaper` scans every site through `quarantine_expired` (a `multitenancy :bypass` read, admitted to the system actor **alone** by a policy above the admin bypass) and purges; the strip purges an upload it refuses. `purge` is admitted only while `quarantined == true`: a released item may be in use, and deleting it stays an admin act. The regeneration scan reads with `authorize_with: :error` too. Not admitted: `update`, `update_metadata`, the soft `destroy`, `trashed`, `restore`, `increment_downloads`. |
+| `CMS.Form` | `read` **only** | The form pipeline, as `Forms.system/0` (#1659). `NotificationWorker` and `AutoresponderWorker` re-read the form a submission was queued for, active or not, with `authorize_with: :error`: a refused read would filter to "form deleted" and the mail would silently never go out, so it fails the job instead. Building, editing or deleting a form stays admin-only. |
+| `CMS.FormField` | `for_form` **only** | The submission is validated against the form's fields; `AutoresponderWorker` and the autoresponder-template validation (`Forms.Autoresponder.definitions_for_form/4`, which a seed or template instantiation reaches with no editor session) read them too. Every one runs with `authorize_with: :error`: a refused read filtering to `[]` would accept a submission with every required field skipped and every value dropped. |
+| `CMS.FormSubmission` | `create` **only** | `Forms.submit/3` records a visitor's validated submission. Visitor data stays admin eyes only: the system cannot read a submission back, re-mark it or delete one. The retention prune is the AshOban trigger's own bypass, unchanged. |
+| `CMS.SiteEmbedSettings` | `read` **only** | The embed route resolves a site's framing default on a visitor's request (`Forms.EmbedPolicy.org_default/1`). The read runs with `authorize_with: :error`, and a failure resolves to `[]` (same-origin only) — never to "no row", which would inherit the deployment's `EMBED_ORIGINS`, wider than a site default of `[]` it may be hiding. Saving the default stays an admin act. Granted through `OrgSettings`' `system_actions:` option. |
 | `Accounts.ThrottleCounter` | `prune` **only** | The shared auth budgets' counter table (#1619). The scheduled prune deletes closed windows; the actor is admitted so an operator or a test can run it by hand. The budgets are charged by `Accounts.ThrottleStore` in raw SQL before anyone is authenticated, so no action serves that path. `read` is forbidden to everyone, admin included: a count per hashed key is an oracle nobody needs. |
 | `Automation.Rule` | `read` **only** | `KilnCMS.Automation.RuleWorker` re-reads the rule it was enqueued for. Authoring a rule is still admin-only — the grant is narrowed to reads inside the existing `policy always()` with `forbid_unless action_type(:read)`. |
 | `Social.Account` | `read`, `enabled_for_provider` **only** | The announcer lists a provider's enabled accounts for a publish. Minting, editing or deleting the credentials for a site's public voice stays an admin act, narrowed the same way. |
@@ -251,6 +256,11 @@ managed through `manage_relationship` on the content resources).
 
 Media is world-readable because published content embeds it (featured images,
 inline assets).
+
+The pipeline's own actions — `record_processing`, `release_quarantine` and
+the cross-site `quarantine_expired` scan — are not an editor's. The first two
+are admin (bypass) or system actor only; `quarantine_expired` is the system
+actor's alone, admin included. See "The system actor" above.
 
 The routes that serve a media item's **bytes** — `/media/:id/download`,
 `/media/:id/stream` and the on-the-fly transforms at `/media/:id/t/:ops` — all
@@ -509,7 +519,8 @@ filters rather than raises.
 | read (`read`, `recent_for_form`), `create`, `destroy` | ✅ | ❌ | ❌ | ❌ |
 
 Submission contents are visitor-provided data, frequently PII — admin eyes only.
-The public submit path validates and then writes as the **system**.
+The public submit path validates and then writes as the **system**
+(`Forms.system/0`, admitted to `create` alone — see "The system actor").
 
 ## Redirects & branding — `Redirect`, `SiteBranding`
 

@@ -354,6 +354,10 @@ defmodule KilnCMS.CMS do
       define :restore_media_item, action: :restore
       define :purge_media_item, action: :purge
       define :increment_media_downloads, action: :increment_downloads
+      # The media pipeline's own writes and scan (#1659) — `KilnCMS.Media.system/0`.
+      define :record_media_processing, action: :record_processing
+      define :release_media_quarantine, action: :release_quarantine
+      define :list_expired_quarantined_media, action: :quarantine_expired, args: [:cutoff]
     end
 
     # Cached on-the-fly transforms (`KilnCMS.Media.Derivatives`) — system-only,
