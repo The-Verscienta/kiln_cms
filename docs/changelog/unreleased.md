@@ -485,6 +485,23 @@ carries the reasoning.
   the save refuses. The validation itself is unchanged and still refuses the
   string `"true"` for `allow_egress` from the API and seeds. Stored rules need
   no migration.
+
+<a id="the-automation-builder-reads-as-steps-and-says-each-rule-back-as-a-sentence"></a>
+
+- **The automation builder reads as steps and says each rule back as a
+  sentence.** `/editor/automation` is now four numbered steps: when (content
+  type and event, the events grouped as editorial changes, tasks and content
+  health), do this, set it up, and name it. The reaction dropdown is a set of
+  cards grouped as "Notify people", "Review & follow-up" and "Keep the site
+  fresh", each with an icon and a line on what it does. While the rule is
+  being built, the form shows it as one sentence, such as "When Post content
+  is published, email team@example.com." The rules list shows that sentence
+  in place of `post.published → send_email`, and a rule saved with no name is
+  named by it — and stays named by it through later edits, until someone types
+  a name of their own. A task event scoped to a content type (a rule that
+  could never fire) is called out in the builder instead of being worded as if
+  it worked.
+
 <a id="console-lists-share-one-empty-state-long-settings-pages-get-a-table-of-contents"></a>
 
 - **Console lists share one empty state; long settings pages get a table of
