@@ -683,26 +683,32 @@ defmodule KilnCMS.Governance.Checkpoint do
   # Three checks, and each one closes a way of forging the other two. See the
   # module docs.
   defp attest(entry, org_id) do
-    case CMS.get_chain_checkpoint(entry.checkpoint_id,
-           actor: system(),
-           tenant: org_id,
-           not_found_error?: false
-         ) do
-      {:ok, %{} = checkpoint} ->
-        attest_against(entry, checkpoint, org_id)
-
-      {:ok, nil} ->
-        {:tampered,
-         "checkpoint entry #{entry.id} names checkpoint #{entry.checkpoint_id}, " <>
-           "which no longer exists"}
-
-      # A refused or failed read is not a missing row. Raised, so
-      # `witnessed_head/3`'s rescue answers `:unreadable` (floored to
-      # `:unverifiable`) — an unreadable table is not evidence of tampering.
-      {:error, error} ->
-        raise Ash.Error.to_error_class(error)
-    end
+    entry.checkpoint_id
+    |> CMS.get_chain_checkpoint(actor: system(), tenant: org_id, not_found_error?: false)
+    |> attest_lookup(entry, org_id)
   end
+
+  @doc false
+  # The verdict for what the checkpoint lookup returned. Split out of `attest/2`
+  # so the refused-read branch can be tested directly: a live read cannot refuse
+  # the checkpoint while still admitting the entry that names it, since both run
+  # as the same system actor.
+  @spec attest_lookup({:ok, struct() | nil} | {:error, term()}, struct(), Ash.UUID.t()) ::
+          witnessed()
+  def attest_lookup({:ok, %{} = checkpoint}, entry, org_id),
+    do: attest_against(entry, checkpoint, org_id)
+
+  def attest_lookup({:ok, nil}, entry, _org_id) do
+    {:tampered,
+     "checkpoint entry #{entry.id} names checkpoint #{entry.checkpoint_id}, " <>
+       "which no longer exists"}
+  end
+
+  # A refused or failed read is not a missing row. Raised, so
+  # `witnessed_head/3`'s rescue answers `:unreadable` (floored to
+  # `:unverifiable`) — an unreadable table is not evidence of tampering.
+  def attest_lookup({:error, error}, _entry, _org_id),
+    do: raise(Ash.Error.to_error_class(error))
 
   defp attest_against(entry, checkpoint, org_id) do
     cond do

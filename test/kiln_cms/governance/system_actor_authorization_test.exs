@@ -272,6 +272,27 @@ defmodule KilnCMS.Governance.SystemActorAuthorizationTest do
       refused(do: Checkpoint.entries(checkpoint, page.org_id))
     end
 
+    test "a refused checkpoint lookup is not reported as a deleted checkpoint",
+         %{page: page, checkpoint: checkpoint} do
+      assert {:ok, entry, _attestation} = Checkpoint.witnessed_head("page", page.id, page.org_id)
+      forbidden = Ash.Error.to_error_class(%Ash.Error.Forbidden.Policy{})
+
+      # Refused: raises, which `witnessed_head/3` turns into `:unreadable`.
+      assert_raise Ash.Error.Forbidden, fn ->
+        Checkpoint.attest_lookup({:error, forbidden}, entry, page.org_id)
+      end
+
+      # Genuinely missing: still tampered.
+      assert {:tampered, reason} = Checkpoint.attest_lookup({:ok, nil}, entry, page.org_id)
+      assert reason =~ "no longer exists"
+
+      # Found: the ordinary attestation.
+      assert {:ok, %{id: id}, _attestation} =
+               Checkpoint.attest_lookup({:ok, checkpoint}, entry, page.org_id)
+
+      assert id == entry.id
+    end
+
     test "fails closed: without the grant a witnessed document is :unreadable, never :none",
          %{page: page} do
       assert :unreadable =
