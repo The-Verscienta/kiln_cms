@@ -5685,11 +5685,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     <%!-- Block chrome: the type label stays put; the controls
                           (drag / move / duplicate / delete) fade in on hover, and
                           on keyboard focus too so they stay reachable (#171):
-                          `focus-within` on the toolbar itself is what makes Tab
-                          onto a faded control reveal it, so keep it. They also
-                          show while the author works inside the card
-                          (`group-focus-within`), and always on a touch screen
-                          (`pointer-coarse`), which has no hover to reveal them
+                          `group-focus-within` covers both Tab onto a faded
+                          control (the toolbar is inside the card) and working
+                          anywhere else in the card. They always show on a touch
+                          screen (`pointer-coarse`), which has no hover to reveal them
                           (#1679). Kit ghost buttons, so each control draws the
                           kit's focus ring. --%>
                     <div class="mb-2 flex items-center justify-between gap-3">
@@ -5699,7 +5698,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       <div
                         role="group"
                         aria-label={gettext("Block actions")}
-                        class="flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100"
+                        class="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100"
                       >
                         <span
                           data-drag-handle
@@ -5715,7 +5714,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           phx-value-dir="up"
                           disabled={bf.index == 0}
                           aria-label={gettext("Move block up")}
-                          class="btn btn-ghost btn-sm p-1 disabled:hover:bg-transparent"
+                          class="btn btn-ghost btn-sm p-1"
                         >
                           <.icon name="hero-chevron-up" class="size-4" />
                         </button>
@@ -5726,7 +5725,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           phx-value-dir="down"
                           disabled={bf.index == blocks_count(@form) - 1}
                           aria-label={gettext("Move block down")}
-                          class="btn btn-ghost btn-sm p-1 disabled:hover:bg-transparent"
+                          class="btn btn-ghost btn-sm p-1"
                         >
                           <.icon name="hero-chevron-down" class="size-4" />
                         </button>

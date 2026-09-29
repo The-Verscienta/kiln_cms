@@ -110,9 +110,12 @@ written as a function component or a raw `class="…"` in a template.
   media Library/Trash switch. When the tabs switch panels on the same page (the
   Form Builder's sections, the editor's inspector), use the full ARIA tabs
   pattern: `role="tablist"` + `phx-hook="TabKeys"` (Left/Right/Home/End, from
-  `assets/js/tab_keys.js`), `role="tab"` with `aria-controls`, `tabindex="0"`
-  on the selected tab and `-1` on the rest, and `role="tabpanel"` +
-  `aria-labelledby` on the panel.
+  `assets/js/tab_keys.js`), `role="tab"`, `tabindex="0"` on the selected tab
+  and `-1` on the rest, and `role="tabpanel"` + `aria-labelledby` +
+  `tabindex="0"` on the panel. `aria-controls` goes only on a tab whose panel
+  is in the DOM: the inspector keeps all three panels mounted, so every tab
+  carries it; the Form Builder mounts only the selected section, so only the
+  selected tab does.
 - **Tables** — `.table` on a raw `<table>` for consistent header/cell/row
   styling (+ `.table-zebra` for stripes). Cells keep their own alignment / width
   / colour utilities; `.table` owns padding, borders and the header treatment.

@@ -8,7 +8,7 @@ defmodule KilnCMSWeb.ContentEditorChromeKitTest do
       panel, every panel stays mounted (so every `aria-controls` resolves),
       and only the selected tab is in the Tab order.
     * The block chrome stays keyboard-reachable: the controls fade in on
-      `focus-within`, not only on hover.
+      `group-focus-within`, not only on hover.
     * The page actions keep their accessible names when they fold to icons.
 
   The arrow keys themselves live in `assets/js/tab_keys.js`, which
@@ -86,7 +86,7 @@ defmodule KilnCMSWeb.ContentEditorChromeKitTest do
         # aria-controls points at a real element.
         assert has_element?(
                  lv,
-                 ~s(#inspector-panel-#{tab}[role="tabpanel"][aria-labelledby="inspector-tab-#{tab}"])
+                 ~s(#inspector-panel-#{tab}[role="tabpanel"][aria-labelledby="inspector-tab-#{tab}"][tabindex="0"])
                )
       end
     end
@@ -124,10 +124,9 @@ defmodule KilnCMSWeb.ContentEditorChromeKitTest do
 
       classes = String.split(class)
 
-      # `focus-within` on the toolbar is what makes Tab onto a faded control
-      # reveal it (#171); the rest widen when it shows, never narrow it.
+      # `group-focus-within` is what makes Tab onto a faded control reveal it
+      # (#171) — the toolbar is inside the card; the rest widen when it shows.
       assert "opacity-0" in classes
-      assert "focus-within:opacity-100" in classes
       assert "group-hover:opacity-100" in classes
       assert "group-focus-within:opacity-100" in classes
       assert "pointer-coarse:opacity-100" in classes

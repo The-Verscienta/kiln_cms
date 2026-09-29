@@ -212,8 +212,8 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
   # (`KilnCMSWeb.AdvisoryComponents`) so the chip and the section it scrolls to
   # can never disagree about what colour this document is.
   defp a11y_chip_class(:good), do: "bg-success/15 text-success-ink hover:bg-success/25"
-  defp a11y_chip_class(:ok), do: "bg-warning/15 text-warning-ink hover:bg-warning/25"
-  defp a11y_chip_class(:poor), do: "bg-error/15 text-error-ink hover:bg-error/25"
+  defp a11y_chip_class(:ok), do: "bg-warning/20 text-warning-ink hover:bg-warning/30"
+  defp a11y_chip_class(:poor), do: "bg-error/12 text-error-ink hover:bg-error/20"
 
   defp a11y_chip_icon(:good), do: "hero-check-circle"
   defp a11y_chip_icon(_grade), do: "hero-exclamation-circle"

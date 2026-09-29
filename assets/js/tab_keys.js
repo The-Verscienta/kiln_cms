@@ -15,6 +15,9 @@
 export const TabKeys = {
   mounted() {
     this.el.addEventListener("keydown", e => {
+      // A modified chord is the browser's or the OS's (Alt+Left is Back),
+      // not a tab move.
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
       const tabs = Array.from(this.el.querySelectorAll('[role="tab"]'))
       const i = tabs.indexOf(document.activeElement)
       if (i === -1) return
