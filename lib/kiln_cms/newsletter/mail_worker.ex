@@ -29,6 +29,8 @@ defmodule KilnCMS.Newsletter.MailWorker do
 
   import Swoosh.Email
 
+  require Logger
+
   alias KilnCMS.Mail
   alias KilnCMS.Newsletter
 
@@ -43,32 +45,33 @@ defmodule KilnCMS.Newsletter.MailWorker do
       when is_binary(tenant) do
     # Strict tenancy (#419): the per-recipient job carries the campaign's org
     # (enqueued by SendWorker).
-    send =
-      Newsletter.get_send!(send_id, authorize?: false, not_found_error?: false, tenant: tenant)
+    #
+    # Both reads run as `Newsletter.system/0` (#1659) and fail CLOSED. Under
+    # the filter a refused read answers `nil`, and `nil` cancels the job as
+    # "not found"; the job is `unique` over every state, so a cancelled
+    # recipient is never re-enqueued and never mailed. `authorize_with:
+    # :error` makes a lost grant a logged retry instead.
+    with {:ok, send} <- fetch("send", send_id, &Newsletter.get_send(&1, lookup_opts(tenant))),
+         {:ok, subscriber} <-
+           fetch("subscriber", subscriber_id, &Newsletter.get_subscriber(&1, lookup_opts(tenant))) do
+      cond do
+        is_nil(send) ->
+          {:cancel, "newsletter send #{send_id} not found"}
 
-    subscriber =
-      Newsletter.get_subscriber!(subscriber_id,
-        authorize?: false,
-        not_found_error?: false,
-        tenant: tenant
-      )
+        is_nil(subscriber) ->
+          {:cancel, "subscriber #{subscriber_id} not found"}
 
-    cond do
-      is_nil(send) ->
-        {:cancel, "newsletter send #{send_id} not found"}
+        subscriber.status != :confirmed ->
+          {:cancel, "subscriber not confirmed (#{subscriber.status})"}
 
-      is_nil(subscriber) ->
-        {:cancel, "subscriber #{subscriber_id} not found"}
+        # The instance-wide list, and this site's own relay's list (#1562).
+        # Raises if either list cannot be read (#1659), which retries the job.
+        Mail.suppressed?(to_string(subscriber.email), org_id: tenant) ->
+          {:cancel, "recipient suppressed (bounced)"}
 
-      subscriber.status != :confirmed ->
-        {:cancel, "subscriber not confirmed (#{subscriber.status})"}
-
-      # The instance-wide list, and this site's own relay's list (#1562).
-      Mail.suppressed?(to_string(subscriber.email), org_id: tenant) ->
-        {:cancel, "recipient suppressed (bounced)"}
-
-      true ->
-        deliver(send, subscriber)
+        true ->
+          deliver(send, subscriber)
+      end
     end
   end
 
@@ -101,15 +104,55 @@ defmodule KilnCMS.Newsletter.MailWorker do
     end
   end
 
-  # Settle the per-recipient outcome under the campaign's own site (epic #336).
+  defp lookup_opts(tenant) do
+    [actor: Newsletter.system(), authorize_with: :error, not_found_error?: false, tenant: tenant]
+  end
+
+  defp fetch(what, id, read) do
+    case read.(id) do
+      {:ok, record} ->
+        {:ok, record}
+
+      {:error, error} ->
+        Logger.error(
+          "Newsletter.MailWorker could not read #{what} #{id}, will retry: " <>
+            Exception.message(error)
+        )
+
+        {:error, error}
+    end
+  end
+
+  # Settle the per-recipient outcome under the campaign's own site (epic #336),
+  # as `Newsletter.system/0` (#1659, admitted for `record_sent` and
+  # `record_failed`).
+  #
+  # A counter that will not move is LOGGED, never raised: by then the message
+  # is out (or refused for good), and failing the job would have Oban mail the
+  # same person the same newsletter again to fix a tally.
   defp record_outcome(:ok, send) do
-    {:ok, _} = Newsletter.record_sent(send, authorize?: false, tenant: send.org_id)
+    send
+    |> Newsletter.record_sent(actor: Newsletter.system(), tenant: send.org_id)
+    |> log_unrecorded(:record_sent, send)
+
     :ok
   end
 
   defp record_outcome({:cancel, reason}, send) do
-    {:ok, _} = Newsletter.record_failed(send, authorize?: false, tenant: send.org_id)
+    send
+    |> Newsletter.record_failed(actor: Newsletter.system(), tenant: send.org_id)
+    |> log_unrecorded(:record_failed, send)
+
     {:cancel, reason}
+  end
+
+  defp log_unrecorded({:ok, _send}, _action, _send_record), do: :ok
+
+  defp log_unrecorded({:error, error}, action, send) do
+    Logger.error(
+      "Newsletter.MailWorker could not #{action} on send #{send.id}: " <>
+        Exception.message(error)
+    )
   end
 
   defp build_email(send, subscriber, html) do

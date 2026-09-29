@@ -55,7 +55,9 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
       allowance nobody maintains stops being a ratchet, and the message says
       what to change.
 
-  Nothing may be added to the backlog. Emptying it finishes #1402.
+  Nothing may be added to the backlog. Emptying it finishes #1402, and #1659
+  did: the backlog is now empty, so every file under `lib/` must be clean. The
+  mechanism stays in place so that is enforced, not assumed.
 
   Pass paths (files or directories) to scan something narrower; the backlog
   still applies, and entries for files the scan did not cover are left alone.
@@ -72,12 +74,12 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
   # Unexplained `authorize?: false` sites that predate the system-actor
   # migration, per file. A ratchet: counts may only go DOWN, and no entry may
   # be added. See "Scope" above; the tracking issue is #1402.
-  @backlog %{
-    "lib/kiln_cms/federation/announce_worker.ex" => 1,
-    "lib/kiln_cms/newsletter.ex" => 1,
-    "lib/kiln_cms/newsletter/mail_worker.ex" => 4,
-    "lib/kiln_cms/newsletter/send_worker.ex" => 4
-  }
+  #
+  # Empty since #1659's last batch: every site under `lib/` is now either run
+  # as an actor or justified. Kept as a map, not deleted, so `problems/2` and
+  # its tests keep their shape; with nothing in it, any unexplained site in any
+  # file is a regression.
+  @backlog %{}
   @window 12
   @justification ~r/authorize\?|bypass/i
 
@@ -91,12 +93,12 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
 
     case problems(counts) do
       [] ->
-        Mix.shell().info(summary(paths, counts))
+        Mix.shell().info(summary(paths, counts, @backlog))
 
       problems ->
         shell = Mix.shell()
         Enum.each(problems, &shell.error/1)
-        report_new_sites(shell, sites)
+        report_new_sites(shell, sites, @backlog)
         Mix.raise(failure_message(length(problems)))
     end
   end
@@ -157,24 +159,24 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
   # The individual lines behind a regression, so a contributor sees WHERE
   # rather than only how many. Only for files over their allowance; a
   # backlogged file's existing sites are not news.
-  defp report_new_sites(shell, sites) do
+  defp report_new_sites(shell, sites, backlog) do
     for {path, lines} <- Enum.sort(sites),
-        length(lines) > Map.get(@backlog, path, 0),
+        length(lines) > Map.get(backlog, path, 0),
         {^path, line} <- lines do
       shell.error("#{path}:#{line}: `authorize?: false` without an adjacent justification")
     end
   end
 
-  defp summary(paths, counts) do
+  defp summary(paths, counts, backlog) do
     remaining =
-      counts |> Map.keys() |> Enum.map(&Map.get(@backlog, &1, 0)) |> Enum.sum()
+      counts |> Map.keys() |> Enum.map(&Map.get(backlog, &1, 0)) |> Enum.sum()
 
     scope = Enum.join(paths, ", ")
 
     if remaining == 0 do
       "Authz: every `authorize?: false` under #{scope} is justified."
     else
-      files = Enum.count(counts, fn {path, _} -> Map.has_key?(@backlog, path) end)
+      files = Enum.count(counts, fn {path, _} -> Map.has_key?(backlog, path) end)
 
       "Authz: no new unexplained `authorize?: false` under #{scope} " <>
         "(#{remaining} still in the #1402 backlog, across #{files} files)."
