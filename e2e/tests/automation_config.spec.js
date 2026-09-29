@@ -17,7 +17,7 @@ test.describe("automation rule settings", () => {
   test("a placeholder chip inserts at the caret, and the save keeps it", async ({ page }) => {
     const name = `Chip rule ${Date.now()}`;
     await page.locator("#rule_name").fill(name);
-    await page.locator("#rule_action").selectOption("send_email");
+    await form(page).getByText("Send an email", { exact: true }).click();
     await page.locator("#rule_config_to").fill("team@example.com");
 
     const subject = page.locator("#rule_config_subject");
@@ -44,7 +44,7 @@ test.describe("automation rule settings", () => {
   });
 
   test("the deliver-as cards swap the fields they need", async ({ page }, testInfo) => {
-    await page.locator("#rule_action").selectOption("suggest_metadata");
+    await form(page).getByText("Draft SEO metadata", { exact: true }).click();
     await expect(page.locator("#rule_config_to")).toBeVisible();
     await expect(page.locator("#rule_config_assignee")).toHaveCount(0);
 
@@ -56,6 +56,22 @@ test.describe("automation rule settings", () => {
 
     await form(page).screenshot({
       path: testInfo.outputPath("automation-settings-task.png"),
+      animations: "disabled",
+    });
+  });
+
+  test("the builder reads back the rule as one sentence", async ({ page }, testInfo) => {
+    await form(page).getByText("Send the newsletter", { exact: true }).click();
+    await expect(page.locator("#rule_config_segment_id")).toBeVisible();
+    await expect(page.locator("#rule_summary")).toContainText(
+      "When any content is published, send the newsletter to all subscribers."
+    );
+
+    // The chosen card is the checked radio, reachable from the keyboard.
+    await expect(page.locator("#rule_action_newsletter")).toBeChecked();
+
+    await form(page).screenshot({
+      path: testInfo.outputPath("automation-builder.png"),
       animations: "disabled",
     });
   });
