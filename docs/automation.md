@@ -17,13 +17,25 @@ on top.
 
 ## Using it
 
-Manage rules at **`/editor/automation`** (admin-only). A rule is:
+Manage rules at **`/editor/automation`** (admin-only). The builder is four
+numbered steps:
 
-- **When** — a lifecycle trigger: `published`, `unpublished`, `updated`,
-  `in_review`, `returned_to_draft`, `assigned`, `overdue`, or the freshness
-  pair `health_overdue` / `health_expired`.
-- **Content type** — a specific type (`post`, a dynamic type's name) or *any*.
-- **Do** — one reaction (below), configured with a small JSON `config`.
+1. **When this happens** — a content type (`post`, a dynamic type's name,
+   *Tasks*, or *any*) and an event, grouped as editorial changes
+   (`published`, `unpublished`, `updated`, `in_review`, `returned_to_draft`),
+   tasks (`assigned`, `overdue`) and content health (`health_overdue` /
+   `health_expired`). A task event scoped to a content type — or a content
+   event scoped to *Tasks* — can never fire, and the builder says so.
+2. **Do this** — one reaction (below), picked from cards grouped as *Notify
+   people*, *Review & follow-up* and *Keep the site fresh*.
+3. **Set it up** — the reaction's settings, as ordinary fields generated from
+   the `config` table below (`KilnCMSWeb.AutomationLive.ConfigFields`). API
+   clients and seeds still write `config` as JSON.
+4. **Name it** — optional. While you build, the form reads the rule back as
+   one sentence ("When Post content is published, email team@example.com.");
+   a rule saved with no name is named by that sentence, and keeps following
+   it when the rule is edited until you type a name of your own. The rules
+   list shows each rule's sentence under its name.
 
 ### Reactions
 
