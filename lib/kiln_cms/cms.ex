@@ -527,6 +527,7 @@ defmodule KilnCMS.CMS do
     resource KilnCMS.CMS.SiteLinkCheck do
       define :list_site_link_check, action: :read
       define :save_site_link_check, action: :save
+      define :record_site_link_sweep, action: :record_sweep
     end
 
     # Per-site editorial workflow settings (#818) — currently just whether
@@ -553,6 +554,7 @@ defmodule KilnCMS.CMS do
     resource KilnCMS.CMS.ExternalLink do
       define :list_external_links, action: :read
       define :observe_external_link, action: :observe
+      define :record_external_link_check, action: :record_check
     end
 
     # Editorial/authorization consent linked to content (#356).

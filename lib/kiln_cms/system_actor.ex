@@ -83,4 +83,58 @@ defmodule KilnCMS.SystemActor do
   @spec new(atom()) :: t()
   def new(subsystem) when is_atom(subsystem) and not is_nil(subsystem),
     do: %__MODULE__{subsystem: subsystem}
+
+  @doc """
+  The actor `subsystem`'s code runs as: `new(subsystem)`, unless a test has
+  overridden it in this process (`with_override/3`).
+
+  A subsystem that wants its missing-grant paths testable exposes this rather
+  than `new/1` (`KilnCMS.Links.system/0`). The return is `term()`, not `t()`:
+  an override can be any actor, including `nil` or a person.
+  """
+  @spec resolve(atom()) :: term()
+  def resolve(subsystem) do
+    case Process.get(override_key(subsystem), :unset) do
+      :unset -> new(subsystem)
+      actor -> actor
+    end
+  end
+
+  @doc false
+  # Test seam (#1659): run `fun` with `resolve(subsystem)` answering `actor` in
+  # this process, so a test can take a grant away and prove the reads behind a
+  # decision fail CLOSED rather than filtering to "nothing". Process-local, and
+  # nothing on a request path calls it; code that could call it could equally
+  # pass any actor it liked. One copy here, rather than one per subsystem.
+  @spec with_override(atom(), term(), (-> result)) :: result when result: term()
+  def with_override(subsystem, actor, fun) do
+    previous = Process.get(override_key(subsystem), :unset)
+    put_override(subsystem, actor)
+
+    try do
+      fun.()
+    after
+      if previous == :unset,
+        do: delete_override(subsystem),
+        else: put_override(subsystem, previous)
+    end
+  end
+
+  @doc false
+  # The unscoped halves of `with_override/3`, for a test that must withdraw a
+  # grant partway through a call (from inside an HTTP stub, say).
+  @spec put_override(atom(), term()) :: :ok
+  def put_override(subsystem, actor) do
+    Process.put(override_key(subsystem), actor)
+    :ok
+  end
+
+  @doc false
+  @spec delete_override(atom()) :: :ok
+  def delete_override(subsystem) do
+    Process.delete(override_key(subsystem))
+    :ok
+  end
+
+  defp override_key(subsystem), do: {__MODULE__, :override, subsystem}
 end

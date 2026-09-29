@@ -18,6 +18,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   on_mount KilnCMSWeb.ContentEditor.Session
   on_mount KilnCMSWeb.ContentEditor.BlockOps
   on_mount KilnCMSWeb.ContentEditor.MarkdownImport
+  on_mount KilnCMSWeb.ContentEditor.MarkdownMode
 
   require Ash.Query
   require Logger
@@ -3306,6 +3307,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # is about to be replaced.
     |> assign(:intel_duplicates, nil)
     |> assign(:intel_tags, nil)
+    # The Markdown view's text and placeholders were written from the blocks
+    # being replaced; leave it rather than let its next keystroke undo the
+    # restore.
+    |> assign(:markdown_mode, nil)
   end
 
   defp clear_seo_suggestions(socket) do
@@ -5352,7 +5357,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
         >
           <.live_file_input upload={@uploads.body_images} />
         </div>
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <%!-- Title and page actions share a row only from xl: below it the
+              actions wrap, and a wrapped second line started under the
+              title rather than under the other actions (#1679). --%>
+        <div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between xl:gap-4">
           <div class="min-w-0">
             <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
               &larr; {gettext("All content")}
@@ -5362,41 +5370,26 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 gettext("Edit %{kind}", kind: @kind)}
             </h1>
           </div>
-          <div class="flex flex-wrap items-center gap-2">
-            <button type="button" phx-click="open_media_browser" class="btn btn-sm btn-default">
-              <.icon name="hero-photo" class="mr-1 size-4" />{gettext("Media library")}
-            </button>
+          <%!-- The page's secondary actions (#1679). Two groups: how to LOOK at
+                the document (Preview, side-by-side, Visual) keep their words;
+                the tools (media, share, duplicate) fold to icons below 2xl.
+                `max-2xl:sr-only` rather than `hidden` keeps each label as the
+                button's accessible name at every width — `hidden` would take
+                it out of the accessibility tree along with the pixels. --%>
+          <div
+            id="editor-page-actions"
+            class="flex flex-wrap items-center gap-2"
+            aria-label={gettext("Page actions")}
+            role="group"
+          >
             <.link
               href={~p"/editor/preview/#{@kind}/#{@record.id}"}
               target="_blank"
               rel="noopener noreferrer"
               class="btn btn-sm btn-default"
             >
-              {gettext("Preview")} &nearr;
+              <.icon name="hero-arrow-top-right-on-square" class="size-4" />{gettext("Preview")}
               <span class="sr-only">{gettext("(opens in a new tab)")}</span>
-            </.link>
-            <%!-- A link for someone WITHOUT an editor account: read-only, this
-                  one document, 15 minutes (`KilnCMS.CMS.PreviewToken`). Offered
-                  to whoever sees this draft as an editor — sharing it
-                  distributes what they can already read, so it is a read
-                  grant, not `@may_write?`. --%>
-            <button
-              :if={@may_share_preview?}
-              id="share-preview-button"
-              type="button"
-              phx-hook="CopyPreviewLink"
-              class="btn btn-sm btn-default"
-            >
-              <.icon name="hero-link" class="mr-1 size-4" />{gettext("Copy preview link")}
-            </button>
-            <%!-- In-context (front-end) editing on Kiln's own rendered page
-                  (#354) — a primary mode, not a detour (Theme C). --%>
-            <.link
-              navigate={~p"/editor/site/#{@kind}/#{@record.slug}"}
-              class="btn btn-sm btn-default"
-              title={gettext("Edit on the rendered page")}
-            >
-              <.icon name="hero-pencil-square" class="mr-1 size-4" />{gettext("Visual")}
             </.link>
             <%!-- A toggle, so its label stays put and `aria-pressed` carries the
                   state — a label that flips between "Side by side" and "Focus"
@@ -5410,7 +5403,44 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 if(@preview_layout == :split, do: "btn-primary", else: "btn-default")
               ]}
             >
-              <.icon name="hero-view-columns" class="mr-1 size-4" />{gettext("Side-by-side preview")}
+              <.icon name="hero-view-columns" class="size-4" />{gettext("Side-by-side preview")}
+            </button>
+            <%!-- In-context (front-end) editing on Kiln's own rendered page
+                  (#354) — a primary mode, not a detour (Theme C). --%>
+            <.link
+              navigate={~p"/editor/site/#{@kind}/#{@record.slug}"}
+              class="btn btn-sm btn-default"
+              title={gettext("Edit on the rendered page")}
+            >
+              <.icon name="hero-pencil-square" class="size-4" />{gettext("Visual")}
+            </.link>
+
+            <span class="mx-0.5 hidden h-5 w-px bg-base-content/15 sm:block" aria-hidden="true"></span>
+
+            <button
+              type="button"
+              phx-click="open_media_browser"
+              class="btn btn-sm btn-ghost"
+              title={gettext("Media library")}
+            >
+              <.icon name="hero-photo" class="size-4" />
+              <span class="max-2xl:sr-only">{gettext("Media library")}</span>
+            </button>
+            <%!-- A link for someone WITHOUT an editor account: read-only, this
+                  one document, 15 minutes (`KilnCMS.CMS.PreviewToken`). Offered
+                  to whoever sees this draft as an editor — sharing it
+                  distributes what they can already read, so it is a read
+                  grant, not `@may_write?`. --%>
+            <button
+              :if={@may_share_preview?}
+              id="share-preview-button"
+              type="button"
+              phx-hook="CopyPreviewLink"
+              class="btn btn-sm btn-ghost"
+              title={gettext("Copy preview link")}
+            >
+              <.icon name="hero-link" class="size-4" />
+              <span class="max-2xl:sr-only">{gettext("Copy preview link")}</span>
             </button>
             <%!-- Duplicate into a new draft (#471). The copy is made from the
                   SAVED row, which is the part worth warning about — and the
@@ -5428,9 +5458,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
               type="button"
               phx-click="duplicate"
               data-confirm={duplicate_confirm(@save_state, @conflict)}
-              class="btn btn-sm btn-default"
+              class="btn btn-sm btn-ghost"
+              title={gettext("Duplicate")}
             >
-              <.icon name="hero-document-duplicate" class="mr-1 size-4" />{gettext("Duplicate")}
+              <.icon name="hero-document-duplicate" class="size-4" />
+              <span class="max-2xl:sr-only">{gettext("Duplicate")}</span>
             </button>
           </div>
         </div>
@@ -5570,58 +5602,75 @@ defmodule KilnCMSWeb.ContentEditorLive do
             <div class="space-y-3">
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <h2 class="text-lg font-medium">{gettext("Blocks")}</h2>
-                <KilnCMSWeb.ContentEditor.MarkdownImport.import_button :if={@may_write?} />
+                <div class="flex flex-wrap items-center gap-2">
+                  <KilnCMSWeb.ContentEditor.MarkdownImport.import_button :if={
+                    @may_write? and is_nil(@markdown_mode)
+                  } />
+                  <KilnCMSWeb.ContentEditor.MarkdownMode.mode_switch
+                    :if={@may_write?}
+                    mode={@markdown_mode}
+                  />
+                </div>
               </div>
 
-              <%!-- Announces keyboard reorder moves to screen readers (#171). --%>
-              <p class="sr-only" role="status" aria-live="polite">{assigns[:moved_announcement]}</p>
+              <KilnCMSWeb.ContentEditor.MarkdownMode.source_editor
+                :if={@markdown_mode}
+                mode={@markdown_mode}
+              />
 
-              <%!-- Narrow the tree to blocks with an open discussion. A count,
+              <%!-- The canvas stays MOUNTED in the Markdown view, only hidden:
+                    its block inputs are what the editor form's change and save
+                    events carry, and the view rewrites the blocks under it. --%>
+              <div class={["space-y-3", @markdown_mode && "hidden"]}>
+                <%!-- Announces keyboard reorder moves to screen readers (#171). --%>
+                <p class="sr-only" role="status" aria-live="polite">{assigns[:moved_announcement]}</p>
+
+                <%!-- Narrow the tree to blocks with an open discussion. A count,
                     not a bare chip: "Unresolved" alone leaves an editor
                     guessing whether zero means "none" or "not loaded". Hidden
                     entirely when there is nothing to filter — a control that
                     can only ever hide everything is noise. --%>
-              <div :if={unresolved_block_count(@comments) > 0} class="flex items-center gap-2">
-                <button
-                  type="button"
-                  phx-click="toggle_thread_filter"
-                  aria-pressed={to_string(@thread_filter == :unresolved)}
-                  class={[
-                    "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs transition-colors duration-150",
-                    @thread_filter == :unresolved &&
-                      "border-warning/40 bg-warning/10 text-warning-ink",
-                    @thread_filter != :unresolved && "border-base-content/20 hover:bg-base-200"
-                  ]}
+                <div :if={unresolved_block_count(@comments) > 0} class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    phx-click="toggle_thread_filter"
+                    aria-pressed={to_string(@thread_filter == :unresolved)}
+                    class={[
+                      "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs transition-colors duration-150",
+                      @thread_filter == :unresolved &&
+                        "border-warning/40 bg-warning/10 text-warning-ink",
+                      @thread_filter != :unresolved && "border-base-content/20 hover:bg-base-200"
+                    ]}
+                  >
+                    <.icon name="hero-chat-bubble-left-ellipsis" class="size-3.5" />
+                    {ngettext(
+                      "%{count} unresolved discussion",
+                      "%{count} unresolved discussions",
+                      unresolved_block_count(@comments),
+                      count: unresolved_block_count(@comments)
+                    )}
+                  </button>
+                  <span :if={@thread_filter == :unresolved} class="text-xs text-base-content/60">
+                    {gettext("Showing only blocks that need attention.")}
+                  </span>
+                </div>
+
+                <%!-- Insert a block before the first one (B2). --%>
+                <.block_inserter
+                  :if={blocks_count(@form) > 0}
+                  id="insert-start"
+                  block_types={@block_types}
+                  anchor="start"
+                  compact
+                />
+
+                <div
+                  id="blocks-sortable"
+                  phx-hook="Sortable"
+                  data-thread-filter={@thread_filter}
+                  class="space-y-3"
                 >
-                  <.icon name="hero-chat-bubble-left-ellipsis" class="size-3.5" />
-                  {ngettext(
-                    "%{count} unresolved discussion",
-                    "%{count} unresolved discussions",
-                    unresolved_block_count(@comments),
-                    count: unresolved_block_count(@comments)
-                  )}
-                </button>
-                <span :if={@thread_filter == :unresolved} class="text-xs text-base-content/60">
-                  {gettext("Showing only blocks that need attention.")}
-                </span>
-              </div>
-
-              <%!-- Insert a block before the first one (B2). --%>
-              <.block_inserter
-                :if={blocks_count(@form) > 0}
-                id="insert-start"
-                block_types={@block_types}
-                anchor="start"
-                compact
-              />
-
-              <div
-                id="blocks-sortable"
-                phx-hook="Sortable"
-                data-thread-filter={@thread_filter}
-                class="space-y-3"
-              >
-                <%!-- `skip_hidden`: the sub-form's hidden inputs render INSIDE the
+                  <%!-- `skip_hidden`: the sub-form's hidden inputs render INSIDE the
                       card (its last children, below) rather than ahead of it as
                       the sortable's direct children. Two readers care. `Sortable`
                       treats the direct children as blocks. morphdom walks them
@@ -5632,109 +5681,119 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       detach and re-append the card to restore order, and a
                       detached focused element loses focus — the author's next
                       keystrokes went to <body>. --%>
-                <.inputs_for :let={bf} field={@form[:blocks]} skip_hidden>
-                  <%!-- `BlockPresence` reports focus in and out of this card so
+                  <.inputs_for :let={bf} field={@form[:blocks]} skip_hidden>
+                    <%!-- `BlockPresence` reports focus in and out of this card so
                         peers can see which block someone is on. `focusin`/
                         `focusout` rather than `phx-focus`/`phx-blur`: those bind
                         the non-bubbling `focus`/`blur`, which never fire for a
                         card whose focusable children are the inputs inside it. --%>
-                  <div
-                    id={"block-#{bf.index}"}
-                    data-sort-id={bf.index}
-                    phx-hook="BlockPresence"
-                    data-block-id={bf[:id].value}
-                    data-block-threads={discussion_state(@comments, @tasks, bf[:id].value)}
-                    data-block-type={block_type_string(bf)}
-                    class="group rounded border border-base-content/15 p-3"
-                  >
-                    <%!-- Carries the block's stable id into save/validate params so
+                    <div
+                      id={"block-#{bf.index}"}
+                      data-sort-id={bf.index}
+                      phx-hook="BlockPresence"
+                      data-block-id={bf[:id].value}
+                      data-block-threads={discussion_state(@comments, @tasks, bf[:id].value)}
+                      data-block-type={block_type_string(bf)}
+                      class="group rounded-lg border border-base-content/15 p-3 transition-colors hover:border-base-content/25 focus-within:border-base-content/30"
+                    >
+                      <%!-- Carries the block's stable id into save/validate params so
                           it can be addressed by identity (columns render their own). --%>
-                    <input
-                      :if={block_type_string(bf) != "columns"}
-                      type="hidden"
-                      name={bf[:id].name}
-                      value={bf[:id].value}
-                    />
-                    <%!-- Block chrome: the type label stays put; the controls
+                      <input
+                        :if={block_type_string(bf) != "columns"}
+                        type="hidden"
+                        name={bf[:id].name}
+                        value={bf[:id].value}
+                      />
+                      <%!-- Block chrome: the type label stays put; the controls
                           (drag / move / duplicate / delete) fade in on hover, and
-                          on keyboard focus too so they stay reachable (#171). --%>
-                    <div class="mb-2 flex items-center justify-between gap-3">
-                      <span class="rounded bg-base-200 px-2 py-1 text-sm font-medium">
-                        {dsl_label(block_type_string(bf))}
-                      </span>
-                      <div class="flex items-center gap-0.5 text-base-content/60 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100">
-                        <span
-                          data-drag-handle
-                          aria-label={gettext("Drag to reorder")}
-                          class="cursor-grab active:cursor-grabbing rounded p-1 hover:bg-base-200 hover:text-base-content"
-                        >
-                          <.icon name="hero-bars-3" class="size-4" />
+                          on keyboard focus too so they stay reachable (#171):
+                          `group-focus-within` covers both Tab onto a faded
+                          control (the toolbar is inside the card) and working
+                          anywhere else in the card. They always show on a touch
+                          screen (`pointer-coarse`), which has no hover to reveal them
+                          (#1679). Kit ghost buttons, so each control draws the
+                          kit's focus ring. --%>
+                      <div class="mb-2 flex items-center justify-between gap-3">
+                        <span class="text-xs font-semibold text-base-content/70">
+                          {dsl_label(block_type_string(bf))}
                         </span>
-                        <button
-                          type="button"
-                          phx-click="move_block"
-                          phx-value-bid={bf[:id].value}
-                          phx-value-dir="up"
-                          disabled={bf.index == 0}
-                          aria-label={gettext("Move block up")}
-                          class="rounded p-1 hover:bg-base-200 hover:text-base-content disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+                        <div
+                          role="group"
+                          aria-label={gettext("Block actions")}
+                          class="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100"
                         >
-                          <.icon name="hero-chevron-up" class="size-4" />
-                        </button>
-                        <button
-                          type="button"
-                          phx-click="move_block"
-                          phx-value-bid={bf[:id].value}
-                          phx-value-dir="down"
-                          disabled={bf.index == blocks_count(@form) - 1}
-                          aria-label={gettext("Move block down")}
-                          class="rounded p-1 hover:bg-base-200 hover:text-base-content disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
-                        >
-                          <.icon name="hero-chevron-down" class="size-4" />
-                        </button>
-                        <button
-                          type="button"
-                          phx-click="duplicate_block"
-                          phx-value-bid={bf[:id].value}
-                          aria-label={gettext("Duplicate block")}
-                          class="rounded p-1 hover:bg-base-200 hover:text-base-content"
-                        >
-                          <.icon name="hero-document-duplicate" class="size-4" />
-                        </button>
-                        <%!-- The button alternative to dragging a block into a
+                          <span
+                            data-drag-handle
+                            aria-label={gettext("Drag to reorder")}
+                            class="btn btn-ghost btn-sm cursor-grab p-1 active:cursor-grabbing"
+                          >
+                            <.icon name="hero-bars-3" class="size-4" />
+                          </span>
+                          <button
+                            type="button"
+                            phx-click="move_block"
+                            phx-value-bid={bf[:id].value}
+                            phx-value-dir="up"
+                            disabled={bf.index == 0}
+                            aria-label={gettext("Move block up")}
+                            class="btn btn-ghost btn-sm p-1"
+                          >
+                            <.icon name="hero-chevron-up" class="size-4" />
+                          </button>
+                          <button
+                            type="button"
+                            phx-click="move_block"
+                            phx-value-bid={bf[:id].value}
+                            phx-value-dir="down"
+                            disabled={bf.index == blocks_count(@form) - 1}
+                            aria-label={gettext("Move block down")}
+                            class="btn btn-ghost btn-sm p-1"
+                          >
+                            <.icon name="hero-chevron-down" class="size-4" />
+                          </button>
+                          <button
+                            type="button"
+                            phx-click="duplicate_block"
+                            phx-value-bid={bf[:id].value}
+                            aria-label={gettext("Duplicate block")}
+                            class="btn btn-ghost btn-sm p-1"
+                          >
+                            <.icon name="hero-document-duplicate" class="size-4" />
+                          </button>
+                          <%!-- The button alternative to dragging a block into a
                               columns block, which the canvas and the nested
                               Sortable can't do between them. Aimed at the first
                               column with room (`nest_target/2`), and absent when
                               there is none. --%>
-                        <button
-                          :if={@nest_target && block_type_string(bf) in @nested_child_types}
-                          type="button"
-                          phx-click="nest_into_columns"
-                          phx-value-bid={bf[:id].value}
-                          phx-value-cols={elem(@nest_target, 0)}
-                          phx-value-col={elem(@nest_target, 1)}
-                          aria-label={gettext("Move into columns")}
-                          title={gettext("Move into columns")}
-                          class="rounded p-1 hover:bg-base-200 hover:text-base-content"
-                        >
-                          <.icon name="hero-arrow-right-end-on-rectangle" class="size-4" />
-                        </button>
-                        <button
-                          type="button"
-                          phx-click="remove_block"
-                          phx-value-bid={bf[:id].value}
-                          data-confirm={gettext("Delete this block? This can't be undone.")}
-                          aria-label={gettext("Remove block")}
-                          class="rounded p-1 hover:bg-base-200 hover:text-error"
-                        >
-                          <.icon name="hero-trash" class="size-4" />
-                        </button>
+                          <button
+                            :if={@nest_target && block_type_string(bf) in @nested_child_types}
+                            type="button"
+                            phx-click="nest_into_columns"
+                            phx-value-bid={bf[:id].value}
+                            phx-value-cols={elem(@nest_target, 0)}
+                            phx-value-col={elem(@nest_target, 1)}
+                            aria-label={gettext("Move into columns")}
+                            title={gettext("Move into columns")}
+                            class="btn btn-ghost btn-sm p-1"
+                          >
+                            <.icon name="hero-arrow-right-end-on-rectangle" class="size-4" />
+                          </button>
+                          <button
+                            type="button"
+                            phx-click="remove_block"
+                            phx-value-bid={bf[:id].value}
+                            data-confirm={gettext("Delete this block? This can't be undone.")}
+                            aria-label={gettext("Remove block")}
+                            class="btn btn-ghost btn-sm p-1 hover:text-error"
+                          >
+                            <.icon name="hero-trash" class="size-4" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                    <%!-- The collab lock UI (ring + "who's editing" badge) lives on
+                      <%!-- The collab lock UI (ring + "who's editing" badge) lives on
                           this non-ignored wrapper so it can update, while the inner
                           editor stays phx-update="ignore" (#140). --%>
-                    <%!-- The editor host is keyed by the block's STABLE id (falling
+                      <%!-- The editor host is keyed by the block's STABLE id (falling
                           back to the index only for a brand-new, not-yet-saved block
                           that has none), so reordering a saved block relocates the
                           same DOM node — its mounted TipTap editor, cursor and undo
@@ -5749,292 +5808,291 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           correct after a reorder — an ignored name would freeze at
                           the mount-time index and swap neighbours' content on a
                           form submit. --%>
-                    <div
-                      :if={block_type_string(bf) == "rich_text"}
-                      class={["relative", lock_ring(@locked_fields, bf[:body].name)]}
-                      {takeover_attrs(@locked_fields, bf[:body].name)}
-                    >
-                      <.field_cursors field={bf[:body].name} cursors={@cursors} />
-                      <%!-- `data-locked` is a data-* attribute, so it stays in sync
+                      <div
+                        :if={block_type_string(bf) == "rich_text"}
+                        class={["relative", lock_ring(@locked_fields, bf[:body].name)]}
+                        {takeover_attrs(@locked_fields, bf[:body].name)}
+                      >
+                        <.field_cursors field={bf[:body].name} cursors={@cursors} />
+                        <%!-- `data-locked` is a data-* attribute, so it stays in sync
                             inside the ignore host; the hook's updated() turns the
                             TipTap editor read-only from it, the way `readonly`
                             does for the plain inputs. --%>
-                      <div
-                        id={"rt-#{rich_host_key(bf)}-v#{@editor_version}"}
-                        phx-hook="RichText"
-                        phx-update="ignore"
-                        data-block-id={bf[:id].value}
-                        data-locked={field_locked?(@locked_fields, bf[:body].name) && "true"}
-                        data-content={rich_text_editor_html(bf)}
-                        data-record-version={@record.lock_version}
-                        data-editor-label={gettext("Rich text editor")}
-                        data-lock-field={bf[:body].name}
-                        data-block-index={bf.index}
-                        data-collab-token={@collab_token}
-                        data-collab-topic={@collab_token && @collab_topic}
-                        data-collab-fragment={@collab_token && collab_fragment(bf)}
-                        data-collab-user={@collab_token && initials(Presence.display_name(@actor))}
-                        data-collab-color={@collab_token && color_hex_for(@actor.id)}
-                        role="group"
-                        aria-label={gettext("Rich text block")}
-                      >
                         <div
-                          data-toolbar
-                          role="toolbar"
-                          aria-label={gettext("Text formatting")}
-                          class="rt-block-toolbar mb-1 flex flex-wrap gap-1"
+                          id={"rt-#{rich_host_key(bf)}-v#{@editor_version}-m#{@markdown_generation}"}
+                          phx-hook="RichText"
+                          phx-update="ignore"
+                          data-block-id={bf[:id].value}
+                          data-locked={field_locked?(@locked_fields, bf[:body].name) && "true"}
+                          data-content={rich_text_editor_html(bf)}
+                          data-record-version={@record.lock_version}
+                          data-editor-label={gettext("Rich text editor")}
+                          data-lock-field={bf[:body].name}
+                          data-block-index={bf.index}
+                          data-collab-token={@collab_token}
+                          data-collab-topic={@collab_token && @collab_topic}
+                          data-collab-fragment={@collab_token && collab_fragment(bf)}
+                          data-collab-user={@collab_token && initials(Presence.display_name(@actor))}
+                          data-collab-color={@collab_token && color_hex_for(@actor.id)}
+                          role="group"
+                          aria-label={gettext("Rich text block")}
                         >
-                        </div>
-                        <div data-editor></div>
-                        <%!-- One coherent slash command (#150, B3): inside a text
+                          <div
+                            data-toolbar
+                            role="toolbar"
+                            aria-label={gettext("Text formatting")}
+                            class="rt-block-toolbar mb-1 flex flex-wrap gap-1"
+                          >
+                          </div>
+                          <div data-editor></div>
+                          <%!-- One coherent slash command (#150, B3): inside a text
                               block it formats the text and can drop a new block in
                               below; on the empty canvas it opens the block palette. --%>
-                        <p class="mt-1 text-xs text-base-content/70">
-                          {gettext("Type / to format this text or insert a block below.")}
-                        </p>
-                      </div>
-                      <%!-- No-JS/JS-pending fallback: the server-rendered form
+                          <p class="mt-1 text-xs text-base-content/70">
+                            {gettext("Type / to format this text or insert a block below.")}
+                          </p>
+                        </div>
+                        <%!-- No-JS/JS-pending fallback: the server-rendered form
                             round-trips legacy_html exactly as stored. Lives outside
                             the ignore host so its index-based name re-renders on a
                             reorder; the server (not JS) owns its value, so there is
                             nothing for a patch to clobber. When a `rich_text_body`
                             push lands, the cast writes `body` and clears legacy_html. --%>
-                      <input
-                        type="hidden"
-                        name={bf[:legacy_html].name}
-                        value={bf[:legacy_html].value}
-                        data-input
-                      />
-                      <%!-- Only for a block that already has its stable id: the
+                        <input
+                          type="hidden"
+                          name={bf[:legacy_html].name}
+                          value={bf[:legacy_html].value}
+                          data-input
+                        />
+                        <%!-- Only for a block that already has its stable id: the
                             suggestion is delivered by a `push_event` the hook
                             matches on `data-block-id`, so a block without one
                             has nothing to deliver to. --%>
-                      <.assist_panel
-                        :if={
-                          @assist_enabled? and @may_write? and @may_assist_blocks? and bf[:id].value
-                        }
-                        block_id={bf[:id].value}
-                        open?={@assist_block == bf[:id].value}
-                        action={@assist_action}
-                        running?={@assist_running?}
-                        result={@assist_result}
-                        egress?={@assist_egress?}
-                        provider={@assist_provider}
-                        conflict={@conflict}
-                      />
-                    </div>
-                    <div :if={block_type_string(bf) == "image"} class="space-y-2">
-                      <img
-                        :if={safe_preview_src(bf[:url].value)}
-                        src={safe_preview_src(bf[:url].value)}
-                        alt=""
-                        class="max-h-40 rounded border border-base-content/10"
-                      />
-                      <input type="hidden" name={bf[:media_id].name} value={media_id_of(bf)} />
-                      <div class="flex items-center gap-2">
-                        <button
-                          type="button"
-                          phx-click="open_picker"
-                          phx-value-bid={bf[:id].value}
-                          class="btn btn-sm btn-default"
-                        >
-                          <.icon name="hero-photo" class="mr-1 size-4" />{gettext(
-                            "Choose from library"
-                          )}
-                        </button>
+                        <.assist_panel
+                          :if={
+                            @assist_enabled? and @may_write? and @may_assist_blocks? and bf[:id].value
+                          }
+                          block_id={bf[:id].value}
+                          open?={@assist_block == bf[:id].value}
+                          action={@assist_action}
+                          running?={@assist_running?}
+                          result={@assist_result}
+                          egress?={@assist_egress?}
+                          provider={@assist_provider}
+                          conflict={@conflict}
+                        />
                       </div>
-                      <.input
-                        field={bf[:url]}
-                        label={gettext("Image URL")}
-                        placeholder={gettext("…or paste a URL")}
-                      />
-                      <.input field={bf[:alt]} label={gettext("Alt text")} />
-                      <.input field={bf[:caption]} label={gettext("Caption")} />
-                    </div>
-                    <div :if={block_type_string(bf) == "file"} class="space-y-2">
-                      <input type="hidden" name={bf[:media_id].name} value={media_id_of(bf)} />
-                      <input type="hidden" name={bf[:filename].name} value={bf[:filename].value} />
-                      <input
-                        type="hidden"
-                        name={bf[:content_type].name}
-                        value={bf[:content_type].value}
-                      />
-                      <input
-                        type="hidden"
-                        name={bf[:byte_size].name}
-                        value={bf[:byte_size].value}
-                      />
-                      <p :if={bf[:filename].value} class="flex items-center gap-2 text-sm">
-                        <.icon name="hero-document" class="size-4 shrink-0" />
-                        <span class="truncate">{bf[:filename].value}</span>
-                      </p>
-                      <div class="flex items-center gap-2">
-                        <button
-                          type="button"
-                          phx-click="open_file_picker"
-                          phx-value-bid={bf[:id].value}
-                          class="btn btn-sm btn-default"
-                        >
-                          <.icon name="hero-document-arrow-down" class="mr-1 size-4" />{gettext(
-                            "Choose from library"
-                          )}
-                        </button>
+                      <div :if={block_type_string(bf) == "image"} class="space-y-2">
+                        <img
+                          :if={safe_preview_src(bf[:url].value)}
+                          src={safe_preview_src(bf[:url].value)}
+                          alt=""
+                          class="max-h-40 rounded border border-base-content/10"
+                        />
+                        <input type="hidden" name={bf[:media_id].name} value={media_id_of(bf)} />
+                        <div class="flex items-center gap-2">
+                          <button
+                            type="button"
+                            phx-click="open_picker"
+                            phx-value-bid={bf[:id].value}
+                            class="btn btn-sm btn-default"
+                          >
+                            <.icon name="hero-photo" class="size-4" />{gettext("Choose from library")}
+                          </button>
+                        </div>
+                        <.input
+                          field={bf[:url]}
+                          label={gettext("Image URL")}
+                          placeholder={gettext("…or paste a URL")}
+                        />
+                        <.input field={bf[:alt]} label={gettext("Alt text")} />
+                        <.input field={bf[:caption]} label={gettext("Caption")} />
                       </div>
-                      <.input
-                        field={bf[:title]}
-                        label={gettext("Title")}
-                        placeholder={bf[:filename].value}
-                      />
-                      <.input field={bf[:description]} label={gettext("Description")} />
-                    </div>
-                    <div :if={block_type_string(bf) == "fragment"} class="space-y-2">
-                      <%!-- One `<select>`, because a reference is one choice.
+                      <div :if={block_type_string(bf) == "file"} class="space-y-2">
+                        <input type="hidden" name={bf[:media_id].name} value={media_id_of(bf)} />
+                        <input type="hidden" name={bf[:filename].name} value={bf[:filename].value} />
+                        <input
+                          type="hidden"
+                          name={bf[:content_type].name}
+                          value={bf[:content_type].value}
+                        />
+                        <input
+                          type="hidden"
+                          name={bf[:byte_size].name}
+                          value={bf[:byte_size].value}
+                        />
+                        <p :if={bf[:filename].value} class="flex items-center gap-2 text-sm">
+                          <.icon name="hero-document" class="size-4 shrink-0" />
+                          <span class="truncate">{bf[:filename].value}</span>
+                        </p>
+                        <div class="flex items-center gap-2">
+                          <button
+                            type="button"
+                            phx-click="open_file_picker"
+                            phx-value-bid={bf[:id].value}
+                            class="btn btn-sm btn-default"
+                          >
+                            <.icon name="hero-document-arrow-down" class="size-4" />{gettext(
+                              "Choose from library"
+                            )}
+                          </button>
+                        </div>
+                        <.input
+                          field={bf[:title]}
+                          label={gettext("Title")}
+                          placeholder={bf[:filename].value}
+                        />
+                        <.input field={bf[:description]} label={gettext("Description")} />
+                      </div>
+                      <div :if={block_type_string(bf) == "fragment"} class="space-y-2">
+                        <%!-- One `<select>`, because a reference is one choice.
                             It posts `"type:id"`, which `normalize_fragment_ref/1`
                             turns into the stored reference map (#479). --%>
-                      <.input
-                        type="select"
-                        name={bf[:ref].name}
-                        value={fragment_ref_value(bf[:ref].value)}
-                        label={gettext("Fragment")}
-                        prompt={gettext("Choose published content…")}
-                        options={fragment_options_for(@fragment_options, bf)}
-                      />
-                      <.input field={bf[:label]} label={gettext("Label (editor only)")} />
-                      <p class="text-xs text-base-content/60">
-                        {gettext(
-                          "The target's blocks are inlined where this block sits. Editing the target updates every page that embeds it; an unpublished or restricted target renders nothing."
-                        )}
-                      </p>
-                    </div>
-                    <.video_editor :if={block_type_string(bf) == "video"} bf={bf} />
-                    <.audio_editor :if={block_type_string(bf) == "audio"} bf={bf} />
-                    <.gallery_editor :if={block_type_string(bf) == "gallery"} bf={bf} />
-                    <.columns_editor
-                      :if={block_type_string(bf) == "columns"}
-                      bf={bf}
-                      columns={col_state(@block_children, bf)}
-                      child_types={@nested_child_types}
-                    />
-                    <div :if={
-                      block_type_string(bf) not in [
-                        "rich_text",
-                        "image",
-                        "file",
-                        "video",
-                        "audio",
-                        "columns",
-                        "gallery",
-                        "fragment"
-                      ]
-                    }>
-                      <.dsl_block_fields
+                        <.input
+                          type="select"
+                          name={bf[:ref].name}
+                          value={fragment_ref_value(bf[:ref].value)}
+                          label={gettext("Fragment")}
+                          prompt={gettext("Choose published content…")}
+                          options={fragment_options_for(@fragment_options, bf)}
+                        />
+                        <.input field={bf[:label]} label={gettext("Label (editor only)")} />
+                        <p class="text-xs text-base-content/60">
+                          {gettext(
+                            "The target's blocks are inlined where this block sits. Editing the target updates every page that embeds it; an unpublished or restricted target renders nothing."
+                          )}
+                        </p>
+                      </div>
+                      <.video_editor :if={block_type_string(bf) == "video"} bf={bf} />
+                      <.audio_editor :if={block_type_string(bf) == "audio"} bf={bf} />
+                      <.gallery_editor :if={block_type_string(bf) == "gallery"} bf={bf} />
+                      <.columns_editor
+                        :if={block_type_string(bf) == "columns"}
                         bf={bf}
-                        role={@tier}
-                        locked_fields={@locked_fields}
-                        cursors={@cursors}
+                        columns={col_state(@block_children, bf)}
+                        child_types={@nested_child_types}
                       />
-                      <.item_rows_editor :if={row_editor_type?(block_type_string(bf))} bf={bf} />
-                    </div>
-                    <%!-- Comments (#404) are rendered here, outside every
+                      <div :if={
+                        block_type_string(bf) not in [
+                          "rich_text",
+                          "image",
+                          "file",
+                          "video",
+                          "audio",
+                          "columns",
+                          "gallery",
+                          "fragment"
+                        ]
+                      }>
+                        <.dsl_block_fields
+                          bf={bf}
+                          role={@tier}
+                          locked_fields={@locked_fields}
+                          cursors={@cursors}
+                        />
+                        <.item_rows_editor :if={row_editor_type?(block_type_string(bf))} bf={bf} />
+                      </div>
+                      <%!-- Comments (#404) are rendered here, outside every
                           per-type branch above, so they apply to any block
                           type — unlike AI assist, which is rich_text-only. --%>
-                    <.block_discussion
-                      :if={bf[:id].value}
-                      block_id={bf[:id].value}
-                      comments={@comments}
-                      tasks={@tasks}
-                      open?={@comment_block == bf[:id].value}
-                      draft={if @comment_block == bf[:id].value, do: @comment_draft}
-                      suggestions={
-                        if @comment_block == bf[:id].value, do: @mention_suggestions, else: []
-                      }
-                      viewers={block_viewers(@editors, @actor.id, bf[:id].value)}
-                      typing={typing_names(@typing, bf[:id].value)}
-                      task_draft={if @comment_block == bf[:id].value, do: @block_task_draft}
-                      assignable_users={@assignable_users}
-                      linkable_tasks={linkable_tasks(@tasks)}
-                      auto_complete_default={@auto_complete_default}
-                    />
-                    <%!-- Inline "+" to insert a block right after this one (B2). --%>
-                    <.block_inserter
-                      id={"insert-after-#{bf[:id].value}"}
-                      block_types={@block_types}
-                      anchor={bf[:id].value}
-                      compact
-                    />
-                    <%!-- Images pasted or dropped on this block, still on their
+                      <.block_discussion
+                        :if={bf[:id].value}
+                        block_id={bf[:id].value}
+                        comments={@comments}
+                        tasks={@tasks}
+                        open?={@comment_block == bf[:id].value}
+                        draft={if @comment_block == bf[:id].value, do: @comment_draft}
+                        suggestions={
+                          if @comment_block == bf[:id].value, do: @mention_suggestions, else: []
+                        }
+                        viewers={block_viewers(@editors, @actor.id, bf[:id].value)}
+                        typing={typing_names(@typing, bf[:id].value)}
+                        task_draft={if @comment_block == bf[:id].value, do: @block_task_draft}
+                        assignable_users={@assignable_users}
+                        linkable_tasks={linkable_tasks(@tasks)}
+                        auto_complete_default={@auto_complete_default}
+                      />
+                      <%!-- Inline "+" to insert a block right after this one (B2). --%>
+                      <.block_inserter
+                        id={"insert-after-#{bf[:id].value}"}
+                        block_types={@block_types}
+                        anchor={bf[:id].value}
+                        compact
+                      />
+                      <%!-- Images pasted or dropped on this block, still on their
                           way up. Inside the card, not beside it: the sortable
                           reads its direct children as blocks. --%>
-                    <.body_image_placeholder
-                      :for={
-                        entry <- pending_body_images(@uploads, @body_upload_anchors, bf[:id].value)
-                      }
-                      entry={entry}
-                      errors={upload_errors(@uploads.body_images, entry)}
-                    />
-                    <%!-- The sub-form's bookkeeping (`_persistent_id`, `_form_type`,
+                      <.body_image_placeholder
+                        :for={
+                          entry <- pending_body_images(@uploads, @body_upload_anchors, bf[:id].value)
+                        }
+                        entry={entry}
+                        errors={upload_errors(@uploads.body_images, entry)}
+                      />
+                      <%!-- The sub-form's bookkeeping (`_persistent_id`, `_form_type`,
                           `_union_type`, `_touched`, …) that `inputs_for` skipped
                           above. Last in the card on purpose: the set grows on the
                           rebuilt form, and appended siblings move nothing, while
                           inputs ahead of the keyed rich-text host would move IT. --%>
-                    <input
-                      :for={{name, value} <- block_hidden_inputs(bf)}
-                      type="hidden"
-                      name={name}
-                      value={value}
-                    />
-                  </div>
-                </.inputs_for>
-              </div>
-              <.body_image_placeholder
-                :for={entry <- pending_body_images(@uploads, @body_upload_anchors, nil)}
-                entry={entry}
-                errors={upload_errors(@uploads.body_images, entry)}
-              />
+                      <input
+                        :for={{name, value} <- block_hidden_inputs(bf)}
+                        type="hidden"
+                        name={name}
+                        value={value}
+                      />
+                    </div>
+                  </.inputs_for>
+                </div>
+                <.body_image_placeholder
+                  :for={entry <- pending_body_images(@uploads, @body_upload_anchors, nil)}
+                  entry={entry}
+                  errors={upload_errors(@uploads.body_images, entry)}
+                />
 
-              <%!-- Discussions whose block is gone. Deleting a block cascades
+                <%!-- Discussions whose block is gone. Deleting a block cascades
                     nothing, so without this section the thread would simply
                     stop being rendered — still stored, still counted by every
                     org-wide read, invisible to the one person who could close
                     it out. --%>
-              <div
-                :if={orphan_block_ids(@form, @comments, @tasks) != []}
-                class="space-y-2 rounded border border-dashed border-base-content/20 p-3"
-              >
-                <p class="text-sm font-medium text-base-content/70">
-                  {gettext("Discussions on removed blocks")}
-                </p>
-                <.block_discussion
-                  :for={orphan_id <- orphan_block_ids(@form, @comments, @tasks)}
-                  block_id={orphan_id}
-                  comments={@comments}
-                  tasks={@tasks}
-                  orphan?={true}
-                  open?={@comment_block == orphan_id}
-                  draft={if @comment_block == orphan_id, do: @comment_draft}
-                  suggestions={if @comment_block == orphan_id, do: @mention_suggestions, else: []}
-                  viewers={[]}
-                  typing={typing_names(@typing, orphan_id)}
-                  task_draft={if @comment_block == orphan_id, do: @block_task_draft}
-                  assignable_users={@assignable_users}
-                  linkable_tasks={linkable_tasks(@tasks)}
-                  auto_complete_default={@auto_complete_default}
-                />
-              </div>
+                <div
+                  :if={orphan_block_ids(@form, @comments, @tasks) != []}
+                  class="space-y-2 rounded border border-dashed border-base-content/20 p-3"
+                >
+                  <p class="text-sm font-medium text-base-content/70">
+                    {gettext("Discussions on removed blocks")}
+                  </p>
+                  <.block_discussion
+                    :for={orphan_id <- orphan_block_ids(@form, @comments, @tasks)}
+                    block_id={orphan_id}
+                    comments={@comments}
+                    tasks={@tasks}
+                    orphan?={true}
+                    open?={@comment_block == orphan_id}
+                    draft={if @comment_block == orphan_id, do: @comment_draft}
+                    suggestions={if @comment_block == orphan_id, do: @mention_suggestions, else: []}
+                    viewers={[]}
+                    typing={typing_names(@typing, orphan_id)}
+                    task_draft={if @comment_block == orphan_id, do: @block_task_draft}
+                    assignable_users={@assignable_users}
+                    linkable_tasks={linkable_tasks(@tasks)}
+                    auto_complete_default={@auto_complete_default}
+                  />
+                </div>
 
-              <%!-- Inviting empty state when a page has no blocks yet (Theme A). --%>
-              <div
-                :if={blocks_count(@form) == 0}
-                class="rounded-lg border border-dashed border-base-content/20 px-6 py-10 text-center"
-              >
-                <.icon name="hero-squares-plus" class="mx-auto size-8 text-base-content/30" />
-                <p class="mt-2 text-sm font-medium">{gettext("No blocks yet")}</p>
-                <p class="mt-1 text-sm text-base-content/60">
-                  {gettext("Add your first block below to start building this page.")}
-                </p>
-              </div>
+                <%!-- Inviting empty state when a page has no blocks yet (Theme A). --%>
+                <div
+                  :if={blocks_count(@form) == 0}
+                  class="rounded-lg border border-dashed border-base-content/20 px-6 py-10 text-center"
+                >
+                  <.icon name="hero-squares-plus" class="mx-auto size-8 text-base-content/30" />
+                  <p class="mt-2 text-sm font-medium">{gettext("No blocks yet")}</p>
+                  <p class="mt-1 text-sm text-base-content/60">
+                    {gettext("Add your first block below to start building this page.")}
+                  </p>
+                </div>
 
-              <.block_inserter block_types={@block_types} global_key={true} />
+                <.block_inserter block_types={@block_types} global_key={true} />
+              </div>
             </div>
           </div>
 

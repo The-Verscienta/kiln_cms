@@ -2398,6 +2398,11 @@ msgstr "La facturación aún no está configurada. Hasta que ambos secretos se r
 msgid "Block"
 msgstr "Bloque"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Block actions"
+msgstr "Acciones del bloque"
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Block actor"
@@ -2443,6 +2448,7 @@ msgstr "Bloqueado: %{reason}"
 msgid "Blocked. Matching followers were removed."
 msgstr "Bloqueado. Se eliminaron los seguidores coincidentes."
 
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/system_live.ex
@@ -4715,6 +4721,11 @@ msgstr "Ejecutar"
 msgid "Document"
 msgstr "Documento"
 
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Document body as Markdown"
+msgstr "Cuerpo del documento en Markdown"
+
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "Document fields"
@@ -4989,6 +5000,16 @@ msgstr "Editar %{kind}"
 msgid "Edit URL"
 msgstr "Editar URL"
 
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Edit as"
+msgstr "Editar como"
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Edit block %{n} on the page"
+msgstr "Editar el bloque %{n} en la página"
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Edit field %{label}"
@@ -5023,6 +5044,11 @@ msgstr "Editar este bloque en el editor completo"
 #, elixir-autogen, elixir-format
 msgid "Edit this block on the page"
 msgstr "Editar este bloque en la página"
+
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Edit this document's blocks as Markdown"
+msgstr "Editar los bloques de este documento como Markdown"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -6469,8 +6495,8 @@ msgstr "Host o URI del actor"
 
 #: lib/kiln_cms_web/live/content_editor/inspector_preview_component.ex
 #, elixir-autogen, elixir-format
-msgid "Hover a block and click Edit to change it on the page."
-msgstr "Pase el cursor sobre un bloque y haga clic en Editar para cambiarlo en la página."
+msgid "Hover a block and click Edit, or Tab to it, to change it on the page."
+msgstr "Pase el cursor sobre un bloque y haga clic en Editar, o llegue con Tab, para cambiarlo en la página."
 
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
@@ -7148,6 +7174,11 @@ msgstr "Biblioteca (%{count})"
 msgid "Light"
 msgstr "Claro"
 
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Lines like <!-- kiln:block gallery … --> stand for blocks Markdown can't express; move or delete them like any line."
+msgstr "Las líneas como <!-- kiln:block gallery … --> representan bloques que Markdown no puede expresar; muévelas o elimínalas como cualquier otra línea."
+
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #, elixir-autogen, elixir-format
 msgid "Link"
@@ -7391,6 +7422,11 @@ msgstr "Marcar como revisado"
 #, elixir-autogen, elixir-format
 msgid "Mark unread"
 msgstr "Marcar como no leído"
+
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Markdown"
+msgstr "Markdown"
 
 #: lib/kiln_cms_web/live/content_editor/markdown_import.ex
 #, elixir-autogen, elixir-format
@@ -9118,6 +9154,11 @@ msgstr "Envía una carga firmada (POST) a servicios externos cuando se publica, 
 msgid "Page %{page}"
 msgstr "Página %{page}"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Page actions"
+msgstr "Acciones de la página"
+
 #: lib/kiln_cms_web/controllers/content_controller.ex
 #: lib/kiln_cms_web/controllers/error_html/404.html.heex
 #, elixir-autogen, elixir-format
@@ -9229,6 +9270,11 @@ msgstr "Contraseña cambiada."
 #, elixir-autogen, elixir-format
 msgid "Past its unpublish date and still published"
 msgstr "Ha pasado su fecha de despublicación y sigue publicado"
+
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Paste or write Markdown. It becomes blocks as you type — switch back to Blocks to see them."
+msgstr "Pega o escribe Markdown. Se convierte en bloques mientras escribes: vuelve a Bloques para verlos."
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -12002,6 +12048,11 @@ msgstr "Otra persona guardó cambios en este contenido. El guardado está en pau
 msgid "Someone else saved this page. Duplicating copies their version, not what you see. Continue?"
 msgstr "Otra persona guardó esta página. Al duplicar se copiará su versión, no lo que ves. ¿Continuar?"
 
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Someone is editing a block right now. Try the Markdown view again once they're done."
+msgstr "Alguien está editando un bloque ahora mismo. Vuelve a probar la vista Markdown cuando termine."
+
 #: lib/kiln_cms_web/controllers/form_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Something needs fixing"
@@ -12839,6 +12890,11 @@ msgstr "Ese enlace de inicio de sesión ha caducado. Empieza de nuevo."
 #, elixir-autogen, elixir-format
 msgid "That tier no longer exists."
 msgstr "Ese nivel ya no existe."
+
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "That's more Markdown than one document can hold (the limit is %{size} MB)."
+msgstr "Es más Markdown del que cabe en un documento (el límite es %{size} MB)."
 
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
@@ -15211,6 +15267,7 @@ msgstr "Necesitas acceso de administrador para ejecutar una comprobación."
 msgid "You need admin access to view that page."
 msgstr "Necesita acceso de administrador para ver esa página."
 
+#: lib/kiln_cms_web/live/link_report_live.ex
 #: lib/kiln_cms_web/live_user_auth.ex
 #, elixir-autogen, elixir-format
 msgid "You need editor access to view that page."
