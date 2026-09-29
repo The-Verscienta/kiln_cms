@@ -561,6 +561,46 @@ carries the reasoning.
   ceiling", and the follow is refused and logged. Honest senders see no
   difference unless the nonce store is down. (#1659)
 
+<a id="billing-webhook-pipeline-runs-under-the-policies"></a>
+
+- **The billing webhook pipeline runs under the policies.** The webhook
+  worker, the resolution ladder that finds an event's membership, the
+  provider-state write, the membership trail and the entitlement recompute's
+  reads reached `WebhookEvent`, `Membership` and `MembershipEvent` through
+  `authorize?: false`. They now run as `KilnCMS.Billing.system/0`.
+  `WebhookEvent` admits it by name for the plain read, `claim` and the three
+  settle stamps, and for nothing else: it may not record, list, look up or
+  delete an event. The receiver keeps its bypass, since the provider's
+  signature is its grant.
+
+  A refused read answers `[]` or `nil`, and in billing both answers used to be
+  acted on. `nil` for the event meant "gone", so the job cancelled. `nil` or
+  `[]` for its membership meant "unresolvable", so the event was marked
+  ignored. `[]` for a user's entitling memberships meant "entitled to
+  nothing", so the recompute stripped a paying member's audiences. Each of
+  these reads now uses `authorize_with: :error`. A refusal is an error: the
+  event is marked failed and Oban retries it, and the recompute aborts and
+  rolls back with its transition, so the member keeps what they had. A refused
+  claim retries instead of cancelling as "already claimed", and the settle
+  stamps, whose results were discarded, now log when they fail.
+
+  The recompute's own writes are now all or nothing. A failed write of a
+  per-org membership used to be dropped: `create_missing` answered `:ok` to
+  its own error, and the sync of an existing row ignored its result. That
+  could leave a payer's `User.audiences` rewritten while the org membership
+  that access actually reads never got the audience. Every write of one
+  recompute now runs in one transaction. Any failure rolls the others back,
+  is logged with the user and org ids, and fails the membership transition,
+  so Oban retries it. A concurrent recompute's row is still not an error:
+  the upsert that meets it succeeds and changes nothing.
+
+  The `User` and `OrgMembership` reads and writes in the recompute, and the
+  account and content steps in `mix kiln.beta.round`, keep `authorize?: false`
+  with a written reason. A system grant over either would be a standing power
+  over every account. None of them can be refused, so none can mistake a
+  refusal for "no such row". The `mix kiln.authz.check` backlog drops by 23
+  sites and six files. (#1659)
+
 <a id="webhooks-social-posting-and-mail-run-under-the-policies"></a>
 
 - **Webhooks, social posting and mail run under the policies.** The webhook

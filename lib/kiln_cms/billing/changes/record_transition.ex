@@ -80,11 +80,16 @@ defmodule KilnCMS.Billing.Changes.RecordTransition do
         audiences_removed: delta.removed,
         provider_event_id: Ash.Changeset.get_argument(changeset, :provider_event_id),
         # Non-nil only when a human caused it — i.e. an admin comp. Webhook-driven
-        # transitions run actorless, and their provenance is the event id above.
+        # transitions run as the system actor (no `:id`), and their provenance is
+        # the event id above.
         actor_id: actor_id(context.actor),
         note: membership.note
       },
-      authorize?: false,
+      # The trail is append-only to every person; `MembershipEvent` admits the
+      # billing system actor by name (#1402, #1659). A refused append fails
+      # this `after_action`, so the transition rolls back and is retried —
+      # an entitlement change is never committed without its trail row.
+      actor: Billing.system(),
       tenant: membership.org_id
     )
   end
