@@ -347,7 +347,7 @@ nothing an editor left alone is pinned. Rich-text bodies are not offered (a
 Portable Text body is not a one-line input) and neither is a block with no
 readable `id`. A running experiment's variants are shown locked, with the
 reason, rather than offered for edit. Results are
-`KilnCMS.Experiments.Results.summarize/2`: per-variant impressions,
+`KilnCMS.Experiments.Results.summarize/3`: per-variant impressions,
 conversions and rate, and a **sample-size floor** (`config :kiln_cms,
 KilnCMS.Experiments, results_floor:`, default 100 impressions per arm) below
 which no leader is called; above it the strictly-highest rate is "leading" —

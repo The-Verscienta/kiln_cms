@@ -29,7 +29,7 @@ defmodule KilnCMSWeb.ExperimentLive do
 
   ## Results, and what they refuse to say
 
-  The panel is `KilnCMS.Experiments.Results.summarize/2`: per-variant
+  The panel is `KilnCMS.Experiments.Results.summarize/3`: per-variant
   impressions, conversions and rate. Below the sample-size floor no arm is
   called; above it the leader is named as "leading", never "significant".
   A **blocked** experiment (`Experiments.blocked_reason/1`, #1087) shows the
