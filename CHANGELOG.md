@@ -133,6 +133,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Automation rules are set up with ordinary fields instead of a JSON box.**
   ([long form](docs/changelog/unreleased.md#automation-rules-are-set-up-with-ordinary-fields-instead-of-a-json-box))
 
+- **The automation builder reads as steps and says each rule back as a
+  sentence.**
+  ([long form](docs/changelog/unreleased.md#the-automation-builder-reads-as-steps-and-says-each-rule-back-as-a-sentence))
+
 - **Console lists share one empty state; long settings pages get a table of
   contents; screen crumbs point at their real parent.**
   ([#1678](https://github.com/The-Verscienta/kiln_cms/issues/1678) · [#1680](https://github.com/The-Verscienta/kiln_cms/issues/1680) · [long form](docs/changelog/unreleased.md#console-lists-share-one-empty-state-long-settings-pages-get-a-table-of-contents))
