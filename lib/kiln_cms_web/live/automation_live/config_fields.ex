@@ -253,8 +253,9 @@ defmodule KilnCMSWeb.AutomationLive.ConfigFields do
       )
 
     ~H"""
+    <%!-- The builder's "Set it up" step heading is the visible title. --%>
     <fieldset class="space-y-3 rounded-lg border border-base-content/10 bg-base-200/30 p-4">
-      <legend class="px-1 text-sm font-medium">{gettext("Settings")}</legend>
+      <legend class="sr-only">{gettext("Settings")}</legend>
 
       <p :if={@fields == []} class="text-sm text-base-content/60">
         {gettext("Nothing to set up — this action runs as soon as its trigger fires.")}

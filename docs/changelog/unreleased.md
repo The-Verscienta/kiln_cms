@@ -485,6 +485,23 @@ carries the reasoning.
   the save refuses. The validation itself is unchanged and still refuses the
   string `"true"` for `allow_egress` from the API and seeds. Stored rules need
   no migration.
+
+<a id="the-automation-builder-reads-as-steps-and-says-each-rule-back-as-a-sentence"></a>
+
+- **The automation builder reads as steps and says each rule back as a
+  sentence.** `/editor/automation` is now four numbered steps: when (content
+  type and event, the events grouped as editorial changes, tasks and content
+  health), do this, set it up, and name it. The reaction dropdown is a set of
+  cards grouped as "Notify people", "Review & follow-up" and "Keep the site
+  fresh", each with an icon and a line on what it does. While the rule is
+  being built, the form shows it as one sentence, such as "When Post content
+  is published, email team@example.com." The rules list shows that sentence
+  in place of `post.published → send_email`, and a rule saved with no name is
+  named by it — and stays named by it through later edits, until someone types
+  a name of their own. A task event scoped to a content type (a rule that
+  could never fire) is called out in the builder instead of being worded as if
+  it worked.
+
 <a id="console-lists-share-one-empty-state-long-settings-pages-get-a-table-of-contents"></a>
 
 - **Console lists share one empty state; long settings pages get a table of
@@ -565,6 +582,64 @@ carries the reasoning.
   it is the reader's own inbox under their own actor, but the failure is now
   logged. Apart from `subscribe` and the stamp order, nothing changes while
   the grants are in place. (#1659)
+
+<a id="content-experiments-run-under-the-policies"></a>
+
+- **Content experiments run under the policies.** The delivery path (the
+  running-set read and the impression and conversion counters), the `:start`
+  and variant-write guards, the results panel and `mix kiln.experiment` reached
+  `Experiment`, `Variant` and `VariantDay` through `authorize?: false`. All but
+  the results panel now run as `KilnCMS.Experiments.system/0` (the mix task labels itself
+  `:operator`), and each resource admits it by action name inside its existing
+  admin write policy: experiments' reads plus `create`, `start` and `conclude`
+  (not `update`, `archive` or `destroy`); variants' reads plus `create` (not
+  re-weighting or removal); and the two counters plus a read on `VariantDay`
+  (not `destroy`, so a system caller cannot erase a result). Promotion now
+  loads the winning variant, and the results panel reads the counters, as the
+  editor instead of bypassing.
+
+  Every read behind a decision passes `authorize_with: :error` (and an
+  experiment's variants load with `authorize_read_with :error`), because a
+  refused read would otherwise answer `[]`, the permissive answer each time:
+  "nothing is running" (every experiment silently stops serving and counting),
+  "no other experiment on this document" (a second one starts), "0 served, 0
+  converted" on every arm, and "No experiments on this site" from the mix task.
+  A lost grant is now an error (`:start` returns `Forbidden`). Delivery still
+  never fails a page: it serves the canonical document, as it always did when
+  the experiment layer could not answer, and now logs why — and no longer
+  caches that failure as "nothing is running" for five minutes; a refused
+  counter write is logged too, instead of swallowed. Content and form lookups
+  in `Health` and `GoalConfigured` stay bypasses with their reason written
+  down (the #1402 content-read argument).
+  The funnel lookups stay in the backlog for the analytics batch. The
+  `mix kiln.authz.check` backlog drops by 19 sites and six files. (#1659)
+
+<a id="the-governance-audit-chain-runs-under-the-policies"></a>
+
+- **The governance audit chain runs under the policies.** The anchor chain,
+  the checkpoint worker and the governance dashboard reached `HistoryAnchor`,
+  `ChainCheckpoint`, `ChainCheckpointEntry` and `MembershipEvent` through
+  `authorize?: false`. They now run as `KilnCMS.Governance.system/0`, a
+  `KilnCMS.SystemActor`, and each resource admits it by action name inside its
+  existing admin-only policy: an anchor's `create` and per-document
+  `for_content` (not the plain read), every checkpoint action by name (so a
+  later `destroy` is not admitted by default), and an entry's `create`,
+  `for_content` and `for_checkpoint` (not the plain read). The sites that read
+  content, `Accounts.User` names, consents or version rows keep their bypass,
+  now with a written reason: a standing system grant over any of those would
+  be wider than the one dashboard it serves. The `mix kiln.authz.check`
+  backlog drops by 24 sites and four files.
+
+  Every one of the migrated reads now fails **closed**. A refused read filters
+  to `[]`, and here `[]` always meant the permissive answer: "never anchored",
+  "never witnessed" (which is what a truncation wants to look like), "no
+  unwitnessed checkpoints" (a witness outage shown as healthy), "no earlier
+  checkpoint" (the chain restarting at 1), or an empty entitlement trail. They
+  run with `authorize_with: :error`, so a lost grant raises instead: the
+  witness lookup reports the document `:unreadable` and the verdict floors to
+  `:unverifiable`, and the anchor hook logs and mints nothing rather than a
+  chain restarted from scratch. No behaviour changes while the grants are in
+  place. (#1659)
 
 <a id="the-link-checker-runs-under-the-policies"></a>
 

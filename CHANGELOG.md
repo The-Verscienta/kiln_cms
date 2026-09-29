@@ -133,6 +133,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Automation rules are set up with ordinary fields instead of a JSON box.**
   ([long form](docs/changelog/unreleased.md#automation-rules-are-set-up-with-ordinary-fields-instead-of-a-json-box))
 
+- **The automation builder reads as steps and says each rule back as a
+  sentence.**
+  ([long form](docs/changelog/unreleased.md#the-automation-builder-reads-as-steps-and-says-each-rule-back-as-a-sentence))
+
 - **Console lists share one empty state; long settings pages get a table of
   contents; screen crumbs point at their real parent.**
   ([#1678](https://github.com/The-Verscienta/kiln_cms/issues/1678) · [#1680](https://github.com/The-Verscienta/kiln_cms/issues/1680) · [long form](docs/changelog/unreleased.md#console-lists-share-one-empty-state-long-settings-pages-get-a-table-of-contents))
@@ -200,6 +204,16 @@ Every summary line below that was shortened links to its own entry there.
   comment thread's recipients and push delivery run as scoped system actors;
   their lookups fail closed and a lost grant is logged, never a silent drop.
   ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#notifications-and-web-push-run-under-the-policies))
+
+- **Content experiments run under the policies.** Delivery, the start guards
+  and `mix kiln.experiment` use a scoped system actor, and
+  every read behind an assignment or a result fails closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#content-experiments-run-under-the-policies))
+
+- **The governance audit chain runs under the policies.** Anchors, checkpoints
+  and the entitlement trail are read and written as a scoped system actor, and
+  every one of those reads fails closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#the-governance-audit-chain-runs-under-the-policies))
 
 - **The link checker runs under the policies.** 16 more internal sites run as
   a scoped system actor or carry a written reason; the counter reads fail closed.
