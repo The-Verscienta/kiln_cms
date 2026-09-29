@@ -151,7 +151,8 @@ defmodule KilnCMSWeb.ContentEditor.Preview do
         KilnCMS.Links.Internal.resolve_all(
           paths,
           link_locale(socket),
-          Accounts.org_id(socket.assigns.current_org)
+          Accounts.org_id(socket.assigns.current_org),
+          socket.assigns.current_user
         )
       )
     end
