@@ -2,6 +2,7 @@ defmodule Kiln.Advisory.BodyTest do
   use ExUnit.Case, async: true
 
   alias Kiln.Advisory.Body
+  alias KilnCMS.CMS.TypedBlocks
 
   defp para(text),
     do: %{"_type" => "block", "style" => "normal", "children" => [%{"text" => text}]}
@@ -257,6 +258,22 @@ defmodule Kiln.Advisory.BodyTest do
       ]
 
       assert Body.compute(blocks).empty_headings == [0]
+    end
+
+    test "from_indexed/1 reports against the index each block carries" do
+      [inlined_a, inlined_b, heading, rich] =
+        TypedBlocks.to_typed([
+          %{"_type" => "heading", "level" => 2, "text" => "From a fragment"},
+          %{"_type" => "heading", "level" => 2, "text" => " "},
+          %{"_type" => "heading", "level" => 2, "text" => "Host heading"},
+          rich([%{"_type" => "block", "style" => "h2", "children" => [%{"text" => ""}]}])
+        ])
+
+      # Two blocks inlined from the fragment at 0, then the host's own 1 and 2.
+      body = Body.from_indexed([{inlined_a, 0}, {inlined_b, 0}, {heading, 1}, {rich, 2}])
+
+      assert body.empty_headings == [0, 2]
+      assert Enum.map(body.headings, & &1.index) == [0, 1]
     end
 
     test "no empty headings on a well-formed document" do

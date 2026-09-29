@@ -29,14 +29,21 @@ defmodule KilnCMS.CMS.SiteLinkCheck do
   # an editor looking at an empty report deserves to know it is empty because
   # nothing has run rather than because nothing is broken. Deciding that this
   # deployment makes outbound requests is an admin act.
+  #
+  # The sweep and the check worker read the switch, and the sweep stamps
+  # `last_swept_at`, as `KilnCMS.Links.system/0` (#1659): `system_actions:`
+  # admits exactly `read` and `record_sweep`, never the settings form's
+  # `save`, so turning checking on stays an admin act.
   use KilnCMS.CMS.OrgSettings,
     table: "site_link_check",
     accept: [:external_enabled],
     read: :editor,
-    update?: false
+    update?: false,
+    system_actions: [:read, :record_sweep]
 
   actions do
-    # Written by `KilnCMS.Links.Sweep` when a run finishes, system-side. Its own
+    # Written by `KilnCMS.Links.Sweep` when a run finishes, as the system
+    # actor (the only caller `system_actions:` admits to it). Its own
     # action rather than a field on `:save` so no settings form can reach it.
     update :record_sweep do
       require_atomic? false

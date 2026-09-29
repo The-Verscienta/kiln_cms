@@ -73,7 +73,18 @@ defmodule KilnCMSWeb.LinkReportLive do
 
   def handle_event("refresh", _params, socket), do: {:noreply, load_report(socket)}
 
-  defp load_report(socket), do: assign(socket, :report, Report.for_org(org_id(socket)))
+  # Read as the viewer (#1659): `ExternalLink`'s read policy admits editors,
+  # which is who this route lets in. The route checks that only at mount, so
+  # someone demoted while the page is open is refused on their next refresh:
+  # send them away with a flash rather than crash the LiveView.
+  defp load_report(socket) do
+    assign(socket, :report, Report.for_org(org_id(socket), socket.assigns.current_user))
+  rescue
+    Ash.Error.Forbidden ->
+      socket
+      |> put_flash(:error, gettext("You need editor access to view that page."))
+      |> redirect(to: ~p"/")
+  end
 
   defp org_id(socket) do
     case socket.assigns[:current_org] do
