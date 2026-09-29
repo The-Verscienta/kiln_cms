@@ -53,8 +53,22 @@ defmodule KilnCMS.Billing.Entitlements do
   `(user_id, organization_id)`, so two recomputes racing for one user cannot
   duplicate a row or abort each other's transaction.
 
-  Every call runs `authorize?: false`: this is a system operation with no actor,
-  and the actions it drives forbid actor-carrying callers outright.
+  ## Who it runs as
+
+  The two billing reads — every tier's audience and the user's entitling
+  memberships — run as `KilnCMS.Billing.system/0` (#1659) with
+  `authorize_with: :error`. A refused read of either would otherwise come back
+  as `[]`, and `[]` here means "entitled to nothing": the recompute would strip
+  a paying member's audiences and commit that as the new truth. A refusal
+  instead aborts the recompute, the membership transition rolls back with it,
+  and Oban retries — the member keeps what they had.
+
+  The writes to `KilnCMS.Accounts.User` and `KilnCMS.Accounts.OrgMembership`,
+  and the reads that feed them, keep `authorize?: false`, each with its reason
+  at the call site: `User.sync_billing_audiences` refuses any caller that
+  carries an actor, and a system grant on `OrgMembership` would be a standing
+  write over every account's role and audiences on every org — wider than the
+  one user this recompute touches (the #1402 argument).
   """
   require Logger
 
@@ -127,9 +141,12 @@ defmodule KilnCMS.Billing.Entitlements do
   # under strict tenancy — it comes back unloaded, which would silently make every
   # membership look non-entitling and grant nothing at all.
   defp tier_audiences do
+    # Tiers are public (`authorize_if always()`), so no grant is involved today;
+    # it runs as the system actor so a later policy applies, and fails closed
+    # like the membership read below.
     Billing.MembershipTier
-    |> Ash.Query.for_read(:all_for_entitlements, %{}, authorize?: false)
-    |> Ash.read()
+    |> Ash.Query.for_read(:all_for_entitlements, %{}, actor: Billing.system())
+    |> Ash.read(authorize_with: :error)
     |> case do
       {:ok, tiers} -> {:ok, Map.new(tiers, &{&1.id, &1.audience})}
       {:error, reason} -> {:error, reason}
@@ -140,10 +157,15 @@ defmodule KilnCMS.Billing.Entitlements do
   # A tier whose audience has been dropped from `config :kiln_cms, :audiences` is
   # skipped with a warning rather than crashing the recompute: persisting it would
   # break every subsequent read of this user.
+  #
+  # FAIL CLOSED (#1659): `Membership`'s read policy admits the billing system
+  # actor, and a caller it does not admit is FILTERED to `[]` — which this
+  # function would report as "entitled to nothing", revoking every paid
+  # audience. `authorize_with: :error` turns that into an error instead.
   defp entitled_by_org(user_id, audiences_by_tier) do
     Membership
-    |> Ash.Query.for_read(:entitling_for_user, %{user_id: user_id}, authorize?: false)
-    |> Ash.read()
+    |> Ash.Query.for_read(:entitling_for_user, %{user_id: user_id}, actor: Billing.system())
+    |> Ash.read(authorize_with: :error)
     |> case do
       {:ok, memberships} ->
         {:ok,
@@ -186,6 +208,10 @@ defmodule KilnCMS.Billing.Entitlements do
     if before == normalize(desired) do
       {:ok, user}
     else
+      # `authorize?: false`: `User.sync_billing_audiences` is `forbid_if always()`
+      # and its change module refuses any actor-carrying call (a system actor
+      # included), so no authorized path can grant an audience; this recompute
+      # is the one writer.
       Accounts.sync_billing_audiences(user, %{audiences: desired}, authorize?: false)
     end
   end
@@ -194,6 +220,10 @@ defmodule KilnCMS.Billing.Entitlements do
   # can move per-org later. Rows are created when missing: a reader who pays on a
   # site they have no membership row for still needs one to carry the audience.
   defp write_org_memberships(user, managed, by_org) do
+    # `authorize?: false`: `OrgMembership` reads are self-only, and a system
+    # grant would be a standing read of every account's memberships (#1402).
+    # A bypass cannot be refused, so this cannot come back `[]` for want of a
+    # grant — `[]` here really means "no memberships" (the legacy branch below).
     with {:ok, memberships} <- Accounts.list_memberships_for_user(user.id, authorize?: false),
          {:ok, memberships} <- affiliate_legacy(user, memberships, by_org) do
       Enum.each(memberships, &sync_existing(&1, managed, by_org))
@@ -230,6 +260,10 @@ defmodule KilnCMS.Billing.Entitlements do
     desired = normalize(Enum.reject(current, &(&1 in managed)) ++ entitled)
 
     if current != desired do
+      # `authorize?: false`: an `OrgMembership` write is an org admin's; a system
+      # grant would be a standing write over every account's role and audiences
+      # on every org (#1402). Only the audiences column is written, and only the
+      # billing-managed part of it changes.
       Accounts.update_org_membership(membership, %{audiences: desired}, authorize?: false)
     end
   end
@@ -244,6 +278,9 @@ defmodule KilnCMS.Billing.Entitlements do
     by_org
     |> Enum.reject(fn {org_id, _audiences} -> MapSet.member?(existing, org_id) end)
     |> Enum.each(fn {org_id, audiences} ->
+      # `authorize?: false`, same reason as `sync_existing/3`: always a
+      # `:viewer` row for `user_id`, and an upsert that changes nothing on
+      # conflict, so it can never overwrite a role.
       case Accounts.create_org_membership(
              %{
                organization_id: org_id,
@@ -264,6 +301,9 @@ defmodule KilnCMS.Billing.Entitlements do
   end
 
   defp fetch_user(user_id) do
+    # `authorize?: false`: `User` reads are self-only, and a system grant would be
+    # a standing read of every account on the deployment (#1402). A bypass
+    # cannot be refused, so `nil` really is "no such user" (and aborts).
     case Accounts.get_user(user_id, authorize?: false, not_found_error?: false) do
       {:ok, nil} -> {:error, :user_not_found}
       {:ok, user} -> {:ok, user}

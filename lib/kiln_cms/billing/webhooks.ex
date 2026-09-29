@@ -30,6 +30,15 @@ defmodule KilnCMS.Billing.Webhooks do
      200. That is normal steady state: events for a customer created outside Kiln,
      or after a membership row was scrubbed. A 500 here would make the provider
      retry for days and eventually disable the endpoint.
+
+  ## A refused read is not "no membership"
+
+  Every lookup runs as `KilnCMS.Billing.system/0` (#1659) with
+  `authorize_with: :error`. A refused read would otherwise answer `nil` or
+  `[]`, which this ladder reads as "nothing we hold": the worker would mark
+  the event `:ignored` and a payment event would be dropped for good. A
+  refusal instead comes back as `{:error, %Ash.Error.Forbidden{}}`, the
+  worker marks the event `:failed`, and Oban retries.
   """
   require Logger
 
@@ -41,7 +50,8 @@ defmodule KilnCMS.Billing.Webhooks do
   Returns `{:ok, membership}`, or `{:ignored, reason}` when the event does not
   correspond to anything we hold.
   """
-  @spec resolve(map()) :: {:ok, struct()} | {:ignored, atom()}
+  @spec resolve(map()) ::
+          {:ok, struct()} | {:ignored, atom()} | {:error, Ash.Error.Forbidden.t()}
   def resolve(event) do
     object = object(event)
 
@@ -62,7 +72,7 @@ defmodule KilnCMS.Billing.Webhooks do
   def org_id(event) do
     case resolve(event) do
       {:ok, membership} -> membership.org_id
-      {:ignored, _reason} -> event |> object() |> metadata() |> Map.get("org_id")
+      _unresolved -> event |> object() |> metadata() |> Map.get("org_id")
     end
   end
 
@@ -84,7 +94,8 @@ defmodule KilnCMS.Billing.Webhooks do
     tenant = org_id || KilnCMS.Accounts.default_org_id()
 
     case Billing.get_membership(membership_id,
-           authorize?: false,
+           actor: Billing.system(),
+           authorize_with: :error,
            tenant: tenant,
            not_found_error?: false
          ) do
@@ -94,8 +105,8 @@ defmodule KilnCMS.Billing.Webhooks do
       {:ok, membership} ->
         verify(membership, org_id, metadata)
 
-      {:error, _reason} ->
-        {:ignored, :membership_not_found}
+      {:error, reason} ->
+        refused_or(reason, {:ignored, :membership_not_found})
     end
   end
 
@@ -133,12 +144,13 @@ defmodule KilnCMS.Billing.Webhooks do
 
       subscription_id ->
         case Billing.membership_by_subscription(subscription_id,
-               authorize?: false,
+               actor: Billing.system(),
+               authorize_with: :error,
                not_found_error?: false
              ) do
           {:ok, nil} -> {:ignored, :no_membership_for_subscription}
           {:ok, membership} -> {:ok, membership}
-          {:error, _reason} -> {:ignored, :no_membership_for_subscription}
+          {:error, reason} -> refused_or(reason, {:ignored, :no_membership_for_subscription})
         end
     end
   end
@@ -146,9 +158,13 @@ defmodule KilnCMS.Billing.Webhooks do
   defp by_customer(object) do
     with customer_id when is_binary(customer_id) <- customer_id(object),
          {:ok, memberships} <-
-           Billing.memberships_by_customer(customer_id, authorize?: false) do
+           Billing.memberships_by_customer(customer_id,
+             actor: Billing.system(),
+             authorize_with: :error
+           ) do
       disambiguate(memberships, object)
     else
+      {:error, reason} -> refused_or(reason, {:ignored, :no_membership_for_customer})
       _other -> {:ignored, :no_membership_for_customer}
     end
   end
@@ -159,13 +175,24 @@ defmodule KilnCMS.Billing.Webhooks do
   defp disambiguate(memberships, object) do
     # More than one tier for the same customer: pick by the event's price id, and
     # if that still doesn't single one out, refuse rather than guess.
+    #
+    # Tiers are public (`MembershipTier`'s read is `authorize_if always()`), so
+    # the system actor needs no grant for this lookup; it runs as one anyway,
+    # so a policy added later applies and a refusal still surfaces as an error.
     with price_id when is_binary(price_id) <- price_id(object),
          {:ok, tier} <-
-           Billing.tier_by_price(price_id, authorize?: false, not_found_error?: false),
+           Billing.tier_by_price(price_id,
+             actor: Billing.system(),
+             authorize_with: :error,
+             not_found_error?: false
+           ),
          false <- is_nil(tier),
          [membership] <- Enum.filter(memberships, &(&1.tier_id == tier.id)) do
       {:ok, membership}
     else
+      {:error, %Ash.Error.Forbidden{} = reason} ->
+        {:error, reason}
+
       _other ->
         Logger.warning(
           "billing: #{length(memberships)} memberships match this customer and the " <>
@@ -175,6 +202,13 @@ defmodule KilnCMS.Billing.Webhooks do
         {:ignored, :ambiguous_customer}
     end
   end
+
+  # A refusal propagates, so the worker retries instead of dropping the event.
+  # Any other read error keeps its old meaning: a malformed id in a verified
+  # payload (an `Invalid` cast) still resolves to nothing rather than retrying
+  # for days.
+  defp refused_or(%Ash.Error.Forbidden{} = reason, _otherwise), do: {:error, reason}
+  defp refused_or(_reason, otherwise), do: otherwise
 
   defp object(%{"data" => %{"object" => object}}) when is_map(object), do: object
   defp object(_event), do: %{}
