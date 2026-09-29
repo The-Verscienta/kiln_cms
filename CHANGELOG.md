@@ -140,6 +140,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Per-type semantic search ranks a record the query names first, however long
+  the record.**
+  ([#1746](https://github.com/The-Verscienta/kiln_cms/pull/1746) · [long form](docs/changelog/unreleased.md#per-type-semantic-search-ranks-a-record-the-query-names-first))
+
 - **An SEO or accessibility finding below a fragment names, and jumps to, the
   right block.**
   ([#1731](https://github.com/The-Verscienta/kiln_cms/pull/1731) · [long form](docs/changelog/unreleased.md#a-seo-or-accessibility-finding-below-a-fragment-names-and-jumps-to-the-right))

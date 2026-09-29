@@ -248,6 +248,23 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="per-type-semantic-search-ranks-a-record-the-query-names-first"></a>
+
+- **Per-type semantic search ranks a record the query names first, however
+  long the record.** The `semantic-search` JSON:API routes, the GraphQL
+  semantic lists and `CMS.semantic_search_*` already exempted a record the
+  query names (by title, or by a field flagged as a name) from
+  `semantic_max_distance`, but still sorted it at its distance rank. A
+  record's one vector is embedded from its whole text, so a long record sits
+  far from a bare-name query, below short records whose names merely sound
+  alike: Verscienta measured 14 of 602 acupuncture points missing the top 10
+  for their own name, the best-documented ones. Named records now come first,
+  nearest first among themselves, as the title leg already does in hybrid
+  search. No re-embed is needed. A query that names something is no longer
+  served by the HNSW index (the distance no longer leads the `ORDER BY`);
+  one that names nothing is unchanged.
+  ([#1746](https://github.com/The-Verscienta/kiln_cms/pull/1746))
+
 <a id="a-seo-or-accessibility-finding-below-a-fragment-names-and-jumps-to-the-right"></a>
 
 - **An SEO or accessibility finding below a fragment names, and jumps to, the
