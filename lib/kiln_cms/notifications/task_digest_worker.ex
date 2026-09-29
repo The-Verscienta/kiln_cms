@@ -14,11 +14,28 @@ defmodule KilnCMS.Notifications.TaskDigestWorker do
   Registered via `KilnCMS.Application`'s `@cron_schedules`
   (`KILN_TASK_DIGEST_CRON`), same pattern as the governance-checkpoint and
   link-check cron jobs — disabled entirely unless a schedule is configured.
+
+  ## Runs as the notifier's system actor, and fails closed (#1659)
+
+  The task reads and the "already notified" stamp run as
+  `KilnCMS.Notifications.system/0`, which `CMS.Task` admits for reads and for
+  `:mark_overdue_notified` alone. A refused read would filter to `[]` — "no
+  task is due", "nothing is newly overdue" — and the digest would silently
+  stop; both reads use `authorize_with: :error`, so a lost grant fails the job
+  where Oban shows it instead.
+
+  The stamp is the dedupe, so it is written **before** the `task.overdue`
+  event fires, and the event fires only if the stamp landed. A stamp that
+  cannot be written leaves the task unmarked for tomorrow's run rather than
+  firing an event this run has no way to remember firing.
   """
   use Oban.Worker, queue: :mail, max_attempts: 3
 
+  require Logger
+
   alias KilnCMS.Accounts
   alias KilnCMS.CMS
+  alias KilnCMS.Notifications
   alias KilnCMS.Notifications.TaskMailWorker
   alias KilnCMS.Notifications.Tasks, as: TaskNotifications
 
@@ -39,8 +56,21 @@ defmodule KilnCMS.Notifications.TaskDigestWorker do
     fire_overdue_events(org_id, today)
   end
 
-  defp send_digests(org_id, horizon) do
-    CMS.list_tasks_due_within!(horizon, authorize?: false, tenant: org_id, load: [:assignee])
+  @doc false
+  # Public, with the phase below, so a test can take the grant away from each
+  # read on its own (#1659) — run in order, the first raise hides the second.
+  @spec send_digests(String.t(), Date.t()) :: :ok
+  def send_digests(org_id, horizon) do
+    horizon
+    |> CMS.list_tasks_due_within!(
+      actor: Notifications.system(),
+      authorize_with: :error,
+      tenant: org_id
+    )
+    # `authorize?: false`: the assignee is an `Accounts.User`, whose read policy
+    # is self-only; a system grant there would cover every account on the
+    # deployment to learn the addresses these tasks already name.
+    |> Ash.load!(:assignee, authorize?: false)
     |> Enum.group_by(& &1.assignee_id)
     |> Enum.each(fn {_assignee_id, tasks} -> enqueue_digest(tasks, org_id) end)
   end
@@ -67,11 +97,24 @@ defmodule KilnCMS.Notifications.TaskDigestWorker do
 
   defp enqueue_digest([], _org_id), do: :ok
 
-  defp fire_overdue_events(org_id, _today) do
-    CMS.list_newly_overdue_tasks!(authorize?: false, tenant: org_id)
+  @doc false
+  @spec fire_overdue_events(String.t(), Date.t()) :: :ok
+  def fire_overdue_events(org_id, _today) do
+    system = Notifications.system()
+
+    CMS.list_newly_overdue_tasks!(actor: system, authorize_with: :error, tenant: org_id)
     |> Enum.each(fn task ->
-      TaskNotifications.dispatch_overdue(task)
-      CMS.mark_task_overdue_notified(task, %{}, authorize?: false, tenant: org_id)
+      # Stamp first, fire second — see the moduledoc.
+      case CMS.mark_task_overdue_notified(task, %{}, actor: system, tenant: org_id) do
+        {:ok, _task} ->
+          TaskNotifications.dispatch_overdue(task)
+
+        {:error, error} ->
+          Logger.error(
+            "task.overdue not fired for task #{task.id}: could not record it as notified: " <>
+              Exception.message(error)
+          )
+      end
     end)
   end
 end

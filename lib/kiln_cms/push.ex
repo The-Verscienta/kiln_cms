@@ -58,6 +58,17 @@ defmodule KilnCMS.Push do
   deployment rotates its pair. A subscription made against a site's own key
   that the site has since rotated is pruned without a request at all
   (`KilnCMS.Push.Keys`).
+
+  ## Who reads the subscriptions (#1659)
+
+  A browser registers its own device, as the signed-in user
+  (`Accounts.PushSubscription`'s `:subscribe` is authorized against the
+  actor it names). Everything after that — the sender's lookup, the worker's
+  reload, delivery bookkeeping, pruning — runs as `system/0`, which the
+  resource admits by action name. The lookups fail **closed**: a refused read
+  would filter to "no devices" and drop every push without a word, so they run
+  with `authorize_with: :error` and a refusal is logged (the sender) or retried
+  by Oban (the worker).
   """
 
   require Logger
@@ -70,6 +81,41 @@ defmodule KilnCMS.Push do
   # Matches the resource's `max_length` — one number, so the constraint can
   # actually fire rather than being unreachable behind this truncation.
   @label_bytes 60
+
+  # See `with_actor/2`.
+  @actor_override {__MODULE__, :actor_override}
+
+  @doc """
+  The actor push delivery runs as: a `KilnCMS.SystemActor` labelled `:push`,
+  admitted on `Accounts.PushSubscription` for `read`, `for_users`,
+  `touch_delivered` and `destroy` only (see `docs/policy-matrix.md`, "The
+  system actor").
+  """
+  @spec system() :: KilnCMS.SystemActor.t() | nil
+  def system do
+    case Process.get(@actor_override, :unset) do
+      :unset -> KilnCMS.SystemActor.new(:push)
+      actor -> actor
+    end
+  end
+
+  @doc false
+  # Test seam (#1659): run `fun` with `system/0` answering `actor` in this
+  # process, so a test can take the grant away and prove the subscription
+  # lookups fail closed. Process-local; nothing on a request path calls it.
+  @spec with_actor(term(), (-> result)) :: result when result: term()
+  def with_actor(actor, fun) do
+    previous = Process.get(@actor_override, :unset)
+    Process.put(@actor_override, actor)
+
+    try do
+      fun.()
+    after
+      if previous == :unset,
+        do: Process.delete(@actor_override),
+        else: Process.put(@actor_override, previous)
+    end
+  end
 
   @doc "Can a browser on the site `org` subscribe to push?"
   @spec enabled?(term()) :: boolean()
@@ -111,7 +157,9 @@ defmodule KilnCMS.Push do
           label: label(params["label"]),
           vapid_public_key: bound_key
         },
-        authorize?: false
+        # As the user whose device this is: `:subscribe` admits only a row
+        # whose `user_id` is the actor's own (#1659).
+        actor: actor
       )
     end
   end
@@ -168,17 +216,31 @@ defmodule KilnCMS.Push do
   end
 
   # The sender's read: system-scoped, because the recipients are decided by the
-  # workflow rather than by whoever is acting.
+  # workflow rather than by whoever is acting. Fails closed (#1659): a refused
+  # read would filter to "nobody has a device", so it raises instead, and the
+  # refusal is logged here — `notify/2` must not raise into the editorial
+  # action, but a lost grant must not drop every push without a word either.
   defp subscriptions_for([]), do: []
 
-  defp subscriptions_for(user_ids),
-    do: Accounts.push_subscriptions_for!(user_ids, authorize?: false)
+  defp subscriptions_for(user_ids) do
+    case Accounts.push_subscriptions_for(user_ids, actor: system(), authorize_with: :error) do
+      {:ok, subscriptions} ->
+        subscriptions
+
+      {:error, error} ->
+        Logger.error(
+          "Push notifications not sent: subscriptions unreadable: #{Exception.message(error)}"
+        )
+
+        []
+    end
+  end
 
   @doc "Delete a subscription a push service has told us is gone."
   @spec prune(struct(), term()) :: :ok
   def prune(subscription, reason) do
     Logger.info("Pruning dead push subscription #{subscription.id}: #{inspect(reason)}")
-    Accounts.remove_push_subscription!(subscription, authorize?: false)
+    Accounts.remove_push_subscription!(subscription, actor: system())
     :ok
   end
 

@@ -37,6 +37,9 @@ defmodule KilnCMS.Notifications.Tasks do
   """
   @spec dispatch_assigned(struct(), map() | nil) :: :ok
   def dispatch_assigned(task, actor) do
+    # `authorize?: false`: the assignee is an `Accounts.User` (self-only read
+    # policy), and a system grant there would cover every account on the
+    # deployment to learn one address the assignment already decided (#1659).
     task = Ash.load!(task, [:assignee], authorize?: false)
 
     if task.assignee do

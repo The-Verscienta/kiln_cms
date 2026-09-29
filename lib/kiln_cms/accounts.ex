@@ -49,8 +49,8 @@ defmodule KilnCMS.Accounts do
     end
 
     # Web Push subscriptions (#628) — one row per browser per account.
-    # `subscribe`/`for_users` are system calls: the first runs from the
-    # controller after it has the actor, the second is the sender's read.
+    # `subscribe` runs as the device's own user; `for_users` is the sender's
+    # read, as `KilnCMS.Push.system/0` (#1659).
     resource KilnCMS.Accounts.PushSubscription do
       define :list_push_subscriptions, action: :for_user, args: [:user_id]
       define :get_push_subscription, action: :read, get_by: [:id]

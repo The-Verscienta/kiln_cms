@@ -61,7 +61,14 @@ defmodule KilnCMS.Push.Worker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"subscription_id" => id, "payload" => payload}}) do
-    case Accounts.get_push_subscription(id, authorize?: false, not_found_error?: false) do
+    # As `Push.system/0`, failing closed (#1659): a refused read would come
+    # back as "not found" and the push would be dropped as though the device
+    # had gone, so a refusal is an error Oban logs and retries instead.
+    case Accounts.get_push_subscription(id,
+           actor: Push.system(),
+           authorize_with: :error,
+           not_found_error?: false
+         ) do
       {:ok, nil} -> :ok
       {:ok, subscription} -> deliver(subscription, payload)
       # A read failure is infrastructure, not a dead device — let Oban retry.
@@ -211,9 +218,14 @@ defmodule KilnCMS.Push.Worker do
   # makes a never-deliverable subscription visible in the settings list, and it
   # must not turn a delivered notification into a failed job.
   defp touch_delivered(subscription) do
-    Accounts.touch_push_subscription!(subscription, authorize?: false)
+    Accounts.touch_push_subscription!(subscription, actor: Push.system())
     :ok
   rescue
-    _error -> :ok
+    error ->
+      Logger.warning(
+        "Push delivered, but last_delivered_at not recorded: #{Exception.message(error)}"
+      )
+
+      :ok
   end
 end

@@ -291,8 +291,13 @@ defmodule KilnCMS.CMS.Task do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
+    # One update is the system's (#1659): the task digest's "already fired
+    # task.overdue" stamp. Narrowed by name, so the system actor still cannot
+    # complete, reassign or edit a task.
     policy action_type(:update) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
+      forbid_unless action(:mark_overdue_notified)
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

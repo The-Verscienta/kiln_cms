@@ -132,19 +132,38 @@ defmodule KilnCMS.Accounts.PushSubscription do
       authorize_if always()
     end
 
+    # The system actor (`KilnCMS.Push.system/0`, #1659) reads for delivery:
+    # `for_users` is the sender's lookup and `read` the worker's reload by id.
+    # Named, so `for_user` and `bound_to_key` are not admitted with them.
     policy action_type(:read) do
       authorize_if expr(user_id == ^actor(:id))
+      forbid_unless action([:read, :for_users])
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
+    # The system actor prunes a device its push service reported gone.
     policy action_type(:destroy) do
       authorize_if expr(user_id == ^actor(:id))
+      forbid_unless action(:destroy)
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
-    # System calls, all four: `subscribe` writes the endpoint keys after the
-    # LiveView has established the actor, `for_users` is the sender's read,
-    # `touch_delivered` is the worker's bookkeeping, and `bound_to_key` is the
-    # site-key rotation's sweep (#1560).
-    policy action([:subscribe, :for_users, :touch_delivered, :bound_to_key]) do
+    # A browser registers its own device: the row's `user_id` must be the
+    # actor's. The upsert still moves a row another account held on the same
+    # endpoint — the moduledoc's "second subscription is the true owner".
+    policy action(:subscribe) do
+      authorize_if relating_to_actor(:user)
+    end
+
+    # System-only: `for_users` is the sender's read and `touch_delivered` the
+    # worker's bookkeeping, both as `Push.system/0` (#1659).
+    policy action([:for_users, :touch_delivered]) do
+      authorize_if KilnCMS.Checks.SystemActor
+    end
+
+    # The site-key rotation's sweep (#1560) stays refused to every actor, the
+    # system actor included; its callers bypass with a written reason.
+    policy action(:bound_to_key) do
       forbid_if always()
     end
   end
