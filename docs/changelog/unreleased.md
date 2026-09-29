@@ -561,6 +561,38 @@ carries the reasoning.
   ceiling", and the follow is refused and logged. Honest senders see no
   difference unless the nonce store is down. (#1659)
 
+<a id="the-media-pipeline-and-public-forms-run-under-the-policies"></a>
+
+- **The media pipeline and public forms run under the policies.** The variant,
+  A/V and metadata-strip workers, the quarantine reaper and the variant
+  regeneration scan reached `MediaItem` through `authorize?: false`; so did the
+  form submission pipeline, its two mail workers, the autoresponder's field
+  lookup and the embed route's per-site framing default (`Form`, `FormField`,
+  `FormSubmission`, `SiteEmbedSettings`). They now run as `KilnCMS.Media.system/0`
+  and `KilnCMS.Forms.system/0`, and each resource admits them by action name.
+  The media pipeline writes what it derives through a new `:record_processing`
+  action rather than `:update`, so it cannot gate an item or edit its tags or
+  alt text, and it may `:purge` an item only while it is still quarantined. The
+  form pipeline may create a submission but never read one back. The
+  `mix kiln.authz.check` backlog drops by 18 sites and ten files.
+
+  The reads a decision rests on now fail closed. A refused worker re-read used
+  to look like "the item was deleted", and the job succeeded having done
+  nothing; for the metadata strip that left the upload quarantined until the
+  reaper deleted it. A refused form-field read would have validated a
+  submission against no fields at all. A refused mail-worker read dropped the
+  notification or the visitor's confirmation. Each now raises or fails the job
+  so Oban retries it. An embed default that cannot be read resolves to
+  same-origin only instead of falling through to `EMBED_ORIGINS`, which could
+  be wider than the site's own `[]`.
+
+  **Fixed along the way:** `KilnCMS.Media.QuarantineReaper` read across every
+  site without a tenant, which strict tenancy (the production default)
+  refuses, so the hourly reaper raised and no stuck quarantine was ever
+  removed. It now scans through a `multitenancy :bypass` read,
+  `:quarantine_expired`, which only the system actor may run (admins
+  included). (#1659)
+
 <a id="billing-webhook-pipeline-runs-under-the-policies"></a>
 
 - **The billing webhook pipeline runs under the policies.** The webhook

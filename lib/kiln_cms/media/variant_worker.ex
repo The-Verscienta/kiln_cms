@@ -33,7 +33,7 @@ defmodule KilnCMS.Media.VariantWorker do
 
   require Logger
 
-  alias KilnCMS.{CMS, ImageProcessor, Storage}
+  alias KilnCMS.{CMS, ImageProcessor, Media, Storage}
   alias KilnCMS.Media.Ingest
 
   @topic "media:updated"
@@ -47,8 +47,13 @@ defmodule KilnCMS.Media.VariantWorker do
     # without one is cancelled with a logged error (#1658) — never run with a
     # `nil` tenant, which strict tenancy turns into a silent no-op.
     with {:ok, tenant} <- Ingest.job_tenant(args, __MODULE__) do
-      case CMS.get_media_item(id, authorize?: false, tenant: tenant) do
+      # As the media pipeline's system actor, `authorize_with: :error` (#1659):
+      # a gated item is not world-readable, so a refused read would filter to
+      # "gone" and the job would succeed having derived nothing. A refusal
+      # fails the job instead.
+      case CMS.get_media_item(id, actor: Media.system(), authorize_with: :error, tenant: tenant) do
         {:ok, %{storage_key: key} = item} when is_binary(key) -> process(item, key, tenant)
+        {:error, %Ash.Error.Forbidden{} = error} -> {:error, error}
         _ -> :ok
       end
     end
@@ -90,7 +95,7 @@ defmodule KilnCMS.Media.VariantWorker do
       previous = item.variants || %{}
 
       {:ok, _item} =
-        CMS.update_media_item(
+        CMS.record_media_processing(
           item,
           %{
             width: width,
@@ -103,7 +108,7 @@ defmodule KilnCMS.Media.VariantWorker do
             # out of the repair it just became eligible for.
             variant_failures: failure_map(result)
           },
-          authorize?: false,
+          actor: Media.system(),
           tenant: tenant
         )
 
