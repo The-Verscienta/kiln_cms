@@ -36,7 +36,7 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
   reports such a key as *added* between the two versions — and a key-wise merge
   would make that report a lie. The fold writes the map as it was stored, then
   `apply_custom_field_registry/2` runs it back through
-  `Changes.ApplyCustomFields.apply_restored/1` (#710): against an EMPTY base, so
+  `Changes.ApplyCustomFields.apply_restored/2` (#710): against an EMPTY base, so
   the wholesale semantics hold, but with every registry pass an ordinary save
   gets — coercion, `:select` membership, media/reference resolution under the
   tenant, computed-field refresh from the restored document, and dropping keys
@@ -59,6 +59,15 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
   The pairs aren't listed here: they're every `belongs_to` whose source attribute
   is restorable, read off the resource, so a future relationship is covered
   without a second list to forget.
+
+  ## As the caller
+
+  The history and the reference checks are read as the restoring actor
+  (#1659), not around the policies: a restore can only put back what its
+  caller may read. Each read uses `authorize_with: :error`, so a refusal raises
+  a `Forbidden` rather than filtering — a filtered history would fold to an
+  empty snapshot and restore every field to its default, and a filtered
+  reference would read as "no longer exists".
 
   ## Re-validation
 
@@ -98,39 +107,44 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
   defp apply_version(changeset, version_id, context) do
     version_module = Module.concat(changeset.resource, Version)
     source_id = changeset.data.id
-    # Version twins are tenant-strict (#419) — reads carry the record org.
-    org_id = changeset.data.org_id
     restorable = VersionFields.restorable_fields(changeset.resource)
 
-    with {:ok, target} <- fetch_target(version_module, version_id, source_id, org_id),
-         {:ok, state} <-
-           VersionSnapshot.at(version_module, source_id, target,
-             authorize?: false,
-             tenant: org_id
-           ) do
+    # Version twins are tenant-strict (#419) — reads carry the record org. As
+    # the caller, failing closed: see "As the caller" in the moduledoc.
+    read_opts =
+      context
+      |> Ash.Context.to_opts()
+      |> Keyword.merge(tenant: changeset.data.org_id, authorize_with: :error)
+
+    with {:ok, target} <- fetch_target(version_module, version_id, source_id, read_opts),
+         {:ok, state} <- VersionSnapshot.at(version_module, source_id, target, read_opts) do
       changeset
       |> restore_fields(state, restorable)
-      |> apply_custom_field_registry(restorable)
+      |> apply_custom_field_registry(restorable, context)
       |> revalidate(context)
       |> revalidate_alt_text(context)
       |> revalidate_claims(context)
-      |> validate_references(restorable, org_id)
+      |> validate_references(restorable, read_opts)
     else
       :error ->
         Ash.Changeset.add_error(changeset,
           field: :version_id,
           message: "is not a version of this record"
         )
+
+      {:error, error} ->
+        Ash.Changeset.add_error(changeset, error)
     end
   end
 
-  defp fetch_target(version_module, version_id, source_id, org_id) do
+  defp fetch_target(version_module, version_id, source_id, read_opts) do
     version_module
     |> Ash.Query.filter(id == ^version_id and version_source_id == ^source_id)
-    |> Ash.read_one(authorize?: false, tenant: org_id)
+    |> Ash.read_one(read_opts)
     |> case do
       {:ok, %{} = version} -> {:ok, version}
-      _ -> :error
+      {:ok, nil} -> :error
+      {:error, error} -> {:error, error}
     end
   end
 
@@ -144,9 +158,9 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
   # `featured_image_id`), and a key whose definition was retired is dropped
   # rather than made publicly readable again. Only when `custom_fields` is
   # actually restorable for this resource.
-  defp apply_custom_field_registry(changeset, restorable) do
+  defp apply_custom_field_registry(changeset, restorable, context) do
     if :custom_fields in restorable do
-      KilnCMS.CMS.Changes.ApplyCustomFields.apply_restored(changeset)
+      KilnCMS.CMS.Changes.ApplyCustomFields.apply_restored(changeset, context)
     else
       changeset
     end
@@ -254,21 +268,21 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
 
   # ── References ────────────────────────────────────────────────────────────
 
-  defp validate_references(changeset, restorable, org_id) do
+  defp validate_references(changeset, restorable, read_opts) do
     changeset.resource
     |> Ash.Resource.Info.relationships()
     |> Enum.filter(&(&1.type == :belongs_to and &1.source_attribute in restorable))
-    |> Enum.reduce(changeset, &check_reference(&2, &1, org_id))
+    |> Enum.reduce(changeset, &check_reference(&2, &1, read_opts))
   end
 
-  defp check_reference(changeset, relationship, org_id) do
+  defp check_reference(changeset, relationship, read_opts) do
     id = Ash.Changeset.get_attribute(changeset, relationship.source_attribute)
 
     cond do
       is_nil(id) ->
         changeset
 
-      reference_exists?(relationship, id, org_id) ->
+      reference_exists?(relationship, id, read_opts) ->
         changeset
 
       true ->
@@ -285,12 +299,17 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
   # back on the page. Deliberately unrescued — an unreadable destination or a
   # dropped connection is not evidence that the record was deleted, and
   # answering "no longer exists" to a pool timeout tells the editor to go hunting
-  # for an image that is sitting in the media library.
-  defp reference_exists?(relationship, id, org_id) do
+  # for an image that is sitting in the media library. Read as the caller with
+  # `authorize_with: :error` (#1659) for the same reason: a row the caller may
+  # not read raises `Forbidden` rather than answering "no longer exists".
+  # `Ash.exists?` cannot take `authorize_with`, hence the one-row read.
+  defp reference_exists?(relationship, id, read_opts) do
     destination_attribute = relationship.destination_attribute
 
     relationship.destination
     |> Ash.Query.filter(^ref(destination_attribute) == ^id)
-    |> Ash.exists?(authorize?: false, tenant: org_id)
+    |> Ash.Query.limit(1)
+    |> Ash.read_one!(read_opts)
+    |> is_struct()
   end
 end

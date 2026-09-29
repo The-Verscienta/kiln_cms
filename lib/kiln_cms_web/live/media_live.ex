@@ -350,7 +350,8 @@ defmodule KilnCMSWeb.MediaLive do
   # throttled `:media` queue at the lowest priority.
   #
   # The tier is re-read rather than trusted from the mount assign: `Regeneration`
-  # reads with `authorize?: false`, so this check is the only one, and an
+  # reads as the media pipeline's system actor (`KilnCMS.Media.system/0`), not
+  # as this user, so this check is the only one, and an
   # assign captured at mount outlives a revoked role for the life of the socket.
   def handle_event("regenerate_variants", _params, socket) do
     if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do

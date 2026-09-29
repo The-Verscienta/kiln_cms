@@ -59,6 +59,7 @@ defmodule KilnCMS.Blocks.RequiredFieldAudit do
   defp stream_records(resource, org_id) do
     resource
     |> Ash.Query.select([:id, :org_id, :blocks])
+    # authorize?: false — operator's read-only audit of every row, drafts too; no system content grant
     |> Ash.stream!(authorize?: false, tenant: org_id, stream_with: :full_read)
   end
 

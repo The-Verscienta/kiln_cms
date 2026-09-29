@@ -36,10 +36,13 @@ defmodule KilnCMS.CMS.SiteCompliance do
   """
   # The shared one-row-per-org shape comes from `KilnCMS.CMS.OrgSettings`
   # (#1080). Editors read it: the editor's compliance panel is resolved from
-  # this row on every keystroke, and it is read there as the signed-in author,
-  # not as a system read. Nothing here is delivered to a visitor. Deciding what
-  # this site may not say — and whether saying it refuses a publish — is an
-  # admin act, the same call `SiteLinkCheck` makes.
+  # this row on every keystroke. Nothing here is delivered to a visitor.
+  # Deciding what this site may not say — and whether saying it refuses a
+  # publish — is an admin act, the same call `SiteLinkCheck` makes.
+  #
+  # `KilnCMS.Compliance.Settings` resolves the row for the publish gate and the
+  # panel as `KilnCMS.OrgSettings.system(:compliance)` (#1659), so the system
+  # actor is admitted for `read` only. Writing the row stays an admin act.
   #
   # **A save writes every column.** AshPostgres narrows `upsert_fields` to the
   # attributes the changeset carries, which is what lets `FeedSettings` accept
@@ -63,6 +66,7 @@ defmodule KilnCMS.CMS.SiteCompliance do
       :phrase_severity
     ],
     read: :editor,
+    system_actions: [:read],
     admin_columns: [:enabled, :require_at_publish, :phrases, :updated_at]
 
   # A ceiling on the site's own vocabulary. Every phrase compiles into one

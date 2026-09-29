@@ -35,25 +35,32 @@ defmodule KilnCMS.CMS.Validations.TagGroupInTenant do
   use Ash.Resource.Validation
 
   alias Ash.Error.Changes.InvalidAttribute
+  alias KilnCMS.CMS.Validations.Lookup
 
   @impl true
-  def validate(changeset, _opts, _context) do
+  def validate(changeset, _opts, context) do
     if Ash.Changeset.changing_attribute?(changeset, :tag_group_id) do
-      validate_supplied(changeset)
+      validate_supplied(changeset, context)
     else
       :ok
     end
   end
 
-  defp validate_supplied(changeset) do
+  defp validate_supplied(changeset, context) do
     case Ash.Changeset.get_attribute(changeset, :tag_group_id) do
       nil ->
         :ok
 
       group_id ->
-        case KilnCMS.CMS.get_tag_group(group_id, authorize?: false, tenant: org_id(changeset)) do
+        # As the caller (#1659): taxonomy is world-readable, so a writer who may
+        # file a tag may see its group. A refusal is not a pass: the write is
+        # refused with the read's Forbidden.
+        case KilnCMS.CMS.get_tag_group(group_id, Lookup.as_caller(context, org_id(changeset))) do
           {:ok, _group} ->
             :ok
+
+          {:error, %Ash.Error.Forbidden{} = forbidden} ->
+            {:error, forbidden}
 
           _not_in_org ->
             {:error,

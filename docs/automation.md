@@ -17,8 +17,14 @@ on top.
 
 ## Using it
 
-Manage rules at **`/editor/automation`** (admin-only). The builder is four
-numbered steps:
+Manage rules at **`/editor/automation`** (admin-only). Above the builder,
+**Start from a recipe** offers common rules ready-made ("Email me when
+something is published", "Create a task when content goes stale", "Announce
+new posts on social media", …). A recipe only fills in the builder: you finish
+what it can't know (which network, whose inbox) and add the rule as usual, and
+nothing is saved until you do (`KilnCMSWeb.AutomationLive.Recipes`).
+
+The builder is numbered steps:
 
 1. **When this happens** — a content type (`post`, a dynamic type's name,
    *Tasks*, or *any*) and an event, grouped as editorial changes
@@ -36,6 +42,20 @@ numbered steps:
    a rule saved with no name is named by that sentence, and keeps following
    it when the rule is edited until you type a name of your own. The rules
    list shows each rule's sentence under its name.
+5. **Try it** — optional, on both the add and the edit form. Pick a recent
+   piece of content and the builder shows what the rule would do to it: the
+   email with its subject and body rendered, the social post text and how many
+   accounts would post it, the task with its assignee, due date and note — or
+   why nothing would happen (an open review task already covers it, a
+   newsletter skips translations, nobody can hold the task). It follows the
+   rule as you edit it and sends, posts and saves nothing. The effects come
+   from `KilnCMS.Automation.RuleWorker.preview/4`, which sits beside the real
+   reaction and shares its templating, defaults and checks, and the event
+   payload from that event's own builder — so `create_task` on a *publish*
+   honestly previews "nobody to assign": only the health events carry the
+   author. The four intelligence reactions are described, not run: running
+   them costs what the rule costs, and `suggest_metadata` may send the page
+   off-site.
 
 ### Reactions
 

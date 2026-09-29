@@ -51,6 +51,7 @@ defmodule KilnCMS.CMS.Validations.MediaAltText do
   alias KilnCMS.Blocks.Gallery
   alias KilnCMS.CMS.MediaItem
   alias KilnCMS.CMS.TypedBlocks
+  alias KilnCMS.CMS.Validations.Lookup
 
   @impl true
   def validate(changeset, opts, _context) do
@@ -59,6 +60,12 @@ defmodule KilnCMS.CMS.Validations.MediaAltText do
     else
       :ok
     end
+  rescue
+    # Fail closed (#1659): the decorative lookup was refused. Not "nothing is
+    # decorative" (which would merely over-refuse) and certainly not a pass —
+    # the write is refused, and says why.
+    _forbidden in Ash.Error.Forbidden ->
+      {:error, field: :state, message: "cannot go live: alt text could not be checked"}
   end
 
   # `only_new?` is the difference between the publish gate and the edit gate
@@ -154,6 +161,13 @@ defmodule KilnCMS.CMS.Validations.MediaAltText do
   end
 
   # One query for every candidate, not one per block.
+  #
+  # Read as the system actor (#1659), not the caller: this gate also runs for
+  # `:publish_scheduled`, whose caller is the AshOban scheduler with no actor,
+  # and a non-editor reader would have audience-gated and quarantined items
+  # filtered out of its answer. `CMS.MediaItem` admits the system actor to the
+  # plain `read` only. `authorize_with: :error` makes a refusal raise (rescued
+  # in `validate/3`) instead of reading as "none of these is decorative".
   defp decorative_ids(candidates, org_id) do
     candidates
     |> Enum.map(&media_id/1)
@@ -173,7 +187,7 @@ defmodule KilnCMS.CMS.Validations.MediaAltText do
         MediaItem
         |> Ash.Query.filter(id in ^ids and decorative == true)
         |> Ash.Query.select([:id])
-        |> Ash.read!(authorize?: false, tenant: org_id)
+        |> Ash.read!(actor: Lookup.system(), authorize_with: :error, tenant: org_id)
         |> Enum.map(& &1.id)
     end
   end

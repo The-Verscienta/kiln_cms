@@ -55,11 +55,14 @@ defmodule KilnCMS.CMS.NameFields do
   end
 
   # System read: this is the schema of the site's fields, not content, and
-  # the search legs that consult it run under their own read policies.
+  # the search legs that consult it run under their own read policies. Run as
+  # the system actor (`FieldDefinition` admits it for reads), failing closed:
+  # a refused read raises rather than caching "no name fields".
   defp load(org_id) do
     KilnCMS.CMS.list_field_definitions!(
       query: [filter: [names_record: true]],
-      authorize?: false,
+      actor: KilnCMS.CMS.Housekeeping.system(:cms_registry),
+      authorize_with: :error,
       tenant: org_id
     )
     |> Enum.group_by(&owner/1, & &1.name)

@@ -51,6 +51,14 @@ defmodule KilnCMS.Analytics.Funnel do
     # tier as the rest of this domain.
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
+
+      # The system actor (#1659) reads funnel DEFINITIONS, never traffic: the
+      # experiment engine resolving a `:funnel_completion` goal's last step
+      # (delivery's target map, the `:start` guard) and `mix kiln.experiment`
+      # resolving `--goal-funnel SLUG`. The primary `read` only — see
+      # `KilnCMS.Analytics.system/1`.
+      forbid_unless action(:read)
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
     # Defining funnels is an admin concern (like webhooks / forms).

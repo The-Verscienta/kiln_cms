@@ -28,7 +28,7 @@ defmodule KilnCMS.Media.AVWorker do
   """
   use Oban.Worker, queue: :media, max_attempts: 3
 
-  alias KilnCMS.{AVProcessor, CMS, Storage}
+  alias KilnCMS.{AVProcessor, CMS, Media, Storage}
   alias KilnCMS.Media.Ingest
 
   require Logger
@@ -51,8 +51,13 @@ defmodule KilnCMS.Media.AVWorker do
     # The item's site (epic #336); a job without `org_id` is cancelled with a
     # logged error (#1658).
     with {:ok, tenant} <- Ingest.job_tenant(args, __MODULE__) do
-      case CMS.get_media_item(id, authorize?: false, tenant: tenant) do
+      # As the media pipeline's system actor, `authorize_with: :error` (#1659):
+      # a gated item is not world-readable, so a refused read would filter to
+      # "gone" and the job would succeed having probed nothing. A refusal
+      # fails the job instead.
+      case CMS.get_media_item(id, actor: Media.system(), authorize_with: :error, tenant: tenant) do
         {:ok, %{storage_key: key} = item} when is_binary(key) -> process(item, key, tenant)
+        {:error, %Ash.Error.Forbidden{} = error} -> {:error, error}
         _ -> :ok
       end
     end
@@ -112,7 +117,9 @@ defmodule KilnCMS.Media.AVWorker do
           |> put_dimensions(probed)
           |> put_poster(item, path, probed)
 
-        {:ok, written} = CMS.update_media_item(item, attrs, authorize?: false, tenant: tenant)
+        {:ok, written} =
+          CMS.record_media_processing(item, attrs, actor: Media.system(), tenant: tenant)
+
         revoke_poster_if_gated(written, tenant)
 
       # No ffprobe, or a container it couldn't read. Either way there is
@@ -157,8 +164,13 @@ defmodule KilnCMS.Media.AVWorker do
       variants ->
         for {_label, %{"key" => key}} <- variants, is_binary(key), do: Storage.delete(key, item)
 
+        # A refused write raises here rather than leave a public still of a
+        # gated video in place.
         {:ok, _cleared} =
-          CMS.update_media_item(item, %{variants: %{}}, authorize?: false, tenant: tenant)
+          CMS.record_media_processing(item, %{variants: %{}},
+            actor: Media.system(),
+            tenant: tenant
+          )
 
         :ok
     end

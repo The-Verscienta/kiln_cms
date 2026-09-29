@@ -131,13 +131,24 @@ defmodule KilnCMS.Feeds do
     # TTL. It degrades to `unavailable/0`, NOT to the operator config — see
     # that function; `KilnCMS.OrgSettings.resolve/2` takes the fallback as a
     # function precisely so this stays a per-setting decision (#1077).
+    # The actor is taken here, in the caller, because a cache miss runs
+    # `read` on a Cachex courier process (see `KilnCMS.OrgSettings`).
+    actor = KilnCMS.OrgSettings.system(:feeds)
+
     KilnCMS.OrgSettings.resolve(org_id,
       cache_key: KilnCMS.Cache.feed_policy_key(org_id),
       ttl: @ttl,
-      # A system read: the row is admin-only by policy, but feeds render for
-      # anonymous readers with no actor. Tenant-scoped, so strict tenancy is
-      # satisfied.
-      read: &KilnCMS.CMS.list_feed_settings(tenant: &1, authorize?: false),
+      # A system read (#1659): the row is admin-only by policy, but feeds
+      # render for anonymous readers with no actor, so it is read as the
+      # system actor `FeedSettings` admits for `read`. Fails closed: a refused
+      # read would be "no row", the operator config, cached for the TTL, which
+      # could turn full content on for a site that switched it off.
+      read:
+        &KilnCMS.CMS.list_feed_settings(
+          tenant: &1,
+          actor: actor,
+          authorize_with: :error
+        ),
       build: &build/1,
       fallback: &unavailable/0,
       label: "feed settings"

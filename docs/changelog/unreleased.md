@@ -515,6 +515,28 @@ carries the reasoning.
   could never fire) is called out in the builder instead of being worded as if
   it worked.
 
+<a id="the-automation-builder-offers-ready-made-recipes-and-a-preview-on-real-content"></a>
+
+- **The automation builder offers ready-made recipes and a preview on real
+  content.** Above the builder,
+  "Start from a recipe" lists six common rules, among them "Email me when
+  something is published" (addressed to the admin), "Create a task when
+  content goes stale" and "Announce new posts on social media". Picking one
+  fills in the form without saving anything. The admin reviews it, fills in
+  what the recipe can't know (such as which network), and adds the rule as
+  usual. The gallery is open while a site has no rules and folded once it has
+  some.
+
+  A final "Try it" step picks a recent piece of content and shows what the
+  rule would do to it: the email with its subject and body rendered, the
+  social post text and how many accounts would post it, the task with its
+  assignee, due date and note, or why nothing would happen (an open review
+  task already covers it, a newsletter would skip a translation). The preview
+  follows the rule as it is edited. It uses the same templating, defaults and
+  checks as the real reaction (`RuleWorker.preview/4`) and sends, posts and
+  saves nothing. The four AI reactions are described rather than run, since
+  running them costs what the rule costs and may send the page off-site.
+
 <a id="console-lists-share-one-empty-state-long-settings-pages-get-a-table-of-contents"></a>
 
 - **Console lists share one empty state; long settings pages get a table of
@@ -535,6 +557,27 @@ carries the reasoning.
   listed under, or Home
   ([#1678](https://github.com/The-Verscienta/kiln_cms/issues/1678),
   [#1680](https://github.com/The-Verscienta/kiln_cms/issues/1680)).
+
+<a id="accounts-system-reads-run-under-the-policies"></a>
+
+- **The accounts domain's system reads run under the policies.**
+  `Accounts.list_org_ids/0` (the tenant list behind AshOban's per-tenant
+  scheduler scans, GDPR erasure, audit verification and the digests),
+  `Accounts.default_org/0` and the membership half of a data-subject export
+  reached `Organization` and `Billing.Membership` through `authorize?: false`.
+  They now run as `KilnCMS.Accounts.system/0`. `Organization` admits it for
+  the plain `read` only: not the request path's tenant resolution
+  (`by_slug`, `by_custom_domain`), and not create or update. All three reads
+  fail closed. A refused tenant list raises instead of answering `[]`, which
+  every sweep would have read as "no orgs, nothing to do"; a refused
+  default-org read answers `:error`, not the "seed row missing" `nil`; and a
+  refused export read is logged as an error. The 20 remaining sites in the
+  domain are the pre-auth flows (sign-in, the second factor and its hold,
+  passkeys, SSO, `/setup`) and the membership lookup inside the policy checks
+  themselves. They keep `authorize?: false`, each with its reason at the call
+  site: there is no actor yet, and a bypass cannot be refused into "no such
+  token" or "no membership". The `mix kiln.authz.check` backlog drops by 23
+  sites and 11 files. No change to any sign-in response. (#1659)
 
 <a id="federation-runs-under-the-policies"></a>
 
@@ -595,6 +638,183 @@ carries the reasoning.
   it is the reader's own inbox under their own actor, but the failure is now
   logged. Apart from `subscribe` and the stamp order, nothing changes while
   the grants are in place. (#1659)
+
+<a id="funnel-lookups-and-the-operator-mix-tasks-run-under-the-policies"></a>
+
+- **Funnel lookups and the operator mix tasks run under the policies.** The
+  experiment engine read funnel definitions with `authorize?: false` in three
+  places: delivery's cached map of each funnel's last step
+  (`Experiments.funnel_targets/1`), the `:start` guard for a
+  `:funnel_completion` goal, and `mix kiln.experiment --goal-funnel SLUG`. All
+  three now read as `KilnCMS.Analytics.system/1`, which `Funnel` and
+  `FunnelStep` admit to their primary `read` and nothing else: not a write,
+  not the builder's `:for_funnel` read, and no traffic resource. Each read uses
+  `authorize_with: :error`. Before, a refused read on the delivery path would
+  have filtered to nothing and been cached as "no funnel targets", so every
+  funnel experiment would silently stop converting for the cache TTL. It now
+  logs and is not cached. A refused slug lookup now raises instead of
+  reporting "No funnel with id or slug" for a funnel that exists.
+  `mix kiln.gen.content --from` reads the type definition as the operator,
+  under `TypeDefinition`'s existing read-only grant. The other operator mix
+  tasks keep `authorize?: false`, each with a comment saying why: whole-corpus
+  content reads (`kiln.audit.verify`, `kiln.embed_all`), an every-org tag
+  backfill, and organization-registry lookups the operator is not a member of
+  (`kiln.federation`, `kiln.search.eval`, `kiln.search.measure_floor`). No
+  mix task is left in the `mix kiln.authz.check` backlog except the part of
+  `kiln.experiment` that #1659's experiments batch covers. (#1659)
+
+<a id="event-log-and-settings-run-under-the-policies"></a>
+
+- **The event log and the per-site settings run under the policies.**
+  `KilnCMS.History` (the block-level event log), the
+  `Feeds`, `Compliance.Settings`, `Branding` and `CodeInjection` resolvers, the
+  automation rule match, the event helpers, the schema export and search's
+  vector legs and query counter reached their resources through
+  `authorize?: false`. They now run as `KilnCMS.SystemActor`, admitted by action
+  name: `DocumentEvent`'s `append`, `anonymize_actor`, `for_document` and a new
+  `by_actor` read (not the plain `read`); `FeedSettings` and `SiteCompliance`
+  for `read` only, through `OrgSettings`' `system_actions:`; `SearchQuery` for
+  `record` only. `FieldDefinition`, `Automation.Rule` and the two embedding
+  tables already admitted the system actor.
+
+  Every migrated read that decides something fails **closed**
+  (`authorize_with: :error`); only search's two vector legs, which feed a
+  ranked result list, do not. A refused read
+  filters to "nothing", and here that answer was never harmless: the event
+  log's sequence read would hand out a number already taken, the GDPR erasure
+  sweep would redact nothing and report success, a settings resolver would
+  cache the operator config for the whole TTL (turning full-content feeds back
+  on, or a site's publish gate off), the rule match would drop every automation
+  while the job succeeded, and the event helpers and schema export would read a
+  type as having no fields. `Automation.dispatch/3` now returns
+  `{:error, reason}` when the rules cannot be read, so the dispatch job retries;
+  it used to swallow a failed read too.
+
+  `History.record/5` also reads the next sequence number under the document's
+  own org. It read with no tenant, which strict tenancy (the production
+  default) refuses, so every append raised there. `replay/3` and `preview_at/3`
+  take an `:org_id` option for the same reason.
+
+  Eleven sites keep `authorize?: false`, each with its reason at the call site:
+  content reads and the collaborative checkpoint's draft write (a system grant
+  there would be a standing read or write over every draft), the operator
+  CLIs' account and org lookups (they find the actor, so there is none yet),
+  and the staging scrub's erasure. The `mix kiln.authz.check` backlog drops by
+  28 sites and 15 files. (#1659)
+
+<a id="cms-helpers-run-under-the-policies"></a>
+
+- **Content releases, slugs, menus and the field registry run under the
+  policies.** The CMS's helper modules reached their resources through
+  `authorize?: false`. They now run as the caller where the caller is
+  entitled, as a `KilnCMS.SystemActor` (`KilnCMS.CMS.Housekeeping`) where
+  there is no caller, and keep a written justification where neither fits.
+  The release go-live worker reads a release and lists its items by status,
+  records the outcome (`mark_*` on `ContentRelease` and `ReleaseItem`, which
+  no person, admin included, may call) and abandons its own crashed claim;
+  it cannot start, schedule or compose a release. The system actor may read
+  `SiteEditorialSettings`, not save it. Menus and taxonomy are read with no
+  actor under their world-readable policies, the field and type registry as
+  the system, and the governance dashboard's content-health panel and CSV
+  export as the person looking. The content reads that decide slug and alias
+  uniqueness keep their bypass on purpose: a filtered read would report a
+  taken slug as free.
+
+  Several reads now fail **closed** instead of answering "nothing": a
+  refused release-item read raises rather than publishing (or rolling back)
+  an empty release; the release worker records a refused read as an error
+  rather than logging the release as vanished; a refused registry read
+  raises rather than deriving a slug from the default pattern, dropping a
+  dynamic type's URL prefix from the reserved segments, or rejecting a
+  `custom_filter` as an unknown field; and `TaskSettings.site_default/1`
+  raises rather than applying the shipped default. The `mix kiln.authz.check`
+  backlog drops by 37 sites and 17 files. (#1659)
+
+<a id="the-cmss-own-bookkeeping-runs-under-the-policies"></a>
+
+- **The CMS's own bookkeeping runs under the policies.** The changes behind a
+  publish, an unpublish, a rename, a restore, an autosave, a comment, a
+  release archive and a form submission reached `Task`, the content resources,
+  `Redirect`, `FormSpamSettings`, `FieldDefinition`, the version history and
+  more through `authorize?: false`. Where the caller is entitled they now run
+  as the caller: the comment thread lookup, the release-item cancel, the
+  version history a restore folds, the autosave rows it coalesces, and a
+  custom field's media or content reference, so an editor can no longer learn
+  a draft's title they may not read by referencing its id. Where the write is
+  the action's consequence rather than the caller's they run as
+  `KilnCMS.CMS.Bookkeeping.system/0`: completing a record's open tasks
+  (`Task` admits it to `:complete` only), pointing `published_version_id`
+  (content admits it to `:set_published_version_id` only), writing a
+  rename's 301 (`Redirect` admits `:create` and `:destroy`), reading the
+  field registry, and reading the spam keywords (`FormSpamSettings`, `read`
+  only). Six sites keep `authorize?: false` with a written reason: the
+  version-row rewrite and prune (no actor may update or delete history), the
+  publish-version lookup, and three content reads that never leave the change.
+  The `mix kiln.authz.check` backlog drops by 26 sites and 15 files.
+
+  The reads a write depends on now fail closed. A refused field-registry
+  read used to filter to "no definitions", and the cleaned map is folded out
+  of the definitions: a partial `custom_fields` write would have silently
+  stored `{}`. A refused manual-boundary read in autosave coalescing would have
+  answered "no manual save" and deleted autosaves on its far side. A refused
+  thread read would have started a second root; a refused pending-items read
+  would have archived a release with its items still reserving their content;
+  a refused spam-keyword read (or a read error) scored a submission as if the
+  site had no keywords. Each now raises, fails the write, or keeps the rows. A
+  published rename whose 301 cannot be written now fails instead of vacating
+  the URL. (#1659)
+
+<a id="cms-validations-look-things-up-under-the-policies"></a>
+
+- **CMS validations look things up under the policies.** Eight CMS validations
+  checked a reference with `authorize?: false`: the release item checks
+  (release open, content exists, release size cap), tag group ownership, menu
+  item placement, slug-pattern tokens, and the required-consent and alt-text
+  publish gates. Six of them now read **as the caller**, with the actor and
+  authorization mode of the action they guard, so an editor's lookup runs
+  under the editor's policies and a trusted caller that bypassed the action
+  reads the same way. The two publish gates also run for the AshOban
+  scheduler, which has no actor, so they read as a scoped system actor, which
+  `CMS.Consent` admits to `for_content` only and `CMS.MediaItem` to the plain
+  `read` only. Every lookup passes `authorize_with: :error`, so a refusal is
+  an error, never a shorter answer. The release size cap used to count an
+  unreadable release as empty and let the add through. It now refuses. A
+  refused publish-gate read refuses the publish ("could not be checked"). The
+  task assignee check keeps its bypass with a justification: `User` is
+  readable only by its owner. The `mix kiln.authz.check` backlog drops by 11
+  sites and nine files. (#1659)
+
+<a id="the-media-pipeline-and-public-forms-run-under-the-policies"></a>
+
+- **The media pipeline and public forms run under the policies.** The variant,
+  A/V and metadata-strip workers, the quarantine reaper and the variant
+  regeneration scan reached `MediaItem` through `authorize?: false`; so did the
+  form submission pipeline, its two mail workers, the autoresponder's field
+  lookup and the embed route's per-site framing default (`Form`, `FormField`,
+  `FormSubmission`, `SiteEmbedSettings`). They now run as `KilnCMS.Media.system/0`
+  and `KilnCMS.Forms.system/0`, and each resource admits them by action name.
+  The media pipeline writes what it derives through a new `:record_processing`
+  action rather than `:update`, so it cannot gate an item or edit its tags or
+  alt text, and it may `:purge` an item only while it is still quarantined. The
+  form pipeline may create a submission but never read one back. The
+  `mix kiln.authz.check` backlog drops by 18 sites and ten files.
+
+  The reads a decision rests on now fail closed. A refused worker re-read used
+  to look like "the item was deleted", and the job succeeded having done
+  nothing; for the metadata strip that left the upload quarantined until the
+  reaper deleted it. A refused form-field read would have validated a
+  submission against no fields at all. A refused mail-worker read dropped the
+  notification or the visitor's confirmation. Each now raises or fails the job
+  so Oban retries it. An embed default that cannot be read resolves to
+  same-origin only instead of falling through to `EMBED_ORIGINS`, which could
+  be wider than the site's own `[]`.
+
+  **Fixed along the way:** `KilnCMS.Media.QuarantineReaper` read across every
+  site without a tenant, which strict tenancy (the production default)
+  refuses, so the hourly reaper raised and no stuck quarantine was ever
+  removed. It now scans through a `multitenancy :bypass` read,
+  `:quarantine_expired`, which only the system actor may run (admins
+  included). (#1659)
 
 <a id="billing-webhook-pipeline-runs-under-the-policies"></a>
 

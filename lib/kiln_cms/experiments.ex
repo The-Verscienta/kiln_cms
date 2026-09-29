@@ -209,10 +209,17 @@ defmodule KilnCMS.Experiments do
 
   # One read for the whole site rather than one per experiment: funnels are few
   # and the delivery path wants a map lookup, not a join.
+  #
+  # Runs as the analytics system actor (#1659) and fails CLOSED
+  # (`authorize_with: :error`): a refused read under the default filter answers
+  # `[]`, which this function would turn into `%{}` — a value the cache DOES
+  # keep, so five minutes of every funnel experiment silently not converting.
+  # Raising lands in the rescue below instead: logged, and `nil`, not cached.
   defp load_funnel_targets(org_id) do
     KilnCMS.Analytics.list_funnels!(
       query: [load: :steps],
-      authorize?: false,
+      actor: KilnCMS.Analytics.system(:experiments),
+      authorize_with: :error,
       tenant: org_id
     )
     |> Enum.flat_map(fn funnel ->

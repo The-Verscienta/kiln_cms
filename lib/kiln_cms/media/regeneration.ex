@@ -232,7 +232,11 @@ defmodule KilnCMS.Media.Regeneration do
     # recorded failure silently reads as "never recorded". That made the whole
     # of #1000 inert on this path, which is the only path `run/2` uses.
     |> Ash.Query.select([:id, :variants, :variant_failures, :content_type, :width])
-    |> Ash.read!(authorize?: false, tenant: org_id)
+    # As the media pipeline's system actor, `authorize_with: :error` (#1659): a
+    # refused read would silently drop every row the grant alone admits (a
+    # gated or quarantined one), and the run would report a library it never
+    # saw. A refusal raises instead, failing the run where it shows.
+    |> Ash.read!(actor: KilnCMS.Media.system(), authorize_with: :error, tenant: org_id)
   end
 
   defp after_cursor(query, nil), do: query

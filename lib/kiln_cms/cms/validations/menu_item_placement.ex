@@ -27,35 +27,42 @@ defmodule KilnCMS.CMS.Validations.MenuItemPlacement do
   require Ash.Query
 
   alias KilnCMS.CMS.MenuItem
+  alias KilnCMS.CMS.Validations.Lookup
 
   @impl true
-  def validate(changeset, _opts, _context) do
+  def validate(changeset, _opts, context) do
     if Ash.Changeset.changing_attribute?(changeset, :parent_id) do
-      validate_move(changeset)
+      validate_move(changeset, Lookup.as_caller(context, changeset.tenant))
     else
       :ok
     end
   end
 
-  defp validate_move(changeset) do
+  # The walk reads as the caller (#1659). Menu items are world-readable, so an
+  # editor moving one sees the whole tree; `authorize_with: :error` still turns
+  # a refused read into a Forbidden rejection rather than a subtree read short —
+  # which would under-count its height and accept a move that nests too deep.
+  defp validate_move(changeset, read_opts) do
     case Ash.Changeset.get_attribute(changeset, :parent_id) do
       nil -> :ok
-      parent_id -> validate_parent(changeset, parent_id)
+      parent_id -> validate_parent(changeset, parent_id, read_opts)
     end
+  rescue
+    forbidden in Ash.Error.Forbidden -> {:error, forbidden}
   end
 
-  defp validate_parent(changeset, parent_id) do
+  defp validate_parent(changeset, parent_id, read_opts) do
     id = Map.get(changeset.data, :id)
 
     if parent_id == id do
       {:error, field: :parent_id, message: "can't be the item itself"}
     else
-      check_ancestry(changeset, parent_id, id)
+      check_ancestry(changeset, parent_id, id, read_opts)
     end
   end
 
-  defp check_ancestry(changeset, parent_id, id) do
-    case ancestors(changeset, parent_id) do
+  defp check_ancestry(changeset, parent_id, id, read_opts) do
+    case ancestors(read_opts, parent_id) do
       {:error, message} ->
         {:error, field: :parent_id, message: message}
 
@@ -66,7 +73,7 @@ defmodule KilnCMS.CMS.Validations.MenuItemPlacement do
 
           # `chain` is the new ancestors, `+ 1` is the item itself, and `height`
           # is how many further levels it drags along.
-          length(chain) + 1 + height(changeset, id) > MenuItem.max_depth() ->
+          length(chain) + 1 + height(read_opts, id) > MenuItem.max_depth() ->
             {:error,
              field: :parent_id, message: "would nest deeper than #{MenuItem.max_depth()} levels"}
 
@@ -83,14 +90,14 @@ defmodule KilnCMS.CMS.Validations.MenuItemPlacement do
   # plus one: a chain longer than that means pre-existing corruption (a cycle
   # committed by two concurrent moves), and walking it forever is exactly what
   # this validation exists to prevent.
-  defp ancestors(changeset, parent_id, acc \\ []) do
+  defp ancestors(read_opts, parent_id, acc \\ []) do
     if length(acc) > MenuItem.max_depth() do
       {:error, "is nested too deeply"}
     else
-      case fetch(changeset, parent_id) do
+      case fetch(read_opts, parent_id) do
         nil -> {:error, "no longer exists"}
         %{parent_id: nil} = item -> {:ok, Enum.reverse([item | acc])}
-        item -> ancestors(changeset, item.parent_id, [item | acc])
+        item -> ancestors(read_opts, item.parent_id, [item | acc])
       end
     end
   end
@@ -99,33 +106,33 @@ defmodule KilnCMS.CMS.Validations.MenuItemPlacement do
   # item has no children yet). Stops once it has seen more than `max_depth`
   # levels: past that the answer is "too deep" either way, and the bound is what
   # keeps a corrupt cycle from spinning.
-  defp height(changeset, id, level \\ 0)
+  defp height(read_opts, id, level \\ 0)
 
-  defp height(_changeset, nil, level), do: level
+  defp height(_read_opts, nil, level), do: level
 
-  defp height(changeset, id, level) do
+  defp height(read_opts, id, level) do
     if level > MenuItem.max_depth() do
       level
     else
-      case child_ids(changeset, id) do
+      case child_ids(read_opts, id) do
         [] -> level
-        children -> children |> Enum.map(&height(changeset, &1, level + 1)) |> Enum.max()
+        children -> children |> Enum.map(&height(read_opts, &1, level + 1)) |> Enum.max()
       end
     end
   end
 
-  defp fetch(changeset, id) do
+  defp fetch(read_opts, id) do
     MenuItem
     |> Ash.Query.filter(id == ^id)
     |> Ash.Query.select([:id, :parent_id, :menu_id])
-    |> Ash.read_one!(authorize?: false, tenant: changeset.tenant)
+    |> Ash.read_one!(read_opts)
   end
 
-  defp child_ids(changeset, id) do
+  defp child_ids(read_opts, id) do
     MenuItem
     |> Ash.Query.filter(parent_id == ^id)
     |> Ash.Query.select([:id])
-    |> Ash.read!(authorize?: false, tenant: changeset.tenant)
+    |> Ash.read!(read_opts)
     |> Enum.map(& &1.id)
   end
 

@@ -134,14 +134,27 @@ defmodule KilnCMS.CMS.HealthSweep do
   defp dispatch(type, record, org_id) do
     KilnCMS.Automation.handle_event(
       "#{type}.health_#{record.health}",
-      %{
-        "id" => record.id,
-        "title" => record.title,
-        "slug" => record.slug,
-        "author_id" => record.author_id,
-        "health" => to_string(record.health)
-      },
+      event_payload(record, record.health),
       org_id
     )
+  end
+
+  @doc """
+  The payload a `<type>.health_<health>` event carries for `record`.
+
+  Public so the automation builder's preview tries a rule on exactly what the
+  sweep would send — this is narrower than an editorial event's serialized
+  document, and it is the only one with `author_id`, which `:create_task`
+  assigns from.
+  """
+  @spec event_payload(struct(), atom() | String.t()) :: map()
+  def event_payload(record, health) do
+    %{
+      "id" => record.id,
+      "title" => record.title,
+      "slug" => record.slug,
+      "author_id" => record.author_id,
+      "health" => to_string(health)
+    }
   end
 end

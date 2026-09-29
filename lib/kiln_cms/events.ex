@@ -28,6 +28,43 @@ defmodule KilnCMS.Events do
   @default_time_zone "Etc/UTC"
   @registry_ttl :timer.minutes(10)
 
+  # See `with_actor/2`.
+  @actor_override {__MODULE__, :actor_override}
+
+  @doc """
+  The actor the event helpers read a type's field definitions as (#1659): a `KilnCMS.SystemActor`, which
+  `KilnCMS.CMS.FieldDefinition` admits for reads (see `docs/policy-matrix.md`,
+  "The system actor"), rather than `authorize?: false`, which would skip every
+  policy on it.
+  """
+  @spec system() :: KilnCMS.SystemActor.t() | nil
+  def system do
+    case Process.get(@actor_override, :unset) do
+      :unset -> KilnCMS.SystemActor.new(:events)
+      actor -> actor
+    end
+  end
+
+  @doc false
+  # Test seam (#1659): run `fun` with `system/0` answering `actor` in this
+  # process, so a test can take the grant away and prove the definitions read
+  # fails CLOSED (raises) instead of answering "this type has no fields".
+  # Process-local, and nothing on a request path calls it; code that could call
+  # it could equally pass any actor it liked.
+  @spec with_actor(term(), (-> result)) :: result when result: term()
+  def with_actor(actor, fun) do
+    previous = Process.get(@actor_override, :unset)
+    Process.put(@actor_override, actor)
+
+    try do
+      fun.()
+    after
+      if previous == :unset,
+        do: Process.delete(@actor_override),
+        else: Process.put(@actor_override, previous)
+    end
+  end
+
   @doc """
   The deployment's default timezone for events with no explicit one.
 
@@ -257,14 +294,25 @@ defmodule KilnCMS.Events do
   # querying the wrong column" into "this type has no fields" — every event in
   # the suite silently became a non-event, with nothing to read. A read that
   # fails here is a fault worth surfacing.
+  #
+  # The same goes for a refused read (#1659), which filters to exactly that
+  # empty answer. So both reads run as `system/0` with `authorize_with: :error`.
   defp definitions(nil, _org_id), do: []
 
   defp definitions({:definition, id}, org_id) do
-    KilnCMS.CMS.field_definitions_for_definition!(id, authorize?: false, tenant: org_id)
+    KilnCMS.CMS.field_definitions_for_definition!(id,
+      actor: system(),
+      authorize_with: :error,
+      tenant: org_id
+    )
   end
 
   defp definitions({:content_type, type}, org_id) when is_atom(type) do
-    KilnCMS.CMS.field_definitions_for!(type, authorize?: false, tenant: org_id)
+    KilnCMS.CMS.field_definitions_for!(type,
+      actor: system(),
+      authorize_with: :error,
+      tenant: org_id
+    )
   end
 
   defp definitions({:content_type, type}, org_id) when is_binary(type) do

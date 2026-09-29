@@ -93,9 +93,15 @@ if Code.ensure_loaded?(Igniter) do
 
         name ->
           Mix.Task.run("app.start")
-          definition = KilnCMS.CMS.get_type_definition_by_name!(name, authorize?: false)
+          definition = type_definition!(name)
           Keyword.merge(promotion_opts(definition), opts)
       end
+    end
+
+    # The operator (#1659), under `TypeDefinition`'s read-only system-actor
+    # grant: a generator reads a type's schema, not content.
+    defp type_definition!(name) do
+      KilnCMS.CMS.get_type_definition_by_name!(name, actor: KilnCMS.SystemActor.new(:operator))
     end
 
     # The generator options a TypeDefinition maps to. Public for unit testing.
@@ -149,7 +155,7 @@ if Code.ensure_loaded?(Igniter) do
     # Compiled types serve at /<plural>/<slug>; if the dynamic type used a
     # different segment, its public URLs move.
     defp url_change_note(name, plural) do
-      definition = KilnCMS.CMS.get_type_definition_by_name!(name, authorize?: false)
+      definition = type_definition!(name)
 
       if definition.path_segment == plural do
         ""

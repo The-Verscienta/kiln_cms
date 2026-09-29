@@ -14,8 +14,17 @@ defmodule KilnCMSWeb.AutomationLive do
   alias KilnCMS.Newsletter
   alias KilnCMS.Social.Account
   alias KilnCMSWeb.AutomationLive.ConfigFields
+  alias KilnCMSWeb.AutomationLive.Preview
+  alias KilnCMSWeb.AutomationLive.Recipes
   alias KilnCMSWeb.AutomationLive.Wording
   alias KilnCMSWeb.ContentEditor.Shared
+
+  # The "Try it" panel: `options` is nil until the admin opens it (listing
+  # documents is a read per content type, not worth making on every visit);
+  # `loaded` caches the picked document so a keystroke doesn't re-read it.
+  # `scope` is the content type the options were listed for — `:unset` until
+  # the first listing, since `nil` is a real scope ("any content").
+  @no_preview %{options: nil, scope: :unset, value: nil, loaded: nil, effects: nil}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -31,6 +40,8 @@ defmodule KilnCMSWeb.AutomationLive do
        |> assign(:config_options, config_options(socket, actor, org))
        |> assign_names()
        |> assign(:edit, nil)
+       |> assign(:recipe, nil)
+       |> assign(:preview, @no_preview)
        |> assign(:form, create_form(actor, org))
        |> load_rules()}
     else
@@ -42,9 +53,25 @@ defmodule KilnCMSWeb.AutomationLive do
   end
 
   @impl true
-  def handle_event("validate", %{"rule" => params}, socket) when is_map(params) do
+  def handle_event("validate", %{"rule" => params} = all, socket) when is_map(params) do
     params = prepare_params(params, socket.assigns.names)
-    {:noreply, assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))}
+
+    {:noreply,
+     socket
+     |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+     |> refresh_preview(:create, all["preview_record"])}
+  end
+
+  # `target` says which builder's panel was opened: the add form's, or the
+  # edit form's — each has its own, since both can be on the page at once.
+  def handle_event("open_preview", %{"target" => target}, socket)
+      when target in ["create", "edit"] do
+    target = String.to_existing_atom(target)
+
+    {:noreply,
+     socket
+     |> put_preview(target, %{@no_preview | options: []})
+     |> refresh_preview(target, nil)}
   end
 
   def handle_event("create", %{"rule" => params}, socket) when is_map(params) do
@@ -53,6 +80,8 @@ defmodule KilnCMSWeb.AutomationLive do
         {:noreply,
          socket
          |> assign(:form, create_form(socket.assigns.actor, socket.assigns.current_org))
+         |> assign(:recipe, nil)
+         |> assign(:preview, @no_preview)
          |> load_rules()
          |> put_flash(:info, gettext("Rule added."))}
 
@@ -61,17 +90,49 @@ defmodule KilnCMSWeb.AutomationLive do
     end
   end
 
+  # A recipe fills a fresh builder; it saves nothing. The settings a recipe
+  # leaves for the admin to choose (which network, which segment) aren't
+  # flagged red: `ConfigFields` holds its errors until the first save attempt,
+  # and a filled builder hasn't had one.
+  def handle_event("use_recipe", %{"id" => id}, socket) when is_binary(id) do
+    case Recipes.get(id, recipe_context(socket.assigns)) do
+      nil ->
+        {:noreply, socket}
+
+      recipe ->
+        form =
+          socket.assigns.actor
+          |> create_form(socket.assigns.current_org)
+          |> AshPhoenix.Form.validate(prepare_params(recipe.params, socket.assigns.names))
+
+        {:noreply,
+         socket
+         |> assign(:form, form)
+         |> assign(:recipe, recipe)
+         |> refresh_preview(:create, socket.assigns.preview.value)}
+    end
+  end
+
+  def handle_event("clear_recipe", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:form, create_form(socket.assigns.actor, socket.assigns.current_org))
+     |> assign(:recipe, nil)
+     |> refresh_preview(:create, socket.assigns.preview.value)}
+  end
+
   def handle_event("edit", %{"id" => id}, socket) when is_binary(id) do
     {:noreply,
      assign(socket, :edit, %{
        id: id,
-       form: edit_form(id, socket.assigns.actor, socket.assigns.current_org)
+       form: edit_form(id, socket.assigns.actor, socket.assigns.current_org),
+       preview: @no_preview
      })}
   end
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
 
-  def handle_event("validate_edit", %{"rule" => params}, socket) when is_map(params) do
+  def handle_event("validate_edit", %{"rule" => params} = all, socket) when is_map(params) do
     edit = %{
       socket.assigns.edit
       | form:
@@ -81,7 +142,10 @@ defmodule KilnCMSWeb.AutomationLive do
           )
     }
 
-    {:noreply, assign(socket, :edit, edit)}
+    {:noreply,
+     socket
+     |> assign(:edit, edit)
+     |> refresh_preview(:edit, all["preview_record"])}
   end
 
   def handle_event("save_edit", %{"rule" => params}, socket) when is_map(params) do
@@ -247,6 +311,66 @@ defmodule KilnCMSWeb.AutomationLive do
 
   defp blank?(value), do: not is_binary(value) or String.trim(value) == ""
 
+  # Re-lists the documents when the rule's content-type scope changes, re-reads
+  # the picked one only when the pick changes, and recomputes the effects from
+  # the draft every time — the preview follows the rule as it is edited.
+  defp refresh_preview(socket, target, value) do
+    case builder(socket, target) do
+      {_form, %{options: nil}} -> socket
+      {form, preview} -> put_preview(socket, target, refreshed(socket, form, preview, value))
+    end
+  end
+
+  defp refreshed(socket, form, preview, value) do
+    %{actor: actor, current_org: org} = socket.assigns
+    draft = draft(form)
+    scope = draft.content_type
+
+    preview =
+      if preview.scope == scope,
+        do: preview,
+        else: %{preview | options: Preview.candidates(actor, org, scope), scope: scope}
+
+    value = if value in [nil, ""], do: nil, else: value
+
+    loaded =
+      cond do
+        is_nil(value) -> nil
+        value == preview.value -> preview.loaded
+        true -> Preview.load(value, actor, org)
+      end
+
+    effects =
+      with {type, record} <- loaded,
+           true <- Preview.previewable?(draft.trigger_event) do
+        Preview.run(draft, type, record, org)
+      else
+        _ -> nil
+      end
+
+    %{preview | value: value, loaded: loaded, effects: effects}
+  end
+
+  # The form and "Try it" state of one builder: the add form's live at the top
+  # level, an open edit form's inside `@edit`.
+  defp builder(socket, :create), do: {socket.assigns.form, socket.assigns.preview}
+  defp builder(%{assigns: %{edit: %{form: form, preview: preview}}}, :edit), do: {form, preview}
+  defp builder(_socket, :edit), do: {nil, %{options: nil}}
+
+  defp put_preview(socket, :create, preview), do: assign(socket, :preview, preview)
+
+  defp put_preview(%{assigns: %{edit: %{} = edit}} = socket, :edit, preview),
+    do: assign(socket, :edit, %{edit | preview: preview})
+
+  defp put_preview(socket, :edit, _preview), do: socket
+
+  defp recipe_context(%{current_user: user, type_options: types}) do
+    %{
+      email: user.email && to_string(user.email),
+      types: for({_label, value} <- types, value != "", do: value)
+    }
+  end
+
   # Option lists for the settings form's pickers — the same assignee roster the
   # content editor's task picker offers (`Shared.assignable_users/1`). Loaded on
   # the connected mount only: the static render is replaced as soon as the
@@ -319,6 +443,8 @@ defmodule KilnCMSWeb.AutomationLive do
           </p>
         </div>
 
+        <.recipes recipes={Recipes.all(recipe_context(assigns))} open={@rules == []} />
+
         <section class="space-y-4">
           <h2 class="text-lg font-medium">{gettext("Add a rule")}</h2>
           <.form
@@ -328,11 +454,26 @@ defmodule KilnCMSWeb.AutomationLive do
             phx-submit="create"
             class="card card-pad space-y-4"
           >
+            <div
+              :if={@recipe}
+              id="recipe-banner"
+              class="flex items-center justify-between gap-3 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm"
+            >
+              <span>
+                {gettext("Started from “%{recipe}”. Change anything you like, then add the rule.",
+                  recipe: @recipe.title
+                )}
+              </span>
+              <button type="button" phx-click="clear_recipe" class="btn btn-sm btn-ghost shrink-0">
+                {gettext("Start over")}
+              </button>
+            </div>
             <.rule_fields
               form={@form}
               type_options={@type_options}
               config_options={@config_options}
               names={@names}
+              preview={@preview}
             />
             <.button type="submit" variant="primary" aria-describedby="rule_summary">
               {gettext("Add rule")}
@@ -415,6 +556,8 @@ defmodule KilnCMSWeb.AutomationLive do
                   type_options={@type_options}
                   config_options={@config_options}
                   names={@names}
+                  preview={@edit.preview}
+                  preview_target="edit"
                 />
                 <label class="flex items-center gap-2 text-sm">
                   <input type="hidden" name="rule[enabled]" value="false" />
@@ -448,10 +591,56 @@ defmodule KilnCMSWeb.AutomationLive do
     """
   end
 
+  attr :recipes, :list, required: true
+  attr :open, :boolean, required: true
+
+  # The gallery of ready-made rules. Open while the site has no rules — the
+  # moment a starting point helps most — and folded away once it has some,
+  # still one click from reach.
+  defp recipes(assigns) do
+    ~H"""
+    <%!-- `open` is only re-sent when `@open` itself changes (the site's first
+         rule folds it), so an admin's own open/fold survives the re-renders
+         in between — picking a recipe included. --%>
+    <details id="recipes" class="group space-y-3" open={@open}>
+      <summary class="flex cursor-pointer list-none items-center gap-2 text-lg font-medium">
+        <.icon
+          name="hero-chevron-right"
+          class="size-4 text-base-content/60 transition-transform group-open:rotate-90"
+        />
+        {gettext("Start from a recipe")}
+      </summary>
+      <p class="text-sm text-base-content/70">
+        {gettext("Pick one to fill in the form below — nothing is saved until you add the rule.")}
+      </p>
+      <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        <button
+          :for={recipe <- @recipes}
+          type="button"
+          id={"recipe-#{recipe.id}"}
+          phx-click="use_recipe"
+          phx-value-id={recipe.id}
+          class="flex items-start gap-3 rounded-lg border border-base-content/15 bg-base-100 p-3 text-left transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          <span class="flex size-8 shrink-0 items-center justify-center rounded-md bg-base-200 text-base-content/70">
+            <.icon name={recipe.icon} class="size-4" />
+          </span>
+          <span class="min-w-0">
+            <span class="block text-sm font-medium">{recipe.title}</span>
+            <span class="block text-xs text-base-content/60">{recipe.description}</span>
+          </span>
+        </button>
+      </div>
+    </details>
+    """
+  end
+
   attr :form, :any, required: true
   attr :type_options, :list, required: true
   attr :config_options, :map, required: true
   attr :names, :map, required: true
+  attr :preview, :map, default: nil, doc: "the builder's \"Try it\" state"
+  attr :preview_target, :string, default: "create", doc: "which builder: create or edit"
 
   # The builder as four numbered steps — when, do what, how, and what to call
   # it — ending on the sentence the rule will read as. The sentence follows
@@ -465,6 +654,7 @@ defmodule KilnCMSWeb.AutomationLive do
 
     assigns =
       assigns
+      |> assign(:draft, draft)
       |> assign(:selected_action, draft.action)
       |> assign(:summary, summary)
       |> assign(:name_value, name_value(assigns.form, Wording.default_name(draft, assigns.names)))
@@ -543,7 +733,90 @@ defmodule KilnCMSWeb.AutomationLive do
           placeholder={gettext("Optional")}
         />
       </.step>
+
+      <.step :if={@preview} number={5} title={gettext("Try it (optional)")}>
+        <.try_it
+          form={@form}
+          target={@preview_target}
+          preview={@preview}
+          draft={@draft}
+          names={@names}
+        />
+      </.step>
     </ol>
+    """
+  end
+
+  attr :form, :any, required: true
+  attr :target, :string, required: true
+  attr :preview, :map, required: true
+  attr :draft, :map, required: true
+  attr :names, :map, required: true
+
+  # Pick a real document and see what the rule would do to it. The picker is
+  # in the builder form under its own name (`preview_record`, not `rule[…]`),
+  # so a pick arrives with the form's own change event and nothing about it
+  # is ever submitted as part of the rule.
+  defp try_it(assigns) do
+    ~H"""
+    <%!-- Ids from the form's own: the add form and an edit form can both be
+         on the page, each with a panel. --%>
+    <div
+      id={"#{@form.id}_try_it"}
+      class="space-y-3 rounded-lg border border-dashed border-base-content/20 p-3"
+    >
+      <div :if={is_nil(@preview.options)} class="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          phx-click="open_preview"
+          phx-value-target={@target}
+          class="btn btn-sm btn-default"
+        >
+          <.icon name="hero-eye" class="size-4" /> {gettext("Try it on real content")}
+        </button>
+        <span class="text-xs text-base-content/60">
+          {gettext("See what this rule would do. Nothing is sent or saved.")}
+        </span>
+      </div>
+
+      <div :if={@preview.options} class="space-y-3">
+        <p :if={not Preview.previewable?(@draft.trigger_event)} class="text-sm text-base-content/70">
+          {gettext("Task events can't be tried on a piece of content.")}
+        </p>
+
+        <div :if={Preview.previewable?(@draft.trigger_event)}>
+          <p :if={@preview.options == []} class="text-sm text-base-content/70">
+            {gettext("There's no content of this type to try it on yet.")}
+          </p>
+          <.input
+            :if={@preview.options != []}
+            type="select"
+            id={"#{@form.id}_preview_record"}
+            name="preview_record"
+            value={@preview.value}
+            label={gettext("Try it on")}
+            prompt={gettext("Choose a piece of content")}
+            options={@preview.options}
+          />
+          <%!-- Not `aria-live`, for the reason the rule's sentence isn't: it
+               re-renders on every keystroke in the builder, and a live region
+               would read the whole preview out each time. --%>
+          <div
+            :if={@preview.effects}
+            id={"#{@form.id}_preview_effects"}
+            class="rounded-md bg-base-200/40 p-3"
+          >
+            <p class="mb-2 text-xs font-medium text-base-content/60">
+              {gettext("This rule would:")}
+            </p>
+            <Preview.effects effects={@preview.effects} names={@names} />
+          </div>
+          <p class="mt-2 text-xs text-base-content/60">
+            {gettext("A preview. Nothing is sent, posted or saved.")}
+          </p>
+        </div>
+      </div>
+    </div>
     """
   end
 

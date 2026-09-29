@@ -84,6 +84,11 @@ defmodule KilnCMS.CMS.ReleasePreview do
   """
   @spec overlay(struct(), keyword()) :: [entry()]
   def overlay(release, opts \\ []) do
+    # authorize?: false — the signed preview token IS the grant: an anonymous
+    # stakeholder holds no actor, and `KilnCMSWeb.ReleasePreviewLive` has already
+    # verified the token and pinned it to the serving org. The reads are the
+    # release's own items and their draft rows, which no policy could admit
+    # without handing every system caller the whole draft corpus (#1402).
     opts = Keyword.merge([authorize?: false, tenant: release.org_id], opts)
 
     release.id

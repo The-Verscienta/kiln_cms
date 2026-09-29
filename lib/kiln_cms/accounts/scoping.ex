@@ -269,6 +269,9 @@ defmodule KilnCMS.Accounts.Scoping do
     admin_tier = RoleGrant.expression([:admin])
     wanted = RoleGrant.expression(tiers)
 
+    # `authorize?: false`: a roster over every account (who to notify, who may
+    # review). A system grant on `Accounts.User` would be a standing read of
+    # every account on the deployment — wider than this query (#1402).
     Accounts.User
     |> Ash.Query.filter(
       (^platform? and ^admin_tier) or
@@ -348,6 +351,11 @@ defmodule KilnCMS.Accounts.Scoping do
 
   defp affiliation(_actor, _org_id), do: :unaffiliated
 
+  # `authorize?: false` (both reads below): this IS the authorization — the
+  # policy checks call it to resolve the actor's tier, so it cannot itself be
+  # authorized without recursing. It must also never be refused: a filtered
+  # membership read would answer "no membership" and resolve to the legacy
+  # global role instead of the per-site one.
   defp resolve_affiliation(user_id, org_id) do
     case Accounts.get_org_membership(user_id, org_id,
            authorize?: false,
@@ -359,6 +367,7 @@ defmodule KilnCMS.Accounts.Scoping do
     end
   end
 
+  # `authorize?: false`: see `resolve_affiliation/2` — part of the same check.
   defp any_membership?(user_id) do
     case Accounts.list_memberships_for_user(user_id, authorize?: false, query: [limit: 1]) do
       {:ok, [_ | _]} -> true

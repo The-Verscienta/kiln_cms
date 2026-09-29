@@ -116,12 +116,10 @@ defmodule KilnCMS.Notifications.SystemActorAuthorizationTest do
                CMS.mark_task_overdue_notified(task, %{}, actor: system, tenant: tenant())
     end
 
-    test "…and no other update: it cannot complete, reopen or edit a task" do
+    # `:complete` is the publish path's grant (`Changes.AutoCompleteTasks`).
+    test "…but it cannot reopen or edit a task" do
       task = overdue_task()
       system = Notifications.system()
-
-      assert {:error, %Ash.Error.Forbidden{}} =
-               CMS.complete_task(task, %{}, actor: system, tenant: tenant())
 
       assert {:error, %Ash.Error.Forbidden{}} =
                CMS.reopen_task(task, %{}, actor: system, tenant: tenant())

@@ -5,14 +5,17 @@ defmodule KilnCMSWeb.AutomationLiveTest do
   @moduletag :capture_log
 
   import Phoenix.LiveViewTest
+  import Swoosh.TestAssertions
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.User
   alias KilnCMS.Automation
   alias KilnCMS.Automation.Rule
   alias KilnCMS.Automation.Validations.ActionConfig
+  alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMSWeb.AutomationLive.ConfigFields
+  alias KilnCMSWeb.AutomationLive.Recipes
   alias KilnCMSWeb.AutomationLive.Wording
 
   @password "password123456"
@@ -145,6 +148,219 @@ defmodule KilnCMSWeb.AutomationLiveTest do
 
       assert rule.trigger_event == :assigned
       assert rule.content_type == "task"
+    end
+
+    test "the recipe gallery is open until the site has a rule", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+      assert has_element?(view, "details#recipes[open]")
+
+      {:ok, _rule} =
+        Automation.create_rule(
+          %{name: "Existing", trigger_event: :updated, action: :invalidate_cache},
+          authorize?: false
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+      assert has_element?(view, "details#recipes")
+      refute has_element?(view, "details#recipes[open]")
+    end
+
+    test "a recipe fills the builder, and saves only when the admin adds it", %{conn: conn} do
+      admin = authed_user(:admin)
+      conn = log_in(conn, admin)
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+
+      view |> element("#recipe-email-on-publish") |> render_click()
+
+      assert has_element?(view, "#recipe-banner", "Email me when something is published")
+      assert has_element?(view, ~s(input#rule_action_send_email[checked]))
+      assert has_element?(view, ~s(#rule_config_to[value="#{admin.email}"]))
+
+      assert has_element?(
+               view,
+               "#rule_summary",
+               "When any content is published, email #{admin.email}."
+             )
+
+      # Picking a recipe wrote nothing.
+      assert Automation.list_rules!(authorize?: false) == []
+
+      view |> form("#new-rule-form") |> render_submit()
+
+      assert [rule] = Automation.list_rules!(authorize?: false)
+      assert rule.action == :send_email
+      assert rule.config == %{"to" => to_string(admin.email)}
+      assert rule.name == "When any content is published, email #{admin.email}."
+      refute has_element?(view, "#recipe-banner")
+    end
+
+    test "a recipe's open questions aren't flagged before the admin answers them", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+
+      # The social recipe can't know which network; it leaves that to pick.
+      view |> element("#recipe-social-on-publish") |> render_click()
+
+      assert has_element?(view, ~s(input#rule_action_social_post[checked]))
+      refute has_element?(view, "#rule_config_provider-error")
+
+      view |> element("#recipe-banner button", "Start over") |> render_click()
+
+      refute has_element?(view, "#recipe-banner")
+      assert has_element?(view, ~s(input#rule_action_send_email[checked]))
+    end
+
+    test "try it: picks a real page and shows what the rule would do, doing none of it",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      conn = log_in(conn, admin)
+
+      page =
+        CMS.create_page!(
+          %{title: "Tide tables", slug: "tide-tables-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+      refute has_element?(view, "#rule_preview_record")
+
+      view |> element("#rule_try_it button", "Try it on real content") |> render_click()
+      assert has_element?(view, ~s(#rule_preview_record option[value="page:#{page.id}"]))
+
+      view
+      |> form("#new-rule-form",
+        rule: %{action: "send_email", config: %{to: "ed@example.com", subject: "Live: {{title}}"}},
+        preview_record: "page:#{page.id}"
+      )
+      |> render_change()
+
+      assert has_element?(view, "#rule_preview_effects", "Email to ed@example.com")
+      assert has_element?(view, "#rule_preview_effects", "Subject: Live: Tide tables")
+
+      # It follows the rule as it's edited.
+      view
+      |> form("#new-rule-form", rule: %{action: "reindex"}, preview_record: "page:#{page.id}")
+      |> render_change()
+
+      assert has_element?(
+               view,
+               "#rule_preview_effects",
+               "Regenerate this page's published version."
+             )
+
+      # A preview: nothing sent, nothing saved.
+      assert_no_email_sent()
+      assert Automation.list_rules!(authorize?: false) == []
+    end
+
+    test "try it works on the edit form too, apart from the add form's", %{conn: conn} do
+      admin = authed_user(:admin)
+      conn = log_in(conn, admin)
+
+      page =
+        CMS.create_page!(
+          %{title: "Harbour hours", slug: "harbour-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      {:ok, rule} =
+        Automation.create_rule(
+          %{
+            name: "Email the desk",
+            trigger_event: :published,
+            action: :send_email,
+            config: %{"to" => "desk@example.com", "subject" => "Up: {{title}}"}
+          },
+          authorize?: false
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+      view |> element("#rule-#{rule.id} button", "Edit") |> render_click()
+
+      panel = "#rule_#{rule.id}_try_it"
+      view |> element("#{panel} button", "Try it on real content") |> render_click()
+
+      # Only the edit form's panel opened.
+      refute has_element?(view, "#rule_preview_record")
+
+      view
+      |> form("#edit-rule-#{rule.id}", preview_record: "page:#{page.id}")
+      |> render_change()
+
+      effects = "#rule_#{rule.id}_preview_effects"
+      assert has_element?(view, effects, "Email to desk@example.com")
+      assert has_element?(view, effects, "Subject: Up: Harbour hours")
+
+      # It follows the edit before it's saved — and saves nothing on its own.
+      view
+      |> form("#edit-rule-#{rule.id}",
+        rule: %{config: %{to: "desk@example.com", subject: "Now: {{title}}"}},
+        preview_record: "page:#{page.id}"
+      )
+      |> render_change()
+
+      assert has_element?(view, effects, "Subject: Now: Harbour hours")
+
+      assert {:ok, %{config: %{"subject" => "Up: {{title}}"}}} =
+               Automation.get_rule(rule.id, authorize?: false)
+
+      assert_no_email_sent()
+    end
+
+    test "try it never tells a stale-segment newsletter it reaches everyone", %{conn: conn} do
+      admin = authed_user(:admin)
+      conn = log_in(conn, admin)
+
+      page =
+        CMS.create_page!(
+          %{title: "Lighthouse", slug: "lighthouse-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+      view |> element("#rule_try_it button", "Try it on real content") |> render_click()
+
+      # A deleted segment: the real send is refused. Saying "all confirmed
+      # subscribers" would describe the opposite of what happens.
+      render_change(view, "validate", %{
+        "rule" => %{
+          "action" => "newsletter",
+          "trigger_event" => "published",
+          "config" => %{"segment_id" => Ash.UUID.generate()}
+        },
+        "preview_record" => "page:#{page.id}"
+      })
+
+      assert has_element?(view, "#rule_preview_effects", "a segment that no longer exists")
+      refute has_element?(view, "#rule_preview_effects", "all confirmed subscribers")
+    end
+
+    test "try it: task events can't be tried on content", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+      view |> element("#rule_try_it button", "Try it on real content") |> render_click()
+
+      view |> form("#new-rule-form", rule: %{trigger_event: "assigned"}) |> render_change()
+
+      assert has_element?(
+               view,
+               "#rule_try_it",
+               "Task events can't be tried on a piece of content."
+             )
+
+      refute has_element?(view, "#rule_preview_record")
+    end
+
+    test "try it: a forged pick previews nothing and breaks nothing", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+      view |> element("#rule_try_it button", "Try it on real content") |> render_click()
+
+      for forged <- ["page:#{Ash.UUID.generate()}", "nope", "page:not-a-uuid", "../etc:1"] do
+        render_change(view, "validate", %{
+          "rule" => %{"action" => "send_email", "trigger_event" => "published"},
+          "preview_record" => forged
+        })
+
+        refute has_element?(view, "#rule_preview_effects")
+      end
     end
 
     test "every reaction is a card that says what it does", %{conn: conn} do
@@ -715,6 +931,44 @@ defmodule KilnCMSWeb.AutomationLiveTest do
     test "every reaction is on exactly one card" do
       carded = for {_group, cards} <- Wording.action_groups(), {a, _card} <- cards, do: a
       assert Enum.sort(carded) == Enum.sort(Rule.action_kinds())
+    end
+  end
+
+  describe "Recipes" do
+    test "every recipe is a rule the builder can express" do
+      recipes = Recipes.all(%{email: "ed@example.com", types: ["post"]})
+      assert recipes != []
+      assert recipes |> Enum.map(& &1.id) |> Enum.uniq() |> length() == length(recipes)
+
+      triggers = Enum.map(Rule.triggers(), &to_string/1)
+      actions = Enum.map(Rule.action_kinds(), &to_string/1)
+
+      for %{id: id, params: params, icon: icon} <- recipes do
+        assert params["trigger_event"] in triggers, "#{id}: unknown trigger"
+        assert params["action"] in actions, "#{id}: unknown reaction"
+        assert String.starts_with?(icon, "hero-")
+
+        shape = ActionConfig.shape(String.to_existing_atom(params["action"]))
+        known = Enum.map(shape.required ++ shape.optional, &elem(&1, 0))
+
+        for key <- Map.keys(params["config"]) do
+          assert key in known, "#{id}: config key #{key} is not in the shape table"
+        end
+      end
+    end
+
+    test "a post recipe falls back to any content on a site without posts" do
+      [with_posts, without] =
+        for types <- [["post"], ["page"]] do
+          Recipes.get("social-on-publish", %{email: nil, types: types}).params["content_type"]
+        end
+
+      assert with_posts == "post"
+      assert without == ""
+    end
+
+    test "an admin without an email gets an empty Send to, not a nil" do
+      assert Recipes.get("email-on-publish", %{email: nil, types: []}).params["config"] == %{}
     end
   end
 

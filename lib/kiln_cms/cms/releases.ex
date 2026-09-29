@@ -250,10 +250,13 @@ defmodule KilnCMS.CMS.Releases do
     Enum.map(items, fn item -> {item, classify_resolved(item, Map.get(records, item.id))} end)
   end
 
-  # A caller that supplies an actor gets AUTHORIZED reads. `Keyword.merge` alone
-  # got this wrong: the caller never passes `:authorize?`, so `authorize?: false`
-  # from `system_opts/1` always survived, and the console's readiness panel
-  # reported the workflow state of content the reader's own policies hide.
+  # A caller that supplies an actor gets AUTHORIZED reads — of the items and of
+  # the content alike. `Keyword.merge` alone once got this wrong: the caller
+  # never passes `:authorize?`, so `authorize?: false` from the system options
+  # always survived, and the console's readiness panel reported the workflow
+  # state of content the reader's own policies hide. The system actor in
+  # `system_opts/1` is replaced by the caller's here, so `content_opts/1` sees
+  # a person and leaves the content reads authorized.
   defp readiness_opts(release, opts) do
     if Keyword.has_key?(opts, :actor),
       do: Keyword.put_new(opts, :tenant, release.org_id),
@@ -277,7 +280,7 @@ defmodule KilnCMS.CMS.Releases do
 
     found =
       type
-      |> ContentTypes.list!(Keyword.put(opts, :query, query))
+      |> ContentTypes.list!(opts |> content_opts() |> Keyword.put(:query, query))
       |> Map.new(&{&1.id, &1})
 
     Enum.map(rows, &{&1.id, found[&1.content_id]})
@@ -569,18 +572,25 @@ defmodule KilnCMS.CMS.Releases do
 
   # --- shared helpers --------------------------------------------------------
 
+  # FAIL CLOSED (#1659): `authorize_with: :error`, because a refused item read
+  # under a filter policy is an EMPTY list, and an empty list is a release with
+  # nothing in it — go-live would mark it `:published` having published
+  # nothing, and rollback would mark it `:rolled_back` having restored nothing.
+  # A refusal raises instead; the worker turns that into `:abandon`.
   defp pending_items(release, opts),
-    do: CMS.list_release_items_with_status!(release.id, :pending, opts)
+    do: CMS.list_release_items_with_status!(release.id, :pending, item_read_opts(opts))
 
   defp applied_items(release, opts),
-    do: CMS.list_release_items_with_status!(release.id, :applied, opts)
+    do: CMS.list_release_items_with_status!(release.id, :applied, item_read_opts(opts))
+
+  defp item_read_opts(opts), do: Keyword.put(opts, :authorize_with, :error)
 
   # `get_record/3` raises for a content type that no longer exists (a dynamic
   # type deleted after the item was added), and returns an error for a record
   # that was trashed or purged. Both are real reasons a release can't ship, and
   # both must read as an error rather than as an exception escaping a transaction.
   defp fetch_record(item, opts) do
-    case ContentTypes.get_record(item.content_type, item.content_id, opts) do
+    case ContentTypes.get_record(item.content_type, item.content_id, content_opts(opts)) do
       {:ok, record} -> {:ok, record}
       {:error, _reason} -> {:error, "content no longer exists"}
     end
@@ -605,17 +615,37 @@ defmodule KilnCMS.CMS.Releases do
   # Without this the site would go live and nothing subscribed would hear about it.
   defp notifying(opts), do: Keyword.put(opts, :return_notifications?, true)
 
-  defp acting(opts, actor), do: opts |> notifying() |> Keyword.put(:actor, actor)
+  defp acting(opts, actor),
+    do: opts |> content_opts() |> notifying() |> Keyword.put(:actor, actor)
 
   defp notified({:ok, _record, notifications}), do: {:ok, notifications}
   defp notified({:ok, _record}), do: {:ok, []}
   defp notified({:error, reason}), do: {:error, describe(reason)}
 
-  # Every write here runs unauthorized on purpose: the authorization decision was
+  # The release's own bookkeeping — reading its items, the `mark_*` writes on
+  # the release and its items — runs as the system actor (#1659), which
+  # `ContentRelease` and `ReleaseItem` admit for exactly those actions (see
+  # `docs/policy-matrix.md`, "The system actor"). The authorization decision was
   # made when an admin claimed the release (`:start` / `:start_rollback` are
-  # admin-only), and the worker publishes types the claiming admin may not hold
-  # individually. `triggering_actor/1` is what keeps the writes attributable.
-  defp system_opts(release), do: [authorize?: false, tenant: release.org_id]
+  # admin-only); no person may call a `mark_*` write.
+  defp system_opts(release),
+    do: [actor: KilnCMS.CMS.Housekeeping.system(:releases), tenant: release.org_id]
+
+  # The CONTENT steps of a claimed release: reading each record and running
+  # its publish / unpublish / restore. `triggering_actor/1` rides along as the
+  # actor for attribution only.
+  defp content_opts(opts) do
+    case Keyword.get(opts, :actor) do
+      # authorize?: false — the worker publishes types the claiming admin may
+      # not hold individually, which is the point of an admin approving a
+      # release as a whole; and the system actor holds no content read or write
+      # by design (#1402), so there is no narrower actor to run these as. Only
+      # the system options reach this clause: a console caller's own actor
+      # keeps its reads authorized (`readiness_opts/2`).
+      %KilnCMS.SystemActor{} -> Keyword.put(opts, :authorize?, false)
+      _caller -> opts
+    end
+  end
 
   # Resolve "does publishing complete open tasks" ONCE for the whole release
   # (#818), here rather than in `Changes.AutoCompleteTasks`, for the same reason
@@ -635,6 +665,10 @@ defmodule KilnCMS.CMS.Releases do
 
   # Users are global, not org-partitioned — no tenant here.
   defp triggering_actor(%{triggered_by_id: id}) do
+    # authorize?: false — `User` reads are self-only, and the id is the admin
+    # who claimed the release. The user is attribution on the version history
+    # and audit chain; it authorizes nothing (see `content_opts/1`). A system
+    # read grant on `User` would cover every account on the deployment (#1402).
     case KilnCMS.Accounts.get_user(id, authorize?: false) do
       {:ok, user} -> user
       _ -> nil

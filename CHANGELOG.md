@@ -137,6 +137,10 @@ Every summary line below that was shortened links to its own entry there.
   sentence.**
   ([long form](docs/changelog/unreleased.md#the-automation-builder-reads-as-steps-and-says-each-rule-back-as-a-sentence))
 
+- **The automation builder offers ready-made recipes and a preview on real
+  content.**
+  ([long form](docs/changelog/unreleased.md#the-automation-builder-offers-ready-made-recipes-and-a-preview-on-real-content))
+
 - **Console lists share one empty state; long settings pages get a table of
   contents; screen crumbs point at their real parent.**
   ([#1678](https://github.com/The-Verscienta/kiln_cms/issues/1678) · [#1680](https://github.com/The-Verscienta/kiln_cms/issues/1680) · [long form](docs/changelog/unreleased.md#console-lists-share-one-empty-state-long-settings-pages-get-a-table-of-contents))
@@ -199,6 +203,10 @@ Every summary line below that was shortened links to its own entry there.
 - **The newsletter sign-up honeypot and public forms trip on the same rule.**
   ([#1657](https://github.com/The-Verscienta/kiln_cms/issues/1657) · [long form](docs/changelog/unreleased.md#newsletter-sign-up-honeypot-matches-forms))
 
+- **The accounts domain's system reads run under the policies.** The tenant
+  list behind every all-orgs sweep can no longer be refused into a silent no-op.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#accounts-system-reads-run-under-the-policies))
+
 - **Federation runs under the policies.** 24 more internal writes and reads run
   as scoped system actors; the replay check and follower ceiling fail closed.
   ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#federation-runs-under-the-policies))
@@ -207,6 +215,33 @@ Every summary line below that was shortened links to its own entry there.
   comment thread's recipients and push delivery run as scoped system actors;
   their lookups fail closed and a lost grant is logged, never a silent drop.
   ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#notifications-and-web-push-run-under-the-policies))
+
+- **Funnel lookups and the operator mix tasks run under the policies.** Funnel
+  reads fail closed; the remaining mix-task bypasses each say why.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#funnel-lookups-and-the-operator-mix-tasks-run-under-the-policies))
+
+- **The event log and the per-site settings run under the policies.** 17 more
+  internal reads and writes run as system actors; those that decide fail closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#event-log-and-settings-run-under-the-policies))
+
+- **Content releases, slugs, menus and the field registry run under the
+  policies.** 37 CMS helper sites move to scoped system actors or the caller;
+  a release's item read fails closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#cms-helpers-run-under-the-policies))
+
+- **The CMS's own bookkeeping runs under the policies.** 26 sites in the
+  content, comment, release and form changes move under the policies or say
+  why not; the reads a write depends on fail closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#the-cmss-own-bookkeeping-runs-under-the-policies))
+
+- **CMS validations look things up under the policies.** Eight reference
+  checks read as the caller or a scoped system actor; a refused read rejects.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#cms-validations-look-things-up-under-the-policies))
+
+- **The media pipeline and public forms run under the policies.** 18 more
+  internal sites run as scoped system actors; the worker re-reads and field
+  reads fail closed, and the quarantine reaper works under strict tenancy.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#the-media-pipeline-and-public-forms-run-under-the-policies))
 
 - **The billing webhook pipeline runs under the policies.** A refused read no
   longer drops a payment event or recomputes a paying member to no access.

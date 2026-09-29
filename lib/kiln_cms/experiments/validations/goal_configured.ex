@@ -99,8 +99,11 @@ defmodule KilnCMS.Experiments.Validations.GoalConfigured do
          message: "a funnel-completion experiment needs a funnel before it can start"}
 
       id ->
+        # The analytics system actor (#1659), failing CLOSED: a refused read is
+        # an error, never a funnel, so `:start` is refused either way.
         case KilnCMS.Analytics.get_funnel(id,
-               authorize?: false,
+               actor: KilnCMS.Analytics.system(:experiments),
+               authorize_with: :error,
                tenant: context.tenant,
                load: [:steps]
              ) do

@@ -42,9 +42,12 @@ defmodule KilnCMS.CMS.Changes.AutoCompleteTasks do
   (`context: %{auto_complete_default: bool}`), which is how
   `KilnCMS.CMS.Releases` turns one read per item into one read per release.
 
-  System-scoped (`authorize?: false`): a scheduled publish
+  Runs as `KilnCMS.CMS.Bookkeeping.system/0` (#1659): a scheduled publish
   (`:publish_scheduled`) has no acting user, and a manual publish shouldn't
-  need its own task-completion permission on top of publish permission.
+  need its own task-completion permission on top of publish permission. `Task`
+  admits the system actor to read and to `:complete` — not to any other
+  update. The read uses `authorize_with: :error`: a refusal fails the publish
+  rather than filtering to "no open tasks" and leaving them open.
   """
   use Ash.Resource.Change
 
@@ -58,10 +61,16 @@ defmodule KilnCMS.CMS.Changes.AutoCompleteTasks do
     Ash.Changeset.after_action(changeset, fn _changeset, record ->
       content_type = KilnCMS.Firing.Engine.public_type(record)
 
+      actor = KilnCMS.CMS.Bookkeeping.system()
+
       content_type
-      |> CMS.list_tasks_for!(record.id, authorize?: false, tenant: record.org_id)
+      |> CMS.list_tasks_for!(record.id,
+        actor: actor,
+        authorize_with: :error,
+        tenant: record.org_id
+      )
       |> Enum.filter(&(&1.status == :open and TaskSettings.auto_complete?(&1, site_default)))
-      |> Enum.each(&CMS.complete_task(&1, %{}, authorize?: false, tenant: record.org_id))
+      |> Enum.each(&CMS.complete_task(&1, %{}, actor: actor, tenant: record.org_id))
 
       {:ok, record}
     end)
