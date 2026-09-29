@@ -248,6 +248,18 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="a-seo-or-accessibility-finding-below-a-fragment-names-and-jumps-to-the-right"></a>
+
+- **An SEO or accessibility finding below a fragment names, and jumps to, the
+  right block.** The editor inlines fragments before analysing the body, and
+  one fragment becomes any number of blocks — so every finding after it
+  carried its position in the expanded list rather than its card's index,
+  and its "block N" link named and scrolled to the wrong card. Findings now
+  carry the index of the top-level block they came from
+  (`Fragments.expand_indexed/3`, `Kiln.Advisory.Body.from_indexed/1`);
+  content inlined from a fragment reports against the fragment's own card.
+  ([#1731](https://github.com/The-Verscienta/kiln_cms/pull/1731))
+
 <a id="search-holds-at-most-two-pooled-connections-and-answers-503-rather-than-500"></a>
 
 - **Search holds at most two pooled connections, and answers `503` rather

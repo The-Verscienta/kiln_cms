@@ -140,6 +140,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **An SEO or accessibility finding below a fragment names, and jumps to, the
+  right block.**
+  ([#1731](https://github.com/The-Verscienta/kiln_cms/pull/1731) · [long form](docs/changelog/unreleased.md#a-seo-or-accessibility-finding-below-a-fragment-names-and-jumps-to-the-right))
+
 - **Search holds at most two pooled connections, and answers `503` rather than
   `500` when the pool is full.**
   ([#1712](https://github.com/The-Verscienta/kiln_cms/issues/1712) · [long form](docs/changelog/unreleased.md#search-holds-at-most-two-pooled-connections-and-answers-503-rather-than-500))
