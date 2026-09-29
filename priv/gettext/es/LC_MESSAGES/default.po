@@ -10006,8 +10006,8 @@ msgstr "Motivo"
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
-msgid "Rebuild the page"
-msgstr "Regenerar la página"
+msgid "Rebuild the page and search"
+msgstr "Reconstruir la página y la búsqueda"
 
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
@@ -10157,8 +10157,8 @@ msgstr "Regenerar también los slugs definidos manualmente"
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
-msgid "Regenerate the published page from the latest content."
-msgstr "Regenera la página publicada con el contenido más reciente."
+msgid "Regenerate the published page and its search entry from the latest content."
+msgstr "Regenera la página publicada y su entrada de búsqueda a partir del contenido más reciente."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -13847,6 +13847,11 @@ msgstr "Este lanzamiento está lleno. Publícalo o mueve algunos elementos a otr
 msgid "This release is nearly full (%{count} of %{cap})."
 msgstr "Este lanzamiento está casi lleno (%{count} de %{cap})."
 
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "This rule would never run: only tasks are assigned or go overdue, and tasks are never published or updated. Pick “Tasks” for a task event, or a content type for the others."
+msgstr "Esta regla nunca se ejecutaría: solo las tareas se asignan o vencen, y una tarea nunca se publica ni se actualiza. Elige «Tareas» para un evento de tarea, o un tipo de contenido para los demás."
+
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
 msgid "This runs code on your public site."
@@ -16303,8 +16308,8 @@ msgstr "legible"
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
-msgid "rebuild the page"
-msgstr "regenerar la página"
+msgid "rebuild the page and its search entry"
+msgstr "reconstruir la página y su entrada de búsqueda"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -16403,8 +16408,18 @@ msgstr "enviar el boletín a %{segment}"
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
+msgid "send the newsletter to a segment that no longer exists"
+msgstr "enviar el boletín a un segmento que ya no existe"
+
+#: lib/kiln_cms_web/live/automation_live/wording.ex
+#, elixir-autogen, elixir-format
 msgid "send the newsletter to all subscribers"
 msgstr "enviar el boletín a todos los suscriptores"
+
+#: lib/kiln_cms_web/live/automation_live/wording.ex
+#, elixir-autogen, elixir-format
+msgid "send the newsletter to one segment"
+msgstr "enviar el boletín a un segmento"
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format

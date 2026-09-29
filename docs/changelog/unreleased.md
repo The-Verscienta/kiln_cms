@@ -438,7 +438,10 @@ carries the reasoning.
   being built, the form shows it as one sentence, such as "When Post content
   is published, email team@example.com." The rules list shows that sentence
   in place of `post.published → send_email`, and a rule saved with no name is
-  named by it.
+  named by it — and stays named by it through later edits, until someone types
+  a name of their own. A task event scoped to a content type (a rule that
+  could never fire) is called out in the builder instead of being worded as if
+  it worked.
 
 <a id="console-lists-share-one-empty-state-long-settings-pages-get-a-table-of-contents"></a>
 

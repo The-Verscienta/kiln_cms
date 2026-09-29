@@ -10006,7 +10006,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
-msgid "Rebuild the page"
+msgid "Rebuild the page and search"
 msgstr ""
 
 #: lib/kiln_cms_web/live/social_live.ex
@@ -10157,7 +10157,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
-msgid "Regenerate the published page from the latest content."
+msgid "Regenerate the published page and its search entry from the latest content."
 msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex
@@ -13847,6 +13847,11 @@ msgstr ""
 msgid "This release is nearly full (%{count} of %{cap})."
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "This rule would never run: only tasks are assigned or go overdue, and tasks are never published or updated. Pick “Tasks” for a task event, or a content type for the others."
+msgstr ""
+
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
 msgid "This runs code on your public site."
@@ -16303,7 +16308,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
-msgid "rebuild the page"
+msgid "rebuild the page and its search entry"
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -16403,7 +16408,17 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
+msgid "send the newsletter to a segment that no longer exists"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/wording.ex
+#, elixir-autogen, elixir-format
 msgid "send the newsletter to all subscribers"
+msgstr ""
+
+#: lib/kiln_cms_web/live/automation_live/wording.ex
+#, elixir-autogen, elixir-format
+msgid "send the newsletter to one segment"
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
