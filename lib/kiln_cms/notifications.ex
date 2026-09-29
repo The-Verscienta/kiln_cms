@@ -119,7 +119,7 @@ defmodule KilnCMS.Notifications do
   #1402 argument).
   """
   @spec system() :: KilnCMS.SystemActor.t() | nil
-  def system, do: KilnCMS.SystemActor.current(:notifications)
+  def system, do: KilnCMS.SystemActor.resolve(:notifications)
 
   @doc false
   # Test seam (#1659): run `fun` with `system/0` answering `actor` in this

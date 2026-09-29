@@ -79,19 +79,35 @@ defmodule KilnCMS.Links.CheckWorker do
     query = Ash.Query.filter(ExternalLink, url_digest == ^DigestUrl.digest(url))
 
     case previous_failures(query, org_id) do
-      nil ->
+      {:ok, nil} ->
         # Every occurrence was pruned between the sweep and this job — the link
         # is no longer published anywhere, so there is nothing to record.
         :ok
 
-      previous ->
+      {:error, reason} ->
+        # The counter could not be read, so no verdict can be computed from it.
+        # Fail CLOSED: write nothing (the rows keep their previous verdict and
+        # count, and the next sweep re-queues the URL) rather than treat the
+        # failure as "no rows" or as a count of zero, which would restart the
+        # retry-before-flagging run. Not an error return, for the reason
+        # `report/3` gives: a retry would ask the host again.
+        Logger.warning(
+          "link check: could not read the failure count for #{url} in #{org_id}: " <>
+            inspect(reason)
+        )
+
+        :ok
+
+      {:ok, previous} when is_integer(previous) ->
         query
-        |> Ash.bulk_update(:record_check, verdict(result, previous),
-          authorize?: false,
+        |> KilnCMS.CMS.record_external_link_check(verdict(result, previous),
+          actor: KilnCMS.Links.system(),
           tenant: org_id,
-          strategy: [:stream],
-          allow_stream_with: :full_read,
-          return_errors?: true
+          bulk_options: [
+            strategy: [:stream],
+            allow_stream_with: :full_read,
+            return_errors?: true
+          ]
         )
         |> report(org_id, url)
     end
@@ -100,16 +116,22 @@ defmodule KilnCMS.Links.CheckWorker do
   # The highest count across this URL's occurrences. Rows added by a later sweep
   # start at zero, and taking the maximum keeps a URL that has been failing for a
   # week from restarting its count because one new page linked it yesterday.
+  #
+  # This read is the retry-before-flagging state, so it runs as the link
+  # checker's system actor with `authorize_with: :error` (#1659): a refused
+  # read would otherwise filter to `{:ok, nil}` — "every occurrence was
+  # pruned" — and a lost grant would silently stop every verdict from landing.
+  # Returns `{:ok, count | nil}`; a refusal or a failure is `{:error, reason}`,
+  # never a count.
   defp previous_failures(query, org_id) do
     query
     |> Ash.Query.sort(failure_count: :desc)
     |> Ash.Query.limit(1)
     |> Ash.Query.select([:failure_count])
-    |> Ash.read_one(authorize?: false, tenant: org_id)
+    |> Ash.read_one(actor: KilnCMS.Links.system(), authorize_with: :error, tenant: org_id)
     |> case do
-      {:ok, %{failure_count: count}} -> count
-      {:ok, nil} -> nil
-      {:error, _reason} -> nil
+      {:ok, %{failure_count: count}} -> {:ok, count}
+      other -> other
     end
   end
 

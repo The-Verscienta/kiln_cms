@@ -89,7 +89,7 @@ defmodule KilnCMS.Push do
   system actor").
   """
   @spec system() :: KilnCMS.SystemActor.t() | nil
-  def system, do: KilnCMS.SystemActor.current(:push)
+  def system, do: KilnCMS.SystemActor.resolve(:push)
 
   @doc false
   # Test seam (#1659): run `fun` with `system/0` answering `actor` in this

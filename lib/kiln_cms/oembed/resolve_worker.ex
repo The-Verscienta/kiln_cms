@@ -73,6 +73,10 @@ defmodule KilnCMS.OEmbed.ResolveWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"org_id" => org_id, "resource" => resource, "id" => id}}) do
+    # A content read, so `authorize?: false` rather than the system actor
+    # (#1659, the #1402 content-read argument): admitting `Checks.SystemActor`
+    # to content's read policy would be a standing read over the whole corpus,
+    # drafts included. Tenant-scoped, one document by id.
     case Ash.get(String.to_existing_atom(resource), id, authorize?: false, tenant: org_id) do
       {:ok, record} -> resolve_and_write(record, org_id)
       # A document deleted between enqueue and run is not a failure.
@@ -88,6 +92,7 @@ defmodule KilnCMS.OEmbed.ResolveWorker do
       resolved ->
         # Re-read *after* the fetch: `record` is now seconds stale, and writing
         # its block list back would delete anything an editor added meanwhile.
+        # `authorize?: false` for the content-read reason on `perform/1`.
         case Ash.get(record.__struct__, record.id, authorize?: false, tenant: org_id) do
           {:ok, current} -> apply_and_write(current, resolved, org_id)
           {:error, _reason} -> :ok
@@ -161,6 +166,13 @@ defmodule KilnCMS.OEmbed.ResolveWorker do
     nil
   end
 
+  # Stays `authorize?: false` (#1659). The content resource admits the system
+  # actor inside its write policy for a deliberately short list of actions
+  # that accept no `:blocks` (`KilnCMS.CMS.Content`, "Keep the list that
+  # way"); `:set_oembed_metadata` writes the block tree, so admitting it would
+  # break the rule that keeps that grant narrow. It is its own action, takes
+  # only `:blocks`, and runs tenant-scoped on the document this job was
+  # enqueued for.
   defp write(record, blocks, org_id) do
     record
     |> Ash.Changeset.for_update(:set_oembed_metadata, %{blocks: blocks},
