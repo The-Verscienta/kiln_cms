@@ -561,6 +561,44 @@ carries the reasoning.
   ceiling", and the follow is refused and logged. Honest senders see no
   difference unless the nonce store is down. (#1659)
 
+<a id="webhooks-social-posting-and-mail-run-under-the-policies"></a>
+
+- **Webhooks, social posting and mail run under the policies.** The webhook
+  dispatch and delivery worker, the social announcer and `Social.configured?/1`,
+  and the mail pipeline's settings and suppression-list calls reached their
+  resources through `authorize?: false`. They now run as
+  `KilnCMS.Webhooks.system/0`, `KilnCMS.Social.system/0` and
+  `KilnCMS.Mail.system/0`. Each resource admits the system actor by action name
+  inside its existing admin policy: webhook endpoints' reads and health
+  counters (not create, edit or delete), the delivery ledger's `read`, `create`
+  and `record_attempt` (not `destroy`), the social ledger's `claim` and four
+  settling updates (not read or `destroy`), the social account's `record_post`
+  stamp, the mail settings' `read` and `init` (not the DKIM or server-IP
+  writes), and both suppression lists' `read` and `suppress` (not clearing
+  one). The account's organization lookup in `Social.canonical_url/1` stays a
+  bypass with its reason written down. The `mix kiln.authz.check` backlog drops
+  by 17 sites and five files.
+
+  Each read below used to answer a refusal with "nothing", and each "nothing"
+  was a decision. They now pass `authorize_with: :error`:
+  - the dispatch's endpoint scan ("nobody subscribed", so no webhook and no
+    trace) now logs the refusal; it does not raise, because it runs after the
+    publish has committed;
+  - the delivery worker's ledger read ("row pruned", so the job succeeded
+    without sending) and endpoint read ("endpoint deleted", so the row was
+    settled as failed) now log and retry. The endpoint is read on its own, not
+    through `load:`, because a relationship load filters under its own rules;
+  - the mail settings read (`nil`, "not set up", which the DKIM signer takes
+    as "no key" and sends unsigned) now raises;
+  - the suppression lookups ("not suppressed", which would resume mail to every
+    hard-bounced address) now raise. `Mail.enqueue!/2` drops a recipient it
+    cannot check and logs it; the newsletter worker's job retries.
+
+  A ledger write that fails after a webhook's `2xx` is logged and no longer
+  fails the job, so Oban does not send the webhook a second time. A failed
+  social ledger write, or a hard bounce the suppression list refused to
+  record, is logged instead of swallowed. (#1659)
+
 <a id="content-experiments-run-under-the-policies"></a>
 
 - **Content experiments run under the policies.** The delivery path (the

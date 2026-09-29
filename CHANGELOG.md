@@ -203,6 +203,11 @@ Every summary line below that was shortened links to its own entry there.
   as scoped system actors; the replay check and follower ceiling fail closed.
   ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#federation-runs-under-the-policies))
 
+- **Webhooks, social posting and mail run under the policies.** Each uses a
+  scoped system actor; the endpoint scan, the ledger re-read, the mail
+  settings and the suppression lookups fail closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#webhooks-social-posting-and-mail-run-under-the-policies))
+
 - **Content experiments run under the policies.** Delivery, the start guards
   and `mix kiln.experiment` use a scoped system actor, and
   every read behind an assignment or a result fails closed.
