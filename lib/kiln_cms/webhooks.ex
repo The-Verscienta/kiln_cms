@@ -41,6 +41,7 @@ defmodule KilnCMS.Webhooks do
   alias KilnCMS.Webhooks.DeliveryWorker
 
   require Ash.Query
+  require Logger
 
   @timestamped_signature_header "x-kilncms-webhook-signature"
   @delivery_id_header "x-kilncms-delivery-id"
@@ -133,18 +134,18 @@ defmodule KilnCMS.Webhooks do
 
   @doc """
   Record + enqueue a delivery for every active endpoint of `org` subscribed to
-  `event`. Runs as a system job (`authorize?: false`); the endpoint scan is
-  tenant-scoped (epic #336) so a publish only fans out to its own site's
-  endpoints. `org` defaults to the sole org (the single-org rollout bridge).
+  `event`. Runs as `system/0`; the endpoint scan is tenant-scoped (epic #336)
+  so a publish only fans out to its own site's endpoints. `org` defaults to
+  the sole org (the single-org rollout bridge).
+
+  The webhook fan-out never raises into the caller (it runs after a publish
+  has committed), but it never fails *silently* either: an endpoint scan or a
+  ledger write the policies refuse is logged as an error, and the other
+  consumers of the event below still run.
   """
   @spec dispatch(String.t(), map(), Ash.ToTenant.t() | nil) :: :ok
   def dispatch(event, payload, org \\ KilnCMS.Accounts.default_org_id()) do
-    CMS.list_webhook_endpoints!(
-      authorize?: false,
-      tenant: org,
-      query: Ash.Query.filter(CMS.WebhookEndpoint, active == true and ^event in events)
-    )
-    |> Enum.each(&enqueue(&1.id, event, payload, org))
+    fan_out(event, payload, org)
 
     # Editorial automation (#342) reacts to the same editorial events — this is
     # the single funnel every `<type>.published`/`.unpublished`/`.updated` flows
@@ -192,13 +193,40 @@ defmodule KilnCMS.Webhooks do
     )
   end
 
+  # The endpoint scan runs as `system/0` (#1659) with `authorize_with: :error`.
+  # Under a filter policy a refused read answers `[]`, which here would mean
+  # "no endpoint is subscribed": every webhook for the event silently not sent,
+  # with nothing in the ledger and nothing in the log. With `:error` a lost
+  # grant is a Forbidden, logged below. It is not re-raised: this runs after
+  # the publish committed (`NotifyWebhooks` is an `after_transaction` hook),
+  # where a raise would report a publish that happened as one that failed, and
+  # would skip automation, federation and the CDN purge as well.
+  defp fan_out(event, payload, org) do
+    CMS.list_webhook_endpoints!(
+      actor: system(),
+      authorize_with: :error,
+      tenant: org,
+      query: Ash.Query.filter(CMS.WebhookEndpoint, active == true and ^event in events)
+    )
+    |> Enum.each(&enqueue(&1.id, event, payload, org))
+  rescue
+    error in Ash.Error.Forbidden ->
+      Logger.error(
+        "Webhook dispatch of #{event} for org #{inspect(org)} refused by policy, " <>
+          "webhook fan-out stopped: " <> Exception.message(error)
+      )
+  end
+
   defp enqueue(endpoint_id, event, payload, org) do
     # The delivery lands in the endpoint's site, and its org rides into the job
-    # args so the worker settles it under the same tenant (epic #336).
+    # args so the worker settles it under the same tenant (epic #336). Written
+    # as `system/0` (#1659): `WebhookDelivery` admits it for `create`. A refused
+    # write raises: into `fan_out/3`'s log for a dispatch, and into the admin's
+    # view for a `redeliver/1` or `ping/1`.
     delivery =
       CMS.create_webhook_delivery!(
         %{endpoint_id: endpoint_id, event: event, payload: payload},
-        authorize?: false,
+        actor: system(),
         tenant: org
       )
 
@@ -213,4 +241,47 @@ defmodule KilnCMS.Webhooks do
   # Extra Req options (e.g. a `Req.Test` plug in the test env).
   def req_options,
     do: Keyword.get(Application.get_env(:kiln_cms, __MODULE__, []), :req_options, [])
+
+  # See `with_actor/2`.
+  @actor_override {__MODULE__, :actor_override}
+
+  @doc """
+  The actor the webhook pipeline runs as (#1659): the dispatch scan, the
+  ledger writes, and `KilnCMS.Webhooks.DeliveryWorker`'s re-read and
+  settlement.
+
+  A `KilnCMS.SystemActor`, admitted by action name on `CMS.WebhookEndpoint`
+  (reads and the two health counters) and `CMS.WebhookDelivery` (read,
+  `create`, `record_attempt`); see `docs/policy-matrix.md`, "The system
+  actor". It may not create, edit or delete an endpoint, nor delete a ledger
+  row.
+  """
+  @spec system() :: KilnCMS.SystemActor.t() | nil
+  def system do
+    case Process.get(@actor_override, :unset) do
+      :unset -> KilnCMS.SystemActor.new(:webhooks)
+      actor -> actor
+    end
+  end
+
+  @doc false
+  # Test seam (#1659): run `fun` with `system/0` answering `actor` in this
+  # process, so a test can take the grant away and prove that the endpoint
+  # scan and the worker's ledger read fail CLOSED (logged, retried) rather than
+  # filtering to "no endpoints" or "row gone". Process-local, and nothing on a
+  # request path calls it; code that could call it could equally pass any
+  # actor it liked.
+  @spec with_actor(term(), (-> result)) :: result when result: term()
+  def with_actor(actor, fun) do
+    previous = Process.get(@actor_override, :unset)
+    Process.put(@actor_override, actor)
+
+    try do
+      fun.()
+    after
+      if previous == :unset,
+        do: Process.delete(@actor_override),
+        else: Process.put(@actor_override, previous)
+    end
+  end
 end

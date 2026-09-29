@@ -142,9 +142,17 @@ corpus grows around it.
 record any other leg (keyword, its any-term relaxation, title or fuzzy)
 also found is kept whatever its distance: a lexical match needs no distance
 alibi. The per-type `semantic-search` API routes have no fusion to leave it
-to, so they filter the leg themselves — exempting a row whose title the query
-names, the way the title leg does in hybrid search, but not a row only the
-keyword, any-term or fuzzy legs vouch for. One value, two (close) edges, and
+to, so they filter the leg themselves — exempting a row the query names (by
+title, or by a field flagged as a name), the way the title and alias legs do
+in hybrid search, but not a row only the keyword, any-term or fuzzy legs vouch
+for. A named row also ranks *first* there, as it does in hybrid search: a
+record's one vector is embedded from its whole text, so a long record sits far
+from a bare-name query, and a named row left at its distance rank fell below
+short records whose names merely sound alike (Verscienta, 2026-09-28: 14 of
+602 acupuncture points missed their own name's top 10). Ranking a named row
+first costs the HNSW plan for that query — the distance no longer leads the
+`ORDER BY` — so Postgres computes every admitted row's distance; a query that
+names nothing keeps the index. One value, two (close) edges, and
 the measurement below labels both. A non-numeric value raises on first use rather than comparing
 as "greater than every distance" and flooring nothing.
 

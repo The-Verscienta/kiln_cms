@@ -116,9 +116,16 @@ defmodule KilnCMS.Social.Post do
     end
   end
 
+  # The announcer (`KilnCMS.Social.system/0`, #1659) claims a row and settles
+  # it. It reads nothing here, and it may not `destroy` one: a system caller
+  # cannot erase the record of what went out on the site's public timeline —
+  # and a deleted claim is a freed dedupe key, which is a second post.
   policies do
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+
+      forbid_unless action([:claim, :succeed, :fail, :unresolved, :skip])
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

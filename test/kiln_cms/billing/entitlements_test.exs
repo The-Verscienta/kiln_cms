@@ -616,6 +616,131 @@ defmodule KilnCMS.Billing.EntitlementsTest do
     end
   end
 
+  describe "a failed write rolls the whole recompute back" do
+    # `persist/5` is handed the entitlement map directly, so the database can
+    # be made to refuse one write: an org that does not exist fails the
+    # upsert's foreign key, and an unconfigured audience fails the update's
+    # cast. Either used to be dropped silently, leaving `User.audiences`
+    # rewritten beside a per-org membership that never got the audience.
+
+    import ExUnit.CaptureLog
+
+    defp affiliated_user do
+      u = user()
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        organization_id: default_org_id(),
+        user_id: u.id,
+        role: :viewer
+      })
+
+      u
+    end
+
+    defp default_membership_audiences(u) do
+      {:ok, memberships} = Accounts.list_memberships_for_user(u.id, authorize?: false)
+      Enum.find(memberships, &(&1.organization_id == default_org_id())).audiences
+    end
+
+    test "a failed membership create is an error, and nothing is applied" do
+      u = affiliated_user()
+      missing_org = Ash.UUID.generate()
+
+      log =
+        capture_log(fn ->
+          assert {:error, _reason} =
+                   Entitlements.persist(u, [], [@gated], [@gated], %{
+                     default_org_id() => [@gated],
+                     missing_org => [@gated]
+                   })
+        end)
+
+      assert log =~ "recompute for user #{u.id} rolled back"
+      assert log =~ ~s(on org "#{missing_org}")
+
+      # The user write and the default-org update both ran before the failed
+      # create; both are rolled back.
+      assert audiences_of(u.id) == []
+      assert default_membership_audiences(u) == []
+      assert {:ok, [_only_default]} = Accounts.list_memberships_for_user(u.id, authorize?: false)
+    end
+
+    test "a failed membership update is an error, and nothing is applied" do
+      u = affiliated_user()
+
+      log =
+        capture_log(fn ->
+          assert {:error, _reason} =
+                   Entitlements.persist(u, [], [@gated], [@gated], %{
+                     default_org_id() => [:not_a_configured_audience]
+                   })
+        end)
+
+      assert log =~ "recompute for user #{u.id} rolled back"
+      assert log =~ ~s(on org "#{default_org_id()}")
+
+      assert audiences_of(u.id) == []
+      assert default_membership_audiences(u) == []
+    end
+
+    test "a membership create refused before the database is an error too" do
+      # The foreign-key case above rolls back by throwing out of the insert's
+      # own transaction. A create refused while its changeset is built (here, an
+      # unconfigured audience) never reaches the database, so only the
+      # `{:error, _}` arm in `create_missing/4` stands between it and `:ok`.
+      u = affiliated_user()
+      other = org("refused")
+
+      capture_log(fn ->
+        assert {:error, _reason} =
+                 Entitlements.persist(u, [], [@gated], [@gated], %{
+                   default_org_id() => [@gated],
+                   other.id => [:not_a_configured_audience]
+                 })
+      end)
+
+      assert audiences_of(u.id) == []
+      assert default_membership_audiences(u) == []
+      assert {:ok, [_only_default]} = Accounts.list_memberships_for_user(u.id, authorize?: false)
+    end
+
+    test "the same map with every org present applies in full" do
+      u = affiliated_user()
+
+      assert :ok =
+               Entitlements.persist(u, [], [@gated], [@gated], %{default_org_id() => [@gated]})
+
+      assert audiences_of(u.id) == [@gated]
+      assert default_membership_audiences(u) == [@gated]
+    end
+
+    test "the upsert's conflict is a success that changes nothing, not an error" do
+      # What `create_missing/4` relies on when a concurrent recompute created
+      # the row first: the same call the recompute makes, against an existing
+      # row, comes back `{:ok, _}` with the row's role and audiences untouched.
+      u = user()
+      other = org("race")
+
+      existing =
+        Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+          organization_id: other.id,
+          user_id: u.id,
+          role: :editor
+        })
+
+      assert {:ok, %{id: id, role: :editor, audiences: []}} =
+               Accounts.create_org_membership(
+                 %{organization_id: other.id, user_id: u.id, role: :viewer, audiences: [@gated]},
+                 authorize?: false,
+                 upsert?: true,
+                 upsert_identity: :unique_membership,
+                 upsert_fields: []
+               )
+
+      assert id == existing.id
+    end
+  end
+
   describe "edge cases" do
     test "a user with no memberships ends with no audiences" do
       u = user()
