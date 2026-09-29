@@ -144,6 +144,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Per-type semantic search ranks a record the query names first, however long
+  the record.**
+  ([#1746](https://github.com/The-Verscienta/kiln_cms/pull/1746) · [long form](docs/changelog/unreleased.md#per-type-semantic-search-ranks-a-record-the-query-names-first))
+
 - **An empty heading line in a rich-text block is now visible in the editor —
   dashed, labelled with its level — so the "heading has no text" finding has
   something on screen to point at.** ([#1728](https://github.com/The-Verscienta/kiln_cms/pull/1728))
