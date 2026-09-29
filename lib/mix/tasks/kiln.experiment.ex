@@ -163,7 +163,7 @@ defmodule Mix.Tasks.Kiln.Experiment do
           %{name: name, content_type: type, document_id: document},
           goal_attrs(opts, org_id)
         ),
-        authorize?: false,
+        actor: operator(),
         tenant: org_id
       )
 
@@ -184,7 +184,7 @@ defmodule Mix.Tasks.Kiln.Experiment do
           control: opts[:control] || false,
           patch: parse_patch(opts[:patch])
         },
-        authorize?: false,
+        actor: operator(),
         tenant: org_id
       )
 
@@ -194,7 +194,7 @@ defmodule Mix.Tasks.Kiln.Experiment do
   defp start(org_id, name) do
     experiment = find(org_id, name) || Mix.raise("No experiment named #{inspect(name)}.")
 
-    case Experiments.start_experiment(experiment, authorize?: false, tenant: org_id) do
+    case Experiments.start_experiment(experiment, actor: operator(), tenant: org_id) do
       {:ok, started} ->
         Mix.shell().info("#{started.name} is running.")
 
@@ -215,7 +215,7 @@ defmodule Mix.Tasks.Kiln.Experiment do
     winner = winner_id(experiment, opts[:winner])
 
     {:ok, concluded} =
-      Experiments.conclude_experiment(experiment, winner, authorize?: false, tenant: org_id)
+      Experiments.conclude_experiment(experiment, winner, actor: operator(), tenant: org_id)
 
     Mix.shell().info("#{concluded.name} concluded.")
 
@@ -231,8 +231,24 @@ defmodule Mix.Tasks.Kiln.Experiment do
 
   # ── helpers ─────────────────────────────────────────────────────────────────
 
+  # An operator at a shell on the host is the deployment's own authority, above
+  # any org role. It runs as a `KilnCMS.SystemActor` (#1659) — the same one
+  # `mix kiln.federation` uses — which `Experiment`, `Variant` and `VariantDay`
+  # admit for exactly the verbs this task has: read, `create`, `start`,
+  # `conclude`, and a variant's `create`. Not `update`, `archive` or `destroy`.
+  defp operator, do: Experiments.system(:operator)
+
+  # Both reads fail CLOSED (`authorize_with: :error`). Under a filter policy a
+  # refused read answers `[]`: here that would be "No experiments on this
+  # site", "No experiment named ..." for one that exists, and "0 served, 0
+  # converted" on every arm — each a plausible answer, and each wrong.
   defp experiments(org_id) do
-    Experiments.list_experiments!(query: [load: :variants], authorize?: false, tenant: org_id)
+    Experiments.list_experiments!(
+      query: [load: :variants],
+      actor: operator(),
+      authorize_with: :error,
+      tenant: org_id
+    )
   end
 
   defp find(org_id, name), do: Enum.find(experiments(org_id), &(&1.name == name))
@@ -240,7 +256,8 @@ defmodule Mix.Tasks.Kiln.Experiment do
   defp totals(org_id, variant_id) do
     Experiments.list_variant_days!(
       query: [filter: [variant_id: variant_id]],
-      authorize?: false,
+      actor: operator(),
+      authorize_with: :error,
       tenant: org_id
     )
     |> Enum.reduce({0, 0}, fn day, {i, c} -> {i + day.impressions, c + day.conversions} end)

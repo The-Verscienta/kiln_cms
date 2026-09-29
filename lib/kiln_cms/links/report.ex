@@ -27,6 +27,15 @@ defmodule KilnCMS.Links.Report do
   thousands of broken occurrences, and this renders in a LiveView. Rows are
   capped and the report says when it truncated, rather than paginating a list
   whose sensible length is zero.
+
+  ## Read as the viewer
+
+  The page is editorial work, and `CMS.ExternalLink`'s read policy admits
+  editors, so the report reads the rows, the counts and the switch as the
+  person looking at it (#1659) rather than around the policy. The reads run
+  with `authorize_with: :error`: a refused read would otherwise filter to
+  nothing and the counts to zero, which is the "nothing is broken" page, so a
+  viewer the policy refuses gets an error instead of a clean bill of health.
   """
 
   require Ash.Query
@@ -63,37 +72,58 @@ defmodule KilnCMS.Links.Report do
           truncated?: boolean()
         }
 
-  @doc "Everything `/editor/links` renders for one site."
-  @spec for_org(Ash.UUID.t()) :: t()
-  def for_org(org_id) do
-    settings = Settings.for_org(org_id)
-    rows = broken_rows(org_id)
+  @doc """
+  Everything `/editor/links` renders for one site, read as `actor`.
+
+  Raises `Ash.Error.Forbidden` when `actor` may not read the site's link rows.
+  """
+  @spec for_org(Ash.UUID.t(), term()) :: t()
+  def for_org(org_id, actor) do
+    settings = Settings.for_org(org_id, actor)
+    rows = broken_rows(org_id, actor)
 
     %{
       enabled?: !!(settings && settings.external_enabled),
       last_swept_at: settings && settings.last_swept_at,
-      counts: counts(org_id),
+      counts: counts(org_id, actor),
       broken: group(rows),
       truncated?: length(rows) >= @row_cap
     }
   end
 
-  defp broken_rows(org_id) do
+  defp broken_rows(org_id, actor) do
     ExternalLink
     |> Ash.Query.filter(outcome == :broken)
     |> Ash.Query.sort(first_failed_at: :asc)
     |> Ash.Query.limit(@row_cap)
-    |> Ash.read!(authorize?: false, tenant: org_id)
+    |> read!(org_id, actor)
+  end
+
+  defp read!(query, org_id, actor) do
+    KilnCMS.CMS.list_external_links!(
+      actor: actor,
+      authorize_with: :error,
+      tenant: org_id,
+      query: query
+    )
   end
 
   # Counted rather than tallied from a read: the whole table is the thing being
   # summarized, and loading it to count it is what the count exists to avoid.
-  defp counts(org_id) do
+  #
+  # `Ash.count/2` cannot fail on a refused read (it has no `authorize_with:`
+  # and answers 0, the "nothing is broken" page), so this probes one row with
+  # `authorize_with: :error` first and raises on a refusal. The probe lives
+  # here, not in whichever read happens to run earlier, so the counts stay
+  # fail-closed however they are called.
+  defp counts(org_id, actor) do
+    ExternalLink |> Ash.Query.limit(1) |> Ash.Query.select([:id]) |> read!(org_id, actor)
+
     Map.new([:ok, :broken, :pending, :transient, :undetermined], fn value ->
       {value,
        ExternalLink
        |> Ash.Query.filter(outcome == ^value)
-       |> Ash.count!(authorize?: false, tenant: org_id)}
+       |> Ash.count!(actor: actor, tenant: org_id)}
     end)
   end
 

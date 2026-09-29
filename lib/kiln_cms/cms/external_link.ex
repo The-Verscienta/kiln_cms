@@ -98,16 +98,26 @@ defmodule KilnCMS.CMS.ExternalLink do
 
   policies do
     # Editors read the report; it is editorial work, not administration.
+    #
+    # The sweep (which rows are due, how many are stale) and the check worker
+    # (the failure counter) read as `KilnCMS.Links.system/0` (#1659). Admitted
+    # with `authorize_if`, never a `bypass`, and narrowed to the plain `read`
+    # by name so a read action added later is not admitted by default.
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
+      forbid_unless action(:read)
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
-    # Nothing writes these by hand. The sweep and the check worker run
-    # system-side (`authorize?: false`); the admin clause exists so that a
-    # "dismiss this row" affordance added later has a policy to land on rather
-    # than a resource that forbids everything.
+    # Nothing writes these by hand. The sweep (`:observe`, the prune's
+    # `:destroy`) and the check worker (`:record_check`) run as
+    # `KilnCMS.Links.system/0`, admitted by action name. The admin clause
+    # exists so that a "dismiss this row" affordance added later has a policy
+    # to land on rather than a resource that forbids everything.
     policy action_type([:create, :update, :destroy]) do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+      forbid_unless action([:observe, :record_check, :destroy])
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 
