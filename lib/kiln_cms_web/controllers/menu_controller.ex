@@ -38,7 +38,7 @@ defmodule KilnCMSWeb.MenuController do
   @max_age_seconds 60
 
   def index(conn, _params) do
-    # `authorize?: false`: a headless consumer has no actor, and `Menu`'s read
+    # authorize?: false — a headless consumer has no actor, and `Menu`'s read
     # policy is `authorize_if always()` regardless; `tenant:` scopes the list to
     # this site and only key/name/locale leave the controller.
     menus =

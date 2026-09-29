@@ -1796,7 +1796,7 @@ defmodule KilnCMS.Governance.Chain do
   # enough of them that there is no n-th row at all is not — so that answers
   # `:unknown` rather than `:none`.
   defp resolved_boundary(%{version_count: n}, scope) when n > 0 do
-    # `authorize?: false`: a version-row read (see `versions/5`).
+    # authorize?: false — a version-row read: no standing grant on the history (`versions/5`).
     scope.resource
     |> version_scope(scope.source_id)
     |> Ash.Query.offset(n - 1)
@@ -1873,8 +1873,8 @@ defmodule KilnCMS.Governance.Chain do
   # incremental fold reads only what is new. See `resume_at/1` for why the
   # boundary is a position rather than a count (#598).
   #
-  # `authorize?: false` on every version-row read in this module (here,
-  # `resolved_boundary/2`, `count_versions/1`, `count_after/2`). The version
+  # Every version-row read in this module (here, `resolved_boundary/2`,
+  # `count_versions/1`, `count_after/2`) bypasses the policies. The version
   # tables ARE the editorial history, drafts included, so a system-actor grant
   # on them would be a standing read over it for every system caller: the
   # `PointInTime` argument from #1402, which #1659 keeps. The reads are
@@ -1884,6 +1884,8 @@ defmodule KilnCMS.Governance.Chain do
   # silently turn off (a count of 0 never exceeds the covered set). A bypass
   # cannot be refused, so the check cannot fail open that way.
   defp versions(resource, source_id, count, org_id, resume \\ :genesis) do
+    # authorize?: false — a version-row read: a system grant on the editorial
+    # history would be standing; this is one document, tenant-scoped.
     resource
     |> version_scope(source_id)
     |> resume_after(resume)
@@ -1967,8 +1969,8 @@ defmodule KilnCMS.Governance.Chain do
     )
   end
 
-  # `authorize?: false`: a version-row count (see `versions/5`).
   defp count_versions(scope) do
+    # authorize?: false — a version-row count: no standing grant on the history (`versions/5`).
     scope.resource
     |> version_scope(scope.source_id)
     |> Ash.count!(authorize?: false, tenant: scope.org_id)
@@ -1978,9 +1980,8 @@ defmodule KilnCMS.Governance.Chain do
   # "how many rows are at or before the boundary" is `count_versions - this`
   # rather than a second, independently-maintained comparison that could drift
   # out of complement with it.
-  #
-  # `authorize?: false`: a version-row count (see `versions/5`).
   defp count_after(scope, key) do
+    # authorize?: false — a version-row count: no standing grant on the history (`versions/5`).
     scope.resource
     |> version_scope(scope.source_id)
     |> resume_after({:after, key})

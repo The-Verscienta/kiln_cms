@@ -158,7 +158,7 @@ defmodule KilnCMS.Firing.Delivery do
   end
 
   defp read_published(org_id, type, slug, locale, unlocks, mode) do
-    # Bypass kept (see the moduledoc's "Authorization on this path"): the
+    # authorize?: false — kept (moduledoc, "Authorization on this path"): the
     # `:public_by_slug` action's own filter carries the published / audience /
     # unlock grant, and a system actor here would be a standing corpus-wide
     # grant rather than this one pinned filter.
@@ -205,8 +205,8 @@ defmodule KilnCMS.Firing.Delivery do
   end
 
   defp locked_in(org_id, type, slug, locale) do
-    # Bypass kept for the same reason as `read_published/6` — see the
-    # moduledoc. This action's filter is narrower still: published AND locked,
+    # authorize?: false — as in `read_published/6`, the action's own filter
+    # carries the grant, and it is narrower still: published AND locked,
     # projected without the block tree, so it can describe a document it cannot
     # serve.
     ContentTypes.get_locked_by_slug(type, slug, locale,

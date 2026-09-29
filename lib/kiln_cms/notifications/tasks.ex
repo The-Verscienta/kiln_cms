@@ -37,7 +37,7 @@ defmodule KilnCMS.Notifications.Tasks do
   """
   @spec dispatch_assigned(struct(), map() | nil) :: :ok
   def dispatch_assigned(task, actor) do
-    # `authorize?: false`: the assignee is an `Accounts.User` (self-only read
+    # authorize?: false — the assignee is an `Accounts.User` (self-only read
     # policy), and a system grant there would cover every account on the
     # deployment to learn one address the assignment already decided (#1659).
     task = Ash.load!(task, [:assignee], authorize?: false)
@@ -131,7 +131,8 @@ defmodule KilnCMS.Notifications.Tasks do
   # webhook too, for want of an inbox row's title.
   defp content_title(task) do
     case ContentTypes.get_record(task.content_type, task.content_id,
-           # `authorize?: false`: a system read — see above; the recipient is already decided.
+           # authorize?: false — only the title, for a recipient already decided;
+           # the assignee's read policy governs the editor, not the inbox row.
            authorize?: false,
            tenant: task.org_id,
            query: [select: [:id, :title]]

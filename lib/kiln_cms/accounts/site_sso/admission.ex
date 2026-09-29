@@ -96,7 +96,7 @@ defmodule KilnCMS.Accounts.SiteSso.Admission do
   """
   @spec verified_domains(Ash.UUID.t()) :: {:ok, [CMS.SiteSsoDomain.t()]} | :error
   def verified_domains(org_id) when is_binary(org_id) do
-    # `authorize?: false`: a pre-auth read on the sign-in path, with no actor
+    # authorize?: false — a pre-auth read on the sign-in path, with no actor
     # yet. Safe: the tenant is the request's own org, and nothing read is shown.
     case CMS.list_site_sso_domains(tenant: org_id, authorize?: false) do
       {:ok, rows} -> {:ok, Enum.reject(rows, &is_nil(&1.verified_at))}
@@ -112,7 +112,7 @@ defmodule KilnCMS.Accounts.SiteSso.Admission do
   """
   @spec isolated(Accounts.User.t(), Ash.UUID.t()) :: :ok | {:error, :access_elsewhere}
   def isolated(user, org_id) do
-    # `authorize?: false`: every membership the account holds, on every org, is
+    # authorize?: false — every membership the account holds, on every org, is
     # exactly the question — a caller-scoped read would hide the ones that
     # refuse. Pre-auth, and only used to decide; nothing is returned.
     memberships = Accounts.list_memberships_for_user!(user.id, authorize?: false)
@@ -185,7 +185,7 @@ defmodule KilnCMS.Accounts.SiteSso.Admission do
   end
 
   defp account(org_id, email, claims) do
-    # `authorize?: false`: a pre-auth lookup of the account the verified ID
+    # authorize?: false — a pre-auth lookup of the account the verified ID
     # token names (rules 1 and 2 have passed); there is no actor to ask as.
     case Accounts.get_user_by_email(email, authorize?: false) do
       {:ok, %Accounts.User{} = user} ->
@@ -225,12 +225,12 @@ defmodule KilnCMS.Accounts.SiteSso.Admission do
   defp create_member(org_id, email, claims) do
     name = if is_binary(claims["name"]), do: claims["name"]
 
-    # `authorize?: false`: the system-only provisioning action, reachable no
+    # authorize?: false — the system-only provisioning action, reachable no
     # other way (see `User`'s policies), for an address that passed rules 1-2
     # and has no account yet.
     with {:ok, user} <-
            Accounts.register_with_site_sso(%{email: email, name: name}, authorize?: false),
-         # `authorize?: false`: membership creation is an admin action; this is
+         # authorize?: false — membership creation is an admin action; this is
          # the system granting the new account `:viewer` on the one site whose
          # provider vouched for it, and nothing more.
          {:ok, _membership} <-
@@ -245,7 +245,7 @@ defmodule KilnCMS.Accounts.SiteSso.Admission do
   end
 
   defp mint(user) do
-    # `authorize?: false`: the system-only token read, which refuses any actor
+    # authorize?: false — the system-only token read, which refuses any actor
     # itself; every admission rule above has passed for this user.
     case Accounts.complete_site_sso_sign_in(user.id, authorize?: false, not_found_error?: false) do
       {:ok, %Accounts.User{} = signed_in} -> {:ok, signed_in}

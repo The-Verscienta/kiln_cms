@@ -251,12 +251,13 @@ defmodule KilnCMSWeb.BridgeSocket do
   defp names?(_claims, _type, _id, _org), do: false
 
   # The document must still exist (a trashed or deleted one stops the stream,
-  # exactly as it does for an actor). `authorize?: false`: a token connection
-  # has no actor to authorize — the grant is the signature `authorize_token/4`
-  # just verified, which binds this read to the ONE id an editor with draft
-  # visibility minted it for (`PreviewToken.mint/3`), and the tenant is the
-  # connecting host's org, which the token's `org_id` was just pinned to.
+  # exactly as it does for an actor).
   defp token_read(ct, id, org) do
+    # authorize?: false — a token connection has no actor to authorize: the
+    # grant is the signature `authorize_token/4` just verified, which binds
+    # this read to the ONE id an editor with draft visibility minted it for
+    # (`PreviewToken.mint/3`), and the tenant is the connecting host's org,
+    # which the token's `org_id` was just pinned to.
     ContentTypes.get_record!(ct.type, id, authorize?: false, tenant: org)
     :ok
   rescue

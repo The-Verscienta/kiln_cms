@@ -54,15 +54,27 @@ Two non-role actors also appear below:
 
   Because a raw bypass skips *every* policy on the resource, each remaining
   site is a piece of the authorization surface this matrix does not show. So
-  each one on a request path has to say why it is safe: every
-  `authorize?: false` under `lib/kiln_cms_web/` sits next to a comment (within
-  the 12 lines above the call, or anywhere inside it) that names the bypass
-  (`authorize?` or `bypass`) and gives the reason — a delivery action whose own
-  filter carries the published/audience/unlock grant, a tenant already scoped
-  by the router, a pre-auth flow with no actor, a system read of display data
-  on a self-only-read resource. One comment covers one call: a second bypass
-  pasted under a justified one needs its own. `mix kiln.authz.check` (part of
-  `mix precommit` and CI) fails on a new one without that comment (#1309).
+  each one has to say why it is safe, with a marker directly above the call
+  (or inside it):
+
+  ```elixir
+  # authorize?: false — delivery: `:public_by_slug` filters published +
+  # audience + unlock itself, and `tenant:` scopes it to this site.
+  CMS.get_published_page_by_slug!(slug, locale, args, authorize?: false, tenant: org)
+  ```
+
+  The dash is `—` or `--`, and the reason must say something — at least three
+  words: a delivery action whose own filter carries the published/audience/
+  unlock grant, a tenant already scoped by the router, a pre-auth flow with no
+  actor, a system read of display data on a self-only-read resource. "Directly
+  above" means the comment block touching the statement the call is part of
+  (above `x =`, a pipeline's head, a `with` clause, a `case` pattern); a
+  marker above a `def ... do` does not reach into its body. A comment that
+  only *mentions* a bypass (`multitenancy :bypass`, "the admin bypass above")
+  justifies nothing (#1739). One marker covers one call: a second bypass
+  pasted under a justified one — or a pipeline that reads and then loads —
+  needs its own. `mix kiln.authz.check` (part of `mix precommit` and CI)
+  fails on a site without one (#1309, #1739).
 
   **The gate covers all of `lib/`** (#1402). Files that predate the
   system-actor migration and still carry unexplained bypasses are listed in the

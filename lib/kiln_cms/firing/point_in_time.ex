@@ -312,7 +312,7 @@ defmodule KilnCMS.Firing.PointInTime do
     # id tiebreaks a publish and an unpublish sharing a timestamp, as in index/4.
     |> Ash.Query.sort(version_inserted_at: :desc, id: :desc)
     |> Ash.Query.limit(1)
-    # Bypass kept (#1402): the version tables ARE the editorial history —
+    # authorize?: false — kept (#1402): the version tables ARE the editorial history —
     # every draft a document ever had. Admitting `Checks.SystemActor` on
     # `VersionPolicies`' read would hand that history to every system caller
     # standing, where this reads one row, tenant-scoped, and uses only its
@@ -388,9 +388,11 @@ defmodule KilnCMS.Firing.PointInTime do
   # on `id`, and `title_slug_at/3`'s raw SQL orders `version_inserted_at ASC, id
   # ASC`. Only the Elixir fold missed it.
   defp replay(version_module, id, up_to, org_id) do
-    # Same bypass and same reason as `last_transition/4` — and the caller has
-    # already established that the document was PUBLISHED at `up_to`, so the
-    # fold can only reconstruct a state that was public at that moment.
+    # authorize?: false — a version-table read, as in `last_transition/4` (a
+    # system grant there would hand every system caller the whole editorial
+    # history), and the caller has already established that the document was
+    # PUBLISHED at `up_to`, so the fold can only reconstruct a state that was
+    # public at that moment.
     KilnCMS.CMS.VersionSnapshot.at_time(version_module, id, up_to,
       authorize?: false,
       tenant: org_id

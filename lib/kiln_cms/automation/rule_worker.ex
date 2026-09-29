@@ -196,8 +196,9 @@ defmodule KilnCMS.Automation.RuleWorker do
          # storage lookup is nil-safe where `get_record` would raise (same
          # guard the :reindex clause uses).
          storage when not is_nil(storage) <- ContentTypes.storage_type(type, org_id),
-         # System read of the event's own record under the rule's tenant
-         # (bypass rationale in the moduledoc).
+         # authorize?: false — the one content record the event names, under the
+         # rule's own tenant; a system content grant would read every draft
+         # (moduledoc, "How this worker is authorized").
          {:ok, record} <- ContentTypes.get_record(type, id, authorize?: false, tenant: org_id),
          :ok <- default_locale_only(record, event) do
       KilnCMS.Newsletter.send_as_newsletter(record,
@@ -275,8 +276,9 @@ defmodule KilnCMS.Automation.RuleWorker do
          storage when not is_nil(storage) <- ContentTypes.storage_type(type, org_id),
          {:ok, record} <-
            ContentTypes.get_record(type, id,
-             # System read of the event's own record under the rule's tenant
-             # (bypass rationale in the moduledoc).
+             # authorize?: false — the one content record the event names, under
+             # the rule's own tenant; a system content grant would read every
+             # draft (moduledoc, "How this worker is authorized").
              authorize?: false,
              tenant: org_id,
              # `KilnCMS.Social.Composer` posts the type's #805 default where the
@@ -377,8 +379,11 @@ defmodule KilnCMS.Automation.RuleWorker do
   # The candidate's effective tier on the rule's org — the same resolution
   # `AssigneeIsEditor` makes at the write, so an author who passes here is not
   # then refused there (and an org-granted editor who is a global viewer is not
-  # skipped over). Tenant-less `authorize?: false` lookup of the `User` row.
+  # skipped over).
   defp editor?(id, org_id) do
+    # authorize?: false — a tenant-less by-id lookup of one global `User` row,
+    # of which only a boolean leaves; `User` reads are self-only, and a system
+    # grant there would cover every account on the deployment.
     case Ash.get(KilnCMS.Accounts.User, id, authorize?: false) do
       {:ok, user} -> KilnCMS.Accounts.Scoping.effective_tier(user, org_id) in [:editor, :admin]
       _ -> false
@@ -411,8 +416,9 @@ defmodule KilnCMS.Automation.RuleWorker do
     # already passed `editor?/2` — which is the same resolution
     # `AssigneeIsEditor` then makes at the write.
     #
-    # The bypass stays with it: the stand-in is a bare `%{id: _}` map, not an
-    # actor any policy could resolve a tier for.
+    # authorize?: false — the stand-in is a bare `%{id: _}` map, not an actor
+    # any policy could resolve a tier for; `AssigneeIsEditor` still validates
+    # the assignee under the bypass.
     case KilnCMS.CMS.assign_task(attrs,
            actor: %{id: assignee_id},
            authorize?: false,
@@ -564,8 +570,9 @@ defmodule KilnCMS.Automation.RuleWorker do
     with type when is_binary(type) <- event_type(event),
          id when is_binary(id) <- payload["id"],
          storage when not is_nil(storage) <- ContentTypes.storage_type(type, org_id) do
-      # System read of the event's own record under the rule's tenant (bypass
-      # rationale in the moduledoc).
+      # authorize?: false — the one content record the event names, under the
+      # rule's own tenant; a system content grant would read every draft
+      # (moduledoc, "How this worker is authorized").
       ContentTypes.get_record(type, id, authorize?: false, tenant: org_id, load: [:tags])
     else
       _ -> :skip

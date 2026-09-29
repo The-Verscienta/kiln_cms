@@ -91,7 +91,7 @@ defmodule KilnCMSWeb.FederationController do
       {:ok, settings} ->
         org_id = Tenant.current_org_id(conn)
 
-        # `authorize?: false`: an ActivityPub fetch has no actor and `Follower`'s
+        # authorize?: false — an ActivityPub fetch has no actor and `Follower`'s
         # read policy is editor-only. Only the tenant-scoped COUNT leaves here —
         # display data for the public collection, never a follower row.
         count = Follower |> Ash.count!(authorize?: false, tenant: org_id)

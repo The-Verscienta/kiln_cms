@@ -288,6 +288,27 @@ carries the reasoning.
   editor never had
   ([#1679](https://github.com/The-Verscienta/kiln_cms/issues/1679)).
 
+<a id="authz-check-requires-a-marker"></a>
+
+- **`mix kiln.authz.check` accepts only an `# authorize?: false — <reason>`
+  marker directly above a bypass; prose that mentions "bypass" no longer
+  counts.** Internal tooling. The gate used to take any comment matching
+  `authorize?` or `bypass` within 12 lines above an `authorize?: false` call
+  as that call's justification. Unrelated prose therefore covered real
+  bypasses: a note about a `multitenancy :bypass` read, or "the admin bypass
+  above". A site is now justified only by a marker, `# authorize?: false —
+  <reason>` (an em dash or `--`), whose reason has at least three words. The
+  marker goes in the comment block directly above the statement the call is
+  part of, with no blank line or code in between, or inside the call itself.
+  A marker above a `def ... do` no longer reaches into the body. Each marker
+  still justifies exactly one call, and a pipeline that reads and then loads
+  now needs two. Every justified site in `lib/` was moved to the marker, and
+  each reason was restated where the old comment only pointed elsewhere
+  ("see `claim/4`", "(bypass: as above)"). The code itself is unchanged, and
+  the `#1402` backlog counts are unchanged. The grammar is documented in the
+  task's moduledoc and in `docs/policy-matrix.md`
+  ([#1739](https://github.com/The-Verscienta/kiln_cms/issues/1739)).
+
 ## Fixed
 
 <a id="per-type-semantic-search-ranks-a-record-the-query-names-first"></a>

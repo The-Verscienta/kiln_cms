@@ -124,9 +124,10 @@ defmodule KilnCMS.Events.Backfill do
     end)
   end
 
-  # `authorize?: false` for the reason `Index.refresh/3` gives: drafts and gated
-  # events need a correct value too, or it is wrong the moment one is published.
   defp page(descriptor, org_id, cursor, batch) do
+    # authorize?: false — a system backfill with no actor: drafts and gated
+    # events need a correct value too, or it is wrong the moment one is
+    # published.
     ContentTypes.list!(descriptor,
       authorize?: false,
       tenant: org_id,

@@ -148,7 +148,7 @@ defmodule KilnCMS.Governance do
     if ids == [] do
       %{}
     else
-      # `authorize?: false`: display names for the admin-gated dashboard.
+      # authorize?: false — display names for the admin-gated dashboard.
       # `Accounts.User`'s read policy is self-only, and a system-actor grant
       # there would be a standing read over every account on the deployment,
       # the case #1402 refused. The ids come from this org's own event rows.
@@ -296,13 +296,12 @@ defmodule KilnCMS.Governance do
   def content_index(org_id, limit \\ 50) do
     # Scoped to the request's site (epic #336) so the governance dashboard only
     # lists the current org's content.
-    #
-    # `authorize?: false`: a content read stays a bypass rather than becoming a
-    # system-actor grant, which would hand every system caller the whole corpus,
-    # drafts included (#1402). The caller is the admin-gated dashboard, and the
-    # read is tenant-scoped and metadata-only.
     compiled =
       Enum.flat_map(ContentTypes.all(), fn ct ->
+        # authorize?: false — a content read stays a bypass rather than becoming a
+        # system-actor grant, which would hand every system caller the whole corpus,
+        # drafts included (#1402). The caller is the admin-gated dashboard, and the
+        # read is tenant-scoped and metadata-only.
         ct.resource
         |> Ash.Query.sort(updated_at: :desc)
         |> Ash.Query.limit(limit)
@@ -333,8 +332,9 @@ defmodule KilnCMS.Governance do
       descriptors ->
         names = Map.new(descriptors, &{&1.definition.id, &1.type})
 
-        # `authorize?: false`: a content read, for the reason given in
-        # `content_index/2` above.
+        # authorize?: false — a content read, as in `content_index/2` above: a
+        # system grant would hand every system caller the corpus, drafts
+        # included; this is tenant-scoped for the admin-gated dashboard.
         KilnCMS.CMS.Entry
         |> Ash.Query.sort(updated_at: :desc)
         |> Ash.Query.limit(limit)
@@ -385,11 +385,11 @@ defmodule KilnCMS.Governance do
     # Scoped to the request's site (epic #336): the type resolves, the record
     # loads, and the version timeline reads all under `org_id`, so an admin on
     # one site's host can never pull another org's content or audit trail by id.
-    #
-    # `authorize?: false` on the record read: content, so no system-actor grant
-    # (#1402, see `content_index/2`). The dashboard route is admin-gated.
     with ct when not is_nil(ct) <- ContentTypes.get(type, org_id),
          resource = storage_resource(ct),
+         # authorize?: false — a content read, so no system-actor grant (#1402,
+         # see `content_index/2`); tenant-scoped, and the dashboard route is
+         # admin-gated.
          {:ok, record} when not is_nil(record) <-
            Ash.get(resource, id, authorize?: false, tenant: org_id, error?: false),
          true <- record_matches_type?(ct, record) do
@@ -454,9 +454,11 @@ defmodule KilnCMS.Governance do
         # (#731). Keyed on the STORAGE type for the reason the anchors are.
         witnessed: describe_witnessed(storage, id, record.org_id),
         # Scoped to the record's own site (epic #336) so the trail only shows
-        # consents from the same org as the content. `authorize?: false`:
-        # consents are compliance records holding personal data, so they get no
-        # standing system-actor read. The dashboard is admin-gated.
+        # consents from the same org as the content.
+        #
+        # authorize?: false — consents are compliance records holding personal
+        # data, so they get no standing system-actor read. The dashboard is
+        # admin-gated.
         consents:
           KilnCMS.CMS.list_consents_for!(to_string(ct.type), id,
             authorize?: false,
@@ -540,7 +542,7 @@ defmodule KilnCMS.Governance do
     if ids == [] do
       %{}
     else
-      # `authorize?: false`: display names, for the reason given in
+      # authorize?: false — display names, for the reason given in
       # `entitlement_names/1`. No standing system grant over `Accounts.User`.
       KilnCMS.Accounts.User
       |> Ash.Query.filter(id in ^ids)

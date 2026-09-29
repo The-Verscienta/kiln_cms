@@ -3528,14 +3528,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Batch-loads `:author` on the whole list in one query rather than once per
   # comment at render time (the component reads it back off the struct — no
-  # per-row load in the template). `authorize?: false` on the load
-  # only: `User`'s read policy is self-only (`id == actor(:id)`), so showing
-  # who wrote a comment — ordinary display data, not sensitive — would
-  # otherwise fail to load for every author but the viewer themselves. The
-  # comment list itself is still policy-checked normally.
+  # per-row load in the template). The comment list itself is still
+  # policy-checked normally.
   defp load_comments(kind, record_id, actor, org) do
     to_string(kind)
     |> CMS.list_comments_for!(record_id, actor: actor, tenant: org)
+    # authorize?: false — the `:author` load only: `User`'s read policy is
+    # self-only (`id == actor(:id)`), so showing who wrote a comment —
+    # ordinary display data, not sensitive — would otherwise fail to load for
+    # every author but the viewer themselves.
     |> Ash.load!(:author, authorize?: false, tenant: org)
   end
 
@@ -3545,13 +3546,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # feeds the settings panel's task list and every block's discussion pin, so
   # the per-block counts cost nothing beyond this read no matter how many
   # blocks the document has.
-  #
-  # `authorize?: false` on the `:assignee` load only, for the same reason as
-  # `load_comments/4`'s author load: `User`'s read policy is self-only, and the
-  # assignee's name is display data. The task list itself is policy-checked.
+  # The task list itself is policy-checked.
   defp load_tasks(kind, record_id, actor, org) do
     to_string(kind)
     |> CMS.list_open_tasks_for!(record_id, actor: actor, tenant: org)
+    # authorize?: false — the `:assignee` load only, as for the comment author
+    # load: `User`'s read policy is self-only, and the name is display data.
     |> Ash.load!(:assignee, authorize?: false, tenant: org)
   end
 

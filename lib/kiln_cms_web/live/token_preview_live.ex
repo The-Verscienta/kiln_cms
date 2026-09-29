@@ -34,7 +34,7 @@ defmodule KilnCMSWeb.TokenPreviewLive do
          # Resolved under the token's org: an admin-defined type lives there.
          %{} = ct <- ContentTypes.get(type, org_id),
          kind = to_string(ct.type),
-         # `authorize?: false`: the signed token IS the grant (anonymous guests
+         # authorize?: false — the signed token IS the grant (anonymous guests
          # hold no actor); type, id and the tenant come from the token, never
          # the URL — content is org-scoped, so the read carries `tenant:`, and
          # `same_site/2` has pinned it to the serving org (#1309).

@@ -129,7 +129,7 @@ defmodule KilnCMS.Storage.SiteProfiles do
   @doc "The profile `id` of the site `org_id`, resolved. Tenant-scoped: another site's id is not found."
   @spec fetch(Ash.UUID.t(), Ash.UUID.t()) :: {:ok, Profile.t()} | {:error, error()}
   def fetch(org_id, id) when is_binary(org_id) and is_binary(id) do
-    # `authorize?: false` — a system read, and the bypass is safe here: uploads
+    # authorize?: false — a system read, and the bypass is safe here: uploads
     # and background jobs resolve storage for an item whose own read was
     # already authorized (or that a worker owns), the read is tenant-scoped to
     # that item's site, and the row never leaves this module except as that
@@ -267,11 +267,11 @@ defmodule KilnCMS.Storage.SiteProfiles do
     end) || []
   end
 
-  # `authorize?: false` — a system read, and the bypass is safe here: it runs
-  # for every page of the site, anonymous visitors included, and what leaves
-  # this function is only the public origins the site's files are already
-  # served from (they are in every `<img src>`), tenant-scoped to that site.
   defp read_origins(org_id) do
+    # authorize?: false — a system read, and the bypass is safe here: it runs
+    # for every page of the site, anonymous visitors included, and what leaves
+    # this function is only the public origins the site's files are already
+    # served from (they are in every `<img src>`), tenant-scoped to that site.
     case CMS.list_storage_profiles(tenant: org_id, authorize?: false) do
       {:ok, rows} ->
         rows |> Enum.map(&origin(&1.public_base_url)) |> Enum.reject(&is_nil/1) |> Enum.uniq()
@@ -347,12 +347,11 @@ defmodule KilnCMS.Storage.SiteProfiles do
 
   # The site's `SiteStorage` row, `nil` when it has none, `:error` when it could
   # not be read.
-  #
-  # `authorize?: false` — a system read, and the bypass is safe here: an upload
-  # asks where the site's files go on the uploader's behalf (their create is
-  # authorized on its own), the read is tenant-scoped to that one site, and the
-  # row never leaves this module except as that site's own profile.
   defp read_settings(org_id) do
+    # authorize?: false — a system read, and the bypass is safe here: an upload
+    # asks where the site's files go on the uploader's behalf (their create is
+    # authorized on its own), the read is tenant-scoped to that one site, and the
+    # row never leaves this module except as that site's own profile.
     case CMS.list_site_storage(tenant: org_id, authorize?: false) do
       {:ok, [row | _rest]} -> {:ok, row}
       {:ok, []} -> {:ok, nil}

@@ -130,12 +130,13 @@ defmodule KilnCMS.Links.Sweep do
     end
   end
 
-  # A content read, so it keeps `authorize?: false` rather than moving to the
-  # system actor (#1659, the #1402 content-read argument): admitting
-  # `Checks.SystemActor` to content's read policy would be a standing read over
-  # the whole corpus, drafts included, for every system caller — wider than
-  # this one scan. It is tenant-scoped and pinned to `state == :published`.
   defp stream(resource, org_id, type_fun) do
+    # authorize?: false — a content read, so it stays a bypass rather than
+    # moving to the system actor (#1659, the #1402 content-read argument):
+    # admitting `Checks.SystemActor` to content's read policy would be a
+    # standing read over the whole corpus, drafts included, for every system
+    # caller — wider than this one scan. It is tenant-scoped and pinned to
+    # `state == :published`.
     resource
     |> Ash.Query.filter(state == :published)
     |> Ash.stream!(authorize?: false, tenant: org_id, stream_with: :full_read)

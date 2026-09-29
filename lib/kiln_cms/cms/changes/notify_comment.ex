@@ -57,14 +57,14 @@ defmodule KilnCMS.CMS.Changes.NotifyComment do
       {:ok, comment}
   end
 
-  # `authorize?: false`, justified (#1402's content-read argument): the record
-  # is read only to address the notification — its title, its link, its
-  # author — and is never returned to the commenter. The commenter may be
-  # automation (`KilnCMS.Automation.RuleWorker` posting a reaction's findings
-  # as a system actor), which has no content read, and a `SystemActor`
-  # content-read grant would hand every system caller the whole corpus.
-  # Recipients are vetted in `KilnCMS.Notifications.dispatch_comment/4`.
   defp content_record(comment) do
+    # authorize?: false — #1402's content-read argument: the record is read
+    # only to address the notification (its title, its link, its author) and
+    # is never returned to the commenter. The commenter may be automation
+    # (`KilnCMS.Automation.RuleWorker` posting a reaction's findings as a
+    # system actor), which has no content read, and a `SystemActor`
+    # content-read grant would hand every system caller the whole corpus.
+    # Recipients are vetted in `KilnCMS.Notifications.dispatch_comment/4`.
     KilnCMS.CMS.ContentTypes.get_record!(comment.content_type, comment.content_id,
       authorize?: false,
       tenant: comment.org_id

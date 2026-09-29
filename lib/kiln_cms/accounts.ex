@@ -396,7 +396,7 @@ defmodule KilnCMS.Accounts do
   """
   @spec actor_from_api_key(String.t()) :: {:ok, KilnCMS.Accounts.User.t()} | :error
   def actor_from_api_key(key) when is_binary(key) do
-    # `authorize?: false`: a pre-auth read — the key IS the credential being
+    # authorize?: false — a pre-auth read — the key IS the credential being
     # verified, so there is no actor yet; AshAuthentication's sign-in
     # preparation (the same one the HTTP `ApiKeyAuth` plug runs) is the grant.
     KilnCMS.Accounts.User

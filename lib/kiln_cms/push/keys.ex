@@ -169,12 +169,11 @@ defmodule KilnCMS.Push.Keys do
   defp subject(_row), do: Vapid.subject()
 
   # The row, `nil` when the site has none, or `:error` when it could not be read.
-  #
-  # `authorize?: false` — a system read. The push worker has no actor, the
-  # subscribe side runs for a reviewer who is not the site's admin, and the
-  # read is tenant-scoped to the one site whose key is being used. The private
-  # half never leaves this module except as that site's own signing key.
   defp read(org_id) do
+    # authorize?: false — a system read. The push worker has no actor, the
+    # subscribe side runs for a reviewer who is not the site's admin, and the
+    # read is tenant-scoped to the one site whose key is being used. The private
+    # half never leaves this module except as that site's own signing key.
     case CMS.list_site_vapid_key(tenant: org_id, authorize?: false) do
       {:ok, [row | _rest]} -> {:ok, row}
       {:ok, []} -> {:ok, nil}

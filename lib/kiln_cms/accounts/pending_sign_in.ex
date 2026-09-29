@@ -241,11 +241,11 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   def resolve(mode, context, blob) when is_map_key(@modes, mode) and is_binary(blob) do
     %{jti?: jti?, remember_me?: carries_remember_me?} = Map.fetch!(@modes, mode)
 
-    # `authorize?: false` on the user read: mid-sign-in, no actor yet. The
-    # signed/encrypted blob is the grant, and it names exactly one account.
     with {:ok, %{"user_id" => user_id, "token" => token} = payload} <-
            unwrap(mode, context, blob),
          {:ok, jti} <- minted_jti(jti?, payload),
+         # authorize?: false — mid-sign-in, no actor yet. The signed/encrypted
+         # blob is the grant, and it names exactly one account.
          user when not is_nil(user) <-
            Accounts.get_user!(user_id, authorize?: false, not_found_error?: false),
          # Re-checked rather than trusted from the first step: an account that
@@ -341,7 +341,7 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   end
 
   defp record_spend(%__MODULE__{jti: jti, user: %Accounts.User{} = user}) when is_binary(jti) do
-    # `authorize?: false` because there is no actor to authorize: the whole
+    # authorize?: false — there is no actor to authorize: the whole
     # point of this step is that the caller has *not* finished signing in. The
     # action is `forbid_if always()` so nothing else can reach it.
     case Accounts.spend_pending_sign_in(
@@ -438,7 +438,7 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   end
 
   defp hold_by_jti(jti) do
-    # `authorize?: false`: no actor mid-sign-in, and `:hold_for_second_factor`
+    # authorize?: false — no actor mid-sign-in, and `:hold_for_second_factor`
     # is `forbid_if always()` — nothing else may reach it.
     Accounts.Token
     |> Ash.Query.filter(jti == ^jti)
@@ -496,7 +496,7 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   end
 
   defp release_by_jti(jti, expires_at, token) do
-    # `authorize?: false`: same as the hold; `:release_second_factor_hold` is
+    # authorize?: false — same as the hold; `:release_second_factor_hold` is
     # `forbid_if always()` for every actor.
     Accounts.Token
     |> Ash.Query.filter(jti == ^jti)
@@ -544,7 +544,7 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   defp stored_row_exists?(token) do
     case Accounts.Token.peeked_jti(token) do
       jti when is_binary(jti) ->
-        # `authorize?: false`, and deliberately so: this existence check is the
+        # authorize?: false — deliberately: this existence check is the
         # fail-CLOSED half of the release. A policy-filtered read answering
         # "no row" would turn a parked credential into `:ok`.
         match?(

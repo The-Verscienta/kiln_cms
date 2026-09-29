@@ -322,7 +322,7 @@ defmodule KilnCMS.Accounts.SignInAlert do
   end
 
   defp lookup(identifier) do
-    # `authorize?: false`: a refused sign-in, so there is no actor. The row
+    # authorize?: false — a refused sign-in, so there is no actor. The row
     # only addresses the alert mail; the caller's response never depends on
     # whether it was found (enumeration-safe).
     User

@@ -12,27 +12,44 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
 
   This gate does not forbid the bypass — public delivery, pre-auth flows and
   system reads for display data all need it. It forbids an *unexplained* one:
-  every `authorize?: false` under `lib/kiln_cms_web/` must sit next to a
-  comment that names the bypass and says why it is safe (system read, tenant
-  already scoped, action's own filter carries the grant, …). A reviewer then
-  reads the reason instead of reconstructing it, and a fresh site cannot land
-  by copy-paste alone.
+  every `authorize?: false` must carry a marker that says why it is safe
+  (system read, tenant already scoped, action's own filter carries the
+  grant, …). A reviewer then reads the reason instead of reconstructing it,
+  and a fresh site cannot land by copy-paste alone.
 
-  ## What counts as a justification
+  ## What counts as a justification: the marker (#1739)
 
-  A comment that mentions `authorize?` or `bypass`, placed on any of the 12
-  lines above the call that carries the bypass, anywhere inside that call
-  (a trailing comment, a comment between its options, or on its closing
-  line). The window is measured from the call, not from the option: a long
-  keyword list with `authorize?: false` at the bottom is still covered by the
-  comment above its head.
+  A comment of exactly this shape:
 
-  A comment serves **one** site. If another bypass call sits between the
-  comment and the site — or the comment is inside another call — it belongs
-  to that earlier site, and the later one needs its own. So a second
-  `authorize?: false` pasted under a justified one is red until it says why
-  it, too, is safe. (Two `authorize?: false` inside the *same* call share the
-  call's comment.)
+      # authorize?: false — <reason>
+
+  The dash is an em dash (`—`) or `--`, with a space on each side, and the
+  reason must hold at least three words of two or more letters (so
+  `see above`, or `—` alone, is not one). The reason may run on over the comment lines below the marker.
+  Nothing else counts: a comment that merely *mentions* a bypass — "the
+  admin bypass above", a `multitenancy :bypass` read, `` `authorize?: false` ``
+  in backticks mid-sentence — justifies nothing. Before #1739 any comment
+  matching `authorize?` or `bypass` within 12 lines did, so unrelated prose
+  silently covered real bypasses.
+
+  Where the marker goes:
+
+    * in the comment block **directly above** the call — no blank line or
+      code between them — or above any line of the statement the call is
+      part of, from its first line down to the call: above `x =` or a
+      pipeline's head, a `with`'s `<-` clause, a `case` clause's pattern, the
+      `fetch = fn loc ->` the call sits in, or a one-line `def f(x), do:`;
+    * or **inside** the call: a trailing comment, one between its options,
+      or one on its closing line.
+
+  A marker above a `def ... do` does not reach into its body: put it on the
+  statement that bypasses.
+
+  A marker serves **one** site. Two bypass calls in one statement (a pipeline
+  that reads and then loads) need two markers, and a second
+  `authorize?: false` pasted under a justified one is red until it, too,
+  says why it is safe. (Two `authorize?: false` inside the *same* call share
+  the call's marker.)
 
   The scan is AST-based, so the phrase inside a string, a `@moduledoc` or a
   comment is not a site — only the actual `authorize?: false` keyword is. A
@@ -78,8 +95,11 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
     "lib/kiln_cms/newsletter/mail_worker.ex" => 4,
     "lib/kiln_cms/newsletter/send_worker.ex" => 4
   }
-  @window 12
-  @justification ~r/authorize\?|bypass/i
+  # `# authorize?: false — <reason>`, or `--` for the dash. The reason is
+  # what a reviewer reads instead of reconstructing it, so it must say
+  # something: at least `@min_reason_words` words.
+  @marker ~r/^#\s*authorize\?: false\s+(?:—|--)\s+(\S.*)$/u
+  @min_reason_words 3
 
   @impl Mix.Task
   def run(args) do
@@ -161,7 +181,9 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
     for {path, lines} <- Enum.sort(sites),
         length(lines) > Map.get(@backlog, path, 0),
         {^path, line} <- lines do
-      shell.error("#{path}:#{line}: `authorize?: false` without an adjacent justification")
+      shell.error(
+        "#{path}:#{line}: `authorize?: false` without an `# authorize?: false — <reason>` marker"
+      )
     end
   end
 
@@ -187,11 +209,14 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
 
     `authorize?: false` skips every policy on the resource. Either pass an
     actor — the request's, or `KilnCMS.SystemActor.new/1` for worker and job
-    code, which the resource's policies then admit by name — or add a comment
-    within #{@window} lines above the call (or inside it) that names the bypass
-    (mention `authorize?` or `bypass`) and says why it is safe: a tenant
-    already scoped by the router, a delivery action whose own filter carries
-    the grant, a pre-auth flow with no actor, ... One comment covers one call.
+    code, which the resource's policies then admit by name — or put a marker
+    directly above the call (or inside it) saying why the bypass is safe:
+
+        # authorize?: false — <reason, at least #{@min_reason_words} words>
+
+    A tenant already scoped by the router, a delivery action whose own filter
+    carries the grant, a pre-auth flow with no actor, ... A comment that merely
+    mentions "bypass" does not count, and one marker covers one call.
 
     The `@backlog` in this task is a ratchet over what predates the
     system-actor migration: counts may only go down, and no entry may be added.
@@ -200,9 +225,9 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
   end
 
   @doc """
-  The `{path, line}` of every `authorize?: false` in `source` that has no
-  adjacent justification comment. Exposed for tests: this is the part that
-  would silently pass on a real bypass if it went wrong.
+  The `{path, line}` of every `authorize?: false` in `source` that no marker
+  justifies. Exposed for tests: this is the part that would silently pass on a
+  real bypass if it went wrong.
   """
   @spec unjustified(String.t(), Path.t()) :: [{Path.t(), pos_integer()}]
   def unjustified(source, path \\ "nofile") do
@@ -212,11 +237,11 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
            token_metadata: true
          ) do
       {:ok, ast, comments} ->
-        justified = justified_lines(comments)
         sites = sites(ast)
+        served = serve(markers(comments), sites, comment_only_lines(source))
 
         for site <- sites,
-            not Enum.any?(justified, &serves?(&1, site, sites)),
+            site not in served,
             line <- site.lines,
             do: {path, line}
 
@@ -225,27 +250,78 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
     end
   end
 
+  @doc """
+  Whether a comment's text (including its `#`) is a justification marker:
+  `# authorize?: false — <reason>` (or `--` for the dash), with a reason of at
+  least #{@min_reason_words} words of two or more letters. Public so the grammar is pinned
+  by the tests.
+  """
+  @spec marker?(String.t()) :: boolean()
+  def marker?(text) do
+    case Regex.run(@marker, text, capture: :all_but_first) do
+      [reason] -> length(Regex.scan(~r/\p{L}{2,}/u, reason)) >= @min_reason_words
+      nil -> false
+    end
+  end
+
   # `Code.string_to_quoted` reports some errors as a `{prefix, suffix}` pair
   # around the offending token rather than a plain string.
   defp parse_error({prefix, suffix}, token), do: prefix <> token <> suffix
   defp parse_error(message, token) when is_binary(message), do: message <> token
 
-  # Line numbers of every comment that reads as a justification.
-  defp justified_lines(comments) do
-    for %{line: line, text: text} <- comments,
-        Regex.match?(@justification, text),
-        do: line
+  # Line numbers of every marker comment.
+  defp markers(comments) do
+    for %{line: line, text: text} <- comments, marker?(text), do: line
   end
 
-  # A comment on line `c` justifies `site` when it sits in the site's window
-  # (`@window` lines above the call's head through its last line) and no
-  # OTHER site claims it first: a bypass call that starts between the comment
-  # and this one, or one whose span contains the comment, owns it.
-  defp serves?(c, site, sites) do
-    c in (site.start - @window)..site.stop and
-      not Enum.any?(sites, fn other ->
-        other != site and other.start < site.start and c <= other.stop
+  # Lines holding nothing but a comment: the building blocks of the comment
+  # block "directly above" a line. A trailing comment on a code line is not
+  # one, and neither is a blank line — either ends the block.
+  defp comment_only_lines(source) do
+    source
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.filter(fn {text, _} -> String.starts_with?(String.trim_leading(text), "#") end)
+    |> MapSet.new(fn {_, line} -> line end)
+  end
+
+  # The comment block ending on the line directly above `line`.
+  defp block_above(line, comment_only) do
+    (line - 1)
+    |> Stream.iterate(&(&1 - 1))
+    |> Enum.take_while(&(&1 >= 1 and MapSet.member?(comment_only, &1)))
+  end
+
+  # A marker on line `c` may justify `site` when it is inside the call's span
+  # (a trailing comment, one between its options, one on its closing line),
+  # or in a comment block directly above a line of the same statement, from
+  # its first line (`x =`, a pipeline's head, a `case` clause's pattern) down
+  # to the call's own first line. Each marker justifies ONE site: markers are handed out most
+  # specific first (fewest eligible sites), each to the first eligible site
+  # not yet justified. Returns the justified sites.
+  defp serve(markers, sites, comment_only) do
+    above =
+      Map.new(sites, fn site ->
+        lines = min(site.anchor, site.start)..site.start
+        {site, lines |> Enum.flat_map(&block_above(&1, comment_only)) |> MapSet.new()}
       end)
+
+    eligible =
+      for c <- markers do
+        {c,
+         Enum.filter(sites, fn site ->
+           c in site.start..site.stop or MapSet.member?(Map.fetch!(above, site), c)
+         end)}
+      end
+
+    eligible
+    |> Enum.sort_by(fn {c, candidates} -> {length(candidates), c} end)
+    |> Enum.reduce(MapSet.new(), fn {_c, candidates}, served ->
+      case Enum.find(candidates, &(not MapSet.member?(served, &1))) do
+        nil -> served
+        site -> MapSet.put(served, site)
+      end
+    end)
   end
 
   # Every bypass site: the call carrying one or more `authorize?: false`
@@ -253,40 +329,114 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
   # the option's line when the call has no closing token), or the bare
   # option itself when it is not an argument of a call (`opts = [authorize?:
   # false]`). `lines` are the option lines, which is what gets reported.
+  # `anchor` is the first line of the statement the site sits in.
   #
   # With the literal encoder every literal is wrapped in a `:__block__` node
   # carrying its line, so a keyword-list pair `authorize?: false` shows up as
   # `{{:__block__, meta, [:authorize?]}, {:__block__, _, [false]}}`.
   defp sites(ast) do
-    {_, {calls, pairs}} =
-      Macro.prewalk(ast, {[], []}, fn
-        {{:__block__, meta, [:authorize?]}, {:__block__, _, [false]}} = node, {calls, pairs} ->
-          {node, {calls, [Keyword.fetch!(meta, :line) | pairs]}}
+    {calls, pairs} = walk(ast, first_line(ast), {[], []})
 
-        {_fun, meta, args} = node, {calls, pairs} when is_list(args) and is_list(meta) ->
-          case {meta[:line], bypass_option_lines(args)} do
-            {nil, _} -> {node, {calls, pairs}}
-            {_, []} -> {node, {calls, pairs}}
-            {line, lines} -> {node, {[{line, meta[:closing][:line], lines} | calls], pairs}}
-          end
-
-        node, acc ->
-          {node, acc}
-      end)
-
-    covered = calls |> Enum.flat_map(fn {_, _, lines} -> lines end) |> MapSet.new()
-
-    call_sites =
-      for {start, closing, lines} <- calls do
-        %{start: start, stop: closing || Enum.max(lines), lines: Enum.sort(lines)}
-      end
+    covered = calls |> Enum.flat_map(& &1.lines) |> MapSet.new()
 
     bare_sites =
-      for line <- Enum.uniq(pairs), line not in covered do
-        %{start: line, stop: line, lines: [line]}
+      for {line, anchor} <- Enum.uniq(pairs), line not in covered do
+        %{start: line, stop: line, lines: [line], anchor: anchor}
       end
 
-    Enum.sort_by(call_sites ++ bare_sites, & &1.start)
+    Enum.sort_by(calls ++ bare_sites, &{&1.start, &1.lines})
+  end
+
+  @body_keys [:do, :else, :after, :rescue, :catch]
+
+  # `stmt` is the first line of the statement being walked. A new statement
+  # starts at each expression of a multi-expression block, at a `do`/`else`
+  # … block body, at each `->` clause of a `case`/`cond`/… (its pattern and
+  # body together) and at each `<-` clause of a `with` or `for`; everything
+  # else (arguments,
+  # operands, pipeline stages) belongs to the statement it is part of.
+  defp walk({{:__block__, meta, [:authorize?]}, {:__block__, _, [false]}}, stmt, {calls, pairs}) do
+    {calls, [{Keyword.fetch!(meta, :line), stmt} | pairs]}
+  end
+
+  defp walk({:__block__, _, exprs}, _stmt, acc) when is_list(exprs) and length(exprs) > 1 do
+    Enum.reduce(exprs, acc, &walk(&1, first_line(&1), &2))
+  end
+
+  defp walk({:<-, _, _} = clause, _stmt, acc), do: walk_node(clause, first_line(clause), acc)
+
+  # An anonymous function is part of the expression it is passed to or bound
+  # in (`fetch = fn loc -> … end`, `Enum.map(xs, fn x -> … end)`): its
+  # clauses stay in that statement.
+  defp walk({:fn, _, clauses}, stmt, acc) when is_list(clauses) do
+    Enum.reduce(clauses, acc, fn
+      {:->, _, [head, body]}, acc -> walk(body, stmt, walk(head, stmt, acc))
+      other, acc -> walk(other, stmt, acc)
+    end)
+  end
+
+  defp walk({:->, _, [head, body]} = clause, _stmt, acc) do
+    stmt = first_line(clause)
+    walk(body, stmt, walk(head, stmt, acc))
+  end
+
+  defp walk({_, meta, args} = node, stmt, acc) when is_list(args) and is_list(meta),
+    do: walk_node(node, stmt, acc)
+
+  defp walk({key, value}, stmt, acc) do
+    if body_key?(key),
+      do: walk(value, first_line(value), acc),
+      else: walk(value, stmt, walk(key, stmt, acc))
+  end
+
+  defp walk(list, stmt, acc) when is_list(list), do: Enum.reduce(list, acc, &walk(&1, stmt, &2))
+  defp walk(_leaf, _stmt, acc), do: acc
+
+  # A call (or operator) node: record it as a site when it carries the option
+  # directly, then walk its parts within the same statement.
+  defp walk_node({fun, meta, args}, stmt, {calls, pairs}) do
+    calls =
+      case {meta[:line], bypass_option_lines(args)} do
+        {nil, _} ->
+          calls
+
+        {_, []} ->
+          calls
+
+        {line, lines} ->
+          stop = get_in(meta, [:closing, :line]) || Enum.max(lines)
+          [%{start: line, stop: stop, lines: Enum.sort(lines), anchor: stmt || line} | calls]
+      end
+
+    walk(args, stmt, walk(fun, stmt, {calls, pairs}))
+  end
+
+  # A `do ... end` body (or `else ... end`, …) starts a statement of its own.
+  # A keyword `do:` body does not: in `defp f(x), do: g(x, authorize?: false)`
+  # the line directly above the call is the `defp`'s own, so the marker above
+  # the one-liner is the one that belongs to it.
+  defp body_key?({:__block__, meta, [key]}),
+    do: key in @body_keys and meta[:format] != :keyword
+
+  defp body_key?(key), do: key in @body_keys
+
+  # The first source line of an expression: the smallest line any node in it
+  # carries. A pipeline's `|>` node sits on the operator's line, not on its
+  # head, so the node's own line is not enough.
+  defp first_line(ast) do
+    {_, min} =
+      Macro.prewalk(ast, nil, fn
+        {_, meta, _} = node, min when is_list(meta) ->
+          case meta[:line] do
+            line when is_integer(line) and (min == nil or line < min) -> {node, line}
+            _ -> {node, min}
+          end
+
+        node, min ->
+          {node, min}
+      end)
+
+    min
   end
 
   # The option lines of every `authorize?: false` that is a DIRECT option of

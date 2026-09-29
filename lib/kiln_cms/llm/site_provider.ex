@@ -145,13 +145,12 @@ defmodule KilnCMS.LLM.SiteProvider do
   def endpoint_host(_route), do: nil
 
   # The row, `nil` when the site has none, or `:error` when it could not be read.
-  #
-  # `authorize?: false` — a system read, and the bypass is safe here for the
-  # reason `KilnCMS.Mail.SiteRelay` gives: `/api/ask` has no actor at all and
-  # the resource's read policy is org-admin, the read is tenant-scoped to the
-  # one site the request is for, and the row never leaves this module except as
-  # that site's own route.
   defp read(org_id) do
+    # authorize?: false — a system read, and the bypass is safe here for the
+    # reason `KilnCMS.Mail.SiteRelay` gives: `/api/ask` has no actor at all and
+    # the resource's read policy is org-admin, the read is tenant-scoped to the
+    # one site the request is for, and the row never leaves this module except as
+    # that site's own route.
     case CMS.list_site_ai_provider(tenant: org_id, authorize?: false) do
       {:ok, [row | _rest]} -> {:ok, row}
       {:ok, []} -> {:ok, nil}

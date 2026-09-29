@@ -120,11 +120,11 @@ defmodule KilnCMSWeb.SitePushLive do
     end
   end
 
-  # How many devices a rotation would cut off. `authorize?: false` — a system
-  # read: the rows belong to the reviewers, not to the admin looking at this
-  # page (admin-gated by the live session), the filter is this org's own key,
-  # and only the count leaves this function.
+  # How many devices a rotation would cut off.
   defp bound_count(socket, %{public_key: key}) when is_binary(key) do
+    # authorize?: false — a system read: the rows belong to the reviewers, not
+    # to the admin looking at this page (admin-gated by the live session), the
+    # filter is this org's own key, and only the count leaves this function.
     socket.assigns.current_org
     |> Accounts.org_id()
     |> Accounts.push_subscriptions_bound_to_key!(key, authorize?: false)

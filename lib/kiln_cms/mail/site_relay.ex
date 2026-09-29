@@ -136,14 +136,13 @@ defmodule KilnCMS.Mail.SiteRelay do
   def allow_private_hosts?, do: config()[:allow_private_hosts] == true
 
   # The row, `nil` when the site has none, or `:error` when it could not be read.
-  #
-  # `authorize?: false` — a system read, and the bypass is safe here: the
-  # delivery job has no actor to authorize (the resource's read policy is
-  # org-admin, and a mail job is nobody), the read is tenant-scoped to the one
-  # site the mail is being sent for, and the row never leaves this module
-  # except as that site's own connection config. Same shape as the other
-  # per-site resolvers (`KilnCMS.Branding`, `KilnCMS.Feeds`).
   defp read(org_id) do
+    # authorize?: false — a system read, and the bypass is safe here: the
+    # delivery job has no actor to authorize (the resource's read policy is
+    # org-admin, and a mail job is nobody), the read is tenant-scoped to the one
+    # site the mail is being sent for, and the row never leaves this module
+    # except as that site's own connection config. Same shape as the other
+    # per-site resolvers (`KilnCMS.Branding`, `KilnCMS.Feeds`).
     case CMS.list_site_mail_relay(tenant: org_id, authorize?: false) do
       {:ok, [row | _rest]} -> {:ok, row}
       {:ok, []} -> {:ok, nil}

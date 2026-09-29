@@ -107,15 +107,14 @@ defmodule KilnCMSWeb.VisualEditingController do
   # refused on this host — `KilnCMSWeb.PreviewController` holds the same line),
   # and the slug — plus the locale, when the caller names one — must be that
   # record's, so a token cannot be replayed under another document's URL.
-  #
-  # `authorize?: false`: the caller holds no actor — the grant is the signature
-  # `PreviewToken.verify/1` checked, which binds this read to the ONE record id
-  # an editor with draft visibility (`PreviewToken.mint/3`) minted it for. The
-  # tenant is the serving org, which the token's `org_id` has just been pinned
-  # to, so the bypassed read cannot reach another site's row.
   defp fetch_by_token(token, ct, slug, locale, org_id) do
     with {:ok, %{type: type, id: id, org_id: ^org_id}} <- PreviewToken.verify(token),
          true <- type == to_string(ct.type),
+         # authorize?: false — the caller holds no actor — the grant is the signature
+         # `PreviewToken.verify/1` checked, which binds this read to the ONE record id
+         # an editor with draft visibility (`PreviewToken.mint/3`) minted it for. The
+         # tenant is the serving org, which the token's `org_id` has just been pinned
+         # to, so the bypassed read cannot reach another site's row.
          {:ok, record} <-
            ContentTypes.get_record(ct, id,
              authorize?: false,

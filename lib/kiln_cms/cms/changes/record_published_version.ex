@@ -60,7 +60,7 @@ defmodule KilnCMS.CMS.Changes.RecordPublishedVersion do
     result
   end
 
-  # `authorize?: false`, justified (#1402's version-history argument): version
+  # The read bypasses the policies (#1402's version-history argument): version
   # rows ARE the editorial history, and a `SystemActor` read grant on them would
   # hand every system caller all of it. This reads one row — the publish
   # version PaperTrail wrote for this very action — and only its id leaves here.
@@ -73,7 +73,8 @@ defmodule KilnCMS.CMS.Changes.RecordPublishedVersion do
     )
     |> Ash.Query.sort(version_inserted_at: :desc)
     |> Ash.Query.limit(1)
-    # `authorize?: false` — the version-history read justified above.
+    # authorize?: false — one version row, tenant-scoped; no standing system
+    # grant over the editorial history, and it cannot be refused into "none".
     |> Ash.read_one(authorize?: false, tenant: org_id)
   end
 end

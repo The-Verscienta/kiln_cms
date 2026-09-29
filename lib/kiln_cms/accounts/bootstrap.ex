@@ -49,7 +49,7 @@ defmodule KilnCMS.Accounts.Bootstrap do
   """
   @spec bootstrapped?() :: boolean()
   def bootstrapped? do
-    # `authorize?: false`: pre-auth, and it also runs inside the policy check
+    # authorize?: false — pre-auth, and it also runs inside the policy check
     # that gates `/setup`, where there is no actor. It must never be refused:
     # a filtered read would answer "no admin yet" and re-open the wizard.
     User
@@ -104,7 +104,7 @@ defmodule KilnCMS.Accounts.Bootstrap do
   # just created. Re-read as a system call: this is the record the caller is
   # about to act AS, not data served to an untrusted reader.
   defp reload!(user) do
-    # `authorize?: false`: the one account just created by this call, re-read
+    # authorize?: false — the one account just created by this call, re-read
     # unscrubbed so it can act as itself; nothing here reaches another reader.
     Ash.get!(User, user.id, authorize?: false)
   end

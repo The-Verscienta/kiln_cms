@@ -92,13 +92,12 @@ defmodule KilnCMS.CMS.HealthSweep do
   # One query per type. `health` is an expression calculation, so this is a
   # `WHERE` in Postgres rather than a full read filtered in Elixir — which is
   # the whole reason it was built as an expression.
-  #
-  # `authorize?: false` is correct here and only here: a scheduled sweep has no
-  # actor, and the alternative (an actorless authorized read) would silently see
-  # only published-and-public content, which is most but not all of what has a
-  # cadence. Nothing leaves this module except an automation event carrying the
-  # same payload a webhook would.
   defp stale_records(ct, org_id) do
+    # authorize?: false — a scheduled sweep has no actor, and the alternative
+    # (an actorless authorized read) would silently see only
+    # published-and-public content, which is most but not all of what has a
+    # cadence. Nothing leaves this module except an automation event carrying
+    # the same payload a webhook would.
     ct
     |> ContentTypes.list!(
       authorize?: false,

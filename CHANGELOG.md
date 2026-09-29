@@ -154,6 +154,11 @@ Every summary line below that was shortened links to its own entry there.
   keyboard-driven tab strip, and block controls show on focus and on touch.**
   ([#1679](https://github.com/The-Verscienta/kiln_cms/issues/1679) · [long form](docs/changelog/unreleased.md#the-content-editors-chrome-is-on-the-component-kit))
 
+- **`mix kiln.authz.check` accepts only an `# authorize?: false — <reason>`
+  marker directly above a bypass; prose that mentions "bypass" no longer
+  counts.**
+  ([#1739](https://github.com/The-Verscienta/kiln_cms/issues/1739) · [long form](docs/changelog/unreleased.md#authz-check-requires-a-marker))
+
 ### Fixed
 
 - **Per-type semantic search ranks a record the query names first, however long

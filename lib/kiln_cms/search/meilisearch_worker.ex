@@ -157,19 +157,21 @@ defmodule KilnCMS.Search.MeilisearchWorker do
   # no clause for is not indexable, and answering `:error` removes whatever a
   # previous version may have put there.
   #
-  # All three keep `authorize?: false` (#1402): threading the system actor
+  # All three bypass the policies (#1402): threading the system actor
   # would mean granting it the `Content` read policy standing, over every
   # document on every site — wider than these calls, which are one id under one
   # tenant, handed here by the fire path, and passed straight to `published/1`,
   # which drops anything an anonymous visitor could not read.
+  #
+  # authorize?: false — one id under one tenant, from the fire path, and `published/1` filters.
   defp load(org_id, "page", id),
     do: published(CMS.get_page(id, authorize?: false, tenant: org_id))
 
-  # (bypass: as above)
+  # authorize?: false — one id under one tenant, from the fire path, and `published/1` filters.
   defp load(org_id, "post", id),
     do: published(CMS.get_post(id, authorize?: false, tenant: org_id))
 
-  # (bypass: as above)
+  # authorize?: false — one id under one tenant, from the fire path, and `published/1` filters.
   defp load(org_id, "entry", id),
     do: published(CMS.get_entry(id, authorize?: false, tenant: org_id))
 

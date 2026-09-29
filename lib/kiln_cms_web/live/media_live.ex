@@ -919,7 +919,7 @@ defmodule KilnCMSWeb.MediaLive do
         []
 
       ids ->
-        # `authorize?: false`: system read for display data — `User`'s read
+        # authorize?: false — system read for display data — `User`'s read
         # policy is self-only (same bypass as the content editor's
         # `assignable_users`), the ids come off media rows the actor's own
         # tenant-scoped read just returned, and only `name`/email-as-label

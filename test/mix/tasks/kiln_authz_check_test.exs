@@ -1,19 +1,45 @@
 defmodule Mix.Tasks.Kiln.Authz.CheckTest do
   @moduledoc """
-  The unexplained-policy-bypass gate (#1309).
+  The unexplained-policy-bypass gate (#1309, #1739).
 
   A gate that only ever passes proves nothing, so the red cases are asserted
-  directly: a bare `authorize?: false`, a comment that is too far away, a
-  comment that is near but does not name the bypass, and the ways the scan
-  could be fooled into a false pass (the phrase inside a string or a doc).
-  The green cases pin the contract a contributor writes to: a trailing
-  comment, a comment block above, and the 12-line window.
+  directly — above all the ones #1739 was about: prose that merely mentions
+  "bypass" (`multitenancy :bypass`, "the admin bypass above"), a marker with no
+  reason, and a marker reaching down to a second call. The green cases pin the
+  contract a contributor writes to: `# authorize?: false — <reason>` directly
+  above the call, or inside it.
   """
   # `Mix.shell/1` is process-global state, so the `run/1` cases cannot share
   # the VM with another test that swaps it.
   use ExUnit.Case, async: false
 
   alias Mix.Tasks.Kiln.Authz.Check
+
+  describe "marker?/1 — the grammar" do
+    test "an em dash or `--`, then a reason of at least three words" do
+      assert Check.marker?("# authorize?: false — webhook path, no actor")
+      assert Check.marker?("# authorize?: false -- webhook path, no actor")
+      assert Check.marker?("#authorize?: false — webhook path, no actor")
+    end
+
+    test "an empty or too-short reason is not one" do
+      refute Check.marker?("# authorize?: false —")
+      refute Check.marker?("# authorize?: false — ")
+      refute Check.marker?("# authorize?: false — see above")
+      refute Check.marker?("# authorize?: false — see `claim/4`.")
+      refute Check.marker?("# authorize?: false — ... --- !!!")
+    end
+
+    test "prose that mentions the bypass is not one" do
+      refute Check.marker?("# policy bypass: webhook path, no actor here")
+      refute Check.marker?("# `authorize?: false`: webhook path, no actor here")
+      refute Check.marker?("# Stays `authorize?: false` (#1659): a content read")
+      refute Check.marker?("# multitenancy :bypass — the token is the only filter")
+      refute Check.marker?("# authorize?: false webhook path, no actor here")
+      refute Check.marker?("# authorize?: false: webhook path, no actor here")
+      refute Check.marker?("# authorize?: true — webhook path, no actor here")
+    end
+  end
 
   describe "unjustified/2 — red" do
     test "a bare bypass" do
@@ -43,10 +69,35 @@ defmodule Mix.Tasks.Kiln.Authz.CheckTest do
       assert [{"a.ex", 4}, {"a.ex", 8}] == Check.unjustified(source, "a.ex")
     end
 
-    test "a nearby comment that does not name the bypass does not count" do
+    test "unrelated prose mentioning a bypass does not justify it (#1739)" do
       source = """
       defmodule A do
-        # Loads the roster once at mount so the dropdown never lags.
+        def go do
+          # The admin bypass above already let this caller in, so authorize?
+          # is not checked twice.
+          Ash.read!(Q, authorize?: false)
+        end
+      end
+      """
+
+      assert [{"a.ex", 5}] == Check.unjustified(source, "a.ex")
+    end
+
+    test "a `multitenancy :bypass` comment does not justify it (#1739)" do
+      source = """
+      defmodule A do
+        # `:by_token` is a `multitenancy :bypass` read.
+        def go(token), do: Ash.read!(Q, token: token, authorize?: false)
+      end
+      """
+
+      assert [{"a.ex", 3}] == Check.unjustified(source, "a.ex")
+    end
+
+    test "the old `# `authorize?: false`: reason` form no longer counts" do
+      source = """
+      defmodule A do
+        # `authorize?: false`: system read of display data.
         def go, do: Ash.read!(Q, authorize?: false)
       end
       """
@@ -54,28 +105,53 @@ defmodule Mix.Tasks.Kiln.Authz.CheckTest do
       assert [{"a.ex", 3}] == Check.unjustified(source, "a.ex")
     end
 
-    test "a justification more than 12 lines above is not adjacent" do
-      filler = String.duplicate("    x = 1\n", 11)
+    test "a marker with an empty or token reason does not count" do
+      for reason <- ["", " ", " see above", " see `claim/4`."] do
+        source = """
+        defmodule A do
+          # authorize?: false —#{reason}
+          def go, do: Ash.read!(Q, authorize?: false)
+        end
+        """
 
+        assert [{"a.ex", 3}] == Check.unjustified(source, "a.ex"), inspect(reason)
+      end
+    end
+
+    test "a marker above the enclosing `def` does not reach into its body" do
       source = """
       defmodule A do
-        # `authorize?: false`: system read of display data.
+        # authorize?: false — webhook path, no actor exists
         def go do
-      #{filler}    Ash.read!(Q, authorize?: false)
+          x = 1
+          Ash.read!(Q, authorize?: false)
         end
       end
       """
 
-      # comment on line 2, bypass on line 15: 13 apart
-      assert [{"a.ex", 15}] == Check.unjustified(source, "a.ex")
+      assert [{"a.ex", 5}] == Check.unjustified(source, "a.ex")
     end
 
-    test "a justification BELOW the site does not count" do
+    test "a blank line between the marker and the call breaks it" do
+      source = """
+      defmodule A do
+        def go do
+          # authorize?: false — webhook path, no actor exists
+
+          Ash.read!(Q, authorize?: false)
+        end
+      end
+      """
+
+      assert [{"a.ex", 5}] == Check.unjustified(source, "a.ex")
+    end
+
+    test "a marker BELOW the site does not count" do
       source = """
       defmodule A do
         def go do
           Ash.read!(Q, authorize?: false)
-          # `authorize?: false` because this is a system read.
+          # authorize?: false — webhook path, no actor exists
         end
       end
       """
@@ -83,14 +159,14 @@ defmodule Mix.Tasks.Kiln.Authz.CheckTest do
       assert [{"a.ex", 3}] == Check.unjustified(source, "a.ex")
     end
 
-    test "the phrase inside a string or a moduledoc is not a justification" do
+    test "the marker inside a string or a moduledoc is not a justification" do
       source = ~S'''
       defmodule A do
         @moduledoc """
-        Every read here runs `authorize?: false` on purpose.
+        # authorize?: false — every read here is a system read
         """
         def go do
-          Logger.info("skipping authorize? check")
+          Logger.info("# authorize?: false — skipping the check here")
           Ash.read!(Q, authorize?: false)
         end
       end
@@ -101,32 +177,40 @@ defmodule Mix.Tasks.Kiln.Authz.CheckTest do
   end
 
   describe "unjustified/2 — green" do
-    test "a trailing comment on the same line" do
+    test "a marker directly above the call" do
       source = """
       defmodule A do
-        def go, do: Ash.read!(Q, authorize?: false) # policy bypass: no actor pre-auth
+        def go do
+          # authorize?: false — webhook path, no actor exists
+          Ash.read!(Q, authorize?: false)
+        end
       end
       """
 
       assert [] == Check.unjustified(source, "a.ex")
     end
 
-    test "a trailing comment must still name the bypass" do
+    test "`--` for the dash" do
       source = """
       defmodule A do
-        def go, do: Ash.read!(Q, authorize?: false) # system read: no actor here
+        def go do
+          # authorize?: false -- webhook path, no actor exists
+          Ash.read!(Q, authorize?: false)
+        end
       end
       """
 
-      assert [{"a.ex", 2}] == Check.unjustified(source, "a.ex")
+      assert [] == Check.unjustified(source, "a.ex")
     end
 
-    test "a comment block above the call, with the bypass several lines down" do
+    test "anywhere in the comment block directly above, with the reason running on" do
       source = """
       defmodule A do
-        # Delivery bypass: `:public_by_slug` filters published + audience itself
-        # and `tenant:` scopes it to this site.
         def go do
+          # Loads the roster once at mount so the dropdown never lags.
+          #
+          # authorize?: false — delivery: `:public_by_slug` filters published +
+          # audience itself, and `tenant:` scopes it to this site.
           CMS.get!(
             slug,
             not_found_error?: false,
@@ -140,19 +224,83 @@ defmodule Mix.Tasks.Kiln.Authz.CheckTest do
       assert [] == Check.unjustified(source, "a.ex")
     end
 
-    test "exactly 12 lines above still counts" do
-      filler = String.duplicate("    x = 1\n", 10)
-
+    test "a trailing marker on the same line" do
       source = """
       defmodule A do
-        # policy bypass: system read
+        def go, do: Ash.read!(Q, authorize?: false) # authorize?: false — pre-auth, no actor yet
+      end
+      """
+
+      assert [] == Check.unjustified(source, "a.ex")
+    end
+
+    test "a trailing comment must still be a marker" do
+      source = """
+      defmodule A do
+        def go, do: Ash.read!(Q, authorize?: false) # policy bypass: no actor pre-auth
+      end
+      """
+
+      assert [{"a.ex", 2}] == Check.unjustified(source, "a.ex")
+    end
+
+    test "above a one-line `def ..., do:` the call is part of" do
+      source = """
+      defmodule A do
+        # authorize?: false — webhook path, no actor exists
+        def go,
+          do: Ash.read!(Q, authorize?: false)
+      end
+      """
+
+      assert [] == Check.unjustified(source, "a.ex")
+    end
+
+    test "above the head of a pipeline, or of the match it is bound in" do
+      source = """
+      defmodule A do
         def go do
-      #{filler}    Ash.read!(Q, authorize?: false)
+          # authorize?: false — webhook path, no actor exists
+          Q
+          |> Ash.Query.filter(x == 1)
+          |> Ash.read!(authorize?: false)
+
+          # authorize?: false — webhook path, no actor exists
+          {:ok, row} =
+            Q
+            |> Ash.read_one(authorize?: false)
+
+          row
         end
       end
       """
 
-      # comment on line 2, bypass on line 14: exactly 12 apart
+      assert [] == Check.unjustified(source, "a.ex")
+    end
+
+    test "above a `with` clause, a `case` clause's pattern, or an `fn` it is passed in" do
+      source = """
+      defmodule A do
+        def go do
+          with {:ok, a} <- a(),
+               # authorize?: false — webhook path, no actor exists
+               {:ok, b} <-
+                 Ash.read_one(Q, authorize?: false) do
+            case a do
+              # authorize?: false — webhook path, no actor exists
+              :x ->
+                Ash.read!(Q, authorize?: false)
+            end
+
+            # authorize?: false — webhook path, no actor exists
+            fetch = fn loc ->
+              Ash.read!(Q, locale: loc, authorize?: false)
+            end
+          end
+        end
+      end
+      """
+
       assert [] == Check.unjustified(source, "a.ex")
     end
 
@@ -181,31 +329,61 @@ defmodule Mix.Tasks.Kiln.Authz.CheckTest do
     end
   end
 
-  describe "unjustified/2 — one comment serves one site" do
-    test "a second bypass pasted under a justified one is red" do
+  describe "unjustified/2 — one marker serves one site" do
+    test "a second bypass pasted under a justified one is red (#1739)" do
       source = """
       defmodule A do
         def go(conn) do
-          # `authorize?: false`: menus are display data; `Menu`'s read policy is
+          # authorize?: false — menus are display data; `Menu`'s read policy is
           # `authorize_if always()` regardless; `tenant:` scopes the list.
           menus = CMS.list_menus!(authorize?: false, tenant: org)
-
           drafts = CMS.list_pages!(authorize?: false, tenant: org)
           users = Accounts.list_users!(authorize?: false)
         end
       end
       """
 
-      assert [{"a.ex", 7}, {"a.ex", 8}] == Check.unjustified(source, "a.ex")
+      assert [{"a.ex", 6}, {"a.ex", 7}] == Check.unjustified(source, "a.ex")
     end
 
-    test "a comment inside another call's span does not reach past it" do
+    test "two bypass calls in one statement need two markers" do
+      source = """
+      defmodule A do
+        def go do
+          # authorize?: false — webhook path, no actor exists
+          Q
+          |> Ash.read!(authorize?: false)
+          |> Ash.load!(:author, authorize?: false)
+        end
+      end
+      """
+
+      assert [{"a.ex", 6}] == Check.unjustified(source, "a.ex")
+    end
+
+    test "each of two markers takes its own call" do
+      source = """
+      defmodule A do
+        def go do
+          # authorize?: false — webhook path, no actor exists
+          Q
+          |> Ash.read!(authorize?: false)
+          # authorize?: false — display data, the author's name only
+          |> Ash.load!(:author, authorize?: false)
+        end
+      end
+      """
+
+      assert [] == Check.unjustified(source, "a.ex")
+    end
+
+    test "a marker inside another call's span does not reach past it" do
       source = """
       defmodule A do
         def go do
           CMS.get!(
             slug,
-            # bypass: delivery filter carries the grant
+            # authorize?: false — delivery filter carries the grant
             authorize?: false,
             tenant: org
           )
@@ -217,32 +395,18 @@ defmodule Mix.Tasks.Kiln.Authz.CheckTest do
 
       assert [{"a.ex", 10}] == Check.unjustified(source, "a.ex")
     end
-
-    test "a comment naming something else nearby is not a justification" do
-      source = """
-      defmodule A do
-        def go(conn) do
-          # 401 Unauthorized when the header is missing; authorization is
-          # checked by the plug above.
-          Ash.read!(Q, authorize?: false)
-        end
-      end
-      """
-
-      assert [{"a.ex", 5}] == Check.unjustified(source, "a.ex")
-    end
   end
 
-  describe "unjustified/2 — the window is the call, not the option" do
-    test "a comment above a call whose bypass is far down its option list" do
-      options = for i <- 1..14, do: "      opt#{i}: #{i},\n"
+  describe "unjustified/2 — the call is the site, not the option" do
+    test "a marker above a call whose bypass is far down its option list" do
+      options = for i <- 1..14, do: "        opt#{i}: #{i},\n"
 
       source = """
       defmodule A do
-        # bypass: system read
         def go do
+          # authorize?: false — webhook path, no actor exists
           CMS.list!(
-      #{options}      authorize?: false
+      #{options}        authorize?: false
           )
         end
       end
@@ -251,19 +415,19 @@ defmodule Mix.Tasks.Kiln.Authz.CheckTest do
       assert [] == Check.unjustified(source, "a.ex")
     end
 
-    test "a comment between the options, or on the closing line, counts" do
+    test "a marker between the options, or on the closing line, counts" do
       source = """
       defmodule A do
         def go do
           CMS.list!(
             authorize?: false,
-            # bypass: system read
+            # authorize?: false — webhook path, no actor exists
             tenant: org
           )
 
           CMS.other!(
             authorize?: false
-          ) # bypass: system read
+          ) # authorize?: false — webhook path, no actor exists
         end
       end
       """
@@ -271,10 +435,10 @@ defmodule Mix.Tasks.Kiln.Authz.CheckTest do
       assert [] == Check.unjustified(source, "a.ex")
     end
 
-    test "two bypass options in one call share its comment" do
+    test "two bypass options in one call share its marker" do
       source = """
       defmodule A do
-        # bypass: fixture builder
+        # authorize?: false — a fixture builder, never on a request path
         def go, do: build(authorize?: false, nested: [authorize?: false])
       end
       """
@@ -328,7 +492,7 @@ defmodule Mix.Tasks.Kiln.Authz.CheckTest do
 
       File.write!(path, """
       defmodule Good do
-        # `authorize?: false`: webhook path, no actor exists.
+        # authorize?: false — webhook path, no actor exists.
         def go, do: Ash.read!(Q, authorize?: false)
       end
       """)

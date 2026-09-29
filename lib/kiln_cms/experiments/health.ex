@@ -246,7 +246,7 @@ defmodule KilnCMS.Experiments.Health do
   end
 
   defp form_submission(%{goal_form_id: id, org_id: org_id}) do
-    # Stays `authorize?: false` (#1659): a tenant-scoped probe of ONE form by id
+    # authorize?: false — kept (#1659): a tenant-scoped probe of ONE form by id
     # whose only output is "active or not". A system-actor grant on `CMS.Form`
     # would be a standing read of every form definition for every system
     # caller, wider than this lookup. It cannot fail open either — a row that
@@ -416,7 +416,7 @@ defmodule KilnCMS.Experiments.Health do
     if is_nil(KilnCMS.CMS.ContentTypes.get(type, org_id)) do
       {:unknown_type, type}
     else
-      # Stays `authorize?: false` (#1659): a CONTENT read, and the #1402
+      # authorize?: false — kept (#1659): a CONTENT read, and the #1402
       # argument applies — a system-actor clause on content reads would hand
       # system code the whole corpus, drafts included. It fails closed: a row
       # that does not come back is `:missing`, which reports the experiment

@@ -262,7 +262,7 @@ defmodule KilnCMSWeb.Tenant do
     if org_id == Accounts.default_org_id() do
       global_base_url()
     else
-      # `authorize?: false`: URL construction for a caller-supplied org id, no
+      # authorize?: false — URL construction for a caller-supplied org id, no
       # actor in hand (jobs, mailers, delivery). `Organization` reads are
       # admin-or-member; only slug/custom_domain are used, both public by
       # construction (they ARE the site's hostname).
@@ -484,7 +484,7 @@ defmodule KilnCMSWeb.Tenant do
   @spec org_count() :: non_neg_integer() | :unknown
   def org_count do
     KilnCMS.Config.Report.probe(:unknown, fn ->
-      # `authorize?: false`: boot/config advisory, no actor; a bare count leaks
+      # authorize?: false — boot/config advisory, no actor; a bare count leaks
       # nothing per-org.
       case Ash.count(KilnCMS.Accounts.Organization, authorize?: false) do
         {:ok, n} -> n
@@ -752,13 +752,14 @@ defmodule KilnCMSWeb.Tenant do
 
   defp by_custom_domain(host), do: lookup(:custom_domain, host)
 
-  # `authorize?: false` on both lookups: host→tenant resolution runs before any
+  # Both lookups bypass the policies: host→tenant resolution runs before any
   # actor exists (it is what the router scopes every later read by), and the
   # `Organization` read policy — admin-or-member — would deny every anonymous
   # request. The host is the only input, and only a resolved org id/struct
   # leaves here.
   defp lookup(:slug, value) do
     read_degrading_exit(fn ->
+      # authorize?: false — pre-auth host→tenant resolution: no actor exists yet.
       case Accounts.get_organization_by_slug(value, authorize?: false) do
         {:ok, %Accounts.Organization{} = org} -> org
         {:ok, nil} -> nil
@@ -769,8 +770,8 @@ defmodule KilnCMSWeb.Tenant do
   end
 
   defp lookup(:custom_domain, value) do
-    # `authorize?: false`: pre-auth host→tenant resolution, see `lookup(:slug, _)`.
     read_degrading_exit(fn ->
+      # authorize?: false — pre-auth host→tenant resolution: no actor exists yet.
       case Accounts.get_organization_by_domain(value, authorize?: false) do
         {:ok, %Accounts.Organization{} = org} -> org
         {:ok, nil} -> nil

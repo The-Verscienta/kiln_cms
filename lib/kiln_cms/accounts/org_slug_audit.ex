@@ -49,7 +49,7 @@ defmodule KilnCMS.Accounts.OrgSlugAudit do
   """
   @spec report() :: %{fixable: [finding()], manual: [finding()]}
   def report do
-    # `authorize?: false`: operator tooling and a boot advisory, with no actor.
+    # authorize?: false — operator tooling and a boot advisory, with no actor.
     # Nothing here is reachable from a web surface.
     orgs = Accounts.list_organizations!(authorize?: false, query: [sort: [slug: :asc]])
     by_normalized = Enum.group_by(orgs, &OrgSlug.normalize(&1.slug), & &1.slug)
@@ -87,7 +87,8 @@ defmodule KilnCMS.Accounts.OrgSlugAudit do
   def fix do
     report().fixable
     |> Enum.reduce_while({:ok, []}, fn %{org: org, fix: slug}, {:ok, done} ->
-      # `authorize?: false`: see `report/0`.
+      # authorize?: false — operator tooling with no actor, like `report/0`;
+      # nothing here is reachable from a web surface.
       case Accounts.update_organization(org, %{slug: slug}, authorize?: false) do
         {:ok, updated} ->
           # A warning, not info: a tenant's host just changed, and that belongs
