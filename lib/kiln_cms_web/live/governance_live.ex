@@ -39,7 +39,13 @@ defmodule KilnCMSWeb.GovernanceLive do
     # Content freshness (docs/content-lifecycles.md). Recomputed per load like
     # the two panels above, and for the same reason: `health` is a calculation,
     # so a stored count would be wrong from the moment a deadline passed.
-    |> assign(:health, KilnCMS.CMS.HealthSummary.for_org(socket.assigns.current_org.id))
+    |> assign(
+      :health,
+      KilnCMS.CMS.HealthSummary.for_org(
+        socket.assigns.current_org.id,
+        socket.assigns.current_user
+      )
+    )
   end
 
   defp apply_action(socket, :show, %{"type" => type, "id" => id}) do

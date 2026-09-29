@@ -58,22 +58,79 @@ defmodule KilnCMS.Automation do
 
   def handle_event(_event, _payload, _org_id), do: :ok
 
+  # See `with_actor/2`.
+  @actor_override {__MODULE__, :actor_override}
+
+  @doc """
+  The actor the rule match runs as (#1659): a `KilnCMS.SystemActor`, admitted
+  on `KilnCMS.Automation.Rule` for reads only (see `docs/policy-matrix.md`,
+  "The system actor"), rather than `authorize?: false`, which would skip every
+  policy on it.
+  """
+  @spec system() :: KilnCMS.SystemActor.t() | nil
+  def system do
+    case Process.get(@actor_override, :unset) do
+      :unset -> KilnCMS.SystemActor.new(:automation)
+      actor -> actor
+    end
+  end
+
+  @doc false
+  # Test seam (#1659): run `fun` with `system/0` answering `actor` in this
+  # process, so a test can take the grant away and prove the rule match fails
+  # CLOSED instead of reading "no rules". Process-local, and nothing on a
+  # request path calls it; code that could call it could equally pass any
+  # actor it liked.
+  @spec with_actor(term(), (-> result)) :: result when result: term()
+  def with_actor(actor, fun) do
+    previous = Process.get(@actor_override, :unset)
+    Process.put(@actor_override, actor)
+
+    try do
+      fun.()
+    after
+      if previous == :unset,
+        do: Process.delete(@actor_override),
+        else: Process.put(@actor_override, previous)
+    end
+  end
+
   @doc """
   Match `event` against `org`'s enabled rules and enqueue one `RuleWorker` per
   rule. Runs off the publish transaction (from `DispatchWorker`), so the
-  `rules_for` read can't poison the publish. Returns `:ok`.
+  `rules_for` read can't poison the publish.
+
+  Returns `:ok`, or `{:error, reason}` when the rules could not be read, which
+  fails the `DispatchWorker` job so Oban retries it. The read runs as
+  `system/0` with `authorize_with: :error`: a refused read would filter to
+  "no rules", dropping every automation for the event while the job reported
+  success. A failed read used to be swallowed the same way.
   """
-  @spec dispatch(String.t(), map(), Ash.UUID.t()) :: :ok
+  @spec dispatch(String.t(), map(), Ash.UUID.t()) :: :ok | {:error, term()}
   def dispatch(event, payload, org_id \\ KilnCMS.Accounts.default_org_id())
 
   def dispatch(event, payload, org_id) when is_binary(event) do
     with [type, verb] <- String.split(event, ".", parts: 2),
-         {:ok, trigger} <- parse_trigger(verb),
-         {:ok, rules} <- rules_for(trigger, type, authorize?: false, tenant: org_id) do
-      Enum.each(rules, &enqueue(&1, event, payload, org_id))
+         {:ok, trigger} <- parse_trigger(verb) do
+      match_rules(trigger, type, event, payload, org_id)
+    else
+      _not_a_lifecycle_trigger -> :ok
     end
+  end
 
-    :ok
+  defp match_rules(trigger, type, event, payload, org_id) do
+    case rules_for(trigger, type, actor: system(), authorize_with: :error, tenant: org_id) do
+      {:ok, rules} ->
+        Enum.each(rules, &enqueue(&1, event, payload, org_id))
+
+      {:error, reason} ->
+        Logger.error(
+          "Automation.dispatch could not read the rules for #{inspect(event)} " <>
+            "in org #{org_id}: #{inspect(reason)}"
+        )
+
+        {:error, reason}
+    end
   end
 
   defp enqueue(rule, event, payload, org_id) do

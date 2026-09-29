@@ -112,6 +112,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **The content editor has a Blocks | Markdown switch: edit the body as
+  Markdown, and it comes back as blocks.**
+  ([long form](docs/changelog/unreleased.md#editor-markdown-view))
+
 - **`mix kiln.migrations.check` fails a PR whose new migration breaks the
   release still serving mid-deploy.**
   ([#1716](https://github.com/The-Verscienta/kiln_cms/issues/1716) · [long form](docs/changelog/unreleased.md#mix-kilnmigrationscheck-gates-expand-contract))
@@ -143,6 +147,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#1679](https://github.com/The-Verscienta/kiln_cms/issues/1679) · [long form](docs/changelog/unreleased.md#the-content-editors-chrome-is-on-the-component-kit))
 
 ### Fixed
+
+- **Per-type semantic search ranks a record the query names first, however long
+  the record.**
+  ([#1746](https://github.com/The-Verscienta/kiln_cms/pull/1746) · [long form](docs/changelog/unreleased.md#per-type-semantic-search-ranks-a-record-the-query-names-first))
 
 - **An empty heading line in a rich-text block is now visible in the editor —
   dashed, labelled with its level — so the "heading has no text" finding has
@@ -184,6 +192,10 @@ Every summary line below that was shortened links to its own entry there.
 - **The newsletter sign-up honeypot and public forms trip on the same rule.**
   ([#1657](https://github.com/The-Verscienta/kiln_cms/issues/1657) · [long form](docs/changelog/unreleased.md#newsletter-sign-up-honeypot-matches-forms))
 
+- **The accounts domain's system reads run under the policies.** The tenant
+  list behind every all-orgs sweep can no longer be refused into a silent no-op.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#accounts-system-reads-run-under-the-policies))
+
 - **Federation runs under the policies.** 24 more internal writes and reads run
   as scoped system actors; the replay check and follower ceiling fail closed.
   ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#federation-runs-under-the-policies))
@@ -191,6 +203,52 @@ Every summary line below that was shortened links to its own entry there.
 - **Funnel lookups and the operator mix tasks run under the policies.** Funnel
   reads fail closed; the remaining mix-task bypasses each say why.
   ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#funnel-lookups-and-the-operator-mix-tasks-run-under-the-policies))
+
+- **The event log and the per-site settings run under the policies.** 17 more
+  internal reads and writes run as system actors; those that decide fail closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#event-log-and-settings-run-under-the-policies))
+
+- **Content releases, slugs, menus and the field registry run under the
+  policies.** 37 CMS helper sites move to scoped system actors or the caller;
+  a release's item read fails closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#cms-helpers-run-under-the-policies))
+
+- **The CMS's own bookkeeping runs under the policies.** 26 sites in the
+  content, comment, release and form changes move under the policies or say
+  why not; the reads a write depends on fail closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#the-cmss-own-bookkeeping-runs-under-the-policies))
+
+- **CMS validations look things up under the policies.** Eight reference
+  checks read as the caller or a scoped system actor; a refused read rejects.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#cms-validations-look-things-up-under-the-policies))
+
+- **The media pipeline and public forms run under the policies.** 18 more
+  internal sites run as scoped system actors; the worker re-reads and field
+  reads fail closed, and the quarantine reaper works under strict tenancy.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#the-media-pipeline-and-public-forms-run-under-the-policies))
+
+- **The billing webhook pipeline runs under the policies.** A refused read no
+  longer drops a payment event or recomputes a paying member to no access.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#billing-webhook-pipeline-runs-under-the-policies))
+
+- **Webhooks, social posting and mail run under the policies.** Each uses a
+  scoped system actor; the endpoint scan, the ledger re-read, the mail
+  settings and the suppression lookups fail closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#webhooks-social-posting-and-mail-run-under-the-policies))
+
+- **Content experiments run under the policies.** Delivery, the start guards
+  and `mix kiln.experiment` use a scoped system actor, and
+  every read behind an assignment or a result fails closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#content-experiments-run-under-the-policies))
+
+- **The governance audit chain runs under the policies.** Anchors, checkpoints
+  and the entitlement trail are read and written as a scoped system actor, and
+  every one of those reads fails closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#the-governance-audit-chain-runs-under-the-policies))
+
+- **The link checker runs under the policies.** 16 more internal sites run as
+  a scoped system actor or carry a written reason; the counter reads fail closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#the-link-checker-runs-under-the-policies))
 
 - **`mint` 1.11.0 closes three advisories: HTTP/1 response smuggling and two
   HTTP/2 client memory exhaustions (EEF-CVE-2026-91043 HIGH, -92103, -94194).**

@@ -613,9 +613,9 @@ defmodule KilnCMS.Search.HybridTest do
 
     test "the per-type semantic action floors the leg, exempting rows the title leg vouches for" do
       # The `semantic-search` API routes have no fusion to leave the floor
-      # to, so they apply it themselves — with the one exemption the title
-      # leg gives hybrid search: a row whose title the query names is kept
-      # whatever its distance. A row vouched only by the keyword legs is not:
+      # to, so they apply it themselves — with what the title leg gives
+      # hybrid search: a row whose title the query names is kept whatever its
+      # distance, and ranks first. A row vouched only by the keyword legs is not:
       # those legs are fusion's, not this action's.
       admin = admin()
       query = "tell me about alpha beta"
@@ -644,11 +644,14 @@ defmodule KilnCMS.Search.HybridTest do
       assert named.id in hybrid_ids and keyword_only.id in hybrid_ids
       refute semantic_only.id in hybrid_ids
 
-      # Sorted by distance still, and paginated and countable still: the
-      # exemption is part of the same query, not a list fused afterwards.
+      # The named row first, then the rest by distance — and paginated and
+      # countable still, by offset or by keyset: the exemption and the
+      # ranking are part of the same query, not a list fused afterwards.
       put_search_env(
         semantic_max_distance: Enum.max(Enum.map(records, &distance_of(&1, query, admin)))
       )
+
+      expected = [named.id | by_distance -- [named.id]]
 
       page =
         KilnCMS.CMS.Page
@@ -657,7 +660,15 @@ defmodule KilnCMS.Search.HybridTest do
         |> Ash.read!(actor: admin)
 
       assert page.count == 3
-      assert ids(page.results) == Enum.take(by_distance, 2)
+      assert ids(page.results) == Enum.take(expected, 2)
+
+      next =
+        KilnCMS.CMS.Page
+        |> Ash.Query.for_read(:search_semantic, %{query: query})
+        |> Ash.Query.page(limit: 2, after: List.last(page.results).__metadata__.keyset)
+        |> Ash.read!(actor: admin)
+
+      assert ids(next.results) == Enum.drop(expected, 2)
     end
   end
 

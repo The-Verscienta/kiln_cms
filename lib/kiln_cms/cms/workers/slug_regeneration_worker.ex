@@ -51,6 +51,10 @@ defmodule KilnCMS.CMS.Workers.SlugRegenerationWorker do
   defp load_actor(nil), do: nil
 
   defp load_actor(actor_id) do
+    # authorize?: false — `User` reads are self-only, and the id was stamped by
+    # the admin who enqueued the run. The user is attribution for the renames'
+    # version history; it authorizes nothing (see `SlugRegeneration.run/3`).
+    # A system read grant on `User` would cover every account (#1402).
     case KilnCMS.Accounts.get_user(actor_id, authorize?: false) do
       {:ok, user} -> user
       _ -> nil

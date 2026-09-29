@@ -16,23 +16,34 @@ defmodule KilnCMS.CMS.Validations.RequiredConsent do
   """
   use Ash.Resource.Validation
 
+  alias KilnCMS.CMS.Validations.Lookup
+
   @impl true
   def validate(changeset, _opts, _context) do
     case required_kinds() do
-      [] ->
-        :ok
+      [] -> :ok
+      required -> check(required, changeset.data)
+    end
+  end
 
-      required ->
-        missing = required -- present_kinds(changeset.data)
+  defp check(required, document) do
+    case present_kinds(document) do
+      {:ok, present} ->
+        case required -- present do
+          [] ->
+            :ok
 
-        if missing == [] do
-          :ok
-        else
-          {:error,
-           field: :state,
-           message:
-             "cannot publish without consent: #{Enum.map_join(missing, ", ", &to_string/1)}"}
+          missing ->
+            {:error,
+             field: :state,
+             message:
+               "cannot publish without consent: #{Enum.map_join(missing, ", ", &to_string/1)}"}
         end
+
+      # Fail closed: a refused read is not "no consent required", and it is not
+      # "every consent present" either. The publish is refused.
+      {:error, _error} ->
+        {:error, field: :state, message: "cannot publish: consents could not be checked"}
     end
   end
 
@@ -40,15 +51,22 @@ defmodule KilnCMS.CMS.Validations.RequiredConsent do
     :kiln_cms |> Application.get_env(:consent, []) |> Keyword.get(:required_before_publish, [])
   end
 
-  # Consent kinds already recorded for this document. Read as the system — the
-  # gate must see every consent regardless of the publishing actor — and scoped
-  # to the document's own site (epic #336) so a consent on another org's content
-  # can never satisfy this org's gate.
+  # Consent kinds already recorded for this document. Read as the system actor
+  # (#1659), not the caller: `:publish_scheduled` is run by the AshOban
+  # scheduler, which has no actor and could not read a consent, and the gate
+  # must see every consent whoever publishes. Admitted to `for_content` only
+  # (`CMS.Consent`'s policy). Scoped to the document's own site (epic #336) so
+  # a consent on another org's content can never satisfy this org's gate.
   defp present_kinds(document) do
     type = to_string(KilnCMS.Firing.Engine.document_type(document))
 
-    KilnCMS.CMS.list_consents_for!(type, document.id, authorize?: false, tenant: document.org_id)
-    |> Enum.map(& &1.kind)
-    |> Enum.uniq()
+    case KilnCMS.CMS.list_consents_for(type, document.id,
+           actor: Lookup.system(),
+           authorize_with: :error,
+           tenant: document.org_id
+         ) do
+      {:ok, consents} -> {:ok, consents |> Enum.map(& &1.kind) |> Enum.uniq()}
+      {:error, error} -> {:error, error}
+    end
   end
 end

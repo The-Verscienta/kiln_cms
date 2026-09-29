@@ -21,9 +21,10 @@ defmodule KilnCMS.CMS.Redirects do
   """
   @spec resolve(String.t(), String.t(), Ash.UUID.t()) :: map() | nil
   def resolve(path, locale, org_id) do
+    # Under the policies, actorless (#1659): `Redirect` rows are world-readable
+    # — delivery serves the same mapping to anyone who hits the old URL.
     with [redirect] <-
            CMS.list_redirects!(
-             authorize?: false,
              tenant: org_id,
              query: [filter: [path: path, locale: locale], limit: 1]
            ),
@@ -38,6 +39,14 @@ defmodule KilnCMS.CMS.Redirects do
 
   # The target's current URL fields, only while it is still published. The
   # destination is its canonical path — a `path_alias` (#485) when set.
+  #
+  # `authorize?: false`, justified (#1402's content-read argument): the read
+  # filters to `state == :published` itself and selects only `slug` and
+  # `path_alias` — the target's public address, which the 301 discloses
+  # anyway. Reading it as the anonymous visitor would drop the redirect for
+  # audience-gated or locked content, whose own page then answers the visitor
+  # with its gate; a `SystemActor` content-read grant would hand every system
+  # caller the whole corpus, drafts included.
   defp published_target(ct, target_id, org_id) do
     Slugs.storage_resource(ct)
     |> Ash.Query.filter(id == ^target_id and state == :published)

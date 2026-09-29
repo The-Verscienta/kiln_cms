@@ -143,19 +143,41 @@ ever be authorized by an explicit clause below.
 | `Firing.PublishedArtifact` | `read`, `for_document`, `get_surface`, `upsert`, `destroy` | The firing engine is the only writer an artifact has ever had, and unpublish is the only destroyer. On read the actor is admitted **alongside** `Checks.DocumentReadable`, not instead of it: delivery settles the audience question on the *document* first (`Firing.Delivery.resolve/5`) and then fetches the body by id, so re-running the document check there with the anonymous actor would refuse every gated page delivery had just unlocked. |
 | `Firing.SyncExposure` | all (`read`, `for_documents`, `record`) | The sync API's record of which document ids it has handed an anonymous caller (`GET /api/sync`, `KilnCMS.Firing.Sync`). A tombstone may name only an id recorded here, so the table is what keeps a never-public draft, gated or locked document out of a delta. No person has a read or write path — `forbid_if always()` for everyone, admin included. |
 | `CMS.TypeDefinition` | `read`, `by_name`, `including_archived` | Read-only. The fire path resolves a dynamic document's public type name and its schema.org `@type` from its definition. Writing one is still admin-only. |
-| `CMS.FieldDefinition` | `read`, `for_type`, `for_definition` | Read-only. Firing needs the field schema to turn a document's `custom_fields` values into JSON-LD. Defining a field is still admin-only. |
+| `CMS.FieldDefinition` | `read`, `for_type`, `for_definition` | Read-only. Firing needs the field schema to turn a document's `custom_fields` values into JSON-LD, and every content write validates against it (`Changes.ApplyCustomFields`, as `CMS.Bookkeeping.system/0`, #1659, with `authorize_with: :error` — a filtered "no definitions" would drop every stored value). Defining a field is still admin-only. |
 | `Analytics.Funnel`, `Analytics.FunnelStep` | the primary `read` **only** | Funnel *definitions*, never traffic (#1659). The experiment engine resolves a `:funnel_completion` goal to its funnel's last step — delivery's cached target map (`Experiments.funnel_targets/1`) and the `:start` guard (`GoalConfigured`) — and `mix kiln.experiment` resolves `--goal-funnel SLUG`. All three read as `Analytics.system/1` and fail closed (`authorize_with: :error`): a refused read under the filter answers `[]`, which delivery would cache as "no funnel targets". Narrowed inside the `action_type(:read)` policy with `forbid_unless action(:read)`, so `FunnelStep.:for_funnel` (the builder's read) and every write stay editor/admin. No traffic resource in this domain admits the system actor. |
 | `Search.BlockEmbedding` | `read`, `for_document`, `nearest`, `upsert`, `destroy` | The per-block semantic index. `Search.BlockIndexer` is the only writer it has ever had — rows are derived from the document's own block tree — and `BlockSearch` / `Search.Related` are its only readers. Whether a *caller* may see a hit is decided one tier up, when the matching document is hydrated under their own authorization. |
 | `Search.TagEmbedding` | `read`, `for_tags`, `nearest`, `upsert`, `destroy` | Same shape, for tag-name vectors: written by `TagEmbeddingWorker` and `Search.Related`, read by `Search.Related` only. |
 | `CMS.MediaDerivative` | all (`read`, `for_item`, `record`, `destroy`) | The bookkeeping row behind each cached on-the-fly image transform (`/media/:id/t/…`). `Media.Derivatives` is its only reader and writer: it counts an item's rows against the per-item budget, prunes the ones cut from a replaced original or around a moved focal point, and lists them for a purge. No person — admin included — reads or writes a row, and there is no API surface. Who may *see* a transform is decided on the `MediaItem`, by the transform controller's ordinary policy-checked read. |
+| `CMS.MediaItem` | `read` **only**, named inside the `action_type(:read)` policy | The alt-text publish gate (`Validations.MediaAltText`) asks which of a document's media ids are marked `decorative`. It also runs for `publish_scheduled`, whose caller is the AshOban scheduler with no actor, so it cannot read as the caller. Narrowed by `forbid_unless action(:read)`: through `library` or `search` it reads only what a stranger may (public, not quarantined), `trashed` stays admin-only, and it has no write. A refusal fails the publish closed ("alt text could not be checked"), never "not decorative". |
+| `CMS.Consent` | `for_content` **only** | The required-consent publish gate (`Validations.RequiredConsent`) lists one document's consents, for the same reason (the scheduler has no actor). It may not record a consent or list them all. A refusal fails the publish closed ("consents could not be checked"), never "nothing required". |
+| `CMS.MediaItem` | `read`, `quarantine_expired`, `record_processing`, `release_quarantine`, and `purge` of a **quarantined** item only | The media pipeline, as `Media.system/0` (#1659). `VariantWorker`, `AVWorker` and `AVStripWorker` re-read the item they were enqueued for (quarantined or gated included) with `authorize_with: :error`, so a refused read fails the job rather than reading as "gone" — which for the strip would leave the upload quarantined until the reaper deleted it. The derived fields (dimensions, duration, variants, `variant_failures`) are written through `record_processing`, never `update`, so the grant cannot gate an item or touch its tags or editor fields; the strip releases through `release_quarantine`. `QuarantineReaper` scans every site through `quarantine_expired` (a `multitenancy :bypass` read, admitted to the system actor **alone** by a policy above the admin bypass) and purges; the strip purges an upload it refuses. `purge` is admitted only while `quarantined == true`: a released item may be in use, and deleting it stays an admin act. The regeneration scan reads with `authorize_with: :error` too. Not admitted: `update`, `update_metadata`, the soft `destroy`, `trashed`, `restore`, `increment_downloads`. |
+| `CMS.Form` | `read` **only** | The form pipeline, as `Forms.system/0` (#1659). `NotificationWorker` and `AutoresponderWorker` re-read the form a submission was queued for, active or not, with `authorize_with: :error`: a refused read would filter to "form deleted" and the mail would silently never go out, so it fails the job instead. Building, editing or deleting a form stays admin-only. |
+| `CMS.FormField` | `for_form` **only** | The submission is validated against the form's fields; `AutoresponderWorker` and the autoresponder-template validation (`Forms.Autoresponder.definitions_for_form/4`, which a seed or template instantiation reaches with no editor session) read them too. Every one runs with `authorize_with: :error`: a refused read filtering to `[]` would accept a submission with every required field skipped and every value dropped. |
+| `CMS.FormSubmission` | `create` **only** | `Forms.submit/3` records a visitor's validated submission. Visitor data stays admin eyes only: the system cannot read a submission back, re-mark it or delete one. The retention prune is the AshOban trigger's own bypass, unchanged. |
+| `CMS.SiteEmbedSettings` | `read` **only** | The embed route resolves a site's framing default on a visitor's request (`Forms.EmbedPolicy.org_default/1`). The read runs with `authorize_with: :error`, and a failure resolves to `[]` (same-origin only) — never to "no row", which would inherit the deployment's `EMBED_ORIGINS`, wider than a site default of `[]` it may be hiding. Saving the default stays an admin act. Granted through `OrgSettings`' `system_actions:` option. |
 | `Accounts.ThrottleCounter` | `prune` **only** | The shared auth budgets' counter table (#1619). The scheduled prune deletes closed windows; the actor is admitted so an operator or a test can run it by hand. The budgets are charged by `Accounts.ThrottleStore` in raw SQL before anyone is authenticated, so no action serves that path. `read` is forbidden to everyone, admin included: a count per hashed key is an oracle nobody needs. |
-| `Automation.Rule` | `read` **only** | `KilnCMS.Automation.RuleWorker` re-reads the rule it was enqueued for. Authoring a rule is still admin-only — the grant is narrowed to reads inside the existing `policy always()` with `forbid_unless action_type(:read)`. |
-| `Social.Account` | `read`, `enabled_for_provider` **only** | The announcer lists a provider's enabled accounts for a publish. Minting, editing or deleting the credentials for a site's public voice stays an admin act, narrowed the same way. |
+| `Accounts.Organization` | `read` **only** | The tenant registry (#1659). `Accounts.list_org_ids/0` is the tenant list behind every all-orgs sweep (AshOban's per-tenant scheduler scans, GDPR erasure, audit verification, the digests), and `Accounts.default_org/0` is the default-org fallback. Both read with `authorize_with: :error`, so a lost grant raises (or answers `:error`) instead of filtering to `[]`, which every sweep would have read as "no orgs, nothing to do". Narrowed inside the member-read policy with `forbid_unless action(:read)`: `by_slug` and `by_custom_domain`, the request path's tenant resolution, are not admitted, and creating or editing an org stays platform-admin. |
+| `CMS.ExternalLink` | `read`, `observe`, `record_check`, `destroy` | The outbound link checker's bookkeeping (#474, #1659), as `Links.system/0`. `Links.Sweep` upserts each occurrence it finds in published content, prunes the rows it no longer sees and reads which URLs are due; `Links.CheckWorker` reads a URL's failure count and writes the verdict to every row sharing it. Every existing action is named, inside the editor read policy and the admin write policy, so one added later is not admitted by default. The reads that back a decision fail closed: the failure-count read and the due-URL stream run with `authorize_with: :error` (a refused read would filter to "pruned" or "nothing due"), and a refused `observe` aborts the sweep before its prune, which would otherwise delete every row and its failure count. The report page reads as the viewing editor, not as the system. |
+| `CMS.SiteLinkCheck` | `read`, `record_sweep` **only** | The sweep and the check worker read whether outbound checking is on (re-read immediately before each request), and the sweep stamps `last_swept_at`. The read runs with `authorize_with: :error` and any error resolves to "disabled", the closed direction for a switch that authorizes egress. The settings form's `save` is not admitted: turning checking on stays an admin act. Granted through `OrgSettings`' `system_actions:` option. |
+| `Automation.Rule` | `read` **only** | `KilnCMS.Automation.RuleWorker` re-reads the rule it was enqueued for, and `Automation.dispatch/3` matches an event against the site's rules; that match fails closed (`authorize_with: :error`), so a refused read fails the dispatch job rather than dropping every rule. Authoring a rule is still admin-only — the grant is narrowed to reads inside the existing `policy always()` with `forbid_unless action_type(:read)`. |
+| `Social.Account` | `read`, `enabled_for_provider`, `record_post` **only** | The announcer lists a provider's enabled accounts for a publish, `Social.configured?/1` asks whether any is enabled, and the announcer stamps "last posted" (`record_post`, which accepts no attributes) on the account it posted as (#1659). Minting, editing or deleting the credentials for a site's public voice stays an admin act, narrowed the same way. |
+| `Social.Post` | `claim`, `succeed`, `fail`, `unresolved`, `skip` **only** | The announce ledger (`Social.system/0`, #1659). The claim is written before the provider is called and its unique index is the "announce once" guarantee; a refused claim is a Forbidden that posts nothing, never "already announced". No read and no `destroy`: a deleted claim would free the dedupe key for a second post. |
+| `CMS.WebhookEndpoint` | `read`, `record_delivery_success`, `record_delivery_failure` **only** | The dispatch scan and the delivery worker read endpoints (`Webhooks.system/0`, #1659), and the worker keeps the health counters behind auto-disable. Creating, editing or deleting an endpoint stays an admin act. Both reads pass `authorize_with: :error`: a refused scan would read as "no endpoint subscribed" and a refused lookup as "endpoint deleted", so a lost grant is logged (and, in the worker, retried) instead. |
+| `CMS.WebhookDelivery` | `read`, `create`, `record_attempt` **only** | The delivery ledger: dispatch writes the row, the worker re-reads it (failing closed: a refused read is retried, not taken for "pruned") and records each attempt. `destroy` is not admitted; the prune trigger runs under its own `AshObanInteraction` bypass. |
+| `Mail.Settings` | `read`, `init` **only** | The DKIM signer and DNS checks read the singleton with no actor of their own, and `ensure_settings!/0` inserts the empty row (`Mail.system/0`, #1659). The read fails closed: `nil` would read as "no DKIM key" and send unsigned. Changing the key or the server IP stays platform-admin. |
+| `Mail.SuppressedRecipient`, `Mail.SiteSuppressedRecipient` | `read`, `suppress` **only** | The pipeline looks every recipient up before queuing and records a hard bounce on the list of the relay that reported it (`Mail.system/0`, #1659). The lookup passes `authorize_with: :error`: a refused read would otherwise be "not suppressed" and resume mail to dead addresses, so `enqueue!/2` drops the recipient and logs, and the newsletter worker retries. Clearing a suppression (`destroy`) stays an admin act. |
 | `CMS.Comment` | `create`, `read` | An editorial-intelligence reaction posts its findings as a document-level comment (#946) on a thread it must be able to read. No `author_id` is stamped — the actor has no `:id` — so `created_by_rule_id` carries the provenance. `update` is **not** admitted: automation posts, it does not edit what anyone said. |
-| `CMS.Task` | `create`, `read` | The same reaction assigns findings as a task, and the lifecycle sweep probes for an open review before opening another. `AssigneeIsEditor` still vets the assignee (validations run whatever the actor is) and `creator_id` stays unstamped. `update` is **not** admitted: automation opens tasks, it does not complete them. |
+| `CMS.Task` | `create`, `read`, and of the updates `complete` **only** | The same reaction assigns findings as a task, and the lifecycle sweep probes for an open review before opening another. `AssigneeIsEditor` still vets the assignee (validations run whatever the actor is) and `creator_id` stays unstamped. A publish completes the record's open tasks (`Changes.AutoCompleteTasks`, as `CMS.Bookkeeping.system/0`, #1659) — a scheduled publish has no person to do it as — reading them with `authorize_with: :error`, so a refused read fails the publish instead of leaving them open. `complete` is named inside the `action_type(:update)` policy with `forbid_unless`: assigning, editing or reopening a task stays an editor's. |
+| `CMS.Redirect` | `create`, `destroy` | A rename of a published record's address leaves a 301 behind and retires any redirect squatting on the new one (`Changes.RecordSlugRedirect`, as `CMS.Bookkeeping.system/0`, #1659). The rename is an editor's; writing a redirect by hand stays an admin act. A refused create fails the rename, so a published URL is never vacated without its 301. `read` is world-readable already. |
+| `CMS.ReleaseItem` | `mark_cancelled` **only** | Archiving a release that never shipped frees its pending items (`Changes.CancelPendingReleaseItems`, as `CMS.Bookkeeping.system/0`, #1659). The archiving editor may not reach a `mark_*` write — they rewrite what rollback restores from — so the pending items are read as the editor, with `authorize_with: :error` (a refusal must not archive the release with its items still reserving their content), and marked cancelled as the system. The other `mark_*` writes stay the release worker's. |
+| `CMS.FormSpamSettings` | `read` **only** | The submission scorer (`Changes.ScoreFormSubmission`, as `CMS.Bookkeeping.system/0`, #1659) reads the site's disallowed keywords for an anonymous visitor. With `authorize_with: :error`, and a read error no longer answers `[]`: either raises, so a submission is refused rather than stored unscored. Saving the list stays an admin act. Granted through `OrgSettings`' `system_actions:` option. |
+| `CMS.ContentRelease` | `read`, `abandon`, `mark_published`, `mark_failed`, `mark_rolled_back`, `mark_rollback_failed` **only** | The release go-live and rollback worker (`CMS.Releases`, `CMS.Workers.ReleaseWorker`, #1659) re-reads the release it was enqueued for, records the outcome, and abandons its own claim when a run crashes. The four `mark_*` writes carry no other policy, so no person, admin included, may stamp a release `:published` that never published. `read` is narrowed to the plain action (not `editable`, `by_state`, `in_window`), and `abandon` sits inside the admin policy with `forbid_unless action(:abandon)`: scheduling, starting and shipping a release stay an admin's decision. |
+| `CMS.ReleaseItem` | `for_release_with_status`, `mark_applied`, `mark_skipped`, `mark_rolled_back` **only** | The same worker lists a release's pending (or applied) items and records what it did to each, including the `prior_state` / `prior_version_id` rollback restores from; no person may write those. The item read fails closed (`authorize_with: :error`): a refused read would otherwise be an empty release, marked `:published` having published nothing. Composing a release (`add`, `set_action`, `cancel`) stays editor work. The *content* steps of a claimed release still run `authorize?: false`, since the system actor holds no content grant. |
+| `CMS.SiteEditorialSettings` | `read` **only** | `Checks.EditorMayPublish` asks whether editors may publish from inside the publish (whose caller may be the scheduler), and `TaskSettings.site_default/1` asks whether publishing completes tasks from a release's go-live. Both fail closed: a refusal answers "editors may not publish", and raises rather than applying the shipped task default. `save` is not admitted. Granted through `OrgSettings`' `system_actions:` option. |
 | `Billing.Settings` | `read`, `init` **only** | The checkout path and the webhook receiver resolve provider credentials with no actor of their own, and `ensure_settings!/0` inserts the empty singleton on first use. Narrowed inside the existing platform-admin policy; the write path to payment credentials stays platform-admin, and every secret column is vault-encrypted and `sensitive?`. |
 | `Billing.Membership` | `read`, `apply_provider_state`, `anonymize` | A paid membership is what grants an audience and a newsletter tier segment, so the tier sync must see the ones it is syncing. The two writes are `forbid_if always()` for every person — this resource has no admin bypass — and are taken only by the verified webhook worker, the reconcile sweep and GDPR erasure. |
-| `Billing.MembershipEvent` | `read`, `append`, `anonymize_actor` | The append-only entitlement trail. No person may write one and there is no `destroy` action at all; the billing pipeline appends and GDPR erasure redacts the acting admin. |
+| `Billing.WebhookEvent` | `read` (by id), `claim`, `mark_processed`, `mark_ignored`, `mark_failed` **only** | The webhook worker re-reads its recorded event, claims it and settles it (#1659). Every write is closed to every person. `receive` stays the receiver's `authorize?: false` (a webhook has no actor; the provider's HMAC is the grant), and `destroy`, `recent`, `by_event_id` and `purgeable` are not admitted: a system actor cannot insert, list or erase a payment event. The worker's read fails closed, since `nil` would mean "event gone" and cancel the job. |
+| `Billing.MembershipEvent` | `read`, `append`, `anonymize_actor` | The append-only entitlement trail. No person may write one and there is no `destroy` action at all; the billing pipeline appends and GDPR erasure redacts the acting admin. The governance dashboard reads it as `Governance.system/0` (#1659), with `authorize_with: :error` so a lost grant raises rather than showing an empty trail. |
 | `Newsletter.Segment` | `read`, `for_tier`, `sync_managed` **only** | The tier-backed lifecycle is driven by billing, not by a human: both write actions are `forbid_if always()` for everyone including admins. Managing a segment by hand stays an admin act, so the grant is narrowed inside the blanket admin policy as well — Ash ANDs policies, so both halves are needed. |
 | `Newsletter.Subscriber` | `read`, `link_member` **only** | `link_member` is the one write that may set `user_id`, and it is `forbid_if always()` for everyone. Narrowed the same way, so admin-only list management is untouched. |
 | `Newsletter.NewsletterSend` | `create` **only** | The "on publish → send the newsletter" automation (`Automation.RuleWorker`) records the campaign it queues (#1655). Before this the create ran `authorize?: false` for every caller, the console included, so the console's tier check was the only gate. Narrowed inside the blanket admin policy; reading the ledger and the fan-out's `mark_*`/`record_*` bookkeeping are unchanged. |
@@ -165,7 +187,17 @@ ever be authorized by an explicit clause below.
 | `Federation.Block` | `read` **only** | The inbox asks whether an actor or its instance is blocked before it records a `Follow`. Deciding what to block stays an admin act. |
 | `Federation.SiteFederation` | `read`, `record_delivery`, `enable`, `disable`, `rekey` **only** | Every federation path starts from the site's settings (`Federation.active_settings/2`); the delivery worker stamps "last federated"; and `mix kiln.federation` (`enable`, `disable`, `rekey`) is an operator at a shell on the host, the deployment's own authority. The settings form's `save` and `destroy` are not admitted — editing the site's public identity stays an admin act. Granted through `OrgSettings`' `system_actions:` option, which narrows inside the macro's read and write policies. |
 | `Federation.SeenSignature` | `record`, `expired`, `destroy` **only** | The inbound replay-nonce store: `HttpSignature` records a verified signature, `SeenSignatureSweeper` counts and deletes expired rows. The plain `read` is refused to everyone, the system actor included — nothing needs to list nonces. No person has any path to this table. |
-| `CMS.Page`, `CMS.Post`, `CMS.Entry` (content) | `reindex_search_text` and `set_embedding` **only**, named inside the `action_type([:create, :update])` policy | Two system-only actions on denormalized columns: the fragment-expanded search text (`Firing.Engine.fire/2`) and the document-level search vector (`Search.EmbeddingWorker`). Both accept no `:blocks` and both are ignored by PaperTrail. The grant sits inside the policy written for people, narrowed to those two actions by `forbid_unless action(...)` — see above for why that rather than a bypass. Keep the list short and every member system-only. Nothing else on the content resources admits the system actor: it holds no tier, so `EditableContentType` / `ReadableContentType` / `InAudience` all refuse it, and a system actor reads no content at all. |
+| `Experiments.Experiment` | `read`, `running`, `create`, `start`, `conclude` **only** | Delivery reads the running set (`Experiments.system/0`, #1659) to decide which arm a page serves and whether a form submission or a later page view converts; the variant-write and `:start` guards read the parent and the running set. `mix kiln.experiment` is an operator at a shell on the host and creates, starts and concludes. `update`, `archive` and `destroy` are not admitted — narrowed inside the admin write policy with `forbid_unless action(...)`. Every read that backs an assignment, a start guard or a result passes `authorize_with: :error` (and `has_many :variants` sets `authorize_read_with :error`, since the option does not reach a relationship load), so a lost grant errors instead of answering "nothing is running". |
+| `Experiments.Variant` | `read`, `create` **only** | The arms delivery assigns between (loaded with the running set) and the `:start` guard counts; `mix kiln.experiment variant` adds one. Re-weighting or removing an arm stays an admin act. |
+| `Experiments.VariantDay` | `read`, `record_impression`, `record_conversion` **only** | The per-variant daily counters. Delivery and the form-submission path write the two counters; `mix kiln.experiment show` reads them, failing closed (the results panel reads them as the viewing editor). `destroy` is not admitted — a system caller cannot erase a result. |
+| `CMS.HistoryAnchor` | `create`, `for_content` **only** | The tamper-evidence chain (#1659): the publish pipeline mints a document's next anchor and `Governance.Chain` reads that document's anchors back to verify or extend them. The plain `read` is not admitted: no Ash read lists anchors across documents. Checkpoint minting does read every document's head, through raw SQL (`Checkpoint.current_heads/1`, `standing_at_witnessed_positions/2`) that no policy governs and that cannot be refused, by design: the head set a checkpoint signs must never be silently shortened. There is still no `update` or `destroy` action. The read's code interface defaults to `authorize_with: :error`: a refused read would filter to `[]`, which reads as "never anchored", so a lost grant raises instead. Version rows themselves stay `authorize?: false` with a written reason: they are the editorial history, and a standing system read over them is the `PointInTime` case #1402 refused. |
+| `CMS.ChainCheckpoint` | `recent`, `unwitnessed`, `create`, `record_publication` **only** | The org-wide witness (#666): `Governance.CheckpointWorker` mints a checkpoint, publishes it and records the receipt, and verification loads the checkpoint an entry names (`get_chain_checkpoint`, a `get_by` on `recent`, so the plain `read` is not admitted). Named action by action inside `policy always()` so a `destroy` added later is not admitted by default. Reads fail closed (their code interfaces default to `authorize_with: :error`): an empty `unwitnessed` would show an outage as healthy, and an empty `recent` would restart the chain at sequence 1. |
+| `CMS.ChainCheckpointEntry` | `create`, `for_content`, `for_checkpoint` **only** | The per-document entries each checkpoint commits to, and verification's read of a document's strongest witnessed head. A refused `for_content` would read as "never witnessed", which is exactly what a truncation wants to look like, so it raises instead and the verdict floors to `:unverifiable`. |
+| `CMS.Page`, `CMS.Post`, `CMS.Entry` (content) | `reindex_search_text`, `set_embedding` and `set_published_version_id` **only**, named inside the `action_type([:create, :update])` policy | Three system-only actions on denormalized columns: the fragment-expanded search text (`Firing.Engine.fire/2`), the document-level search vector (`Search.EmbeddingWorker`), and the pointer at the version a publish wrote (`Changes.RecordPublishedVersion` / `ClearPublishedVersion`, as `CMS.Bookkeeping.system/0`, #1659 — the publish may be the scheduler's). None accepts `:blocks` and all are ignored by PaperTrail. The grant sits inside the policy written for people, narrowed to those two actions by `forbid_unless action(...)` — see above for why that rather than a bypass. Keep the list short and every member system-only. Nothing else on the content resources admits the system actor: it holds no tier, so `EditableContentType` / `ReadableContentType` / `InAudience` all refuse it, and a system actor reads no content at all. |
+| `History.DocumentEvent` | `for_document`, `by_actor`, `append`, `anonymize_actor` **only** | The block-level event log (#1659). The History API appends an event with the next per-document sequence number, folds one document's events for time-travel, and GDPR erasure redacts one user's events (a bulk update authorizes its query as a read, hence `by_actor`). The plain `read` is not admitted: nothing lists the whole log. No person, admin included, may append or rewrite an event. Every read fails closed (`authorize_with: :error`, `authorize_query_with: :error` on the erasure): a refused sequence read would hand out a number already taken, a refused fold would render an empty document, and a refused erasure would erase nothing and report success. |
+| `CMS.FeedSettings` | `read` **only** | `KilnCMS.Feeds` resolves a site's syndication policy for anonymous feed readers (#1659). A refused read would be "no row", the operator config, cached for the TTL, which can turn full content on for a site that switched it off, so the read fails closed to `Feeds.unavailable/0`, uncached. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
+| `CMS.SiteCompliance` | `read` **only** | `Compliance.Settings` resolves a site's claim-checking rules and publish gate for the editor panel and the publish path (#1659). Fails closed to `Settings.unavailable/0`, uncached, for the same reason as `FeedSettings`. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
+| `Analytics.SearchQuery` | `record` **only** | `Search.record_query/3` counts a search, usually an anonymous visitor's (#1659). No person may record one (an admin still can, through the admin bypass above the policy), and the system may not read or purge the counters; the nightly purge is the AshOban trigger's own. |
 
 Legend: ✅ allowed · ❌ forbidden · 🔎 allowed but row-filtered (reads return only the rows the policy permits, never an error) · ⚙️ system-only (`authorize?: false`).
 
@@ -253,6 +285,15 @@ managed through `manage_relationship` on the content resources).
 Media is world-readable because published content embeds it (featured images,
 inline assets).
 
+The alt-text publish gate (`Validations.MediaAltText`) reads the `decorative`
+flag as the **system actor**, through the plain `read` only (#1659); see
+[The system actor](#the-system-actor).
+
+The pipeline's own actions — `record_processing`, `release_quarantine` and
+the cross-site `quarantine_expired` scan — are not an editor's. The first two
+are admin (bypass) or system actor only; `quarantine_expired` is the system
+actor's alone, admin included. See "The system actor" above.
+
 The routes that serve a media item's **bytes** — `/media/:id/download`,
 `/media/:id/stream` and the on-the-fly transforms at `/media/:id/t/:ops` — all
 read the row through this policy under the request's session actor
@@ -267,8 +308,9 @@ everyone. The transform route additionally refuses out-of-bounds parameters
 |--------|:-----:|:------:|:------:|:---------:|
 | read, `create`, `update`, `destroy` | ✅ | ❌ | ❌ | ❌ |
 
-Endpoint configuration is admin-only. The delivery worker reads endpoints as the
-**system** (`authorize?: false`).
+Endpoint configuration is admin-only. The delivery pipeline reads endpoints and
+keeps their health counters as the **system actor** (see
+[The system actor](#the-system-actor)); it cannot create, edit or delete one.
 
 ## Mail settings — `Mail.Settings`
 
@@ -277,9 +319,9 @@ Endpoint configuration is admin-only. The delivery worker reads endpoints as the
 | read, `init`, `generate_dkim`, `rotate_dkim`, `configure_key_source`, `set_server_ip`, `record_verification` | ✅ | ❌ | ❌ | ❌ |
 
 Instance-wide mail/DKIM configuration (`/editor/mail`) is admin-only. The
-delivery pipeline resolves the DKIM key as the **system**
-(`authorize?: false` via `KilnCMS.Mail.dkim_config/0`), as does the lazy
-singleton creation (`ensure_settings!/0`, reached only from the admin page).
+delivery pipeline resolves the DKIM key as the **system actor**
+(`KilnCMS.Mail.dkim_config/0`), as does the lazy singleton creation
+(`ensure_settings!/0`); both are admitted for `read` and `init` only.
 
 ## Billing settings — `Billing.Settings`
 
@@ -304,7 +346,8 @@ policy before doing anything).
 
 Managed from `/editor/mail` (admin-only). The delivery pipeline writes
 suppressions on a hard bounce and consults them before queuing as the
-**system** (`authorize?: false`). As with reads elsewhere, a non-admin read is
+**system actor** (`read` and `suppress` only; a refused lookup fails closed and
+the recipient is not mailed). As with reads elsewhere, a non-admin read is
 filtered to nothing rather than erroring, so the list never leaks.
 
 ## Custom fields — `FieldDefinition`
@@ -330,6 +373,8 @@ reads them with `authorize?: false`.
 `record` is `forbid_if always()` for every role — view/search counts are written
 only by the **system** delivery path (`authorize?: false`). Reading aggregates is
 editor/admin only (privacy-first: no per-user data is stored anyway).
+`SearchQuery`'s `record` is written as a system actor instead (#1659), admitted
+by name; see [The system actor](#the-system-actor).
 
 ## Accounts — `User`, `Token`
 
@@ -417,6 +462,9 @@ deletable.
 |--------|:-----:|:------:|:------:|:---------:|
 | read (`read`, `by_slug`, `by_custom_domain`) | ✅ all | 🔎 own memberships | 🔎 own memberships | ❌ |
 | `create`, `update` | ✅ | ❌ | ❌ | ❌ |
+
+The system actor may use the plain `read` only (#1659, see
+[The system actor](#the-system-actor)).
 
 `OrgMembership`:
 
@@ -510,13 +558,14 @@ filters rather than raises.
 | read (`read`, `recent_for_form`), `create`, `destroy` | ✅ | ❌ | ❌ | ❌ |
 
 Submission contents are visitor-provided data, frequently PII — admin eyes only.
-The public submit path validates and then writes as the **system**.
+The public submit path validates and then writes as the **system**
+(`Forms.system/0`, admitted to `create` alone — see "The system actor").
 
 ## Redirects & branding — `Redirect`, `SiteBranding`
 
 | Resource | read | writes |
 |---|---|---|
-| `Redirect` (`read`) | ✅ everyone incl. anonymous | `create`: admin only · `destroy`: admin, **or** whoever may write the target record |
+| `Redirect` (`read`) | ✅ everyone incl. anonymous | `create`: admin only · `destroy`: admin, **or** whoever may write the target record · both also the slug-change hook's system actor (see "The system actor") |
 | `SiteBranding` (`read`) | ✅ everyone incl. anonymous | admin only (`save`, `update`, `destroy`) |
 
 Both are public information by design — delivery serves the same redirect map to
@@ -601,13 +650,14 @@ own list instead (next section).
 
 | Action | admin | editor | viewer | anonymous | system |
 |--------|:-----:|:------:|:------:|:---------:|:------:|
-| read, `destroy` | ✅ | ❌ | ❌ | ❌ | ✅ |
+| read | ✅ | ❌ | ❌ | ❌ | ✅ |
+| `destroy` | ✅ | ❌ | ❌ | ❌ | ❌ |
 | `suppress` | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 The addresses one site's own relay rejected as dead, per site
 (`org_id`, `email`). Org admin reads and clears it from `/editor/site-mail`; a
 non-admin read filters to nothing. Only the delivery pipeline writes it, as
-the **system** (`authorize?: false`), on a reject naming the recipient that
+the **system actor**, on a reject naming the recipient that
 came through that site's relay. Not even the site's admin can add a row: that
 would stop the site's mail to an address without a bounce ever happening.
 
@@ -719,19 +769,30 @@ write route exists on either surface.
 There is no `update` action — consent records are corrected by recording a new
 one, not by editing history.
 
+The publish gate (`Validations.RequiredConsent`) reads a document's consents as
+the **system actor**, through `for_content` only (#1659); see
+[The system actor](#the-system-actor).
+
 `HistoryAnchor` — every action (`read`, `for_content`, `create`) is admin-only;
-there is deliberately no destroy. The publish pipeline writes anchors as the
-**system**.
+there is deliberately no destroy. The publish pipeline writes anchors, and the
+chain reads them back, as `Governance.system/0`, admitted for `create` and
+`for_content` only (see [The system actor](#the-system-actor)).
+`ChainCheckpoint` and `ChainCheckpointEntry` are admin-only for people in the
+same way, and admit the system actor to their own lists of actions:
+`recent`, `unwitnessed`, `create` and `record_publication` on a checkpoint,
+and `create`, `for_content` and `for_checkpoint` on an entry. None of the
+three admits the plain `read`.
 
 `History.DocumentEvent`:
 
 | Action | admin | editor | viewer | anonymous |
 |--------|:-----:|:------:|:------:|:---------:|
-| read (`read`, `for_document`) | ✅ | ✅ | ❌ | ❌ |
-| `append`, `anonymize_actor` | ⚙️ | ⚙️ | ⚙️ | ⚙️ |
+| read (`read`, `for_document`, `by_actor`) | ✅ | ✅ | ❌ | ❌ |
+| `append`, `anonymize_actor` | ❌ | ❌ | ❌ | ❌ |
 
-Writes are `forbid_if always()` for every role — the event log is append-only
-through the History API as the system, and has no destroy action at all.
+Writes are refused to every role, admin included — the event log is
+append-only through the History API, which writes as `History.system/0` (see
+[The system actor](#the-system-actor)), and has no destroy action at all.
 
 ## Automation & newsletter
 
@@ -822,8 +883,8 @@ edits two sites sees each site's notifications in that site's console only.
 |--------|:-----:|:------:|:------:|:---------:|
 | read (`read`, `recent`), `create`, `record_attempt`, `destroy` | ✅ | ❌ | ❌ | ❌ |
 
-Delivery history is admin-only. The delivery pipeline writes attempts as the
-system, and the `prune_deliveries` AshOban trigger runs under the
+Delivery history is admin-only. The delivery pipeline writes the row and its
+attempts as the system actor (never `destroy`), and the `prune_deliveries` AshOban trigger runs under the
 `AshObanInteraction` bypass.
 
 ## The API-key axis

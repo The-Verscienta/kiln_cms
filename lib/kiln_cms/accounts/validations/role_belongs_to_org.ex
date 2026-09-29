@@ -29,6 +29,9 @@ defmodule KilnCMS.Accounts.Validations.RoleBelongsToOrg do
     end
   end
 
+  # `authorize?: false`: a validation must see the role as stored, whoever is
+  # acting (validations run before policies, with any actor or none). It only
+  # ever refuses: a miss fails the write, so a bypass cannot fail open here.
   defp get_role(role_id) do
     Accounts.get_role(role_id, authorize?: false, not_found_error?: false)
   end

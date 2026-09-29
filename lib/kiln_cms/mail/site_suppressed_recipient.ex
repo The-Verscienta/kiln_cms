@@ -56,15 +56,24 @@ defmodule KilnCMS.Mail.SiteSuppressedRecipient do
   policies do
     # The site's admins see and clear their own site's list, from
     # `/editor/site-mail`. Tenant-scoped reads never reach another site's rows.
+    #
+    # The delivery pipeline (`KilnCMS.Mail.system/0`, #1659) looks an address
+    # up before every send for the site, failing closed. It may not `destroy`
+    # a row: clearing a suppression is the site admin's call.
     policy action_type([:read, :destroy]) do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+
+      forbid_unless action(:read)
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
-    # Written only by the delivery pipeline (`authorize?: false`), on a site
-    # relay's reject naming the recipient. A caller who could add rows could
-    # stop a site's mail to anyone without a bounce ever happening.
+    # Written only by the delivery pipeline (`KilnCMS.Mail.system/0`), on a
+    # site relay's reject naming the recipient. No person may, admin
+    # included: a caller who could add rows could stop a site's mail to anyone
+    # without a bounce ever happening.
     policy action_type(:create) do
-      forbid_if always()
+      forbid_unless action(:suppress)
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

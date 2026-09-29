@@ -91,9 +91,15 @@ defmodule KilnCMS.CMS.FormField do
     # resource's primary `:read`. Splitting the grant per action would leave that
     # load matching an editors-only policy and silently render a form with no
     # fields — a load filters rather than errors, so nothing would announce it.
+    #
+    # The submission pipeline, the autoresponder and its template validation
+    # read a form's fields — active or not — through `:for_form` as
+    # `KilnCMS.Forms.system/0` (#1659), admitted by name.
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
       authorize_if expr(form.active == true)
+      forbid_unless action(:for_form)
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
     policy action_type([:create, :update, :destroy]) do

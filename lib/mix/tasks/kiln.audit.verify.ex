@@ -117,10 +117,13 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
           # Minimal select — the verifier needs identity, not block trees. The
           # dynamic tier shares the :entry storage resource, which is also what
           # the publish hook keys anchors on.
-          # authorize?: false — an operator audit of EVERY record of every
-          # type in every org (#1659): a CONTENT read under the #1402 argument
-          # (a system-actor grant on content would be the whole corpus, drafts
-          # included, for every system caller). Identity columns only.
+          #
+          # `authorize?: false`: an operator sweep over every document, drafts
+          # included, which no system-actor grant should give system code
+          # standing access to (#1402's content-read argument). It must also
+          # not be refusable: a refused read would filter to `[]`, the sweep
+          # would check nothing and exit 0, i.e. report a clean corpus (#1659). Identity
+          # columns only.
           record <-
             ContentTypes.list!(ct,
               authorize?: false,

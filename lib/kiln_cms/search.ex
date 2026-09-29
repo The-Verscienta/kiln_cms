@@ -207,9 +207,10 @@ defmodule KilnCMS.Search do
   needs no distance alibi. The per-type semantic actions
   (`:search_semantic` / `:search_semantic_published`, the `semantic-search`
   JSON:API routes) have no fusion to leave it to, so they filter the leg
-  themselves — with the title leg's exemption: a row whose title the query
-  names is kept whatever its distance (`KilnCMS.CMS.Content`). A row vouched
-  only by the keyword, any-term or fuzzy legs is still floored there.
+  themselves — with what the title and alias legs give hybrid search: a row
+  the query names is kept whatever its distance, and ranks first
+  (`KilnCMS.CMS.Content`). A row vouched only by the keyword, any-term or
+  fuzzy legs is still floored there.
 
   The distinction matters because a short query naming a record embeds far
   from that record's long prose. Filtering the leg *before* fusion made the
@@ -890,7 +891,7 @@ defmodule KilnCMS.Search do
       limit: @block_candidates
     })
     |> Ash.Query.load(semantic_distance: %{query_vector: vector})
-    |> Ash.read!(authorize?: false, tenant: tenant)
+    |> Ash.read!(actor: KilnCMS.SystemActor.new(:search), tenant: tenant)
     |> Enum.reduce({[], MapSet.new()}, fn row, {acc, seen} ->
       if MapSet.member?(seen, row.document_id) do
         {acc, seen}
@@ -954,7 +955,7 @@ defmodule KilnCMS.Search do
   defp nearest_tags(vector, tenant) do
     KilnCMS.SearchIndex.nearest_tag_embeddings_any!(
       %{vector: vector, threshold: tag_leg_threshold(), limit: tag_leg_limit()},
-      authorize?: false,
+      actor: KilnCMS.SystemActor.new(:search),
       tenant: tenant
     )
   end
@@ -1595,9 +1596,11 @@ defmodule KilnCMS.Search do
       # The recorded query lands in the request's site (epic #336). Strict-
       # tenancy prep (#419): a caller that omits `:tenant` records against the
       # default org explicitly rather than relying on a nil-tenant global write.
+      # Written as the system actor `SearchQuery` admits for `record` only
+      # (#1659): the searcher is often anonymous, and no person may write one.
       KilnCMS.Analytics.record_search(
         %{query: normalized, locale: locale, result_count: result_count},
-        authorize?: false,
+        actor: KilnCMS.SystemActor.new(:search),
         tenant: Keyword.get(opts, :tenant) || KilnCMS.Accounts.default_org_id()
       )
     end

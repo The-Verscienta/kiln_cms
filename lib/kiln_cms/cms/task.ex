@@ -284,15 +284,21 @@ defmodule KilnCMS.CMS.Task do
     # findings as a task (#946) and probes for an open lifecycle review before
     # creating another. `AssigneeIsEditor` still vets the assignee — validations
     # run whatever the actor is — and `creator_id` stays unstamped, since the
-    # actor has no `:id`: `created_by_rule_id` is the provenance. `update` is
-    # NOT admitted: automation opens tasks, it does not complete them.
+    # actor has no `:id`: `created_by_rule_id` is the provenance.
     policy action_type([:create, :read]) do
       authorize_if KilnCMS.Checks.SystemActor
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
+    # Of the updates, the system actor may run `:complete` ONLY (#1659): a
+    # publish completes the record's open tasks
+    # (`Changes.AutoCompleteTasks`, as `KilnCMS.CMS.Bookkeeping.system/0`),
+    # and a scheduled publish has no person to do it as. Reassigning, editing
+    # or reopening a task stays an editor's.
     policy action_type(:update) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
+      forbid_unless action(:complete)
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

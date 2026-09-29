@@ -45,6 +45,43 @@ defmodule KilnCMS.SchemaExport do
 
   @dialect "https://json-schema.org/draft/2020-12/schema"
 
+  # See `with_actor/2`.
+  @actor_override {__MODULE__, :actor_override}
+
+  @doc """
+  The actor the export reads a type's field definitions as (#1659): a
+  `KilnCMS.SystemActor`, which `KilnCMS.CMS.FieldDefinition` admits for reads
+  (see `docs/policy-matrix.md`, "The system actor"), rather than
+  `authorize?: false`, which would skip every policy on it.
+  """
+  @spec system() :: KilnCMS.SystemActor.t() | nil
+  def system do
+    case Process.get(@actor_override, :unset) do
+      :unset -> KilnCMS.SystemActor.new(:schema_export)
+      actor -> actor
+    end
+  end
+
+  @doc false
+  # Test seam (#1659): run `fun` with `system/0` answering `actor` in this
+  # process, so a test can take the grant away and prove the definitions read
+  # fails CLOSED (raises) instead of exporting a type with no custom fields.
+  # Process-local, and nothing on a request path calls it; code that could call
+  # it could equally pass any actor it liked.
+  @spec with_actor(term(), (-> result)) :: result when result: term()
+  def with_actor(actor, fun) do
+    previous = Process.get(@actor_override, :unset)
+    Process.put(@actor_override, actor)
+
+    try do
+      fun.()
+    after
+      if previous == :unset,
+        do: Process.delete(@actor_override),
+        else: Process.put(@actor_override, previous)
+    end
+  end
+
   @typedoc """
   Options for `json_schema/1`.
 
@@ -161,13 +198,19 @@ defmodule KilnCMS.SchemaExport do
 
   # Definitions are registry metadata for a type the caller already named, and
   # the export runs outside any actor's session (a mix task has none), so the
-  # read is unauthorized under the export's own org — the same posture firing
-  # takes in `KilnCMS.Firing.CustomFields`.
+  # read runs as `system/0` under the export's own org — the same posture
+  # firing takes in `KilnCMS.Firing.CustomFields`. It fails closed (#1659): a
+  # refused read would filter to `[]` and publish a schema with every custom
+  # field missing, which a typed client would then build against.
   defp describe(%{source: :dynamic, definition: definition} = ct, org_id) do
     Map.put(
       ct,
       :field_definitions,
-      CMS.field_definitions_for_definition!(definition.id, authorize?: false, tenant: org_id)
+      CMS.field_definitions_for_definition!(definition.id,
+        actor: system(),
+        authorize_with: :error,
+        tenant: org_id
+      )
     )
   end
 
@@ -175,7 +218,7 @@ defmodule KilnCMS.SchemaExport do
     Map.put(
       ct,
       :field_definitions,
-      CMS.field_definitions_for!(type, authorize?: false, tenant: org_id)
+      CMS.field_definitions_for!(type, actor: system(), authorize_with: :error, tenant: org_id)
     )
   end
 

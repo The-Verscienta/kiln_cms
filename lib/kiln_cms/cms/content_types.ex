@@ -115,8 +115,17 @@ defmodule KilnCMS.CMS.ContentTypes do
     end
   end
 
+  # As the system actor (`TypeDefinition` admits it for reads, #1402): the
+  # registry is read for anonymous delivery too. `authorize_with: :error`
+  # because "no dynamic types" is an answer callers act on — it drops their
+  # prefixes from `Slugs.taken_root_segments/1`, so a root page could claim a
+  # section's URL — and it would be cached.
   defp load_dynamic(org_id) do
-    KilnCMS.CMS.list_type_definitions!(authorize?: false, tenant: org_id)
+    KilnCMS.CMS.list_type_definitions!(
+      actor: KilnCMS.CMS.Housekeeping.system(:cms_registry),
+      authorize_with: :error,
+      tenant: org_id
+    )
     |> Enum.map(&describe_dynamic/1)
     |> Enum.sort_by(& &1.label)
   end

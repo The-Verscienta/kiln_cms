@@ -466,9 +466,15 @@ defmodule KilnCMS.Governance.Chain do
   defp reattest_document(resource, source_id, old_type, new_type, org_id, signing?) do
     # An ungated, ASCENDING read: the rows exist regardless of the runtime kill
     # switch, and the `prev_anchor_digest` links must re-propagate oldest-first.
+    #
+    # Fails closed (#1659): a refused read would filter to `[]`, the promotion
+    # would re-key nothing, and the moved document's anchors would be left
+    # behind under the old type. The interface defaults to
+    # `authorize_with: :error` (`KilnCMS.CMS`), so it raises instead, and the
+    # promotion's transaction rolls the move back.
     anchors =
       CMS.list_history_anchors_for!(old_type, source_id,
-        authorize?: false,
+        actor: KilnCMS.Governance.system(),
         tenant: org_id,
         query: [sort: [sequence: :asc]]
       )
@@ -670,7 +676,7 @@ defmodule KilnCMS.Governance.Chain do
           folded_version_ids: folded_ids,
           payload_version: 6
         },
-        authorize?: false,
+        actor: KilnCMS.Governance.system(),
         tenant: record.org_id
       )
 
@@ -1790,6 +1796,7 @@ defmodule KilnCMS.Governance.Chain do
   # enough of them that there is no n-th row at all is not — so that answers
   # `:unknown` rather than `:none`.
   defp resolved_boundary(%{version_count: n}, scope) when n > 0 do
+    # `authorize?: false`: a version-row read (see `versions/5`).
     scope.resource
     |> version_scope(scope.source_id)
     |> Ash.Query.offset(n - 1)
@@ -1846,8 +1853,14 @@ defmodule KilnCMS.Governance.Chain do
     query = [sort: [sequence: :desc]]
     query = if limit, do: Keyword.put(query, :limit, limit), else: query
 
+    # Fails closed (#1659). Every answer this module gives starts here, and a
+    # refused read would filter to `[]`, which is "never anchored": verification
+    # would have no baseline to compare against, and the next mint would restart
+    # the chain at position 1 with no predecessor link. The interface defaults to
+    # `authorize_with: :error` (`KilnCMS.CMS`), so a lost grant raises: an
+    # error, not a clean-looking chain.
     CMS.list_history_anchors_for!(type, source_id,
-      authorize?: false,
+      actor: KilnCMS.Governance.system(),
       tenant: org_id,
       query: query
     )
@@ -1859,6 +1872,17 @@ defmodule KilnCMS.Governance.Chain do
   # `resume` skips the prefix an earlier anchor already covered, so an
   # incremental fold reads only what is new. See `resume_at/1` for why the
   # boundary is a position rather than a count (#598).
+  #
+  # `authorize?: false` on every version-row read in this module (here,
+  # `resolved_boundary/2`, `count_versions/1`, `count_after/2`). The version
+  # tables ARE the editorial history, drafts included, so a system-actor grant
+  # on them would be a standing read over it for every system caller: the
+  # `PointInTime` argument from #1402, which #1659 keeps. The reads are
+  # tenant-scoped and narrowed to one document by `version_scope/2`.
+  #
+  # The two counts back the #598 late-arrival check, which a refused read would
+  # silently turn off (a count of 0 never exceeds the covered set). A bypass
+  # cannot be refused, so the check cannot fail open that way.
   defp versions(resource, source_id, count, org_id, resume \\ :genesis) do
     resource
     |> version_scope(source_id)
@@ -1943,6 +1967,7 @@ defmodule KilnCMS.Governance.Chain do
     )
   end
 
+  # `authorize?: false`: a version-row count (see `versions/5`).
   defp count_versions(scope) do
     scope.resource
     |> version_scope(scope.source_id)
@@ -1953,6 +1978,8 @@ defmodule KilnCMS.Governance.Chain do
   # "how many rows are at or before the boundary" is `count_versions - this`
   # rather than a second, independently-maintained comparison that could drift
   # out of complement with it.
+  #
+  # `authorize?: false`: a version-row count (see `versions/5`).
   defp count_after(scope, key) do
     scope.resource
     |> version_scope(scope.source_id)

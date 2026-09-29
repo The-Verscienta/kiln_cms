@@ -32,9 +32,18 @@ defmodule KilnCMS.History.DocumentEvent do
       prepare build(sort: [seq: :asc])
     end
 
+    # Every event one user produced, across documents: the rows the GDPR
+    # erasure sweep (`KilnCMS.History.anonymize_actor/1`) redacts. A bulk
+    # update authorizes its query as a read, so the sweep needs a read action
+    # of its own for the system actor to be admitted to (#1659).
+    read :by_actor do
+      argument :actor_id, :uuid, allow_nil?: false
+      filter expr(actor_id == ^arg(:actor_id))
+    end
+
     # Privacy (#212/#219): null the actor on a user's events when that user is
     # erased, while keeping the content-history rows themselves for audit. Run as
-    # a system job (`authorize?: false`) from `KilnCMS.History.anonymize_actor/1`.
+    # `KilnCMS.History.system/0` from `KilnCMS.History.anonymize_actor/1`.
     update :anonymize_actor do
       description "Clear actor_id (user erasure) while retaining the event."
       accept []
@@ -43,27 +52,36 @@ defmodule KilnCMS.History.DocumentEvent do
   end
 
   policies do
-    # History is internal; reads are editor/admin tooling, writes only via the
-    # History API (authorize?: false). Non-editors get nothing.
+    # History is internal; reads are editor/admin tooling. Non-editors get
+    # nothing. The History API reads as `KilnCMS.History.system/0` (#1659):
+    # one document's events (`for_document`) and one erased user's
+    # (`by_actor`), narrowed inside this policy rather than granted by a
+    # bypass. The plain `read` is not admitted: nothing in the History API
+    # lists the whole log.
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
       authorize_if KilnCMS.CMS.Checks.OrgEditor
+      forbid_unless action([:for_document, :by_actor])
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
+    # Writes (the append, and actor anonymization) only ever run through the
+    # History API as `KilnCMS.History.system/0`, each admitted by name. No
+    # person, admin included, may write to or rewrite the event log.
     policy action_type(:create) do
-      forbid_if always()
+      forbid_unless action(:append)
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
-    # Writes (incl. actor anonymization) only ever run as a trusted system job
-    # (`authorize?: false`); no external caller may mutate the event log.
     policy action_type(:update) do
-      forbid_if always()
+      forbid_unless action(:anonymize_actor)
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 
   # Multi-tenancy (epic #336): an event belongs to the same site as the document
   # it records. `global?: true` keeps the tenant optional; the append/read system
-  # jobs (`authorize?: false`) carry the document's org. The `:doc_seq` identity
+  # jobs (`KilnCMS.History.system/0`) carry the document's org. The `:doc_seq` identity
   # keeps its name (only its columns gain `org_id`), so the
   # `document_events_doc_seq_index` reference in `KilnCMS.History` stays valid.
   multitenancy do

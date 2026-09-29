@@ -131,6 +131,9 @@ defmodule KilnCMS.Experiments.Validations.GoalConfigured do
   defp funnel_target_exists(funnel, context) do
     last = List.last(funnel.steps)
 
+    # Stays `authorize?: false` (#1659): a CONTENT read (the #1402 argument — a
+    # system-actor grant on content would be the whole corpus, drafts
+    # included). Fails closed: a row that does not come back refuses `:start`.
     case KilnCMS.CMS.ContentTypes.get_record(last.content_type, last.content_id,
            authorize?: false,
            tenant: context.tenant
@@ -189,6 +192,10 @@ defmodule KilnCMS.Experiments.Validations.GoalConfigured do
   # condemns (#1008 review) — and it is what `funnel_target_exists/2` below has
   # always done for the sibling goal.
   defp goal_form_usable(id, context) do
+    # Stays `authorize?: false` (#1659), for the reason `Health.form_submission/1`
+    # gives: one tenant-scoped form by id, answering only "active or not"; a
+    # system-actor grant on `CMS.Form` would be a standing read of every form.
+    # Fails closed: a form that does not come back refuses `:start`.
     case KilnCMS.CMS.get_form(id, authorize?: false, tenant: context.tenant) do
       {:ok, %{active: true}} ->
         :ok
@@ -224,6 +231,8 @@ defmodule KilnCMS.Experiments.Validations.GoalConfigured do
     type = Ash.Changeset.get_attribute(changeset, :goal_content_type)
     id = Ash.Changeset.get_attribute(changeset, :goal_document_id)
 
+    # Stays `authorize?: false` (#1659): a CONTENT read, as in
+    # `funnel_target_exists/2`. Fails closed: no row refuses `:start`.
     case KilnCMS.CMS.ContentTypes.get_record(type, id,
            authorize?: false,
            tenant: context.tenant

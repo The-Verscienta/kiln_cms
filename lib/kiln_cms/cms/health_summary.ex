@@ -24,6 +24,14 @@ defmodule KilnCMS.CMS.HealthSummary do
   resolved separately — one bounded existence probe per type — and the panel
   says which of the two it is looking at. Same argument the claims panel makes
   for rendering "off" rather than skipping itself.
+
+  ## Read as the person looking
+
+  Every read runs as `actor` — the dashboard's viewer — under the content
+  policies (#1659), so the panel and its export list only records that person
+  may read. The governance dashboard is admin-only, and an admin reads every
+  record, so the numbers are unchanged; what changed is that this module no
+  longer decides that on the caller's behalf.
   """
   import Ash.Expr
 
@@ -71,13 +79,13 @@ defmodule KilnCMS.CMS.HealthSummary do
   `worst` is capped at `limit` (default 10) — a dashboard section is a prompt to
   act, not a work queue; the queue is `/editor?health=overdue`.
   """
-  @spec for_org(Ash.UUID.t(), pos_integer()) :: t()
-  def for_org(org_id, limit \\ 10) do
+  @spec for_org(Ash.UUID.t(), term(), pos_integer()) :: t()
+  def for_org(org_id, actor, limit \\ 10) do
     types = ContentTypes.all_for_org(org_id)
-    rows = Enum.flat_map(types, &unhealthy_rows(&1, org_id))
+    rows = Enum.flat_map(types, &unhealthy_rows(&1, org_id, actor))
 
     %{
-      in_use?: Enum.any?(types, &cadenced?(&1, org_id)),
+      in_use?: Enum.any?(types, &cadenced?(&1, org_id, actor)),
       truncated?: Enum.any?(types, &(row_count(rows, &1) >= @per_type_limit)),
       counts:
         Map.new(@unhealthy, fn health -> {health, Enum.count(rows, &(&1.health == health))} end),
@@ -92,11 +100,11 @@ defmodule KilnCMS.CMS.HealthSummary do
   and a compliance officer wants all of them. Still bounded per type by
   `@per_type_limit`, which the panel's own "at least" wording covers.
   """
-  @spec csv_rows(Ash.UUID.t()) :: [[String.t() | nil]]
-  def csv_rows(org_id) do
+  @spec csv_rows(Ash.UUID.t(), term()) :: [[String.t() | nil]]
+  def csv_rows(org_id, actor) do
     org_id
     |> ContentTypes.all_for_org()
-    |> Enum.flat_map(&unhealthy_rows(&1, org_id))
+    |> Enum.flat_map(&unhealthy_rows(&1, org_id, actor))
     |> Enum.sort_by(&sort_key/1)
     |> Enum.map(fn row ->
       [
@@ -118,10 +126,10 @@ defmodule KilnCMS.CMS.HealthSummary do
 
   defp row_count(rows, ct), do: Enum.count(rows, &(&1.type == ct.type))
 
-  defp unhealthy_rows(ct, org_id) do
+  defp unhealthy_rows(ct, org_id, actor) do
     ct
     |> ContentTypes.list!(
-      authorize?: false,
+      actor: actor,
       tenant: org_id,
       query: [
         filter: expr(health in ^@unhealthy),
@@ -149,10 +157,10 @@ defmodule KilnCMS.CMS.HealthSummary do
 
   # Does anything published on this type carry a lifecycle at all? An existence
   # probe, not a count — the panel only needs to know which sentence to write.
-  defp cadenced?(ct, org_id) do
+  defp cadenced?(ct, org_id, actor) do
     ct
     |> ContentTypes.list!(
-      authorize?: false,
+      actor: actor,
       tenant: org_id,
       query: [
         filter:

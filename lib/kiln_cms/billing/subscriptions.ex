@@ -187,8 +187,11 @@ defmodule KilnCMS.Billing.Subscriptions do
   defp apply_state(membership, attrs, event) do
     attrs = Map.put(attrs, :provider_event_id, event["id"])
 
+    # As the billing system actor (#1659): `Membership` closes
+    # `:apply_provider_state` to every person and admits this actor by name.
+    # A refusal is an `{:error, _}`, which the worker records and retries.
     Billing.apply_provider_state(membership, attrs,
-      authorize?: false,
+      actor: Billing.system(),
       tenant: membership.org_id
     )
   end

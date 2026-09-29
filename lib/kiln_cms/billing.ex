@@ -38,7 +38,51 @@ defmodule KilnCMS.Billing do
   # erasure all reach billing with no actor of their own. `Settings` admits
   # this actor for `:read`/`:init`; `Membership` and `MembershipEvent` admit it
   # for the actions closed to every person (#1402).
-  defp system_actor, do: KilnCMS.SystemActor.new(:billing)
+  defp system_actor, do: system()
+
+  # See `with_actor/2`.
+  @actor_override {__MODULE__, :actor_override}
+
+  @doc """
+  The actor billing's own pipeline runs as (#1402, #1659): the webhook worker
+  and the event resolution behind it, the membership transition and its
+  entitlement trail, the entitlement recompute's reads, and GDPR erasure.
+
+  A `KilnCMS.SystemActor` labelled `:billing`, admitted by name on
+  `Billing.Settings`, `Billing.Membership`, `Billing.MembershipEvent` and
+  `Billing.WebhookEvent` (see `docs/policy-matrix.md`, "The system actor"),
+  rather than `authorize?: false`, which would skip every policy on them.
+  Writes to `Accounts.User` and `Accounts.OrgMembership` keep their bypass,
+  each with its reason at the call site.
+  """
+  @spec system() :: KilnCMS.SystemActor.t() | nil
+  def system do
+    case Process.get(@actor_override, :unset) do
+      :unset -> KilnCMS.SystemActor.new(:billing)
+      actor -> actor
+    end
+  end
+
+  @doc false
+  # Test seam (#1659): run `fun` with `system/0` answering `actor` in this
+  # process, so a test can take the grant away and prove the migrated reads
+  # fail CLOSED (raise, error, retry) rather than filtering to `[]` or `nil`,
+  # which is how a refused read answers. Process-local, and nothing on a
+  # request path calls it; code that could call it could equally pass any
+  # actor it liked.
+  @spec with_actor(term(), (-> result)) :: result when result: term()
+  def with_actor(actor, fun) do
+    previous = Process.get(@actor_override, :unset)
+    Process.put(@actor_override, actor)
+
+    try do
+      fun.()
+    after
+      if previous == :unset,
+        do: Process.delete(@actor_override),
+        else: Process.put(@actor_override, previous)
+    end
+  end
 
   resources do
     resource KilnCMS.Billing.Settings do
@@ -80,16 +124,18 @@ defmodule KilnCMS.Billing do
 
       define :memberships_by_customer, action: :by_customer, args: [:provider_customer_id]
       define :stale_memberships, action: :stale, args: [:before]
-      # System-only (`authorize?: false`) — the webhook worker and reconcile sweep.
+      # System-only (`system/0`) — the webhook worker and reconcile sweep.
       define :apply_provider_state, action: :apply_provider_state
-      # GDPR erasure — system-only (`authorize?: false`).
+      # GDPR erasure — system-only (`system/0`).
       define :anonymize_membership_row, action: :anonymize
       define :comp_membership, action: :comp
       define :uncomp_membership, action: :uncomp
     end
 
     resource KilnCMS.Billing.WebhookEvent do
-      # All system-only: the receiver and worker run `authorize?: false`.
+      # All system-only: the receiver runs `authorize?: false` (a webhook has
+      # no actor; the provider's HMAC is the grant), the worker runs as
+      # `system/0`.
       define :receive_webhook_event, action: :receive
       define :claim_webhook_event, action: :claim
       define :mark_webhook_event_processed, action: :mark_processed

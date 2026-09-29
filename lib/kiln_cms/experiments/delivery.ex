@@ -238,7 +238,9 @@ defmodule KilnCMS.Experiments.Delivery do
 
   defp count_conversion(variant_id, org_id) do
     async(fn ->
-      Experiments.record_conversion(variant_id, authorize?: false, tenant: org_id)
+      variant_id
+      |> Experiments.record_conversion(actor: Experiments.system(), tenant: org_id)
+      |> log_refused("a conversion")
     end)
   end
 
@@ -437,10 +439,26 @@ defmodule KilnCMS.Experiments.Delivery do
     _error -> false
   end
 
+  # Both counters write as `Experiments.system/0` (#1659), which `VariantDay`
+  # admits for exactly these two actions.
   defp record_impression(variant, org_id) do
     async(fn ->
-      Experiments.record_impression(variant.id, authorize?: false, tenant: org_id)
+      variant.id
+      |> Experiments.record_impression(actor: Experiments.system(), tenant: org_id)
+      |> log_refused("an impression")
     end)
+  end
+
+  # A counter must never fail a page, so an error is not raised — but it is not
+  # swallowed either. A write refused because the grant went missing would
+  # otherwise stop every arm counting at once, silently, while the results
+  # panel kept reading the frozen totals as a result.
+  defp log_refused({:ok, _row}, _counter), do: :ok
+
+  defp log_refused({:error, error}, counter) do
+    Logger.warning(
+      "Experiments.Delivery could not record #{counter}: " <> Exception.message(error)
+    )
   end
 
   # Same posture as `KilnCMSWeb.ViewTracking`: off the request path, and a

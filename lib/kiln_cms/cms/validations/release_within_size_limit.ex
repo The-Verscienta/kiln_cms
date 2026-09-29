@@ -22,32 +22,51 @@ defmodule KilnCMS.CMS.Validations.ReleaseWithinSizeLimit do
 
   alias Ash.Error.Changes.InvalidChanges
   alias KilnCMS.CMS.Releases
+  alias KilnCMS.CMS.Validations.Lookup
 
   @impl true
-  def validate(changeset, _opts, _context) do
+  def validate(changeset, _opts, context) do
     release_id = Ash.Changeset.get_attribute(changeset, :release_id)
     cap = Releases.max_items()
 
-    if is_nil(release_id) or pending_count(release_id, changeset.tenant) < cap do
-      :ok
-    else
-      {:error,
-       InvalidChanges.exception(
-         fields: [:release_id],
-         message: "release is full (#{cap} items); ship or split it"
-       )}
+    case release_id && pending_count(release_id, changeset.tenant, context) do
+      nil ->
+        :ok
+
+      {:ok, count} when count < cap ->
+        :ok
+
+      {:ok, _count} ->
+        {:error,
+         InvalidChanges.exception(
+           fields: [:release_id],
+           message: "release is full (#{cap} items); ship or split it"
+         )}
+
+      {:error, %Ash.Error.Forbidden{} = forbidden} ->
+        {:error, forbidden}
+
+      {:error, _error} ->
+        {:error,
+         InvalidChanges.exception(
+           fields: [:release_id],
+           message: "release size could not be checked"
+         )}
     end
   end
 
-  defp pending_count(release_id, tenant) do
-    case KilnCMS.CMS.list_release_items_with_status(release_id, :pending,
-           authorize?: false,
-           tenant: tenant
+  # As the caller (#1659), with `authorize_with: :error`. The count IS the cap,
+  # so a read that came back short would let the release grow past it: a
+  # refused or failed read is a rejection, never a count of zero. (It used to
+  # be zero, which let an unreadable release take any number of items.)
+  defp pending_count(release_id, tenant, context) do
+    case KilnCMS.CMS.list_release_items_with_status(
+           release_id,
+           :pending,
+           Lookup.as_caller(context, tenant)
          ) do
-      {:ok, items} -> length(items)
-      # Unreadable for any reason: don't invent a cap failure out of a read
-      # problem — the add's other validations and the FK will speak for it.
-      _ -> 0
+      {:ok, items} -> {:ok, length(items)}
+      {:error, error} -> {:error, error}
     end
   end
 end

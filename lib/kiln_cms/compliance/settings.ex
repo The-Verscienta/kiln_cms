@@ -113,11 +113,12 @@ defmodule KilnCMS.Compliance.Settings do
   """
   @spec for_org_uncached(Accounts.Organization.t() | Ash.UUID.t() | nil) :: t()
   def for_org_uncached(%Accounts.Organization{id: id}) when is_binary(id),
-    do: resolve(id) || unavailable()
+    do: resolve(id, system()) || unavailable()
 
   def for_org_uncached(nil), do: for_org_uncached(Accounts.default_org_id())
 
-  def for_org_uncached(org_id) when is_binary(org_id), do: resolve(org_id) || unavailable()
+  def for_org_uncached(org_id) when is_binary(org_id),
+    do: resolve(org_id, system()) || unavailable()
 
   def for_org_uncached(_other), do: unavailable()
 
@@ -126,14 +127,31 @@ defmodule KilnCMS.Compliance.Settings do
     # then declines to store — so a transient error degrades for one call rather
     # than for the whole TTL. It degrades to `unavailable/0`, not to the
     # operator config: see that function.
-    KilnCMS.Cache.fetch(KilnCMS.Cache.compliance_key(org_id), @ttl, fn -> resolve(org_id) end) ||
+    #
+    # The actor is taken here, not inside the fallback, because a cache miss
+    # runs the fallback on a Cachex courier process.
+    actor = system()
+
+    KilnCMS.Cache.fetch(KilnCMS.Cache.compliance_key(org_id), @ttl, fn ->
+      resolve(org_id, actor)
+    end) ||
       unavailable()
   end
 
-  defp resolve(org_id) do
+  defp system, do: KilnCMS.OrgSettings.system(:compliance)
+
+  # Read as the system actor `SiteCompliance` admits for `read` (#1659), and
+  # fails closed: a refused read would be "no row", and the operator config
+  # built from it would be cached for the TTL, turning off a site's own
+  # publish gate. A refusal is an error instead, which is not cached.
+  defp resolve(org_id, actor) do
     SiteCompliance
     |> Ash.Query.limit(1)
-    |> Ash.read_one(authorize?: false, tenant: org_id)
+    |> Ash.read_one(
+      actor: actor,
+      authorize_with: :error,
+      tenant: org_id
+    )
     |> case do
       {:ok, row} ->
         for_row(row)

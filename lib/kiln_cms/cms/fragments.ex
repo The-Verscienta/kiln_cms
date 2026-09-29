@@ -432,6 +432,10 @@ defmodule KilnCMS.CMS.Fragments do
       |> Ash.Query.filter(id == ^id and state == :published and audience in ^audiences)
       |> Ash.Query.select([:id, :blocks])
       |> scope_dynamic(ct)
+      # authorize?: false — a public delivery read: the filter above
+      # (`:published`, the reader's audiences, by id, scoped to the type) is the
+      # boundary, and only `:blocks` leaves for inlining. The system actor holds
+      # no content read (#1402).
       |> Ash.read_one!(authorize?: false, tenant: org_id)
     else
       _ -> nil

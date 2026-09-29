@@ -61,18 +61,26 @@ defmodule KilnCMS.CMS.Redirect do
       authorize_if always()
     end
 
-    # Writes are admin-only (per-org tier, like webhook config); the
-    # slug-change hook itself runs system-side (`authorize?: false`).
+    # Writes are admin-only (per-org tier, like webhook config). The
+    # slug-change hook (`Changes.RecordSlugRedirect`) runs as
+    # `KilnCMS.CMS.Bookkeeping.system/0` (#1659), admitted to `:create` only:
+    # it never edits a row.
     policy action_type([:create, :update]) do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+      forbid_unless action(:create)
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
     # Deleting is admin work too — except for the rows the content editor
     # lists under a record's own address: whoever may write the record may
     # retire a redirect that points at it (`WritesRedirectTarget` re-asks the
     # target's `:update` policy), and nothing else.
+    #
+    # The system actor may destroy too (#1659): the same hook retires a
+    # redirect squatting on the path a rename just made live again.
     policy action_type(:destroy) do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+      authorize_if KilnCMS.Checks.SystemActor
       authorize_if KilnCMS.CMS.Checks.WritesRedirectTarget
     end
   end

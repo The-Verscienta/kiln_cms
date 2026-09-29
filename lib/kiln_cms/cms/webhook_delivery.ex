@@ -93,15 +93,23 @@ defmodule KilnCMS.CMS.WebhookDelivery do
       authorize_if always()
     end
 
-    # Delivery history is admin-only; the pipeline writes with authorize?: false.
+    # Delivery history is admin-only.
+    #
+    # The pipeline (`KilnCMS.Webhooks.system/0`, #1659) writes one ledger row
+    # per delivery, re-reads it in the worker and records each attempt on it.
+    # It may NOT `destroy` one: the ledger is pruned by the trigger above, and
+    # a system caller cannot erase the record of whether a POST went out.
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+
+      forbid_unless action([:read, :create, :record_attempt])
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 
   # Multi-tenancy (epic #336): a delivery belongs to the same site as its
   # endpoint. `global?: true` keeps the tenant optional; the pipeline create
-  # (`KilnCMS.Webhooks.enqueue`, `authorize?: false`) carries the endpoint's org.
+  # (`KilnCMS.Webhooks.enqueue`, as the system actor) carries the endpoint's org.
   multitenancy do
     strategy :attribute
     attribute :org_id

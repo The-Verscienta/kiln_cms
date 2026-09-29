@@ -41,11 +41,16 @@ defmodule KilnCMS.CMS.SiteEditorialSettings do
   # Editors read it: the task list and the content editor's task panel both
   # explain what publishing will do to an open task, and that sentence is
   # wrong if they cannot see the setting. Changing it is an admin act.
+  #
+  # The system actor may `read` it (#1659): `Checks.EditorMayPublish` asks it
+  # from inside a publish, and `TaskSettings.site_default/1` from a release's
+  # go-live, neither of which has a person reading. `save` is not admitted.
   use KilnCMS.CMS.OrgSettings,
     table: "site_editorial_settings",
     accept: [:auto_complete_tasks_on_publish, :editors_can_publish],
     read: :editor,
-    update?: false
+    update?: false,
+    system_actions: [:read]
 
   attributes do
     # `true` is what #501 shipped unconditionally. See the moduledoc on why this

@@ -251,15 +251,34 @@ defmodule KilnCMS.CMS.ReleaseItem do
     # would let a human call the `mark_*` writes and rewrite the `prior_state` /
     # `prior_version_id` that rollback restores from. `OrgEditor` matches admins
     # too, so nothing legitimate is lost.
+    # The release worker (a system actor, #1659) lists a release's items by
+    # status, and reads nothing else.
     policy action_type(:read) do
+      authorize_if KilnCMS.CMS.Checks.OrgEditor
+      forbid_unless action(:for_release_with_status)
+      authorize_if KilnCMS.Checks.SystemActor
+    end
+
+    # Editors compose a release's contents.
+    policy action([:add, :set_action, :cancel]) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
-    # Editors compose a release's contents. The `mark_*` writes carry no policy
-    # on purpose: they are only ever reached from the release worker, which runs
-    # `authorize?: false` after an admin claimed the release.
-    policy action([:add, :set_action, :cancel]) do
-      authorize_if KilnCMS.CMS.Checks.OrgEditor
+    # The go-live and rollback item writes, which capture the `prior_state` /
+    # `prior_version_id` rollback restores from. Only the release worker's
+    # system actor is admitted; no person, admin included, may call them.
+    policy action([:mark_applied, :mark_skipped, :mark_rolled_back]) do
+      authorize_if KilnCMS.Checks.SystemActor
+    end
+
+    # Except `:mark_cancelled`, which the system actor may run (#1659):
+    # archiving an unshipped release frees its pending items
+    # (`Changes.CancelPendingReleaseItems`, as `KilnCMS.CMS.Bookkeeping.system/0`)
+    # — the archiving editor may not reach a `mark_*` write, by the design
+    # above. It sets the status alone; `prior_state` / `prior_version_id` are
+    # the go-live writes', and those stay the release worker's.
+    policy action(:mark_cancelled) do
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 
