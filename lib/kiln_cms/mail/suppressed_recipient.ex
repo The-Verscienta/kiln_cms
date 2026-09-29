@@ -47,10 +47,17 @@ defmodule KilnCMS.Mail.SuppressedRecipient do
     # PLATFORM-admin only, NOT a per-org tier (#419): the suppression ledger is
     # instance-wide (no `multitenancy` block), so it gates on the global
     # `User.role` — an `OrgAdmin` check would resolve to the default org and
-    # expose the cross-site bounce list to a default-org membership admin. The
-    # delivery pipeline writes/reads as the system (`authorize?: false`).
+    # expose the cross-site bounce list to a default-org membership admin.
+    #
+    # The delivery pipeline (`KilnCMS.Mail.system/0`, #1659) looks an address
+    # up before every send and records a hard bounce. It may not `destroy` a
+    # row: clearing a suppression resumes mail to that address, which is the
+    # operator's call. The lookup fails closed (`authorize_with: :error`).
     policy always() do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
+
+      forbid_unless action([:read, :suppress])
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

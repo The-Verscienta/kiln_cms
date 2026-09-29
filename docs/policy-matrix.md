@@ -149,7 +149,12 @@ ever be authorized by an explicit clause below.
 | `CMS.MediaDerivative` | all (`read`, `for_item`, `record`, `destroy`) | The bookkeeping row behind each cached on-the-fly image transform (`/media/:id/t/…`). `Media.Derivatives` is its only reader and writer: it counts an item's rows against the per-item budget, prunes the ones cut from a replaced original or around a moved focal point, and lists them for a purge. No person — admin included — reads or writes a row, and there is no API surface. Who may *see* a transform is decided on the `MediaItem`, by the transform controller's ordinary policy-checked read. |
 | `Accounts.ThrottleCounter` | `prune` **only** | The shared auth budgets' counter table (#1619). The scheduled prune deletes closed windows; the actor is admitted so an operator or a test can run it by hand. The budgets are charged by `Accounts.ThrottleStore` in raw SQL before anyone is authenticated, so no action serves that path. `read` is forbidden to everyone, admin included: a count per hashed key is an oracle nobody needs. |
 | `Automation.Rule` | `read` **only** | `KilnCMS.Automation.RuleWorker` re-reads the rule it was enqueued for. Authoring a rule is still admin-only — the grant is narrowed to reads inside the existing `policy always()` with `forbid_unless action_type(:read)`. |
-| `Social.Account` | `read`, `enabled_for_provider` **only** | The announcer lists a provider's enabled accounts for a publish. Minting, editing or deleting the credentials for a site's public voice stays an admin act, narrowed the same way. |
+| `Social.Account` | `read`, `enabled_for_provider`, `record_post` **only** | The announcer lists a provider's enabled accounts for a publish, `Social.configured?/1` asks whether any is enabled, and the announcer stamps "last posted" (`record_post`, which accepts no attributes) on the account it posted as (#1659). Minting, editing or deleting the credentials for a site's public voice stays an admin act, narrowed the same way. |
+| `Social.Post` | `claim`, `succeed`, `fail`, `unresolved`, `skip` **only** | The announce ledger (`Social.system/0`, #1659). The claim is written before the provider is called and its unique index is the "announce once" guarantee; a refused claim is a Forbidden that posts nothing, never "already announced". No read and no `destroy`: a deleted claim would free the dedupe key for a second post. |
+| `CMS.WebhookEndpoint` | `read`, `record_delivery_success`, `record_delivery_failure` **only** | The dispatch scan and the delivery worker read endpoints (`Webhooks.system/0`, #1659), and the worker keeps the health counters behind auto-disable. Creating, editing or deleting an endpoint stays an admin act. Both reads pass `authorize_with: :error`: a refused scan would read as "no endpoint subscribed" and a refused lookup as "endpoint deleted", so a lost grant is logged (and, in the worker, retried) instead. |
+| `CMS.WebhookDelivery` | `read`, `create`, `record_attempt` **only** | The delivery ledger: dispatch writes the row, the worker re-reads it (failing closed: a refused read is retried, not taken for "pruned") and records each attempt. `destroy` is not admitted; the prune trigger runs under its own `AshObanInteraction` bypass. |
+| `Mail.Settings` | `read`, `init` **only** | The DKIM signer and DNS checks read the singleton with no actor of their own, and `ensure_settings!/0` inserts the empty row (`Mail.system/0`, #1659). The read fails closed: `nil` would read as "no DKIM key" and send unsigned. Changing the key or the server IP stays platform-admin. |
+| `Mail.SuppressedRecipient`, `Mail.SiteSuppressedRecipient` | `read`, `suppress` **only** | The pipeline looks every recipient up before queuing and records a hard bounce on the list of the relay that reported it (`Mail.system/0`, #1659). The lookup passes `authorize_with: :error`: a refused read would otherwise be "not suppressed" and resume mail to dead addresses, so `enqueue!/2` drops the recipient and logs, and the newsletter worker retries. Clearing a suppression (`destroy`) stays an admin act. |
 | `CMS.Comment` | `create`, `read` | An editorial-intelligence reaction posts its findings as a document-level comment (#946) on a thread it must be able to read. No `author_id` is stamped — the actor has no `:id` — so `created_by_rule_id` carries the provenance. `update` is **not** admitted: automation posts, it does not edit what anyone said. |
 | `CMS.Task` | `create`, `read` | The same reaction assigns findings as a task, and the lifecycle sweep probes for an open review before opening another. `AssigneeIsEditor` still vets the assignee (validations run whatever the actor is) and `creator_id` stays unstamped. `update` is **not** admitted: automation opens tasks, it does not complete them. |
 | `Billing.Settings` | `read`, `init` **only** | The checkout path and the webhook receiver resolve provider credentials with no actor of their own, and `ensure_settings!/0` inserts the empty singleton on first use. Narrowed inside the existing platform-admin policy; the write path to payment credentials stays platform-admin, and every secret column is vault-encrypted and `sensitive?`. |
@@ -266,8 +271,9 @@ everyone. The transform route additionally refuses out-of-bounds parameters
 |--------|:-----:|:------:|:------:|:---------:|
 | read, `create`, `update`, `destroy` | ✅ | ❌ | ❌ | ❌ |
 
-Endpoint configuration is admin-only. The delivery worker reads endpoints as the
-**system** (`authorize?: false`).
+Endpoint configuration is admin-only. The delivery pipeline reads endpoints and
+keeps their health counters as the **system actor** (see
+[The system actor](#the-system-actor)); it cannot create, edit or delete one.
 
 ## Mail settings — `Mail.Settings`
 
@@ -276,9 +282,9 @@ Endpoint configuration is admin-only. The delivery worker reads endpoints as the
 | read, `init`, `generate_dkim`, `rotate_dkim`, `configure_key_source`, `set_server_ip`, `record_verification` | ✅ | ❌ | ❌ | ❌ |
 
 Instance-wide mail/DKIM configuration (`/editor/mail`) is admin-only. The
-delivery pipeline resolves the DKIM key as the **system**
-(`authorize?: false` via `KilnCMS.Mail.dkim_config/0`), as does the lazy
-singleton creation (`ensure_settings!/0`, reached only from the admin page).
+delivery pipeline resolves the DKIM key as the **system actor**
+(`KilnCMS.Mail.dkim_config/0`), as does the lazy singleton creation
+(`ensure_settings!/0`); both are admitted for `read` and `init` only.
 
 ## Billing settings — `Billing.Settings`
 
@@ -303,7 +309,8 @@ policy before doing anything).
 
 Managed from `/editor/mail` (admin-only). The delivery pipeline writes
 suppressions on a hard bounce and consults them before queuing as the
-**system** (`authorize?: false`). As with reads elsewhere, a non-admin read is
+**system actor** (`read` and `suppress` only; a refused lookup fails closed and
+the recipient is not mailed). As with reads elsewhere, a non-admin read is
 filtered to nothing rather than erroring, so the list never leaks.
 
 ## Custom fields — `FieldDefinition`
@@ -600,13 +607,14 @@ own list instead (next section).
 
 | Action | admin | editor | viewer | anonymous | system |
 |--------|:-----:|:------:|:------:|:---------:|:------:|
-| read, `destroy` | ✅ | ❌ | ❌ | ❌ | ✅ |
+| read | ✅ | ❌ | ❌ | ❌ | ✅ |
+| `destroy` | ✅ | ❌ | ❌ | ❌ | ❌ |
 | `suppress` | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 The addresses one site's own relay rejected as dead, per site
 (`org_id`, `email`). Org admin reads and clears it from `/editor/site-mail`; a
 non-admin read filters to nothing. Only the delivery pipeline writes it, as
-the **system** (`authorize?: false`), on a reject naming the recipient that
+the **system actor**, on a reject naming the recipient that
 came through that site's relay. Not even the site's admin can add a row: that
 would stop the site's mail to an address without a bounce ever happening.
 
@@ -821,8 +829,8 @@ edits two sites sees each site's notifications in that site's console only.
 |--------|:-----:|:------:|:------:|:---------:|
 | read (`read`, `recent`), `create`, `record_attempt`, `destroy` | ✅ | ❌ | ❌ | ❌ |
 
-Delivery history is admin-only. The delivery pipeline writes attempts as the
-system, and the `prune_deliveries` AshOban trigger runs under the
+Delivery history is admin-only. The delivery pipeline writes the row and its
+attempts as the system actor (never `destroy`), and the `prune_deliveries` AshOban trigger runs under the
 `AshObanInteraction` bypass.
 
 ## The API-key axis

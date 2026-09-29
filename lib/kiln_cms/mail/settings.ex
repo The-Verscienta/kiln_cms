@@ -91,11 +91,20 @@ defmodule KilnCMS.Mail.Settings do
     # singleton (DKIM key, relay credentials) with no `multitenancy` block, so
     # it must gate on the global `User.role` — an `OrgAdmin` check would
     # resolve a tenant-less subject to the default org and let a default-org
-    # membership admin rewrite mail config for every site. The delivery
-    # pipeline reads with `authorize?: false` as a system job
-    # (KilnCMS.Mail.dkim_config/0).
+    # membership admin rewrite mail config for every site.
+    #
+    # The delivery pipeline (`KilnCMS.Mail.dkim_config/0`) and the DNS checks
+    # read this singleton with no actor of their own, and `ensure_settings!/0`
+    # inserts the empty row on first use. Both run as `KilnCMS.Mail.system/0`
+    # (#1659), admitted by name and narrowed to `:read` and `:init` inside this
+    # policy (Ash ANDs policies, so a second one could not lift this one's
+    # refusal). Generating, rotating or re-sourcing the DKIM key, and setting
+    # the server IP, stay platform-admin. `:init` accepts no attributes.
     policy always() do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
+
+      forbid_unless action([:read, :init])
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 
