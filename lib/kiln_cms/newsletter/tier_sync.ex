@@ -186,15 +186,14 @@ defmodule KilnCMS.Newsletter.TierSync do
 
   # Upserts on email, so an existing hand-added subscriber is LINKED rather than
   # duplicated — and `upsert_fields [:user_id]` means their consent status is
-  # untouched by the link.
-  #
-  # `get_user` keeps its bypass deliberately (#1402): `User`'s read policy is
-  # self-only, so admitting the system actor there would be a standing grant
-  # over every account on the deployment — far wider than this by-primary-key
-  # read of the one row the membership itself names, of which only the email
-  # and name are used. `link_member` is `forbid_if always()` for every person
-  # and admits this actor by name.
+  # untouched by the link. `link_member` is `forbid_if always()` for every
+  # person and admits this actor by name.
   defp link_new(user_id, org_id) do
+    # authorize?: false — kept deliberately (#1402): `User`'s read policy is
+    # self-only, so admitting the system actor there would be a standing grant
+    # over every account on the deployment — far wider than this by-primary-key
+    # read of the one row the membership itself names, of which only the email
+    # and name are used.
     with {:ok, user} <- KilnCMS.Accounts.get_user(user_id, authorize?: false),
          true <- verified?(user),
          {:ok, subscriber} <-
