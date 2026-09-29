@@ -48,15 +48,26 @@ defmodule KilnCMS.CMS.TaskSettings do
   """
   @spec site_default(Ash.UUID.t() | struct()) :: boolean()
   def site_default(org) do
+    # As the system actor (`SiteEditorialSettings` admits it for `read` only,
+    # #1659): a release's go-live asks this with no person reading. A refusal
+    # RAISES rather than answering the shipped default — "no row" would
+    # complete tasks the site said to leave open.
     SiteEditorialSettings
     |> Ash.Query.limit(1)
-    |> Ash.read_one(authorize?: false, tenant: org)
+    |> Ash.read_one(
+      actor: KilnCMS.CMS.Housekeeping.system(:cms_settings),
+      authorize_with: :error,
+      tenant: org
+    )
     |> case do
       {:ok, %SiteEditorialSettings{auto_complete_tasks_on_publish: value}} ->
         value
 
       {:ok, nil} ->
         @shipped_default
+
+      {:error, %Ash.Error.Forbidden{} = error} ->
+        raise error
 
       {:error, reason} ->
         Logger.warning(

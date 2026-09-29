@@ -29,7 +29,10 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
   `media`/`reference` fields filter by their snapshot's stable `id`
   (equality-shaped operators only) and are not sortable. Definitions are read
-  with `authorize?: false` (registry metadata, not user data). No index backs
+  as the system (`KilnCMS.CMS.Housekeeping`, #1659): registry metadata, not
+  user data, and the public API's anonymous callers filter too. The read fails
+  closed — a refused registry read raises rather than resolving to "no
+  fields" (which would already 400, never widen the result). No index backs
   these predicates — promote a hot field to a compiled attribute when that
   starts to matter (D4/D17).
   """
@@ -71,25 +74,32 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     if function_exported?(resource, :__kiln_dynamic_entry__, 0) do
       entry_definitions(query, tenant)
     else
-      KilnCMS.CMS.field_definitions_for!(resource.__kiln_content_type__(),
-        authorize?: false,
-        tenant: tenant
-      )
+      KilnCMS.CMS.field_definitions_for!(resource.__kiln_content_type__(), registry_opts(tenant))
     end
+  end
+
+  # As the system, with `authorize_with: :error`: a refusal is an error, never
+  # an empty registry. See the moduledoc.
+  defp registry_opts(tenant) do
+    [
+      actor: KilnCMS.CMS.Housekeeping.system(:cms_registry),
+      authorize_with: :error,
+      tenant: tenant
+    ]
   end
 
   defp entry_definitions(query, tenant) do
     cond do
       id = equality_filter_value(query, :type_definition_id) ->
-        KilnCMS.CMS.field_definitions_for_definition!(id, authorize?: false, tenant: tenant)
+        KilnCMS.CMS.field_definitions_for_definition!(id, registry_opts(tenant))
 
       name = equality_filter_value(query, :type_name) ->
-        case KilnCMS.CMS.get_type_definition_by_name(name, authorize?: false, tenant: tenant) do
+        case KilnCMS.CMS.get_type_definition_by_name(name, registry_opts(tenant)) do
           {:ok, definition} ->
-            KilnCMS.CMS.field_definitions_for_definition!(definition.id,
-              authorize?: false,
-              tenant: tenant
-            )
+            KilnCMS.CMS.field_definitions_for_definition!(definition.id, registry_opts(tenant))
+
+          {:error, %Ash.Error.Forbidden{} = error} ->
+            raise error
 
           _ ->
             []
@@ -97,9 +107,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
       true ->
         KilnCMS.CMS.list_field_definitions!(
-          query: [filter: [type_definition_id: [is_nil: false]]],
-          authorize?: false,
-          tenant: tenant
+          [query: [filter: [type_definition_id: [is_nil: false]]]] ++ registry_opts(tenant)
         )
     end
   end

@@ -48,6 +48,13 @@ defmodule KilnCMS.CMS.Slugs do
       |> maybe_filter(:locale, locale)
       |> exclude_record(exclude_id)
       |> Ash.Query.limit(1)
+      # authorize?: false — an existence probe that must see EVERY row holding
+      # the alias: drafts, other content types, rows the caller's type scope
+      # hides. A filtered read would report a taken alias as free, and the
+      # unique index would then refuse the write (or, for a derived alias,
+      # mint a clash). Only `[:id]` is selected and only a boolean leaves; the
+      # system actor holds no content read by design (#1402), so there is no
+      # narrower actor to run it as.
       |> Ash.read!(authorize?: false, tenant: tenant)
       |> Kernel.!=([])
     end)
@@ -155,6 +162,11 @@ defmodule KilnCMS.CMS.Slugs do
     record =
       query
       |> Ash.Query.limit(1)
+      # authorize?: false — a public delivery read: every caller above
+      # (`find_published_by_alias/5`, `find_locked_by_alias/4`,
+      # `find_teaser_by_alias/3`) filters to `:published` and its audience or
+      # lock axis itself, and selects the column set that axis allows. The
+      # filter is the boundary, exactly as for `Content`'s delivery actions.
       |> Ash.read!(authorize?: false, tenant: org_id)
       |> List.first()
 
@@ -357,10 +369,9 @@ defmodule KilnCMS.CMS.Slugs do
     with definition_id when not is_nil(definition_id) <-
            changeset_attribute(changeset, :type_definition_id),
          {:ok, definition} <-
-           KilnCMS.CMS.get_type_definition(definition_id,
-             authorize?: false,
-             tenant: changeset.tenant
-           ) do
+           definition_id
+           |> KilnCMS.CMS.get_type_definition(registry_opts(changeset.tenant))
+           |> raise_if_forbidden() do
       case kind do
         :slug -> definition.slug_pattern
         :alias -> definition.alias_pattern
@@ -370,12 +381,34 @@ defmodule KilnCMS.CMS.Slugs do
     end
   end
 
+  # Registry reads (`TypeDefinition`, `FieldDefinition`) run as the system: the
+  # write deriving the slug may be anonymous-adjacent (a form, the scheduler),
+  # and the registry is the site's schema, not content. `authorize_with: :error`
+  # so a refusal raises instead of reading as "no pattern" / "no fields" — which
+  # would derive a different slug than the editor previewed.
+  defp registry_opts(tenant) do
+    [
+      actor: KilnCMS.CMS.Housekeeping.system(:cms_registry),
+      authorize_with: :error,
+      tenant: tenant
+    ]
+  end
+
+  # A missing definition is a miss (`nil` pattern); a refused read is not.
+  defp raise_if_forbidden({:error, %Ash.Error.Forbidden{} = error}), do: raise(error)
+  defp raise_if_forbidden(result), do: result
+
   defp changeset_category_slug(changeset, pattern) do
     with true <- KilnCMS.Slug.Pattern.uses?(pattern, "category"),
          category_id when not is_nil(category_id) <-
            changeset_attribute(changeset, :category_id),
+         # World-readable taxonomy (`policy action_type(:read) → always()`),
+         # so no actor is needed; `authorize_with: :error` keeps a future
+         # narrower policy from reading as "no category".
          {:ok, category} <-
-           KilnCMS.CMS.get_category(category_id, authorize?: false, tenant: changeset.tenant) do
+           category_id
+           |> KilnCMS.CMS.get_category(authorize_with: :error, tenant: changeset.tenant)
+           |> raise_if_forbidden() do
       category.slug
     else
       _ -> nil
@@ -546,18 +579,25 @@ defmodule KilnCMS.CMS.Slugs do
       _unknown -> ct |> descriptor_field_definitions(tenant) |> type_token_definitions()
     end
   rescue
+    # A REFUSED read is not an outage: it is a missing grant, and degrading
+    # would let a regeneration run rewrite live URLs to the token-less form
+    # (the bug this function exists to prevent). Let it raise.
+    error in Ash.Error.Forbidden ->
+      reraise error, __STACKTRACE__
+
     # An unreadable definition set must not crash the editor's mount or abort a
     # regeneration run; degrade to the built-ins, as the save-time validation
     # does. The cost is that the preview can disagree with the save again — but
     # only while the read is failing, which is an outage, not a steady state.
-    _error -> []
+    _error ->
+      []
   end
 
   defp descriptor_field_definitions(%{source: :dynamic, definition: %{id: id}}, tenant),
-    do: KilnCMS.CMS.field_definitions_for_definition!(id, authorize?: false, tenant: tenant)
+    do: KilnCMS.CMS.field_definitions_for_definition!(id, registry_opts(tenant))
 
   defp descriptor_field_definitions(%{type: type}, tenant) when not is_nil(type),
-    do: KilnCMS.CMS.field_definitions_for!(type, authorize?: false, tenant: tenant)
+    do: KilnCMS.CMS.field_definitions_for!(type, registry_opts(tenant))
 
   defp descriptor_field_definitions(_ct, _tenant), do: []
 
@@ -567,13 +607,10 @@ defmodule KilnCMS.CMS.Slugs do
     if function_exported?(resource, :__kiln_dynamic_entry__, 0) do
       case changeset_attribute(changeset, :type_definition_id) do
         nil -> []
-        id -> KilnCMS.CMS.field_definitions_for_definition!(id, authorize?: false, tenant: tenant)
+        id -> KilnCMS.CMS.field_definitions_for_definition!(id, registry_opts(tenant))
       end
     else
-      KilnCMS.CMS.field_definitions_for!(resource.__kiln_content_type__(),
-        authorize?: false,
-        tenant: tenant
-      )
+      KilnCMS.CMS.field_definitions_for!(resource.__kiln_content_type__(), registry_opts(tenant))
     end
   end
 
@@ -700,6 +737,11 @@ defmodule KilnCMS.CMS.Slugs do
     |> maybe_filter(:org_id, opts[:org_id])
     |> maybe_filter(:type_definition_id, opts[:type_definition_id])
     |> exclude_record(opts[:exclude_id])
+    # authorize?: false — the uniqueness read. It must see every row the
+    # `unique_slug` index spans (drafts, trashed rows, types the caller's scope
+    # hides), because a slug it cannot see is a slug it reports as FREE. Only
+    # `:slug` is selected and nothing but the chosen variant leaves; the system
+    # actor holds no content read by design (#1402).
     |> Ash.read!(authorize?: false, tenant: opts[:tenant])
     |> Enum.map(& &1.slug)
   end

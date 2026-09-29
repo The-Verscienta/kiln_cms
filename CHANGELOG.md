@@ -207,6 +207,11 @@ Every summary line below that was shortened links to its own entry there.
   as scoped system actors; the replay check and follower ceiling fail closed.
   ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#federation-runs-under-the-policies))
 
+- **Content releases, slugs, menus and the field registry run under the
+  policies.** 37 CMS helper sites move to scoped system actors or the caller;
+  a release's item read fails closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#cms-helpers-run-under-the-policies))
+
 - **The CMS's own bookkeeping runs under the policies.** 26 sites in the
   content, comment, release and form changes move under the policies or say
   why not; the reads a write depends on fail closed.

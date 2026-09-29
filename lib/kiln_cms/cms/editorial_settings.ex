@@ -37,7 +37,7 @@ defmodule KilnCMS.CMS.EditorialSettings do
   def editors_can_publish?(org) do
     SiteEditorialSettings
     |> Ash.Query.limit(1)
-    |> Ash.read_one(authorize?: false, tenant: org)
+    |> Ash.read_one(system_opts(org))
     |> case do
       {:ok, %SiteEditorialSettings{editors_can_publish: value}} ->
         value
@@ -55,6 +55,18 @@ defmodule KilnCMS.CMS.EditorialSettings do
     end
   end
 
+  # Read as the system actor, which `SiteEditorialSettings` admits for `read`
+  # only (#1659): the publish check that asks has no person reading. A refusal
+  # is `Ash.Error.Forbidden` (`authorize_with: :error`), never an empty read,
+  # so it lands in the logged error branch — which answers "no".
+  defp system_opts(org) do
+    [
+      actor: KilnCMS.CMS.Housekeeping.system(:cms_settings),
+      authorize_with: :error,
+      tenant: org
+    ]
+  end
+
   @doc """
   Whether anyone has ever answered for `org` — i.e. a settings row exists.
 
@@ -69,14 +81,15 @@ defmodule KilnCMS.CMS.EditorialSettings do
   def chosen?(nil), do: true
 
   def chosen?(org) do
-    # Policy bypass (`authorize?: false`), same as `editors_can_publish?/1`: an
-    # existence probe on the one settings row of a tenant the caller already
-    # resolved. Nothing from the row leaves this function but a boolean, and it
-    # authorizes nothing — Home shows the card only to an admin, and the save
-    # behind the card runs as the actor under the resource's write policy.
+    # As the system, same as `editors_can_publish?/1`: an existence probe on
+    # the one settings row of a tenant the caller already resolved. Nothing
+    # from the row leaves this function but a boolean, and it authorizes
+    # nothing — Home shows the card only to an admin, and the save behind the
+    # card runs as the actor under the resource's write policy. A refusal is
+    # an error, which answers `true` below (no nag), never "no row".
     SiteEditorialSettings
     |> Ash.Query.limit(1)
-    |> Ash.read_one(authorize?: false, tenant: org)
+    |> Ash.read_one(system_opts(org))
     |> case do
       {:ok, nil} -> false
       {:ok, %SiteEditorialSettings{}} -> true
