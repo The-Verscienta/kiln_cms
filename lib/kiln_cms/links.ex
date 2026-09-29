@@ -8,9 +8,6 @@ defmodule KilnCMS.Links do
   bookkeeping runs as (#1659).
   """
 
-  # See `with_actor/2`.
-  @actor_override {__MODULE__, :actor_override}
-
   @doc """
   The actor the link checker's bookkeeping runs as: the sweep's observe, prune
   and enqueue over `CMS.ExternalLink`, the check worker's verdict writes, and
@@ -24,33 +21,14 @@ defmodule KilnCMS.Links do
   site: a system-actor grant on content would be a standing read over the
   whole corpus, drafts included, which is wider than the one sweep it serves
   (the #1402 argument).
+
+  Typed `term()`: under `with_actor/2` it answers whatever the test put there.
   """
-  @spec system() :: KilnCMS.SystemActor.t() | nil
-  def system do
-    case Process.get(@actor_override, :unset) do
-      :unset -> KilnCMS.SystemActor.new(:links)
-      actor -> actor
-    end
-  end
+  @spec system() :: term()
+  def system, do: KilnCMS.SystemActor.resolve(:links)
 
   @doc false
-  # Test seam (#1659): run `fun` with `system/0` answering `actor` in this
-  # process. It exists so a test can take the grant away and prove that the
-  # reads backing the retry-before-flagging counter and the sweep fail CLOSED
-  # rather than filtering to "nothing", which is how a refused read answers.
-  # Process-local, and nothing on a request path calls it; code that could
-  # call it could equally pass any actor it liked.
+  # Test seam (#1659): `KilnCMS.SystemActor.with_override/3` for `:links`.
   @spec with_actor(term(), (-> result)) :: result when result: term()
-  def with_actor(actor, fun) do
-    previous = Process.get(@actor_override, :unset)
-    Process.put(@actor_override, actor)
-
-    try do
-      fun.()
-    after
-      if previous == :unset,
-        do: Process.delete(@actor_override),
-        else: Process.put(@actor_override, previous)
-    end
-  end
+  def with_actor(actor, fun), do: KilnCMS.SystemActor.with_override(:links, actor, fun)
 end

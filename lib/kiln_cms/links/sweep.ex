@@ -218,9 +218,12 @@ defmodule KilnCMS.Links.Sweep do
       %Ash.BulkResult{status: :success} ->
         count
 
+      # Not `count`: a refused or failed destroy (#1659) deleted nothing, or
+      # not all of it, and reporting the pre-count would log a prune that
+      # never happened. The stale rows wait for the next sweep.
       %Ash.BulkResult{errors: errors} ->
         Logger.warning("link check: prune for #{org_id} reported #{inspect(errors)}")
-        count
+        0
     end
   end
 

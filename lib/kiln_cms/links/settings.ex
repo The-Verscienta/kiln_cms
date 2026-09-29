@@ -27,19 +27,27 @@ defmodule KilnCMS.Links.Settings do
 
   alias KilnCMS.CMS.SiteLinkCheck
 
-  @doc "This site's link-check settings row, or `nil` if it has never been saved."
-  @spec for_org(Ash.UUID.t()) :: SiteLinkCheck.t() | nil
-  def for_org(org_id) do
-    # As the link checker's system actor (#1659), and `authorize_with: :error`
-    # so a lost grant is an error here rather than a silently filtered `nil`.
-    # Both land on "disabled" below, which is the closed direction for a
-    # switch that authorizes outbound requests; the error is also logged.
-    SiteLinkCheck
-    |> Ash.Query.limit(1)
-    |> Ash.read_one(actor: KilnCMS.Links.system(), authorize_with: :error, tenant: org_id)
-    |> case do
-      {:ok, settings} ->
-        settings
+  @doc """
+  This site's link-check settings row, or `nil` if it has never been saved.
+
+  Read as `actor`: the link checker's system actor by default (the sweep and
+  the check worker), or the person viewing the report, so the system grant
+  stays on system code.
+  """
+  @spec for_org(Ash.UUID.t(), term()) :: SiteLinkCheck.t() | nil
+  def for_org(org_id, actor \\ KilnCMS.Links.system()) do
+    # `authorize_with: :error` (#1659) so a lost grant is an error here rather
+    # than a silently filtered `nil`. Both land on "disabled" below, which is
+    # the closed direction for a switch that authorizes outbound requests; the
+    # error is also logged.
+    case KilnCMS.CMS.list_site_link_check(
+           actor: actor,
+           authorize_with: :error,
+           tenant: org_id,
+           query: [limit: 1]
+         ) do
+      {:ok, rows} ->
+        List.first(rows)
 
       {:error, reason} ->
         # A read failure (or a refused one) must not read as "enabled". The
@@ -87,8 +95,7 @@ defmodule KilnCMS.Links.Settings do
         :ok
 
       settings ->
-        case Ash.update(settings, %{},
-               action: :record_sweep,
+        case KilnCMS.CMS.record_site_link_sweep(settings,
                actor: KilnCMS.Links.system(),
                tenant: org_id
              ) do

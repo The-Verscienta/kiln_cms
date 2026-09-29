@@ -31,11 +31,11 @@ defmodule KilnCMS.Links.Report do
   ## Read as the viewer
 
   The page is editorial work, and `CMS.ExternalLink`'s read policy admits
-  editors, so the report reads the rows as the person looking at it (#1659)
-  rather than around the policy. The first read runs with
-  `authorize_with: :error`: a refused read would otherwise filter to nothing
-  and the counts to zero, which is the "nothing is broken" page, so a viewer
-  the policy refuses gets an error instead of a clean bill of health.
+  editors, so the report reads the rows, the counts and the switch as the
+  person looking at it (#1659) rather than around the policy. The reads run
+  with `authorize_with: :error`: a refused read would otherwise filter to
+  nothing and the counts to zero, which is the "nothing is broken" page, so a
+  viewer the policy refuses gets an error instead of a clean bill of health.
   """
 
   require Ash.Query
@@ -79,7 +79,7 @@ defmodule KilnCMS.Links.Report do
   """
   @spec for_org(Ash.UUID.t(), term()) :: t()
   def for_org(org_id, actor) do
-    settings = Settings.for_org(org_id)
+    settings = Settings.for_org(org_id, actor)
     rows = broken_rows(org_id, actor)
 
     %{
@@ -91,20 +91,34 @@ defmodule KilnCMS.Links.Report do
     }
   end
 
-  # Also the probe for `counts/2` below, which cannot fail on a refused read
-  # (`Ash.count/2` has no `authorize_with:` and answers 0): this read runs
-  # first and raises instead.
   defp broken_rows(org_id, actor) do
     ExternalLink
     |> Ash.Query.filter(outcome == :broken)
     |> Ash.Query.sort(first_failed_at: :asc)
     |> Ash.Query.limit(@row_cap)
-    |> Ash.read!(actor: actor, authorize_with: :error, tenant: org_id)
+    |> read!(org_id, actor)
+  end
+
+  defp read!(query, org_id, actor) do
+    KilnCMS.CMS.list_external_links!(
+      actor: actor,
+      authorize_with: :error,
+      tenant: org_id,
+      query: query
+    )
   end
 
   # Counted rather than tallied from a read: the whole table is the thing being
   # summarized, and loading it to count it is what the count exists to avoid.
+  #
+  # `Ash.count/2` cannot fail on a refused read (it has no `authorize_with:`
+  # and answers 0, the "nothing is broken" page), so this probes one row with
+  # `authorize_with: :error` first and raises on a refusal. The probe lives
+  # here, not in whichever read happens to run earlier, so the counts stay
+  # fail-closed however they are called.
   defp counts(org_id, actor) do
+    ExternalLink |> Ash.Query.limit(1) |> Ash.Query.select([:id]) |> read!(org_id, actor)
+
     Map.new([:ok, :broken, :pending, :transient, :undetermined], fn value ->
       {value,
        ExternalLink

@@ -211,7 +211,7 @@ defmodule KilnCMS.Links.SystemActorAuthorizationTest do
       # readable, the counter is not. A refused read that filtered to "no rows"
       # would log nothing; one read as zero would write `:transient, 1`.
       Req.Test.stub(KilnCMS.Links.External, fn conn ->
-        Process.put({KilnCMS.Links, :actor_override}, nil)
+        SystemActor.put_override(:links, nil)
         Plug.Conn.send_resp(conn, 503, "")
       end)
 
@@ -220,7 +220,7 @@ defmodule KilnCMS.Links.SystemActorAuthorizationTest do
           try do
             assert :ok = perform_job(CheckWorker, %{"org_id" => org, "url" => @url})
           after
-            Process.delete({KilnCMS.Links, :actor_override})
+            SystemActor.delete_override(:links)
           end
         end)
 
