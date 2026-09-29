@@ -14,6 +14,18 @@ defmodule KilnCMS.Accounts.Changes.EvictSessions do
   broadcast that could roll back the change would leave the grant narrowed and
   the socket still holding the old one, which is the worst of both.
 
+  ## `after_commit?: true` — when the reconnect must meet the commit
+
+  An evicted client reconnects at once, and that reconnect is re-authorized
+  against whatever the database says *then*. From an `after_action` the
+  broadcast leaves before the COMMIT, so when the same transaction also revokes
+  the tokens the reconnect would be checked against (the password actions,
+  #734/#1637), a fast enough reconnect reads the old, still-live row and mounts
+  again — on a token that is revoked a moment later. `after_commit?: true` moves
+  the broadcast into `after_transaction`, on success only. It is opt-in rather
+  than the default only because the other declared uses include a `destroy`,
+  whose `after_transaction` hand-off has not been exercised here.
+
   ## Narrowing only, and every change counts as narrowing
 
   A widened grant needs no eviction — the socket simply has less than it could
@@ -39,9 +51,20 @@ defmodule KilnCMS.Accounts.Changes.EvictSessions do
     reason = Keyword.get(opts, :reason, changeset.action.name)
     field = Keyword.get(opts, :user_id, :id)
 
-    Ash.Changeset.after_action(changeset, fn _changeset, record ->
-      SessionEviction.evict(Map.get(record, field), reason)
-      {:ok, record}
-    end)
+    if Keyword.get(opts, :after_commit?, false) do
+      Ash.Changeset.after_transaction(changeset, fn
+        _changeset, {:ok, record} = result ->
+          SessionEviction.evict(Map.get(record, field), reason)
+          result
+
+        _changeset, result ->
+          result
+      end)
+    else
+      Ash.Changeset.after_action(changeset, fn _changeset, record ->
+        SessionEviction.evict(Map.get(record, field), reason)
+        {:ok, record}
+      end)
+    end
   end
 end

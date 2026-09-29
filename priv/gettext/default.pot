@@ -9475,7 +9475,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
-msgid "Password changed."
+msgid "Password changed. Sign in again with your new password."
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/recipes.ex

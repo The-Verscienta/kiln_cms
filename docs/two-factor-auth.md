@@ -81,8 +81,9 @@ every sign-in, after the first factor.
   Held rather than revoked, because the exchange may still complete — and the
   release is filtered on the hold purpose **in the UPDATE's own WHERE**, so a
   token revoked mid-window is not resurrected by a late redemption even if the
-  revocation lands after the release has read the row. The revokers are
-  `log_out_everywhere` (a password change) and account erasure, which sweep
+  revocation lands after the release has read the row. The revokers are a
+  password change or reset (`KilnCMS.Accounts.Changes.RevokeAllTokens`, #734)
+  and account erasure, which sweep
   every row a subject owns, held ones included. Sign-out revokes too, but only
   the token in *that* session — a browser sitting at the code prompt is not
   signed in and carries none, so signing out elsewhere does not reach a held
@@ -104,10 +105,12 @@ asks for a code again. `KilnCMSWeb.AuthController` withholds it there and
 `KilnCMSWeb.TwoFactorController` issues it on success instead.
 
 Once issued it *does* skip the code prompt on later visits, deliberately — it
-represents a device that completed every factor. Signing out deletes it. Note
-that changing the password does **not** currently revoke it (nor any other
-stored token — see [#730](https://github.com/The-Verscienta/kiln_cms/issues/734)),
-so signing out is the reliable way to withdraw a device today.
+represents a device that completed every factor. Signing out deletes it. Changing
+or resetting the password revokes it too, along with every other stored token
+the account holds — every session, and any sign-in waiting at this prompt
+([#734](https://github.com/The-Verscienta/kiln_cms/issues/734)) — so a password
+change is how to withdraw a device you no longer have. Before 1.0 it did not:
+the flag that was meant to do it never fired.
 
 ## Why a wrong code can say "too many attempts"
 

@@ -314,7 +314,8 @@ defmodule KilnCMS.Accounts.PendingSignIn do
 
   The release is filtered on the hold purpose **in the UPDATE's own WHERE**,
   which is what keeps it from resurrecting a token revoked in between: a password
-  change fires `log_out_everywhere` and an erasure fires `AnonymizeUser`, both of
+  change or reset runs `KilnCMS.Accounts.Changes.RevokeAllTokens` (#734) and an
+  erasure fires `AnonymizeUser`, both of
   which sweep every row the subject owns — held ones included — to
   `"revocation"`, and a release then matches nothing. It is a release, not an
   unconditional restore, and the database is what enforces that rather than the

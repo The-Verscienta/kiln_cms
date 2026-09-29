@@ -7,6 +7,21 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="password-rotation-upgrade-revokes-nothing-retroactively"></a>
+
+- **Upgrading revokes nothing by itself: if an account changed or reset its
+  password on an earlier release because it may have leaked, do it again (or
+  use *Sign out everywhere*).** The fix above applies to password changes made
+  after the upgrade. A session or remember-me cookie issued before a password
+  change on an earlier release was never revoked, and stays valid until it
+  expires, which is up to 30 days for a remember-me cookie. For an account
+  whose credential you think leaked, change or reset its password again on
+  this release. An administrator can also use *Sign out everywhere* on the
+  account's page under `/editor/accounts`, which has always revoked every
+  token. Users who change their password in settings are now signed out on
+  that device too, and asked to sign in again
+  ([#734](https://github.com/The-Verscienta/kiln_cms/issues/734)).
+
 <a id="a-new-index-on-every-content-tables-titles-is-built-concurrently-by-the"></a>
 
 - **A new index on every content table's titles is built `CONCURRENTLY` by
@@ -434,6 +449,41 @@ carries the reasoning.
   ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543))
 
 ## Security
+
+<a id="password-rotation-revokes-every-session"></a>
+
+- **Changing or resetting a password now signs out every other session and
+  remember-me cookie.** `KilnCMS.Accounts.User` has long declared
+  `log_out_everywhere apply_on_password_change? true`, and the docs treated
+  that as the control. It never fired. AshAuthentication hangs its change on
+  `hashed_password` being *touched*, and checks that when the changeset is
+  built. Both password actions, `:change_password` and
+  `:reset_password_with_token`, write the hash later, in a `before_action`, so
+  the check always saw it untouched. Every session JWT, and the 30-day
+  remember-me cookie, of whoever held the old password kept signing them in,
+  as the external auth review for #1536 confirmed. Both actions now declare
+  `KilnCMS.Accounts.Changes.RevokeAllTokens`. It runs the add-on's own
+  `log_out_everywhere` action inside the write's transaction, through
+  AshAuthentication's interaction bypass, so it needs neither
+  `authorize?: false` nor a system actor. It fails closed: if the revocation
+  cannot be written, the password is not changed either. Every stored token
+  the account holds is revoked. That covers every session, the remember-me
+  cookie, pending confirmation and magic-link tokens, and a sign-in parked at
+  the two-factor prompt (#742), because a reset means the old password may be
+  someone else's. The reset also signs the resetting browser in, and that
+  session is minted after the sweep, so it survives it. The reset now evicts
+  the account's live sockets too, as `:change_password` already did
+  ([#1637](https://github.com/The-Verscienta/kiln_cms/issues/1637)), so a
+  console already open on another device is disconnected, and its reconnect
+  finds no token to mount on. Both evictions now broadcast after the commit
+  (`EvictSessions`' new `after_commit?: true`), so a fast reconnect cannot
+  read the token before its revocation lands. One behaviour change: the
+  device that changes its password in settings is signed out too. A
+  LiveView cannot write the cookie a re-issued session would need, and after
+  a rotation the old password no longer proves who holds a session. The
+  settings page now says "Password changed. Sign in again with your new
+  password." and goes to `/sign-in`
+  ([#734](https://github.com/The-Verscienta/kiln_cms/issues/734)).
 
 <a id="the-editors-link-advisory-no-longer-reveals-content-the-editor-cannot-read"></a>
 

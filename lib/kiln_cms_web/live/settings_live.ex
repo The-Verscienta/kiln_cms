@@ -334,12 +334,20 @@ defmodule KilnCMSWeb.SettingsLive do
 
   def handle_event("save_password", %{"user" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.password_form, params: params) do
-      {:ok, user} ->
-        # Reset the form so the password fields clear after a successful change.
+      {:ok, _user} ->
+        # The change revoked every stored token the account had, this
+        # session's included (#734) — see `:change_password` for why this
+        # device is not exempt — so there is nothing left to stay signed in
+        # on. Say so and send them to sign in, rather than leave them on a
+        # page whose next request (or the socket's reconnect after the
+        # eviction) would bounce them there without explanation.
         {:noreply,
          socket
-         |> assign(:password_form, password_form(user))
-         |> put_flash(:info, gettext("Password changed."))}
+         |> put_flash(
+           :info,
+           gettext("Password changed. Sign in again with your new password.")
+         )
+         |> redirect(to: ~p"/sign-in")}
 
       {:error, form} ->
         {:noreply,
