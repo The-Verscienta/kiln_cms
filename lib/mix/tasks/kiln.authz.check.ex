@@ -73,8 +73,6 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
   # migration, per file. A ratchet: counts may only go DOWN, and no entry may
   # be added. See "Scope" above; the tracking issue is #1402.
   @backlog %{
-    "lib/kiln_cms/experiments.ex" => 1,
-    "lib/kiln_cms/experiments/validations/goal_configured.ex" => 1,
     "lib/kiln_cms/federation/announce_worker.ex" => 1,
     "lib/kiln_cms/newsletter.ex" => 1,
     "lib/kiln_cms/newsletter/mail_worker.ex" => 4,
@@ -84,13 +82,7 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
     "lib/kiln_cms/notifications/task_mail_worker.ex" => 2,
     "lib/kiln_cms/notifications/tasks.ex" => 1,
     "lib/kiln_cms/push.ex" => 3,
-    "lib/kiln_cms/push/worker.ex" => 2,
-    "lib/mix/tasks/kiln.embed_all.ex" => 2,
-    "lib/mix/tasks/kiln.experiment.ex" => 1,
-    "lib/mix/tasks/kiln.federation.ex" => 1,
-    "lib/mix/tasks/kiln.gen.content.ex" => 2,
-    "lib/mix/tasks/kiln.search.eval.ex" => 1,
-    "lib/mix/tasks/kiln.search.measure_floor.ex" => 1
+    "lib/kiln_cms/push/worker.ex" => 2
   }
   @window 12
   @justification ~r/authorize\?|bypass/i

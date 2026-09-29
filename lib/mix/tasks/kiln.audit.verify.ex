@@ -122,7 +122,8 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
           # included, which no system-actor grant should give system code
           # standing access to (#1402's content-read argument). It must also
           # not be refusable: a refused read would filter to `[]`, the sweep
-          # would check nothing and exit 0, i.e. report a clean corpus (#1659).
+          # would check nothing and exit 0, i.e. report a clean corpus (#1659). Identity
+          # columns only.
           record <-
             ContentTypes.list!(ct,
               authorize?: false,

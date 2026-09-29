@@ -582,6 +582,30 @@ carries the reasoning.
   ceiling", and the follow is refused and logged. Honest senders see no
   difference unless the nonce store is down. (#1659)
 
+<a id="funnel-lookups-and-the-operator-mix-tasks-run-under-the-policies"></a>
+
+- **Funnel lookups and the operator mix tasks run under the policies.** The
+  experiment engine read funnel definitions with `authorize?: false` in three
+  places: delivery's cached map of each funnel's last step
+  (`Experiments.funnel_targets/1`), the `:start` guard for a
+  `:funnel_completion` goal, and `mix kiln.experiment --goal-funnel SLUG`. All
+  three now read as `KilnCMS.Analytics.system/1`, which `Funnel` and
+  `FunnelStep` admit to their primary `read` and nothing else: not a write,
+  not the builder's `:for_funnel` read, and no traffic resource. Each read uses
+  `authorize_with: :error`. Before, a refused read on the delivery path would
+  have filtered to nothing and been cached as "no funnel targets", so every
+  funnel experiment would silently stop converting for the cache TTL. It now
+  logs and is not cached. A refused slug lookup now raises instead of
+  reporting "No funnel with id or slug" for a funnel that exists.
+  `mix kiln.gen.content --from` reads the type definition as the operator,
+  under `TypeDefinition`'s existing read-only grant. The other operator mix
+  tasks keep `authorize?: false`, each with a comment saying why: whole-corpus
+  content reads (`kiln.audit.verify`, `kiln.embed_all`), an every-org tag
+  backfill, and organization-registry lookups the operator is not a member of
+  (`kiln.federation`, `kiln.search.eval`, `kiln.search.measure_floor`). No
+  mix task is left in the `mix kiln.authz.check` backlog except the part of
+  `kiln.experiment` that #1659's experiments batch covers. (#1659)
+
 <a id="event-log-and-settings-run-under-the-policies"></a>
 
 - **The event log and the per-site settings run under the policies.**

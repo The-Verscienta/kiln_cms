@@ -172,8 +172,9 @@ defmodule Mix.Tasks.Kiln.Search.MeasureFloor do
   defp resolve_org(nil), do: KilnCMS.Accounts.default_org_id()
 
   defp resolve_org(slug) do
-    # Operator-run task resolving the org it was told to measure — the
-    # organization registry has no anonymous read, and this is not a request.
+    # authorize?: false — an operator-run task resolving the org it was told
+    # to measure (#1659): the organization registry has no anonymous read, the
+    # operator is no member, and this is not a request.
     case KilnCMS.Accounts.get_organization_by_slug(slug, authorize?: false) do
       {:ok, %{id: id}} -> id
       _none -> Mix.raise("no organization with slug #{inspect(slug)}")

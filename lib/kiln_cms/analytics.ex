@@ -69,6 +69,53 @@ defmodule KilnCMS.Analytics do
     end
   end
 
+  # Its own env key rather than one inside `config :kiln_cms, KilnCMS.Analytics`,
+  # which is this domain's Spark (`otp_app:`) configuration.
+  @system_actor_override :analytics_system_actor_override
+
+  @doc """
+  The actor system code reads funnel definitions as (#1659): the experiment
+  engine resolving a `:funnel_completion` goal to its funnel's last step —
+  `KilnCMS.Experiments.funnel_targets/1` on the delivery path and the
+  `:start` guard `KilnCMS.Experiments.Validations.GoalConfigured` — and
+  `mix kiln.experiment` resolving `--goal-funnel SLUG`.
+
+  A `KilnCMS.SystemActor`, admitted to the primary `read` of `Funnel` and
+  `FunnelStep` only (see `docs/policy-matrix.md`, "The system actor"), rather
+  than `authorize?: false`, which would skip every policy on them. No write,
+  and none of this domain's traffic resources: a funnel is a definition.
+
+  `subsystem` is the provenance label only (see `KilnCMS.SystemActor`); the
+  grant is the same for every caller.
+  """
+  @spec system(atom()) :: KilnCMS.SystemActor.t() | term()
+  def system(subsystem) do
+    case Application.fetch_env(:kiln_cms, @system_actor_override) do
+      {:ok, actor} -> actor
+      :error -> KilnCMS.SystemActor.new(subsystem)
+    end
+  end
+
+  @doc false
+  # Test seam (#1659): run `fun` with `system/1` answering `actor`, so a test
+  # can take the grant away and prove each funnel read fails CLOSED rather than
+  # filtering to `[]` — which, on the delivery path, would be cached as "no
+  # funnel targets" and silently stop every funnel experiment converting.
+  # Application env rather than the process dictionary, so the override
+  # reaches the cache's courier process — the production shape — and is
+  # therefore VM-global: only an `async: false` test may call it. Code that
+  # could call it could equally pass any actor it liked.
+  @spec with_actor(term(), (-> result)) :: result when result: term()
+  def with_actor(actor, fun) do
+    Application.put_env(:kiln_cms, @system_actor_override, actor)
+
+    try do
+      fun.()
+    after
+      Application.delete_env(:kiln_cms, @system_actor_override)
+    end
+  end
+
   @doc """
   Whether referrer attribution (#619) is enabled — off by default. Read with
   `Application.get_env/3`, never `compile_env`, so an operator can flip
