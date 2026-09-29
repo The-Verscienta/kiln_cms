@@ -171,13 +171,12 @@ defmodule KilnCMS.Search.Meilisearch.SiteInstance do
   end
 
   # The row, `nil` when the site has none, or `:error` when it could not be read.
-  #
-  # `authorize?: false` — a system read, and the bypass is safe here for the
-  # reasons `KilnCMS.Mail.SiteRelay` gives: the jobs asking have no actor (the
-  # read policy is org-admin, and an indexing job is nobody), the read is
-  # tenant-scoped to the one site being indexed or searched, and the row never
-  # leaves this module except as that site's own connection.
   defp read(org_id) do
+    # authorize?: false — a system read, and the bypass is safe here for the
+    # reasons `KilnCMS.Mail.SiteRelay` gives: the jobs asking have no actor (the
+    # read policy is org-admin, and an indexing job is nobody), the read is
+    # tenant-scoped to the one site being indexed or searched, and the row never
+    # leaves this module except as that site's own connection.
     case CMS.list_site_meilisearch(tenant: org_id, authorize?: false) do
       {:ok, [row | _rest]} -> {:ok, row}
       {:ok, []} -> {:ok, nil}

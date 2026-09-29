@@ -83,10 +83,10 @@ defmodule KilnCMS.Accounts.AdminPasswordReset do
       invalid(:user_id, "the reset email could not be queued — check the mail settings")
   end
 
-  # Read with `authorize?: false` after the action's own admin-only policy has
-  # run: `User`'s read policy is self-only for non-admins, and the actor here is
-  # by definition someone else's administrator.
   defp fetch(user_id) do
+    # authorize?: false — read only after the action's own admin-only policy
+    # has run: `User`'s read policy is self-only for non-admins, and the actor
+    # here is by definition someone else's administrator.
     case KilnCMS.Accounts.get_user(user_id, authorize?: false, not_found_error?: false) do
       {:ok, %User{} = user} -> {:ok, user}
       _ -> invalid(:user_id, "no account with that id")

@@ -211,7 +211,7 @@ defmodule KilnCMS.Mail do
     if ids == [] do
       %{}
     else
-      # `authorize?: false`: a system read, scoped to the site by `tenant:`,
+      # authorize?: false — a system read, scoped to the site by `tenant:`,
       # that turns ids into domains only — the caller is the site's own admin
       # page, whose mount guard is the org-admin tier.
       KilnCMS.Newsletter.list_subscribers!(

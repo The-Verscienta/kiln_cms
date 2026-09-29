@@ -103,7 +103,7 @@ defmodule KilnCMS.I18n.Fallback do
     KilnCMS.OrgSettings.resolve(org_id,
       cache_key: KilnCMS.Cache.locale_fallbacks_key(org_id),
       ttl: @ttl,
-      # `authorize?: false` bypass, as every delivery resolver's is: the row
+      # authorize?: false — as every delivery resolver's is: the row
       # is admin-only by policy and delivery has no actor. Safe because the
       # read is pinned to this one tenant and only the resolved chains — no
       # more than `GET /api/locales` publishes — ever leave this module.

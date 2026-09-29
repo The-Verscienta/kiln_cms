@@ -88,7 +88,7 @@ defmodule KilnCMSWeb.SocketReauth do
   def reload_actor(nil), do: {:ok, nil}
 
   def reload_actor(%{id: id, __metadata__: metadata}) do
-    # `authorize?: false`: the reload is a system read of the connect-time
+    # authorize?: false — the reload is a system read of the connect-time
     # actor's own row by an id that came from a verified token, not the client;
     # `User`'s read policy is admin-or-self, and the fresh struct is then run
     # through the real policies by every caller.

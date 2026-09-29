@@ -145,18 +145,19 @@ defmodule KilnCMSWeb.FeedController do
     %{locale: conn.assigns[:path_locale] || KilnCMS.I18n.default_locale(), taxonomy: nil}
   end
 
-  # `authorize?: false` on both lookups: a feed reader has no actor, and taxonomy
-  # reads are world-readable anyway (`Taxonomy`'s read policy is `authorize_if
-  # always()`); `tenant:` keeps the slug lookup inside this site.
   defp taxonomy(org_id, :category, slug) do
+    # authorize?: false — a feed reader has no actor, and taxonomy reads are
+    # world-readable anyway (`Taxonomy`'s read policy is `authorize_if
+    # always()`); `tenant:` keeps the slug lookup inside this site.
     case KilnCMS.CMS.get_category_by_slug(slug, authorize?: false, tenant: org_id) do
       {:ok, category} -> category
       _other -> nil
     end
   end
 
-  # Same bypass as the category clause above.
   defp taxonomy(org_id, :tag, slug) do
+    # authorize?: false — a feed reader has no actor, and tag reads are
+    # world-readable anyway; `tenant:` keeps the slug lookup inside this site.
     case KilnCMS.CMS.get_tag_by_slug(slug, authorize?: false, tenant: org_id) do
       {:ok, tag} -> tag
       _other -> nil

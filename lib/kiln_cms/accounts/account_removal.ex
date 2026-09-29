@@ -181,10 +181,10 @@ defmodule KilnCMS.Accounts.AccountRemoval do
     %{counts: counts, unreadable: unreadable}
   end
 
-  # `authorize?: false`: the same reasoning as `authored_batch/4` below. This is
-  # the admin's confirmation count across every org the person authored in, which
-  # no actor's own scope covers, and it writes nothing.
   defp count_authored(ct, user_id, org_id) do
+    # authorize?: false — the same reasoning as `authored_batch/4` below. This is
+    # the admin's confirmation count across every org the person authored in, which
+    # no actor's own scope covers, and it writes nothing.
     {:ok,
      ContentTypes.count!(ct.type,
        authorize?: false,
@@ -283,11 +283,11 @@ defmodule KilnCMS.Accounts.AccountRemoval do
     end
   end
 
-  # `authorize?: false`: the caller is already an admin by the time this runs
-  # (the console gates on it and `:anonymize` re-checks), and the read spans
-  # every org — which no actor's own scope covers. The *writes* below keep the
-  # actor, so each one is still authorized and still attributed.
   defp authored_batch(ct, user_id, org_id, cursor) do
+    # authorize?: false — the caller is already an admin by the time this runs
+    # (the console gates on it and `:anonymize` re-checks), and the read spans
+    # every org — which no actor's own scope covers. The *writes* below keep the
+    # actor, so each one is still authorized and still attributed.
     {:ok,
      ContentTypes.list!(ct.type,
        authorize?: false,

@@ -34,7 +34,7 @@ defmodule KilnCMS.CMS.Changes.DropVapidSubscriptions do
   # is right everywhere else. This runs only inside the admin-authorized
   # `:rotate`/`:destroy` of this site's own key.
   defp drop(org_id, key) do
-    # `authorize?: false`: `bound_to_key` is system-only by policy, and its own
+    # authorize?: false — `bound_to_key` is system-only by policy, and its own
     # filter (this org, this key) is the whole grant.
     subscriptions = Accounts.push_subscriptions_bound_to_key!(org_id, key, authorize?: false)
 

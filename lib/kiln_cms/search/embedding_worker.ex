@@ -42,7 +42,7 @@ defmodule KilnCMS.Search.EmbeddingWorker do
   end
 
   defp embed(resource, org_id, id) do
-    # Bypass kept (#1402). Threading the system actor here would mean a
+    # authorize?: false — kept (#1402). Threading the system actor here would mean a
     # `Checks.SystemActor` clause on the `Content` READ policy — a standing
     # grant over every document on every site, drafts included, to every system
     # caller. That is wider than this one call, which is bounded to a single id

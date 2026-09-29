@@ -45,18 +45,19 @@ defmodule KilnCMSWeb.PreviewController do
   defp same_site(org_id, %{id: org_id}), do: :ok
   defp same_site(_org_id, _org), do: :error
 
-  # `authorize?: false` (moduledoc): the caller is anonymous — no actor — and the
-  # grant is the `Phoenix.Token` signature `PreviewToken.verify/1` checked above,
-  # which binds the read to the ONE record id an editor minted it for. The
-  # token's `org_id` is the tenant (#1309): content is org-scoped, so a
-  # tenant-less read would be refused under strict tenancy, and `same_site/2`
-  # has already pinned it to the serving org.
   defp fetch(type, id, org_id) do
     case ContentTypes.get(type, org_id) do
       nil ->
         {:error, :unknown_type}
 
       ct ->
+        # authorize?: false — (moduledoc) the caller is anonymous, with no
+        # actor, and the grant is the `Phoenix.Token` signature
+        # `PreviewToken.verify/1` checked above, which binds the read to the
+        # ONE record id an editor minted it for. The token's `org_id` is the
+        # tenant (#1309): content is org-scoped, so a tenant-less read would be
+        # refused under strict tenancy, and `same_site/2` has already pinned it
+        # to the serving org.
         ContentTypes.get_record(ct, id,
           authorize?: false,
           tenant: org_id,

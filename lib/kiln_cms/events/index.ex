@@ -170,11 +170,11 @@ defmodule KilnCMS.Events.Index do
   defp changed?(%DateTime{}, nil), do: true
 
   # `:set_next_occurrence`, never `:update` — see that action's comment in
-  # `KilnCMS.CMS.Content`. `authorize?: false`: both callers are system passes
-  # that must maintain the value for drafts and gated events too, because a
-  # value that is only correct for public rows is wrong the moment one is
-  # published.
+  # `KilnCMS.CMS.Content`.
   defp write(record, org_id, next) do
+    # authorize?: false — both callers are system passes that must maintain the
+    # value for drafts and gated events too, because a value that is only
+    # correct for public rows is wrong the moment one is published.
     record
     |> Ash.Changeset.for_update(:set_next_occurrence, %{next_occurrence_at: next},
       authorize?: false,

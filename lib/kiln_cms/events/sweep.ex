@@ -131,10 +131,10 @@ defmodule KilnCMS.Events.Sweep do
     end
   end
 
-  # `authorize?: false`, because this is a system job that must see drafts and
-  # audience-gated events too — a value that is only correct for public rows is
-  # wrong the moment one is published.
   defp stale(descriptor, org_id, anchor, batch) do
+    # authorize?: false — a system job that must see drafts and audience-gated
+    # events too: a value that is only correct for public rows is wrong the
+    # moment one is published.
     ContentTypes.list!(descriptor,
       authorize?: false,
       tenant: org_id,

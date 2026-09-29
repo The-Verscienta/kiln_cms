@@ -39,15 +39,14 @@ defmodule KilnCMS.CMS.Redirects do
 
   # The target's current URL fields, only while it is still published. The
   # destination is its canonical path — a `path_alias` (#485) when set.
-  #
-  # `authorize?: false`, justified (#1402's content-read argument): the read
-  # filters to `state == :published` itself and selects only `slug` and
-  # `path_alias` — the target's public address, which the 301 discloses
-  # anyway. Reading it as the anonymous visitor would drop the redirect for
-  # audience-gated or locked content, whose own page then answers the visitor
-  # with its gate; a `SystemActor` content-read grant would hand every system
-  # caller the whole corpus, drafts included.
   defp published_target(ct, target_id, org_id) do
+    # authorize?: false — #1402's content-read argument: the read filters to
+    # `state == :published` itself and selects only `slug` and `path_alias` —
+    # the target's public address, which the 301 discloses anyway. Reading it
+    # as the anonymous visitor would drop the redirect for audience-gated or
+    # locked content, whose own page then answers the visitor with its gate; a
+    # `SystemActor` content-read grant would hand every system caller the
+    # whole corpus, drafts included.
     Slugs.storage_resource(ct)
     |> Ash.Query.filter(id == ^target_id and state == :published)
     |> Ash.Query.select([:slug, :path_alias])

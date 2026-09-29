@@ -31,7 +31,7 @@ defmodule KilnCMS.Accounts.Changes.EvictRoleMembers do
   end
 
   defp evict_members(role_id, reason) do
-    # `authorize?: false`: the eviction must reach EVERY member of the role,
+    # authorize?: false — the eviction must reach EVERY member of the role,
     # whoever narrowed it. A policy-filtered read (the editing admin's, or a
     # system actor's) that missed a row would leave that member's socket on
     # the old grant with nothing logged — the fail-open this change exists to

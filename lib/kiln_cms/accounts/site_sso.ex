@@ -255,10 +255,10 @@ defmodule KilnCMS.Accounts.SiteSso do
     end
   end
 
-  # `authorize?: false` — a system read on the sign-in path, where there is no
-  # actor yet. Safe: the tenant is the request's own org, and nothing read here
-  # is shown to the visitor except the button label.
   defp read_provider(org_id) do
+    # authorize?: false — a system read on the sign-in path, where there is no
+    # actor yet. Safe: the tenant is the request's own org, and nothing read here
+    # is shown to the visitor except the button label.
     case CMS.list_site_sso_provider(tenant: org_id, authorize?: false) do
       {:ok, [row | _rest]} ->
         {:ok, row}

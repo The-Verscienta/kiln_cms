@@ -97,7 +97,8 @@ defmodule KilnCMSWeb.ProvenanceController do
     type = Engine.document_type(record)
 
     # `record.org_id` is the request tenant (resolved through Delivery.published/4).
-    # `authorize?: false`: no actor on this public endpoint, and the artifact's
+    #
+    # authorize?: false — no actor on this public endpoint, and the artifact's
     # read policy (`DocumentReadable`) re-asks a question already answered —
     # `record` came back from the published, public-audience delivery read, so
     # this is the artifact of a document the anonymous reader may see; `tenant:`

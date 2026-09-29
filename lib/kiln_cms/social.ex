@@ -164,7 +164,7 @@ defmodule KilnCMS.Social do
   """
   @spec canonical_url(struct()) :: String.t()
   def canonical_url(record) do
-    # `authorize?: false` kept (#1659): one organization by primary key, for
+    # authorize?: false — kept (#1659): one organization by primary key, for
     # its public base URL. Admitting the system actor on `Organization`'s read
     # policy would be a standing read of every site on the deployment, far
     # wider than this lookup of the record's own org.

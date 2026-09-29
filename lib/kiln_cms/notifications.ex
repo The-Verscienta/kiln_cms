@@ -398,7 +398,7 @@ defmodule KilnCMS.Notifications do
       thread_participants(comment)
       |> Enum.map(& &1.author_id)
 
-    # `authorize?: false`: an `Accounts.User` read (self-only policy) — a system
+    # authorize?: false — an `Accounts.User` read (self-only policy) — a system
     # grant there would cover every account on the deployment, for one name.
     author = record |> Ash.load!(:author, authorize?: false) |> Map.get(:author)
 
@@ -427,8 +427,9 @@ defmodule KilnCMS.Notifications do
   defp author_id(%{id: id}), do: id
   defp author_id(_author), do: nil
 
-  # `authorize?: false`: an `Accounts.User` read — see `thread_audience/2`.
   defp user_by_id(id) do
+    # authorize?: false — an `Accounts.User` read (self-only policy): a system
+    # grant would cover every account on the deployment, for one by-id lookup.
     case Ash.get(User, id, authorize?: false) do
       {:ok, user} -> user
       _error -> nil
@@ -467,14 +468,15 @@ defmodule KilnCMS.Notifications do
   def mention_roster(org) do
     org_id = KilnCMS.Accounts.org_id(org)
 
-    # `authorize?: false` on the membership and user reads below: both
+    # authorize?: false — on this membership read and the user read below: both
     # policies are self-only, and a system grant on either would be a standing
     # read of the deployment's whole account graph — wider than this roster.
     members = KilnCMS.Accounts.list_memberships_for_org!(org_id, authorize?: false)
     member_ids = MapSet.new(members, & &1.user_id)
     assigned_ids = assigned_user_ids()
 
-    # `authorize?: false`: the user read — see the membership read above.
+    # authorize?: false — the user read for the roster: `User` reads are
+    # self-only, and a system grant would be a standing read of every account.
     User
     |> Ash.read!(authorize?: false)
     |> Enum.filter(fn user ->
@@ -495,8 +497,9 @@ defmodule KilnCMS.Notifications do
   # the later `member?/2`.
   defp assigned_user_ids, do: MapSet.new(assigned_ids())
 
-  # `authorize?: false`: a membership read — see `mention_roster/1`.
   defp assigned_ids do
+    # authorize?: false — a membership read for the mention roster: its policy
+    # is self-only, and a system grant would read the whole account graph.
     KilnCMS.Accounts.OrgMembership
     |> Ash.read!(authorize?: false)
     |> Enum.map(& &1.user_id)
@@ -556,7 +559,8 @@ defmodule KilnCMS.Notifications do
   # Author-targeted events (`:published`, `:returned_to_draft`) load the author
   # and notify them unless they've muted that event for their account.
   defp notify_author(record, event, actor) do
-    # `authorize?: false`: an `Accounts.User` read — see `thread_audience/2`.
+    # authorize?: false — an `Accounts.User` read (self-only policy): a system
+    # grant would cover every account on the deployment, for one name.
     author = record |> Ash.load!(:author, authorize?: false) |> Map.get(:author)
 
     if author && wants?(author, event) do

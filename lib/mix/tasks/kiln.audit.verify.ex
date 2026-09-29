@@ -118,7 +118,7 @@ defmodule Mix.Tasks.Kiln.Audit.Verify do
           # dynamic tier shares the :entry storage resource, which is also what
           # the publish hook keys anchors on.
           #
-          # `authorize?: false`: an operator sweep over every document, drafts
+          # authorize?: false — an operator sweep over every document, drafts
           # included, which no system-actor grant should give system code
           # standing access to (#1402's content-read argument). It must also
           # not be refusable: a refused read would filter to `[]`, the sweep

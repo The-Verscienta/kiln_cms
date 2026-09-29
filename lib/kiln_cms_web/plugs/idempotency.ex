@@ -139,7 +139,7 @@ defmodule KilnCMSWeb.Plugs.Idempotency do
   end
 
   defp existing(scope, key, fingerprint, tenant, attempt) do
-    # authorize?: false — see `claim/4`.
+    # authorize?: false — a system table with a forbid-all policy, as in `claim/4`.
     case Ash.read_one(
            Ash.Query.for_read(IdempotentRequest, :lookup, %{scope: scope, key: key}),
            authorize?: false,
@@ -162,7 +162,7 @@ defmodule KilnCMSWeb.Plugs.Idempotency do
   end
 
   defp reclaim(record, fingerprint, tenant) do
-    # authorize?: false — see `claim/4`.
+    # authorize?: false — a system table with a forbid-all policy, as in `claim/4`.
     record
     |> Ash.Changeset.for_update(:reclaim, %{fingerprint: fingerprint},
       authorize?: false,
@@ -195,7 +195,7 @@ defmodule KilnCMSWeb.Plugs.Idempotency do
             into: %{},
             do: {name, value}
 
-      # authorize?: false — see `claim/4`.
+      # authorize?: false — a system table with a forbid-all policy, as in `claim/4`.
       record
       |> Ash.Changeset.for_update(
         :complete,
@@ -206,7 +206,7 @@ defmodule KilnCMSWeb.Plugs.Idempotency do
       |> Ash.update()
       |> log_failure()
     else
-      # authorize?: false — see `claim/4`.
+      # authorize?: false — a system table with a forbid-all policy, as in `claim/4`.
       record |> Ash.destroy(authorize?: false, tenant: tenant) |> log_failure()
     end
 

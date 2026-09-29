@@ -82,7 +82,7 @@ defmodule KilnCMS.Notifications.TaskDigestWorker do
       authorize_with: :error,
       tenant: org_id
     )
-    # `authorize?: false`: the assignee is an `Accounts.User`, whose read policy
+    # authorize?: false — the assignee is an `Accounts.User`, whose read policy
     # is self-only; a system grant there would cover every account on the
     # deployment to learn the addresses these tasks already name.
     |> Ash.load!(:assignee, authorize?: false)

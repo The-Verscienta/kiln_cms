@@ -258,7 +258,7 @@ defmodule KilnCMS.Billing.Entitlements do
     if before == normalize(desired) do
       {:ok, user}
     else
-      # `authorize?: false`: `User.sync_billing_audiences` is `forbid_if always()`
+      # authorize?: false — `User.sync_billing_audiences` is `forbid_if always()`
       # and its change module refuses any actor-carrying call (a system actor
       # included), so no authorized path can grant an audience; this recompute
       # is the one writer.
@@ -270,7 +270,7 @@ defmodule KilnCMS.Billing.Entitlements do
   # can move per-org later. Rows are created when missing: a reader who pays on a
   # site they have no membership row for still needs one to carry the audience.
   defp write_org_memberships(user, managed, by_org) do
-    # `authorize?: false`: `OrgMembership` reads are self-only, and a system
+    # authorize?: false — `OrgMembership` reads are self-only, and a system
     # grant would be a standing read of every account's memberships (#1402).
     # A bypass cannot be refused, so this cannot come back `[]` for want of a
     # grant — `[]` here really means "no memberships" (the legacy branch below).
@@ -303,7 +303,7 @@ defmodule KilnCMS.Billing.Entitlements do
   # default org.
   defp affiliate_legacy(user, memberships, by_org) do
     if LegacyAffiliation.unaffiliated?(memberships) and map_size(by_org) > 0 do
-      # `authorize?: false`: the same system write as every other one in this
+      # authorize?: false — the same system write as every other one in this
       # module (see the moduledoc), and it grants on the default org what the
       # account held there before it had a membership.
       with {:ok, membership} <-
@@ -320,7 +320,7 @@ defmodule KilnCMS.Billing.Entitlements do
     desired = normalize(Enum.reject(current, &(&1 in managed)) ++ entitled)
 
     if current != desired do
-      # `authorize?: false`: an `OrgMembership` write is an org admin's; a system
+      # authorize?: false — an `OrgMembership` write is an org admin's; a system
       # grant would be a standing write over every account's role and audiences
       # on every org (#1402). Only the audiences column is written, and only the
       # billing-managed part of it changes.
@@ -345,7 +345,7 @@ defmodule KilnCMS.Billing.Entitlements do
     by_org
     |> Enum.reject(fn {org_id, _audiences} -> MapSet.member?(existing, org_id) end)
     |> each_ok(fn {org_id, audiences} ->
-      # `authorize?: false`, same reason as `sync_existing/3`: always a
+      # authorize?: false — same reason as `sync_existing/3`: always a
       # `:viewer` row for `user_id`, and an upsert that changes nothing on
       # conflict, so it can never overwrite a role.
       case Accounts.create_org_membership(
@@ -368,7 +368,7 @@ defmodule KilnCMS.Billing.Entitlements do
   end
 
   defp fetch_user(user_id) do
-    # `authorize?: false`: `User` reads are self-only, and a system grant would be
+    # authorize?: false — `User` reads are self-only, and a system grant would be
     # a standing read of every account on the deployment (#1402). A bypass
     # cannot be refused, so `nil` really is "no such user" (and aborts).
     case Accounts.get_user(user_id, authorize?: false, not_found_error?: false) do

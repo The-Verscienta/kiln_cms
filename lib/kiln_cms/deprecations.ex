@@ -100,7 +100,7 @@ defmodule KilnCMS.Deprecations do
         }
   def report do
     %{
-      # `authorize?: false`: operator tooling, run from a shell or `bin/kiln_cms
+      # authorize?: false — operator tooling, run from a shell or `bin/kiln_cms
       # eval` with no request and no actor. The action's policy admits only a
       # platform admin, and nothing here is reachable from a web surface.
       legacy_audience_accounts: Accounts.list_legacy_audience_accounts!(authorize?: false),
@@ -147,12 +147,13 @@ defmodule KilnCMS.Deprecations do
           failed: [{Accounts.User.t(), term()}]
         }
   def migrate_legacy_audiences do
-    # `authorize?: false` on both calls: the same operator tooling as
-    # `report/0`, with no actor. The membership written grants exactly what
-    # the fallback granted on the default org, so it widens nothing.
+    # authorize?: false — the same operator tooling as `report/0`, with no
+    # actor; the list only feeds the membership write below.
     Accounts.list_legacy_audience_accounts!(authorize?: false)
     |> Enum.reduce(%{migrated: [], failed: []}, fn user, acc ->
-      # `authorize?: false`: see the comment above the read.
+      # authorize?: false — operator tooling with no actor; the membership
+      # written grants exactly what the fallback granted on the default org,
+      # so it widens nothing.
       case LegacyAffiliation.ensure_default_membership(user, authorize?: false) do
         {:ok, _membership} -> %{acc | migrated: [user | acc.migrated]}
         {:error, error} -> %{acc | failed: [{user, error} | acc.failed]}

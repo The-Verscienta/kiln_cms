@@ -43,15 +43,17 @@ defmodule KilnCMS.Search.BlockEmbeddingWorker do
   # through `ContentTypes.get_record/3`. Sibling of the same gap in
   # `MeilisearchWorker` (#1012), enqueued from the same `FireWorker` call.
   #
-  # All three keep `authorize?: false` (#1402), like `MeilisearchWorker.load/3`:
+  # All three bypass the policies (#1402), like `MeilisearchWorker.load/3`:
   # a `Checks.SystemActor` clause on the `Content` read policy would be a
   # standing corpus-wide grant, where this is one id under one tenant, handed
   # here by the fire path. What the indexer then WRITES is actor-authorized —
   # see `KilnCMS.Search.BlockIndexer`.
+  #
+  # authorize?: false — one id under one tenant, from the fire path; no system content grant.
   defp load(org_id, "page", id), do: CMS.get_page(id, authorize?: false, tenant: org_id)
-  # (bypass: as above)
+  # authorize?: false — one id under one tenant, from the fire path; no system content grant.
   defp load(org_id, "post", id), do: CMS.get_post(id, authorize?: false, tenant: org_id)
-  # (bypass: as above)
+  # authorize?: false — one id under one tenant, from the fire path; no system content grant.
   defp load(org_id, "entry", id), do: CMS.get_entry(id, authorize?: false, tenant: org_id)
   defp load(_org_id, _type, _id), do: :error
 

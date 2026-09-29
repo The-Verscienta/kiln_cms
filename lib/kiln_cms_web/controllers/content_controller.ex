@@ -67,7 +67,7 @@ defmodule KilnCMSWeb.ContentController do
     audiences = reader_audiences(conn)
     unlocks = ContentLock.grants(conn)
 
-    # Delivery bypass (moduledoc): `:public_by_slug` filters published + audience
+    # authorize?: false — delivery (moduledoc): `:public_by_slug` filters published + audience
     # + unlock itself; `tenant:` scopes it to this site.
     fetch =
       &CMS.get_published_page_by_slug!(slug, &1, %{audiences: audiences, unlocks: unlocks},
@@ -105,7 +105,7 @@ defmodule KilnCMSWeb.ContentController do
     audiences = reader_audiences(conn)
     unlocks = ContentLock.grants(conn)
 
-    # Delivery bypass (moduledoc): `:public_by_slug` filters published + audience
+    # authorize?: false — delivery (moduledoc): `:public_by_slug` filters published + audience
     # + unlock itself; `tenant:` scopes it to this site.
     fetch =
       &CMS.get_published_post_by_slug!(slug, &1, %{audiences: audiences, unlocks: unlocks},
@@ -135,7 +135,7 @@ defmodule KilnCMSWeb.ContentController do
     unlocks = ContentLock.grants(conn)
     ct = ContentTypes.get_by_path(type, org_id)
 
-    # Delivery bypass (moduledoc): the type's `:public_by_slug` filters
+    # authorize?: false — delivery (moduledoc): the type's `:public_by_slug` filters
     # published + audience + unlock itself; `tenant:` scopes it to this site.
     with ct when not is_nil(ct) <- ct,
          fetch =
@@ -324,7 +324,7 @@ defmodule KilnCMSWeb.ContentController do
   defp locked_record(conn, path, ct, locale) do
     slug = path |> String.split("/") |> List.last()
 
-    # Delivery bypass (moduledoc): `:locked_by_slug` returns only a published,
+    # authorize?: false — delivery (moduledoc): `:locked_by_slug` returns only a published,
     # in-audience, passphrase-locked record — the interstitial's inputs, never
     # the body — and `tenant:` scopes it to this site.
     fetch = fn loc ->
@@ -398,7 +398,7 @@ defmodule KilnCMSWeb.ContentController do
     locale = locale(conn)
     org_id = current_org_id(conn)
 
-    # Delivery bypass (moduledoc): `:teaser_by_slug` selects only the teaser
+    # authorize?: false — delivery (moduledoc): `:teaser_by_slug` selects only the teaser
     # fields of a published, audience-gated record (the marketing surface for a
     # reader outside the audience); `tenant:` scopes it to this site.
     fetch = fn loc ->
@@ -539,7 +539,7 @@ defmodule KilnCMSWeb.ContentController do
     # No `count: true` — only `more?` is used, and a count adds a full
     # COUNT(*) over published posts to every request.
     #
-    # Delivery bypass (moduledoc): `:published` filters published + unlocked
+    # authorize?: false — delivery (moduledoc): `:published` filters published + unlocked
     # itself (audience-gated posts are listed on purpose, badged as such);
     # `tenant:` scopes it to this site.
     %Ash.Page.Offset{results: posts, more?: more?} =
@@ -1063,10 +1063,11 @@ defmodule KilnCMSWeb.ContentController do
   # hreflang/locale links never point at another org's content. Best-effort: a
   # content type without a translations interface simply yields none.
   #
-  # Delivery bypass (moduledoc): `:published_translations` filters published +
-  # audience + unlock itself (no unlocks are passed, so a locked variant is
-  # simply not listed), and `tenant:` scopes it to this site.
   defp translations(ct, slug, org_id, audiences) do
+    # authorize?: false — delivery (moduledoc): `:published_translations`
+    # filters published + audience + unlock itself (no unlocks are passed, so
+    # a locked variant is simply not listed), and `tenant:` scopes it to this
+    # site.
     ContentTypes.list_translations(ct.type, slug,
       audiences: audiences,
       authorize?: false,
@@ -1204,10 +1205,9 @@ defmodule KilnCMSWeb.ContentController do
         %{}
 
       ids ->
-        # Tenant-scoped so a page can only enrich media from its own site (#336);
-        # `authorize?: false` is the delivery bypass (moduledoc), so the tenant
-        # is the guard — and the ids come from blocks of a record delivery
-        # already resolved as readable.
+        # authorize?: false — delivery (moduledoc), so the tenant is the guard:
+        # a page can only enrich media from its own site (#336), and the ids
+        # come from blocks of a record delivery already resolved as readable.
         CMS.list_media_items!(
           authorize?: false,
           tenant: org_id,

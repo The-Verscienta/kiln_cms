@@ -103,7 +103,7 @@ defmodule KilnCMS.CMS.Changes.CoalesceAutosaveVersions do
         # `VersionSnapshot` is what will do the replaying.
         merged = KilnCMS.CMS.VersionSnapshot.merge(versions)
 
-        # `authorize?: false` for the write and the deletes, justified: version
+        # authorize?: false — for the write and the deletes: version
         # rows are the editorial history, and `VersionPolicies` refuses update
         # and destroy to EVERY actor, the system actor included. Admitting a
         # `SystemActor` there would be a standing grant to rewrite and delete
@@ -115,7 +115,9 @@ defmodule KilnCMS.CMS.Changes.CoalesceAutosaveVersions do
           tenant: record.org_id
         )
 
-        # `authorize?: false`: the same justification as the rewrite above.
+        # authorize?: false — as for the rewrite above: `VersionPolicies`
+        # refuses destroy to every actor, and these are only the superseded
+        # autosaves chosen above under the editor's own read.
         Enum.each(
           superseded,
           &Ash.destroy!(&1, action: :destroy, authorize?: false, tenant: record.org_id)

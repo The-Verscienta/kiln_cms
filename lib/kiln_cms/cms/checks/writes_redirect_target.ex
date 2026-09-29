@@ -51,13 +51,13 @@ defmodule KilnCMS.CMS.Checks.WritesRedirectTarget do
 
   def match?(_actor, _context, _opts), do: false
 
-  # System read (`authorize?: false`, the same bypass `Redirects.resolve/3`
-  # uses): the row is only looked up so its OWN policy can be asked, with the
-  # actor, on the next line. Reading it as the actor would turn "may not read
-  # this draft" into "may not delete its redirect", which is the same answer
-  # by a longer road — and a read filter on a `:read` action could hide a
-  # record the actor may perfectly well update.
   defp load_target(ct, target_id, org_id) do
+    # authorize?: false — the same bypass `Redirects.resolve/3` uses: the row
+    # is only looked up so its OWN policy can be asked, with the actor, on the
+    # next line. Reading it as the actor would turn "may not read this draft"
+    # into "may not delete its redirect", which is the same answer by a longer
+    # road — and a read filter on a `:read` action could hide a record the
+    # actor may perfectly well update.
     Slugs.storage_resource(ct)
     |> Ash.Query.filter(id == ^target_id)
     |> Ash.read_one!(authorize?: false, tenant: org_id)
