@@ -11,25 +11,37 @@ defmodule KilnCMS.CMS.Changes.CancelPendingReleaseItems do
 
   Runs in `after_action`, inside the archive's own transaction: the release
   moving to `:archived` and its items being freed are one write or neither.
+
+  Reads the pending items as the archiving editor (#1659) — archiving already
+  requires the editor grant `ReleaseItem` reads with — and marks them
+  cancelled as `KilnCMS.CMS.Bookkeeping.system/0`, since `:mark_cancelled` is
+  a `mark_*` write no person may reach. The read uses `authorize_with:
+  :error`: a refused read would filter to "nothing pending", archive the
+  release, and leave its items reserving their content forever.
   """
   use Ash.Resource.Change
 
   @impl true
-  def change(changeset, _opts, _context) do
+  def change(changeset, _opts, context) do
     Ash.Changeset.after_action(changeset, fn _changeset, release ->
-      case cancel_pending(release) do
+      case cancel_pending(release, context) do
         :ok -> {:ok, release}
         {:error, reason} -> {:error, reason}
       end
     end)
   end
 
-  defp cancel_pending(release) do
-    opts = [authorize?: false, tenant: release.org_id]
+  defp cancel_pending(release, context) do
+    read_opts =
+      context
+      |> Ash.Context.to_opts()
+      |> Keyword.merge(tenant: release.org_id, authorize_with: :error)
+
+    write_opts = [actor: KilnCMS.CMS.Bookkeeping.system(), tenant: release.org_id]
 
     with {:ok, items} <-
-           KilnCMS.CMS.list_release_items_with_status(release.id, :pending, opts) do
-      Enum.reduce_while(items, :ok, &cancel_one(&1, &2, opts))
+           KilnCMS.CMS.list_release_items_with_status(release.id, :pending, read_opts) do
+      Enum.reduce_while(items, :ok, &cancel_one(&1, &2, write_opts))
     end
   end
 

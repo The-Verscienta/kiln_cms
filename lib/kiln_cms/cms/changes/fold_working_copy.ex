@@ -62,6 +62,14 @@ defmodule KilnCMS.CMS.Changes.FoldWorkingCopy do
   # `FOR UPDATE`, so a `:save_working_copy` racing this transition waits behind
   # it and then fails its own `state == :published` filter, rather than landing
   # between this read and the UPDATE that follows it.
+  #
+  # `authorize?: false`, justified (#1402's content-read argument): this is the
+  # row the caller's own transition was already authorized to write, re-read
+  # under a lock for three of its own columns, and nothing read leaves the
+  # changeset. The transition's caller is often the AshOban scheduler
+  # (`:archive_scheduled`), which has no read grant on content, and a
+  # `SystemActor` content-read grant would hand every system caller the whole
+  # corpus, drafts included.
   defp current_working_copy(%{data: %{id: id, org_id: org_id}, resource: resource}) do
     resource
     |> Ash.Query.filter(id == ^id)

@@ -236,7 +236,10 @@ defmodule KilnCMS.Automation.RuleWorkerAuthorizationTest do
                )
     end
 
-    test "it may not complete anyone's task" do
+    # `:complete` IS admitted since #1659 — a publish completes the record's
+    # open tasks as `CMS.Bookkeeping.system/0`, and the check matches any
+    # system actor — so the line is now drawn at editing and reopening.
+    test "it may not edit or reopen anyone's task" do
       document = page()
       editor = user(:editor)
 
@@ -253,7 +256,12 @@ defmodule KilnCMS.Automation.RuleWorkerAuthorizationTest do
         )
 
       assert {:error, %Ash.Error.Forbidden{}} =
-               CMS.complete_task(task, actor: system(), tenant: org_id())
+               CMS.update_task(task, %{note: "rewritten"}, actor: system(), tenant: org_id())
+
+      done = CMS.complete_task!(task, actor: editor, tenant: org_id())
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.reopen_task(done, actor: system(), tenant: org_id())
     end
   end
 

@@ -261,6 +261,16 @@ defmodule KilnCMS.CMS.ReleaseItem do
     policy action([:add, :set_action, :cancel]) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
+
+    # Except `:mark_cancelled`, which the system actor may run (#1659):
+    # archiving an unshipped release frees its pending items
+    # (`Changes.CancelPendingReleaseItems`, as `KilnCMS.CMS.Bookkeeping.system/0`)
+    # — the archiving editor may not reach a `mark_*` write, by the design
+    # above. It sets the status alone; `prior_state` / `prior_version_id` are
+    # the go-live writes', and those stay the release worker's.
+    policy action(:mark_cancelled) do
+      authorize_if KilnCMS.Checks.SystemActor
+    end
   end
 
   # Multi-tenancy (epic #336): an item belongs to the same site as its release

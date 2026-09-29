@@ -9,6 +9,14 @@ defmodule KilnCMS.CMS.Changes.RecordSlugRedirect do
   Also drops any stale redirect occupying the record's *new* path: real
   content always wins over a redirect in delivery, but the row would
   resurface if the record moved on again.
+
+  Writes as `KilnCMS.CMS.Bookkeeping.system/0` (#1659), not as the editor:
+  redirects are admin-only to write, and the 301 is the rename's consequence,
+  not the editor's own edit. `Redirect` admits the system actor to `:create`
+  and `:destroy` only. The squatter lookup reads with `authorize_with: :error`:
+  a refusal must not read as "no redirect on the new path" and leave one
+  standing. A refused create raises, which fails the rename — a published URL
+  is never vacated without its 301.
   """
   use Ash.Resource.Change
 
@@ -40,7 +48,7 @@ defmodule KilnCMS.CMS.Changes.RecordSlugRedirect do
     with ct when not is_nil(ct) <- Slugs.descriptor_for_record(record) do
       old_path = Slugs.public_path_for(ct, data)
       new_path = Slugs.public_path_for(ct, record)
-      opts = [authorize?: false, tenant: Map.get(record, :org_id)]
+      opts = [actor: KilnCMS.CMS.Bookkeeping.system(), tenant: Map.get(record, :org_id)]
 
       if old_path != new_path do
         CMS.create_redirect!(
@@ -54,7 +62,7 @@ defmodule KilnCMS.CMS.Changes.RecordSlugRedirect do
         )
 
         # The new path is live content again — retire any redirect squatting on it.
-        [query: [filter: [path: new_path, locale: record.locale]]]
+        [query: [filter: [path: new_path, locale: record.locale]], authorize_with: :error]
         |> Keyword.merge(opts)
         |> CMS.list_redirects!()
         |> Enum.each(&CMS.destroy_redirect!(&1, opts))
