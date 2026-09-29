@@ -5357,7 +5357,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
         >
           <.live_file_input upload={@uploads.body_images} />
         </div>
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <%!-- Title and page actions share a row only from xl: below it the
+              actions wrap, and a wrapped second line started under the
+              title rather than under the other actions (#1679). --%>
+        <div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between xl:gap-4">
           <div class="min-w-0">
             <.link navigate={~p"/editor"} class="text-sm text-base-content/60 hover:underline">
               &larr; {gettext("All content")}
@@ -5367,41 +5370,26 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 gettext("Edit %{kind}", kind: @kind)}
             </h1>
           </div>
-          <div class="flex flex-wrap items-center gap-2">
-            <button type="button" phx-click="open_media_browser" class="btn btn-sm btn-default">
-              <.icon name="hero-photo" class="mr-1 size-4" />{gettext("Media library")}
-            </button>
+          <%!-- The page's secondary actions (#1679). Two groups: how to LOOK at
+                the document (Preview, side-by-side, Visual) keep their words;
+                the tools (media, share, duplicate) fold to icons below 2xl.
+                `max-2xl:sr-only` rather than `hidden` keeps each label as the
+                button's accessible name at every width — `hidden` would take
+                it out of the accessibility tree along with the pixels. --%>
+          <div
+            id="editor-page-actions"
+            class="flex flex-wrap items-center gap-2"
+            aria-label={gettext("Page actions")}
+            role="group"
+          >
             <.link
               href={~p"/editor/preview/#{@kind}/#{@record.id}"}
               target="_blank"
               rel="noopener noreferrer"
               class="btn btn-sm btn-default"
             >
-              {gettext("Preview")} &nearr;
+              <.icon name="hero-arrow-top-right-on-square" class="size-4" />{gettext("Preview")}
               <span class="sr-only">{gettext("(opens in a new tab)")}</span>
-            </.link>
-            <%!-- A link for someone WITHOUT an editor account: read-only, this
-                  one document, 15 minutes (`KilnCMS.CMS.PreviewToken`). Offered
-                  to whoever sees this draft as an editor — sharing it
-                  distributes what they can already read, so it is a read
-                  grant, not `@may_write?`. --%>
-            <button
-              :if={@may_share_preview?}
-              id="share-preview-button"
-              type="button"
-              phx-hook="CopyPreviewLink"
-              class="btn btn-sm btn-default"
-            >
-              <.icon name="hero-link" class="mr-1 size-4" />{gettext("Copy preview link")}
-            </button>
-            <%!-- In-context (front-end) editing on Kiln's own rendered page
-                  (#354) — a primary mode, not a detour (Theme C). --%>
-            <.link
-              navigate={~p"/editor/site/#{@kind}/#{@record.slug}"}
-              class="btn btn-sm btn-default"
-              title={gettext("Edit on the rendered page")}
-            >
-              <.icon name="hero-pencil-square" class="mr-1 size-4" />{gettext("Visual")}
             </.link>
             <%!-- A toggle, so its label stays put and `aria-pressed` carries the
                   state — a label that flips between "Side by side" and "Focus"
@@ -5415,7 +5403,44 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 if(@preview_layout == :split, do: "btn-primary", else: "btn-default")
               ]}
             >
-              <.icon name="hero-view-columns" class="mr-1 size-4" />{gettext("Side-by-side preview")}
+              <.icon name="hero-view-columns" class="size-4" />{gettext("Side-by-side preview")}
+            </button>
+            <%!-- In-context (front-end) editing on Kiln's own rendered page
+                  (#354) — a primary mode, not a detour (Theme C). --%>
+            <.link
+              navigate={~p"/editor/site/#{@kind}/#{@record.slug}"}
+              class="btn btn-sm btn-default"
+              title={gettext("Edit on the rendered page")}
+            >
+              <.icon name="hero-pencil-square" class="size-4" />{gettext("Visual")}
+            </.link>
+
+            <span class="mx-0.5 hidden h-5 w-px bg-base-content/15 sm:block" aria-hidden="true"></span>
+
+            <button
+              type="button"
+              phx-click="open_media_browser"
+              class="btn btn-sm btn-ghost"
+              title={gettext("Media library")}
+            >
+              <.icon name="hero-photo" class="size-4" />
+              <span class="max-2xl:sr-only">{gettext("Media library")}</span>
+            </button>
+            <%!-- A link for someone WITHOUT an editor account: read-only, this
+                  one document, 15 minutes (`KilnCMS.CMS.PreviewToken`). Offered
+                  to whoever sees this draft as an editor — sharing it
+                  distributes what they can already read, so it is a read
+                  grant, not `@may_write?`. --%>
+            <button
+              :if={@may_share_preview?}
+              id="share-preview-button"
+              type="button"
+              phx-hook="CopyPreviewLink"
+              class="btn btn-sm btn-ghost"
+              title={gettext("Copy preview link")}
+            >
+              <.icon name="hero-link" class="size-4" />
+              <span class="max-2xl:sr-only">{gettext("Copy preview link")}</span>
             </button>
             <%!-- Duplicate into a new draft (#471). The copy is made from the
                   SAVED row, which is the part worth warning about — and the
@@ -5433,9 +5458,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
               type="button"
               phx-click="duplicate"
               data-confirm={duplicate_confirm(@save_state, @conflict)}
-              class="btn btn-sm btn-default"
+              class="btn btn-sm btn-ghost"
+              title={gettext("Duplicate")}
             >
-              <.icon name="hero-document-duplicate" class="mr-1 size-4" />{gettext("Duplicate")}
+              <.icon name="hero-document-duplicate" class="size-4" />
+              <span class="max-2xl:sr-only">{gettext("Duplicate")}</span>
             </button>
           </div>
         </div>
@@ -5667,7 +5694,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       data-block-id={bf[:id].value}
                       data-block-threads={discussion_state(@comments, @tasks, bf[:id].value)}
                       data-block-type={block_type_string(bf)}
-                      class="group rounded border border-base-content/15 p-3"
+                      class="group rounded-lg border border-base-content/15 p-3 transition-colors hover:border-base-content/25 focus-within:border-base-content/30"
                     >
                       <%!-- Carries the block's stable id into save/validate params so
                           it can be addressed by identity (columns render their own). --%>
@@ -5679,16 +5706,26 @@ defmodule KilnCMSWeb.ContentEditorLive do
                       />
                       <%!-- Block chrome: the type label stays put; the controls
                           (drag / move / duplicate / delete) fade in on hover, and
-                          on keyboard focus too so they stay reachable (#171). --%>
+                          on keyboard focus too so they stay reachable (#171):
+                          `group-focus-within` covers both Tab onto a faded
+                          control (the toolbar is inside the card) and working
+                          anywhere else in the card. They always show on a touch
+                          screen (`pointer-coarse`), which has no hover to reveal them
+                          (#1679). Kit ghost buttons, so each control draws the
+                          kit's focus ring. --%>
                       <div class="mb-2 flex items-center justify-between gap-3">
-                        <span class="rounded bg-base-200 px-2 py-1 text-sm font-medium">
+                        <span class="text-xs font-semibold text-base-content/70">
                           {dsl_label(block_type_string(bf))}
                         </span>
-                        <div class="flex items-center gap-0.5 text-base-content/60 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100">
+                        <div
+                          role="group"
+                          aria-label={gettext("Block actions")}
+                          class="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100"
+                        >
                           <span
                             data-drag-handle
                             aria-label={gettext("Drag to reorder")}
-                            class="cursor-grab active:cursor-grabbing rounded p-1 hover:bg-base-200 hover:text-base-content"
+                            class="btn btn-ghost btn-sm cursor-grab p-1 active:cursor-grabbing"
                           >
                             <.icon name="hero-bars-3" class="size-4" />
                           </span>
@@ -5699,7 +5736,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                             phx-value-dir="up"
                             disabled={bf.index == 0}
                             aria-label={gettext("Move block up")}
-                            class="rounded p-1 hover:bg-base-200 hover:text-base-content disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+                            class="btn btn-ghost btn-sm p-1"
                           >
                             <.icon name="hero-chevron-up" class="size-4" />
                           </button>
@@ -5710,7 +5747,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                             phx-value-dir="down"
                             disabled={bf.index == blocks_count(@form) - 1}
                             aria-label={gettext("Move block down")}
-                            class="rounded p-1 hover:bg-base-200 hover:text-base-content disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+                            class="btn btn-ghost btn-sm p-1"
                           >
                             <.icon name="hero-chevron-down" class="size-4" />
                           </button>
@@ -5719,7 +5756,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                             phx-click="duplicate_block"
                             phx-value-bid={bf[:id].value}
                             aria-label={gettext("Duplicate block")}
-                            class="rounded p-1 hover:bg-base-200 hover:text-base-content"
+                            class="btn btn-ghost btn-sm p-1"
                           >
                             <.icon name="hero-document-duplicate" class="size-4" />
                           </button>
@@ -5737,7 +5774,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                             phx-value-col={elem(@nest_target, 1)}
                             aria-label={gettext("Move into columns")}
                             title={gettext("Move into columns")}
-                            class="rounded p-1 hover:bg-base-200 hover:text-base-content"
+                            class="btn btn-ghost btn-sm p-1"
                           >
                             <.icon name="hero-arrow-right-end-on-rectangle" class="size-4" />
                           </button>
@@ -5747,7 +5784,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                             phx-value-bid={bf[:id].value}
                             data-confirm={gettext("Delete this block? This can't be undone.")}
                             aria-label={gettext("Remove block")}
-                            class="rounded p-1 hover:bg-base-200 hover:text-error"
+                            class="btn btn-ghost btn-sm p-1 hover:text-error"
                           >
                             <.icon name="hero-trash" class="size-4" />
                           </button>
@@ -5860,9 +5897,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                             phx-value-bid={bf[:id].value}
                             class="btn btn-sm btn-default"
                           >
-                            <.icon name="hero-photo" class="mr-1 size-4" />{gettext(
-                              "Choose from library"
-                            )}
+                            <.icon name="hero-photo" class="size-4" />{gettext("Choose from library")}
                           </button>
                         </div>
                         <.input
@@ -5897,7 +5932,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                             phx-value-bid={bf[:id].value}
                             class="btn btn-sm btn-default"
                           >
-                            <.icon name="hero-document-arrow-down" class="mr-1 size-4" />{gettext(
+                            <.icon name="hero-document-arrow-down" class="size-4" />{gettext(
                               "Choose from library"
                             )}
                           </button>

@@ -2398,6 +2398,11 @@ msgstr ""
 msgid "Block"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Block actions"
+msgstr ""
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Block actor"
@@ -5000,6 +5005,11 @@ msgstr ""
 msgid "Edit as"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Edit block %{n} on the page"
+msgstr ""
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Edit field %{label}"
@@ -6485,7 +6495,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/inspector_preview_component.ex
 #, elixir-autogen, elixir-format
-msgid "Hover a block and click Edit to change it on the page."
+msgid "Hover a block and click Edit, or Tab to it, to change it on the page."
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
@@ -9142,6 +9152,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Page %{page}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Page actions"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/content_controller.ex
