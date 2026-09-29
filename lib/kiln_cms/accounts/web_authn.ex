@@ -94,7 +94,9 @@ defmodule KilnCMS.Accounts.WebAuthn do
           public_key: :erlang.term_to_binary(credential.credential_public_key),
           sign_count: auth_data.sign_count
         },
-        # No policy runs, but the demo-mode refusal reads the actor
+        # `authorize?: false`: a ceremony-only write (see the domain) that
+        # this verified attestation is the grant for. No policy runs, but the
+        # demo-mode refusal reads the actor
         # (Validations.NotDemoSharedAccount), so the enrolling user rides along.
         actor: user,
         authorize?: false
@@ -169,6 +171,9 @@ defmodule KilnCMS.Accounts.WebAuthn do
   defp decode_cose_key(binary), do: Plug.Crypto.non_executable_binary_to_term(binary, [:safe])
 
   defp lookup(credential_id) do
+    # `authorize?: false`: a passkey sign-in, so no actor yet. An unknown
+    # credential fails closed (`:unknown_credential`), and a bypass cannot be
+    # refused into one.
     case Accounts.get_passkey_by_credential_id(credential_id,
            authorize?: false,
            not_found_error?: false
@@ -188,12 +193,16 @@ defmodule KilnCMS.Accounts.WebAuthn do
     end
   end
 
+  # `authorize?: false`: ceremony-only bookkeeping on the credential that just
+  # verified; there is no signed-in actor until `sign_in/1` below.
   defp bump_usage(passkey, sign_count) do
     Accounts.bump_passkey_usage(passkey, %{sign_count: sign_count}, authorize?: false)
   end
 
   # The dedicated sign-in read mints the session token (metadata) exactly like
   # the built-in strategies — see User.sign_in_with_passkey.
+  # `authorize?: false`: the sign-in itself — the verified assertion is the
+  # grant, and the action is system-only (see the domain).
   defp sign_in(user_id) do
     case Accounts.complete_passkey_sign_in(user_id, authorize?: false, not_found_error?: false) do
       {:ok, %KilnCMS.Accounts.User{} = user} -> {:ok, user}

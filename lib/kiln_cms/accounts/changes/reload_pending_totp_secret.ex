@@ -50,6 +50,10 @@ defmodule KilnCMS.Accounts.Changes.ReloadPendingTotpSecret do
 
   @impl true
   def change(changeset, _opts, _context) do
+    # `authorize?: false`: a re-read of the very row this action is already
+    # authorized to update, for one private column (`totp_pending_secret`)
+    # that no read policy should be widened to hand out. Nothing read here
+    # leaves the changeset.
     case KilnCMS.Accounts.get_user(changeset.data.id,
            authorize?: false,
            not_found_error?: false

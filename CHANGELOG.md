@@ -199,6 +199,10 @@ Every summary line below that was shortened links to its own entry there.
 - **The newsletter sign-up honeypot and public forms trip on the same rule.**
   ([#1657](https://github.com/The-Verscienta/kiln_cms/issues/1657) · [long form](docs/changelog/unreleased.md#newsletter-sign-up-honeypot-matches-forms))
 
+- **The accounts domain's system reads run under the policies.** The tenant
+  list behind every all-orgs sweep can no longer be refused into a silent no-op.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#accounts-system-reads-run-under-the-policies))
+
 - **Federation runs under the policies.** 24 more internal writes and reads run
   as scoped system actors; the replay check and follower ceiling fail closed.
   ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#federation-runs-under-the-policies))
