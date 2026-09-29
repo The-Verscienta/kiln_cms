@@ -8,6 +8,8 @@
 //   * an expanded toolbar with live active-state highlighting
 //   * a slash-command menu ("/") that both transforms the current text and, in
 //     the block editor, inserts a new Kiln block below (B3 — one "/" for both)
+//   * list detection: "•" or "1)" typed, bullets pasted as characters, and
+//     Word's list paragraphs become real lists (list_detect.js)
 //   * links: the Link mark StarterKit v2 leaves out, plus the ⌘K popover that
 //     authors them and one href gate mirroring the server's (#823)
 //
@@ -23,6 +25,7 @@ import TableRow from "@tiptap/extension-table-row"
 import TableHeader from "@tiptap/extension-table-header"
 import TableCell from "@tiptap/extension-table-cell"
 import {markdownPaste} from "./markdown_paste"
+import {ListDetect} from "./list_detect"
 
 // Tables (#475): StarterKit doesn't include them, so every editor mount adds
 // this set. Column resizing stays off in v1 — colwidths wouldn't survive the
@@ -774,7 +777,7 @@ export function mount(hook) {
   } else {
     buildEditor(
       hook,
-      [StarterKit, ...LINK_EXTENSIONS, ...TABLE_EXTENSIONS, ...bodyImageExtensions(hook)],
+      [StarterKit, ...LINK_EXTENSIONS, ...TABLE_EXTENSIONS, ListDetect, ...bodyImageExtensions(hook)],
       hook.el.dataset.content || ""
     )
   }
@@ -805,6 +808,7 @@ async function mountCollab(hook, {token, topic, fragment}) {
     StarterKit.configure({history: false}),
     ...LINK_EXTENSIONS,
     ...TABLE_EXTENSIONS,
+    ListDetect,
     ...bodyImageExtensions(hook),
     Collaboration.configure({document: handle.doc, field: fragment}),
     // Remote carets labeled with each collaborator's initials, in the same
@@ -840,7 +844,7 @@ export function mountInline(hook) {
 
   const editor = new Editor({
     element: hook.el,
-    extensions: [StarterKit, ...LINK_EXTENSIONS, ...TABLE_EXTENSIONS],
+    extensions: [StarterKit, ...LINK_EXTENSIONS, ...TABLE_EXTENSIONS, ListDetect],
     content: seed,
     editorProps: {
       attributes: {
