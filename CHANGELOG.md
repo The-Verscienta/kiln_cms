@@ -172,6 +172,11 @@ Every summary line below that was shortened links to its own entry there.
   as scoped system actors; the replay check and follower ceiling fail closed.
   ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#federation-runs-under-the-policies))
 
+- **Content experiments run under the policies.** Delivery, the start guards,
+  the results panel and `mix kiln.experiment` use a scoped system actor, and
+  every read behind an assignment or a result fails closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#content-experiments-run-under-the-policies))
+
 - **`mint` 1.11.0 closes three advisories: HTTP/1 response smuggling and two
   HTTP/2 client memory exhaustions (EEF-CVE-2026-91043 HIGH, -92103, -94194).**
   ([#1722](https://github.com/The-Verscienta/kiln_cms/pull/1722) · [long form](docs/changelog/unreleased.md#mint-1110-closes-three-advisories-http1-response-smuggling-and-two-http2))
