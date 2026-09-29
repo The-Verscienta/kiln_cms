@@ -501,10 +501,19 @@ defmodule KilnCMS.CMS.MediaItem do
     # moment the strip finished, and hand an audience-holder the unstripped
     # private blob before it did. Written into the policy, not a UI filter,
     # because the JSON:API and GraphQL surfaces read through this too.
+    #
+    # The system actor reads the plain `read`, and only that (#1659): the
+    # publish gate `Validations.MediaAltText` asks which of a document's media
+    # ids are marked decorative, and it also runs for `:publish_scheduled`,
+    # whose caller (the AshOban scheduler) has no actor. Through `library` or
+    # `search` it reads only what a stranger may; `trashed` stays admin-only
+    # (below), and it has no write.
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
       authorize_if expr(^ref(:audience) == :public and ^ref(:quarantined) == false)
       authorize_if KilnCMS.CMS.Checks.MediaInAudience
+      forbid_unless action(:read)
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
     # Uploading and editing media metadata is reserved for editors (and admins

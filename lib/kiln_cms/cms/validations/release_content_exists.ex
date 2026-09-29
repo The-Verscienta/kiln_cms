@@ -20,9 +20,10 @@ defmodule KilnCMS.CMS.Validations.ReleaseContentExists do
 
   alias Ash.Error.Changes.InvalidAttribute
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.Validations.Lookup
 
   @impl true
-  def validate(changeset, _opts, _context) do
+  def validate(changeset, _opts, context) do
     content_type = Ash.Changeset.get_attribute(changeset, :content_type)
     content_id = Ash.Changeset.get_attribute(changeset, :content_id)
 
@@ -30,14 +31,21 @@ defmodule KilnCMS.CMS.Validations.ReleaseContentExists do
          not ContentTypes.type?(content_type) do
       :ok
     else
-      check(content_type, content_id, changeset.tenant)
+      check(content_type, content_id, changeset.tenant, context)
     end
   end
 
-  defp check(content_type, content_id, tenant) do
-    case ContentTypes.get_record(content_type, content_id, authorize?: false, tenant: tenant) do
+  # As the caller (#1659): adding to a release needs `OrgEditor`, which reads
+  # every document in the org, draft or published — unless a type scope (#332)
+  # withholds the type, which `EditableReleaseContent` reports on its own. A record
+  # the caller may not read is refused like one that does not exist, never
+  # taken as existing; answering it as an ordinary invalid write (not a
+  # Forbidden) keeps a scoped editor's error what it was, and says nothing
+  # about whether the record is there.
+  defp check(content_type, content_id, tenant, context) do
+    case ContentTypes.get_record(content_type, content_id, Lookup.as_caller(context, tenant)) do
       {:ok, %{} = _record} -> :ok
-      _ -> refuse(content_id)
+      _missing_or_refused -> refuse(content_id)
     end
   rescue
     # The type resolved in the guard above, but the registry can still race a

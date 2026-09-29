@@ -147,6 +147,8 @@ ever be authorized by an explicit clause below.
 | `Search.BlockEmbedding` | `read`, `for_document`, `nearest`, `upsert`, `destroy` | The per-block semantic index. `Search.BlockIndexer` is the only writer it has ever had — rows are derived from the document's own block tree — and `BlockSearch` / `Search.Related` are its only readers. Whether a *caller* may see a hit is decided one tier up, when the matching document is hydrated under their own authorization. |
 | `Search.TagEmbedding` | `read`, `for_tags`, `nearest`, `upsert`, `destroy` | Same shape, for tag-name vectors: written by `TagEmbeddingWorker` and `Search.Related`, read by `Search.Related` only. |
 | `CMS.MediaDerivative` | all (`read`, `for_item`, `record`, `destroy`) | The bookkeeping row behind each cached on-the-fly image transform (`/media/:id/t/…`). `Media.Derivatives` is its only reader and writer: it counts an item's rows against the per-item budget, prunes the ones cut from a replaced original or around a moved focal point, and lists them for a purge. No person — admin included — reads or writes a row, and there is no API surface. Who may *see* a transform is decided on the `MediaItem`, by the transform controller's ordinary policy-checked read. |
+| `CMS.MediaItem` | `read` **only**, named inside the `action_type(:read)` policy | The alt-text publish gate (`Validations.MediaAltText`) asks which of a document's media ids are marked `decorative`. It also runs for `publish_scheduled`, whose caller is the AshOban scheduler with no actor, so it cannot read as the caller. Narrowed by `forbid_unless action(:read)`: through `library` or `search` it reads only what a stranger may (public, not quarantined), `trashed` stays admin-only, and it has no write. A refusal fails the publish closed ("alt text could not be checked"), never "not decorative". |
+| `CMS.Consent` | `for_content` **only** | The required-consent publish gate (`Validations.RequiredConsent`) lists one document's consents, for the same reason (the scheduler has no actor). It may not record a consent or list them all. A refusal fails the publish closed ("consents could not be checked"), never "nothing required". |
 | `Accounts.ThrottleCounter` | `prune` **only** | The shared auth budgets' counter table (#1619). The scheduled prune deletes closed windows; the actor is admitted so an operator or a test can run it by hand. The budgets are charged by `Accounts.ThrottleStore` in raw SQL before anyone is authenticated, so no action serves that path. `read` is forbidden to everyone, admin included: a count per hashed key is an oracle nobody needs. |
 | `Automation.Rule` | `read` **only** | `KilnCMS.Automation.RuleWorker` re-reads the rule it was enqueued for. Authoring a rule is still admin-only — the grant is narrowed to reads inside the existing `policy always()` with `forbid_unless action_type(:read)`. |
 | `Social.Account` | `read`, `enabled_for_provider` **only** | The announcer lists a provider's enabled accounts for a publish. Minting, editing or deleting the credentials for a site's public voice stays an admin act, narrowed the same way. |
@@ -251,6 +253,10 @@ managed through `manage_relationship` on the content resources).
 
 Media is world-readable because published content embeds it (featured images,
 inline assets).
+
+The alt-text publish gate (`Validations.MediaAltText`) reads the `decorative`
+flag as the **system actor**, through the plain `read` only (#1659); see
+[The system actor](#the-system-actor).
 
 The routes that serve a media item's **bytes** — `/media/:id/download`,
 `/media/:id/stream` and the on-the-fly transforms at `/media/:id/t/:ops` — all
@@ -717,6 +723,10 @@ write route exists on either surface.
 
 There is no `update` action — consent records are corrected by recording a new
 one, not by editing history.
+
+The publish gate (`Validations.RequiredConsent`) reads a document's consents as
+the **system actor**, through `for_content` only (#1659); see
+[The system actor](#the-system-actor).
 
 `HistoryAnchor` — every action (`read`, `for_content`, `create`) is admin-only;
 there is deliberately no destroy. The publish pipeline writes anchors as the

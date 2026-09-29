@@ -498,6 +498,26 @@ carries the reasoning.
   ceiling", and the follow is refused and logged. Honest senders see no
   difference unless the nonce store is down. (#1659)
 
+<a id="cms-validations-look-things-up-under-the-policies"></a>
+
+- **CMS validations look things up under the policies.** Eight CMS validations
+  checked a reference with `authorize?: false`: the release item checks
+  (release open, content exists, release size cap), tag group ownership, menu
+  item placement, slug-pattern tokens, and the required-consent and alt-text
+  publish gates. Six of them now read **as the caller**, with the actor and
+  authorization mode of the action they guard, so an editor's lookup runs
+  under the editor's policies and a trusted caller that bypassed the action
+  reads the same way. The two publish gates also run for the AshOban
+  scheduler, which has no actor, so they read as a scoped system actor, which
+  `CMS.Consent` admits to `for_content` only and `CMS.MediaItem` to the plain
+  `read` only. Every lookup passes `authorize_with: :error`, so a refusal is
+  an error, never a shorter answer. The release size cap used to count an
+  unreadable release as empty and let the add through. It now refuses. A
+  refused publish-gate read refuses the publish ("could not be checked"). The
+  task assignee check keeps its bypass with a justification: `User` is
+  readable only by its owner. The `mix kiln.authz.check` backlog drops by 11
+  sites and nine files. (#1659)
+
 <a id="mix-kilnmigrationscheck-gates-expand-contract"></a>
 
 - **`mix kiln.migrations.check` fails a PR whose new migration breaks the
