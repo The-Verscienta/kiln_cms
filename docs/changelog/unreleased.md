@@ -531,6 +531,35 @@ carries the reasoning.
   ceiling", and the follow is refused and logged. Honest senders see no
   difference unless the nonce store is down. (#1659)
 
+<a id="the-link-checker-runs-under-the-policies"></a>
+
+- **The link checker runs under the policies.** The outbound link sweep, the
+  per-URL check worker and the reader of the "check outbound links" switch
+  reached `ExternalLink` and `SiteLinkCheck` through `authorize?: false`. They
+  now run as `KilnCMS.Links.system/0`, a `KilnCMS.SystemActor`, and each
+  resource admits it by action name: the occurrence rows' `read`, `observe`,
+  `record_check` and `destroy`, and the switch's `read` and `record_sweep` (not
+  the settings form's `save`, so turning checking on stays an admin act). The
+  broken-link report at `/editor/links` now reads as the editor viewing it.
+
+  The reads that back a decision fail closed. The check worker's
+  failure-count read, which drives the retry-before-flagging counter, runs
+  with `authorize_with: :error`, and a refusal writes no verdict instead of
+  reading as "no rows". The sweep's due-URL read raises instead of queueing
+  nothing. A refused `observe` aborts the sweep before its prune, which would
+  otherwise delete every row along with its failure count. The switch read
+  logs a refusal and resolves it to "off". A viewer the report's policy
+  refuses gets an error, not an empty "nothing is broken" page.
+
+  Content reads stay `authorize?: false`, each with a written reason: the
+  sweep's scan of published documents, the internal checker's target-state
+  lookup, oEmbed's document reads and the related-links keyword search. A
+  system-actor grant on content would be a standing read over the whole
+  corpus, drafts included. oEmbed's `:set_oembed_metadata` write also stays:
+  it writes the block tree, and the content resource admits the system actor
+  only to actions that accept no `:blocks`. The `mix kiln.authz.check` backlog
+  drops by 16 sites and seven files. (#1659)
+
 <a id="mix-kilnmigrationscheck-gates-expand-contract"></a>
 
 - **`mix kiln.migrations.check` fails a PR whose new migration breaks the

@@ -15267,6 +15267,7 @@ msgstr "Vous devez être administrateur pour lancer une vérification."
 msgid "You need admin access to view that page."
 msgstr "Vous avez besoin d'un accès administrateur pour voir cette page."
 
+#: lib/kiln_cms_web/live/link_report_live.ex
 #: lib/kiln_cms_web/live_user_auth.ex
 #, elixir-autogen, elixir-format
 msgid "You need editor access to view that page."
