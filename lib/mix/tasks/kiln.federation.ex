@@ -194,6 +194,9 @@ defmodule Mix.Tasks.Kiln.Federation do
   # The org's slug is the natural handle — it is already the subdomain label,
   # so `@acme@acme.example.com` reads the way an operator expects.
   defp default_username(org_id) do
+    # authorize?: false — the organization registry (#1659): the operator is
+    # no member of the org, and the read yields only its slug for a default
+    # handle. Accounts' own system grants are the accounts batch's to add.
     case KilnCMS.Accounts.get_organization(org_id, authorize?: false) do
       {:ok, %{slug: slug}} when is_binary(slug) -> slug
       _other -> "site"

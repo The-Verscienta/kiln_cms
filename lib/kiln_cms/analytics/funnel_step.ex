@@ -55,6 +55,12 @@ defmodule KilnCMS.Analytics.FunnelStep do
 
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
+
+      # The system actor (#1659) loads a funnel's steps through the primary
+      # `read` (`load: :steps`) — not `:for_funnel`, the builder's own read.
+      # See `KilnCMS.Analytics.Funnel`'s read policy.
+      forbid_unless action(:read)
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
     policy action_type([:create, :update, :destroy]) do

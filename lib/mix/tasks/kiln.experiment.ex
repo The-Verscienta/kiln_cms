@@ -333,8 +333,16 @@ defmodule Mix.Tasks.Kiln.Experiment do
   # Without it the advertised slug path never worked at all — and on a
   # non-strict build it worked worse, listing every org's funnels so a slug
   # collision handed back another site's id.
+  #
+  # Runs as the operator (#1659) under `Funnel`'s system-actor read grant, and
+  # fails CLOSED: a refused read raises rather than answering `[]`, which would
+  # print "No funnel with id or slug ..." for a funnel that exists.
   defp funnel_id_from_slug(slug, org_id) do
-    KilnCMS.Analytics.list_funnels!(authorize?: false, tenant: org_id)
+    KilnCMS.Analytics.list_funnels!(
+      actor: KilnCMS.Analytics.system(:operator),
+      authorize_with: :error,
+      tenant: org_id
+    )
     |> Enum.find(&(&1.slug == slug))
     |> case do
       nil -> Mix.raise("No funnel with id or slug #{inspect(slug)} on this site.")

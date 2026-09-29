@@ -139,14 +139,14 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
     "lib/kiln_cms/compliance/report.ex" => 2,
     "lib/kiln_cms/compliance/settings.ex" => 1,
     "lib/kiln_cms/events.ex" => 2,
-    "lib/kiln_cms/experiments.ex" => 2,
+    "lib/kiln_cms/experiments.ex" => 1,
     "lib/kiln_cms/experiments/changes/refuse_when_running.ex" => 1,
     "lib/kiln_cms/experiments/changes/require_variants.ex" => 2,
     "lib/kiln_cms/experiments/delivery.ex" => 2,
     "lib/kiln_cms/experiments/health.ex" => 2,
     "lib/kiln_cms/experiments/promotion.ex" => 1,
     "lib/kiln_cms/experiments/results.ex" => 1,
-    "lib/kiln_cms/experiments/validations/goal_configured.ex" => 4,
+    "lib/kiln_cms/experiments/validations/goal_configured.ex" => 3,
     "lib/kiln_cms/federation/announce_worker.ex" => 1,
     "lib/kiln_cms/feeds.ex" => 1,
     "lib/kiln_cms/forms.ex" => 2,
@@ -188,13 +188,7 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
     "lib/kiln_cms/staging/scrub.ex" => 1,
     "lib/kiln_cms/webhooks.ex" => 2,
     "lib/kiln_cms/webhooks/delivery_worker.ex" => 5,
-    "lib/mix/tasks/kiln.audit.verify.ex" => 1,
-    "lib/mix/tasks/kiln.embed_all.ex" => 2,
-    "lib/mix/tasks/kiln.experiment.ex" => 7,
-    "lib/mix/tasks/kiln.federation.ex" => 1,
-    "lib/mix/tasks/kiln.gen.content.ex" => 2,
-    "lib/mix/tasks/kiln.search.eval.ex" => 1,
-    "lib/mix/tasks/kiln.search.measure_floor.ex" => 1
+    "lib/mix/tasks/kiln.experiment.ex" => 6
   }
   @window 12
   @justification ~r/authorize\?|bypass/i

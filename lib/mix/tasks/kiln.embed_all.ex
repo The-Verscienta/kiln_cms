@@ -52,6 +52,9 @@ defmodule Mix.Tasks.Kiln.EmbedAll do
   defp enqueue_tags do
     tags =
       Enum.flat_map(KilnCMS.Accounts.list_org_ids(), fn org_id ->
+        # authorize?: false — an operator backfill over every org's tags
+        # (#1659); the index must see all of them, and a standing system-actor
+        # grant on `Tag` for one mix task would outlive it. Ids only.
         CMS.list_tags!(authorize?: false, tenant: org_id, query: [select: [:id, :org_id]])
       end)
 
@@ -70,6 +73,9 @@ defmodule Mix.Tasks.Kiln.EmbedAll do
     # (+ the tenant, #336) are needed — don't drag blocks/search_text/embedding.
     records =
       Enum.flat_map(KilnCMS.Accounts.list_org_ids(), fn org_id ->
+        # authorize?: false — an operator backfill over every org's content
+        # (#1659): a CONTENT read under the #1402 argument, drafts included on
+        # purpose (they are searchable in the editor). Ids only.
         lister.(authorize?: false, tenant: org_id, query: [select: [:id, :org_id]])
       end)
 
