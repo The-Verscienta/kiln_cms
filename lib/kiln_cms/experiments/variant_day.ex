@@ -71,14 +71,14 @@ defmodule KilnCMS.Experiments.VariantDay do
   policies do
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :operator}
     end
 
     policy action_type([:create, :update, :destroy]) do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
 
       forbid_unless action([:record_impression, :record_conversion])
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :experiments}
     end
   end
 

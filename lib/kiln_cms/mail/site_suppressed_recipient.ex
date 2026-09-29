@@ -64,7 +64,7 @@ defmodule KilnCMS.Mail.SiteSuppressedRecipient do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
 
       forbid_unless action(:read)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :mail}
     end
 
     # Written only by the delivery pipeline (`KilnCMS.Mail.system/0`), on a
@@ -73,7 +73,7 @@ defmodule KilnCMS.Mail.SiteSuppressedRecipient do
     # without a bounce ever happening.
     policy action_type(:create) do
       forbid_unless action(:suppress)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :mail}
     end
   end
 

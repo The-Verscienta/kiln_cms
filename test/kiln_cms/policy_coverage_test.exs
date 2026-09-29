@@ -156,7 +156,7 @@ defmodule KilnCMS.PolicyCoverageTest do
            later PR adds beneath it, which is the thing the system actor exists
            to stop.
 
-           Put `authorize_if KilnCMS.Checks.SystemActor` inside the policy that
+           Put `authorize_if {KilnCMS.Checks.SystemActor, subsystem: ...}` inside the policy that
            should admit system code. When a broad policy written for people
            would otherwise AND-refuse, narrow the grant inside THAT policy
            rather than reaching for a bypass:
@@ -164,7 +164,7 @@ defmodule KilnCMS.PolicyCoverageTest do
                policy action_type([:create, :update]) do
                  authorize_if KilnCMS.CMS.Checks.EditableContentType
                  forbid_unless action([:reindex_search_text, :set_embedding])
-                 authorize_if KilnCMS.Checks.SystemActor
+                 authorize_if {KilnCMS.Checks.SystemActor, subsystem: :firing}
                end
 
            See `KilnCMS.Checks.SystemActor` and docs/policy-matrix.md.
@@ -198,6 +198,39 @@ defmodule KilnCMS.PolicyCoverageTest do
            The whole point of the system actor over `authorize?: false` is that
            what system code may do is written down. Add a row naming the
            resource, the actions that admit it, and why.
+           """
+  end
+
+  # #1747: each clause names the subsystems it admits, and the matrix row names
+  # them too. `KilnCMS.SystemActorScopeTest` checks action by action what the
+  # clauses actually admit; this is the cheap structural half, so a subsystem
+  # added to a clause (or a row) without the other fails even for an action
+  # nobody has listed yet.
+  test "each resource's system-actor clauses and its matrix rows name the same subsystems" do
+    rows = KilnCMS.SystemActorGrants.matrix_rows()
+
+    offenders =
+      for resource <- Enum.uniq(for {resource, _policy} <- system_actor_policies(), do: resource),
+          matrix_rows = Enum.filter(rows, fn {resources, _} -> resource in resources end),
+          matrix_rows != [],
+          in_code = KilnCMS.SystemActorGrants.named_subsystems(resource),
+          in_matrix =
+            MapSet.new(for {_, grants} <- matrix_rows, {_, subs} <- grants, sub <- subs, do: sub),
+          in_code != in_matrix do
+        "  * #{inspect(resource)}: clauses name #{inspect(Enum.sort(in_code))}, " <>
+          "the matrix #{inspect(Enum.sort(in_matrix))}"
+      end
+
+    assert offenders == [],
+           """
+           The subsystems a resource's `KilnCMS.Checks.SystemActor` clauses name
+           and the ones its "The system actor" row(s) in #{@matrix_path} name
+           differ:
+
+           #{Enum.join(offenders, "\n")}
+
+           Name each subsystem in both places, in the row's Subsystems column,
+           against the actions it is admitted to.
            """
   end
 

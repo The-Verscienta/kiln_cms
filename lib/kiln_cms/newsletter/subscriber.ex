@@ -170,7 +170,7 @@ defmodule KilnCMS.Newsletter.Subscriber do
     # admins; `KilnCMS.Newsletter.TierSync` is named here (#1402) instead of
     # reaching around the block.
     policy action(:link_member) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :newsletter}
       forbid_if always()
     end
 
@@ -204,7 +204,7 @@ defmodule KilnCMS.Newsletter.Subscriber do
       # Narrowed to those two rather than widened: managing a subscriber list
       # by hand stays an admin act.
       forbid_unless action([:read, :link_member])
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :newsletter}
     end
   end
 

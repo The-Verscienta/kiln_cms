@@ -52,13 +52,16 @@ defmodule KilnCMS.CMS.OrgSettings do
       `AshAdmin.Resource` extension and its `admin` block are emitted.
     * `:extensions` — further Ash extensions (`AshOban`, `AshPaperTrail.Resource`).
     * `:domain` — defaults to `KilnCMS.CMS`.
-    * `:system_actions` — actions `KilnCMS.SystemActor` may run (#1659).
-      Defaults to `[]`: no system grant. Each named action is admitted with
-      `forbid_unless action(...)` + `authorize_if KilnCMS.Checks.SystemActor`
-      *inside* the read and write policies below, never a bypass — Ash ANDs
-      policies, so a second policy in the resource body could not lift these
-      ones' refusal. A resource that sets it needs a row in
-      `docs/policy-matrix.md` ("The system actor").
+    * `:system_actions` — actions `KilnCMS.SystemActor` may run (#1659), each
+      with the subsystem(s) whose code calls it (#1747), as a keyword list:
+      `[read: [:federation, :operator], record_delivery: :federation]`.
+      Defaults to `[]`: no system grant. The named actions are admitted with
+      `forbid_unless action(...)` + `authorize_if {KilnCMS.Checks.SystemActor,
+      subsystem: ..., action: ...}` *inside* the read and write policies below,
+      never a bypass — Ash ANDs policies, so a second policy in the resource
+      body could not lift these ones' refusal. A resource that sets it needs a
+      row in `docs/policy-matrix.md` ("The system actor") naming the same
+      subsystems.
 
   ## The read side
 
@@ -85,6 +88,65 @@ defmodule KilnCMS.CMS.OrgSettings do
     |> Enum.sort()
   end
 
+  # `system_actions:` as `[{action, [subsystem]}]`, each list sorted. Refuses
+  # the pre-#1747 bare list of actions (a grant with no subsystem), so an old
+  # call site fails the build rather than admitting nobody.
+  @doc false
+  def system_grants!(system_actions) do
+    unless Keyword.keyword?(system_actions) do
+      raise ArgumentError,
+            "OrgSettings :system_actions must be a keyword list of action => subsystem(s), " <>
+              "e.g. [read: :feeds] (#1747), got: #{inspect(system_actions)}"
+    end
+
+    for {action, subsystems} <- system_actions do
+      subsystems = List.wrap(subsystems)
+
+      unless subsystems != [] and
+               Enum.all?(subsystems, &(is_atom(&1) and &1 not in [nil, true, false])) do
+        raise ArgumentError,
+              "OrgSettings :system_actions #{inspect(action)} must name its subsystem(s) " <>
+                "as an atom or a non-empty list of atoms, got: #{inspect(subsystems)}"
+      end
+
+      {action, subsystems |> Enum.uniq() |> Enum.sort()}
+    end
+  end
+
+  # For a person the first clause of each policy has already decided, so these
+  # are unreachable; for a system actor every action but the named ones forbids
+  # at the `forbid_unless`.
+  #
+  # Actions that share a subsystem list share a clause; `action:` narrows a
+  # clause to its own actions only when the resource grants more than one list,
+  # so a subsystem admitted to one action is never admitted to another by
+  # sitting below the same `forbid_unless`.
+  defp system_clauses([]), do: nil
+
+  defp system_clauses(system_actions) do
+    groups =
+      system_actions
+      |> Enum.group_by(fn {_action, subsystems} -> subsystems end, &elem(&1, 0))
+      |> Enum.sort()
+
+    grants =
+      for {subsystems, actions} <- groups do
+        check_opts =
+          if length(groups) == 1,
+            do: [subsystem: subsystems],
+            else: [subsystem: subsystems, action: Enum.sort(actions)]
+
+        quote do
+          authorize_if {KilnCMS.Checks.SystemActor, unquote(check_opts)}
+        end
+      end
+
+    quote do
+      forbid_unless action(unquote(Keyword.keys(system_actions)))
+      unquote_splicing(grants)
+    end
+  end
+
   defmacro __using__(opts) do
     table = Keyword.fetch!(opts, :table)
     accept = Keyword.fetch!(opts, :accept)
@@ -96,7 +158,7 @@ defmodule KilnCMS.CMS.OrgSettings do
     admin_columns = Keyword.get(opts, :admin_columns)
     extra_extensions = Keyword.get(opts, :extensions, [])
     domain = Keyword.get(opts, :domain, KilnCMS.CMS)
-    system_actions = Keyword.get(opts, :system_actions, [])
+    system_actions = opts |> Keyword.get(:system_actions, []) |> system_grants!()
 
     unless read in [:public, :editor, :admin] do
       raise ArgumentError,
@@ -146,17 +208,8 @@ defmodule KilnCMS.CMS.OrgSettings do
         end
       end
 
-    # The system grant, spliced into both policies (or `nil`, a no-op). For a
-    # person the first clause of each policy has already decided, so these two
-    # are unreachable; for a system actor every action but the named ones
-    # forbids at the first.
-    system_clauses =
-      if system_actions != [] do
-        quote do
-          forbid_unless action(unquote(system_actions))
-          authorize_if KilnCMS.Checks.SystemActor
-        end
-      end
+    # The system grant, spliced into both policies (or `nil`, a no-op).
+    system_clauses = system_clauses(system_actions)
 
     update_action =
       if update? do

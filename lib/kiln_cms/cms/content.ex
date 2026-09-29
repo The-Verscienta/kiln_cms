@@ -3260,9 +3260,17 @@ defmodule KilnCMS.CMS.Content do
           #
           # None accepts `:blocks`, all are ignored by PaperTrail, and none
           # has a caller that is a person. Keep the list that way: an action
-          # anyone else calls does not belong in it.
+          # anyone else calls does not belong in it. Each is admitted to the
+          # one subsystem that calls it (#1747).
           forbid_unless action([:reindex_search_text, :set_embedding, :set_published_version_id])
-          authorize_if KilnCMS.Checks.SystemActor
+
+          authorize_if {KilnCMS.Checks.SystemActor,
+                        subsystem: :firing, action: :reindex_search_text}
+
+          authorize_if {KilnCMS.Checks.SystemActor, subsystem: :search, action: :set_embedding}
+
+          authorize_if {KilnCMS.Checks.SystemActor,
+                        subsystem: :cms_bookkeeping, action: :set_published_version_id}
         end
 
         # Publishing is an admin approval step — editors submit for review

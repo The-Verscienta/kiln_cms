@@ -4,8 +4,9 @@ defmodule KilnCMS.SystemActorTest do
 
   Two things are pinned here, and both are load-bearing:
 
-    * `KilnCMS.Checks.SystemActor` matches the system actor and **nothing
-      else** — a plain map that happens to look like one does not pass;
+    * `KilnCMS.Checks.SystemActor` matches a system actor whose subsystem the
+      clause names (#1747) and **nothing else** — not another subsystem, and
+      not a plain map that happens to look like one;
     * the actor resolves to *no* tier and *no* audience, so it cannot pick up
       a grant through a role/audience check written for people. Every grant it
       ever gets has to be a `Checks.SystemActor` clause someone typed.
@@ -17,6 +18,13 @@ defmodule KilnCMS.SystemActorTest do
   alias KilnCMS.SystemActor
 
   defp context, do: %{subject: nil, resource: KilnCMS.Firing.ReferenceEdge, action: nil}
+  defp context(action), do: %{context() | action: %{name: action}}
+
+  # The options as a resource's `authorize_if` hands them over, after `init/1`.
+  defp opts(opts) do
+    {:ok, opts} = Check.init(opts)
+    opts
+  end
 
   describe "new/1" do
     test "labels the actor with its subsystem" do
@@ -40,16 +48,55 @@ defmodule KilnCMS.SystemActorTest do
   end
 
   describe "Checks.SystemActor" do
-    test "matches a system actor" do
-      assert Check.match?(SystemActor.new(:firing), context(), [])
+    test "matches a system actor of a subsystem it names" do
+      assert Check.match?(SystemActor.new(:firing), context(), opts(subsystem: :firing))
+
+      assert Check.match?(
+               SystemActor.new(:billing),
+               context(),
+               opts(subsystem: [:firing, :billing])
+             )
     end
 
-    test "matches whatever the subsystem label says" do
-      assert Check.match?(SystemActor.new(:billing), context(), [])
+    test "does not match a system actor of any other subsystem" do
+      refute Check.match?(SystemActor.new(:billing), context(), opts(subsystem: :firing))
+      refute Check.match?(SystemActor.new(:automation), context(), opts(subsystem: [:firing]))
+    end
+
+    test "`action:` narrows the clause to the actions it names" do
+      clause = opts(subsystem: :cms_bookkeeping, action: :complete)
+
+      assert Check.match?(SystemActor.new(:cms_bookkeeping), context(:complete), clause)
+      refute Check.match?(SystemActor.new(:cms_bookkeeping), context(:reopen), clause)
+      refute Check.match?(SystemActor.new(:automation), context(:complete), clause)
+      # No action to compare against is not a match.
+      refute Check.match?(SystemActor.new(:cms_bookkeeping), context(), clause)
+    end
+
+    # The build-time half (#1747): `Ash.Policy.Check.transform/1` runs `init/1`
+    # when the resource compiles, and a `{:error, _}` is a DslError there.
+    test "a clause that names no subsystem does not initialize" do
+      assert {:error, message} = Check.init([])
+      assert message =~ "needs `subsystem:`"
+
+      for bad <- [[], nil, true, "firing", [:firing, "billing"], [nil]] do
+        assert {:error, _} = Check.init(subsystem: bad), "accepted subsystem: #{inspect(bad)}"
+      end
+
+      assert {:error, _} = Check.init(subsystem: :firing, action: [])
+    end
+
+    test "init/1 normalizes an atom to a sorted list" do
+      assert {:ok, opts} = Check.init(subsystem: :firing, action: :upsert)
+      assert opts[:subsystem] == [:firing]
+      assert opts[:action] == [:upsert]
+
+      assert {:ok, opts} = Check.init(subsystem: [:search, :firing, :search])
+      assert opts[:subsystem] == [:firing, :search]
     end
 
     test "does not match an absent actor" do
-      refute Check.match?(nil, context(), [])
+      refute Check.match?(nil, context(), opts(subsystem: :firing))
     end
 
     test "does not match a user" do
@@ -60,11 +107,11 @@ defmodule KilnCMS.SystemActorTest do
           role: :admin
         })
 
-      refute Check.match?(user, context(), [])
+      refute Check.match?(user, context(), opts(subsystem: :firing))
     end
 
     test "does not match a bare map shaped like one" do
-      refute Check.match?(%{subsystem: :firing}, context(), [])
+      refute Check.match?(%{subsystem: :firing}, context(), opts(subsystem: :firing))
     end
   end
 

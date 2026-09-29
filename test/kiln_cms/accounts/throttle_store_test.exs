@@ -135,7 +135,8 @@ defmodule KilnCMS.Accounts.ThrottleStoreTest do
       ThrottleStore.hit(closed, "k", 1, 10)
       Process.sleep(10)
 
-      assert KilnCMS.Accounts.prune_throttle_counters!(actor: KilnCMS.SystemActor.new(:test)) >= 1
+      assert KilnCMS.Accounts.prune_throttle_counters!(actor: KilnCMS.SystemActor.new(:operator)) >=
+               1
 
       admin = %KilnCMS.Accounts.User{id: Ecto.UUID.generate(), role: :admin}
 

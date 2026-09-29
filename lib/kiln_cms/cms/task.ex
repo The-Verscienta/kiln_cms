@@ -300,9 +300,15 @@ defmodule KilnCMS.CMS.Task do
     # creating another. `AssigneeIsEditor` still vets the assignee — validations
     # run whatever the actor is — and `creator_id` stays unstamped, since the
     # actor has no `:id`: `created_by_rule_id` is the provenance.
+    #
+    # Publishing (`KilnCMS.CMS.Bookkeeping.system/0`) and the task digest
+    # (`KilnCMS.Notifications.system/0`) read tasks too, and only read them
+    # (#1747).
     policy action_type([:create, :read]) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :automation}
       authorize_if KilnCMS.CMS.Checks.OrgEditor
+      forbid_unless action_type(:read)
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: [:cms_bookkeeping, :notifications]}
     end
 
     # Of the updates, the system actor may run two ONLY (#1659):
@@ -311,11 +317,17 @@ defmodule KilnCMS.CMS.Task do
     #     and a scheduled publish has no person to do it as;
     #   * `:mark_overdue_notified` — the task digest's "already fired
     #     task.overdue" claim (`Notifications.TaskDigestWorker`).
-    # Reassigning, editing or reopening a task stays an editor's.
+    # Reassigning, editing or reopening a task stays an editor's. Each update
+    # is admitted to its own caller only (#1747): the automation worker, which
+    # opens tasks, may not complete one.
     policy action_type(:update) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
       forbid_unless action([:complete, :mark_overdue_notified])
-      authorize_if KilnCMS.Checks.SystemActor
+
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :cms_bookkeeping, action: :complete}
+
+      authorize_if {KilnCMS.Checks.SystemActor,
+                    subsystem: :notifications, action: :mark_overdue_notified}
     end
   end
 

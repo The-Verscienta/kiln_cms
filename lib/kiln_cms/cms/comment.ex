@@ -235,9 +235,15 @@ defmodule KilnCMS.CMS.Comment do
     # actor has no `:id`, deliberately — so `created_by_rule_id` carries the
     # provenance exactly as it did under the bypass. `update` is NOT admitted:
     # automation posts, it does not edit what anyone said.
+    #
+    # The notifier (`KilnCMS.Notifications.system/0`, #1659) reads a thread's
+    # participants to address a comment's notifications — a read, and only a
+    # read (#1747).
     policy action_type([:create, :read]) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :automation}
       authorize_if KilnCMS.CMS.Checks.OrgEditor
+      forbid_unless action_type(:read)
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :notifications}
     end
 
     policy action_type(:update) do

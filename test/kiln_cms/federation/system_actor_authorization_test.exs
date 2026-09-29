@@ -215,19 +215,33 @@ defmodule KilnCMS.Federation.SystemActorAuthorizationTest do
     end
 
     test "the operator enables, re-keys and disables" do
+      operator = KilnCMS.SystemActor.new(:operator)
+
       assert {:ok, settings} =
                Federation.enable_site_federation("https://kiln.example", "kiln",
-                 actor: system(),
+                 actor: operator,
                  tenant: org_id()
                )
 
       assert {:ok, rekeyed} =
-               Federation.rekey_site_federation(settings, actor: system(), tenant: org_id())
+               Federation.rekey_site_federation(settings, actor: operator, tenant: org_id())
 
       refute rekeyed.public_key_pem == settings.public_key_pem
 
       assert {:ok, %{enabled: false}} =
-               Federation.disable_site_federation(rekeyed, actor: system(), tenant: org_id())
+               Federation.disable_site_federation(rekeyed, actor: operator, tenant: org_id())
+    end
+
+    # `mix kiln.federation` is the operator's (#1747): the federation paths
+    # read and stamp the row, and may not switch federation or rotate its key.
+    test "the federation paths' own actor may not enable, re-key or disable" do
+      settings = FederationFixtures.enable_site!(org_id())
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Federation.rekey_site_federation(settings, actor: system(), tenant: org_id())
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Federation.disable_site_federation(settings, actor: system(), tenant: org_id())
     end
 
     test "it cannot edit the site's identity through the settings form" do

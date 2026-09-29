@@ -77,7 +77,7 @@ defmodule KilnCMS.CMS.MediaDerivative do
     # Who may SEE a transform is decided on the item, by the transform
     # controller's ordinary policy-checked `MediaItem` read.
     policy always() do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :media_transforms}
     end
   end
 

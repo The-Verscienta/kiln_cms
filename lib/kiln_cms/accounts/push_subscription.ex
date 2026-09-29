@@ -138,7 +138,7 @@ defmodule KilnCMS.Accounts.PushSubscription do
     policy action_type(:read) do
       authorize_if expr(user_id == ^actor(:id))
       forbid_unless action([:read, :for_users])
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :push}
     end
 
     # The system actor prunes a device its push service reported gone, and the
@@ -146,7 +146,7 @@ defmodule KilnCMS.Accounts.PushSubscription do
     # destroy action; a second one must be named here before system code gets it.
     policy action_type(:destroy) do
       authorize_if expr(user_id == ^actor(:id))
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :push}
     end
 
     # A browser registers its own device: the row's `user_id` must be the
@@ -160,7 +160,7 @@ defmodule KilnCMS.Accounts.PushSubscription do
     # System-only: `for_users` is the sender's read and `touch_delivered` the
     # worker's bookkeeping, both as `Push.system/0` (#1659).
     policy action([:for_users, :touch_delivered]) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :push}
     end
 
     # The site-key rotation's sweep (#1560) stays refused to every actor, the

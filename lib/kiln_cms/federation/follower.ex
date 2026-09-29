@@ -92,12 +92,12 @@ defmodule KilnCMS.Federation.Follower do
   policies do
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: [:federation, :operator]}
     end
 
     policy action_type([:create, :update, :destroy]) do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :federation}
     end
   end
 

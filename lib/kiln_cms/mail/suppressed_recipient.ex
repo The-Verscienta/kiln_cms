@@ -57,7 +57,7 @@ defmodule KilnCMS.Mail.SuppressedRecipient do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
 
       forbid_unless action([:read, :suppress])
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :mail}
     end
   end
 

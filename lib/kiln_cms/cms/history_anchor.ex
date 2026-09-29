@@ -127,7 +127,7 @@ defmodule KilnCMS.CMS.HistoryAnchor do
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
       forbid_unless action([:create, :for_content])
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :governance}
     end
   end
 

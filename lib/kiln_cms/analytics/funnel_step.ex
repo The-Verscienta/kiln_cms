@@ -60,7 +60,7 @@ defmodule KilnCMS.Analytics.FunnelStep do
       # `read` (`load: :steps`) — not `:for_funnel`, the builder's own read.
       # See `KilnCMS.Analytics.Funnel`'s read policy.
       forbid_unless action(:read)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :experiments}
     end
 
     policy action_type([:create, :update, :destroy]) do

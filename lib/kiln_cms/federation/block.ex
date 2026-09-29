@@ -54,7 +54,7 @@ defmodule KilnCMS.Federation.Block do
     # deciding who to block stays an admin act.
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :federation}
     end
 
     policy action_type([:create, :update, :destroy]) do

@@ -66,7 +66,7 @@ defmodule KilnCMS.CMS.SiteCompliance do
       :phrase_severity
     ],
     read: :editor,
-    system_actions: [:read],
+    system_actions: [read: :compliance],
     admin_columns: [:enabled, :require_at_publish, :phrases, :updated_at]
 
   # A ceiling on the site's own vocabulary. Every phrase compiles into one

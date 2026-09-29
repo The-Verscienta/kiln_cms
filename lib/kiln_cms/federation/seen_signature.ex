@@ -64,7 +64,7 @@ defmodule KilnCMS.Federation.SeenSignature do
     # reads a nonce table, and the sweep only ever needs `:expired`.
     policy always() do
       forbid_unless action([:record, :expired, :destroy])
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :federation}
     end
   end
 

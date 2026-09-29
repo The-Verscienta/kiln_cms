@@ -55,7 +55,7 @@ defmodule KilnCMS.Firing.ReferenceEdge do
     # re-fire wave only editors-and-up have a reason to see it, and the wave
     # itself now says so out loud rather than bypassing (#1402).
     policy action_type(:read) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :firing}
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
 
@@ -66,7 +66,7 @@ defmodule KilnCMS.Firing.ReferenceEdge do
     # the fire path's system actor (#1402), and `authorize_if` rather than
     # `bypass` so a policy added to this resource later still applies to it.
     policy action_type([:create, :update, :destroy]) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :firing}
       forbid_if always()
     end
   end

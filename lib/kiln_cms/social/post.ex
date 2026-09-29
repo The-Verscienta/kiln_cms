@@ -125,7 +125,7 @@ defmodule KilnCMS.Social.Post do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
 
       forbid_unless action([:claim, :succeed, :fail, :unresolved, :skip])
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :social}
     end
   end
 

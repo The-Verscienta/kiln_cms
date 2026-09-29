@@ -92,7 +92,7 @@ defmodule KilnCMS.Newsletter.NewsletterSend do
       # `:create` only, narrowed inside the admin policy rather than a bypass
       # (#1402). Reading or rewriting the ledger stays an admin act.
       forbid_unless action(:create)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :automation}
     end
   end
 

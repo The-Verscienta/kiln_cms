@@ -256,7 +256,7 @@ defmodule KilnCMS.CMS.ReleaseItem do
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
       forbid_unless action(:for_release_with_status)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :releases}
     end
 
     # Editors compose a release's contents.
@@ -268,7 +268,7 @@ defmodule KilnCMS.CMS.ReleaseItem do
     # `prior_version_id` rollback restores from. Only the release worker's
     # system actor is admitted; no person, admin included, may call them.
     policy action([:mark_applied, :mark_skipped, :mark_rolled_back]) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :releases}
     end
 
     # Except `:mark_cancelled`, which the system actor may run (#1659):
@@ -278,7 +278,7 @@ defmodule KilnCMS.CMS.ReleaseItem do
     # above. It sets the status alone; `prior_state` / `prior_version_id` are
     # the go-live writes', and those stay the release worker's.
     policy action(:mark_cancelled) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :cms_bookkeeping}
     end
   end
 

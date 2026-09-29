@@ -270,6 +270,10 @@ Every summary line below that was shortened links to its own entry there.
   HTTP/2 client memory exhaustions (EEF-CVE-2026-91043 HIGH, -92103, -94194).**
   ([#1722](https://github.com/The-Verscienta/kiln_cms/pull/1722) · [long form](docs/changelog/unreleased.md#mint-1110-closes-three-advisories-http1-response-smuggling-and-two-http2))
 
+- **Each system-actor grant now names the subsystems it admits.** One worker's
+  grant is no longer every worker's; no behaviour changes for users.
+  ([#1747](https://github.com/The-Verscienta/kiln_cms/issues/1747) · [long form](docs/changelog/unreleased.md#each-system-actor-grant-now-names-the-subsystems-it-admits))
+
 ## [0.12.0] - 2026-09-27
 
 Long form: [docs/changelog/v0.12.0.md](docs/changelog/v0.12.0.md) —

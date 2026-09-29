@@ -36,7 +36,7 @@ defmodule KilnCMS.Newsletter.SegmentMembership do
     # does read, create and destroy here — there is nothing narrower to say,
     # and the row carries no data of its own beyond the two ids.
     policy always() do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :newsletter}
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
     end
   end

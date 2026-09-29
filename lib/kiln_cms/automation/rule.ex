@@ -146,7 +146,7 @@ defmodule KilnCMS.Automation.Rule do
       # one's refusal, and widening this one outright would let system code
       # author rules. Authoring stays admin.
       forbid_unless action_type(:read)
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :automation}
     end
   end
 

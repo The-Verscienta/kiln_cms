@@ -95,7 +95,7 @@ defmodule KilnCMS.Firing.PublishedArtifact do
     policy action_type(:read) do
       access_type :runtime
 
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: [:delivery, :firing]}
 
       # Editors and admins see every document, so they see every artifact. A
       # simple check, so it short-circuits before the runtime check's query.
@@ -104,7 +104,7 @@ defmodule KilnCMS.Firing.PublishedArtifact do
     end
 
     policy action_type([:create, :update, :destroy]) do
-      authorize_if KilnCMS.Checks.SystemActor
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :firing}
       forbid_if always()
     end
   end
