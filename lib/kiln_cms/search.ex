@@ -891,7 +891,7 @@ defmodule KilnCMS.Search do
       limit: @block_candidates
     })
     |> Ash.Query.load(semantic_distance: %{query_vector: vector})
-    |> Ash.read!(authorize?: false, tenant: tenant)
+    |> Ash.read!(actor: KilnCMS.SystemActor.new(:search), tenant: tenant)
     |> Enum.reduce({[], MapSet.new()}, fn row, {acc, seen} ->
       if MapSet.member?(seen, row.document_id) do
         {acc, seen}
@@ -955,7 +955,7 @@ defmodule KilnCMS.Search do
   defp nearest_tags(vector, tenant) do
     KilnCMS.SearchIndex.nearest_tag_embeddings_any!(
       %{vector: vector, threshold: tag_leg_threshold(), limit: tag_leg_limit()},
-      authorize?: false,
+      actor: KilnCMS.SystemActor.new(:search),
       tenant: tenant
     )
   end
@@ -1596,9 +1596,11 @@ defmodule KilnCMS.Search do
       # The recorded query lands in the request's site (epic #336). Strict-
       # tenancy prep (#419): a caller that omits `:tenant` records against the
       # default org explicitly rather than relying on a nil-tenant global write.
+      # Written as the system actor `SearchQuery` admits for `record` only
+      # (#1659): the searcher is often anonymous, and no person may write one.
       KilnCMS.Analytics.record_search(
         %{query: normalized, locale: locale, result_count: result_count},
-        authorize?: false,
+        actor: KilnCMS.SystemActor.new(:search),
         tenant: Keyword.get(opts, :tenant) || KilnCMS.Accounts.default_org_id()
       )
     end

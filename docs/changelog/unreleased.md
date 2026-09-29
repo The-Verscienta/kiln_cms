@@ -582,6 +582,45 @@ carries the reasoning.
   ceiling", and the follow is refused and logged. Honest senders see no
   difference unless the nonce store is down. (#1659)
 
+<a id="event-log-and-settings-run-under-the-policies"></a>
+
+- **The event log and the per-site settings run under the policies.**
+  `KilnCMS.History` (the block-level event log), the
+  `Feeds`, `Compliance.Settings`, `Branding` and `CodeInjection` resolvers, the
+  automation rule match, the event helpers, the schema export and search's
+  vector legs and query counter reached their resources through
+  `authorize?: false`. They now run as `KilnCMS.SystemActor`, admitted by action
+  name: `DocumentEvent`'s `append`, `anonymize_actor`, `for_document` and a new
+  `by_actor` read (not the plain `read`); `FeedSettings` and `SiteCompliance`
+  for `read` only, through `OrgSettings`' `system_actions:`; `SearchQuery` for
+  `record` only. `FieldDefinition`, `Automation.Rule` and the two embedding
+  tables already admitted the system actor.
+
+  Every migrated read that decides something fails **closed**
+  (`authorize_with: :error`); only search's two vector legs, which feed a
+  ranked result list, do not. A refused read
+  filters to "nothing", and here that answer was never harmless: the event
+  log's sequence read would hand out a number already taken, the GDPR erasure
+  sweep would redact nothing and report success, a settings resolver would
+  cache the operator config for the whole TTL (turning full-content feeds back
+  on, or a site's publish gate off), the rule match would drop every automation
+  while the job succeeded, and the event helpers and schema export would read a
+  type as having no fields. `Automation.dispatch/3` now returns
+  `{:error, reason}` when the rules cannot be read, so the dispatch job retries;
+  it used to swallow a failed read too.
+
+  `History.record/5` also reads the next sequence number under the document's
+  own org. It read with no tenant, which strict tenancy (the production
+  default) refuses, so every append raised there. `replay/3` and `preview_at/3`
+  take an `:org_id` option for the same reason.
+
+  Eleven sites keep `authorize?: false`, each with its reason at the call site:
+  content reads and the collaborative checkpoint's draft write (a system grant
+  there would be a standing read or write over every draft), the operator
+  CLIs' account and org lookups (they find the actor, so there is none yet),
+  and the staging scrub's erasure. The `mix kiln.authz.check` backlog drops by
+  28 sites and 15 files. (#1659)
+
 <a id="cms-helpers-run-under-the-policies"></a>
 
 - **Content releases, slugs, menus and the field registry run under the

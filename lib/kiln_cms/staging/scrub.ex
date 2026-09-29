@@ -140,11 +140,13 @@ defmodule KilnCMS.Staging.Scrub do
   # `KilnCMS.Accounts.Changes.AnonymizeUser`). Runs as a system job (no actor),
   # so it bypasses the admin-only policy that guards the action at runtime.
   defp anonymize_users do
+    # authorize?: false — operator scrub of a clone must see every account; no system User grant
     Accounts.list_users!(authorize?: false)
     |> Enum.reject(& &1.anonymized_at)
     # The one caller `NotLastAdmin` is written to exempt: a scrubbed clone must
     # hold no real operator's credentials, so erasing the last admin is the point.
     |> Enum.map(
+      # authorize?: false — erasure is admin-only; a system grant would be a standing right to erase
       &Accounts.anonymize_user!(&1,
         authorize?: false,
         context: KilnCMS.Accounts.Validations.NotLastAdmin.exempt()

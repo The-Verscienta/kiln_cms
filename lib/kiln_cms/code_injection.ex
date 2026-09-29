@@ -81,10 +81,21 @@ defmodule KilnCMS.CodeInjection do
     # `:error` (not nil) on an infrastructure failure, which is not cached, so
     # a transient fault degrades to "no injection" for one request rather than
     # for the whole TTL.
+    # The actor is taken here, in the caller, because a cache miss runs
+    # `read` on a Cachex courier process (see `KilnCMS.OrgSettings`).
+    actor = KilnCMS.OrgSettings.system(:code_injection)
+
     KilnCMS.OrgSettings.resolve(org_id,
       cache_key: KilnCMS.Cache.code_injection_key(org_id),
       ttl: @ttl,
-      read: &CMS.list_site_code_injection(authorize?: false, tenant: &1),
+      # A system read (#1659), for the same reason as branding: the row is
+      # world-readable by policy and the page renders with no actor.
+      read:
+        &CMS.list_site_code_injection(
+          tenant: &1,
+          actor: actor,
+          authorize_with: :error
+        ),
       build: &build/1,
       fallback: &empty/0,
       label: "code injection"

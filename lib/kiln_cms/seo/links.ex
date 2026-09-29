@@ -124,6 +124,7 @@ defmodule KilnCMS.Seo.Links do
 
       query ->
         query
+        # authorize?: false — content search; linkable?/1 below keeps only published, public pages
         |> Search.global(
           tenant: record.org_id,
           authorize?: false,

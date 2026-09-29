@@ -169,6 +169,7 @@ defmodule KilnCMS.Compliance.Report do
       Enum.flat_map(ContentTypes.all(), fn ct ->
         ct.resource
         |> published_query()
+        # authorize?: false — content scan for an admin-gated page; a system content grant reads every draft
         |> Ash.read!(authorize?: false, tenant: org_id)
         |> Enum.map(&%{record: &1, type: to_string(ct.type)})
       end)
@@ -186,6 +187,7 @@ defmodule KilnCMS.Compliance.Report do
 
         KilnCMS.CMS.Entry
         |> published_query()
+        # authorize?: false — as above, for dynamic types: a system grant on Entry would read every draft
         |> Ash.read!(authorize?: false, tenant: org_id)
         |> Enum.flat_map(&entry_document(&1, names))
     end
