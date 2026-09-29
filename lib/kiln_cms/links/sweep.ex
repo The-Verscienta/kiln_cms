@@ -130,6 +130,11 @@ defmodule KilnCMS.Links.Sweep do
     end
   end
 
+  # A content read, so it keeps `authorize?: false` rather than moving to the
+  # system actor (#1659, the #1402 content-read argument): admitting
+  # `Checks.SystemActor` to content's read policy would be a standing read over
+  # the whole corpus, drafts included, for every system caller — wider than
+  # this one scan. It is tenant-scoped and pinned to `state == :published`.
   defp stream(resource, org_id, type_fun) do
     resource
     |> Ash.Query.filter(state == :published)
@@ -176,9 +181,16 @@ defmodule KilnCMS.Links.Sweep do
       document_title: document.title
     }
 
-    case Ash.create(ExternalLink, attrs, action: :observe, authorize?: false, tenant: org_id) do
+    case KilnCMS.CMS.observe_external_link(attrs, actor: KilnCMS.Links.system(), tenant: org_id) do
       {:ok, _row} ->
         true
+
+      {:error, %Ash.Error.Forbidden{} = error} ->
+        # A refused grant is not a malformed URL (#1659). Skipping it would
+        # leave every row un-refreshed, and the prune below would then delete
+        # them all, taking each URL's failure count with it. Abort the sweep
+        # before the prune instead: see "Reconciliation by timestamp".
+        raise error
 
       {:error, reason} ->
         # One malformed URL must not abandon the rest of the document. The row
@@ -195,10 +207,10 @@ defmodule KilnCMS.Links.Sweep do
   # that can least afford it.
   defp prune(org_id, started_at) do
     query = Ash.Query.filter(ExternalLink, last_seen_at < ^started_at)
-    count = Ash.count!(query, authorize?: false, tenant: org_id)
+    count = Ash.count!(query, actor: KilnCMS.Links.system(), tenant: org_id)
 
     case Ash.bulk_destroy(query, :destroy, %{},
-           authorize?: false,
+           actor: KilnCMS.Links.system(),
            tenant: org_id,
            strategy: [:atomic, :stream],
            return_errors?: true
@@ -222,7 +234,15 @@ defmodule KilnCMS.Links.Sweep do
     |> Ash.Query.sort(url_digest: :asc)
     |> Ash.Query.distinct([:url_digest])
     |> Ash.Query.select([:url, :url_digest])
-    |> Ash.stream!(authorize?: false, tenant: org_id, stream_with: :full_read)
+    # `authorize_with: :error` (#1659): a refused read would filter to no rows,
+    # and a sweep that queues nothing looks exactly like a site with nothing
+    # due. A lost grant raises instead, failing the sweep job where it shows.
+    |> Ash.stream!(
+      actor: KilnCMS.Links.system(),
+      authorize_with: :error,
+      tenant: org_id,
+      stream_with: :full_read
+    )
     |> Stream.map(&CheckWorker.new(%{"org_id" => org_id, "url" => &1.url}))
     |> Stream.chunk_every(@chunk)
     |> Enum.reduce(0, fn jobs, count ->

@@ -30,18 +30,22 @@ defmodule KilnCMS.Links.Settings do
   @doc "This site's link-check settings row, or `nil` if it has never been saved."
   @spec for_org(Ash.UUID.t()) :: SiteLinkCheck.t() | nil
   def for_org(org_id) do
+    # As the link checker's system actor (#1659), and `authorize_with: :error`
+    # so a lost grant is an error here rather than a silently filtered `nil`.
+    # Both land on "disabled" below, which is the closed direction for a
+    # switch that authorizes outbound requests; the error is also logged.
     SiteLinkCheck
     |> Ash.Query.limit(1)
-    |> Ash.read_one(authorize?: false, tenant: org_id)
+    |> Ash.read_one(actor: KilnCMS.Links.system(), authorize_with: :error, tenant: org_id)
     |> case do
       {:ok, settings} ->
         settings
 
       {:error, reason} ->
-        # A read failure must not read as "enabled". The sweep skips the org for
-        # this run and says so, which is recoverable; guessing the other way
-        # would make a database blip into outbound traffic from a site that
-        # never asked for any.
+        # A read failure (or a refused one) must not read as "enabled". The
+        # sweep skips the org for this run and says so, which is recoverable;
+        # guessing the other way would make a database blip into outbound
+        # traffic from a site that never asked for any.
         Logger.warning("link check: could not read settings for #{org_id}: #{inspect(reason)}")
         nil
     end
@@ -83,7 +87,11 @@ defmodule KilnCMS.Links.Settings do
         :ok
 
       settings ->
-        case Ash.update(settings, %{}, action: :record_sweep, authorize?: false, tenant: org_id) do
+        case Ash.update(settings, %{},
+               action: :record_sweep,
+               actor: KilnCMS.Links.system(),
+               tenant: org_id
+             ) do
           {:ok, _updated} ->
             :ok
 

@@ -73,7 +73,10 @@ defmodule KilnCMSWeb.LinkReportLive do
 
   def handle_event("refresh", _params, socket), do: {:noreply, load_report(socket)}
 
-  defp load_report(socket), do: assign(socket, :report, Report.for_org(org_id(socket)))
+  # Read as the viewer (#1659): `ExternalLink`'s read policy admits editors,
+  # which is who this route lets in.
+  defp load_report(socket),
+    do: assign(socket, :report, Report.for_org(org_id(socket), socket.assigns.current_user))
 
   defp org_id(socket) do
     case socket.assigns[:current_org] do

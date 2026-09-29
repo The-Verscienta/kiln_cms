@@ -116,10 +116,6 @@ Every summary line below that was shortened links to its own entry there.
   release still serving mid-deploy.**
   ([#1716](https://github.com/The-Verscienta/kiln_cms/issues/1716) · [long form](docs/changelog/unreleased.md#mix-kilnmigrationscheck-gates-expand-contract))
 
-- **Rich-text blocks turn lists into real lists: typed with "•" or "1)", pasted
-  as bullet characters (a PDF, an email), or pasted from Word with nesting kept.**
-  ([#1729](https://github.com/The-Verscienta/kiln_cms/pull/1729))
-
 ### Changed
 
 - **Keep `RichText.legacy_html` as a fallback instead of removing it;
@@ -175,6 +171,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Federation runs under the policies.** 24 more internal writes and reads run
   as scoped system actors; the replay check and follower ceiling fail closed.
   ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#federation-runs-under-the-policies))
+
+- **The link checker runs under the policies.** 16 more internal sites run as
+  a scoped system actor or carry a written reason; the counter reads fail closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#the-link-checker-runs-under-the-policies))
 
 - **`mint` 1.11.0 closes three advisories: HTTP/1 response smuggling and two
   HTTP/2 client memory exhaustions (EEF-CVE-2026-91043 HIGH, -92103, -94194).**
