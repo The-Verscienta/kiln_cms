@@ -148,14 +148,21 @@ ever be authorized by an explicit clause below.
 | `Search.TagEmbedding` | `read`, `for_tags`, `nearest`, `upsert`, `destroy` | Same shape, for tag-name vectors: written by `TagEmbeddingWorker` and `Search.Related`, read by `Search.Related` only. |
 | `CMS.MediaDerivative` | all (`read`, `for_item`, `record`, `destroy`) | The bookkeeping row behind each cached on-the-fly image transform (`/media/:id/t/…`). `Media.Derivatives` is its only reader and writer: it counts an item's rows against the per-item budget, prunes the ones cut from a replaced original or around a moved focal point, and lists them for a purge. No person — admin included — reads or writes a row, and there is no API surface. Who may *see* a transform is decided on the `MediaItem`, by the transform controller's ordinary policy-checked read. |
 | `Accounts.ThrottleCounter` | `prune` **only** | The shared auth budgets' counter table (#1619). The scheduled prune deletes closed windows; the actor is admitted so an operator or a test can run it by hand. The budgets are charged by `Accounts.ThrottleStore` in raw SQL before anyone is authenticated, so no action serves that path. `read` is forbidden to everyone, admin included: a count per hashed key is an oracle nobody needs. |
+| `CMS.ExternalLink` | `read`, `observe`, `record_check`, `destroy` | The outbound link checker's bookkeeping (#474, #1659), as `Links.system/0`. `Links.Sweep` upserts each occurrence it finds in published content, prunes the rows it no longer sees and reads which URLs are due; `Links.CheckWorker` reads a URL's failure count and writes the verdict to every row sharing it. Every existing action is named, inside the editor read policy and the admin write policy, so one added later is not admitted by default. The reads that back a decision fail closed: the failure-count read and the due-URL stream run with `authorize_with: :error` (a refused read would filter to "pruned" or "nothing due"), and a refused `observe` aborts the sweep before its prune, which would otherwise delete every row and its failure count. The report page reads as the viewing editor, not as the system. |
+| `CMS.SiteLinkCheck` | `read`, `record_sweep` **only** | The sweep and the check worker read whether outbound checking is on (re-read immediately before each request), and the sweep stamps `last_swept_at`. The read runs with `authorize_with: :error` and any error resolves to "disabled", the closed direction for a switch that authorizes egress. The settings form's `save` is not admitted: turning checking on stays an admin act. Granted through `OrgSettings`' `system_actions:` option. |
 | `Automation.Rule` | `read` **only** | `KilnCMS.Automation.RuleWorker` re-reads the rule it was enqueued for. Authoring a rule is still admin-only — the grant is narrowed to reads inside the existing `policy always()` with `forbid_unless action_type(:read)`. |
-| `Social.Account` | `read`, `enabled_for_provider` **only** | The announcer lists a provider's enabled accounts for a publish. Minting, editing or deleting the credentials for a site's public voice stays an admin act, narrowed the same way. |
+| `Social.Account` | `read`, `enabled_for_provider`, `record_post` **only** | The announcer lists a provider's enabled accounts for a publish, `Social.configured?/1` asks whether any is enabled, and the announcer stamps "last posted" (`record_post`, which accepts no attributes) on the account it posted as (#1659). Minting, editing or deleting the credentials for a site's public voice stays an admin act, narrowed the same way. |
+| `Social.Post` | `claim`, `succeed`, `fail`, `unresolved`, `skip` **only** | The announce ledger (`Social.system/0`, #1659). The claim is written before the provider is called and its unique index is the "announce once" guarantee; a refused claim is a Forbidden that posts nothing, never "already announced". No read and no `destroy`: a deleted claim would free the dedupe key for a second post. |
+| `CMS.WebhookEndpoint` | `read`, `record_delivery_success`, `record_delivery_failure` **only** | The dispatch scan and the delivery worker read endpoints (`Webhooks.system/0`, #1659), and the worker keeps the health counters behind auto-disable. Creating, editing or deleting an endpoint stays an admin act. Both reads pass `authorize_with: :error`: a refused scan would read as "no endpoint subscribed" and a refused lookup as "endpoint deleted", so a lost grant is logged (and, in the worker, retried) instead. |
+| `CMS.WebhookDelivery` | `read`, `create`, `record_attempt` **only** | The delivery ledger: dispatch writes the row, the worker re-reads it (failing closed: a refused read is retried, not taken for "pruned") and records each attempt. `destroy` is not admitted; the prune trigger runs under its own `AshObanInteraction` bypass. |
+| `Mail.Settings` | `read`, `init` **only** | The DKIM signer and DNS checks read the singleton with no actor of their own, and `ensure_settings!/0` inserts the empty row (`Mail.system/0`, #1659). The read fails closed: `nil` would read as "no DKIM key" and send unsigned. Changing the key or the server IP stays platform-admin. |
+| `Mail.SuppressedRecipient`, `Mail.SiteSuppressedRecipient` | `read`, `suppress` **only** | The pipeline looks every recipient up before queuing and records a hard bounce on the list of the relay that reported it (`Mail.system/0`, #1659). The lookup passes `authorize_with: :error`: a refused read would otherwise be "not suppressed" and resume mail to dead addresses, so `enqueue!/2` drops the recipient and logs, and the newsletter worker retries. Clearing a suppression (`destroy`) stays an admin act. |
 | `CMS.Comment` | `create`, `read` | An editorial-intelligence reaction posts its findings as a document-level comment (#946) on a thread it must be able to read. No `author_id` is stamped — the actor has no `:id` — so `created_by_rule_id` carries the provenance. `update` is **not** admitted: automation posts, it does not edit what anyone said. |
 | `CMS.Task` | `create`, `read` | The same reaction assigns findings as a task, and the lifecycle sweep probes for an open review before opening another. `AssigneeIsEditor` still vets the assignee (validations run whatever the actor is) and `creator_id` stays unstamped. `update` is **not** admitted: automation opens tasks, it does not complete them. |
 | `Billing.Settings` | `read`, `init` **only** | The checkout path and the webhook receiver resolve provider credentials with no actor of their own, and `ensure_settings!/0` inserts the empty singleton on first use. Narrowed inside the existing platform-admin policy; the write path to payment credentials stays platform-admin, and every secret column is vault-encrypted and `sensitive?`. |
 | `Billing.Membership` | `read`, `apply_provider_state`, `anonymize` | A paid membership is what grants an audience and a newsletter tier segment, so the tier sync must see the ones it is syncing. The two writes are `forbid_if always()` for every person — this resource has no admin bypass — and are taken only by the verified webhook worker, the reconcile sweep and GDPR erasure. |
 | `Billing.WebhookEvent` | `read` (by id), `claim`, `mark_processed`, `mark_ignored`, `mark_failed` **only** | The webhook worker re-reads its recorded event, claims it and settles it (#1659). Every write is closed to every person. `receive` stays the receiver's `authorize?: false` (a webhook has no actor; the provider's HMAC is the grant), and `destroy`, `recent`, `by_event_id` and `purgeable` are not admitted: a system actor cannot insert, list or erase a payment event. The worker's read fails closed, since `nil` would mean "event gone" and cancel the job. |
-| `Billing.MembershipEvent` | `read`, `append`, `anonymize_actor` | The append-only entitlement trail. No person may write one and there is no `destroy` action at all; the billing pipeline appends and GDPR erasure redacts the acting admin. |
+| `Billing.MembershipEvent` | `read`, `append`, `anonymize_actor` | The append-only entitlement trail. No person may write one and there is no `destroy` action at all; the billing pipeline appends and GDPR erasure redacts the acting admin. The governance dashboard reads it as `Governance.system/0` (#1659), with `authorize_with: :error` so a lost grant raises rather than showing an empty trail. |
 | `Newsletter.Segment` | `read`, `for_tier`, `sync_managed` **only** | The tier-backed lifecycle is driven by billing, not by a human: both write actions are `forbid_if always()` for everyone including admins. Managing a segment by hand stays an admin act, so the grant is narrowed inside the blanket admin policy as well — Ash ANDs policies, so both halves are needed. |
 | `Newsletter.Subscriber` | `read`, `link_member` **only** | `link_member` is the one write that may set `user_id`, and it is `forbid_if always()` for everyone. Narrowed the same way, so admin-only list management is untouched. |
 | `Newsletter.NewsletterSend` | `create` **only** | The "on publish → send the newsletter" automation (`Automation.RuleWorker`) records the campaign it queues (#1655). Before this the create ran `authorize?: false` for every caller, the console included, so the console's tier check was the only gate. Narrowed inside the blanket admin policy; reading the ledger and the fan-out's `mark_*`/`record_*` bookkeeping are unchanged. |
@@ -165,6 +172,12 @@ ever be authorized by an explicit clause below.
 | `Federation.Block` | `read` **only** | The inbox asks whether an actor or its instance is blocked before it records a `Follow`. Deciding what to block stays an admin act. |
 | `Federation.SiteFederation` | `read`, `record_delivery`, `enable`, `disable`, `rekey` **only** | Every federation path starts from the site's settings (`Federation.active_settings/2`); the delivery worker stamps "last federated"; and `mix kiln.federation` (`enable`, `disable`, `rekey`) is an operator at a shell on the host, the deployment's own authority. The settings form's `save` and `destroy` are not admitted — editing the site's public identity stays an admin act. Granted through `OrgSettings`' `system_actions:` option, which narrows inside the macro's read and write policies. |
 | `Federation.SeenSignature` | `record`, `expired`, `destroy` **only** | The inbound replay-nonce store: `HttpSignature` records a verified signature, `SeenSignatureSweeper` counts and deletes expired rows. The plain `read` is refused to everyone, the system actor included — nothing needs to list nonces. No person has any path to this table. |
+| `Experiments.Experiment` | `read`, `running`, `create`, `start`, `conclude` **only** | Delivery reads the running set (`Experiments.system/0`, #1659) to decide which arm a page serves and whether a form submission or a later page view converts; the variant-write and `:start` guards read the parent and the running set. `mix kiln.experiment` is an operator at a shell on the host and creates, starts and concludes. `update`, `archive` and `destroy` are not admitted — narrowed inside the admin write policy with `forbid_unless action(...)`. Every read that backs an assignment, a start guard or a result passes `authorize_with: :error` (and `has_many :variants` sets `authorize_read_with :error`, since the option does not reach a relationship load), so a lost grant errors instead of answering "nothing is running". |
+| `Experiments.Variant` | `read`, `create` **only** | The arms delivery assigns between (loaded with the running set) and the `:start` guard counts; `mix kiln.experiment variant` adds one. Re-weighting or removing an arm stays an admin act. |
+| `Experiments.VariantDay` | `read`, `record_impression`, `record_conversion` **only** | The per-variant daily counters. Delivery and the form-submission path write the two counters; `mix kiln.experiment show` reads them, failing closed (the results panel reads them as the viewing editor). `destroy` is not admitted — a system caller cannot erase a result. |
+| `CMS.HistoryAnchor` | `create`, `for_content` **only** | The tamper-evidence chain (#1659): the publish pipeline mints a document's next anchor and `Governance.Chain` reads that document's anchors back to verify or extend them. The plain `read` is not admitted: no Ash read lists anchors across documents. Checkpoint minting does read every document's head, through raw SQL (`Checkpoint.current_heads/1`, `standing_at_witnessed_positions/2`) that no policy governs and that cannot be refused, by design: the head set a checkpoint signs must never be silently shortened. There is still no `update` or `destroy` action. The read's code interface defaults to `authorize_with: :error`: a refused read would filter to `[]`, which reads as "never anchored", so a lost grant raises instead. Version rows themselves stay `authorize?: false` with a written reason: they are the editorial history, and a standing system read over them is the `PointInTime` case #1402 refused. |
+| `CMS.ChainCheckpoint` | `recent`, `unwitnessed`, `create`, `record_publication` **only** | The org-wide witness (#666): `Governance.CheckpointWorker` mints a checkpoint, publishes it and records the receipt, and verification loads the checkpoint an entry names (`get_chain_checkpoint`, a `get_by` on `recent`, so the plain `read` is not admitted). Named action by action inside `policy always()` so a `destroy` added later is not admitted by default. Reads fail closed (their code interfaces default to `authorize_with: :error`): an empty `unwitnessed` would show an outage as healthy, and an empty `recent` would restart the chain at sequence 1. |
+| `CMS.ChainCheckpointEntry` | `create`, `for_content`, `for_checkpoint` **only** | The per-document entries each checkpoint commits to, and verification's read of a document's strongest witnessed head. A refused `for_content` would read as "never witnessed", which is exactly what a truncation wants to look like, so it raises instead and the verdict floors to `:unverifiable`. |
 | `CMS.Page`, `CMS.Post`, `CMS.Entry` (content) | `reindex_search_text` and `set_embedding` **only**, named inside the `action_type([:create, :update])` policy | Two system-only actions on denormalized columns: the fragment-expanded search text (`Firing.Engine.fire/2`) and the document-level search vector (`Search.EmbeddingWorker`). Both accept no `:blocks` and both are ignored by PaperTrail. The grant sits inside the policy written for people, narrowed to those two actions by `forbid_unless action(...)` — see above for why that rather than a bypass. Keep the list short and every member system-only. Nothing else on the content resources admits the system actor: it holds no tier, so `EditableContentType` / `ReadableContentType` / `InAudience` all refuse it, and a system actor reads no content at all. |
 
 Legend: ✅ allowed · ❌ forbidden · 🔎 allowed but row-filtered (reads return only the rows the policy permits, never an error) · ⚙️ system-only (`authorize?: false`).
@@ -267,8 +280,9 @@ everyone. The transform route additionally refuses out-of-bounds parameters
 |--------|:-----:|:------:|:------:|:---------:|
 | read, `create`, `update`, `destroy` | ✅ | ❌ | ❌ | ❌ |
 
-Endpoint configuration is admin-only. The delivery worker reads endpoints as the
-**system** (`authorize?: false`).
+Endpoint configuration is admin-only. The delivery pipeline reads endpoints and
+keeps their health counters as the **system actor** (see
+[The system actor](#the-system-actor)); it cannot create, edit or delete one.
 
 ## Mail settings — `Mail.Settings`
 
@@ -277,9 +291,9 @@ Endpoint configuration is admin-only. The delivery worker reads endpoints as the
 | read, `init`, `generate_dkim`, `rotate_dkim`, `configure_key_source`, `set_server_ip`, `record_verification` | ✅ | ❌ | ❌ | ❌ |
 
 Instance-wide mail/DKIM configuration (`/editor/mail`) is admin-only. The
-delivery pipeline resolves the DKIM key as the **system**
-(`authorize?: false` via `KilnCMS.Mail.dkim_config/0`), as does the lazy
-singleton creation (`ensure_settings!/0`, reached only from the admin page).
+delivery pipeline resolves the DKIM key as the **system actor**
+(`KilnCMS.Mail.dkim_config/0`), as does the lazy singleton creation
+(`ensure_settings!/0`); both are admitted for `read` and `init` only.
 
 ## Billing settings — `Billing.Settings`
 
@@ -304,7 +318,8 @@ policy before doing anything).
 
 Managed from `/editor/mail` (admin-only). The delivery pipeline writes
 suppressions on a hard bounce and consults them before queuing as the
-**system** (`authorize?: false`). As with reads elsewhere, a non-admin read is
+**system actor** (`read` and `suppress` only; a refused lookup fails closed and
+the recipient is not mailed). As with reads elsewhere, a non-admin read is
 filtered to nothing rather than erroring, so the list never leaks.
 
 ## Custom fields — `FieldDefinition`
@@ -601,13 +616,14 @@ own list instead (next section).
 
 | Action | admin | editor | viewer | anonymous | system |
 |--------|:-----:|:------:|:------:|:---------:|:------:|
-| read, `destroy` | ✅ | ❌ | ❌ | ❌ | ✅ |
+| read | ✅ | ❌ | ❌ | ❌ | ✅ |
+| `destroy` | ✅ | ❌ | ❌ | ❌ | ❌ |
 | `suppress` | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 The addresses one site's own relay rejected as dead, per site
 (`org_id`, `email`). Org admin reads and clears it from `/editor/site-mail`; a
 non-admin read filters to nothing. Only the delivery pipeline writes it, as
-the **system** (`authorize?: false`), on a reject naming the recipient that
+the **system actor**, on a reject naming the recipient that
 came through that site's relay. Not even the site's admin can add a row: that
 would stop the site's mail to an address without a bounce ever happening.
 
@@ -720,8 +736,14 @@ There is no `update` action — consent records are corrected by recording a new
 one, not by editing history.
 
 `HistoryAnchor` — every action (`read`, `for_content`, `create`) is admin-only;
-there is deliberately no destroy. The publish pipeline writes anchors as the
-**system**.
+there is deliberately no destroy. The publish pipeline writes anchors, and the
+chain reads them back, as `Governance.system/0`, admitted for `create` and
+`for_content` only (see [The system actor](#the-system-actor)).
+`ChainCheckpoint` and `ChainCheckpointEntry` are admin-only for people in the
+same way, and admit the system actor to their own lists of actions:
+`recent`, `unwitnessed`, `create` and `record_publication` on a checkpoint,
+and `create`, `for_content` and `for_checkpoint` on an entry. None of the
+three admits the plain `read`.
 
 `History.DocumentEvent`:
 
@@ -822,8 +844,8 @@ edits two sites sees each site's notifications in that site's console only.
 |--------|:-----:|:------:|:------:|:---------:|
 | read (`read`, `recent`), `create`, `record_attempt`, `destroy` | ✅ | ❌ | ❌ | ❌ |
 
-Delivery history is admin-only. The delivery pipeline writes attempts as the
-system, and the `prune_deliveries` AshOban trigger runs under the
+Delivery history is admin-only. The delivery pipeline writes the row and its
+attempts as the system actor (never `destroy`), and the `prune_deliveries` AshOban trigger runs under the
 `AshObanInteraction` bypass.
 
 ## The API-key axis

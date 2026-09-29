@@ -831,6 +831,10 @@ defmodule KilnCMS.Blocks.PortableText do
     end
   end
 
+  @doc "Render PT blocks as Markdown — see `KilnCMS.Blocks.PortableText.Markdown`."
+  @spec to_markdown([pt_block()] | nil) :: String.t()
+  defdelegate to_markdown(blocks), to: KilnCMS.Blocks.PortableText.Markdown
+
   # ── Portable Text → plain text (search / embeddings) ──────────────────────
 
   @doc "Flatten PT blocks to plain text."

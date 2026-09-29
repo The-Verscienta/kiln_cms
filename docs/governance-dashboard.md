@@ -36,8 +36,12 @@ for dynamic types), and `trail/3` which loads the item, its PaperTrail versions
 types version on `KilnCMS.CMS.Entry`), and its consents
 (`KilnCMS.CMS.list_consents_for!`). Actor attribution comes from
 `belongs_to_actor :user` on the paper-trail config (nilified if the account is
-ever deleted — audit rows outlive users). Gathered as the system
-(`authorize?: false`) behind the admin-gated route. `KilnCMSWeb.GovernanceLive`
+ever deleted — audit rows outlive users). Gathered behind the admin-gated
+route: anchors, checkpoints and the entitlement trail as
+`KilnCMS.Governance.system/0`, a scoped system actor that fails closed when
+its grant is missing (#1659); content, version rows, consents and user names
+with `authorize?: false`, each with its reason at the call site (see the
+`KilnCMS.Governance` moduledoc). `KilnCMSWeb.GovernanceLive`
 renders it; `KilnCMSWeb.GovernanceController` serves the JSON and CSV exports.
 
 ## Scope & later phases

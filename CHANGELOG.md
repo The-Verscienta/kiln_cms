@@ -112,6 +112,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **The content editor has a Blocks | Markdown switch: edit the body as
+  Markdown, and it comes back as blocks.**
+  ([long form](docs/changelog/unreleased.md#editor-markdown-view))
+
 - **`mix kiln.migrations.check` fails a PR whose new migration breaks the
   release still serving mid-deploy.**
   ([#1716](https://github.com/The-Verscienta/kiln_cms/issues/1716) · [long form](docs/changelog/unreleased.md#mix-kilnmigrationscheck-gates-expand-contract))
@@ -138,7 +142,19 @@ Every summary line below that was shortened links to its own entry there.
   its major.**
   ([#1544](https://github.com/The-Verscienta/kiln_cms/issues/1544) · [long form](docs/changelog/unreleased.md#the-release-images-latest-tag-moves-only-to-the-highest-final-release-and-from))
 
+- **The content editor's chrome is on the component kit: the inspector is a
+  keyboard-driven tab strip, and block controls show on focus and on touch.**
+  ([#1679](https://github.com/The-Verscienta/kiln_cms/issues/1679) · [long form](docs/changelog/unreleased.md#the-content-editors-chrome-is-on-the-component-kit))
+
 ### Fixed
+
+- **Per-type semantic search ranks a record the query names first, however long
+  the record.**
+  ([#1746](https://github.com/The-Verscienta/kiln_cms/pull/1746) · [long form](docs/changelog/unreleased.md#per-type-semantic-search-ranks-a-record-the-query-names-first))
+
+- **An empty heading line in a rich-text block is now visible in the editor —
+  dashed, labelled with its level — so the "heading has no text" finding has
+  something on screen to point at.** ([#1728](https://github.com/The-Verscienta/kiln_cms/pull/1728))
 
 - **An SEO or accessibility finding below a fragment names, and jumps to, the
   right block.**
@@ -183,6 +199,25 @@ Every summary line below that was shortened links to its own entry there.
 - **The billing webhook pipeline runs under the policies.** A refused read no
   longer drops a payment event or recomputes a paying member to no access.
   ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#billing-webhook-pipeline-runs-under-the-policies))
+
+- **Webhooks, social posting and mail run under the policies.** Each uses a
+  scoped system actor; the endpoint scan, the ledger re-read, the mail
+  settings and the suppression lookups fail closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#webhooks-social-posting-and-mail-run-under-the-policies))
+
+- **Content experiments run under the policies.** Delivery, the start guards
+  and `mix kiln.experiment` use a scoped system actor, and
+  every read behind an assignment or a result fails closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#content-experiments-run-under-the-policies))
+
+- **The governance audit chain runs under the policies.** Anchors, checkpoints
+  and the entitlement trail are read and written as a scoped system actor, and
+  every one of those reads fails closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#the-governance-audit-chain-runs-under-the-policies))
+
+- **The link checker runs under the policies.** 16 more internal sites run as
+  a scoped system actor or carry a written reason; the counter reads fail closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#the-link-checker-runs-under-the-policies))
 
 - **`mint` 1.11.0 closes three advisories: HTTP/1 response smuggling and two
   HTTP/2 client memory exhaustions (EEF-CVE-2026-91043 HIGH, -92103, -94194).**

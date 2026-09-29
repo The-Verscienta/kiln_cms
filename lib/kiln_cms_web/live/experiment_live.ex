@@ -238,7 +238,7 @@ defmodule KilnCMSWeb.ExperimentLive do
     |> assign(:experiment, experiment)
     |> assign(:page_title, experiment.name)
     |> assign(:doc, doc)
-    |> assign(:results, Results.summarize(experiment, org.id))
+    |> assign(:results, Results.summarize(experiment, org.id, socket.assigns.current_user))
     |> assign(:enabled?, Experiments.enabled?())
   end
 
