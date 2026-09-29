@@ -7,6 +7,38 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="upgrade-to-1-0-with-allow-major-from-0-12"></a>
+
+- **1.0 is a major version: move to it with `mix kiln.update --allow-major`,
+  from 0.12.0, after 0.12's own upgrade steps.** `mix kiln.update` refuses a
+  move across a major version unless you pass `--allow-major`, and a plain
+  update never targets a release candidate, so try one with
+  `mix kiln.update --to v1.0.0-rc.1 --allow-major`. Go through 0.12.0 first,
+  not straight from an older release: 1.0 removes what 0.12 deprecated, and
+  0.12 is the release that migrates it. On 0.12, run
+  `mix kiln.blocks.backfill` and `mix kiln.deprecations --migrate-audiences`,
+  and let webhook and newsletter jobs queued before 0.12 drain; the notes
+  below say what each removal needs. A project pinned to 0.11 or older runs a
+  `mix kiln.update` that shows none of these notes (0.8.0 and older show none
+  at all), which is another reason to stop at 0.12.0 on the way
+  ([#1545](https://github.com/The-Verscienta/kiln_cms/issues/1545)).
+
+<a id="set-deployment-specific-session-salts"></a>
+
+- **Set this deployment's own session salts if you still use the shipped
+  defaults; changing them signs everyone out once.** The session cookie's
+  signing and encryption keys are derived from `secret_key_base` and two
+  salts, `:session_signing_salt` and `:session_encryption_salt`. Their
+  defaults are public constants in this open-source tree. They are not
+  secrets by themselves (`secret_key_base` carries the real entropy), but a
+  deployment is better off with its own. Set them at compile time in
+  `config/project.exs`
+  (`config :kiln_cms, session_signing_salt: "…", session_encryption_salt: "…"`),
+  pick a quiet moment, and expect every user to sign in again once. Found by
+  the 1.0 external authentication review
+  ([#1536](https://github.com/The-Verscienta/kiln_cms/issues/1536); see
+  `docs/environment-variables.md`).
+
 <a id="password-rotation-upgrade-revokes-nothing-retroactively"></a>
 
 - **Upgrading revokes nothing by itself: if an account changed or reset its
