@@ -473,6 +473,27 @@ carries the reasoning.
   ([#1678](https://github.com/The-Verscienta/kiln_cms/issues/1678),
   [#1680](https://github.com/The-Verscienta/kiln_cms/issues/1680)).
 
+<a id="accounts-system-reads-run-under-the-policies"></a>
+
+- **The accounts domain's system reads run under the policies.**
+  `Accounts.list_org_ids/0` (the tenant list behind AshOban's per-tenant
+  scheduler scans, GDPR erasure, audit verification and the digests),
+  `Accounts.default_org/0` and the membership half of a data-subject export
+  reached `Organization` and `Billing.Membership` through `authorize?: false`.
+  They now run as `KilnCMS.Accounts.system/0`. `Organization` admits it for
+  the plain `read` only: not the request path's tenant resolution
+  (`by_slug`, `by_custom_domain`), and not create or update. All three reads
+  fail closed. A refused tenant list raises instead of answering `[]`, which
+  every sweep would have read as "no orgs, nothing to do"; a refused
+  default-org read answers `:error`, not the "seed row missing" `nil`; and a
+  refused export read is logged as an error. The 20 remaining sites in the
+  domain are the pre-auth flows (sign-in, the second factor and its hold,
+  passkeys, SSO, `/setup`) and the membership lookup inside the policy checks
+  themselves. They keep `authorize?: false`, each with its reason at the call
+  site: there is no actor yet, and a bypass cannot be refused into "no such
+  token" or "no membership". The `mix kiln.authz.check` backlog drops by 23
+  sites and 11 files. No change to any sign-in response. (#1659)
+
 <a id="federation-runs-under-the-policies"></a>
 
 - **Federation runs under the policies.** The inbox, the publish fan-out, the

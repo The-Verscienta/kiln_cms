@@ -141,8 +141,17 @@ defmodule KilnCMS.Accounts.Organization do
     # A signed-in user may read the orgs they belong to (backs the org switcher
     # in a later PR). Anonymous callers resolve the tenant by host, not by
     # reading this table, so no public read is exposed.
+    #
+    # The system actor (#1659) may use the plain `read` and nothing else: the
+    # tenant list behind every all-orgs sweep (`Accounts.list_org_ids/0`) and
+    # the default-org fallback (`Accounts.default_org/0`). The member grant is
+    # unaffected — `^actor(:id)` templates to nil for an actor with no `:id`.
+    # `by_slug` / `by_custom_domain` are the request path's tenant resolution
+    # and are not admitted.
     policy action_type(:read) do
       authorize_if expr(exists(memberships, user_id == ^actor(:id)))
+      forbid_unless action(:read)
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
     # Provisioning/managing tenants is admin-only (covered by the bypass; explicit

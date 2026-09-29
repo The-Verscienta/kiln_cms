@@ -73,17 +73,6 @@ defmodule Mix.Tasks.Kiln.Authz.Check do
   # migration, per file. A ratchet: counts may only go DOWN, and no entry may
   # be added. See "Scope" above; the tracking issue is #1402.
   @backlog %{
-    "lib/kiln_cms/accounts.ex" => 3,
-    "lib/kiln_cms/accounts/bootstrap.ex" => 2,
-    "lib/kiln_cms/accounts/changes/evict_role_members.ex" => 1,
-    "lib/kiln_cms/accounts/changes/register_with_sso.ex" => 2,
-    "lib/kiln_cms/accounts/changes/reload_pending_totp_secret.ex" => 1,
-    "lib/kiln_cms/accounts/pending_sign_in.ex" => 4,
-    "lib/kiln_cms/accounts/scoping.ex" => 3,
-    "lib/kiln_cms/accounts/second_factor.ex" => 1,
-    "lib/kiln_cms/accounts/sign_in_alert.ex" => 1,
-    "lib/kiln_cms/accounts/validations/role_belongs_to_org.ex" => 1,
-    "lib/kiln_cms/accounts/web_authn.ex" => 4,
     "lib/kiln_cms/automation.ex" => 1,
     "lib/kiln_cms/beta/round.ex" => 6,
     "lib/kiln_cms/billing/changes/record_transition.ex" => 1,

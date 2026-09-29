@@ -148,6 +148,7 @@ ever be authorized by an explicit clause below.
 | `Search.TagEmbedding` | `read`, `for_tags`, `nearest`, `upsert`, `destroy` | Same shape, for tag-name vectors: written by `TagEmbeddingWorker` and `Search.Related`, read by `Search.Related` only. |
 | `CMS.MediaDerivative` | all (`read`, `for_item`, `record`, `destroy`) | The bookkeeping row behind each cached on-the-fly image transform (`/media/:id/t/…`). `Media.Derivatives` is its only reader and writer: it counts an item's rows against the per-item budget, prunes the ones cut from a replaced original or around a moved focal point, and lists them for a purge. No person — admin included — reads or writes a row, and there is no API surface. Who may *see* a transform is decided on the `MediaItem`, by the transform controller's ordinary policy-checked read. |
 | `Accounts.ThrottleCounter` | `prune` **only** | The shared auth budgets' counter table (#1619). The scheduled prune deletes closed windows; the actor is admitted so an operator or a test can run it by hand. The budgets are charged by `Accounts.ThrottleStore` in raw SQL before anyone is authenticated, so no action serves that path. `read` is forbidden to everyone, admin included: a count per hashed key is an oracle nobody needs. |
+| `Accounts.Organization` | `read` **only** | The tenant registry (#1659). `Accounts.list_org_ids/0` is the tenant list behind every all-orgs sweep (AshOban's per-tenant scheduler scans, GDPR erasure, audit verification, the digests), and `Accounts.default_org/0` is the default-org fallback. Both read with `authorize_with: :error`, so a lost grant raises (or answers `:error`) instead of filtering to `[]`, which every sweep would have read as "no orgs, nothing to do". Narrowed inside the member-read policy with `forbid_unless action(:read)`: `by_slug` and `by_custom_domain`, the request path's tenant resolution, are not admitted, and creating or editing an org stays platform-admin. |
 | `Automation.Rule` | `read` **only** | `KilnCMS.Automation.RuleWorker` re-reads the rule it was enqueued for. Authoring a rule is still admin-only — the grant is narrowed to reads inside the existing `policy always()` with `forbid_unless action_type(:read)`. |
 | `Social.Account` | `read`, `enabled_for_provider` **only** | The announcer lists a provider's enabled accounts for a publish. Minting, editing or deleting the credentials for a site's public voice stays an admin act, narrowed the same way. |
 | `CMS.Comment` | `create`, `read` | An editorial-intelligence reaction posts its findings as a document-level comment (#946) on a thread it must be able to read. No `author_id` is stamped — the actor has no `:id` — so `created_by_rule_id` carries the provenance. `update` is **not** admitted: automation posts, it does not edit what anyone said. |
@@ -416,6 +417,9 @@ deletable.
 |--------|:-----:|:------:|:------:|:---------:|
 | read (`read`, `by_slug`, `by_custom_domain`) | ✅ all | 🔎 own memberships | 🔎 own memberships | ❌ |
 | `create`, `update` | ✅ | ❌ | ❌ | ❌ |
+
+The system actor may use the plain `read` only (#1659, see
+[The system actor](#the-system-actor)).
 
 `OrgMembership`:
 
