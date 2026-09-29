@@ -208,6 +208,15 @@ Every summary line below that was shortened links to its own entry there.
   their lookups fail closed and a lost grant is logged, never a silent drop.
   ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#notifications-and-web-push-run-under-the-policies))
 
+- **The billing webhook pipeline runs under the policies.** A refused read no
+  longer drops a payment event or recomputes a paying member to no access.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#billing-webhook-pipeline-runs-under-the-policies))
+
+- **Webhooks, social posting and mail run under the policies.** Each uses a
+  scoped system actor; the endpoint scan, the ledger re-read, the mail
+  settings and the suppression lookups fail closed.
+  ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#webhooks-social-posting-and-mail-run-under-the-policies))
+
 - **Content experiments run under the policies.** Delivery, the start guards
   and `mix kiln.experiment` use a scoped system actor, and
   every read behind an assignment or a result fails closed.

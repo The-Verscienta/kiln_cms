@@ -596,6 +596,84 @@ carries the reasoning.
   logged. Apart from `subscribe` and the stamp order, nothing changes while
   the grants are in place. (#1659)
 
+<a id="billing-webhook-pipeline-runs-under-the-policies"></a>
+
+- **The billing webhook pipeline runs under the policies.** The webhook
+  worker, the resolution ladder that finds an event's membership, the
+  provider-state write, the membership trail and the entitlement recompute's
+  reads reached `WebhookEvent`, `Membership` and `MembershipEvent` through
+  `authorize?: false`. They now run as `KilnCMS.Billing.system/0`.
+  `WebhookEvent` admits it by name for the plain read, `claim` and the three
+  settle stamps, and for nothing else: it may not record, list, look up or
+  delete an event. The receiver keeps its bypass, since the provider's
+  signature is its grant.
+
+  A refused read answers `[]` or `nil`, and in billing both answers used to be
+  acted on. `nil` for the event meant "gone", so the job cancelled. `nil` or
+  `[]` for its membership meant "unresolvable", so the event was marked
+  ignored. `[]` for a user's entitling memberships meant "entitled to
+  nothing", so the recompute stripped a paying member's audiences. Each of
+  these reads now uses `authorize_with: :error`. A refusal is an error: the
+  event is marked failed and Oban retries it, and the recompute aborts and
+  rolls back with its transition, so the member keeps what they had. A refused
+  claim retries instead of cancelling as "already claimed", and the settle
+  stamps, whose results were discarded, now log when they fail.
+
+  The recompute's own writes are now all or nothing. A failed write of a
+  per-org membership used to be dropped: `create_missing` answered `:ok` to
+  its own error, and the sync of an existing row ignored its result. That
+  could leave a payer's `User.audiences` rewritten while the org membership
+  that access actually reads never got the audience. Every write of one
+  recompute now runs in one transaction. Any failure rolls the others back,
+  is logged with the user and org ids, and fails the membership transition,
+  so Oban retries it. A concurrent recompute's row is still not an error:
+  the upsert that meets it succeeds and changes nothing.
+
+  The `User` and `OrgMembership` reads and writes in the recompute, and the
+  account and content steps in `mix kiln.beta.round`, keep `authorize?: false`
+  with a written reason. A system grant over either would be a standing power
+  over every account. None of them can be refused, so none can mistake a
+  refusal for "no such row". The `mix kiln.authz.check` backlog drops by 23
+  sites and six files. (#1659)
+
+<a id="webhooks-social-posting-and-mail-run-under-the-policies"></a>
+
+- **Webhooks, social posting and mail run under the policies.** The webhook
+  dispatch and delivery worker, the social announcer and `Social.configured?/1`,
+  and the mail pipeline's settings and suppression-list calls reached their
+  resources through `authorize?: false`. They now run as
+  `KilnCMS.Webhooks.system/0`, `KilnCMS.Social.system/0` and
+  `KilnCMS.Mail.system/0`. Each resource admits the system actor by action name
+  inside its existing admin policy: webhook endpoints' reads and health
+  counters (not create, edit or delete), the delivery ledger's `read`, `create`
+  and `record_attempt` (not `destroy`), the social ledger's `claim` and four
+  settling updates (not read or `destroy`), the social account's `record_post`
+  stamp, the mail settings' `read` and `init` (not the DKIM or server-IP
+  writes), and both suppression lists' `read` and `suppress` (not clearing
+  one). The account's organization lookup in `Social.canonical_url/1` stays a
+  bypass with its reason written down. The `mix kiln.authz.check` backlog drops
+  by 17 sites and five files.
+
+  Each read below used to answer a refusal with "nothing", and each "nothing"
+  was a decision. They now pass `authorize_with: :error`:
+  - the dispatch's endpoint scan ("nobody subscribed", so no webhook and no
+    trace) now logs the refusal; it does not raise, because it runs after the
+    publish has committed;
+  - the delivery worker's ledger read ("row pruned", so the job succeeded
+    without sending) and endpoint read ("endpoint deleted", so the row was
+    settled as failed) now log and retry. The endpoint is read on its own, not
+    through `load:`, because a relationship load filters under its own rules;
+  - the mail settings read (`nil`, "not set up", which the DKIM signer takes
+    as "no key" and sends unsigned) now raises;
+  - the suppression lookups ("not suppressed", which would resume mail to every
+    hard-bounced address) now raise. `Mail.enqueue!/2` drops a recipient it
+    cannot check and logs it; the newsletter worker's job retries.
+
+  A ledger write that fails after a webhook's `2xx` is logged and no longer
+  fails the job, so Oban does not send the webhook a second time. A failed
+  social ledger write, or a hard bounce the suppression list refused to
+  record, is logged instead of swallowed. (#1659)
+
 <a id="content-experiments-run-under-the-policies"></a>
 
 - **Content experiments run under the policies.** The delivery path (the

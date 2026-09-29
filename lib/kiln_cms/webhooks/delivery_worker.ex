@@ -10,6 +10,8 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   """
   use Oban.Worker, queue: :webhooks, max_attempts: 5
 
+  require Logger
+
   alias KilnCMS.CMS
   alias KilnCMS.CMS.WebhookEndpoint
   alias KilnCMS.Deprecations
@@ -21,10 +23,20 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
       when is_binary(tenant) do
     # `org_id` scopes the ledger read/settlement to the delivery's site (epic
     # #336); every job this release enqueues carries it.
-    case CMS.get_webhook_delivery(id, authorize?: false, tenant: tenant, load: [:endpoint]) do
-      {:ok, delivery} -> attempt(delivery, job)
+    with {:ok, delivery} <- fetch_delivery(id, tenant),
+         {:ok, endpoint} <- fetch_endpoint(delivery, tenant) do
+      attempt(%{delivery | endpoint: endpoint}, job)
+    else
       # Ledger row pruned/deleted from under the job — nothing to deliver.
-      _ -> :ok
+      :gone ->
+        :ok
+
+      {:error, error} ->
+        Logger.error(
+          "Webhook delivery #{id} could not be read, retrying: " <> Exception.message(error)
+        )
+
+        {:error, error}
     end
   end
 
@@ -34,6 +46,46 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   # not raised: a crash would retry a job that can never succeed, and running it
   # against a guessed org is exactly the fallback that was removed.
   def perform(%Oban.Job{args: args}), do: Deprecations.cancel_legacy_job(__MODULE__, args)
+
+  # Both reads run as `Webhooks.system/0` (#1659) with `authorize_with: :error`.
+  # Under a filter policy a refused read comes back as "not found", and each
+  # "not found" here is a decision: a missing ledger row means "pruned, nothing
+  # to deliver" (the job succeeds and the webhook is never sent), and a missing
+  # endpoint means "deleted" (the row is settled as failed and the job
+  # succeeds). A lost grant must read as neither. With `:error` it is a
+  # Forbidden, which `perform/1` logs and hands to Oban to retry.
+  #
+  # The endpoint is read on its own rather than `load:`-ed with the delivery:
+  # a relationship load authorizes with the relationship's own
+  # `authorize_read_with` (`:filter` by default), not with the parent read's,
+  # so a refused endpoint would have loaded as `nil`, which is "deleted".
+  defp fetch_delivery(id, tenant) do
+    case CMS.get_webhook_delivery(id,
+           actor: Webhooks.system(),
+           authorize_with: :error,
+           tenant: tenant
+         ) do
+      {:ok, delivery} -> {:ok, delivery}
+      {:error, error} -> if not_found?(error), do: :gone, else: {:error, error}
+    end
+  end
+
+  defp fetch_endpoint(delivery, tenant) do
+    case CMS.get_webhook_endpoint(delivery.endpoint_id,
+           actor: Webhooks.system(),
+           authorize_with: :error,
+           tenant: tenant
+         ) do
+      {:ok, endpoint} -> {:ok, endpoint}
+      {:error, error} -> if not_found?(error), do: {:ok, nil}, else: {:error, error}
+    end
+  end
+
+  defp not_found?(%Ash.Error.Invalid{errors: errors}),
+    do: Enum.all?(errors, &match?(%Ash.Error.Query.NotFound{}, &1))
+
+  defp not_found?(%Ash.Error.Query.NotFound{}), do: true
+  defp not_found?(_error), do: false
 
   defp attempt(%{endpoint: endpoint} = delivery, job) do
     cond do
@@ -59,10 +111,17 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   # Record this attempt on the ledger row — and, when the outcome is final,
   # on the endpoint's health counters (success resets, exhaustion bumps and
   # may auto-disable).
+  #
+  # Written as `Webhooks.system/0` (#1659). A bookkeeping write that fails —
+  # the grant lost, or the database — is LOGGED and does not change the job's
+  # outcome, which the POST alone decides. Raising here after a 2xx would fail
+  # the job and have Oban send the webhook again, a duplicate the receiver can
+  # only drop by `delivery_id`; swallowing it without a word would leave the
+  # row `:pending` with nobody told why.
   defp settle(delivery, job, {:ok, status}, _final?) do
     # The fetched delivery/endpoint carry their org; settle under it (epic #336).
-    CMS.record_webhook_delivery_attempt!(
-      delivery,
+    delivery
+    |> CMS.record_webhook_delivery_attempt(
       %{
         status: :succeeded,
         attempts: job.attempt,
@@ -70,40 +129,49 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
         last_error: nil,
         delivered_at: DateTime.utc_now()
       },
-      authorize?: false,
+      actor: Webhooks.system(),
       tenant: delivery.org_id
     )
+    |> log_unrecorded(delivery, "attempt")
 
     if delivery.endpoint do
-      CMS.record_webhook_success!(delivery.endpoint, %{},
-        authorize?: false,
-        tenant: delivery.org_id
-      )
+      delivery.endpoint
+      |> CMS.record_webhook_success(%{}, actor: Webhooks.system(), tenant: delivery.org_id)
+      |> log_unrecorded(delivery, "endpoint success")
     end
   end
 
   defp settle(delivery, job, {:error, reason}, final?) do
-    CMS.record_webhook_delivery_attempt!(
-      delivery,
+    delivery
+    |> CMS.record_webhook_delivery_attempt(
       %{
         status: if(final?, do: :failed, else: :pending),
         attempts: job.attempt,
         last_status: parse_status(reason),
         last_error: reason
       },
-      authorize?: false,
+      actor: Webhooks.system(),
       tenant: delivery.org_id
     )
+    |> log_unrecorded(delivery, "attempt")
 
     # Bump health only for a live endpoint that truly exhausted its retries —
     # a failed ping against an already-disabled endpoint proves nothing new.
     if final? and is_struct(delivery.endpoint, KilnCMS.CMS.WebhookEndpoint) and
          delivery.endpoint.active do
-      CMS.record_webhook_failure!(delivery.endpoint, %{},
-        authorize?: false,
-        tenant: delivery.org_id
-      )
+      delivery.endpoint
+      |> CMS.record_webhook_failure(%{}, actor: Webhooks.system(), tenant: delivery.org_id)
+      |> log_unrecorded(delivery, "endpoint failure")
     end
+  end
+
+  defp log_unrecorded({:ok, _record}, _delivery, _what), do: :ok
+
+  defp log_unrecorded({:error, error}, delivery, what) do
+    Logger.error(
+      "Webhook delivery #{delivery.id}: #{what} not recorded on the ledger: " <>
+        Exception.message(error)
+    )
   end
 
   # "endpoint returned HTTP 503" → 503, for the ledger's status column.
