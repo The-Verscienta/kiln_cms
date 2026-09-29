@@ -5782,7 +5782,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                             TipTap editor read-only from it, the way `readonly`
                             does for the plain inputs. --%>
                         <div
-                          id={"rt-#{rich_host_key(bf)}-v#{@editor_version}"}
+                          id={"rt-#{rich_host_key(bf)}-v#{@editor_version}-m#{@markdown_generation}"}
                           phx-hook="RichText"
                           phx-update="ignore"
                           data-block-id={bf[:id].value}

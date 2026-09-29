@@ -14,7 +14,19 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownMode do
       resulting blocks in the form (`from_source/2`), so the preview, autosave
       and Save all see what the text says. A placeholder brings its block back
       unchanged, with its id.
-    * **Leaving** just closes the view: the blocks are already there.
+    * **Leaving** just closes the view: the blocks are already there. After
+      an edit, the rich-text editors remount (`@markdown_generation` is part
+      of their element id), since they keep the content they mounted with.
+
+  Prose keeps its block ids across edits: the blocks a parse produces take
+  the ids of the previous parse's, by position and type, so a discussion on a
+  paragraph survives a typo fixed two sections away. Rich text is written as
+  Markdown only when it reads back the same (tables with merged cells, custom
+  objects and the like become placeholders), and so is an image only when its
+  URL is one the Markdown importer keeps.
+
+  While another editor holds a lock on a block, the view does not rewrite the
+  blocks: entering is refused, and so is applying an edit.
 
   Text that matches what entering wrote restores the blocks exactly as they
   were (ids, block types, everything): an author who looks at the Markdown and
@@ -31,18 +43,23 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownMode do
 
   import KilnCMSWeb.ContentEditor.BlockParams,
     only: [
+      add_blocks: 2,
       full_blocks_input: 1,
+      html_block_params: 2,
       inject_children: 2,
       inject_rich_bodies: 2,
       remove_all_blocks: 1,
-      to_int: 1
+      to_int: 1,
+      writable?: 1
     ]
 
   import KilnCMSWeb.ContentEditor.BlockOps, only: [revalidate: 2]
-  import KilnCMSWeb.ContentEditor.Preview, only: [broadcast_preview: 1, refresh_preview: 1]
+  import KilnCMSWeb.ContentEditor.Preview, only: [broadcast_preview: 1]
   import KilnCMSWeb.ContentEditor.Session, only: [mark_dirty: 1]
+  import KilnCMSWeb.ContentEditor.Shared, only: [locked_fields: 1]
 
   alias KilnCMS.Blocks.PortableText
+  alias KilnCMS.HTMLSanitizer
   alias KilnCMS.Markdown
 
   @placeholder ~r/^\s*<!--\s*kiln:block\s+([a-z0-9_]+)\s+([0-9A-Za-z-]+)\s*-->\s*$/
@@ -51,6 +68,7 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownMode do
     {:cont,
      socket
      |> assign(:markdown_mode, nil)
+     |> assign(:markdown_generation, 0)
      |> attach_hook(:editor_markdown_mode, :handle_event, &on_event/3)}
   end
 
@@ -59,13 +77,22 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownMode do
   defp on_event(_event, _params, %{assigns: %{record: nil}} = socket), do: {:cont, socket}
 
   defp on_event("markdown_mode_enter", _params, socket) do
-    if writable?(socket) and is_nil(socket.assigns.markdown_mode),
-      do: {:halt, enter(socket)},
-      else: {:halt, socket}
+    cond do
+      not writable?(socket) or socket.assigns.markdown_mode != nil -> {:halt, socket}
+      blocks_locked?(socket) -> {:halt, locked(socket)}
+      true -> {:halt, enter(socket)}
+    end
   end
 
-  defp on_event("markdown_mode_exit", _params, socket),
-    do: {:halt, assign(socket, :markdown_mode, nil)}
+  defp on_event("markdown_mode_exit", _params, socket) do
+    socket =
+      case socket.assigns.markdown_mode do
+        %{touched?: true} -> update(socket, :markdown_generation, &(&1 + 1))
+        _ -> socket
+      end
+
+    {:halt, assign(socket, :markdown_mode, nil)}
+  end
 
   defp on_event("markdown_mode_change", %{"markdown_source" => text}, socket)
        when is_binary(text) do
@@ -83,6 +110,9 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownMode do
            )
          )}
 
+      blocks_locked?(socket) ->
+        {:halt, locked(socket)}
+
       true ->
         {:halt, change(socket, text)}
     end
@@ -92,7 +122,23 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownMode do
 
   defp on_event(_event, _params, socket), do: {:cont, socket}
 
-  defp writable?(socket), do: socket.assigns[:may_write?] == true
+  # A peer's lock on any block field (`form[blocks][N][…]`). Rewriting the
+  # blocks would overwrite what they are typing, and move their lock onto
+  # whichever block lands at that position.
+  defp blocks_locked?(socket) do
+    prefix = socket.assigns.form.name <> "[blocks]"
+    socket |> locked_fields() |> Enum.any?(&String.starts_with?(&1, prefix))
+  end
+
+  defp locked(socket) do
+    put_flash(
+      socket,
+      :error,
+      gettext(
+        "Someone is editing a block right now. Try the Markdown view again once they're done."
+      )
+    )
+  end
 
   # ── Entering / changing ───────────────────────────────────────────────────
 
@@ -115,7 +161,9 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownMode do
       original: source,
       snapshot: %{blocks: blocks, block_children: children, rich_bodies: rich_bodies},
       kept: kept,
-      applied: :original
+      prose_ids: prose_ids(blocks, kept),
+      applied: :original,
+      touched?: false
     })
   end
 
@@ -133,7 +181,7 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownMode do
         socket
 
       true ->
-        blocks = from_source(text, mode.kept)
+        blocks = from_source(text, mode.kept, mode.prose_ids)
 
         kept_ids =
           for %{"id" => id} <- blocks, Map.has_key?(mode.kept, id), into: MapSet.new(), do: id
@@ -150,30 +198,32 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownMode do
             )
         }
 
-        apply_blocks(socket, state, %{mode | source: text, applied: :parsed})
+        mode = %{mode | source: text, applied: :parsed, prose_ids: prose_ids(blocks, mode.kept)}
+        apply_blocks(socket, state, mode)
     end
   end
 
   defp same_text?(a, b), do: String.trim(a) == String.trim(b)
+
+  # The ids of the blocks written as Markdown, in order — what the next parse
+  # hands out again.
+  defp prose_ids(blocks, kept) do
+    for %{"id" => id, "_union_type" => type} <- blocks, not Map.has_key?(kept, id), do: {type, id}
+  end
 
   # Replace every block sub-form with `state.blocks`, the way the `.md` import
   # does (sub-forms added one by one — see `MarkdownImport.apply_import/2` for
   # why a longer params list is not enough), then re-validate so the form, the
   # preview and the next save agree.
   defp apply_blocks(socket, state, mode) do
-    base = remove_all_blocks(socket.assigns.form)
-
-    form =
-      Enum.reduce(state.blocks, base, fn params, form ->
-        AshPhoenix.Form.add_form(form, form.name <> "[blocks]", params: params)
-      end)
+    form = socket.assigns.form |> remove_all_blocks() |> add_blocks(state.blocks)
 
     socket =
       socket
       |> assign(:form, form)
       |> assign(:block_children, state.block_children)
       |> assign(:rich_bodies, state.rich_bodies)
-      |> assign(:markdown_mode, mode)
+      |> assign(:markdown_mode, %{mode | touched?: true})
 
     params =
       form
@@ -183,7 +233,8 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownMode do
 
     socket = revalidate(socket, params)
     broadcast_preview(socket)
-    socket |> refresh_preview() |> mark_dirty()
+    # `mark_dirty/1` refreshes the inline preview itself.
+    mark_dirty(socket)
   end
 
   defp ensure_id(%{"id" => id} = block) when is_binary(id) and id != "", do: block
@@ -220,17 +271,31 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownMode do
   maps. A placeholder line whose id is in `kept` brings that block back as it
   was — once; a copy, or an id it doesn't know, is dropped. Every run of
   Markdown between them goes through `KilnCMS.Markdown.to_blocks/2`.
+
+  The blocks the Markdown parses to take their ids from `prose_ids`
+  (`{type, id}` in order, from the previous parse) by position, where the
+  type matches; the rest get fresh ones.
   """
-  @spec from_source(String.t(), %{String.t() => map()}) :: [map()]
-  def from_source(text, kept) do
-    {segments, _used} =
+  @spec from_source(String.t(), %{String.t() => map()}, [{String.t(), String.t()}]) :: [map()]
+  def from_source(text, kept, prose_ids \\ []) do
+    {blocks, _used} =
       text
       |> String.split(~r/\r?\n/)
       |> segments()
       |> Enum.flat_map_reduce(MapSet.new(), &segment_blocks(&1, &2, kept))
 
-    segments
+    {blocks, _left} = Enum.map_reduce(blocks, prose_ids, &assign_id/2)
+    blocks
   end
+
+  # A kept block has its id; a parsed one (id `nil`) takes the next one.
+  defp assign_id(%{"id" => id} = block, queue) when is_binary(id), do: {block, queue}
+
+  defp assign_id(%{"_union_type" => type} = block, [{type, id} | rest]),
+    do: {Map.put(block, "id", id), rest}
+
+  defp assign_id(block, [_other | rest]), do: {Map.put(block, "id", Ash.UUID.generate()), rest}
+  defp assign_id(block, []), do: {Map.put(block, "id", Ash.UUID.generate()), []}
 
   defp segment_blocks({:keep, id}, used, kept) do
     cond do
@@ -241,7 +306,9 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownMode do
   end
 
   defp segment_blocks({:markdown, lines}, used, _kept),
-    do: {lines |> Enum.join("\n") |> Markdown.to_blocks() |> Enum.map(&block_params/1), used}
+    do:
+      {lines |> Enum.join("\n") |> Markdown.to_blocks() |> Enum.map(&html_block_params(&1, nil)),
+       used}
 
   # Lines → `{:markdown, lines}` runs and `{:keep, id}` placeholders. A
   # placeholder-shaped line inside a fenced code block is code, not a block.
@@ -284,14 +351,9 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownMode do
       String.first(String.trim(line)) == String.first(fence)
   end
 
-  # `KilnCMS.Blocks.Html`'s `%{"type", "value"}` shape → a union sub-form's
-  # params, with the stable id every editor block carries.
-  defp block_params(%{"type" => type, "value" => value}),
-    do: Map.merge(value, %{"_union_type" => type, "id" => Ash.UUID.generate()})
-
   defp block_markdown(%{"_union_type" => "rich_text"} = block) do
     case block["body"] do
-      [_ | _] = body -> {:markdown, PortableText.to_markdown(body)}
+      [_ | _] = body -> prose_markdown(body)
       # Prose Portable Text can't hold (a list in a quote, marks in code) is
       # kept as its stored HTML — rewriting it through Markdown would lose it.
       _ -> if blank?(block["legacy_html"]), do: {:markdown, ""}, else: :keep
@@ -312,7 +374,9 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownMode do
   defp block_markdown(%{"_union_type" => "image"} = block) do
     url = trimmed(block["url"])
 
-    if url == "" or not blank?(block["media_id"]) do
+    # The importer keeps only a URL `safe_image_src/1` accepts as it is; any
+    # other (a bare media id, a relative path) would vanish on the next edit.
+    if url == "" or not blank?(block["media_id"]) or HTMLSanitizer.safe_image_src(url) != url do
       :keep
     else
       {:markdown, image(url, trimmed(block["alt"]), trimmed(block["caption"]))}
@@ -320,6 +384,30 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownMode do
   end
 
   defp block_markdown(_block), do: :keep
+
+  # Prose becomes Markdown only when that Markdown reads back as the same
+  # prose; anything it can't hold (merged table cells, a headerless table, a
+  # custom object) keeps the block whole, as a placeholder.
+  defp prose_markdown(body) do
+    markdown = PortableText.to_markdown(body)
+    html = PortableText.to_html(body)
+
+    cond do
+      html == "" -> {:markdown, ""}
+      reads_back?(markdown, html) -> {:markdown, markdown}
+      true -> :keep
+    end
+  end
+
+  defp reads_back?(markdown, html) do
+    case Markdown.to_blocks(markdown) do
+      [%{"type" => "rich_text", "value" => %{"body" => body}}] ->
+        PortableText.to_html(body) == html
+
+      _ ->
+        false
+    end
+  end
 
   defp heading(level, text) do
     # An unset level is the heading block's own default, h2.
@@ -415,16 +503,18 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownMode do
           )}
         </span>
       </p>
-      <textarea
+      <.input
+        type="textarea"
         id="markdown-mode-source"
         name="markdown_source"
+        value={@mode.source}
         phx-change="markdown_mode_change"
         phx-debounce="400"
         rows="24"
         spellcheck="true"
         aria-label={gettext("Document body as Markdown")}
         class="block min-h-[24rem] w-full resize-y rounded-lg border border-base-content/15 bg-base-100 p-4 font-mono text-sm leading-relaxed shadow-sm transition-colors duration-150 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-      >{Phoenix.HTML.Form.normalize_value("textarea", @mode.source)}</textarea>
+      />
     </div>
     """
   end

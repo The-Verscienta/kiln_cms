@@ -61,4 +61,47 @@ defmodule KilnCMSWeb.ContentEditorMarkdownModeTest do
     assert [%{"_union_type" => "rich_text", "body" => [%{"style" => "code"} = code]}] = blocks
     assert hd(code["children"])["text"] =~ "kiln:block gallery"
   end
+
+  test "an image whose URL the importer wouldn't keep is kept whole" do
+    for url <- ["abc123", "uploads/a.png"] do
+      image = %{"_union_type" => "image", "id" => "img-#{url}", "url" => url, "alt" => "A"}
+      assert {"<!-- kiln:block image img-" <> _, %{}} = MarkdownMode.to_source([image])
+    end
+  end
+
+  test "prose that Markdown can't hold is kept whole" do
+    merged = %{
+      "_union_type" => "rich_text",
+      "id" => "t",
+      "body" => [
+        %{
+          "_type" => "table",
+          "rows" => [
+            %{"cells" => [%{"header" => true, "colspan" => 2, "children" => [%{"text" => "A"}]}]},
+            %{
+              "cells" => [
+                %{"children" => [%{"text" => "1"}]},
+                %{"children" => [%{"text" => "2"}]}
+              ]
+            }
+          ]
+        }
+      ]
+    }
+
+    assert {"<!-- kiln:block rich_text t -->\n", %{"t" => ^merged}} =
+             MarkdownMode.to_source([merged])
+  end
+
+  test "parsed blocks take the previous ids by position and type" do
+    blocks =
+      MarkdownMode.from_source(
+        "First.\n\n#{placeholder(@gallery)}\n\nSecond.\n\nThird.",
+        %{@gallery["id"] => @gallery},
+        [{"rich_text", "p1"}, {"image", "img"}]
+      )
+
+    assert [%{"id" => "p1"}, @gallery, %{"id" => fresh}] = blocks
+    refute fresh in ["p1", "img"]
+  end
 end

@@ -12033,6 +12033,11 @@ msgstr "Otra persona guardó cambios en este contenido. El guardado está en pau
 msgid "Someone else saved this page. Duplicating copies their version, not what you see. Continue?"
 msgstr "Otra persona guardó esta página. Al duplicar se copiará su versión, no lo que ves. ¿Continuar?"
 
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Someone is editing a block right now. Try the Markdown view again once they're done."
+msgstr "Alguien está editando un bloque ahora mismo. Vuelve a probar la vista Markdown cuando termine."
+
 #: lib/kiln_cms_web/controllers/form_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Something needs fixing"

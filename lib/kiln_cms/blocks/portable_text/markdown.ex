@@ -56,15 +56,27 @@ defmodule KilnCMS.Blocks.PortableText.Markdown do
         ""
 
       # A heading is one line: a hard break inside it would end the heading.
+      # A trailing `#` would read as the optional closing sequence (the parser
+      # ignores a `\#` there, so it is written as an entity).
       text ->
-        String.duplicate("#", String.to_integer(n)) <> " " <> String.replace(text, "  \n", " ")
+        text = text |> String.replace("  \n", " ") |> String.replace(~r/#(\s*)$/, "&#35;\\1")
+        String.duplicate("#", String.to_integer(n)) <> " " <> text
     end
   end
 
   defp block(%{"style" => "blockquote"} = block) do
     case inline(block) do
-      "" -> ""
-      text -> text |> String.split("\n") |> Enum.map_join("\n", &String.trim_trailing("> " <> &1))
+      "" ->
+        ""
+
+      # Each line keeps its trailing two-space hard break.
+      text ->
+        text
+        |> String.split("\n")
+        |> Enum.map_join("\n", fn
+          "" -> ">"
+          line -> "> " <> line
+        end)
     end
   end
 
@@ -78,15 +90,7 @@ defmodule KilnCMS.Blocks.PortableText.Markdown do
   end
 
   # A fence one backtick longer than the longest run inside the code.
-  defp fence_for(code) do
-    longest =
-      ~r/`+/
-      |> Regex.scan(code)
-      |> Enum.map(fn [run] -> String.length(run) end)
-      |> Enum.max(fn -> 0 end)
-
-    String.duplicate("`", max(3, longest + 1))
-  end
+  defp fence_for(code), do: String.duplicate("`", max(3, longest_backtick_run(code) + 1))
 
   # Consecutive items: numbered items count up per level, and a new
   # level-1 run of the other kind starts a separate list (a blank line apart,
@@ -155,7 +159,8 @@ defmodule KilnCMS.Blocks.PortableText.Markdown do
   # A block's spans, with marks opened and closed as a stack so a run shared by
   # neighbouring spans is written once (`**a *b***`, not `**a****b**`), and the
   # whitespace at a span's edge moved outside its delimiters (`** a**` is not
-  # emphasis).
+  # emphasis). Inline code is not on the stack: each run writes its own code
+  # span (see `text_for/2`), since nothing inside one is Markdown.
   defp inline(block) do
     defs = List.wrap(block["markDefs"])
 
@@ -163,19 +168,44 @@ defmodule KilnCMS.Blocks.PortableText.Markdown do
       block
       |> children()
       |> merge_runs(defs)
-      |> Enum.reduce({"", []}, fn {text, marks}, {out, stack} ->
-        keep = common_prefix(stack, marks)
-        {out, stack} = close(out, stack, length(stack) - keep)
-        opening = Enum.drop(marks, keep)
-        {lead, text} = split_leading_space(text, opening)
-        out = out <> lead <> Enum.map_join(opening, &open/1)
-        {out <> text_for(text, marks), stack ++ opening}
-      end)
+      |> Enum.reduce({"", []}, &emit_run/2)
 
     {out, _} = close(out, stack, length(stack))
     String.trim(out)
   end
 
+  # A whitespace-only run opens nothing: `** **` is not emphasis, and its
+  # delimiters would be left as literal asterisks.
+  defp emit_run({text, marks}, {out, stack}) do
+    if String.trim(text) == "" and "code" not in marks do
+      {out <> text_for(text, []), stack}
+    else
+      # Keep the open marks this run still carries, in the order they were
+      # opened; close the rest and open what is new. Reordering them would
+      # close and reopen a mark mid-word (`*a****b***`).
+      keep = stack |> Enum.take_while(fn {mark, _} -> mark in marks end) |> length()
+      {out, stack} = close(out, stack, length(stack) - keep)
+      opening = (marks -- ["code"]) -- Enum.map(stack, &elem(&1, 0))
+      {lead, text} = split_leading_space(text, opening)
+      {out, opened} = open_marks(out <> lead, opening)
+      {out <> text_for(text, marks), stack ++ opened}
+    end
+  end
+
+  defp open_marks(out, marks) do
+    Enum.reduce(marks, {out, []}, fn mark, {out, opened} ->
+      style = style_for(mark, out)
+      {open(out, mark, style), opened ++ [{mark, style}]}
+    end)
+  end
+
+  # A `*` delimiter straight after another (`**a***b*`) runs into it, and the
+  # parser reads the pair as one run. The HTML element says the same thing
+  # unambiguously, and the importer keeps it.
+  defp style_for(mark, out) when mark in ["strong", "em"],
+    do: if(String.ends_with?(out, "*"), do: :html, else: :markdown)
+
+  defp style_for(_mark, _out), do: :markdown
   defp children(block), do: block["children"] |> List.wrap() |> Enum.filter(&is_map/1)
 
   # Each span as `{text, marks}` with its marks resolved (a link key becomes
@@ -212,9 +242,6 @@ defmodule KilnCMS.Blocks.PortableText.Markdown do
     end)
   end
 
-  defp common_prefix([a | as], [a | bs]), do: 1 + common_prefix(as, bs)
-  defp common_prefix(_, _), do: 0
-
   defp close(out, stack, 0), do: {out, stack}
 
   defp close(out, stack, count) do
@@ -231,39 +258,65 @@ defmodule KilnCMS.Blocks.PortableText.Markdown do
     {binary_part(text, 0, byte_size(text) - byte_size(trimmed)), trimmed}
   end
 
-  defp open({:link, _href}), do: "["
-  defp open("strong"), do: "**"
-  defp open("em"), do: "*"
-  defp open("strike"), do: "~~"
-  defp open("underline"), do: "<u>"
-  defp open("code"), do: "`"
-
-  defp close_mark({:link, href}), do: "](" <> link_target(href) <> ")"
-  defp close_mark("underline"), do: "</u>"
-  defp close_mark(mark), do: open(mark)
-
-  # Spaces and parentheses would end the destination early; `<…>` holds them.
-  defp link_target(href) do
-    if String.match?(href, ~r/[\s()<>]/),
-      do: "<" <> String.replace(href, ">", "%3E") <> ">",
-      else: href
+  # A `!` right before a link's `[` would make it an image.
+  defp open(out, {:link, _href}, _style) do
+    if String.ends_with?(out, "!"),
+      do: binary_part(out, 0, byte_size(out) - 1) <> "\\![",
+      else: out <> "["
   end
 
-  # Inline code is written raw — it has no escapes — and a hard break inside
-  # prose becomes Markdown's two-space line break.
+  defp open(out, mark, :html), do: out <> "<" <> html_tag(mark) <> ">"
+  defp open(out, "strong", :markdown), do: out <> "**"
+  defp open(out, "em", :markdown), do: out <> "*"
+  defp open(out, "strike", :markdown), do: out <> "~~"
+  defp open(out, "underline", :markdown), do: out <> "<u>"
+
+  defp close_mark({{:link, href}, _style}), do: "](" <> link_target(href) <> ")"
+  defp close_mark({mark, :html}), do: "</" <> html_tag(mark) <> ">"
+  defp close_mark({"strong", :markdown}), do: "**"
+  defp close_mark({"em", :markdown}), do: "*"
+  defp close_mark({"strike", :markdown}), do: "~~"
+  defp close_mark({"underline", :markdown}), do: "</u>"
+
+  defp html_tag("strong"), do: "strong"
+  defp html_tag("em"), do: "em"
+
+  # Spaces and parentheses would end the destination early, and the parser
+  # takes no `<…>` destination, so they are percent-encoded — the same URL.
+  defp link_target(href),
+    do: Regex.replace(~r/[\s()<>]/, href, fn char -> "%" <> Base.encode16(char) end)
+
+  # Inline code is written raw — it has no escapes — between backtick runs
+  # longer than any inside it (padded when it starts or ends with one), and a
+  # hard break inside prose becomes Markdown's two-space line break.
   defp text_for(text, marks) do
     if "code" in marks do
-      String.replace(text, "\n", " ")
+      code = String.replace(text, "\n", " ")
+      ticks = String.duplicate("`", longest_backtick_run(code) + 1)
+      pad = if String.starts_with?(code, "`") or String.ends_with?(code, "`"), do: " ", else: ""
+      ticks <> pad <> code <> pad <> ticks
     else
       text |> escape() |> String.replace("\n", "  \n")
     end
   end
 
+  defp longest_backtick_run(code) do
+    ~r/`+/
+    |> Regex.scan(code)
+    |> Enum.map(fn [run] -> String.length(run) end)
+    |> Enum.max(fn -> 0 end)
+  end
+
   # Characters that would otherwise start Markdown syntax. Line-start markers
-  # (`#`, `>`, `-`, `+`, `1.`) are escaped only where they would take effect.
+  # (`#`, `>`, `-`, `+`, `1.`, a `---`/`===` rule or underline) are escaped only
+  # where they would take effect. `&` and `<` become entities: the parser
+  # treats `\<` as the start of raw HTML all the same, and a bare `&copy;`
+  # as the character it names.
   defp escape(text) do
     text
-    |> String.replace(~r/([\\`*\[\]<~])/, "\\\\\\1")
+    |> String.replace("&", "&amp;")
+    |> String.replace("<", "&lt;")
+    |> String.replace(~r/([\\`*\[\]~])/, "\\\\\\1")
     # An underscore inside a word (`snake_case`) is never emphasis.
     |> String.replace(~r/(?<![\p{L}\p{N}])_|_(?![\p{L}\p{N}])/u, "\\\\_")
     |> String.split("\n")
@@ -272,7 +325,11 @@ defmodule KilnCMS.Blocks.PortableText.Markdown do
 
   defp escape_line_start(line) do
     cond do
-      String.match?(line, ~r/^\s*(#+(\s|$)|>|[-+](\s|$))/) ->
+      # The parser ignores `\=`, so an underline is broken with an entity.
+      String.match?(line, ~r/^\s*=+\s*$/) ->
+        String.replace(line, "=", "&#61;", global: false)
+
+      String.match?(line, ~r/^\s*(#+(\s|$)|>|[-+](\s|$)|-+\s*$)/) ->
         String.replace(line, ~r/^(\s*)(.)/, "\\1\\\\\\2")
 
       String.match?(line, ~r/^\s*\d+[.)](\s|$)/) ->

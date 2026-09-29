@@ -160,6 +160,26 @@ defmodule KilnCMSWeb.ContentEditor.BlockParams do
     end
   end
 
+  # Append a sub-form per union input map, one by one. Adding is what keeps
+  # each block's type: validating a longer `blocks` params list instead
+  # matches an entry with no sub-form by POSITION, and it inherits another
+  # block's type.
+  def add_blocks(form, blocks) do
+    Enum.reduce(blocks, form, fn params, form ->
+      AshPhoenix.Form.add_form(form, form.name <> "[blocks]", params: params)
+    end)
+  end
+
+  # `KilnCMS.Blocks.Html`'s `%{"type", "value"}` input shape (what
+  # `KilnCMS.Markdown` produces) → a union sub-form's params, with the stable
+  # id every editor block carries.
+  def html_block_params(%{"type" => type, "value" => value}, id \\ Ash.UUID.generate()),
+    do: Map.merge(value, %{"_union_type" => type, "id" => id})
+
+  # The editor's own write gate, which every block-writing event checks; the
+  # record's policies re-check the eventual save.
+  def writable?(socket), do: socket.assigns[:may_write?] == true
+
   # The complete current block set as a list of union input maps (string keys,
   # `_union_type` discriminator, stable `id`), read from the live sub-forms. This
   # is the payload a caller merges a targeted edit into so that validating it

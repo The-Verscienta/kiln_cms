@@ -319,6 +319,37 @@ defmodule KilnCMSWeb.ContentEditorMarkdownTest do
       assert Enum.map(saved(page).blocks, &prose/1) == ["Only prose now."]
     end
 
+    test "a peer's lock on a block keeps the view from rewriting the blocks", %{conn: conn} do
+      {lv, page} = open(conn, [rich("<p>Theirs.</p>")])
+
+      send(
+        lv.pid,
+        {:field_locks, "editing:page:#{page.id}",
+         %{
+           "form[blocks][0][body]" => %{
+             pid: spawn(fn -> :ok end),
+             user_id: "peer",
+             name: "Peer",
+             since: DateTime.utc_now(),
+             last_active: DateTime.utc_now()
+           }
+         }}
+      )
+
+      assert enter(lv) =~ "Someone is editing a block right now."
+      refute has_element?(lv, "#markdown-mode-source")
+    end
+
+    test "leaving after an edit remounts the rich-text editors", %{conn: conn} do
+      {lv, _page} = open(conn, [rich("<p>Before.</p>")])
+
+      enter(lv)
+      type_markdown(lv, "After.")
+      lv |> element("#editor-mode-blocks") |> render_click()
+
+      assert has_element?(lv, ~s([phx-hook="RichText"][id$="-m1"]))
+    end
+
     defp prose_or_text(%Ash.Union{value: %{text: text}}), do: text
     defp prose_or_text(block), do: prose(block)
   end

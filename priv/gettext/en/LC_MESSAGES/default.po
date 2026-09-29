@@ -12033,6 +12033,11 @@ msgstr ""
 msgid "Someone else saved this page. Duplicating copies their version, not what you see. Continue?"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
+#, elixir-autogen, elixir-format
+msgid "Someone is editing a block right now. Try the Markdown view again once they're done."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/form_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Something needs fixing"
