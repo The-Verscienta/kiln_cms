@@ -64,7 +64,13 @@ defmodule KilnCMS.CMS.Promotion do
   @spec promote!(String.t(), keyword()) ::
           {:ok, %{entries: non_neg_integer(), versions: non_neg_integer()}}
   def promote!(name, opts \\ []) when is_binary(name) do
-    definition = CMS.get_type_definition_by_name!(name, authorize?: false)
+    # As the system actor (`TypeDefinition` admits it for reads): this runs from
+    # `mix kiln.promote_data`, an operator at the host's shell with no actor.
+    definition =
+      CMS.get_type_definition_by_name!(name,
+        actor: KilnCMS.CMS.Housekeeping.system(:promotion),
+        authorize_with: :error
+      )
 
     target = ContentTypes.get(opts[:into] || name)
 
@@ -339,6 +345,11 @@ defmodule KilnCMS.CMS.Promotion do
   # Archive (AshArchival soft-delete), returning the held notifications so the
   # caller can dispatch them post-commit.
   defp archive_definition(definition) do
+    # authorize?: false — the last step of an operator's promotion, inside the
+    # same transaction as the raw-SQL row moves above. `TypeDefinition` writes
+    # are admin-only (`forbid_if always()` below the admin bypass); admitting a
+    # system actor to `destroy` would let every system caller archive a site's
+    # content types.
     case Ash.destroy(definition, authorize?: false, return_notifications?: true) do
       {:ok, notifications} when is_list(notifications) -> notifications
       :ok -> []

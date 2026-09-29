@@ -405,12 +405,17 @@ defmodule KilnCMS.CMS.ContentRelease do
     # letting a human stamp a release `:published` that never published, or
     # rewrite an item's captured `prior_version_id` and quietly corrupt what
     # rollback restores. Admins reach everything they should through the
-    # explicit policies below; the worker reaches the `mark_*` actions the only
-    # way anything should, with `authorize?: false`.
+    # explicit policies below; the release worker reaches the `mark_*` actions
+    # as a `KilnCMS.SystemActor` (#1659), admitted to those and nothing a
+    # person may do.
 
     # Editor-facing only — a release is never part of a delivered document.
+    # The release worker (a system actor) re-reads the release it was enqueued
+    # for through the plain `read`, and only that one.
     policy action_type(:read) do
       authorize_if KilnCMS.CMS.Checks.OrgEditor
+      forbid_unless action(:read)
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
     # Composing a release is editor work.
@@ -422,6 +427,20 @@ defmodule KilnCMS.CMS.ContentRelease do
     # and a release must not be a way around it.
     policy action([:schedule, :unschedule, :start, :start_rollback, :abandon]) do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+
+      # A go-live that crashed abandons its own claim (`ReleaseWorker`), so the
+      # release is not stuck `:publishing` forever. Only `:abandon`: shipping
+      # or scheduling stays an admin's decision.
+      forbid_unless action(:abandon)
+      authorize_if KilnCMS.Checks.SystemActor
+    end
+
+    # The go-live and rollback outcome writes. No person may call these — a
+    # human stamping a release `:published` that never published is exactly
+    # what the missing admin bypass above prevents — so only the release
+    # worker's system actor is admitted.
+    policy action([:mark_published, :mark_failed, :mark_rolled_back, :mark_rollback_failed]) do
+      authorize_if KilnCMS.Checks.SystemActor
     end
 
     # Closing out is editor work UNTIL the release is somebody else's decision.

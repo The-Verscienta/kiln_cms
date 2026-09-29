@@ -498,6 +498,34 @@ carries the reasoning.
   ceiling", and the follow is refused and logged. Honest senders see no
   difference unless the nonce store is down. (#1659)
 
+<a id="cms-helpers-run-under-the-policies"></a>
+
+- **Content releases, slugs, menus and the field registry run under the
+  policies.** The CMS's helper modules reached their resources through
+  `authorize?: false`. They now run as the caller where the caller is
+  entitled, as a `KilnCMS.SystemActor` (`KilnCMS.CMS.Housekeeping`) where
+  there is no caller, and keep a written justification where neither fits.
+  The release go-live worker reads a release and lists its items by status,
+  records the outcome (`mark_*` on `ContentRelease` and `ReleaseItem`, which
+  no person, admin included, may call) and abandons its own crashed claim;
+  it cannot start, schedule or compose a release. The system actor may read
+  `SiteEditorialSettings`, not save it. Menus and taxonomy are read with no
+  actor under their world-readable policies, the field and type registry as
+  the system, and the governance dashboard's content-health panel and CSV
+  export as the person looking. The content reads that decide slug and alias
+  uniqueness keep their bypass on purpose: a filtered read would report a
+  taken slug as free.
+
+  Several reads now fail **closed** instead of answering "nothing": a
+  refused release-item read raises rather than publishing (or rolling back)
+  an empty release; the release worker records a refused read as an error
+  rather than logging the release as vanished; a refused registry read
+  raises rather than deriving a slug from the default pattern, dropping a
+  dynamic type's URL prefix from the reserved segments, or rejecting a
+  `custom_filter` as an unknown field; and `TaskSettings.site_default/1`
+  raises rather than applying the shipped default. The `mix kiln.authz.check`
+  backlog drops by 37 sites and 17 files. (#1659)
+
 <a id="mix-kilnmigrationscheck-gates-expand-contract"></a>
 
 - **`mix kiln.migrations.check` fails a PR whose new migration breaks the

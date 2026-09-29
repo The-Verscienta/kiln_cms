@@ -215,6 +215,9 @@ defmodule KilnCMS.CMS.Content do
       resource
       |> Ash.Query.for_read(action, Map.take(query.arguments, arg_names))
       |> Ash.Query.select([:id])
+      # authorize?: false — see above: ids only, which only widen an exemption
+      # on rows the semantic action still reads under the caller's policies.
+      # The system actor holds no content read by design (#1402).
       |> Ash.read!(tenant: query.tenant, authorize?: false)
       |> Enum.map(& &1.id)
     end)
