@@ -193,17 +193,20 @@ defmodule KilnCMS.Newsletter.Subscriber do
       authorize_if expr(not is_nil(user_id) and user_id == ^actor(:id))
     end
 
-    # Admin-only management. Public subscribe/confirm/unsubscribe and the send
-    # pipeline still run `authorize?: false` behind token checks.
+    # Admin-only management. Public subscribe/confirm/unsubscribe still run
+    # `authorize?: false` behind token checks.
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
 
       # Ash ANDs policies, so the `:link_member` grant above is not enough on
       # its own — this blanket policy applies to that action too, and to the
       # read `TierSync` makes to find an existing subscriber before linking.
-      # Narrowed to those two rather than widened: managing a subscriber list
-      # by hand stays an admin act.
-      forbid_unless action([:read, :link_member])
+      # The send pipeline (`KilnCMS.Newsletter.system/0`, #1659) reads the
+      # campaign's recipients (`:confirmed`) and re-reads each one before
+      # delivery (`:read`). Narrowed to those rather than widened: managing a
+      # subscriber list by hand, and every consent change, stays an admin act
+      # (or the subscriber's own).
+      forbid_unless action([:read, :confirmed, :link_member])
       authorize_if {KilnCMS.Checks.SystemActor, subsystem: :newsletter}
     end
   end
