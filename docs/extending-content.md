@@ -224,7 +224,9 @@ mix kiln.promote_data recipe              # move entries + versions + fields
 The data move is transactional and preserves record ids, so taggings and
 content links survive untouched; custom-field definitions are re-scoped to the
 compiled type (the editor keeps rendering them), and the `TypeDefinition` is
-archived. Fields stay data-driven after promotion — promote an individual
+archived. Type definitions are per-site: the generator reads the default
+org's `recipe` unless you name another with `--org SLUG`
+(`mix kiln.gen.content --from recipe --org acme`). Fields stay data-driven after promotion — promote an individual
 field to a real attribute by hand (add the attribute, migrate the JSONB key,
 drop the definition) when querying or indexing demands it.
 

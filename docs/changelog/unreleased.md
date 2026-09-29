@@ -290,6 +290,21 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="mix-kiln-gen-content-from-works-under-strict-tenancy"></a>
+
+- **`mix kiln.gen.content --from` works under strict tenancy, and takes
+  `--org SLUG`.** The generator read the dynamic type's `TypeDefinition` with
+  no tenant. The fail-open test build answered that read, but production
+  compiles strict tenancy and refused it, so promoting a dynamic type failed
+  there. It now reads in the organization `--org SLUG` names, or the default
+  org when the option is left out, still as the operator under
+  `TypeDefinition`'s read-only grant. An unknown slug, or a type that org
+  does not define, stops the task with a message naming it; any other
+  failed read raises as itself rather than posing as a missing type. Type
+  definitions are per-site, so `--org` also picks between two sites that
+  each define a type of the same name.
+  ([#1743](https://github.com/The-Verscienta/kiln_cms/issues/1743))
+
 <a id="per-type-semantic-search-ranks-a-record-the-query-names-first"></a>
 
 - **Per-type semantic search ranks a record the query names first, however

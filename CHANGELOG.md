@@ -156,6 +156,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **`mix kiln.gen.content --from` works under strict tenancy, and takes
+  `--org SLUG`.**
+  ([#1743](https://github.com/The-Verscienta/kiln_cms/issues/1743) · [long form](docs/changelog/unreleased.md#mix-kiln-gen-content-from-works-under-strict-tenancy))
+
 - **Per-type semantic search ranks a record the query names first, however long
   the record.**
   ([#1746](https://github.com/The-Verscienta/kiln_cms/pull/1746) · [long form](docs/changelog/unreleased.md#per-type-semantic-search-ranks-a-record-the-query-names-first))

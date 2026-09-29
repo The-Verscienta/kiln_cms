@@ -36,6 +36,14 @@ if Code.ensure_loaded?(Igniter) do
       entries, versions and custom-field definitions over. Fields stay
       data-driven (the editor renders from `FieldDefinition` rows); promote
       individual fields to real attributes by hand when querying demands it.
+    * `--org <slug>` - with `--from`, the organization whose dynamic type to
+      promote (default: the default org). Type definitions are per-site, so
+      two sites can each define a type of the same name; this picks which one
+      the generator reads.
+
+    ```bash
+    mix kiln.gen.content --from recipe --org acme
+    ```
 
     After running, generate and apply the migration:
 
@@ -58,14 +66,20 @@ if Code.ensure_loaded?(Igniter) do
       %Igniter.Mix.Task.Info{
         positional: [name: [optional: true]],
         example: @example,
-        schema: [excerpt: :boolean, published: :boolean, plural: :string, from: :string],
+        schema: [
+          excerpt: :boolean,
+          published: :boolean,
+          plural: :string,
+          from: :string,
+          org: :string
+        ],
         aliases: [e: :excerpt, p: :published]
       }
     end
 
     @impl Igniter.Mix.Task
     def igniter(igniter) do
-      opts = derive_opts(igniter.args.options)
+      {opts, definition} = derive_opts(igniter.args.options)
       name = igniter.args.positional[:name] || default_name!(opts)
       module = resource_module(name)
       type = type_atom(module)
@@ -81,28 +95,69 @@ if Code.ensure_loaded?(Igniter) do
         {:"list_#{type}_versions", "define :list_#{type}_versions, action: :read"}
       ])
       |> Igniter.add_notice(notice(module, type, plural))
-      |> maybe_add_promotion_notice(opts)
+      |> maybe_add_promotion_notice(opts, definition)
     end
 
     # With --from, flags/plural come from the dynamic type's TypeDefinition
-    # (explicit CLI flags still win).
+    # (explicit CLI flags still win). Returns the definition too, so the
+    # promotion notice reads the same row rather than a second lookup.
     defp derive_opts(opts) do
       case opts[:from] do
         nil ->
-          opts
+          {opts, nil}
 
         name ->
           Mix.Task.run("app.start")
-          definition = type_definition!(name)
-          Keyword.merge(promotion_opts(definition), opts)
+          definition = type_definition!(name, opts[:org])
+          {Keyword.merge(promotion_opts(definition), opts), definition}
       end
     end
 
     # The operator (#1659), under `TypeDefinition`'s read-only system-actor
-    # grant: a generator reads a type's schema, not content.
-    defp type_definition!(name) do
-      KilnCMS.CMS.get_type_definition_by_name!(name, actor: KilnCMS.SystemActor.new(:operator))
+    # grant: a generator reads a type's schema, not content. Always with a
+    # tenant (#1743): type definitions are per-org, and strict tenancy — the
+    # production build — refuses a tenant-less read.
+    defp type_definition!(name, org_slug) do
+      org_id = resolve_org!(org_slug)
+
+      case KilnCMS.CMS.get_type_definition_by_name(name,
+             actor: KilnCMS.SystemActor.new(:operator),
+             tenant: org_id
+           ) do
+        {:ok, definition} ->
+          definition
+
+        {:error, error} ->
+          # Only a miss gets the friendly message; anything else (a refused
+          # read, a tenancy error) is a bug and surfaces as itself.
+          if not_found?(error) do
+            Mix.raise(
+              "no dynamic type named #{inspect(name)} in organization #{org_label(org_slug)}"
+            )
+          else
+            raise error
+          end
+      end
     end
+
+    defp not_found?(%Ash.Error.Query.NotFound{}), do: true
+    defp not_found?(%{errors: errors}) when is_list(errors), do: Enum.any?(errors, &not_found?/1)
+    defp not_found?(_other), do: false
+
+    defp resolve_org!(nil), do: KilnCMS.Accounts.default_org_id()
+
+    defp resolve_org!(slug) do
+      # authorize?: false — an operator-run task resolving the org it was told
+      # to read (#1659): the organization registry has no anonymous read, the
+      # operator is no member, and this is not a request.
+      case KilnCMS.Accounts.get_organization_by_slug(slug, authorize?: false) do
+        {:ok, %{id: id}} -> id
+        _none -> Mix.raise("no organization with slug #{inspect(slug)}")
+      end
+    end
+
+    defp org_label(nil), do: "(the default org)"
+    defp org_label(slug), do: inspect(slug)
 
     # The generator options a TypeDefinition maps to. Public for unit testing.
     # A path_segment that isn't a valid identifier fragment can't become the
@@ -130,7 +185,7 @@ if Code.ensure_loaded?(Igniter) do
       end
     end
 
-    defp maybe_add_promotion_notice(igniter, opts) do
+    defp maybe_add_promotion_notice(igniter, opts, definition) do
       case opts[:from] do
         nil ->
           igniter
@@ -147,16 +202,14 @@ if Code.ensure_loaded?(Igniter) do
           That relocates its entries (ids preserved), version history, and
           custom-field definitions, then archives the TypeDefinition. Its custom
           fields stay data-driven — promote individual fields to real attributes
-          by hand when querying/indexing demands it.#{url_change_note(name, plural)}
+          by hand when querying/indexing demands it.#{url_change_note(definition, plural)}
           """)
       end
     end
 
     # Compiled types serve at /<plural>/<slug>; if the dynamic type used a
     # different segment, its public URLs move.
-    defp url_change_note(name, plural) do
-      definition = type_definition!(name)
-
+    defp url_change_note(definition, plural) do
       if definition.path_segment == plural do
         ""
       else
