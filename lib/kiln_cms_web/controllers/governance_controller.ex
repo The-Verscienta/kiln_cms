@@ -142,7 +142,12 @@ defmodule KilnCMSWeb.GovernanceController do
   # sobelow_skip ["XSS.SendResp"]
   def export_health_csv(conn, _params) do
     if KilnCMSWeb.LiveUserAuth.effective_tier(conn) == :admin do
-      rows = HealthSummary.csv_rows(KilnCMSWeb.Tenant.current_org_id(conn))
+      rows =
+        HealthSummary.csv_rows(
+          KilnCMSWeb.Tenant.current_org_id(conn),
+          conn.assigns[:current_user]
+        )
+
       header = ~w(type title health due_at id)
 
       conn

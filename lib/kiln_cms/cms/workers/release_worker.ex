@@ -30,9 +30,20 @@ defmodule KilnCMS.CMS.Workers.ReleaseWorker do
   def perform(%Oban.Job{args: %{"release_id" => id, "org_id" => org_id} = args}) do
     mode = args["mode"] || "publish"
 
-    case CMS.get_release(id, authorize?: false, tenant: org_id) do
+    # As the system actor, which `ContentRelease` admits for `read`. A refusal
+    # is not "vanished": `authorize_with: :error` makes it an error the job
+    # records, rather than a quiet `:ok` that leaves the release in its claim
+    # state with nobody told.
+    case CMS.get_release(id, system_opts(org_id) ++ [authorize_with: :error]) do
       {:ok, release} ->
         run(release, mode)
+
+      {:error, %Ash.Error.Forbidden{} = error} ->
+        Logger.error(
+          "Release #{id}: the #{mode} job may not read it: #{Exception.message(error)}"
+        )
+
+        {:error, error}
 
       # Deleted between the claim and the job. Nothing to publish, nothing to
       # report to — a discarded job here would just be noise in the queue.
@@ -75,11 +86,16 @@ defmodule KilnCMS.CMS.Workers.ReleaseWorker do
       {:error, error}
   end
 
+  # As the system actor, which `ContentRelease` admits to `:abandon` (and to no
+  # other admin action) so a crashed run can leave its claim state.
   defp abandon(release) do
-    KilnCMS.CMS.abandon_release(release, %{}, authorize?: false, tenant: release.org_id)
+    KilnCMS.CMS.abandon_release(release, %{}, system_opts(release.org_id))
   rescue
     _error -> :ok
   end
+
+  defp system_opts(org_id),
+    do: [actor: KilnCMS.CMS.Housekeeping.system(:releases), tenant: org_id]
 
   # The failure is already recorded on the release (state + reason + item), which
   # is where an editor looks. Returning `:ok` keeps Oban from retrying — see the

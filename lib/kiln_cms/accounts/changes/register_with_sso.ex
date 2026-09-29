@@ -120,6 +120,8 @@ defmodule KilnCMS.Accounts.Changes.RegisterWithSso do
   # A stored provider identity for this iss/sub — the stable match the
   # strategy's resolver will coerce the upsert to.
   defp identity_linked?(sub) when is_binary(sub) and sub != "" do
+    # `authorize?: false`: an SSO callback, before anyone is signed in — there
+    # is no actor. An existence check the invite-only gate decides on.
     KilnCMS.Accounts.UserIdentity
     |> Ash.Query.filter(strategy == "sso" and uid == ^sub)
     |> Ash.exists?(authorize?: false)
@@ -131,6 +133,9 @@ defmodule KilnCMS.Accounts.Changes.RegisterWithSso do
   # invite-only gate can't drift from what the rest of the app considers an
   # existing account.
   defp existing_user?(email) do
+    # `authorize?: false`: same pre-auth callback, no actor; the answer only
+    # decides whether the invite-only gate admits the sign-in, and is never
+    # shown to the caller.
     match?({:ok, %{}}, Accounts.get_user_by_email(email, authorize?: false))
   end
 end

@@ -106,9 +106,9 @@ defmodule KilnCMS.CMS.Menus do
 
   ## Options
 
-    * `:audiences` — which audience tiers the reader holds. Because this read
-      runs `authorize?: false`, its filter is the sole security boundary, so it
-      gates the audience axis too, not just publish state (`Content`'s rule for
+    * `:audiences` — which audience tiers the reader holds. Because the
+      target read runs without a reader's policies, its filter is the sole
+      security boundary, so it gates the audience axis too, not just publish state (`Content`'s rule for
       exactly this shape). Defaults to `[:public]`, which is what an anonymous
       caller gets — the same answer the sitemap and the feeds give. A front end
       that has authenticated its reader can widen it.
@@ -126,8 +126,11 @@ defmodule KilnCMS.CMS.Menus do
     org_id
     |> KilnCMS.I18n.Fallback.chain(locale, mode, implicit_default?: false)
     |> Enum.find_value(:not_found, fn step ->
+      # Under the policies with no actor: `Menu` is world-readable
+      # (`action_type(:read) → always()`). `authorize_with: :error` so a future
+      # narrower policy raises rather than reading as "no such menu".
       case CMS.get_menu_by_key!(key, step,
-             authorize?: false,
+             authorize_with: :error,
              tenant: org_id,
              not_found_error?: false
            ) do
@@ -164,7 +167,7 @@ defmodule KilnCMS.CMS.Menus do
     MenuItem
     |> Ash.Query.filter(menu_id == ^menu.id)
     |> Ash.Query.sort(position: :asc, label: :asc)
-    |> Ash.read!(authorize?: false, tenant: org_id)
+    |> read_items(org_id)
     |> detached()
   end
 
@@ -220,7 +223,7 @@ defmodule KilnCMS.CMS.Menus do
       MenuItem
       |> Ash.Query.filter(menu_id == ^menu.id)
       |> Ash.Query.sort(position: :asc, label: :asc)
-      |> Ash.read!(authorize?: false, tenant: org_id)
+      |> read_items(org_id)
 
     urls = resolve_urls(items, org_id, opts)
 
@@ -234,6 +237,14 @@ defmodule KilnCMS.CMS.Menus do
 
     build(by_parent, nil, urls)
   end
+
+  # A menu's items, under the policies with no actor: `MenuItem` is
+  # world-readable like the menu. `authorize_with: :error` because both callers
+  # decide on the WHOLE set — `detached/2` answers "which items reach no root",
+  # and the editor re-parents from it — so a partial read must raise, never
+  # quietly drop a subtree.
+  defp read_items(query, org_id),
+    do: Ash.read!(query, authorize_with: :error, tenant: org_id)
 
   # An editor-hidden item is out unless the caller asked for hidden ones; a
   # `:content` item with no resolved URL is out because its target isn't
@@ -304,6 +315,11 @@ defmodule KilnCMS.CMS.Menus do
     |> Ash.Query.filter(id in ^ids and state == :published and audience in ^audiences)
     |> Ash.Query.select([:id, :slug, :path_alias, :locale])
     |> scope_dynamic(ct)
+    # authorize?: false — a public delivery read of content: the filter above
+    # is the boundary (`:published` and the reader's audiences, by id, scoped
+    # to the type), and only the columns a link needs are selected. The system
+    # actor holds no content read (#1402); anonymous policies would drop the
+    # audiences a front end has vouched for.
     |> Ash.read!(authorize?: false, tenant: org_id)
     |> Map.new(&{&1.id, I18n.localized_path(&1.locale, Slugs.public_path_for(ct, &1))})
   end

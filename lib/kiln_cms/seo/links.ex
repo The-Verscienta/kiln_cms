@@ -112,6 +112,11 @@ defmodule KilnCMS.Seo.Links do
     end
   end
 
+  # `Search.global/2` runs `authorize?: false` here (#1659): it is a content
+  # read, and the #1402 content-read argument applies — a system-actor grant
+  # on content would be a standing read over the whole corpus. Nothing it
+  # returns reaches the author unfiltered: `entry/2` keeps only published,
+  # public documents, the delivery boundary.
   defp keyword(record, limit) do
     case query_for(record) do
       "" ->

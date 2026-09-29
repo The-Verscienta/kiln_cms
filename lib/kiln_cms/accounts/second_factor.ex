@@ -146,6 +146,9 @@ defmodule KilnCMS.Accounts.SecondFactor do
     do: :invalid
 
   defp recovery_code(user, code) do
+    # `authorize?: false`: pre-auth — the second factor is what is being
+    # checked, so the sign-in has no actor yet. The consume action verifies
+    # and burns the code in one write; it is not reachable any other way.
     case Accounts.consume_totp_recovery_code(user, %{code: code}, authorize?: false) do
       # The consume action returns a fresh record; the caller's metadata (the
       # already-minted first-factor token) is reattached so the sign-in can be

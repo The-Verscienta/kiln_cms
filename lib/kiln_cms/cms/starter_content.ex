@@ -48,6 +48,11 @@ defmodule KilnCMS.CMS.StarterContent do
     |> Ash.Query.filter(slug == ^@home_slug and state == :published)
     |> Ash.Query.select([:id])
     |> Ash.Query.limit(1)
+    # authorize?: false — an existence probe for the site root: filtered to
+    # `:published` above and selecting only `:id`, so only a boolean leaves.
+    # Audience is not a question here (delivery answers it), which is why an
+    # anonymous-policy read would be wrong: it would call a members-only Home
+    # missing. The system actor holds no content read (#1402).
     |> Ash.read!(authorize?: false, tenant: org_id)
     |> Enum.any?()
   end

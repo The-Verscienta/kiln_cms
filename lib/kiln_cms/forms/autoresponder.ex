@@ -43,10 +43,12 @@ defmodule KilnCMS.Forms.Autoresponder do
   end
 
   @doc """
-  Token definitions for a form by id — looks its current fields up
-  (`authorize?: false`: this runs from a validation or the anonymous
-  submission pipeline, neither of which carries an editor session).  A `nil`
-  id (a brand-new, not-yet-persisted form) has no fields yet.
+  Token definitions for a form by id — looks its current fields up as
+  `KilnCMS.Forms.system/0` (#1659): this runs from a validation, which a
+  template instantiation or a seed reaches without an editor session. A
+  refused read raises rather than answer "no fields", which would reject every
+  `[field:…]` token as unknown. A `nil` id (a brand-new, not-yet-persisted
+  form) has no fields yet.
   """
   @spec definitions_for_form(Ecto.UUID.t() | nil, String.t(), boolean(), Ash.ToTenant.t()) ::
           [Kiln.Tokens.definition()]
@@ -54,7 +56,13 @@ defmodule KilnCMS.Forms.Autoresponder do
     do: definitions([], form_name, escape?)
 
   def definitions_for_form(form_id, form_name, escape?, tenant) do
-    fields = CMS.form_fields_for!(form_id, authorize?: false, tenant: tenant)
+    fields =
+      CMS.form_fields_for!(form_id,
+        actor: KilnCMS.Forms.system(),
+        authorize_with: :error,
+        tenant: tenant
+      )
+
     definitions(fields, form_name, escape?)
   end
 

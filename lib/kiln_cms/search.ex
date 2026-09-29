@@ -207,9 +207,10 @@ defmodule KilnCMS.Search do
   needs no distance alibi. The per-type semantic actions
   (`:search_semantic` / `:search_semantic_published`, the `semantic-search`
   JSON:API routes) have no fusion to leave it to, so they filter the leg
-  themselves — with the title leg's exemption: a row whose title the query
-  names is kept whatever its distance (`KilnCMS.CMS.Content`). A row vouched
-  only by the keyword, any-term or fuzzy legs is still floored there.
+  themselves — with what the title and alias legs give hybrid search: a row
+  the query names is kept whatever its distance, and ranks first
+  (`KilnCMS.CMS.Content`). A row vouched only by the keyword, any-term or
+  fuzzy legs is still floored there.
 
   The distinction matters because a short query naming a record embeds far
   from that record's long prose. Filtering the leg *before* fusion made the

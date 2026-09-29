@@ -14,11 +14,15 @@ defmodule KilnCMS.CMS.FormSpamSettings do
   # The shared one-row-per-org shape comes from `KilnCMS.CMS.OrgSettings`
   # (#1080). Never delivered — an org's keyword list is not public information
   # the way branding/code-injection are, so unlike those, no public read here.
+  # The one reader besides an admin is the submission scorer
+  # (`Changes.ScoreFormSubmission`), as `KilnCMS.CMS.Bookkeeping.system/0`
+  # (#1659): `read` only — saving the list stays an admin act.
   use KilnCMS.CMS.OrgSettings,
     table: "form_spam_settings",
     accept: [:keywords],
     read: :admin,
-    admin_columns: [:keywords, :updated_at]
+    admin_columns: [:keywords, :updated_at],
+    system_actions: [:read]
 
   attributes do
     # Case-insensitive substring matches against every free-text field value

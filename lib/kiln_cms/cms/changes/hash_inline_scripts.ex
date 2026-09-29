@@ -34,8 +34,8 @@ defmodule KilnCMS.CMS.Changes.HashInlineScripts do
   @fields [:head_html, :footer_html]
 
   @impl true
-  def change(changeset, _opts, _context) do
-    stored = stored_row(changeset)
+  def change(changeset, _opts, context) do
+    stored = stored_row(changeset, context)
     values = Enum.map(@fields, &resulting(changeset, stored, &1))
 
     Ash.Changeset.force_change_attribute(
@@ -57,24 +57,27 @@ defmodule KilnCMS.CMS.Changes.HashInlineScripts do
   # the stored row has to be read. Skipped entirely when both fields are being
   # written, which is what the settings form always does — the read is the cost
   # of a partial save, not of every save.
-  defp stored_row(changeset) do
+  defp stored_row(changeset, context) do
     if Enum.all?(@fields, &Ash.Changeset.changing_attribute?(changeset, &1)) do
       nil
     else
-      read_row(changeset)
+      read_row(changeset, context)
     end
   end
 
-  defp read_row(changeset) do
+  # As the saving admin (#1659) — the row is world-readable anyway (it is
+  # served to every visitor), so the caller never lacks the grant. A read that
+  # fails anyway lands in the rescue below, which fails closed.
+  defp read_row(changeset, context) do
     case changeset.data do
       %{id: id} when not is_nil(id) ->
         changeset.data
 
       _new ->
-        KilnCMS.CMS.list_site_code_injection!(
-          authorize?: false,
-          tenant: Ash.Changeset.get_attribute(changeset, :org_id)
-        )
+        context
+        |> Ash.Context.to_opts()
+        |> Keyword.put(:tenant, Ash.Changeset.get_attribute(changeset, :org_id))
+        |> KilnCMS.CMS.list_site_code_injection!()
         |> List.first()
     end
   rescue

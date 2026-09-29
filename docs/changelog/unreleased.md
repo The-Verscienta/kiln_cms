@@ -183,6 +183,22 @@ carries the reasoning.
 
 ## Added
 
+<a id="editor-markdown-view"></a>
+
+- **The content editor has a Blocks | Markdown switch.** Markdown shows the
+  document's blocks as one Markdown text: prose keeps its headings, lists,
+  marks, links, code and tables (`PortableText.to_markdown/1`, the new reverse
+  of `KilnCMS.Markdown`), and headings, dividers and plain images become their
+  Markdown. A block Markdown can't express (a gallery, a form, columns, a
+  media-library image) becomes a placeholder line,
+  `<!-- kiln:block gallery <id> -->`, that stands for it unchanged and can be
+  moved or deleted like any line. Whatever is pasted or typed is parsed as you
+  go, through the same converter as paste, `.md` import and the API's
+  `body_markdown`, so the preview, autosave and Save all see it, and switching
+  back shows the blocks. Switching back without an edit leaves every block
+  exactly as it was. An edit re-parses the text, so prose between placeholders
+  becomes one rich-text block.
+
 <a id="on-012-before-upgrading-to-10"></a>
 
 - **On 0.12, before `mix kiln.update --allow-major` to 1.0: run the block
@@ -273,6 +289,23 @@ carries the reasoning.
   ([#1679](https://github.com/The-Verscienta/kiln_cms/issues/1679)).
 
 ## Fixed
+
+<a id="per-type-semantic-search-ranks-a-record-the-query-names-first"></a>
+
+- **Per-type semantic search ranks a record the query names first, however
+  long the record.** The `semantic-search` JSON:API routes, the GraphQL
+  semantic lists and `CMS.semantic_search_*` already exempted a record the
+  query names (by title, or by a field flagged as a name) from
+  `semantic_max_distance`, but still sorted it at its distance rank. A
+  record's one vector is embedded from its whole text, so a long record sits
+  far from a bare-name query, below short records whose names merely sound
+  alike: Verscienta measured 14 of 602 acupuncture points missing the top 10
+  for their own name, the best-documented ones. Named records now come first,
+  nearest first among themselves, as the title leg already does in hybrid
+  search. No re-embed is needed. A query that names something is no longer
+  served by the HNSW index (the distance no longer leads the `ORDER BY`);
+  one that names nothing is unchanged.
+  ([#1746](https://github.com/The-Verscienta/kiln_cms/pull/1746))
 
 <a id="a-seo-or-accessibility-finding-below-a-fragment-names-and-jumps-to-the-right"></a>
 
@@ -473,6 +506,27 @@ carries the reasoning.
   ([#1678](https://github.com/The-Verscienta/kiln_cms/issues/1678),
   [#1680](https://github.com/The-Verscienta/kiln_cms/issues/1680)).
 
+<a id="accounts-system-reads-run-under-the-policies"></a>
+
+- **The accounts domain's system reads run under the policies.**
+  `Accounts.list_org_ids/0` (the tenant list behind AshOban's per-tenant
+  scheduler scans, GDPR erasure, audit verification and the digests),
+  `Accounts.default_org/0` and the membership half of a data-subject export
+  reached `Organization` and `Billing.Membership` through `authorize?: false`.
+  They now run as `KilnCMS.Accounts.system/0`. `Organization` admits it for
+  the plain `read` only: not the request path's tenant resolution
+  (`by_slug`, `by_custom_domain`), and not create or update. All three reads
+  fail closed. A refused tenant list raises instead of answering `[]`, which
+  every sweep would have read as "no orgs, nothing to do"; a refused
+  default-org read answers `:error`, not the "seed row missing" `nil`; and a
+  refused export read is logged as an error. The 20 remaining sites in the
+  domain are the pre-auth flows (sign-in, the second factor and its hold,
+  passkeys, SSO, `/setup`) and the membership lookup inside the policy checks
+  themselves. They keep `authorize?: false`, each with its reason at the call
+  site: there is no actor yet, and a bypass cannot be refused into "no such
+  token" or "no membership". The `mix kiln.authz.check` backlog drops by 23
+  sites and 11 files. No change to any sign-in response. (#1659)
+
 <a id="federation-runs-under-the-policies"></a>
 
 - **Federation runs under the policies.** The inbox, the publish fan-out, the
@@ -536,6 +590,285 @@ carries the reasoning.
   CLIs' account and org lookups (they find the actor, so there is none yet),
   and the staging scrub's erasure. The `mix kiln.authz.check` backlog drops by
   28 sites and 15 files. (#1659)
+
+<a id="cms-helpers-run-under-the-policies"></a>
+
+- **Content releases, slugs, menus and the field registry run under the
+  policies.** The CMS's helper modules reached their resources through
+  `authorize?: false`. They now run as the caller where the caller is
+  entitled, as a `KilnCMS.SystemActor` (`KilnCMS.CMS.Housekeeping`) where
+  there is no caller, and keep a written justification where neither fits.
+  The release go-live worker reads a release and lists its items by status,
+  records the outcome (`mark_*` on `ContentRelease` and `ReleaseItem`, which
+  no person, admin included, may call) and abandons its own crashed claim;
+  it cannot start, schedule or compose a release. The system actor may read
+  `SiteEditorialSettings`, not save it. Menus and taxonomy are read with no
+  actor under their world-readable policies, the field and type registry as
+  the system, and the governance dashboard's content-health panel and CSV
+  export as the person looking. The content reads that decide slug and alias
+  uniqueness keep their bypass on purpose: a filtered read would report a
+  taken slug as free.
+
+  Several reads now fail **closed** instead of answering "nothing": a
+  refused release-item read raises rather than publishing (or rolling back)
+  an empty release; the release worker records a refused read as an error
+  rather than logging the release as vanished; a refused registry read
+  raises rather than deriving a slug from the default pattern, dropping a
+  dynamic type's URL prefix from the reserved segments, or rejecting a
+  `custom_filter` as an unknown field; and `TaskSettings.site_default/1`
+  raises rather than applying the shipped default. The `mix kiln.authz.check`
+  backlog drops by 37 sites and 17 files. (#1659)
+
+<a id="the-cmss-own-bookkeeping-runs-under-the-policies"></a>
+
+- **The CMS's own bookkeeping runs under the policies.** The changes behind a
+  publish, an unpublish, a rename, a restore, an autosave, a comment, a
+  release archive and a form submission reached `Task`, the content resources,
+  `Redirect`, `FormSpamSettings`, `FieldDefinition`, the version history and
+  more through `authorize?: false`. Where the caller is entitled they now run
+  as the caller: the comment thread lookup, the release-item cancel, the
+  version history a restore folds, the autosave rows it coalesces, and a
+  custom field's media or content reference, so an editor can no longer learn
+  a draft's title they may not read by referencing its id. Where the write is
+  the action's consequence rather than the caller's they run as
+  `KilnCMS.CMS.Bookkeeping.system/0`: completing a record's open tasks
+  (`Task` admits it to `:complete` only), pointing `published_version_id`
+  (content admits it to `:set_published_version_id` only), writing a
+  rename's 301 (`Redirect` admits `:create` and `:destroy`), reading the
+  field registry, and reading the spam keywords (`FormSpamSettings`, `read`
+  only). Six sites keep `authorize?: false` with a written reason: the
+  version-row rewrite and prune (no actor may update or delete history), the
+  publish-version lookup, and three content reads that never leave the change.
+  The `mix kiln.authz.check` backlog drops by 26 sites and 15 files.
+
+  The reads a write depends on now fail closed. A refused field-registry
+  read used to filter to "no definitions", and the cleaned map is folded out
+  of the definitions: a partial `custom_fields` write would have silently
+  stored `{}`. A refused manual-boundary read in autosave coalescing would have
+  answered "no manual save" and deleted autosaves on its far side. A refused
+  thread read would have started a second root; a refused pending-items read
+  would have archived a release with its items still reserving their content;
+  a refused spam-keyword read (or a read error) scored a submission as if the
+  site had no keywords. Each now raises, fails the write, or keeps the rows. A
+  published rename whose 301 cannot be written now fails instead of vacating
+  the URL. (#1659)
+
+<a id="cms-validations-look-things-up-under-the-policies"></a>
+
+- **CMS validations look things up under the policies.** Eight CMS validations
+  checked a reference with `authorize?: false`: the release item checks
+  (release open, content exists, release size cap), tag group ownership, menu
+  item placement, slug-pattern tokens, and the required-consent and alt-text
+  publish gates. Six of them now read **as the caller**, with the actor and
+  authorization mode of the action they guard, so an editor's lookup runs
+  under the editor's policies and a trusted caller that bypassed the action
+  reads the same way. The two publish gates also run for the AshOban
+  scheduler, which has no actor, so they read as a scoped system actor, which
+  `CMS.Consent` admits to `for_content` only and `CMS.MediaItem` to the plain
+  `read` only. Every lookup passes `authorize_with: :error`, so a refusal is
+  an error, never a shorter answer. The release size cap used to count an
+  unreadable release as empty and let the add through. It now refuses. A
+  refused publish-gate read refuses the publish ("could not be checked"). The
+  task assignee check keeps its bypass with a justification: `User` is
+  readable only by its owner. The `mix kiln.authz.check` backlog drops by 11
+  sites and nine files. (#1659)
+
+<a id="the-media-pipeline-and-public-forms-run-under-the-policies"></a>
+
+- **The media pipeline and public forms run under the policies.** The variant,
+  A/V and metadata-strip workers, the quarantine reaper and the variant
+  regeneration scan reached `MediaItem` through `authorize?: false`; so did the
+  form submission pipeline, its two mail workers, the autoresponder's field
+  lookup and the embed route's per-site framing default (`Form`, `FormField`,
+  `FormSubmission`, `SiteEmbedSettings`). They now run as `KilnCMS.Media.system/0`
+  and `KilnCMS.Forms.system/0`, and each resource admits them by action name.
+  The media pipeline writes what it derives through a new `:record_processing`
+  action rather than `:update`, so it cannot gate an item or edit its tags or
+  alt text, and it may `:purge` an item only while it is still quarantined. The
+  form pipeline may create a submission but never read one back. The
+  `mix kiln.authz.check` backlog drops by 18 sites and ten files.
+
+  The reads a decision rests on now fail closed. A refused worker re-read used
+  to look like "the item was deleted", and the job succeeded having done
+  nothing; for the metadata strip that left the upload quarantined until the
+  reaper deleted it. A refused form-field read would have validated a
+  submission against no fields at all. A refused mail-worker read dropped the
+  notification or the visitor's confirmation. Each now raises or fails the job
+  so Oban retries it. An embed default that cannot be read resolves to
+  same-origin only instead of falling through to `EMBED_ORIGINS`, which could
+  be wider than the site's own `[]`.
+
+  **Fixed along the way:** `KilnCMS.Media.QuarantineReaper` read across every
+  site without a tenant, which strict tenancy (the production default)
+  refuses, so the hourly reaper raised and no stuck quarantine was ever
+  removed. It now scans through a `multitenancy :bypass` read,
+  `:quarantine_expired`, which only the system actor may run (admins
+  included). (#1659)
+
+<a id="billing-webhook-pipeline-runs-under-the-policies"></a>
+
+- **The billing webhook pipeline runs under the policies.** The webhook
+  worker, the resolution ladder that finds an event's membership, the
+  provider-state write, the membership trail and the entitlement recompute's
+  reads reached `WebhookEvent`, `Membership` and `MembershipEvent` through
+  `authorize?: false`. They now run as `KilnCMS.Billing.system/0`.
+  `WebhookEvent` admits it by name for the plain read, `claim` and the three
+  settle stamps, and for nothing else: it may not record, list, look up or
+  delete an event. The receiver keeps its bypass, since the provider's
+  signature is its grant.
+
+  A refused read answers `[]` or `nil`, and in billing both answers used to be
+  acted on. `nil` for the event meant "gone", so the job cancelled. `nil` or
+  `[]` for its membership meant "unresolvable", so the event was marked
+  ignored. `[]` for a user's entitling memberships meant "entitled to
+  nothing", so the recompute stripped a paying member's audiences. Each of
+  these reads now uses `authorize_with: :error`. A refusal is an error: the
+  event is marked failed and Oban retries it, and the recompute aborts and
+  rolls back with its transition, so the member keeps what they had. A refused
+  claim retries instead of cancelling as "already claimed", and the settle
+  stamps, whose results were discarded, now log when they fail.
+
+  The recompute's own writes are now all or nothing. A failed write of a
+  per-org membership used to be dropped: `create_missing` answered `:ok` to
+  its own error, and the sync of an existing row ignored its result. That
+  could leave a payer's `User.audiences` rewritten while the org membership
+  that access actually reads never got the audience. Every write of one
+  recompute now runs in one transaction. Any failure rolls the others back,
+  is logged with the user and org ids, and fails the membership transition,
+  so Oban retries it. A concurrent recompute's row is still not an error:
+  the upsert that meets it succeeds and changes nothing.
+
+  The `User` and `OrgMembership` reads and writes in the recompute, and the
+  account and content steps in `mix kiln.beta.round`, keep `authorize?: false`
+  with a written reason. A system grant over either would be a standing power
+  over every account. None of them can be refused, so none can mistake a
+  refusal for "no such row". The `mix kiln.authz.check` backlog drops by 23
+  sites and six files. (#1659)
+
+<a id="webhooks-social-posting-and-mail-run-under-the-policies"></a>
+
+- **Webhooks, social posting and mail run under the policies.** The webhook
+  dispatch and delivery worker, the social announcer and `Social.configured?/1`,
+  and the mail pipeline's settings and suppression-list calls reached their
+  resources through `authorize?: false`. They now run as
+  `KilnCMS.Webhooks.system/0`, `KilnCMS.Social.system/0` and
+  `KilnCMS.Mail.system/0`. Each resource admits the system actor by action name
+  inside its existing admin policy: webhook endpoints' reads and health
+  counters (not create, edit or delete), the delivery ledger's `read`, `create`
+  and `record_attempt` (not `destroy`), the social ledger's `claim` and four
+  settling updates (not read or `destroy`), the social account's `record_post`
+  stamp, the mail settings' `read` and `init` (not the DKIM or server-IP
+  writes), and both suppression lists' `read` and `suppress` (not clearing
+  one). The account's organization lookup in `Social.canonical_url/1` stays a
+  bypass with its reason written down. The `mix kiln.authz.check` backlog drops
+  by 17 sites and five files.
+
+  Each read below used to answer a refusal with "nothing", and each "nothing"
+  was a decision. They now pass `authorize_with: :error`:
+  - the dispatch's endpoint scan ("nobody subscribed", so no webhook and no
+    trace) now logs the refusal; it does not raise, because it runs after the
+    publish has committed;
+  - the delivery worker's ledger read ("row pruned", so the job succeeded
+    without sending) and endpoint read ("endpoint deleted", so the row was
+    settled as failed) now log and retry. The endpoint is read on its own, not
+    through `load:`, because a relationship load filters under its own rules;
+  - the mail settings read (`nil`, "not set up", which the DKIM signer takes
+    as "no key" and sends unsigned) now raises;
+  - the suppression lookups ("not suppressed", which would resume mail to every
+    hard-bounced address) now raise. `Mail.enqueue!/2` drops a recipient it
+    cannot check and logs it; the newsletter worker's job retries.
+
+  A ledger write that fails after a webhook's `2xx` is logged and no longer
+  fails the job, so Oban does not send the webhook a second time. A failed
+  social ledger write, or a hard bounce the suppression list refused to
+  record, is logged instead of swallowed. (#1659)
+
+<a id="content-experiments-run-under-the-policies"></a>
+
+- **Content experiments run under the policies.** The delivery path (the
+  running-set read and the impression and conversion counters), the `:start`
+  and variant-write guards, the results panel and `mix kiln.experiment` reached
+  `Experiment`, `Variant` and `VariantDay` through `authorize?: false`. All but
+  the results panel now run as `KilnCMS.Experiments.system/0` (the mix task labels itself
+  `:operator`), and each resource admits it by action name inside its existing
+  admin write policy: experiments' reads plus `create`, `start` and `conclude`
+  (not `update`, `archive` or `destroy`); variants' reads plus `create` (not
+  re-weighting or removal); and the two counters plus a read on `VariantDay`
+  (not `destroy`, so a system caller cannot erase a result). Promotion now
+  loads the winning variant, and the results panel reads the counters, as the
+  editor instead of bypassing.
+
+  Every read behind a decision passes `authorize_with: :error` (and an
+  experiment's variants load with `authorize_read_with :error`), because a
+  refused read would otherwise answer `[]`, the permissive answer each time:
+  "nothing is running" (every experiment silently stops serving and counting),
+  "no other experiment on this document" (a second one starts), "0 served, 0
+  converted" on every arm, and "No experiments on this site" from the mix task.
+  A lost grant is now an error (`:start` returns `Forbidden`). Delivery still
+  never fails a page: it serves the canonical document, as it always did when
+  the experiment layer could not answer, and now logs why — and no longer
+  caches that failure as "nothing is running" for five minutes; a refused
+  counter write is logged too, instead of swallowed. Content and form lookups
+  in `Health` and `GoalConfigured` stay bypasses with their reason written
+  down (the #1402 content-read argument).
+  The funnel lookups stay in the backlog for the analytics batch. The
+  `mix kiln.authz.check` backlog drops by 19 sites and six files. (#1659)
+
+<a id="the-governance-audit-chain-runs-under-the-policies"></a>
+
+- **The governance audit chain runs under the policies.** The anchor chain,
+  the checkpoint worker and the governance dashboard reached `HistoryAnchor`,
+  `ChainCheckpoint`, `ChainCheckpointEntry` and `MembershipEvent` through
+  `authorize?: false`. They now run as `KilnCMS.Governance.system/0`, a
+  `KilnCMS.SystemActor`, and each resource admits it by action name inside its
+  existing admin-only policy: an anchor's `create` and per-document
+  `for_content` (not the plain read), every checkpoint action by name (so a
+  later `destroy` is not admitted by default), and an entry's `create`,
+  `for_content` and `for_checkpoint` (not the plain read). The sites that read
+  content, `Accounts.User` names, consents or version rows keep their bypass,
+  now with a written reason: a standing system grant over any of those would
+  be wider than the one dashboard it serves. The `mix kiln.authz.check`
+  backlog drops by 24 sites and four files.
+
+  Every one of the migrated reads now fails **closed**. A refused read filters
+  to `[]`, and here `[]` always meant the permissive answer: "never anchored",
+  "never witnessed" (which is what a truncation wants to look like), "no
+  unwitnessed checkpoints" (a witness outage shown as healthy), "no earlier
+  checkpoint" (the chain restarting at 1), or an empty entitlement trail. They
+  run with `authorize_with: :error`, so a lost grant raises instead: the
+  witness lookup reports the document `:unreadable` and the verdict floors to
+  `:unverifiable`, and the anchor hook logs and mints nothing rather than a
+  chain restarted from scratch. No behaviour changes while the grants are in
+  place. (#1659)
+
+<a id="the-link-checker-runs-under-the-policies"></a>
+
+- **The link checker runs under the policies.** The outbound link sweep, the
+  per-URL check worker and the reader of the "check outbound links" switch
+  reached `ExternalLink` and `SiteLinkCheck` through `authorize?: false`. They
+  now run as `KilnCMS.Links.system/0`, a `KilnCMS.SystemActor`, and each
+  resource admits it by action name: the occurrence rows' `read`, `observe`,
+  `record_check` and `destroy`, and the switch's `read` and `record_sweep` (not
+  the settings form's `save`, so turning checking on stays an admin act). The
+  broken-link report at `/editor/links` now reads as the editor viewing it.
+
+  The reads that back a decision fail closed. The check worker's
+  failure-count read, which drives the retry-before-flagging counter, runs
+  with `authorize_with: :error`, and a refusal writes no verdict instead of
+  reading as "no rows". The sweep's due-URL read raises instead of queueing
+  nothing. A refused `observe` aborts the sweep before its prune, which would
+  otherwise delete every row along with its failure count. The switch read
+  logs a refusal and resolves it to "off". A viewer the report's policy
+  refuses gets an error, not an empty "nothing is broken" page.
+
+  Content reads stay `authorize?: false`, each with a written reason: the
+  sweep's scan of published documents, the internal checker's target-state
+  lookup, oEmbed's document reads and the related-links keyword search. A
+  system-actor grant on content would be a standing read over the whole
+  corpus, drafts included. oEmbed's `:set_oembed_metadata` write also stays:
+  it writes the block tree, and the content resource admits the system actor
+  only to actions that accept no `:blocks`. The `mix kiln.authz.check` backlog
+  drops by 16 sites and seven files. (#1659)
 
 <a id="mix-kilnmigrationscheck-gates-expand-contract"></a>
 

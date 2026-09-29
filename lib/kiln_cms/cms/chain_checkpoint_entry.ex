@@ -118,8 +118,14 @@ defmodule KilnCMS.CMS.ChainCheckpointEntry do
   end
 
   policies do
+    # Admin-only for people. The checkpoint worker writes entries and
+    # verification reads them back as `KilnCMS.Governance.system/0` (#1659):
+    # `create`, `for_content` and `for_checkpoint` only. The plain `read` is
+    # not admitted.
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
+      forbid_unless action([:create, :for_content, :for_checkpoint])
+      authorize_if KilnCMS.Checks.SystemActor
     end
   end
 

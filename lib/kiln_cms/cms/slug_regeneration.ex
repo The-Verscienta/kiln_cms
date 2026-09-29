@@ -69,6 +69,10 @@ defmodule KilnCMS.CMS.SlugRegeneration do
     actor = opts[:actor]
 
     reduce(kind, tenant, opts, fn ct, record, change ->
+      # authorize?: false — a bulk admin/operator tool: the admin was checked
+      # when the run was enqueued (`SlugRegenLive`, #1160), and the mix task is
+      # an operator at the host's shell, which has no actor at all. `actor:` is
+      # attribution for the version history only.
       case ContentTypes.update(ct, record, %{slug: change.new},
              actor: actor,
              tenant: tenant,
@@ -182,6 +186,9 @@ defmodule KilnCMS.CMS.SlugRegeneration do
           query
       end
 
+    # authorize?: false — the regeneration has to see every record of the type,
+    # drafts included, to rename them; the same admin/operator gate as `run/3`
+    # applies. The system actor holds no content read by design (#1402).
     Ash.stream!(query, authorize?: false, tenant: tenant, batch_size: 100)
   end
 end
