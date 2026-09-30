@@ -3487,6 +3487,11 @@ msgstr ""
 msgid "Content type"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Content type %{type} no longer exists."
+msgstr ""
+
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Content type archived."
@@ -4388,6 +4393,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
+#: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -4455,6 +4461,11 @@ msgstr ""
 msgid "Delete menu"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Delete orphaned field %{name}"
+msgstr ""
+
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
 #, elixir-autogen, elixir-format
@@ -4520,6 +4531,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delete this menu and all of its items?"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Delete this orphaned field?"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
@@ -9346,6 +9362,11 @@ msgstr ""
 msgid "Origin"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Orphaned fields"
+msgstr ""
+
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
 msgid "Other"
@@ -13932,6 +13953,11 @@ msgstr ""
 msgid "These addresses hard-bounced and are skipped on future sends. Remove one to let it receive mail again."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "These fields belong to a content type that no longer exists — a removed plugin, or a type that was renamed or deleted. Nothing shows, checks or delivers them. Delete them to tidy up."
+msgstr ""
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "These items are not reachable from the top level, so they do not appear in the menu above or on the site. Moving one to the top level brings it back, along with anything nested under it — start with the outermost, and the rest may return on their own."
@@ -16689,6 +16715,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "or drag and drop"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "orphaned"
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex

@@ -182,6 +182,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **A custom field whose content type no longer exists no longer crashes the
+  Fields screen; it is listed as orphaned, with a delete.**
+  ([#1770](https://github.com/The-Verscienta/kiln_cms/issues/1770) · [long form](docs/changelog/unreleased.md#a-custom-field-whose-content-type-no-longer-exists-no-longer-crashes-the-fields))
+
 - **A new API key acts as the signed-in admin unless another owner is picked;
   it no longer defaults to whichever account is listed first.**
   ([#1771](https://github.com/The-Verscienta/kiln_cms/issues/1771) · [long form](docs/changelog/unreleased.md#a-new-api-key-acts-as-the-signed-in-admin-by-default))

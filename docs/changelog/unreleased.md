@@ -397,6 +397,25 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="a-custom-field-whose-content-type-no-longer-exists-no-longer-crashes-the-fields"></a>
+
+- **A custom field whose content type no longer exists no longer crashes the
+  Fields screen; it is listed as orphaned, with a delete.** A field
+  definition stores its compiled content type's name as text and read it
+  back as an atom, refusing any name with no atom behind it. A write can
+  only store a registered type, but an upgraded site can still hold a
+  row for a type that is gone (a removed plugin, a renamed or deleted
+  type, a row from early dynamic-type testing), and every read that met
+  it failed, taking `/editor/fields` down with `cannot load "…" as type
+  Ash.Type.Atom`. Such a name now loads as an orphan marker instead,
+  without creating an atom. `/editor/fields` lists these fields under
+  *Orphaned fields* with a delete button (admins only, as before). Search's
+  name-field leg skips them, and they never resolve to a content type, not
+  even a dynamic type with the same name, so deleting one purges no stored
+  values. The column and its stored values are unchanged, so there is no
+  migration.
+  ([#1770](https://github.com/The-Verscienta/kiln_cms/issues/1770))
+
 <a id="a-new-api-key-acts-as-the-signed-in-admin-by-default"></a>
 
 - **A new API key acts as the signed-in admin unless another owner is

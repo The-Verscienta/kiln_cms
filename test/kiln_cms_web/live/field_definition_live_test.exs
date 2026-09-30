@@ -488,6 +488,62 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     })
   end
 
+  # #1770: a row whose stored content type no longer exists (a removed plugin,
+  # a renamed or deleted type). A write cannot make one, so it goes in as raw
+  # SQL, the way an upgraded database already holds it; the name is built at
+  # runtime so no atom of it exists — the case that used to crash the read.
+  describe "an orphaned field" do
+    test "the screen still renders, listing it apart as orphaned", %{conn: conn} do
+      admin = authed_user(:admin)
+      create_field!(admin, :page, "live_field")
+      gone = "gone_type_#{System.unique_integer([:positive])}"
+      id = insert_orphan!(gone, "stale_field")
+
+      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      assert html =~ "live_field"
+      assert has_element?(lv, "#orphaned-fields #field-#{id}", "stale_field")
+      assert has_element?(lv, "#orphaned-fields #field-#{id}", gone)
+      assert has_element?(lv, "#orphaned-fields", "Orphaned fields")
+      # Not offered for editing: it cannot be saved while it points at nothing.
+      refute has_element?(lv, "#field-#{id} button[phx-click=edit]")
+    end
+
+    test "an admin deletes it from the screen", %{conn: conn} do
+      admin = authed_user(:admin)
+      id = insert_orphan!("gone_type_#{System.unique_integer([:positive])}", "stale_field")
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      lv |> element("#field-#{id} button[phx-click=delete]") |> render_click()
+
+      refute has_element?(lv, "#orphaned-fields")
+      assert render(lv) =~ "Field deleted."
+      assert {:error, _} = CMS.get_field_definition(id, actor: admin)
+    end
+  end
+
+  defp insert_orphan!(content_type, name) do
+    id = Ecto.UUID.generate()
+
+    KilnCMS.Repo.query!(
+      """
+      INSERT INTO field_definitions
+        (id, org_id, content_type, name, label, field_type, required, options,
+         position, names_record, inserted_at, updated_at)
+      VALUES ($1, $2, $3, $4, $4, 'string', false, '{}', 0, false, now(), now())
+      """,
+      [
+        Ecto.UUID.dump!(id),
+        Ecto.UUID.dump!(KilnCMS.Accounts.default_org_id()),
+        content_type,
+        name
+      ]
+    )
+
+    id
+  end
+
   defp name_value(lv) do
     lv
     |> element(~s|#new-field-form input[name="field_definition[name]"]|)

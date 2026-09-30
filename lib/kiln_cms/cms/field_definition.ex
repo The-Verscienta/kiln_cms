@@ -84,6 +84,30 @@ defmodule KilnCMS.CMS.FieldDefinition do
 
   def name_from_label(_label), do: ""
 
+  @doc """
+  Whether a definition is **orphaned**: scoped to a compiled content type that
+  no longer exists (#1770).
+
+  A write cannot produce one — `Validations.KnownContentType` refuses an
+  unregistered type — but an upgraded site can hold one: a plugin removed, a
+  compiled type renamed or deleted. The stored name either has no atom at all
+  (it loads as a `KilnCMS.CMS.OrphanedContentType`) or is an atom the registry
+  no longer lists. Either way nothing renders, validates or delivers the field;
+  the Fields screen lists it apart so an admin can delete it.
+
+  A dynamic-scoped definition is never orphaned by this test: its
+  `type_definition_id` is a foreign key to a row that still exists.
+  """
+  @spec orphaned?(t() | map()) :: boolean()
+  def orphaned?(%{type_definition_id: nil, content_type: %KilnCMS.CMS.OrphanedContentType{}}),
+    do: true
+
+  def orphaned?(%{type_definition_id: nil, content_type: type})
+      when is_atom(type) and not is_nil(type),
+      do: not KilnCMS.CMS.ContentTypes.type?(type)
+
+  def orphaned?(_definition), do: false
+
   admin do
     resource_group :content
     table_columns [:content_type, :name, :label, :field_type, :required, :position]
@@ -247,7 +271,11 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # Which compiled content type this field is attached to (atom, e.g.
     # `:page`) — nil for a field owned by a dynamic type (see the
     # `type_definition` relationship and `Validations.OneFieldScope`).
-    attribute :content_type, :atom, public?: true
+    #
+    # Stored as text like `:atom`, but a stored name with no existing atom
+    # loads as a `KilnCMS.CMS.OrphanedContentType` rather than failing the
+    # read (#1770) — see `orphaned?/1`.
+    attribute :content_type, KilnCMS.CMS.Types.StoredContentType, public?: true
 
     # Machine key inside the `custom_fields` map.
     attribute :name, :string,

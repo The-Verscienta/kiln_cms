@@ -474,12 +474,16 @@ defmodule KilnCMS.CMS.ContentTypes do
   prevents anyway). Atoms only ever name compiled types.
   """
   @spec get(
-          atom() | String.t() | t() | nil,
+          atom() | String.t() | t() | KilnCMS.CMS.OrphanedContentType.t() | nil,
           KilnCMS.Accounts.Organization.t() | Ash.UUID.t() | nil
         ) :: t() | nil
   def get(type, org \\ nil)
 
   def get(nil, _org), do: nil
+
+  # A stored type name that no longer exists (#1770) names nothing — in
+  # particular not a dynamic type that happens to share the bare string.
+  def get(%KilnCMS.CMS.OrphanedContentType{}, _org), do: nil
 
   # An already-resolved descriptor passes through — iteration call sites hand
   # the descriptor straight to the dispatch helpers, so a type archived between
@@ -504,7 +508,7 @@ defmodule KilnCMS.CMS.ContentTypes do
   end
 
   @doc "Whether `type` is a known content type."
-  @spec type?(atom() | String.t()) :: boolean()
+  @spec type?(atom() | String.t() | KilnCMS.CMS.OrphanedContentType.t()) :: boolean()
   def type?(type), do: not is_nil(get(type))
 
   # --- dispatch to the per-type code interfaces ------------------------------
