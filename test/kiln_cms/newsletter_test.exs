@@ -232,6 +232,7 @@ defmodule KilnCMS.NewsletterTest do
     test "the system actor cannot erase or fail a campaign" do
       actor = admin()
       post = published_post(actor, "Readable #{slug()}")
+      subscriber(actor)
       assert {:ok, send} = Newsletter.send_as_newsletter(post, actor: actor)
       system = KilnCMS.SystemActor.new(:automation)
 
@@ -244,6 +245,7 @@ defmodule KilnCMS.NewsletterTest do
     test "an admin's send records who sent it" do
       actor = admin()
       post = published_post(actor, "Admin #{slug()}")
+      subscriber(actor)
 
       assert {:ok, send} = Newsletter.send_as_newsletter(post, actor: actor)
       assert send.sent_by_id == actor.id
@@ -340,6 +342,7 @@ defmodule KilnCMS.NewsletterTest do
 
     test "an unfired document snoozes rather than failing" do
       actor = admin()
+      subscriber(actor)
       rule = newsletter_rule()
 
       # Draft → publish but WITHOUT draining, so no :web artifact exists yet.
@@ -347,6 +350,64 @@ defmodule KilnCMS.NewsletterTest do
       post = CMS.publish_post!(post, %{}, actor: actor)
 
       assert {:snooze, _} = run_rule(rule, post)
+    end
+
+    # #1775: an empty audience is settled, not retried, and spends nothing —
+    # the same publish revision still sends once someone has confirmed.
+    test "no confirmed subscriber is skipped without a campaign, and doesn't burn the revision" do
+      actor = admin()
+      rule = newsletter_rule(%{trigger_event: :updated})
+      _pending = subscriber(actor, confirmed: false)
+      post = published_post(actor, "Empty NL #{System.unique_integer([:positive])}")
+
+      assert :ok = run_rule(rule, post)
+      assert sends_for(post) == []
+
+      subscriber(actor)
+      assert :ok = run_rule(rule, post)
+      assert [_campaign] = sends_for(post)
+    end
+  end
+
+  describe "an audience with no confirmed subscriber (#1775)" do
+    test "is refused before anything is recorded or queued" do
+      actor = admin()
+      post = published_post(actor, "Nobody #{slug()}")
+      _pending = subscriber(actor, confirmed: false)
+
+      assert {:error, :no_recipients} = Newsletter.send_as_newsletter(post, actor: actor)
+
+      assert Newsletter.list_sends!(authorize?: false, query: [filter: [content_id: post.id]]) ==
+               []
+
+      assert Oban.Testing.all_enqueued(repo: KilnCMS.Repo, worker: KilnCMS.Newsletter.SendWorker) ==
+               []
+    end
+
+    test "a segment whose only members are unconfirmed is refused" do
+      actor = admin()
+      post = published_post(actor, "Empty segment #{slug()}")
+      _elsewhere = subscriber(actor)
+      segment = Newsletter.create_segment!(%{name: "Pending only", slug: slug()}, actor: actor)
+      pending = subscriber(actor, confirmed: false)
+
+      Newsletter.add_to_segment!(%{segment_id: segment.id, subscriber_id: pending.id},
+        actor: actor
+      )
+
+      assert {:error, :no_recipients} =
+               Newsletter.send_as_newsletter(post, actor: actor, segment_id: segment.id)
+
+      assert {:ok, _send} = Newsletter.send_as_newsletter(post, actor: actor)
+    end
+
+    test "has_recipients?/3 fails closed on a refused read" do
+      actor = admin()
+      subscriber(actor)
+      org = KilnCMS.Accounts.default_org_id()
+
+      assert {:ok, true} = Newsletter.has_recipients?(org, nil, actor)
+      assert {:error, %Ash.Error.Forbidden{}} = Newsletter.has_recipients?(org, nil, nil)
     end
   end
 end

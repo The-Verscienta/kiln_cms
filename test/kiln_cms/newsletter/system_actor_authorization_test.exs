@@ -336,6 +336,8 @@ defmodule KilnCMS.Newsletter.SystemActorAuthorizationTest do
       admin = user(:admin)
       segment = Newsletter.create_segment!(%{name: "SAB12", slug: slug()}, actor: admin)
       post = published_post(admin)
+      sub = subscriber(admin)
+      Newsletter.add_to_segment!(%{segment_id: segment.id, subscriber_id: sub.id}, actor: admin)
 
       assert {:ok, send} =
                Newsletter.send_as_newsletter(post,
@@ -344,6 +346,23 @@ defmodule KilnCMS.Newsletter.SystemActorAuthorizationTest do
                )
 
       assert send.segment_id == segment.id
+    end
+
+    # #1775: the recipient preflight fails CLOSED. A refused subscriber read
+    # would otherwise answer "nobody to send to", and the automation would
+    # settle it as skipped; as a Forbidden, the rule's job retries.
+    test "a refused recipient read is a Forbidden, not :no_recipients" do
+      admin = user(:admin)
+      subscriber(admin)
+      post = published_post(admin)
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Newsletter.with_actor(nil, fn ->
+                 Newsletter.send_as_newsletter(post, actor: KilnCMS.SystemActor.new(:automation))
+               end)
+
+      assert Newsletter.list_sends!(authorize?: false, query: [filter: [content_id: post.id]]) ==
+               []
     end
 
     test "a segment that does not exist is still :no_such_segment" do
@@ -395,7 +414,9 @@ defmodule KilnCMS.Newsletter.SystemActorAuthorizationTest do
     end
 
     test "opening a campaign is :automation's alone" do
-      post = published_post(user(:admin))
+      admin = user(:admin)
+      subscriber(admin)
+      post = published_post(admin)
 
       assert {:ok, _send} =
                Newsletter.send_as_newsletter(post, actor: KilnCMS.SystemActor.new(:automation))

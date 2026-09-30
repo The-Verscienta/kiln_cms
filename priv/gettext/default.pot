@@ -8348,6 +8348,11 @@ msgstr[1] ""
 msgid "No comments on this block yet."
 msgstr ""
 
+#: lib/kiln_cms_web/live/newsletter_live.ex
+#, elixir-autogen, elixir-format
+msgid "No confirmed subscribers yet. Add subscribers below and confirm them to send."
+msgstr ""
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "No consent recorded for this content."
@@ -8745,6 +8750,11 @@ msgstr ""
 msgid "Nobody follows this site yet."
 msgstr ""
 
+#: lib/kiln_cms_web/live/newsletter_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nobody would receive this — the audience has no confirmed subscribers. Add subscribers below and confirm them first."
+msgstr ""
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "None"
@@ -8794,6 +8804,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "Not sure which surface to use? Start with the consumer guide:"
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex
+#, elixir-autogen, elixir-format
+msgid "Not translated yet"
 msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex
@@ -14286,6 +14301,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
 msgid "This runs code on your public site."
+msgstr ""
+
+#: lib/kiln_cms_web/live/newsletter_live.ex
+#, elixir-autogen, elixir-format
+msgid "This segment has no confirmed subscribers. Pick another segment, or add and confirm subscribers first."
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex

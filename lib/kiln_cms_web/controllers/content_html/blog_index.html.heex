@@ -7,7 +7,11 @@
 
   <ul class="public-index mt-8 space-y-8">
     <li :for={post <- @posts}>
-      <a href={KilnCMS.I18n.localized_path(@locale, ~p"/blog/#{post.slug}")} class="group block">
+      <a
+        href={KilnCMS.I18n.localized_path(@locale, ~p"/blog/#{post.slug}")}
+        class="group block"
+        lang={post.locale != @locale && post.locale}
+      >
         <h2 class="text-xl font-semibold group-hover:underline">
           {post.title}
           <%!--
@@ -23,6 +27,13 @@
           --%>
           <.badge :if={post.audience != :public} variant="primary">
             {gettext("Members")}
+          </.badge>
+          <%!--
+            Listed through the site's fallback chain (#1765): a post with no
+            variant in this locale shows in the one it has, and says so.
+          --%>
+          <.badge :if={post.locale != @locale} variant="outline">
+            {gettext("Not translated yet")}
           </.badge>
         </h2>
         <p :if={post.published_at} class="mt-1 text-sm text-base-content/70">

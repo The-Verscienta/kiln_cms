@@ -186,6 +186,22 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **On a multi-locale site, `/fr/blog` lists the posts `/fr/blog/<slug>`
+  serves, and every article keeps its language switcher.**
+  ([#1765](https://github.com/The-Verscienta/kiln_cms/issues/1765) · [long form](docs/changelog/unreleased.md#the-blog-index-follows-the-locale-fallback-chain))
+
+- **The seeded demo page and post, and the beta-round sandbox posts, no longer
+  print their title twice.**
+  ([#1767](https://github.com/The-Verscienta/kiln_cms/issues/1767) · [long form](docs/changelog/unreleased.md#seeded-content-no-longer-prints-its-title-twice))
+
+- **Submitting the same piece for review twice no longer leaves the reviewer
+  two identical inbox rows.**
+  ([#1785](https://github.com/The-Verscienta/kiln_cms/issues/1785) · [long form](docs/changelog/unreleased.md#a-repeated-review-request-is-one-inbox-row-while-unread))
+
+- **A newsletter with no confirmed subscriber to send to is refused, and the
+  Send button says so.**
+  ([#1775](https://github.com/The-Verscienta/kiln_cms/issues/1775) · [long form](docs/changelog/unreleased.md#a-newsletter-with-no-confirmed-subscriber-is-refused))
+
 - **A custom field whose content type no longer exists no longer crashes the
   Fields screen; it is listed as orphaned, with a delete.**
   ([#1770](https://github.com/The-Verscienta/kiln_cms/issues/1770) · [long form](docs/changelog/unreleased.md#a-custom-field-whose-content-type-no-longer-exists-no-longer-crashes-the-fields))

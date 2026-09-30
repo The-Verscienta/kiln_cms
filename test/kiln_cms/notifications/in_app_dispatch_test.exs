@@ -271,6 +271,110 @@ defmodule KilnCMS.Notifications.InAppDispatchTest do
     end
   end
 
+  # #1785: the same document-level event, still unread, is one inbox row.
+  describe "a repeated lifecycle event while the first is unread" do
+    test "submitting the same page for review twice leaves the reviewer one row" do
+      admin = user(:admin)
+      editor = user(:editor)
+
+      page = CMS.create_page!(%{title: "Twice for review", slug: slug()}, actor: editor)
+      page = CMS.submit_page_for_review!(page, %{}, actor: editor)
+      page = CMS.return_page_to_draft!(page, %{}, actor: admin)
+      CMS.submit_page_for_review!(page, %{}, actor: editor)
+      drain()
+
+      assert [%{event: :submitted_for_review}] = inbox(admin)
+    end
+
+    test "once the first is read, the next occurrence is new again" do
+      admin = user(:admin)
+      page = CMS.create_page!(%{title: "Read then again", slug: slug()}, actor: admin)
+
+      attrs = %{
+        user_id: admin.id,
+        org_id: page.org_id,
+        event: :submitted_for_review,
+        content_type: "page",
+        content_id: page.id,
+        title: page.title
+      }
+
+      :ok = Notifications.record_in_app(attrs)
+      :ok = Notifications.record_in_app(attrs)
+      assert [first] = inbox(admin)
+
+      Notifications.mark_notification_read!(first, actor: admin)
+      :ok = Notifications.record_in_app(attrs)
+
+      assert [%{read_at: nil}, %{id: id}] = inbox(admin)
+      assert id == first.id
+    end
+
+    test "the collapse is per recipient, event and document" do
+      admin = user(:admin)
+      other = user(:admin)
+      page = CMS.create_page!(%{title: "Keyed", slug: slug()}, actor: admin)
+      page_b = CMS.create_page!(%{title: "Keyed B", slug: slug()}, actor: admin)
+
+      base = %{
+        user_id: admin.id,
+        org_id: page.org_id,
+        event: :submitted_for_review,
+        content_type: "page",
+        content_id: page.id,
+        title: page.title
+      }
+
+      for attrs <- [
+            base,
+            %{base | user_id: other.id},
+            %{base | event: :published},
+            %{base | content_id: page_b.id}
+          ] do
+        :ok = Notifications.record_in_app(attrs)
+      end
+
+      assert length(inbox(admin)) == 3
+      assert length(inbox(other)) == 1
+    end
+
+    test "comments are never collapsed — each is its own thing to read" do
+      admin = user(:admin)
+      page = CMS.create_page!(%{title: "Chatty", slug: slug()}, actor: admin)
+
+      attrs = %{
+        user_id: admin.id,
+        org_id: page.org_id,
+        event: :comment_added,
+        content_type: "page",
+        content_id: page.id,
+        block_id: Ash.UUID.generate(),
+        title: page.title,
+        excerpt: "first"
+      }
+
+      :ok = Notifications.record_in_app(attrs)
+      :ok = Notifications.record_in_app(%{attrs | excerpt: "second"})
+
+      assert length(inbox(admin)) == 2
+    end
+
+    test "the duplicate check is the notifier's alone" do
+      admin = user(:admin)
+      page = CMS.create_page!(%{title: "Private", slug: slug()}, actor: admin)
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Notifications.unread_notification_about(
+                 admin.id,
+                 :submitted_for_review,
+                 page.id,
+                 actor: admin,
+                 authorize_with: :error,
+                 tenant: page.org_id
+               )
+    end
+  end
+
   describe "a rolled-back write notifies nobody" do
     test "a refused publish records nothing" do
       author = user(:editor)

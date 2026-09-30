@@ -8348,6 +8348,11 @@ msgstr[1] "Aucun problème d’allégation trouvé dans %{count} vérifications 
 msgid "No comments on this block yet."
 msgstr "Aucun commentaire sur ce bloc pour l'instant."
 
+#: lib/kiln_cms_web/live/newsletter_live.ex
+#, elixir-autogen, elixir-format
+msgid "No confirmed subscribers yet. Add subscribers below and confirm them to send."
+msgstr "Aucun abonné confirmé pour l’instant. Ajoutez des abonnés ci-dessous et confirmez-les pour pouvoir envoyer."
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "No consent recorded for this content."
@@ -8745,6 +8750,11 @@ msgstr "Aucun webhook pour le moment"
 msgid "Nobody follows this site yet."
 msgstr "Personne ne suit encore ce site."
 
+#: lib/kiln_cms_web/live/newsletter_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nobody would receive this — the audience has no confirmed subscribers. Add subscribers below and confirm them first."
+msgstr "Personne ne le recevrait : l’audience n’a aucun abonné confirmé. Ajoutez des abonnés ci-dessous et confirmez-les d’abord."
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "None"
@@ -8795,6 +8805,11 @@ msgstr "Pas encore enregistré. Le brouillon est créé dès que vous lui donnez
 #, elixir-autogen, elixir-format
 msgid "Not sure which surface to use? Start with the consumer guide:"
 msgstr "Vous ne savez pas quelle surface utiliser ? Commencez par le guide du consommateur :"
+
+#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex
+#, elixir-autogen, elixir-format
+msgid "Not translated yet"
+msgstr "Pas encore traduit"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -14287,6 +14302,11 @@ msgstr "Cette règle :"
 #, elixir-autogen, elixir-format
 msgid "This runs code on your public site."
 msgstr "Ceci exécute du code sur votre site public."
+
+#: lib/kiln_cms_web/live/newsletter_live.ex
+#, elixir-autogen, elixir-format
+msgid "This segment has no confirmed subscribers. Pick another segment, or add and confirm subscribers first."
+msgstr "Ce segment n’a aucun abonné confirmé. Choisissez un autre segment, ou ajoutez et confirmez d’abord des abonnés."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format

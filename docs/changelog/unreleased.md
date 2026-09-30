@@ -409,6 +409,70 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="the-blog-index-follows-the-locale-fallback-chain"></a>
+
+- **On a multi-locale site, `/fr/blog` lists the posts `/fr/blog/<slug>`
+  serves, and every article keeps its language switcher.** The blog index
+  listed only posts written in the requested locale, while the article view
+  walks the site's locale fallback chain
+  ([#1579](https://github.com/The-Verscienta/kiln_cms/pull/1579)). So
+  `/fr/blog` said there were no posts while `/fr/blog/hello-world` served the
+  English post. The index now walks the same chain in one query: each post
+  appears once, in the first locale on the chain it is published in, and
+  pagination stays exact. A post shown in another language carries a "Not
+  translated yet" badge and a `lang` attribute. A passphrase-locked variant
+  does not hide the variant after it, which matches the article view. A
+  locale whose chain is `[]` still lists only its own posts. The article's
+  language switcher listed only published translations, so a single-language
+  post had one link, which the header hides, and a reader on `/fr/…` had no
+  way back to English. It now offers every locale the site runs whose chain
+  reaches a published variant, and marks the locale in the URL as current
+  ([#1765](https://github.com/The-Verscienta/kiln_cms/issues/1765)).
+
+<a id="seeded-content-no-longer-prints-its-title-twice"></a>
+
+- **The seeded demo page and post, and the beta-round sandbox posts, no longer
+  print their title twice.** `priv/repo/seeds.exs` (`/welcome`,
+  `/blog/hello-world`) and `mix kiln.beta.round` gave each record a first
+  heading block repeating its title, and the public templates already print
+  the title as the page's `h1`, so readers saw it twice. The seeds now start
+  with the body text. Seeding skips records that already exist, so a
+  database seeded before this keeps the old blocks; delete the heading block
+  in the editor, or drop and re-seed a development database
+  ([#1767](https://github.com/The-Verscienta/kiln_cms/issues/1767)).
+
+<a id="a-repeated-review-request-is-one-inbox-row-while-unread"></a>
+
+- **Submitting the same piece for review twice no longer leaves the reviewer
+  two identical inbox rows.** Every review request, publish notice and return
+  to draft wrote a new in-app notification, so an editor who submitted a page,
+  took it back and submitted it again left each reviewer two unread "asked for
+  a review" rows for one document. While one of those is still unread for the
+  same recipient and document, a repeat is no longer written; once it is read,
+  the next one is new again. The check and the write run under a
+  transaction-scoped advisory lock on (site, recipient, event, document), so
+  two submits racing each other still leave one row. There is no migration.
+  A partial unique index would have failed to build over the duplicates
+  already in the table. Comments, mentions and task assignments are never
+  collapsed, and email and Web Push are unchanged
+  ([#1785](https://github.com/The-Verscienta/kiln_cms/issues/1785)).
+
+<a id="a-newsletter-with-no-confirmed-subscriber-is-refused"></a>
+
+- **A newsletter with no confirmed subscriber to send to is refused, and the
+  Send button says so.** `Newsletter.send_as_newsletter/2` recorded and
+  queued a campaign whatever its audience held, so a site with nobody
+  confirmed got a campaign marked sent to zero people. For an automation
+  rule that also spent the one send each publish revision gets, so
+  confirming subscribers afterwards could not send that revision. It now
+  answers `{:error, :no_recipients}` before anything is written when the
+  segment, or the whole site, has no confirmed subscriber. The check reads
+  as the sender and fails closed: a refused read is a `Forbidden`, not "no
+  recipients", so an automation rule retries it, and settles a real
+  `:no_recipients` without retrying. On `/editor/newsletter` the Send button
+  is disabled, with a line saying why, while the chosen audience is empty
+  ([#1775](https://github.com/The-Verscienta/kiln_cms/issues/1775)).
+
 <a id="a-custom-field-whose-content-type-no-longer-exists-no-longer-crashes-the-fields"></a>
 
 - **A custom field whose content type no longer exists no longer crashes the

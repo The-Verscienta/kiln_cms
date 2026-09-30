@@ -87,6 +87,12 @@ defmodule KilnCMS.Notifications do
 
       define :notifications_for_user, action: :for_user, args: [:user_id]
       define :unread_notifications_for_user, action: :unread_for_user, args: [:user_id]
+      # System-only, like `:notify`: the duplicate check `record_in_app/1`
+      # makes before writing a document-level row (#1785).
+      define :unread_notification_about,
+        action: :unread_about,
+        args: [:user_id, :event, :content_id]
+
       define :get_notification, action: :read, get_by: [:id]
       define :mark_notification_read, action: :mark_read
       define :mark_notification_unread, action: :mark_unread
@@ -622,12 +628,14 @@ defmodule KilnCMS.Notifications do
   The resource's `:notify` policy (`forbid_if actor_present()`) is the grant.
   This is not an `authorize?: false` bypass: the policy runs, and an
   authenticated caller reaching that action is refused by it.
+
+  A document-level lifecycle event (review requested, published, returned to
+  draft) that is already waiting **unread** for the same recipient and
+  document is not recorded again (#1785) — see the resource's moduledoc.
   """
   @spec record_in_app(map()) :: :ok
-  def record_in_app(%{user_id: _user_id, org_id: org_id} = attrs) do
-    attrs
-    |> Map.delete(:org_id)
-    |> record_notification!(tenant: org_id)
+  def record_in_app(%{user_id: _user_id, org_id: _org_id} = attrs) do
+    if collapses?(attrs), do: record_once(attrs), else: insert_notification(attrs)
 
     # Only after the row exists — see `topic/1` for why the message carries
     # nothing and every subscriber re-reads for itself.
@@ -638,6 +646,44 @@ defmodule KilnCMS.Notifications do
     error ->
       Logger.error("in-app notification not recorded: #{Exception.message(error)}")
       :ok
+  end
+
+  # The events that describe a document's state rather than a message about it
+  # (#1785). A second one while the first is still unread tells the recipient
+  # nothing new; a second comment, mention or task does.
+  @collapsing_events [:submitted_for_review, :published, :returned_to_draft]
+
+  defp collapses?(%{event: event} = attrs),
+    do: event in @collapsing_events and is_nil(Map.get(attrs, :block_id))
+
+  defp insert_notification(%{org_id: org_id} = attrs) do
+    attrs
+    |> Map.delete(:org_id)
+    |> record_notification!(tenant: org_id)
+  end
+
+  # Check-then-insert, made atomic by a transaction-scoped advisory lock on
+  # the row's key: two submits racing each other both check under the lock,
+  # so the second sees the first's row. A lock rather than a partial unique
+  # index, because the rows this bug already wrote would fail building that
+  # index on upgrade, and `notifications` is a large table whose index build
+  # would have to run concurrently.
+  #
+  # A failed check writes the row anyway: a duplicate in the inbox is a
+  # smaller harm than a review request nobody hears about.
+  defp record_once(
+         %{org_id: org_id, user_id: user_id, event: event, content_id: content_id} = attrs
+       ) do
+    KilnCMS.Repo.transaction(fn ->
+      KilnCMS.Repo.query!("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        "kiln:notification:#{org_id}:#{user_id}:#{event}:#{content_id}"
+      ])
+
+      case unread_notification_about(user_id, event, content_id, tenant: org_id) do
+        {:ok, [_waiting | _]} -> :already_waiting
+        _none_or_failed -> insert_notification(attrs)
+      end
+    end)
   end
 
   # Deliberately content-free beyond the type name — see `KilnCMS.Push`. No

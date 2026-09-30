@@ -475,6 +475,62 @@ defmodule KilnCMSWeb.LocaleFallbackTest do
 
       assert conn |> get("/es/#{s}") |> response(404)
     end
+
+    # #1765: the switcher offers the locales whose URL serves something.
+    test "a locale whose chain is empty is left out of the switcher", %{conn: conn} do
+      chains!(%{"es" => []})
+      s = slug()
+
+      Ash.Seed.seed!(KilnCMS.CMS.Post, %{
+        title: "English only",
+        slug: s,
+        locale: "en",
+        state: :published,
+        published_at: DateTime.utc_now()
+      })
+
+      html = conn |> get("/blog/#{s}") |> html_response(200)
+      assert html =~ ~r{href="[^"]*/fr/blog/#{s}" hreflang="fr"}
+      # `/es/blog/<slug>` would 404: Spanish never falls back on this site.
+      refute html =~ ~r{href="[^"]*/es/blog/#{s}" hreflang="es"}
+    end
+
+    test "the blog index walks the same chain as the article (#1765)", %{conn: conn} do
+      chains!(%{"es" => ["fr"], "fr" => []})
+      s = slug()
+
+      for {locale, title} <- [{"en", "English #{s}"}, {"fr", "Français #{s}"}] do
+        Ash.Seed.seed!(KilnCMS.CMS.Post, %{
+          title: title,
+          slug: s,
+          locale: locale,
+          state: :published,
+          published_at: DateTime.utc_now()
+        })
+      end
+
+      only_en = slug()
+
+      Ash.Seed.seed!(KilnCMS.CMS.Post, %{
+        title: "Only English #{only_en}",
+        slug: only_en,
+        locale: "en",
+        state: :published,
+        published_at: DateTime.utc_now()
+      })
+
+      # es → fr: the French variant, and nothing that exists only in English
+      # (the chain is taken as written, with no hop to the default).
+      html = conn |> get("/es/blog") |> html_response(200)
+      assert html =~ "Français #{s}"
+      refute html =~ "English #{s}"
+      refute html =~ "Only English #{only_en}"
+
+      # fr → []: French posts only.
+      html = conn |> get("/fr/blog") |> html_response(200)
+      assert html =~ "Français #{s}"
+      refute html =~ "Only English #{only_en}"
+    end
   end
 
   describe "GET /api/locales" do

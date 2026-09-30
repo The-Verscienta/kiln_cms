@@ -77,6 +77,12 @@ defmodule KilnCMSWeb.NewsletterLiveTest do
     |> Ash.create!(actor: ctx.actor, tenant: ctx.org)
   end
 
+  defp confirmed!(ctx) do
+    ctx
+    |> subscriber!("nl-confirmed-#{System.unique_integer([:positive])}@example.com")
+    |> Newsletter.confirm_subscriber!(actor: ctx.actor, tenant: ctx.org)
+  end
+
   describe "segments" do
     test "a submitted segment is created and listed", %{conn: conn} = ctx do
       {:ok, view, _html} = live(conn, ~p"/editor/newsletter")
@@ -252,6 +258,7 @@ defmodule KilnCMSWeb.NewsletterLiveTest do
 
     test "a sent campaign is queued and appears in the history", %{conn: conn} = ctx do
       post = fired_post(ctx)
+      confirmed!(ctx)
       {:ok, view, html} = live(conn, ~p"/editor/newsletter")
       # The post is offered, so the choice the operator makes is a real one.
       assert html =~ post.title
@@ -294,6 +301,7 @@ defmodule KilnCMSWeb.NewsletterLiveTest do
 
     test "a manual re-send is allowed, and makes a second campaign", %{conn: conn} = ctx do
       post = fired_post(ctx)
+      confirmed!(ctx)
       {:ok, view, _html} = live(conn, ~p"/editor/newsletter")
 
       send_it = fn ->
@@ -311,6 +319,61 @@ defmodule KilnCMSWeb.NewsletterLiveTest do
       # and the difference is two copies in every subscriber's inbox.
       assert [_first, _second] =
                Ash.read!(KilnCMS.Newsletter.NewsletterSend, actor: ctx.actor, tenant: ctx.org)
+    end
+
+    # #1775: an audience with nobody confirmed in it cannot be sent to.
+    test "with no confirmed subscriber the Send button is disabled and says why",
+         %{conn: conn} = ctx do
+      post = fired_post(ctx)
+      pending = subscriber!(ctx, "nl-pending-#{System.unique_integer([:positive])}@example.com")
+      {:ok, view, _html} = live(conn, ~p"/editor/newsletter")
+
+      assert has_element?(view, "#newsletter-send-button[disabled]")
+      assert has_element?(view, "#newsletter-no-recipients", "No confirmed subscribers yet.")
+
+      # The server refuses on its own, whatever the button says.
+      html =
+        view
+        |> form("#newsletter-send-form", send: %{post_id: post.id, segment_id: "", subject: ""})
+        |> render_submit()
+
+      assert html =~ "the audience has no confirmed subscribers"
+      assert Ash.read!(KilnCMS.Newsletter.NewsletterSend, actor: ctx.actor, tenant: ctx.org) == []
+
+      # Confirming someone from the list enables it.
+      view
+      |> element("button[phx-click='confirm_subscriber'][phx-value-id='#{pending.id}']")
+      |> render_click()
+
+      refute has_element?(view, "#newsletter-send-button[disabled]")
+      refute has_element?(view, "#newsletter-no-recipients")
+    end
+
+    test "picking a segment with nobody confirmed in it disables Send", %{conn: conn} = ctx do
+      post = fired_post(ctx)
+      confirmed!(ctx)
+
+      segment =
+        Newsletter.create_segment!(%{name: "Nobody yet", slug: "nl-empty-seg"},
+          actor: ctx.actor,
+          tenant: ctx.org
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/newsletter")
+      refute has_element?(view, "#newsletter-send-button[disabled]")
+
+      view
+      |> form("#newsletter-send-form", send: %{post_id: post.id, segment_id: segment.id})
+      |> render_change()
+
+      assert has_element?(view, "#newsletter-send-button[disabled]")
+      assert has_element?(view, "#newsletter-no-recipients", "This segment has no confirmed")
+
+      view
+      |> form("#newsletter-send-form", send: %{post_id: post.id, segment_id: ""})
+      |> render_change()
+
+      refute has_element?(view, "#newsletter-send-button[disabled]")
     end
 
     test "submitting with no post chosen asks for one, and records nothing",

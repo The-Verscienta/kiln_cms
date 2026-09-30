@@ -59,12 +59,11 @@ defmodule KilnCMS.Search.EvalIntegrationTest do
       seo_description: "A world-class, Elixir-native headless CMS.",
       blocks:
         typed_blocks([
-          %{type: :heading, content: "Welcome to KilnCMS", data: %{"level" => 1}, order: 0},
           %{
             type: :rich_text,
             content:
               "<p>This page was created by the seed script and published via the workflow.</p>",
-            order: 1
+            order: 0
           }
         ])
     })
@@ -85,12 +84,11 @@ defmodule KilnCMS.Search.EvalIntegrationTest do
       excerpt: "The first post on a KilnCMS-powered site.",
       blocks:
         typed_blocks([
-          %{type: :heading, content: "Hello, World", data: %{"level" => 1}, order: 0},
           %{
             type: :rich_text,
             content:
               "<p>KilnCMS pairs Ash's declarative modeling with LiveView's real-time UX.</p>",
-            order: 1
+            order: 0
           }
         ])
     })
