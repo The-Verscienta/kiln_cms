@@ -511,9 +511,12 @@ defmodule KilnCMSWeb.AnalyticsLive do
                     href={row.public}
                     target="_blank"
                     rel="noopener noreferrer"
+                    aria-label={
+                      gettext("View %{title} on the site (opens in a new tab)", title: row.title)
+                    }
                     class="ml-2 text-xs text-primary-ink hover:underline"
                   >
-                    view &nearr; <span class="sr-only">{gettext("(opens in a new tab)")}</span>
+                    {gettext("view")} <span aria-hidden="true">&nearr;</span>
                   </a>
                 </td>
                 <td class="capitalize text-base-content/70">{row.type}</td>

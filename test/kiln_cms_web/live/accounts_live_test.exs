@@ -8,6 +8,7 @@ defmodule KilnCMSWeb.AccountsLiveTest do
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.{Scoping, User}
+  alias KilnCMS.Test.AccessibleNames
 
   @password "password123456"
 
@@ -137,6 +138,18 @@ defmodule KilnCMSWeb.AccountsLiveTest do
       assert html =~ to_string(other.email)
       assert html =~ "Dana Reed"
       assert html =~ "editor"
+    end
+
+    test "each row's Manage link names its account (#1774)", %{conn: conn, other: other} do
+      another = seeded(:viewer)
+      {:ok, view, _html} = live(conn, ~p"/editor/accounts")
+      html = render(view)
+
+      for user <- [other, another] do
+        assert AccessibleNames.name(html, "#account-#{user.id} a.btn") == "Manage #{user.email}"
+      end
+
+      assert AccessibleNames.repeated(html, "li[id^='account-'] a") == []
     end
 
     test "searches by email", %{conn: conn, other: other} do

@@ -186,6 +186,11 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Accessibility: repeated row actions in the console name the record they act
+  on, the Translations table names each control's content and locale, and the
+  calendar filters are announced by their label alone.**
+  ([#1774](https://github.com/The-Verscienta/kiln_cms/issues/1774) · [long form](docs/changelog/unreleased.md#repeated-row-actions-name-the-record-they-act-on))
+
 - **On a multi-locale site, `/fr/blog` lists the posts `/fr/blog/<slug>`
   serves, and every article keeps its language switcher.**
   ([#1765](https://github.com/The-Verscienta/kiln_cms/issues/1765) · [long form](docs/changelog/unreleased.md#the-blog-index-follows-the-locale-fallback-chain))

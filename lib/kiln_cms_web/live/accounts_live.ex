@@ -589,6 +589,7 @@ defmodule KilnCMSWeb.AccountsLive do
             </div>
             <.link
               navigate={~p"/editor/accounts/#{user.id}"}
+              aria-label={gettext("Manage %{email}", email: user.email)}
               class="btn btn-sm btn-default shrink-0"
             >
               {gettext("Manage")}

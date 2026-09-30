@@ -16,6 +16,7 @@ defmodule KilnCMSWeb.GovernanceLiveTest do
 
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
+  alias KilnCMS.Test.AccessibleNames
 
   @password "password123456"
 
@@ -60,6 +61,24 @@ defmodule KilnCMSWeb.GovernanceLiveTest do
     {:ok, _view, html} = live(log_in(conn, admin), ~p"/editor/governance")
     assert html =~ "Governance"
     assert html =~ "Auditable Post"
+  end
+
+  test "each row's Trail link names the content it opens (#1774)", %{conn: conn} do
+    admin = authed_user(:admin)
+
+    posts =
+      for title <- ["Trail One", "Trail Two"],
+          do: CMS.create_post!(%{title: title, slug: slug()}, actor: admin)
+
+    {:ok, view, _html} = live(log_in(conn, admin), ~p"/editor/governance")
+    html = render(view)
+
+    for post <- posts do
+      assert AccessibleNames.name(html, ~s(a.btn[href="/editor/governance/post/#{post.id}"])) ==
+               "Trail for #{post.title}"
+    end
+
+    assert AccessibleNames.repeated(html, "li a.btn") == []
   end
 
   test "the detail shows the version timeline and consents", %{conn: conn} do
