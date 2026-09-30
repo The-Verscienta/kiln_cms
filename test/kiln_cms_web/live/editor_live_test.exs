@@ -86,6 +86,8 @@ defmodule KilnCMSWeb.EditorLiveTest do
     |> KilnCMS.LegacyView.blocks()
   end
 
+  defp typed_blocks(record), do: KilnCMS.CMS.TypedBlocks.to_typed(record.blocks)
+
   defp page_versions(page_id) do
     CMS.list_page_versions!(authorize?: false)
     |> Enum.filter(&(&1.version_source_id == page_id))
@@ -1445,6 +1447,23 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
+  # #1760: `form` and `fragment` fell through to the generic "Insert a block"
+  # line, and nothing noticed. Every core type is held to a real description
+  # here, so the next block added to `KilnCMS.Blocks` can't slip past either.
+  # Plugin blocks are left out: `Kiln.Block` has no description to show.
+  describe "block picker descriptions" do
+    test "every core block type has its own description" do
+      generic = KilnCMSWeb.ContentEditorLive.block_description("no-such-block")
+
+      for type <- KilnCMS.Blocks.core_types() do
+        description = KilnCMSWeb.ContentEditorLive.block_description(to_string(type))
+
+        assert description != generic,
+               "the #{type} block shows the generic #{inspect(generic)} in the picker"
+      end
+    end
+  end
+
   describe "media library browser (editor chrome)" do
     test "opening from chrome and picking inserts a new image block", %{conn: conn} do
       media = Ash.Seed.seed!(MediaItem, %{filename: "hero.jpg", url: "/uploads/hero"})
@@ -1469,6 +1488,101 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert to_string(block.type) == "image"
       assert block.content == "/uploads/hero"
       assert block.data["media_id"] == media.id
+    end
+
+    # #1782: a library pick dropped the alt text the editor had already written
+    # on the media item, and the publish gate then asked for it again.
+    test "a library pick carries the item's alt text into the new block", %{conn: conn} do
+      media =
+        Ash.Seed.seed!(MediaItem, %{
+          filename: "kiln.jpg",
+          url: "/uploads/kiln",
+          alt: "A loaded kiln at dawn"
+        })
+
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      lv |> element("button[phx-click='open_media_browser']") |> render_click()
+
+      lv
+      |> element(
+        "button[phx-click='pick_image'][phx-value-index='new'][phx-value-id='#{media.id}']"
+      )
+      |> render_click()
+
+      lv |> form("#page-editor") |> render_submit()
+
+      [block] = typed_blocks(CMS.get_page!(page.id, authorize?: false))
+      assert block.alt == "A loaded kiln at dawn"
+      assert block.media_id == media.id
+    end
+
+    test "filling an image block seeds a blank alt from the library", %{conn: conn} do
+      media =
+        Ash.Seed.seed!(MediaItem, %{filename: "k.jpg", url: "/uploads/k", alt: "Glaze tests"})
+
+      page =
+        draft_page(%{
+          blocks: KilnCMS.TypedFixtures.typed_blocks([%{type: :image, content: "", order: 0}])
+        })
+
+      [img] = blocks_legacy(page)
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      render_hook(lv, "open_picker", %{"bid" => img.id})
+
+      render_hook(lv, "pick_image", %{
+        "index" => "block",
+        "bid" => img.id,
+        "id" => media.id,
+        "url" => "/uploads/k"
+      })
+
+      lv |> form("#page-editor") |> render_submit()
+
+      [block] = typed_blocks(CMS.get_page!(page.id, authorize?: false))
+      assert block.url == "/uploads/k"
+      assert block.alt == "Glaze tests"
+    end
+
+    # The block's own alt is a per-placement description: the library's never
+    # overwrites one the editor already typed.
+    test "filling an image block keeps an alt the block already has", %{conn: conn} do
+      media =
+        Ash.Seed.seed!(MediaItem, %{filename: "k2.jpg", url: "/uploads/k2", alt: "Library alt"})
+
+      block_id = Ash.UUID.generate()
+
+      page =
+        draft_page(%{
+          blocks:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{id: block_id, type: :image, content: "", data: %{"alt" => "My own"}, order: 0}
+            ])
+        })
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      render_hook(lv, "open_picker", %{"bid" => block_id})
+
+      render_hook(lv, "pick_image", %{
+        "index" => "block",
+        "bid" => block_id,
+        "id" => media.id,
+        "url" => "/uploads/k2"
+      })
+
+      lv |> form("#page-editor") |> render_submit()
+
+      [block] = typed_blocks(CMS.get_page!(page.id, authorize?: false))
+      assert block.url == "/uploads/k2"
+      assert block.alt == "My own"
     end
 
     test "searching filters the browser grid", %{conn: conn} do

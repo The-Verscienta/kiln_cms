@@ -665,6 +665,8 @@ defmodule KilnCMSWeb.ContentController do
             locale: locale,
             limit: 20,
             filters: filters,
+            # A page hit has no excerpt; the highlight is its snippet (#1766).
+            highlight: true,
             # Exactly the three read below — not `content_sections/0`, which
             # would also sweep any other registered type this page never shows
             # (#960).

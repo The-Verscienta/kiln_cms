@@ -12,12 +12,19 @@ defmodule KilnCMS.CMS.BlockText do
 
   @doc "Returns the concatenated plain text of `blocks` (space-separated)."
   @spec to_text([term()] | nil) :: String.t()
-  def to_text(blocks) do
+  def to_text(blocks), do: blocks |> block_texts() |> Enum.join(" ")
+
+  @doc """
+  The plain text of each block in `blocks`, in order, empty ones dropped —
+  `to_text/1` before the join, for a caller that needs block boundaries
+  (`KilnCMS.CMS.Changes.SetSearchText` recognising a leading heading).
+  """
+  @spec block_texts([term()] | nil) :: [String.t()]
+  def block_texts(blocks) do
     blocks
     |> TypedBlocks.to_typed()
     |> Enum.map(&Blocks.search_text/1)
     |> Enum.reject(&(&1 == ""))
-    |> Enum.join(" ")
   end
 
   @doc """

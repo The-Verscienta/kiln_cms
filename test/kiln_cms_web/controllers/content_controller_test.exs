@@ -740,6 +740,33 @@ defmodule KilnCMSWeb.ContentControllerTest do
       assert html =~ "public-search-submit"
     end
 
+    # #1766: a page hit showed its title and nothing else. (`Ash.Seed` skips
+    # the change that writes `search_text`, so these tests set it directly.)
+    test "a page hit shows its search highlight, escaped but for the marks", %{conn: conn} do
+      term = "kilnsnippet#{uniq()}"
+
+      page(%{
+        title: "Firing guide",
+        search_text: "Firing guide Load the #{term} slowly, salt & ash, vent early."
+      })
+
+      html = conn |> get(~p"/search?q=#{term}") |> html_response(200)
+
+      assert html =~ "search-snippet"
+      assert html =~ "<mark>#{term}</mark>"
+      # The document's own text is escaped; only the marks are markup.
+      assert html =~ "salt &amp; ash"
+    end
+
+    test "a page hit with no highlight falls back to its meta description", %{conn: conn} do
+      term = "kilnmeta#{uniq()}"
+      page(%{title: "#{term} page", seo_description: "How the studio fires its glazes."})
+
+      html = conn |> get(~p"/search?q=#{term}") |> html_response(200)
+
+      assert html =~ "How the studio fires its glazes."
+    end
+
     test "a typo gets fuzzy-rescued results plus a did-you-mean link", %{conn: conn} do
       page = page(%{title: "Fermentation Handbook #{uniq()}"})
 

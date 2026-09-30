@@ -269,27 +269,41 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         query: [sort: [position: :asc, name: :asc]]
       )
 
+    # A definition whose content type no longer exists (#1770) is listed on
+    # its own, with only a delete: nothing renders, validates or delivers it,
+    # and it cannot be saved back while it points at nothing.
+    {orphaned, owned} = Enum.split_with(definitions, &FieldDefinition.orphaned?/1)
+
     grouped =
-      definitions
+      owned
       |> Enum.group_by(&scope_key/1)
       |> Enum.sort_by(fn {scope, _definitions} ->
         group_heading(scope, socket.assigns.dynamic_types)
       end)
 
-    socket |> assign(:definitions, definitions) |> assign(:grouped, grouped)
+    socket
+    |> assign(:definitions, definitions)
+    |> assign(:grouped, grouped)
+    |> assign(:orphaned, Enum.sort_by(orphaned, &{to_string(&1.content_type), &1.name}))
   end
 
-  # A definition's owner: a compiled content type XOR a dynamic one.
-  defp scope_key(%{type_definition_id: nil, content_type: content_type}),
-    do: {:compiled, content_type}
+  # A definition's owner: a compiled content type XOR a dynamic one — or, for
+  # an orphan, the stored name of a type that is gone.
+  defp scope_key(%{type_definition_id: nil, content_type: content_type} = definition) do
+    if FieldDefinition.orphaned?(definition),
+      do: {:orphaned, to_string(content_type)},
+      else: {:compiled, content_type}
+  end
 
   defp scope_key(%{type_definition_id: id}), do: {:dynamic, id}
 
-  # The same owner, as the type checkbox's value.
+  # The same owner, as the type checkbox's value. An orphan's owner has no
+  # checkbox, so its value matches none.
   defp scope_param(definition) do
     case scope_key(definition) do
       {:compiled, type} -> to_string(type)
       {:dynamic, id} -> "def:#{id}"
+      {:orphaned, name} -> "orphaned:#{name}"
     end
   end
 
@@ -784,6 +798,56 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               </li>
             </ul>
           </div>
+        </section>
+
+        <section
+          :if={@orphaned != []}
+          id="orphaned-fields"
+          class="space-y-3"
+          aria-labelledby="orphaned-fields-heading"
+        >
+          <div>
+            <h2 id="orphaned-fields-heading" class="flex items-center gap-2 text-lg font-medium">
+              <.icon name="hero-exclamation-triangle" class="size-5 text-warning" />
+              {gettext("Orphaned fields")}
+            </h2>
+            <p class="text-sm text-base-content/70">
+              {gettext(
+                "These fields belong to a content type that no longer exists — a removed plugin, or a type that was renamed or deleted. Nothing shows, checks or delivers them. Delete them to tidy up."
+              )}
+            </p>
+          </div>
+          <ul class="card divide-y divide-base-content/10 border-warning/40">
+            <li :for={definition <- @orphaned} id={"field-#{definition.id}"} class="p-4">
+              <div class="flex items-start justify-between gap-4">
+                <div class="min-w-0 space-y-1">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="font-medium">{definition.label}</span>
+                    <code class="text-xs text-base-content/60">{definition.name}</code>
+                    <span class="rounded bg-warning/20 px-1.5 py-0.5 text-xs text-warning">
+                      {gettext("orphaned")}
+                    </span>
+                  </div>
+                  <p class="text-xs text-base-content/60">
+                    {gettext("Content type %{type} no longer exists.",
+                      type: to_string(definition.content_type)
+                    )}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  phx-click="delete"
+                  phx-value-id={definition.id}
+                  data-confirm={gettext("Delete this orphaned field?")}
+                  aria-label={gettext("Delete orphaned field %{name}", name: definition.name)}
+                  class="btn btn-sm btn-default shrink-0 hover:text-error"
+                >
+                  <.icon name="hero-trash" class="size-4" />
+                  {gettext("Delete")}
+                </button>
+              </div>
+            </li>
+          </ul>
         </section>
       </div>
     </Layouts.console>

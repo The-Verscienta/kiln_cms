@@ -11,6 +11,13 @@ defmodule KilnCMSWeb.SearchPaletteLive do
   scan finds quickly. The screen list is `KilnCMSWeb.ConsoleNav` — the same one
   the sidebar draws, already filtered to what this actor may open, so the
   palette can never offer a door that only bounces them.
+
+  A content hit whose title *is* the query — compared case-, whitespace- and
+  quote-blind — is lifted out of its section into a **Best match** row above
+  everything else (#1781). The sections render in a fixed order with up to
+  eight hits each, so an exact post title used to sit ninth behind eight
+  loosely matching pages. The row is a presentation of the hits the search
+  already returned, not a re-rank: the ranking itself is `KilnCMS.Search`'s.
   """
   use KilnCMSWeb, :live_view
 
@@ -27,6 +34,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
      |> assign(:searched, false)
      |> assign(:retention_days, KilnCMS.Analytics.SearchQuery.retention_days())
      |> assign(:screens, [])
+     |> assign(:best, [])
      # Built once: what this actor may open does not change while they type.
      |> assign(
        :destinations,
@@ -57,6 +65,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
         |> assign(:query, "")
         |> assign(:searched, false)
         |> assign(:screens, [])
+        |> assign(:best, [])
         |> assign(:results, empty())
       else
         results =
@@ -80,10 +89,13 @@ defmodule KilnCMSWeb.SearchPaletteLive do
         # on the write; lands in the current site (epic #336).
         Search.record_query_async(query, total, tenant: socket.assigns.current_org)
 
+        {best, results} = split_best_matches(results, query)
+
         socket
         |> assign(:query, query)
         |> assign(:searched, true)
         |> assign(:screens, ConsoleNav.match(socket.assigns.destinations, query))
+        |> assign(:best, best)
         |> assign(:results, results)
       end
 
@@ -101,10 +113,58 @@ defmodule KilnCMSWeb.SearchPaletteLive do
        }),
        do: length(p) + length(o) + length(e) + length(m) + length(c) + length(t) + length(g)
 
+  # The content sections a Best match row is drawn from, with the editor path
+  # segment and label each hit carries there.
+  @best_match_sections [:pages, :posts, :entries]
+
+  # Moves every hit whose title equals the query out of its section, so it is
+  # drawn once, in the Best match row. Section order is kept (pages, posts,
+  # custom content) and so is each section's own ranked order.
+  defp split_best_matches(results, query) do
+    wanted = normalize_title(query)
+
+    Enum.reduce(@best_match_sections, {[], results}, fn section, {best, acc} ->
+      {exact, rest} =
+        acc
+        |> Map.get(section, [])
+        |> Enum.split_with(&(normalize_title(&1.title) == wanted))
+
+      {best ++ Enum.map(exact, &best_match(section, &1)), Map.put(acc, section, rest)}
+    end)
+  end
+
+  defp best_match(:pages, record), do: %{type: "page", label: gettext("Page"), record: record}
+  defp best_match(:posts, record), do: %{type: "post", label: gettext("Post"), record: record}
+
+  defp best_match(:entries, record),
+    do: %{
+      type: record.type_name,
+      label: Phoenix.Naming.humanize(record.type_name),
+      record: record
+    }
+
+  # Case-, whitespace- and quote-blind: a title typed with a straight
+  # apostrophe matches one stored with a curly one, which is what a word
+  # processor paste leaves behind.
+  defp normalize_title(title) when is_binary(title) do
+    title
+    |> String.replace(["\u2018", "\u2019", "\u02BC"], "'")
+    |> String.replace(["\u201C", "\u201D"], "\"")
+    |> String.split()
+    |> Enum.join(" ")
+    |> String.downcase()
+  end
+
+  defp normalize_title(_title), do: nil
+
   @impl true
   def render(assigns) do
     assigns =
-      assign(assigns, :count, result_count(assigns.results) + length(assigns.screens))
+      assign(
+        assigns,
+        :count,
+        result_count(assigns.results) + length(assigns.screens) + length(assigns.best)
+      )
 
     ~H"""
     <Layouts.console
@@ -167,6 +227,17 @@ defmodule KilnCMSWeb.SearchPaletteLive do
         </.empty_state>
 
         <div :if={@count > 0} class="space-y-6">
+          <%!-- An exact title match leads (#1781), above the screens too: a
+                title equal to everything typed is the strictest match the
+                palette can make, where a screen matches on a keyword. --%>
+          <.section :if={@best != []} id="palette-best-match" title={gettext("Best match")}>
+            <.content_row
+              :for={b <- @best}
+              type={b.type}
+              record={b.record}
+              label={b.label}
+            />
+          </.section>
           <%!-- Screens lead (#1319): a match on a destination is an unambiguous
                 answer, and the content hits below it are not. The description
                 is shown because a keyword match ("rss" → Feeds) otherwise
@@ -250,11 +321,12 @@ defmodule KilnCMSWeb.SearchPaletteLive do
   end
 
   attr :title, :string, required: true
+  attr :id, :string, default: nil
   slot :inner_block, required: true
 
   defp section(assigns) do
     ~H"""
-    <div>
+    <div id={@id}>
       <h2 class="mb-1 text-xs font-semibold uppercase tracking-wide text-base-content/70">
         {@title}
       </h2>
@@ -267,6 +339,7 @@ defmodule KilnCMSWeb.SearchPaletteLive do
 
   attr :type, :string, required: true
   attr :record, :map, required: true
+  attr :label, :string, default: nil, doc: "the hit's content type, where its section doesn't say"
 
   defp content_row(assigns) do
     ~H"""
@@ -276,6 +349,9 @@ defmodule KilnCMSWeb.SearchPaletteLive do
     >
       <span class="font-medium">{@record.title}</span>
       <span class="ml-2 text-xs text-base-content/70">/{@record.slug}</span>
+      <span :if={@label} class="ml-2 text-xs uppercase tracking-wide text-base-content/50">
+        {@label}
+      </span>
       <p
         :if={snippet(@record)}
         class="mt-0.5 line-clamp-2 text-xs text-base-content/60 [&_mark]:rounded-sm [&_mark]:bg-warning/30 [&_mark]:px-0.5 [&_mark]:text-base-content"
