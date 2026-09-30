@@ -263,13 +263,9 @@ defmodule KilnCMSWeb.FormBuilderLive do
   def handle_event("copied", _params, socket),
     do: {:noreply, put_flash(socket, :info, gettext("Embed code copied to clipboard."))}
 
-  # The one-line snippet an embedder pastes on their site (see `/embed.js`).
-  # Must be the ORG'S OWN host (#557) — `embed.js` derives the iframe origin
-  # from this script's `src` unless `data-kiln-origin` is set, so the global
-  # endpoint host here would point every tenant's embed at the default org.
-  defp embed_snippet(slug, org) do
-    ~s(<script src="#{KilnCMSWeb.Tenant.base_url(org)}/embed.js" data-kiln-form="#{slug}"></script>)
-  end
+  # The one-line snippet an embedder pastes on their site (see `/embed.js`) —
+  # on the org's own host (#557); shared with the forms list.
+  defp embed_snippet(slug, org), do: KilnCMSWeb.Embed.form_snippet(slug, org)
 
   # Since #562 the shipped default is same-origin only, so a copied snippet on a
   # third-party page renders blank until an origin is allowed. Say so here —

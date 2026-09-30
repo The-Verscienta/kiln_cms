@@ -119,7 +119,9 @@ defmodule KilnCMSWeb.SiteAiLive do
           "ask_model" => row.ask_model
         }
       else
-        %{"enabled" => true, "provider" => "anthropic"}
+        # Unconfigured: the toggle starts OFF, agreeing with the status copy
+        # above it; saving a half-filled form must not quietly enable it (#1780).
+        %{"enabled" => false, "provider" => "anthropic"}
       end
 
     org_id = KilnCMS.Accounts.org_id(socket.assigns.current_org)

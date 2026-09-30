@@ -74,6 +74,70 @@ defmodule KilnCMSWeb.ApiKeyLiveTest do
       assert html =~ "marketing-site"
     end
 
+    # #1771: the owner select used to render only user options, so the browser
+    # silently picked whoever `list_users!` returned first — an admin could mint
+    # a key acting as the wrong account without noticing.
+    test "the owner defaults to the signed-in admin, not the first listed user",
+         %{conn: conn} do
+      # Seeded first so it would lead an insertion-ordered list, and with an
+      # email that would lead an alphabetical one.
+      other =
+        Ash.Seed.seed!(User, %{
+          email: "aaa-first-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt(@password),
+          confirmed_at: DateTime.utc_now(),
+          role: :admin
+        })
+
+      admin = authed_user(:admin)
+      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/api-keys")
+
+      # Exactly one owner option is selected, and it is the signed-in admin.
+      doc = LazyHTML.from_fragment(html)
+      selected = LazyHTML.query(doc, "#new-api-key-owner option[selected]")
+      assert LazyHTML.attribute(selected, "value") == [admin.id]
+      assert LazyHTML.text(selected) =~ "you"
+
+      # The choice is still visible and explicit: the other user is offered.
+      assert has_element?(lv, "#new-api-key-owner option[value='#{other.id}']")
+      assert has_element?(lv, "#new-api-key-owner-hint")
+
+      # Submitting without touching the select mints the key for the admin.
+      lv
+      |> form("#new-api-key-form", %{name: "default-owner", days: "30"})
+      |> render_submit()
+
+      [key] =
+        KilnCMS.Accounts.list_all_api_keys!(actor: admin)
+        |> Enum.filter(&(&1.name == "default-owner"))
+
+      assert key.user_id == admin.id
+    end
+
+    test "minting for another user is an explicit choice that is honoured", %{conn: conn} do
+      admin = authed_user(:admin)
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/api-keys")
+
+      lv
+      |> form("#new-api-key-form", %{name: "for-editor", user_id: editor.id, days: "30"})
+      |> render_submit()
+
+      [key] =
+        KilnCMS.Accounts.list_all_api_keys!(actor: admin)
+        |> Enum.filter(&(&1.name == "for-editor"))
+
+      assert key.user_id == editor.id
+    end
+
+    test "a blank owner is refused with a flash instead of crashing", %{conn: conn} do
+      admin = authed_user(:admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/api-keys")
+
+      html = render_submit(lv, "mint", %{"user_id" => "", "name" => "x", "days" => "30"})
+      assert html =~ "Choose which user the key acts as"
+    end
+
     test "admin revokes a key", %{conn: conn} do
       admin = authed_user(:admin)
 

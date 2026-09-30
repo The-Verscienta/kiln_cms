@@ -39,6 +39,13 @@ defmodule KilnCMSWeb.TypeDefinitionLiveTest do
     |> AshAuthentication.Plug.Helpers.store_in_session(user)
   end
 
+  # #1773 (WCAG 2.4.2): the heading said "Content types" but the browser tab
+  # said only "KilnCMS" — the page never assigned :page_title.
+  test "the page has a descriptive document title", %{conn: conn} do
+    {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/types")
+    assert page_title(lv) =~ "Content types"
+  end
+
   test "an admin creates a dynamic content type through the UI", %{conn: conn} do
     admin = authed_user(:admin)
     {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/types")
