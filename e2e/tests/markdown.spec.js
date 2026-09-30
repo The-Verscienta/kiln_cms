@@ -132,32 +132,49 @@ test.describe("markdown", () => {
 
   test("the Markdown view turns pasted Markdown into blocks on the way back", async ({ page }) => {
     const id = await newDraftPage(page);
+    // A heading block's text and level, and each text block's editor (#1800:
+    // headings and `---` are blocks of their own, the prose between them one
+    // text block per section).
+    const headingText = page.locator('#blocks-sortable textarea[name$="[text]"]');
+    const headingLevel = page.locator('#blocks-sortable [name$="[level]"]');
+    const texts = page.locator('[phx-hook="RichText"] .ProseMirror');
+
     try {
       await page.getByRole("button", { name: "Markdown", exact: true }).click();
       const source = page.locator("#markdown-mode-source");
       await expect(source).toBeVisible();
       await expect(page.locator("#blocks-sortable")).toBeHidden();
 
-      await source.fill("## From Markdown\n\n- one\n- **two**\n\n| A | B |\n|---|---|\n| 1 | 2 |\n");
+      await source.fill(
+        "## From Markdown\n\n- one\n- **two**\n\n---\n\n| A | B |\n|---|---|\n| 1 | 2 |\n",
+      );
       // Straight to Blocks, inside the debounce: the blur sends the text first.
       await page.getByRole("button", { name: "Blocks", exact: true }).click();
       await expect(source).toHaveCount(0);
 
-      const prose = page.locator('[phx-hook="RichText"] .ProseMirror').first();
-      await expect(prose.locator("h2")).toHaveText("From Markdown");
-      await expect(prose.locator("li")).toHaveCount(2);
-      await expect(prose.locator("strong")).toHaveText("two");
-      await expect(prose.locator("table")).toHaveCount(1);
+      // heading, text (the list), divider, text (the table).
+      const checkBlocks = async () => {
+        await expect(headingText).toHaveCount(1);
+        await expect(headingText).toHaveValue("From Markdown");
+        await expect(headingLevel).toHaveValue("2");
+        await expect(page.getByText("Section break — no editable fields.")).toHaveCount(1);
+        await expect(texts).toHaveCount(2);
+        await expect(texts.nth(0).locator("h2")).toHaveCount(0);
+        await expect(texts.nth(0).locator("li")).toHaveCount(2);
+        await expect(texts.nth(0).locator("strong")).toHaveText("two");
+        await expect(texts.nth(1).locator("table")).toHaveCount(1);
+      };
+      await checkBlocks();
 
       await save(page);
       await page.reload();
-      await expect(page.locator('[phx-hook="RichText"] .ProseMirror').first().locator("h2")).toHaveText(
-        "From Markdown",
-      );
+      await checkBlocks();
 
       // And back out: the saved blocks read as the same Markdown.
       await page.getByRole("button", { name: "Markdown", exact: true }).click();
-      await expect(page.locator("#markdown-mode-source")).toHaveValue(/^## From Markdown\n\n- one\n- \*\*two\*\*/);
+      await expect(page.locator("#markdown-mode-source")).toHaveValue(
+        /^## From Markdown\n\n- one\n- \*\*two\*\*\n\n---\n\n\| A \| B \|/,
+      );
     } finally {
       await deleteContentById(page, "page", id);
     }
@@ -168,7 +185,9 @@ test.describe("markdown", () => {
     const markdownButton = page.getByRole("button", { name: "Markdown", exact: true });
     const blocksButton = page.getByRole("button", { name: "Blocks", exact: true });
     const source = page.locator("#markdown-mode-source");
-    const prose = page.locator('[phx-hook="RichText"] .ProseMirror').first();
+    const texts = page.locator('[phx-hook="RichText"] .ProseMirror');
+    const prose = texts.first();
+    const headingText = page.locator('#blocks-sortable textarea[name$="[text]"]');
 
     try {
       // Blocks → Markdown straight after typing: the switch flushes the block.
@@ -178,27 +197,32 @@ test.describe("markdown", () => {
       await markdownButton.click();
       await expect(source).toHaveValue("Typed in a block\n");
 
-      // Markdown → Blocks with an edit.
+      // Markdown → Blocks with an edit: the new heading is a heading block
+      // after the text block (#1800).
       await source.fill("Typed in a block\n\n## Added in Markdown\n");
       await blocksButton.click();
-      await expect(prose.locator("h2")).toHaveText("Added in Markdown");
+      await expect(texts).toHaveCount(1);
+      await expect(prose).toHaveText("Typed in a block");
+      await expect(headingText).toHaveValue("Added in Markdown");
 
       // An edit in the block editor, then Markdown again: it shows both.
-      await prose.locator("h2").click();
+      await prose.click();
       await page.keyboard.press("End");
       await page.keyboard.type(" and blocks");
       await markdownButton.click();
-      await expect(source).toHaveValue("Typed in a block\n\n## Added in Markdown and blocks\n");
+      await expect(source).toHaveValue("Typed in a block and blocks\n\n## Added in Markdown\n");
 
-      // And back once more, then persisted.
-      await source.fill("Typed in a block\n\n## Added in Markdown and blocks\n\n- a list\n");
+      // And back once more, then persisted: text, heading, text (the list).
+      await source.fill("Typed in a block and blocks\n\n## Added in Markdown\n\n- a list\n");
       await blocksButton.click();
-      await expect(prose.locator("li")).toHaveText("a list");
+      await expect(texts).toHaveCount(2);
+      await expect(texts.nth(1).locator("li")).toHaveText("a list");
       await save(page);
       await page.reload();
-      await expect(page.locator('[phx-hook="RichText"] .ProseMirror').first().locator("li")).toHaveText(
-        "a list",
-      );
+      await expect(texts).toHaveCount(2);
+      await expect(texts.first()).toHaveText("Typed in a block and blocks");
+      await expect(headingText).toHaveValue("Added in Markdown");
+      await expect(texts.nth(1).locator("li")).toHaveText("a list");
     } finally {
       await deleteContentById(page, "page", id);
     }
