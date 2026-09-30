@@ -528,6 +528,18 @@ carries the reasoning.
   now delivered in a test.
   ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543))
 
+<a id="an-overlays-composed-suite-no-longer-fails-the-configured-domains-test"></a>
+
+- **An overlay that registers its own domain through its plugin no longer fails
+  the core's "configured domains" test in its composed suite.**
+  The test compared `:ash_domains` minus the name `Example.Catalog` against
+  the domains compiled from `lib/kiln_cms/`, so it held only for the in-tree
+  example overlay. A downstream overlay that lists its own domain in
+  `:ash_domains`, as `c:Kiln.Plugin.domains/0` asks it to, failed it on a
+  correct configuration once its suite composed with the core's. The test now
+  subtracts every domain the installed plugins declare. Test-only; nothing
+  changes at runtime.
+
 ## Security
 
 <a id="password-rotation-revokes-every-session"></a>
