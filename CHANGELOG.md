@@ -190,6 +190,11 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **The media library says how many files one upload takes, shows that
+  uploaded files are still being processed, and ties its URL field to its
+  label.**
+  ([#1802](https://github.com/The-Verscienta/kiln_cms/issues/1802), [#1803](https://github.com/The-Verscienta/kiln_cms/issues/1803), [#1804](https://github.com/The-Verscienta/kiln_cms/issues/1804) · [long form](docs/changelog/unreleased.md#media-uploads-state-their-limit-and-show-processing))
+
 - **Accessibility: repeated row actions in the console name the record they act
   on, the Translations table names each control's content and locale, and the
   calendar filters are announced by their label alone.**

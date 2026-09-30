@@ -10044,6 +10044,13 @@ msgstr "Test en cours…"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
+msgid "Processing %{count} file… This can take a moment."
+msgid_plural "Processing %{count} files… This can take a moment."
+msgstr[0] "Traitement de %{count} fichier… Cela peut prendre un moment."
+msgstr[1] "Traitement de %{count} fichiers… Cela peut prendre un moment."
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
 msgid "Processing…"
 msgstr "Traitement en cours…"
 
@@ -14996,6 +15003,11 @@ msgstr "Sans titre"
 msgid "Unused"
 msgstr "Inutilisé"
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Up to %{max} files at a time"
+msgstr "Jusqu’à %{max} fichiers à la fois"
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Up to date"
@@ -15094,6 +15106,11 @@ msgstr "Téléversé jusqu'au"
 #, elixir-autogen, elixir-format
 msgid "Uploading %{name}… %{pct}%"
 msgstr "Téléversement de %{name}… %{pct} %"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Uploading…"
+msgstr "Envoi…"
 
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
@@ -15917,6 +15934,13 @@ msgstr "Vous avez besoin d'un accès administrateur pour voir cette page."
 #, elixir-autogen, elixir-format
 msgid "You need editor access to view that page."
 msgstr "Vous avez besoin d'un accès éditeur pour voir cette page."
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "You picked %{count} file, but you can upload up to %{max} at a time. Remove some, then upload the rest afterwards."
+msgid_plural "You picked %{count} files, but you can upload up to %{max} at a time. Remove some, then upload the rest afterwards."
+msgstr[0] "Vous avez choisi %{count} fichier, mais vous pouvez en envoyer %{max} au maximum à la fois. Retirez-en quelques-uns, puis envoyez le reste ensuite."
+msgstr[1] "Vous avez choisi %{count} fichiers, mais vous pouvez en envoyer %{max} au maximum à la fois. Retirez-en quelques-uns, puis envoyez le reste ensuite."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -17113,19 +17137,10 @@ msgid "today"
 msgstr "aujourd'hui"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "too large (max %{mb} MB)"
 msgstr "trop volumineux (max %{mb} Mo)"
-
-#: lib/kiln_cms_web/live/media_live.ex
-#, elixir-autogen, elixir-format
-msgid "too large (max 10 MB)"
-msgstr "trop volumineux (max 10 Mo)"
-
-#: lib/kiln_cms_web/live/media_live.ex
-#, elixir-autogen, elixir-format
-msgid "too many files (max 10)"
-msgstr "trop de fichiers (max 10)"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
