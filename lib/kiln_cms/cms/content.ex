@@ -2255,7 +2255,7 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.BroadcastCalendar
 
           # `<type>.created` carries the new draft's full body, so the event is
-          # opt-in on an endpoint (`WebhookEndpoint.default_events/0`).
+          # opt-in on an endpoint (`WebhookEndpoint.default_events/1`).
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "created"}
         end
 

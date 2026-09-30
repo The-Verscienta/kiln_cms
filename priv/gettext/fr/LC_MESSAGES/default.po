@@ -3087,9 +3087,15 @@ msgstr "Réservation libérée ; le lancement peut être relancé."
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
+#: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Clear"
 msgstr "Effacer"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Clear %{group} events"
+msgstr "Effacer les événements %{group}"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
@@ -5619,6 +5625,11 @@ msgstr "Événement"
 #, elixir-autogen, elixir-format
 msgid "Events"
 msgstr "Événements"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Events marked “includes unpublished content” send the full body of drafts and embargoed documents. They are off by default: select them only if this receiver should see content before it is published."
+msgstr "Les événements marqués « inclut du contenu non publié » envoient le corps complet des brouillons et des documents sous embargo. Ils sont désactivés par défaut : sélectionnez-les seulement si ce destinataire doit voir le contenu avant sa publication."
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -10246,6 +10257,11 @@ msgstr "Motif"
 msgid "Rebuild the page and search"
 msgstr "Reconstruire la page et la recherche"
 
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Receives unpublished content"
+msgstr "Reçoit du contenu non publié"
+
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Recent announcements"
@@ -10905,6 +10921,7 @@ msgid "Reset this site to the default branding?"
 msgstr "Réinitialiser ce site à la personnalisation de marque par défaut ?"
 
 #: lib/kiln_cms_web/live/branding_live.ex
+#: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reset to defaults"
 msgstr "Réinitialiser aux valeurs par défaut"
@@ -11736,9 +11753,15 @@ msgid "Select a field on the canvas to edit it, or add one from the palette."
 msgstr "Sélectionnez un champ sur le canevas pour le modifier, ou ajoutez-en un depuis la palette."
 
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Select all"
 msgstr "Tout sélectionner"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Select all %{group} events"
+msgstr "Sélectionner tous les événements %{group}"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -11754,6 +11777,11 @@ msgstr "Sélectionner tout ce qui est visible"
 #, elixir-autogen, elixir-format
 msgid "Select content in the content list and use “Add to release”."
 msgstr "Sélectionnez du contenu dans la liste et utilisez « Ajouter au lancement »."
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Select events"
+msgstr "Sélectionner des événements"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -16362,6 +16390,11 @@ msgstr "les dimensions de l'image sont trop grandes"
 #, elixir-autogen, elixir-format
 msgid "in review"
 msgstr "en révision"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "includes unpublished content"
+msgstr "inclut du contenu non publié"
 
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format

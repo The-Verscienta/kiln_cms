@@ -92,6 +92,10 @@ Every summary line below that was shortened links to its own entry there.
   backfill and `mix kiln.deprecations --migrate-audiences`, and drain the queue.**
   ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#on-012-before-upgrading-to-10))
 
+- **Review webhook endpoints marked *Receives unpublished content* under
+  `/editor/webhooks`; untick the draft events on any that shouldn't get drafts.**
+  ([#1776](https://github.com/The-Verscienta/kiln_cms/issues/1776) · [long form](docs/changelog/unreleased.md#review-webhook-endpoints-that-receive-unpublished-content))
+
 ### Breaking
 
 - **On a multi-org install with `KILN_CONSOLE_HOST` set, each non-default
@@ -342,6 +346,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Each system-actor grant now names the subsystems it admits.** One worker's
   grant is no longer every worker's; no behaviour changes for users.
   ([#1747](https://github.com/The-Verscienta/kiln_cms/issues/1747) · [long form](docs/changelog/unreleased.md#each-system-actor-grant-now-names-the-subsystems-it-admits))
+
+- **A webhook added in the console no longer receives unpublished drafts
+  unless an admin selects those events.** The form ticked every event.
+  ([#1776](https://github.com/The-Verscienta/kiln_cms/issues/1776) · [long form](docs/changelog/unreleased.md#a-webhook-added-in-the-console-no-longer-receives-unpublished-drafts))
 
 ## [0.12.0] - 2026-09-27
 

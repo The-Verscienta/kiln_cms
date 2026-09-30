@@ -3087,8 +3087,14 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
+#: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Clear"
+msgstr ""
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Clear %{group} events"
 msgstr ""
 
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -5618,6 +5624,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Events"
+msgstr ""
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Events marked “includes unpublished content” send the full body of drafts and embargoed documents. They are off by default: select them only if this receiver should see content before it is published."
 msgstr ""
 
 #: lib/kiln_cms_web/live/governance_live.ex
@@ -10246,6 +10257,11 @@ msgstr ""
 msgid "Rebuild the page and search"
 msgstr ""
 
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Receives unpublished content"
+msgstr ""
+
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Recent announcements"
@@ -10905,6 +10921,7 @@ msgid "Reset this site to the default branding?"
 msgstr ""
 
 #: lib/kiln_cms_web/live/branding_live.ex
+#: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reset to defaults"
 msgstr ""
@@ -11736,8 +11753,14 @@ msgid "Select a field on the canvas to edit it, or add one from the palette."
 msgstr ""
 
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Select all"
+msgstr ""
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Select all %{group} events"
 msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex
@@ -11753,6 +11776,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Select content in the content list and use “Add to release”."
+msgstr ""
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Select events"
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -16361,6 +16389,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "in review"
+msgstr ""
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "includes unpublished content"
 msgstr ""
 
 #: lib/kiln_cms_web/live/federation_live.ex

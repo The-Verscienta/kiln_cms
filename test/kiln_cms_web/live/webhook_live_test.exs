@@ -108,6 +108,189 @@ defmodule KilnCMSWeb.WebhookLiveTest do
     end
   end
 
+  # #1776: the new-endpoint form used to tick every event, so an endpoint added
+  # without reviewing the list was POSTed unpublished draft bodies.
+  describe "default selection and bulk controls (#1776)" do
+    @draft_events ~w(page.created page.in_review page.returned_to_draft)
+
+    defp checked(html, form_id) do
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query("##{form_id} input[type=checkbox][name='webhook[events][]'][checked]")
+      |> LazyHTML.attribute("value")
+    end
+
+    defp open(conn) do
+      {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/webhooks")
+      {lv, html}
+    end
+
+    defp bulk(lv, target, op, group \\ nil) do
+      selector =
+        ~s(button[phx-click="select_events"][phx-value-target="#{target}"][phx-value-op="#{op}"]) <>
+          if(group, do: ~s([phx-value-group="#{group}"]), else: "")
+
+      lv |> element(selector) |> render_click()
+    end
+
+    test "a new endpoint starts with exactly the resource's default events", %{conn: conn} do
+      {lv, html} = open(conn)
+
+      assert Enum.sort(checked(html, "new-webhook-form")) ==
+               Enum.sort(WebhookEndpoint.default_events())
+
+      for event <- @draft_events, do: refute(event in checked(html, "new-webhook-form"))
+
+      lv
+      |> form("#new-webhook-form", webhook: %{url: "https://hooks.test/defaults"})
+      |> render_submit()
+
+      assert [endpoint] = CMS.list_webhook_endpoints!(authorize?: false)
+      assert Enum.sort(endpoint.events) == Enum.sort(WebhookEndpoint.default_events())
+      for event <- @draft_events, do: refute(event in endpoint.events)
+      # The console's default is the one a programmatic create gets.
+      api = CMS.create_webhook_endpoint!(%{url: "https://hooks.test/api"}, authorize?: false)
+      assert Enum.sort(api.events) == Enum.sort(endpoint.events)
+    end
+
+    test "draft-carrying events are marked, and only those", %{conn: conn} do
+      {_lv, html} = open(conn)
+      doc = LazyHTML.from_document(html)
+
+      marked =
+        for label <- LazyHTML.query(doc, "#new-webhook-form label"),
+            LazyHTML.text(label) =~ "includes unpublished content",
+            value <- label |> LazyHTML.query("input") |> LazyHTML.attribute("value"),
+            do: value
+
+      assert Enum.sort(marked) ==
+               Enum.sort(
+                 Enum.filter(WebhookEndpoint.events(), &WebhookEndpoint.carries_drafts?/1)
+               )
+
+      for event <- @draft_events, do: assert(event in marked)
+      refute "page.published" in marked
+    end
+
+    test "a deliberate opt-in to draft events is kept and flagged", %{conn: conn} do
+      {lv, _html} = open(conn)
+
+      html =
+        lv
+        |> form("#new-webhook-form",
+          webhook: %{url: "https://hooks.test/drafts", events: ["page.in_review"]}
+        )
+        |> render_submit()
+
+      assert [endpoint] = CMS.list_webhook_endpoints!(authorize?: false)
+      assert endpoint.events == ["page.in_review"]
+      assert html =~ "Receives unpublished content"
+      assert has_element?(lv, "#webhook-#{endpoint.id}-drafts")
+    end
+
+    test "an endpoint without draft events carries no flag", %{conn: conn} do
+      {lv, _html} = open(conn)
+
+      lv
+      |> form("#new-webhook-form", webhook: %{url: "https://hooks.test/clean"})
+      |> render_submit()
+
+      assert [endpoint] = CMS.list_webhook_endpoints!(authorize?: false)
+      refute has_element?(lv, "#webhook-#{endpoint.id}-drafts")
+    end
+
+    test "Select all, Clear and Reset to defaults", %{conn: conn} do
+      {lv, _html} = open(conn)
+      all = WebhookEndpoint.events()
+
+      html = bulk(lv, "new", "all")
+      assert Enum.sort(checked(html, "new-webhook-form")) == Enum.sort(all)
+
+      html = bulk(lv, "new", "none")
+      assert checked(html, "new-webhook-form") == []
+
+      html = bulk(lv, "new", "defaults")
+
+      assert Enum.sort(checked(html, "new-webhook-form")) ==
+               Enum.sort(WebhookEndpoint.default_events())
+
+      # Select all then submit: every event, drafts included, on purpose.
+      bulk(lv, "new", "all")
+
+      lv
+      |> form("#new-webhook-form", webhook: %{url: "https://hooks.test/everything"})
+      |> render_submit()
+
+      assert [endpoint] = CMS.list_webhook_endpoints!(authorize?: false)
+      assert Enum.sort(endpoint.events) == Enum.sort(all)
+    end
+
+    test "bulk controls keep the URL typed so far", %{conn: conn} do
+      {lv, _html} = open(conn)
+
+      lv
+      |> form("#new-webhook-form", webhook: %{url: "https://hooks.test/typed"})
+      |> render_change()
+
+      html = bulk(lv, "new", "none")
+      assert html =~ ~s(value="https://hooks.test/typed")
+    end
+
+    test "a group toggle selects the whole group, then clears it", %{conn: conn} do
+      {lv, _html} = open(conn)
+      page = Enum.filter(WebhookEndpoint.events(), &String.starts_with?(&1, "page."))
+
+      html = bulk(lv, "new", "group", "page")
+      selected = checked(html, "new-webhook-form")
+      for event <- page, do: assert(event in selected)
+      # Other groups are left as they were.
+      assert "post.published" in selected
+      refute "post.in_review" in selected
+
+      html = bulk(lv, "new", "group", "page")
+      selected = checked(html, "new-webhook-form")
+      for event <- page, do: refute(event in selected)
+      assert "post.published" in selected
+    end
+
+    test "the group toggle is a labelled button", %{conn: conn} do
+      {lv, _html} = open(conn)
+
+      assert has_element?(
+               lv,
+               ~s(#new-events-page button[type="button"][aria-label="Select all page events"])
+             )
+
+      bulk(lv, "new", "group", "page")
+
+      assert has_element?(
+               lv,
+               ~s(#new-events-page button[type="button"][aria-label="Clear page events"])
+             )
+    end
+
+    test "the edit form's bulk controls act on that endpoint", %{conn: conn} do
+      endpoint = seed_endpoint()
+      {lv, _html} = open(conn)
+
+      lv
+      |> element(~s(button[phx-click="edit"][phx-value-id="#{endpoint.id}"]))
+      |> render_click()
+
+      html = bulk(lv, "edit", "none")
+      assert checked(html, "edit-webhook-#{endpoint.id}") == []
+      # The new-endpoint form is untouched.
+      assert Enum.sort(checked(html, "new-webhook-form")) ==
+               Enum.sort(WebhookEndpoint.default_events())
+
+      lv |> form("#edit-webhook-#{endpoint.id}") |> render_submit()
+
+      saved = CMS.get_webhook_endpoint!(endpoint.id, authorize?: false)
+      assert saved.events == []
+      assert saved.url == "https://hooks.test/existing"
+    end
+  end
+
   describe "manage" do
     defp seed_endpoint do
       Ash.Seed.seed!(KilnCMS.CMS.WebhookEndpoint, %{
