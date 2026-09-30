@@ -174,6 +174,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **On a multi-locale site, `/fr/blog` lists the posts `/fr/blog/<slug>`
+  serves, and every article keeps its language switcher.**
+  ([#1765](https://github.com/The-Verscienta/kiln_cms/issues/1765) · [long form](docs/changelog/unreleased.md#the-blog-index-follows-the-locale-fallback-chain))
+
 - **The seeded demo page and post, and the beta-round sandbox posts, no longer
   print their title twice.**
   ([#1767](https://github.com/The-Verscienta/kiln_cms/issues/1767) · [long form](docs/changelog/unreleased.md#seeded-content-no-longer-prints-its-title-twice))

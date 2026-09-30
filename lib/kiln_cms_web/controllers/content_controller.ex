@@ -29,6 +29,8 @@ defmodule KilnCMSWeb.ContentController do
   """
   use KilnCMSWeb, :controller
 
+  require Ash.Query
+
   alias KilnCMS.Cache
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentPassword
@@ -546,7 +548,7 @@ defmodule KilnCMSWeb.ContentController do
       CMS.list_published_posts!(
         authorize?: false,
         tenant: org.id,
-        query: [filter: [locale: locale]],
+        query: localized_index(org.id, locale),
         page: [limit: @blog_page_size, offset: page * @blog_page_size]
       )
 
@@ -770,6 +772,38 @@ defmodule KilnCMSWeb.ContentController do
 
   defp page_param(_params), do: 0
 
+  # The blog index in `requested`, along the same fallback chain the article
+  # view walks (#1765): each post once, in the first locale on the chain it
+  # is published in. It used to list `requested` only, so `/fr/blog` said
+  # "no posts yet" on a site whose English post `/fr/blog/<slug>` still served.
+  #
+  # One query, so offset pagination stays exact: a variant is listed unless
+  # the same slug has a listable variant EARLIER on the chain. "Listable" is
+  # the `:published` action's own filter (published, not passphrase-locked,
+  # not in the trash), so a locked French variant does not hide the English
+  # one — the article view skips it the same way. The table is `posts`: this
+  # index is the blog's alone.
+  defp localized_index(org_id, requested) do
+    case Fallback.chain(org_id, requested) do
+      [only] ->
+        Ash.Query.filter(CMS.Post, locale == ^only)
+
+      chain ->
+        CMS.Post
+        |> Ash.Query.filter(locale in ^chain)
+        |> Ash.Query.filter(
+          fragment(
+            "NOT EXISTS (SELECT 1 FROM posts AS earlier WHERE earlier.org_id = ? AND earlier.slug = ? AND earlier.state = 'published' AND earlier.access_password_hash IS NULL AND earlier.archived_at IS NULL AND array_position(?::text[], earlier.locale) < array_position(?::text[], ?))",
+            org_id,
+            slug,
+            ^chain,
+            ^chain,
+            locale
+          )
+        )
+    end
+  end
+
   # Language-switcher links to the blog index in each supported locale.
   defp blog_locale_links(current, base_url) do
     for locale <- I18n.locales() do
@@ -949,7 +983,10 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:og_image, record.seo_image)
     |> assign(:og_type, "article")
     |> assign(:hreflang, hreflang_alternates(ct, translations, base_url))
-    |> assign(:locale_links, locale_links(ct, translations, record.locale, base_url))
+    |> assign(
+      :locale_links,
+      locale_links(ct, record, translations, locale(conn), org.id, base_url)
+    )
     |> assign(
       :feeds,
       feed_alternates(ct, org, base_url, record.locale) ++
@@ -1096,17 +1133,27 @@ defmodule KilnCMSWeb.ContentController do
     end
   end
 
-  # Language-switcher links to each published translation of this record.
-  defp locale_links(ct, translations, current, base_url) do
-    translations
-    |> Enum.map(
-      &%{
-        locale: &1.locale,
-        href: locale_url(ct, &1.slug, &1.locale, base_url),
-        current: &1.locale == current
+  # Language-switcher links for a document (#1765): every locale this site
+  # runs whose fallback chain reaches a published variant of it — the same
+  # locales whose URL for this slug serves something. It used to list the
+  # published translations only, so an English post read at `/fr/…` (served
+  # through the fallback chain) had a one-entry switcher, which the header
+  # hides, and no way back to English.
+  #
+  # `current` is the locale the reader asked for, the one in the URL, not the
+  # variant served: that is the link that leads back here.
+  defp locale_links(ct, record, translations, requested, org_id, base_url) do
+    published = MapSet.new([record | translations], & &1.locale)
+    chains = Fallback.chains(org_id)
+
+    for locale <- I18n.locales(),
+        chains |> Fallback.chain(locale) |> Enum.any?(&MapSet.member?(published, &1)) do
+      %{
+        locale: locale,
+        href: locale_url(ct, record.slug, locale, base_url),
+        current: locale == requested
       }
-    )
-    |> Enum.sort_by(& &1.locale)
+    end
   end
 
   # Absolute public URL for `slug` in `locale` (non-default locales are prefixed).

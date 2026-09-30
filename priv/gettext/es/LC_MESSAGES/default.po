@@ -8715,6 +8715,11 @@ msgstr "Aún no se ha guardado. El borrador se crea en cuanto le das un título.
 msgid "Not sure which surface to use? Start with the consumer guide:"
 msgstr "¿No sabe qué superficie usar? Empiece por la guía del consumidor:"
 
+#: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex
+#, elixir-autogen, elixir-format
+msgid "Not translated yet"
+msgstr "Aún sin traducir"
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Not used by any published document."

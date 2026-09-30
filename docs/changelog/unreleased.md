@@ -358,6 +358,26 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="the-blog-index-follows-the-locale-fallback-chain"></a>
+
+- **On a multi-locale site, `/fr/blog` lists the posts `/fr/blog/<slug>`
+  serves, and every article keeps its language switcher.** The blog index
+  listed only posts written in the requested locale, while the article view
+  walks the site's locale fallback chain
+  ([#1579](https://github.com/The-Verscienta/kiln_cms/pull/1579)). So
+  `/fr/blog` said there were no posts while `/fr/blog/hello-world` served the
+  English post. The index now walks the same chain in one query: each post
+  appears once, in the first locale on the chain it is published in, and
+  pagination stays exact. A post shown in another language carries a "Not
+  translated yet" badge and a `lang` attribute. A passphrase-locked variant
+  does not hide the variant after it, which matches the article view. A
+  locale whose chain is `[]` still lists only its own posts. The article's
+  language switcher listed only published translations, so a single-language
+  post had one link, which the header hides, and a reader on `/fr/…` had no
+  way back to English. It now offers every locale the site runs whose chain
+  reaches a published variant, and marks the locale in the URL as current
+  ([#1765](https://github.com/The-Verscienta/kiln_cms/issues/1765)).
+
 <a id="seeded-content-no-longer-prints-its-title-twice"></a>
 
 - **The seeded demo page and post, and the beta-round sandbox posts, no longer
