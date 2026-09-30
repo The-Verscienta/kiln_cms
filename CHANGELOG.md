@@ -213,6 +213,9 @@ Every summary line below that was shortened links to its own entry there.
   unsubscribed.**
   ([#1690](https://github.com/The-Verscienta/kiln_cms/issues/1690) · [long form](docs/changelog/unreleased.md#an-old-newsletter-confirmation-link-no-longer-re-subscribes))
 
+- **Picking an image from the media library keeps the alt text written on it.**
+  ([#1782](https://github.com/The-Verscienta/kiln_cms/issues/1782) · [long form](docs/changelog/unreleased.md#picking-a-library-image-keeps-its-alt-text))
+
 ### Security
 
 - **Changing or resetting a password now signs out every other session and

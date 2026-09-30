@@ -501,6 +501,20 @@ carries the reasoning.
   now delivered in a test.
   ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543))
 
+<a id="picking-a-library-image-keeps-its-alt-text"></a>
+
+- **Picking an image from the media library keeps the alt text written on
+  it.** Choosing *Choose from library* for a new or an empty image block filled
+  the URL and left *Alt text* blank, so the editor raised "1 image has no alt
+  text" for a description the library already held. A pasted or uploaded
+  image always carried it. A library pick now fills the block's alt from the
+  media item when the block has none; an alt the block already has is its
+  own, per-placement description and is never overwritten. The alt is read
+  from the media item on the server, not taken from the click. A gallery
+  still starts each picked image with a blank alt: its per-image
+  descriptions are asked for by the publish gate, on purpose
+  ([#1782](https://github.com/The-Verscienta/kiln_cms/issues/1782)).
+
 ## Security
 
 <a id="password-rotation-revokes-every-session"></a>

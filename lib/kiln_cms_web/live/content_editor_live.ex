@@ -3205,6 +3205,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> mark_dirty(:settings)
   end
 
+  # A library pick carries the item's alt text, the same as a paste or upload
+  # does through `insert_image_block/4` (#1782) — the editor wrote that
+  # description once, in the library, and dropping it here made the publish
+  # gate ask for it again.
   defp apply_pick(socket, :new, media_id, url) do
     form =
       AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
@@ -3212,7 +3216,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
           "_union_type" => "image",
           "id" => Ash.UUID.generate(),
           "url" => url,
-          "media_id" => media_id
+          "media_id" => media_id,
+          "alt" => library_alt(socket, media_id)
         }
       )
 
@@ -3236,7 +3241,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         blocks =
           socket.assigns.form
           |> full_blocks_input()
-          |> List.update_at(index, &Map.merge(&1, %{"url" => url, "media_id" => media_id}))
+          |> List.update_at(index, &fill_picked_image(&1, socket, media_id, url))
 
         params =
           socket.assigns.form
@@ -3246,6 +3251,36 @@ defmodule KilnCMSWeb.ContentEditorLive do
         socket = revalidate(socket, params)
         broadcast_preview(socket)
         mark_dirty(socket)
+    end
+  end
+
+  # The block's own alt wins: one the editor already typed is a per-placement
+  # description and is never overwritten by the library's. Only a blank alt is
+  # seeded from `MediaItem.alt`, the rule `insert_image_block/4` applies to a
+  # paste or upload (#1782).
+  defp fill_picked_image(block, socket, media_id, url) do
+    block = Map.merge(block, %{"url" => url, "media_id" => media_id})
+
+    if blank_alt?(block["alt"]),
+      do: Map.put(block, "alt", library_alt(socket, media_id)),
+      else: block
+  end
+
+  defp blank_alt?(alt), do: not is_binary(alt) or String.trim(alt) == ""
+
+  # The picked item's library alt text, read server-side from the
+  # actor-authorized `MediaItem` rather than trusted from the click payload —
+  # the same reasoning as `pick_file`. An item the actor cannot read (or one
+  # deleted since the grid rendered) contributes nothing, not an error.
+  defp library_alt(_socket, media_id) when not is_binary(media_id), do: ""
+
+  defp library_alt(socket, media_id) do
+    case CMS.get_media_item(media_id,
+           actor: socket.assigns.actor,
+           tenant: socket.assigns.current_org
+         ) do
+      {:ok, %{alt: alt}} when is_binary(alt) -> alt
+      _ -> ""
     end
   end
 
