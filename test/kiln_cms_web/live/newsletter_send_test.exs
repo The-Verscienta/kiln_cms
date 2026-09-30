@@ -75,6 +75,11 @@ defmodule KilnCMSWeb.NewsletterSendTest do
     admin = user(:admin)
     post = fired_post(admin)
 
+    # Somebody to send to (#1775): an empty audience is refused on its own.
+    %{email: "nl-send-sub-#{System.unique_integer([:positive])}@example.com"}
+    |> KilnCMS.Newsletter.subscribe!(actor: admin)
+    |> KilnCMS.Newsletter.confirm_subscriber!(actor: admin)
+
     assert {:noreply, sent} =
              KilnCMSWeb.NewsletterLive.handle_event(
                "send",

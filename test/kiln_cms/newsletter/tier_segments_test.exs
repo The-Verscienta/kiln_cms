@@ -135,6 +135,33 @@ defmodule KilnCMS.Newsletter.TierSegmentsTest do
     )
   end
 
+  # A campaign needs somebody to send to (#1775): a confirmed subscriber,
+  # optionally in `segment`.
+  defp confirmed_subscriber(segment \\ nil) do
+    opts = [authorize?: false, tenant: org_id()]
+
+    sub =
+      Newsletter.subscribe!(
+        %{email: "ts-sub-#{System.unique_integer([:positive])}@example.com"},
+        opts
+      )
+      |> Newsletter.confirm_subscriber!(opts)
+
+    if segment,
+      do: Newsletter.add_to_segment!(%{segment_id: segment.id, subscriber_id: sub.id}, opts)
+
+    sub
+  end
+
+  # A member's billing-linked subscriber lands `:pending`; confirm it.
+  defp confirm_member(user) do
+    opts = [authorize?: false, tenant: org_id()]
+
+    user.id
+    |> Newsletter.subscribers_for_user!(opts)
+    |> Enum.each(&Newsletter.confirm_subscriber!(&1, opts))
+  end
+
   describe "tier segments are created automatically" do
     test "creating a tier creates its segment" do
       t = tier(%{name: "Patron"})
@@ -299,6 +326,7 @@ defmodule KilnCMS.Newsletter.TierSegmentsTest do
       u = member()
       t = tier()
       activate(u, t)
+      confirm_member(u)
 
       post = gated_post()
       segment = tier_segment(t)
@@ -339,12 +367,14 @@ defmodule KilnCMS.Newsletter.TierSegmentsTest do
     test "a public post is still sendable to any segment" do
       post = public_post()
       segment = hand_built_segment()
+      confirmed_subscriber(segment)
 
       assert {:ok, _send} =
                Newsletter.send_as_newsletter(post, segment_id: segment.id, actor: admin())
     end
 
     test "a public post is still sendable with no segment" do
+      confirmed_subscriber()
       assert {:ok, _send} = Newsletter.send_as_newsletter(public_post(), actor: admin())
     end
 

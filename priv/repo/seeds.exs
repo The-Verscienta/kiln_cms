@@ -151,7 +151,8 @@ ensure_content.(
         seo_title: "Welcome to KilnCMS",
         seo_description: "A world-class, Elixir-native headless CMS.",
         blocks: [
-          %{"_type" => "heading", "text" => "Welcome to KilnCMS", "level" => 1},
+          # No heading block repeating the title: the public templates already
+          # print the title as the page's h1 (#1767).
           %{
             "_type" => "rich_text",
             "body" =>
@@ -215,7 +216,8 @@ ensure_content.(
         slug: "hello-world",
         excerpt: "The first post on a KilnCMS-powered site.",
         blocks: [
-          %{"_type" => "heading", "text" => "Hello, World", "level" => 1},
+          # No heading block repeating the title: the public templates already
+          # print the title as the page's h1 (#1767).
           %{
             "_type" => "rich_text",
             "body" =>

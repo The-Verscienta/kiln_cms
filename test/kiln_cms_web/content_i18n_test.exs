@@ -110,12 +110,65 @@ defmodule KilnCMSWeb.ContentI18nTest do
     assert html =~ ~s(aria-current="true")
   end
 
-  test "no language switcher for single-locale content", %{conn: conn} do
+  # #1765: this deployment runs three locales, so single-locale content still
+  # gets a switcher — `/fr/<slug>` serves it through the fallback chain, and a
+  # reader who landed there needs the way back.
+  test "single-locale content still gets a switcher on a multi-locale site", %{conn: conn} do
     s = slug()
     page(%{title: "About", slug: s, locale: "en"})
 
-    html = conn |> get(~p"/#{s}") |> html_response(200)
-    refute html =~ ~s(aria-label="Language")
+    html = conn |> get("/fr/#{s}") |> html_response(200)
+    assert html =~ "About"
+    # The group's label is translated ("Langue"); the links are what matter.
+    assert html =~ ~s(aria-label="Langue")
+    assert html =~ ~r{href="[^"]*/#{s}" hreflang="en"}
+    assert html =~ ~r{href="[^"]*/es/#{s}" hreflang="es"}
+    # The current link is the locale the reader asked for, not the one served.
+    assert html =~ ~r{href="[^"]*/fr/#{s}" hreflang="fr" aria-current="true"}
+  end
+
+  describe "the blog index follows the fallback chain (#1765)" do
+    test "a post with no French variant is listed on /fr/blog, and says so", %{conn: conn} do
+      s = slug()
+      post(%{title: "Hello, World", slug: s, locale: "en"})
+
+      html = conn |> get("/fr/blog") |> html_response(200)
+      assert html =~ "Hello, World"
+      assert html =~ ~s(href="/fr/blog/#{s}")
+      assert html =~ ~s(lang="en")
+      assert html =~ "Pas encore traduit"
+      refute html =~ "Aucun article pour le moment."
+    end
+
+    test "a translated post is listed once, in the requested locale", %{conn: conn} do
+      s = slug()
+      post(%{title: "Hello EN #{s}", slug: s, locale: "en"})
+      post(%{title: "Bonjour FR #{s}", slug: s, locale: "fr"})
+
+      html = conn |> get("/fr/blog") |> html_response(200)
+      assert html =~ "Bonjour FR #{s}"
+      refute html =~ "Hello EN #{s}"
+
+      html = conn |> get("/blog") |> html_response(200)
+      assert html =~ "Hello EN #{s}"
+      refute html =~ "Bonjour FR #{s}"
+    end
+
+    test "a locked French variant does not hide the English one", %{conn: conn} do
+      s = slug()
+      post(%{title: "Open EN #{s}", slug: s, locale: "en"})
+
+      post(%{
+        title: "Locked FR #{s}",
+        slug: s,
+        locale: "fr",
+        access_password_hash: Bcrypt.hash_pwd_salt("a-shared-secret")
+      })
+
+      html = conn |> get("/fr/blog") |> html_response(200)
+      assert html =~ "Open EN #{s}"
+      refute html =~ "Locked FR #{s}"
+    end
   end
 
   # #146: internal public links must keep the active locale prefix.

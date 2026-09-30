@@ -521,8 +521,12 @@ defmodule KilnCMS.Automation.RuleWorker do
     end
   end
 
+  # Nobody confirmed to send to (#1775) is settled, not retried: a retry
+  # cannot conjure a subscriber, and the refusal wrote no ledger row, so the
+  # next publish revision still gets its campaign. A REFUSED recipient read is
+  # a Forbidden, which falls to the last clause and retries (#1659).
   defp settle_newsletter({:error, reason}, _record, event)
-       when reason in [:not_published, :gated] do
+       when reason in [:not_published, :gated, :no_recipients] do
     Logger.info("Automation newsletter rule skipped #{event}: #{inspect(reason)}")
     :ok
   end
