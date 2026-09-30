@@ -1425,6 +1425,7 @@ msgstr ""
 msgid "Acts as"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add"
@@ -2786,8 +2787,8 @@ msgstr ""
 msgid "Categories"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
-#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
 msgid "Category"
@@ -3632,6 +3633,11 @@ msgstr ""
 msgid "Couldn't add it to that release: %{reason}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor/inline_terms.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't add that category."
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't add that field."
@@ -3645,6 +3651,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't add that member — are they already on this site?"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor/inline_terms.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't add that tag."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -4173,6 +4184,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Create release"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Create tag “%{name}”"
 msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex
@@ -6130,6 +6146,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
 msgid "Find existing content that covers the same ground."
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Find or add a tag…"
 msgstr ""
 
 #: lib/kiln_cms_web/live/search_palette_live.ex
@@ -8145,6 +8166,16 @@ msgstr ""
 msgid "New %{type}"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "New category"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "New category name"
+msgstr ""
+
 #: lib/kiln_cms_web/notification_text.ex
 #, elixir-autogen, elixir-format
 msgid "New comment"
@@ -8749,6 +8780,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "No tags yet."
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "No tags yet. Type a name below to add one."
 msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -9402,6 +9438,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Options — one per line"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Or type a name below to add one."
 msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
@@ -10650,6 +10691,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reload the page before changing tags."
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reload the page before changing the category."
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
@@ -15750,9 +15796,19 @@ msgstr ""
 msgid "You don't have a membership to manage yet."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor/inline_terms.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to add categories."
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to add images here."
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor/inline_terms.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to add tags."
 msgstr ""
 
 #: lib/kiln_cms_web/live/experiment_live.ex

@@ -536,6 +536,12 @@ const Hooks = {
     mounted() {
       this.timer = null
       this.bind()
+      // After an inline create (#1805) the server has cleared its query; the
+      // box is phx-update="ignore", so emptying it is ours to do.
+      this.handleEvent("tag-filter-reset", () => {
+        if (this.timer) clearTimeout(this.timer)
+        if (this.input) this.input.value = ""
+      })
     },
 
     updated() {
@@ -580,8 +586,18 @@ const Hooks = {
       this.onChange = e => e.stopPropagation()
       input.addEventListener("change", this.onChange)
       // Enter in a search field would otherwise submit the whole content form.
+      // Instead it adds what is typed as a tag (#1805) — the server ticks an
+      // existing tag of that name, and ignores the push for a role that may
+      // not create tags. Sent directly rather than by clicking the "Create"
+      // button, which may still be showing the previous, debounced query.
       this.onKey = e => {
-        if (e.key === "Enter") e.preventDefault()
+        if (e.key !== "Enter") return
+        e.preventDefault()
+        if (e.isComposing) return
+        const name = e.target.value.trim()
+        if (name === "") return
+        if (this.timer) clearTimeout(this.timer)
+        this.pushEvent("create_tag", {name})
       }
       input.addEventListener("keydown", this.onKey)
     },
@@ -592,6 +608,28 @@ const Hooks = {
       this.input.removeEventListener("change", this.onChange)
       this.input.removeEventListener("keydown", this.onKey)
       this.input = null
+    },
+  },
+  // The inline "New category" field (#1805) sits inside the content form, so
+  // Enter would submit the whole document. Enter adds instead, sending what is
+  // typed (the synced draft may be one keystroke behind); Escape cancels.
+  InlineCreate: {
+    mounted() {
+      this.onKey = e => {
+        if (!e.target.matches("[data-inline-create-input]")) return
+        if (e.key === "Enter") {
+          e.preventDefault()
+          if (e.isComposing) return
+          this.pushEvent("create_category", {name: e.target.value})
+        } else if (e.key === "Escape") {
+          e.preventDefault()
+          this.el.querySelector("[data-inline-create-cancel]")?.click()
+        }
+      }
+      this.el.addEventListener("keydown", this.onKey)
+    },
+    destroyed() {
+      this.el.removeEventListener("keydown", this.onKey)
     },
   },
   // Notion-style slash-command block inserter (#29). The server renders the

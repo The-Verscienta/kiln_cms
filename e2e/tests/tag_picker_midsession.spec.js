@@ -108,7 +108,11 @@ test.describe("tag picker mid-session growth", () => {
 
       const picker = page.locator("#tag-picker");
       await expect(picker).toBeVisible();
-      await expect(picker.locator("[data-tag-filter-input]")).toHaveCount(0);
+      // Since #1805 the filter box is also how an editor *adds* a tag, so for
+      // anyone allowed to create tags (this admin) it renders even with no
+      // sections — the rebind path below is now exercised only by the
+      // section list growing under an already-bound box.
+      await expect(picker.locator("[data-tag-filter-input]")).toHaveCount(1);
       await expect(picker.locator("details[data-tag-section]")).toHaveCount(0);
 
       // The second session: a different signed-in editor, in a separate

@@ -407,15 +407,8 @@ defmodule KilnCMSWeb.TaxonomyLive do
     name = Map.get(params, "name", "")
 
     case String.trim(Map.get(params, "slug", "")) do
-      "" -> Map.put(params, "slug", derived_slug(name))
+      "" -> Map.put(params, "slug", KilnCMS.Slug.taxonomy_slug(name))
       _slug -> params
-    end
-  end
-
-  defp derived_slug(name) do
-    case KilnCMS.Slug.slugify(name) do
-      "" -> KilnCMS.Slug.random_suffix()
-      slug -> slug
     end
   end
 

@@ -290,6 +290,18 @@ carries the reasoning.
      1.0, with an error in the log, and its work is not done.
   ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543))
 
+<a id="add-tags-and-categories-from-the-editor"></a>
+
+- **Add a new tag or category without leaving the content editor.** In the tag
+  picker, type a name that no tag has and choose *Create tag “…”* (or press
+  Enter); under Category, choose *New category*, type a name and press Add.
+  The new term is selected on the entry like one picked from the list, and is
+  attached when the entry is saved. A name that already exists selects that
+  term instead of making a second one. The options appear only for people the
+  Taxonomy rules let create terms (editors and admins), and a term made here
+  gets the same slug the Taxonomy page would give it.
+  ([#1805](https://github.com/The-Verscienta/kiln_cms/issues/1805))
+
 ## Changed
 
 <a id="keep-legacy-html-as-a-fallback"></a>

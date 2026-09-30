@@ -169,12 +169,12 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
       </.inspector_section>
 
       <.inspector_section title={gettext("Organization & relationships")}>
-        <.input
-          field={@form[:category_id]}
-          type="select"
-          label={gettext("Category")}
-          prompt="— None —"
-          options={Enum.map(@categories, &{&1.name, &1.id})}
+        <.category_field
+          form={@form}
+          categories={@categories}
+          can_create?={@can_create_category?}
+          draft={@category_draft}
+          error={@category_error}
         />
 
         <.input
@@ -229,6 +229,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
           tag_query={@tag_query}
           tags_capped?={length(@tags) >= @max_tags}
           tag_limit={@max_tags}
+          can_create?={@can_create_tag?}
         />
 
         <.featured_image_field form={@form} media={@media} />
