@@ -57,7 +57,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Upgrade notes
 
 - **1.0 is a major version: move to it with `mix kiln.update --allow-major`,
-  from 0.12.0, after 0.12's own upgrade steps.**
+  from 0.12.1, after 0.12's own upgrade steps.**
   ([#1545](https://github.com/The-Verscienta/kiln_cms/issues/1545) · [long form](docs/changelog/unreleased.md#upgrade-to-1-0-with-allow-major-from-0-12))
 
 - **Set this deployment's own session salts if you still use the shipped
