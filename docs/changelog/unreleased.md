@@ -98,6 +98,23 @@ carries the reasoning.
   any such slug is left
   ([#1710](https://github.com/The-Verscienta/kiln_cms/issues/1710)).
 
+<a id="review-webhook-endpoints-that-receive-unpublished-content"></a>
+
+- **Review webhook endpoints marked *Receives unpublished content* under
+  `/editor/webhooks`; untick the draft events on any that shouldn't get drafts.**
+  Until this release the new-webhook form ticked every event, including
+  `<type>.created`, `<type>.in_review` and `<type>.returned_to_draft`, which
+  send the full body of unpublished and embargoed documents. An endpoint added
+  in the console without unticking them has been receiving drafts. Upgrading
+  changes no endpoint's events, because some receivers want drafts (a preview
+  build, a review tool). Open `/editor/webhooks` in each organization after
+  upgrading: every endpoint that receives one of those events is marked on its
+  row. Edit any that should mirror only published content, **Reset to
+  defaults** or untick the marked events, and save. If drafts reached a third
+  party that should not have had them, treat that receiver as holding
+  unpublished content
+  ([#1776](https://github.com/The-Verscienta/kiln_cms/issues/1776)).
+
 ## Breaking
 
 <a id="on-a-multi-org-install-with-kiln_console_host-set-each-non-default-orgs-console"></a>
@@ -1212,3 +1229,23 @@ carries the reasoning.
   user-visible behaviour
   changes: every caller keeps exactly the actions it already made
   ([#1747](https://github.com/The-Verscienta/kiln_cms/issues/1747)).
+
+<a id="a-webhook-added-in-the-console-no-longer-receives-unpublished-drafts"></a>
+
+- **A webhook added in the console no longer receives unpublished drafts
+  unless an admin selects those events.** `WebhookEndpoint.default_events/0`
+  has always left out `<type>.created`, `<type>.in_review` and
+  `<type>.returned_to_draft`, because their payload is the full body of a
+  document that is not published, draft or embargoed. The new-webhook form at
+  `/editor/webhooks` did not use it: it ticked every event, so an endpoint
+  added without reading the list was sent drafts. The form now starts with
+  exactly the resource's default for the site's own content types. Those
+  three events are marked *includes unpublished content*, and any endpoint
+  subscribed to one says *Receives unpublished content* on its row. The form
+  also has **Select all**, **Clear**, **Reset to defaults** and a toggle per
+  event group, all buttons. A create through the code interface or AshAdmin
+  that names no events now gets the default for its own organization's types
+  rather than the default organization's. Webhooks have no JSON:API or
+  GraphQL route, so there is no other create path. Existing endpoints keep
+  their events; see the upgrade note
+  ([#1776](https://github.com/The-Verscienta/kiln_cms/issues/1776)).
