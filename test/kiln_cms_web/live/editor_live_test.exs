@@ -2869,9 +2869,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "No tags are available on this content type"
       refute html =~ "No tags yet."
 
-      # Nothing to filter, so no filter box — and nothing that could then claim
-      # the filter matched nothing.
-      refute html =~ "data-tag-filter-input"
+      # Nothing to filter — but an editor may add a tag from the box (#1805),
+      # so it stays, and nothing claims the (empty) filter matched nothing.
+      assert html =~ "data-tag-filter-input"
+      assert html =~ "Or type a name below to add one."
       refute html =~ "No tags match that filter."
       refute html =~ "data-tag-section"
 
@@ -2915,7 +2916,9 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert CMS.get_post!(post.id, authorize?: false, load: [:tags]).tags == []
       assert html =~ "No tags are available on this content type"
       refute html =~ "Also attached"
-      refute html =~ "data-tag-filter-input"
+      # The box stays for adding a tag (#1805), with no sections under it.
+      assert html =~ "data-tag-filter-input"
+      refute html =~ "data-tag-section"
     end
 
     test "an org with no tags at all still says so", %{conn: conn} do

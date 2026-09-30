@@ -46,6 +46,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.Search.Related
   alias KilnCMS.Slug
   alias KilnCMS.Unsplash
+  alias KilnCMSWeb.ContentEditor.InlineTerms
   alias KilnCMSWeb.ContentEditor.NewDraft
   alias KilnCMSWeb.EditorTelemetry
   alias KilnCMSWeb.Presence
@@ -519,6 +520,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
       :categories,
       CMS.list_categories!(actor: actor, tenant: org, query: [sort: [name: :asc]])
     )
+    # Inline "add a new term" (#1805): offered only where the Taxonomy
+    # policies would accept the write. `category_draft` is the open inline
+    # name field (`nil` = closed).
+    |> assign(:can_create_tag?, InlineTerms.can_create?(:tag, actor, org))
+    |> assign(:can_create_category?, InlineTerms.can_create?(:category, actor, org))
+    |> assign(:category_draft, nil)
+    |> assign(:category_error, nil)
     # Three columns, not every column (#528). Cap at `@max_tags` (#1149) —
     # since #638 an unrendered tag is no longer detached by omission, so a
     # bounded window is safe. The filter box queries the full vocabulary;
@@ -2581,6 +2589,89 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, socket}
   end
 
+  # Add a tag from the picker's filter box (#1805): the "Create tag" button, or
+  # Enter in the box (the TagFilter hook sends what is typed). A name that
+  # already exists ticks that tag instead of making a second one. Only the tag
+  # row is written now; attaching it is an ordinary tick, so it reaches the
+  # entry through the draft and Save like any other.
+  def handle_event("create_tag", %{"name" => name}, socket) when is_binary(name) do
+    %{actor: actor, current_org: org} = socket.assigns
+
+    cond do
+      not socket.assigns.can_create_tag? ->
+        {:noreply, socket}
+
+      socket.assigns.conflict ->
+        {:noreply, put_flash(socket, :error, gettext("Reload the page before changing tags."))}
+
+      true ->
+        case InlineTerms.find_or_create(:tag, name, actor, org) do
+          {:ok, tag, _how} ->
+            {:noreply, pick_new_tag(socket, tag)}
+
+          {:error, message} ->
+            {:noreply, put_flash(socket, :error, message)}
+
+          :ignore ->
+            {:noreply, socket}
+        end
+    end
+  end
+
+  def handle_event("create_tag", _params, socket), do: {:noreply, socket}
+
+  # The Category field's "New category" affordance (#1805). The name field sits
+  # inside the editor form, so — like `comment_draft` — it carries its own
+  # `phx-change` and the Add button reads the synced assign.
+  def handle_event("category_new_open", _params, socket) do
+    if socket.assigns.can_create_category? do
+      {:noreply, socket |> assign(:category_draft, "") |> assign(:category_error, nil)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("category_new_cancel", _params, socket),
+    do: {:noreply, socket |> assign(:category_draft, nil) |> assign(:category_error, nil)}
+
+  def handle_event("category_new_draft", params, socket) do
+    case {socket.assigns.category_draft, params["new_category_name"]} do
+      {draft, value} when is_binary(draft) and is_binary(value) ->
+        {:noreply, socket |> assign(:category_draft, value) |> assign(:category_error, nil)}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("create_category", params, socket) do
+    %{actor: actor, current_org: org} = socket.assigns
+    # Enter in the field sends what is typed (the hook); the button relies on
+    # the synced draft.
+    name = params["name"] || socket.assigns.category_draft
+
+    cond do
+      not socket.assigns.can_create_category? or is_nil(socket.assigns.category_draft) ->
+        {:noreply, socket}
+
+      socket.assigns.conflict ->
+        {:noreply,
+         put_flash(socket, :error, gettext("Reload the page before changing the category."))}
+
+      true ->
+        case InlineTerms.find_or_create(:category, name, actor, org) do
+          {:ok, category, _how} ->
+            {:noreply, pick_new_category(socket, category)}
+
+          {:error, message} ->
+            {:noreply, assign(socket, :category_error, message)}
+
+          :ignore ->
+            {:noreply, socket}
+        end
+    end
+  end
+
   # Set the social card image from the library (#476). No `id` in the match —
   # `apply_pick(:seo_image, ...)` never reads it, so binding it here would be
   # an unguarded client value with nothing to guard it against (#764).
@@ -4418,28 +4509,93 @@ defmodule KilnCMSWeb.ContentEditorLive do
         put_flash(socket, :error, gettext("Reload the page before changing tags."))
 
       true ->
-        current =
-          socket.assigns.form
-          |> selected_tag_ids(socket.assigns.record)
-          |> MapSet.to_list()
-
-        # Written back as `tag_ids` and immediately rewritten by
-        # `merge_tag_params/2` — leaving `tag_ids` in the form's params
-        # beside the verbs would make the next save contradictory, and
-        # `MergeArguments` refuses that combination outright rather than
-        # resolving it by declaration order.
-        params =
-          socket.assigns.form
-          |> AshPhoenix.Form.params()
-          |> Map.drop(["add_tag_ids", "remove_tag_ids"])
-          |> Map.put("tag_ids", Enum.uniq(current ++ [tag_id]))
-          |> merge_tag_params(socket)
-
         socket
-        |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+        |> tick_tag(tag_id)
         |> assign(:intel_tags, Enum.reject(suggestions, &(to_string(&1.tag.id) == tag_id)))
-        |> mark_dirty(:settings)
     end
+  end
+
+  # Tick one tag in the form, exactly as clicking its checkbox would: the
+  # suggestion panel and the picker's inline create (#1805) both land here, so
+  # a tag chosen either way reaches the entry through the same draft/Save path
+  # as a hand-ticked one.
+  #
+  # The current selection is read the same way `tag_picker/1` reads it — see
+  # `add_suggested_tag/2` for why that fallback matters.
+  defp tick_tag(socket, tag_id) do
+    current =
+      socket.assigns.form
+      |> selected_tag_ids(socket.assigns.record)
+      |> MapSet.to_list()
+
+    # Written back as `tag_ids` and immediately rewritten by
+    # `merge_tag_params/2` — leaving `tag_ids` in the form's params
+    # beside the verbs would make the next save contradictory, and
+    # `MergeArguments` refuses that combination outright rather than
+    # resolving it by declaration order.
+    params =
+      socket.assigns.form
+      |> AshPhoenix.Form.params()
+      |> Map.drop(["add_tag_ids", "remove_tag_ids"])
+      |> Map.put("tag_ids", Enum.uniq(current ++ [tag_id]))
+      |> merge_tag_params(socket)
+
+    socket
+    |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+    |> mark_dirty(:settings)
+  end
+
+  # After an inline tag create (#1805): clear the filter, reload the window
+  # with the tag unioned in (the vocabulary is capped — a new "zzz" would
+  # otherwise fall past it and be ticked with no checkbox to show for it),
+  # open the section it lands in, and tick it.
+  defp pick_new_tag(socket, tag) do
+    %{actor: actor, current_org: org} = socket.assigns
+    id = to_string(tag.id)
+
+    tags =
+      actor
+      |> load_org_tags(org, "")
+      |> Kernel.++([tag])
+      |> Enum.uniq_by(& &1.id)
+
+    socket =
+      socket
+      |> assign(:tag_query, "")
+      |> assign(:tags, tags)
+      |> refresh_tag_index()
+
+    section =
+      Enum.find_value(socket.assigns.tag_index.sections, fn section ->
+        Enum.any?(section.tags, &(&1.id == id)) && section.key
+      end)
+
+    socket
+    |> update(:tag_sections_open, &if(section, do: MapSet.put(&1, section), else: &1))
+    |> tick_tag(id)
+    # The filter box is `phx-update="ignore"`, so the hook empties it.
+    |> push_event("tag-filter-reset", %{})
+  end
+
+  # After an inline category create (#1805): add it to the select's options and
+  # select it, through `validate` like a pick from the dropdown.
+  defp pick_new_category(socket, category) do
+    categories =
+      (socket.assigns.categories ++ [category])
+      |> Enum.uniq_by(& &1.id)
+      |> Enum.sort_by(&String.downcase(&1.name))
+
+    params =
+      socket.assigns.form
+      |> AshPhoenix.Form.params()
+      |> Map.put("category_id", to_string(category.id))
+
+    socket
+    |> assign(:categories, categories)
+    |> assign(:category_draft, nil)
+    |> assign(:category_error, nil)
+    |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+    |> mark_dirty(:settings)
   end
 
   # Accept one proposed value into the form.
@@ -6196,6 +6352,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
               releases={@releases}
               release_draft={@release_draft}
               categories={@categories}
+              can_create_tag?={@can_create_tag?}
+              can_create_category?={@can_create_category?}
+              category_draft={@category_draft}
+              category_error={@category_error}
               audiences={@audiences}
               tag_index={@tag_index}
               tag_sections_open={@tag_sections_open}

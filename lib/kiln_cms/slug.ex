@@ -129,4 +129,21 @@ defmodule KilnCMS.Slug do
   end
 
   def slugify(_text), do: ""
+
+  @doc """
+  The slug a taxonomy term (category, tag, tag group) gets from its name when
+  none is typed: `slugify/1`, or a `random_suffix/0` when the name has nothing
+  ASCII left in it ("北京", "Привет") — an empty slug is a rejected write, and a
+  site writing in a non-Latin script must still be able to add a term.
+
+  One rule for the Taxonomy page and the content editor's inline create
+  (#1805), so a term gets the same slug whichever screen made it.
+  """
+  @spec taxonomy_slug(term()) :: String.t()
+  def taxonomy_slug(name) do
+    case slugify(name) do
+      "" -> random_suffix()
+      slug -> slug
+    end
+  end
 end
