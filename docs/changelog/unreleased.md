@@ -526,6 +526,21 @@ carries the reasoning.
   description for the picker to read
   ([#1760](https://github.com/The-Verscienta/kiln_cms/issues/1760)).
 
+<a id="a-search-highlight-names-the-title-once"></a>
+
+- **A search highlight names the title once, not two or three times before
+  the body.** The denormalized `search_text` joined the title, `seo_title`,
+  `seo_description` and the block text as they were, so a page whose SEO title
+  is its title and whose body opens with it as a heading carried it three
+  times, and the `highlight` in `/api/search` and the palette read it back
+  that way. A field value equal to one already written (ignoring case and
+  spacing) is now left out, and so is a first block that repeats one. Ranking
+  loses nothing: the title keeps its own weighted leg. Stored rows are
+  rewritten on their next save, and a published one on its next fire, so no
+  step is required; `mix kiln.refire_all` rewrites every published document
+  at once
+  ([#1758](https://github.com/The-Verscienta/kiln_cms/issues/1758)).
+
 ## Security
 
 <a id="password-rotation-revokes-every-session"></a>

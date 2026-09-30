@@ -219,6 +219,10 @@ Every summary line below that was shortened links to its own entry there.
 - **The Form and Fragment blocks say what they are in the block picker.**
   ([#1760](https://github.com/The-Verscienta/kiln_cms/issues/1760) · [long form](docs/changelog/unreleased.md#form-and-fragment-blocks-say-what-they-are-in-the-block-picker))
 
+- **A search highlight names the title once, not two or three times before
+  the body.**
+  ([#1758](https://github.com/The-Verscienta/kiln_cms/issues/1758) · [long form](docs/changelog/unreleased.md#a-search-highlight-names-the-title-once))
+
 ### Security
 
 - **Changing or resetting a password now signs out every other session and
