@@ -356,6 +356,18 @@ carries the reasoning.
   task's moduledoc and in `docs/policy-matrix.md`
   ([#1739](https://github.com/The-Verscienta/kiln_cms/issues/1739)).
 
+<a id="the-search-palette-leads-with-an-exact-title-match"></a>
+
+- **The ⌘K search palette leads with a *Best match* row when a title is
+  exactly what was typed.** The palette draws pages, posts and custom content
+  in a fixed order with up to eight hits each, so an exact post title came
+  ninth behind eight pages that shared a few words with it. A hit whose title
+  equals the query, ignoring case, spacing and straight or curly quotes, now
+  moves out of its section into a row above everything else, labelled with its
+  type. The row only reorders what the search returned; the search ranking
+  itself is unchanged
+  ([#1781](https://github.com/The-Verscienta/kiln_cms/issues/1781)).
+
 ## Fixed
 
 <a id="mix-kiln-gen-content-from-works-under-strict-tenancy"></a>

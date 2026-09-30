@@ -172,6 +172,10 @@ Every summary line below that was shortened links to its own entry there.
   counts.**
   ([#1739](https://github.com/The-Verscienta/kiln_cms/issues/1739) · [long form](docs/changelog/unreleased.md#authz-check-requires-a-marker))
 
+- **The ⌘K search palette leads with a *Best match* row when a title is
+  exactly what was typed.**
+  ([#1781](https://github.com/The-Verscienta/kiln_cms/issues/1781) · [long form](docs/changelog/unreleased.md#the-search-palette-leads-with-an-exact-title-match))
+
 ### Fixed
 
 - **`mix kiln.gen.content --from` works under strict tenancy, and takes

@@ -2421,6 +2421,11 @@ msgstr "Sauvegardes"
 msgid "Backups aren't set up yet — turn them on before you go live."
 msgstr "Les sauvegardes ne sont pas encore configurées — activez-les avant la mise en ligne."
 
+#: lib/kiln_cms_web/live/search_palette_live.ex
+#, elixir-autogen, elixir-format
+msgid "Best match"
+msgstr "Meilleure correspondance"
+
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -9364,6 +9369,11 @@ msgstr "Remplace le titre dans les résultats de recherche et les onglets du nav
 msgid "POST a signed payload to external services when content is published, updated, or unpublished."
 msgstr "Envoyer une charge utile signée (POST) à des services externes lorsque du contenu est publié, mis à jour ou dépublié."
 
+#: lib/kiln_cms_web/live/search_palette_live.ex
+#, elixir-autogen, elixir-format
+msgid "Page"
+msgstr "Page"
+
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex
 #: lib/kiln_cms_web/controllers/content_html/event_index.html.heex
 #: lib/kiln_cms_web/live/accounts_live.ex
@@ -9728,6 +9738,11 @@ msgstr "Contenu enrichi Portable Text"
 #, elixir-autogen, elixir-format
 msgid "Position"
 msgstr "Position"
+
+#: lib/kiln_cms_web/live/search_palette_live.ex
+#, elixir-autogen, elixir-format
+msgid "Post"
+msgstr "Article"
 
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #, elixir-autogen, elixir-format
