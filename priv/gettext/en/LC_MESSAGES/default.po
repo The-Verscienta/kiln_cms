@@ -10085,6 +10085,13 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
+msgid "Processing %{count} file… This can take a moment."
+msgid_plural "Processing %{count} files… This can take a moment."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
 msgid "Processing…"
 msgstr ""
 
@@ -15042,6 +15049,11 @@ msgstr ""
 msgid "Unused"
 msgstr ""
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Up to %{max} files at a time"
+msgstr ""
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Up to date"
@@ -15139,6 +15151,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Uploading %{name}… %{pct}%"
+msgstr ""
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Uploading…"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/page_html.ex
@@ -15973,6 +15990,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "You need editor access to view that page."
 msgstr ""
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "You picked %{count} file, but you can upload up to %{max} at a time. Remove some, then upload the rest afterwards."
+msgid_plural "You picked %{count} files, but you can upload up to %{max} at a time. Remove some, then upload the rest afterwards."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -17169,18 +17193,9 @@ msgid "today"
 msgstr "today"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "too large (max %{mb} MB)"
-msgstr ""
-
-#: lib/kiln_cms_web/live/media_live.ex
-#, elixir-autogen, elixir-format
-msgid "too large (max 10 MB)"
-msgstr ""
-
-#: lib/kiln_cms_web/live/media_live.ex
-#, elixir-autogen, elixir-format
-msgid "too many files (max 10)"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex

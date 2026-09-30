@@ -434,6 +434,38 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="media-uploads-state-their-limit-and-show-processing"></a>
+
+- **The media library says how many files one upload takes, shows that
+  uploaded files are still being processed, and ties its URL field to its
+  label.** Three findings from the beta round on `/media`. The drop zone now
+  says *Up to 10 files at a time*; picking more used to be refused with "too
+  many files (max 10)", a limit stated nowhere else. The refusal now reads
+  *You picked 14 files, but you can upload up to 10 at a time*, and the Upload
+  button stays disabled until the selection fits. The limit stays at 10: every
+  picked file waits on the server's temp disk until the batch is processed,
+  and a video may be 500 MB. The oversize message named 10 MB; it now names
+  the real ceiling (500 MB), and the tighter per-type caps are still reported
+  per file ([#1802](https://github.com/The-Verscienta/kiln_cms/issues/1802)).
+  Once the bytes arrived, each file was checked, stripped of metadata and
+  saved one after another inside the page's own process, so a batch of photos
+  sat for several seconds on a full progress bar with no sign of life. Files
+  are now processed four at a time in the background. Meanwhile each row says
+  *Processing…*, a live region announces *Processing 10 files… This can take
+  a moment.*, and the button is disabled. Ten 12-megapixel JPEGs took about
+  600 ms one at a time and about 210 ms four at a time on local storage; the
+  saving is larger on object storage, where each file is a network round trip.
+  The upload still runs as the signed-in user in the current site, and each
+  refused file is still named in the result
+  ([#1803](https://github.com/The-Verscienta/kiln_cms/issues/1803)). In the
+  detail drawer, the read-only URL field had neither `id` nor `name` and its
+  label pointed at nothing, which Chrome DevTools reports as an issue. Both
+  are fixed. The same report named an interactive element inside a
+  `<summary>`; none is present on the current console pages, and a new test
+  now fails if one appears on any of them. A Playwright spec checks Chrome's
+  own audit on the media page
+  ([#1804](https://github.com/The-Verscienta/kiln_cms/issues/1804)).
+
 <a id="repeated-row-actions-name-the-record-they-act-on"></a>
 
 - **Accessibility: repeated row actions in the console name the record they

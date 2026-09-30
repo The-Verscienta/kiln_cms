@@ -22,7 +22,13 @@ defmodule KilnCMSWeb.MediaLive do
   alias KilnCMSWeb.Params
 
   @accept ~w(.jpg .jpeg .png .webp .gif .pdf .docx .xlsx .pptx .doc .xls .ppt .zip .mp4 .m4a .webm .mp3 .vtt)
+  # Files per upload batch (#1802). Every picked file is held on the server's
+  # temp disk until the batch is processed, and a video may be 500 MB, so the
+  # count bounds that footprint too. The drop zone states it, and the refusal
+  # names it — both read this attribute, so they can't drift from it.
   @max_entries 10
+  # Files of one batch ingested at once (#1803) — see `ingest_all/3`.
+  @ingest_concurrency 4
   # Phoenix's `allow_upload` takes one ceiling for every entry (there's no
   # per-accept-type cap in the API), so this is the LARGEST of the per-type
   # caps — `KilnCMS.Media.Ingest` enforces the tighter one for whichever type
@@ -74,6 +80,8 @@ defmodule KilnCMSWeb.MediaLive do
      |> assign(:unsplash_more?, false)
      |> assign(:unsplash_searching?, false)
      |> assign(:unsplash_importing, MapSet.new())
+     # Entry refs of the batch being ingested (#1803) — `[]` when idle.
+     |> assign(:processing_refs, [])
      |> allow_upload(:media,
        accept: @accept,
        max_entries: @max_entries,
@@ -182,33 +190,34 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
+  # A file that is being processed can't be cancelled: its temp file is the
+  # one the ingest is reading, and cancelling deletes it mid-read.
   def handle_event("cancel", %{"ref" => ref}, socket) when is_binary(ref) do
-    {:noreply, cancel_upload(socket, :media, ref)}
+    if ref in socket.assigns.processing_refs,
+      do: {:noreply, socket},
+      else: {:noreply, cancel_upload(socket, :media, ref)}
   end
 
+  # Processing an upload (sniff, metadata strip, store, insert) takes a moment
+  # per file, and for a batch of photos it used to run here, one file after
+  # another, with nothing on screen but a finished progress bar (#1803). So:
+  #
+  #   1. Collect the finished entries' temp paths WITHOUT consuming them
+  #      (`{:postpone, _}`) — the upload channel keeps each file on disk until
+  #      its entry is consumed.
+  #   2. Ingest them in a `start_async` task, a few at a time, while the page
+  #      says "Processing N files…" and stays responsive.
+  #   3. Consume the entries in `handle_async(:ingest_uploads, …)`, which
+  #      removes the temp files, then refresh the library and flash the result.
+  #
+  # The ingest still runs as THIS user in THIS site (`actor`/`org` are passed
+  # explicitly, exactly as before) — only the process it runs in changes.
   def handle_event("save", _params, socket) do
-    actor = socket.assigns.actor
-    org = socket.assigns.current_org
-
-    results =
-      consume_uploaded_entries(socket, :media, fn %{path: path}, entry ->
-        {:ok, {entry.client_name, store_entry(path, entry, actor, org)}}
-      end)
-
-    {ok, failed} = Enum.split_with(results, fn {_name, result} -> result == :ok end)
-    failures = for {name, {:error, reason}} <- failed, do: {name, reason}
-
-    # Each ingest deferred its published-cache clear (`cache_bust: :defer` in
-    # `store_entry/4`) — a 10-file drop must not full-clear the cache 10
-    # times. One compensating clear for the batch.
-    if ok != [], do: KilnCMS.CMS.Changes.BustMediaCache.bust()
-
-    socket =
-      socket
-      |> refresh_library()
-      |> flash_for_upload(length(ok), failures)
-
-    {:noreply, socket}
+    if socket.assigns.processing_refs != [] do
+      {:noreply, socket}
+    else
+      start_ingest(socket)
+    end
   end
 
   def handle_event("delete", %{"id" => id}, socket) when is_binary(id) do
@@ -582,6 +591,24 @@ defmodule KilnCMSWeb.MediaLive do
     do: {:noreply, put_flash(socket, :info, gettext("URL copied to clipboard."))}
 
   @impl true
+  def handle_async(:ingest_uploads, {:ok, results}, socket),
+    do: {:noreply, finish_ingest(socket, results)}
+
+  # The task itself died (per-file crashes are caught inside it), so nothing
+  # says which files made it. Report every file as failed and let the library
+  # refresh show what did land.
+  def handle_async(:ingest_uploads, {:exit, reason}, socket) do
+    Logger.error("media upload batch crashed: #{inspect(reason)}")
+    refs = socket.assigns.processing_refs
+
+    results =
+      for entry <- socket.assigns.uploads.media.entries, entry.ref in refs do
+        {entry.ref, entry.client_name, {:error, :create_failed}}
+      end
+
+    {:noreply, finish_ingest(socket, results)}
+  end
+
   def handle_async(:unsplash_search, result, socket) do
     socket = assign(socket, :unsplash_searching?, false)
 
@@ -676,9 +703,78 @@ defmodule KilnCMSWeb.MediaLive do
   #
   # The returned reason reaches the failure flash so editors learn WHICH file
   # failed and why, not just a count (audit U-M5).
-  defp store_entry(path, entry, actor, org) do
+  defp start_ingest(socket) do
+    actor = socket.assigns.actor
+    org = socket.assigns.current_org
+
+    jobs =
+      consume_uploaded_entries(socket, :media, fn %{path: path}, entry ->
+        {:postpone, {entry.ref, entry.client_name, path}}
+      end)
+
+    case jobs do
+      [] ->
+        {:noreply, socket}
+
+      jobs ->
+        {:noreply,
+         socket
+         |> assign(:processing_refs, Enum.map(jobs, fn {ref, _name, _path} -> ref end))
+         |> start_async(:ingest_uploads, fn -> ingest_all(jobs, actor, org) end)}
+    end
+  end
+
+  # A few files at a time: each ingest is mostly native work (libvips, qpdf,
+  # ffmpeg) plus one insert, so a handful in parallel cuts a batch's wait
+  # roughly by that factor without letting one upload take the whole DB pool
+  # or decode ten full-size photos at once. `async_stream_nolink`, so a file
+  # whose ingest crashes is reported as that file failing, not as the batch.
+  defp ingest_all(jobs, actor, org) do
+    KilnCMS.TaskSupervisor
+    |> Task.Supervisor.async_stream_nolink(
+      jobs,
+      fn {_ref, name, path} -> store_entry(path, name, actor, org) end,
+      max_concurrency: @ingest_concurrency,
+      ordered: true,
+      timeout: :infinity
+    )
+    |> Enum.zip_with(jobs, fn
+      {:ok, result}, {ref, name, _path} ->
+        {ref, name, result}
+
+      {:exit, reason}, {ref, name, _path} ->
+        Logger.error("media upload ingest of #{inspect(name)} crashed: #{inspect(reason)}")
+        {ref, name, {:error, :create_failed}}
+    end)
+  end
+
+  # Consume the entries the task processed — by ref, so a file picked while
+  # the batch was processing stays queued for the next Upload click — then
+  # report. Consuming is what removes the temp files.
+  defp finish_ingest(socket, results) do
+    refs = socket.assigns.processing_refs
+
+    for entry <- socket.assigns.uploads.media.entries, entry.ref in refs do
+      consume_uploaded_entry(socket, entry, fn _meta -> {:ok, :done} end)
+    end
+
+    {ok, failed} = Enum.split_with(results, fn {_ref, _name, result} -> result == :ok end)
+    failures = for {_ref, name, {:error, reason}} <- failed, do: {name, reason}
+
+    # Each ingest deferred its published-cache clear (`cache_bust: :defer` in
+    # `store_entry/4`) — a 10-file drop must not full-clear the cache 10
+    # times. One compensating clear for the batch.
+    if ok != [], do: KilnCMS.CMS.Changes.BustMediaCache.bust()
+
+    socket
+    |> assign(:processing_refs, [])
+    |> refresh_library()
+    |> flash_for_upload(length(ok), failures)
+  end
+
+  defp store_entry(path, client_name, actor, org) do
     # `cache_bust: :defer`: the save handler issues one clear for the batch.
-    case Ingest.store_file(path, entry.client_name,
+    case Ingest.store_file(path, client_name,
            actor: actor,
            tenant: org,
            cache_bust: :defer
@@ -1382,10 +1478,27 @@ defmodule KilnCMSWeb.MediaLive do
 
   defp humanize_bytes(b), do: gettext("%{size} MB", size: Float.round(b / 1_048_576, 1))
 
-  defp error_to_string(:too_large), do: gettext("too large (max 10 MB)")
-  defp error_to_string(:too_many_files), do: gettext("too many files (max 10)")
+  # Phoenix refuses an entry over `@max_file_size` — the video ceiling, the
+  # largest of the per-type caps (the tighter image/document caps are
+  # Ingest's, and come back through `upload_failure_reason/1`).
+  defp error_to_string(:too_large),
+    do: gettext("too large (max %{mb} MB)", mb: div(@max_file_size, 1_048_576))
+
   defp error_to_string(:not_accepted), do: gettext("unsupported type")
   defp error_to_string(other), do: to_string(other)
+
+  # The whole-upload refusal (#1802): say how many were picked and how many fit,
+  # and what to do about it — "too many files" alone left a tester guessing.
+  defp upload_error_to_string(:too_many_files, picked) do
+    ngettext(
+      "You picked %{count} file, but you can upload up to %{max} at a time. Remove some, then upload the rest afterwards.",
+      "You picked %{count} files, but you can upload up to %{max} at a time. Remove some, then upload the rest afterwards.",
+      picked,
+      max: @max_entries
+    )
+  end
+
+  defp upload_error_to_string(other, _picked), do: error_to_string(other)
 
   @impl true
   def render(assigns) do
@@ -1528,6 +1641,11 @@ defmodule KilnCMSWeb.MediaLive do
             <p class="text-xs text-base-content/50">
               {gettext("Video and audio are served as uploaded — export web-ready H.264/AAC.")}
             </p>
+            <%!-- The batch limit is stated up front (#1802) rather than
+                  discovered by picking one file too many. --%>
+            <p id="upload-batch-limit" class="mt-2 text-xs font-medium text-base-content/70">
+              {gettext("Up to %{max} files at a time", max: @uploads.media.max_entries)}
+            </p>
             <.live_file_input upload={@uploads.media} class="sr-only" />
           </div>
 
@@ -1539,7 +1657,15 @@ defmodule KilnCMSWeb.MediaLive do
               <.live_img_preview entry={entry} class="size-14 rounded object-cover" />
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm font-medium">{entry.client_name}</p>
+                <p
+                  :if={entry.ref in @processing_refs}
+                  class="mt-1 flex items-center gap-1 text-xs text-base-content/70"
+                >
+                  <.icon name="hero-arrow-path" class="size-3 motion-safe:animate-spin" />
+                  {gettext("Processing…")}
+                </p>
                 <div
+                  :if={entry.ref not in @processing_refs}
                   class="mt-1 h-1.5 w-full overflow-hidden rounded bg-base-content/10"
                   role="progressbar"
                   aria-valuenow={entry.progress}
@@ -1554,6 +1680,7 @@ defmodule KilnCMSWeb.MediaLive do
                 </p>
               </div>
               <button
+                :if={entry.ref not in @processing_refs}
                 type="button"
                 phx-click="cancel"
                 phx-value-ref={entry.ref}
@@ -1565,14 +1692,55 @@ defmodule KilnCMSWeb.MediaLive do
             </div>
           </div>
 
-          <p :for={err <- upload_errors(@uploads.media)} class="text-sm text-error">
-            {error_to_string(err)}
+          <div id="upload-error" role="alert">
+            <p :for={err <- upload_errors(@uploads.media)} class="text-sm text-error">
+              {upload_error_to_string(err, length(@uploads.media.entries))}
+            </p>
+          </div>
+
+          <%!-- Processing status (#1803): after the bytes arrive, each file is
+                still checked, stripped of metadata and saved, which takes a
+                moment per file. The region is always rendered so a screen
+                reader announces the text when it appears. --%>
+          <p
+            id="upload-status"
+            role="status"
+            aria-live="polite"
+            class={[
+              "flex items-center gap-2 text-sm text-base-content/80",
+              @processing_refs == [] && "hidden"
+            ]}
+          >
+            <.icon
+              :if={@processing_refs != []}
+              name="hero-arrow-path"
+              class="size-4 motion-safe:animate-spin"
+            />
+            <span :if={@processing_refs != []}>
+              {ngettext(
+                "Processing %{count} file… This can take a moment.",
+                "Processing %{count} files… This can take a moment.",
+                length(@processing_refs)
+              )}
+            </span>
           </p>
 
-          <.button :if={@uploads.media.entries != []} type="submit" variant="primary">
-            {ngettext("Upload %{count} file", "Upload %{count} files", length(@uploads.media.entries),
-              count: length(@uploads.media.entries)
-            )}
+          <.button
+            :if={@uploads.media.entries != []}
+            id="upload-submit"
+            type="submit"
+            variant="primary"
+            disabled={@processing_refs != [] or upload_errors(@uploads.media) != []}
+            phx-disable-with={gettext("Uploading…")}
+          >
+            {if @processing_refs != [],
+              do: gettext("Processing…"),
+              else:
+                ngettext(
+                  "Upload %{count} file",
+                  "Upload %{count} files",
+                  length(@uploads.media.entries)
+                )}
           </.button>
         </form>
 
@@ -2282,9 +2450,13 @@ defmodule KilnCMSWeb.MediaLive do
         </div>
 
         <div class="mt-4">
-          <label class="text-xs text-base-content/70">{gettext("URL")}</label>
+          <%!-- `id` + `for` tie the label to the field, and the `name` keeps
+                Chrome's "form field needs an id or name" audit quiet (#1804). --%>
+          <label for="media-item-url" class="text-xs text-base-content/70">{gettext("URL")}</label>
           <div class="mt-1 flex gap-2">
             <input
+              id="media-item-url"
+              name="media_item_url"
               type="text"
               value={@item.url}
               readonly
