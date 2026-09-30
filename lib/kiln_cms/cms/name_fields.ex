@@ -65,6 +65,8 @@ defmodule KilnCMS.CMS.NameFields do
       authorize_with: :error,
       tenant: org_id
     )
+    # A definition whose content type is gone (#1770) names no record.
+    |> Enum.reject(&KilnCMS.CMS.FieldDefinition.orphaned?/1)
     |> Enum.group_by(&owner/1, & &1.name)
     |> Map.new(fn {type, names} -> {type, Enum.uniq(names)} end)
   end
