@@ -508,7 +508,7 @@ carries the reasoning.
   The test compared `:ash_domains` minus the name `Example.Catalog` against
   the domains compiled from `lib/kiln_cms/`, so it held only for the in-tree
   example overlay. A downstream overlay that lists its own domain in
-  `:ash_domains`, as `Kiln.Plugin.domains/0` asks it to, failed it on a
+  `:ash_domains`, as `c:Kiln.Plugin.domains/0` asks it to, failed it on a
   correct configuration once its suite composed with the core's. The test now
   subtracts every domain the installed plugins declare. Test-only; nothing
   changes at runtime.
