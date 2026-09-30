@@ -447,11 +447,18 @@ defmodule KilnCMSWeb.Layouts do
       {gettext("Search")}
     </.link>
 
+    <.dev_assets_banner />
+
     <%!-- `minmax(0, 1fr)`, not a bare `1fr`: a `1fr` track never shrinks below
           its content's min-content width, so one wide descendant (a long <pre>,
           a wide table) widened the column past the viewport and scrolled the
-          whole shell sideways — even when that descendant scrolls itself. --%>
-    <div class="min-h-screen bg-base-100 lg:grid lg:grid-cols-[var(--side-w)_minmax(0,1fr)]">
+          whole shell sideways — even when that descendant scrolls itself.
+
+          `var(--side-w,16rem)`, not a bare `var(--side-w)`: the token lives in
+          app.css, and a stylesheet built before it existed made the whole
+          track list invalid — one full-width column, the workspace pushed
+          below the fold (#1755). The fallback is the expanded width. --%>
+    <div class="min-h-screen bg-base-100 lg:grid lg:grid-cols-[var(--side-w,16rem)_minmax(0,1fr)]">
       <%!-- CSS-only mobile drawer: the peer checkbox drives the sidebar + backdrop
             with no socket round-trip, so the menu works before LiveView connects.
 
@@ -635,6 +642,30 @@ defmodule KilnCMSWeb.Layouts do
       </div>
 
       <.flash_group flash={@flash} />
+    </div>
+    """
+  end
+
+  @doc """
+  A development-only strip across the top of the console when the local asset
+  build is stale or missing (#1761) — see `KilnCMSWeb.DevAssets`. Renders
+  nothing in any other build, and nothing in dev while the build is sound.
+
+  Styled inline on purpose: the stylesheet is the thing that may be out of
+  date, so a utility class here could be missing from it too.
+  """
+  def dev_assets_banner(assigns) do
+    assigns =
+      assign(assigns, :message, KilnCMSWeb.DevAssets.message(KilnCMSWeb.DevAssets.problems()))
+
+    ~H"""
+    <div
+      :if={@message}
+      id="dev-assets-banner"
+      role="alert"
+      style="position:relative;z-index:60;padding:0.75rem 1rem;background:#7c2d12;color:#fff7ed;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap"
+    >
+      {@message}
     </div>
     """
   end

@@ -74,4 +74,21 @@ test.describe("console shell layout", () => {
     expect(result.selfScrolls).toBe(true);
     expect(result.asideLeft).toBe(0);
   });
+
+  // The sidebar column is `var(--side-w)`, defined in app.css. A stylesheet
+  // built before the token existed made the whole track list invalid: one
+  // full-width column, the workspace pushed below the fold (#1755). `initial`
+  // is the guaranteed-invalid value a missing definition resolves to.
+  test("without the width token the shell keeps its two columns", async ({ page }) => {
+    const result = await page.evaluate(() => {
+      document.documentElement.style.setProperty("--side-w", "initial");
+      const aside = document.querySelector("aside.side-shell").getBoundingClientRect();
+      const main = document.getElementById("main").getBoundingClientRect();
+      return { asideWidth: aside.width, mainTop: main.top, mainLeft: main.left };
+    });
+
+    expect(result.asideWidth).toBe(256);
+    expect(result.mainLeft).toBeGreaterThanOrEqual(256);
+    expect(result.mainTop).toBeLessThan(800);
+  });
 });

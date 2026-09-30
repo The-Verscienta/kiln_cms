@@ -172,6 +172,10 @@ Every summary line below that was shortened links to its own entry there.
   counts.**
   ([#1739](https://github.com/The-Verscienta/kiln_cms/issues/1739) · [long form](docs/changelog/unreleased.md#authz-check-requires-a-marker))
 
+- **In development, a stale or missing asset build is reported at boot and on
+  the console, with the command that rebuilds it.**
+  ([#1761](https://github.com/The-Verscienta/kiln_cms/issues/1761) · [long form](docs/changelog/unreleased.md#a-stale-local-asset-build-is-reported-in-development))
+
 ### Fixed
 
 - **`mix kiln.gen.content --from` works under strict tenancy, and takes
@@ -216,6 +220,14 @@ Every summary line below that was shortened links to its own entry there.
 - **An overlay that registers its own domain through its plugin no longer fails
   the core's "configured domains" test in its composed suite.**
   ([long form](docs/changelog/unreleased.md#an-overlays-composed-suite-no-longer-fails-the-configured-domains-test))
+
+- **The reconnect toasts come down with the error they report; "We can't find
+  the internet" no longer stays up beside "Something went wrong!".**
+  ([#1784](https://github.com/The-Verscienta/kiln_cms/issues/1784) · [long form](docs/changelog/unreleased.md#the-reconnect-toasts-come-down-with-the-error-they-report))
+
+- **The console keeps its two columns when the stylesheet lacks the sidebar
+  width token.**
+  ([#1755](https://github.com/The-Verscienta/kiln_cms/issues/1755) · [long form](docs/changelog/unreleased.md#the-console-keeps-its-two-columns-without-the-sidebar-width-token))
 
 ### Security
 

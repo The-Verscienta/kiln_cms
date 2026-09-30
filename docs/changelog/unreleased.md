@@ -356,6 +356,28 @@ carries the reasoning.
   task's moduledoc and in `docs/policy-matrix.md`
   ([#1739](https://github.com/The-Verscienta/kiln_cms/issues/1739)).
 
+<a id="a-stale-local-asset-build-is-reported-in-development"></a>
+
+- **In development, a stale or missing asset build is reported at boot and on
+  the console, with the command that rebuilds it.** `mix phx.server` still
+  boots when a Tailwind or esbuild watcher dies, for example when macOS kills
+  a downloaded Tailwind binary it no longer trusts (exit 137), or when
+  `assets/node_modules` is missing. The browser then got whatever build was
+  left on disk. Beta testers running from source met a months-old stylesheet
+  and reported a broken console. Twenty seconds after a dev boot, long enough
+  for the watchers' first build, `KilnCMSWeb.DevAssets` now checks the build.
+  It looks for a missing stylesheet or script bundle, a stylesheet that lacks
+  a custom property `assets/css/app.css` declares, and a missing
+  `assets/node_modules`. The stylesheet check reads content, not timestamps,
+  because Tailwind does not rewrite an output that comes out the same. What it
+  finds is logged as a warning and drawn as a banner across the console. Both
+  name the fix: `mix assets.build`, with `mix assets.setup` first when
+  `node_modules` is missing, or re-signing the Tailwind binary after an exit
+  137. Only a dev build carries the check; every other build compiles it to
+  nothing. `docs/beta-testing.md` now tells facilitators to run the published
+  image, and how to recover a local build
+  ([#1761](https://github.com/The-Verscienta/kiln_cms/issues/1761)).
+
 ## Fixed
 
 <a id="mix-kiln-gen-content-from-works-under-strict-tenancy"></a>
@@ -512,6 +534,33 @@ carries the reasoning.
   correct configuration once its suite composed with the core's. The test now
   subtracts every domain the installed plugins declare. Test-only; nothing
   changes at runtime.
+
+<a id="the-reconnect-toasts-come-down-with-the-error-they-report"></a>
+
+- **The reconnect toasts come down with the error they report; "We can't find
+  the internet" no longer stays up beside "Something went wrong!".** LiveView
+  raises each toast with a one-shot `phx-disconnected` command and lowers it
+  with a one-shot `phx-connected` one. A view can leave an error state
+  without the second arriving. When the line came back but the view's rejoin
+  failed, LiveView swapped `phx-client-error` for `phx-server-error`, and
+  nothing lowered the first toast, so both stood on the page until a reload.
+  A stylesheet rule now keeps each toast hidden unless the view's container
+  carries its error class, which LiveView always keeps current. Raising a
+  toast is still the command's job, so a line that drops and comes straight
+  back still shows nothing. `e2e/tests/reconnect_toasts.spec.js` cuts the
+  line, refuses the rejoin, and runs the liveness watchdog's rebuild of a
+  quiet line
+  ([#1784](https://github.com/The-Verscienta/kiln_cms/issues/1784)).
+
+<a id="the-console-keeps-its-two-columns-without-the-sidebar-width-token"></a>
+
+- **The console keeps its two columns when the stylesheet lacks the sidebar
+  width token.** The console's grid read its sidebar column from `--side-w`,
+  which `assets/css/app.css` defines. A stylesheet built before the token
+  existed made the whole column list invalid: one full-width column, with the
+  workspace pushed below the fold. The grid now falls back to the expanded
+  width, `16rem`
+  ([#1755](https://github.com/The-Verscienta/kiln_cms/issues/1755)).
 
 ## Security
 
