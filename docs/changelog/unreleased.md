@@ -407,6 +407,16 @@ carries the reasoning.
   image, and how to recover a local build
   ([#1761](https://github.com/The-Verscienta/kiln_cms/issues/1761)).
 
+<a id="coolify-build-records-its-commit"></a>
+
+- **A Coolify build records the commit it deployed.** The Dockerfile's
+  `GIT_SHA` build arg — what `/editor/system` shows as the build — now falls
+  back to `SOURCE_COMMIT`, the build arg Coolify passes when an application's
+  *Include Source Commit in Build* setting is on. Before, a Coolify Redeploy
+  could not run `$(git rev-parse HEAD)`, so every instance built that way
+  reported "No build stamp". An explicit `GIT_SHA` still wins; `BUILD_DATE`
+  has no Coolify equivalent and stays unset unless you set it.
+
 ## Fixed
 
 <a id="repeated-row-actions-name-the-record-they-act-on"></a>

@@ -680,8 +680,10 @@ indefinitely and the fork's own security releases never surface.
 
 `GIT_SHA` and `BUILD_DATE` are Docker **build args**, not runtime variables —
 the Dockerfile records them as `KILN_GIT_SHA` / `KILN_BUILD_DATE` so a running
-instance can name the commit it was built from. Omitting them is harmless; the
-page then reports the version alone.
+instance can name the commit it was built from. Without `GIT_SHA` it takes the
+`SOURCE_COMMIT` build arg, which Coolify passes when the app's **Include Source
+Commit in Build** setting is on. Omitting them is harmless; the page then
+reports the version alone.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
@@ -689,7 +691,7 @@ page then reports the version alone.
 | `KILN_UPDATE_REPO` | `The-Verscienta/kiln_cms` | The `owner/name` this build compares itself against. **Forks must set this.** Left at the default, a fork is told about upstream's releases — and a fork *ahead* of upstream compares as newer, so the page reports "Up to date" forever and the fork's own security releases never surface. A value that isn't `owner/name` is rejected, not ignored. | [`config/runtime/updates.exs:72`](../config/runtime/updates.exs#L72), [`Kiln.Updates`](../lib/kiln/updates.ex) |
 | `KILN_UPDATE_RELEASES_URL` | derived from `KILN_UPDATE_REPO` | Full releases-API endpoint, for GitHub Enterprise or an internal mirror that can't reach `api.github.com`. Overrides the endpoint only — set `KILN_UPDATE_REPO` alongside it so the release link has a fallback. | [`config/runtime/updates.exs:78`](../config/runtime/updates.exs#L78), [`Kiln.Updates`](../lib/kiln/updates.ex) |
 | `KILN_PIN_PATH` | unset | Path to this project's pinned Kiln checkout (`kiln/upstream`, `upstream`, …). Display only: the update page prefixes its `mix kiln.update` command with a matching `cd`. Unset by default because the pin's path is a downstream choice — see [`projects/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md). | [`config/runtime/updates.exs:55`](../config/runtime/updates.exs#L55), [`Kiln.Updates`](../lib/kiln/updates.ex) |
-| `KILN_GIT_SHA` | unset | Commit the image was built from. Set via `--build-arg GIT_SHA`. | [`Kiln.Version`](../lib/kiln/version.ex) |
+| `KILN_GIT_SHA` | unset | Commit the image was built from. Set via `--build-arg GIT_SHA`, else `--build-arg SOURCE_COMMIT` (what Coolify passes). | [`Kiln.Version`](../lib/kiln/version.ex) |
 | `KILN_BUILD_DATE` | unset | ISO-8601 UTC build timestamp. Set via `--build-arg BUILD_DATE`. | [`Kiln.Version`](../lib/kiln/version.ex) |
 
 ### referrer attribution (#619)

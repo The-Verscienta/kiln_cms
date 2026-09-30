@@ -244,14 +244,20 @@ COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/kiln_cms ./
 #
 #   docker build --build-arg GIT_SHA="$(git rev-parse HEAD)" \
 #                --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" .
+#
+# SOURCE_COMMIT is the fallback for the SHA: it is the build arg Coolify passes
+# when the app's "Include Source Commit in Build" setting is on, so a Coolify
+# Redeploy records its commit with nothing to update per deploy. An explicit
+# GIT_SHA wins.
 ARG GIT_SHA=""
+ARG SOURCE_COMMIT=""
 ARG BUILD_DATE=""
-ENV KILN_GIT_SHA=${GIT_SHA}
+ENV KILN_GIT_SHA=${GIT_SHA:-${SOURCE_COMMIT}}
 ENV KILN_BUILD_DATE=${BUILD_DATE}
 
 LABEL org.opencontainers.image.title="KilnCMS" \
       org.opencontainers.image.source="https://github.com/The-Verscienta/kiln_cms" \
-      org.opencontainers.image.revision=${GIT_SHA} \
+      org.opencontainers.image.revision=${GIT_SHA:-${SOURCE_COMMIT}} \
       org.opencontainers.image.created=${BUILD_DATE}
 
 USER nobody

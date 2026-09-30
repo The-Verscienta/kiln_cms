@@ -184,6 +184,10 @@ Every summary line below that was shortened links to its own entry there.
   the console, with the command that rebuilds it.**
   ([#1761](https://github.com/The-Verscienta/kiln_cms/issues/1761) · [long form](docs/changelog/unreleased.md#a-stale-local-asset-build-is-reported-in-development))
 
+- **A Coolify build records the commit it deployed: turn on *Include Source
+  Commit in Build* and the Dockerfile uses Coolify's `SOURCE_COMMIT`.**
+  ([long form](docs/changelog/unreleased.md#coolify-build-records-its-commit))
+
 ### Fixed
 
 - **Accessibility: repeated row actions in the console name the record they act
