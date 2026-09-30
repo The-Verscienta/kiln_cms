@@ -128,6 +128,13 @@ Both build args are optional — an image without them boots and reports its
 version, it just can't name the commit. See
 [`releasing.md`](releasing.md#build-stamping).
 
+A PaaS that builds from the Dockerfile can't run `$(git rev-parse HEAD)`. For
+Coolify, turn on the application's **Include Source Commit in Build** setting:
+Coolify then passes the deployed commit as the `SOURCE_COMMIT` build arg, and
+the Dockerfile uses it whenever `GIT_SHA` isn't set, so every Redeploy records
+its commit. The build date has no equivalent; leave it unset or set
+`BUILD_DATE` as a build variable yourself.
+
 Two things about the build worth knowing before you size a build host:
 
 - **Peak RAM is `mix deps.compile`**, not the app compile. The Ash ecosystem
@@ -471,7 +478,9 @@ network.
 a single VPS running Coolify, deploying by a manual **Redeploy** that builds
 the Dockerfile and starts the container: migrations run on boot, assets build
 at image build, and the health check is `/live`. Everything above applies as
-is; environment goes in Coolify's application settings, and Coolify's Traefik
+is; environment goes in Coolify's application settings (turn on **Include
+Source Commit in Build** so the image records its commit — see
+[Building the image](#building-the-image)), and Coolify's Traefik
 is the proxy — set `TRUSTED_PROXIES` to its docker network range. The
 per-release checklists under *Audits & release checklists* were written
 against this target and describe, per feature batch, what to verify after a

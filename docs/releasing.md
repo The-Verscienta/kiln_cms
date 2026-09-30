@@ -549,4 +549,6 @@ docker build \
 ```
 
 Without them the image still boots and reports its version; it just can't name
-the commit, which is the first thing you want when a deploy misbehaves.
+the commit, which is the first thing you want when a deploy misbehaves. When
+`GIT_SHA` is unset the Dockerfile falls back to a `SOURCE_COMMIT` build arg,
+which Coolify passes when its **Include Source Commit in Build** setting is on.
