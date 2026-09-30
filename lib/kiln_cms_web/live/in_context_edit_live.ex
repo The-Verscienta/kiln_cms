@@ -11,10 +11,19 @@ defmodule KilnCMSWeb.InContextEditLive do
   the same Ash `:update`/`:autosave` actions the structured editor uses — so
   policies (#332) and PaperTrail versioning are native, with no separate write path.
 
-  Scope is inline text editing of existing blocks plus drag-and-drop (and
-  keyboard) reordering. Structural add / delete of blocks belongs to the block
-  editor and page-building (#335) and stays out of scope — the "Open full editor"
-  link covers it.
+  Scope is inline text editing, drag-and-drop (and keyboard) reordering, and
+  adding the inline-editable block types — paragraph (`rich_text`), heading and
+  quote — where the author is looking (#1801). An added block joins the same
+  working set and is written by the same save, so it inherits the optimistic
+  lock, the policies and the versioning above with no second write path.
+
+  An added block that is still empty is *held*: shown, but left out of every
+  write until it has text. Heading and quote text is required, so writing it
+  empty would fail the whole save; holding it is what lets an author add a block
+  and then edit a different one without the autosave refusing. A block added in
+  this session can be removed again from here. Removing any other block, and
+  adding the other block types, stays with the block editor (#335) — the "Other
+  block types" entry and "Open full editor" link go there.
 
   Editor/admin only (mounted in the `:editor_routes` live session). The per-type
   authoring scope is enforced by the resource policies at save time, exactly as in
@@ -95,6 +104,12 @@ defmodule KilnCMSWeb.InContextEditLive do
     # `phx-update="ignore"` editable regions remount and reload from the
     # fresh content rather than keeping the stale DOM they own.
     |> assign(:region_version, 0)
+    # Where the "Add a block" menu is open: a block id (insert after it),
+    # `"end"`, or nil when closed (#1801).
+    |> assign(:add_at, nil)
+    # Blocks added in this session. Only these may be removed from here, and
+    # only these are held out of a write while empty.
+    |> assign(:new_block_ids, MapSet.new())
     |> assign_record(record)
   end
 
@@ -211,6 +226,60 @@ defmodule KilnCMSWeb.InContextEditLive do
     end
   end
 
+  # Open / close the "Add a block" menu at a position (#1801): after the block
+  # `at`, or at the end of the page.
+  def handle_event("open_add", %{"at" => at}, socket) when is_binary(at) do
+    {:noreply, assign(socket, :add_at, at)}
+  end
+
+  def handle_event("close_add", _params, socket), do: {:noreply, assign(socket, :add_at, nil)}
+
+  # Insert an empty inline-editable block after `at` (a block id) or at the
+  # end. It goes into the working set only; it is not written until it has
+  # text (see `split_held/1`), so adding one never marks the page dirty.
+  def handle_event("add_block", %{"type" => type, "at" => at}, socket)
+      when is_binary(type) and is_binary(at) do
+    with true <- socket.assigns.may_write?,
+         true <- Map.has_key?(InlineEditing.inline_fields(), type),
+         index when is_integer(index) <- insert_index(socket.assigns.blocks, at) do
+      id = Ash.UUID.generate()
+      input = new_block_input(type, id)
+      [descriptor] = InlineEditing.editable_blocks(TypedBlocks.to_typed([input]))
+
+      {:noreply,
+       socket
+       |> insert_block(index, input, descriptor)
+       |> update(:new_block_ids, &MapSet.put(&1, id))
+       |> assign(:add_at, nil)
+       |> assign(:moved_announcement, added_label(type))
+       |> push_event("kiln:focus-block", %{id: id})}
+    else
+      _ -> {:noreply, assign(socket, :add_at, nil)}
+    end
+  end
+
+  # Remove a block added in this session. Any other block is left alone: taking
+  # an existing block off the page stays with the full editor.
+  def handle_event("remove_block", %{"id" => id}, socket) when is_binary(id) do
+    index = Enum.find_index(socket.assigns.blocks, &(to_string(&1.id) == id))
+
+    if index && MapSet.member?(socket.assigns.new_block_ids, id) do
+      blank? = blank_block?(Enum.at(socket.assigns.block_inputs, index))
+
+      socket =
+        socket
+        |> assign(:block_inputs, List.delete_at(socket.assigns.block_inputs, index))
+        |> assign(:blocks, reindex(List.delete_at(socket.assigns.blocks, index)))
+        |> update(:new_block_ids, &MapSet.delete(&1, id))
+        |> assign(:moved_announcement, gettext("Block removed"))
+
+      # A held (empty) block was never written, so there is nothing to save.
+      {:noreply, if(blank?, do: socket, else: mark_dirty(socket))}
+    else
+      {:noreply, socket}
+    end
+  end
+
   # Explicit save (the toolbar Save button, and the only save path for non-draft
   # content). Optimistic-lock conflicts pause with a banner rather than clobbering
   # a concurrent edit.
@@ -231,6 +300,8 @@ defmodule KilnCMSWeb.InContextEditLive do
      |> cancel_autosave_timer()
      |> assign_record(reload(socket, socket.assigns.record.id))
      |> reset_regions()
+     |> assign(:new_block_ids, MapSet.new())
+     |> assign(:add_at, nil)
      |> assign(:conflict, false)
      |> assign(:save_state, :saved)
      |> put_flash(:info, gettext("Reloaded the latest version."))}
@@ -302,14 +373,11 @@ defmodule KilnCMSWeb.InContextEditLive do
     # `:update` shares the `:save` telemetry event with the structured editor.
     event = if action == :autosave, do: :autosave, else: :save
 
+    {inputs, held} = split_held(socket)
+
     result =
       EditorTelemetry.span(event, %{kind: socket.assigns.kind}, fn ->
-        InlineEditing.write(
-          socket.assigns.record,
-          action,
-          socket.assigns.block_inputs,
-          socket.assigns.actor
-        )
+        InlineEditing.write(socket.assigns.record, action, inputs, socket.assigns.actor)
       end)
 
     case result do
@@ -317,6 +385,7 @@ defmodule KilnCMSWeb.InContextEditLive do
         {:ok,
          socket
          |> assign_record(reload(socket, record.id))
+         |> restore_held(held)
          |> reset_regions()
          |> assign(:save_state, :saved)}
 
@@ -402,6 +471,91 @@ defmodule KilnCMSWeb.InContextEditLive do
     end
   end
 
+  # ── adding blocks (#1801) ──────────────────────────────────────────────────
+
+  # The working-set position a new block goes to: after block `at`, or last.
+  defp insert_index(blocks, "end"), do: length(blocks)
+
+  defp insert_index(blocks, at) do
+    case Enum.find_index(blocks, &(to_string(&1.id) == at)) do
+      nil -> nil
+      index -> index + 1
+    end
+  end
+
+  # An empty block of `type` as a `BlockUnion` input map, carrying its stable id.
+  defp new_block_input("heading", id), do: %{"id" => id, "_type" => "heading", "level" => 2}
+  defp new_block_input("rich_text", id), do: %{"id" => id, "_type" => "rich_text", "body" => []}
+  defp new_block_input(type, id), do: %{"id" => id, "_type" => type}
+
+  defp insert_block(socket, index, input, descriptor) do
+    socket
+    |> update(:block_inputs, &List.insert_at(&1, index, input))
+    |> update(:blocks, &reindex(List.insert_at(&1, index, descriptor)))
+  end
+
+  defp reindex(blocks) do
+    blocks |> Enum.with_index() |> Enum.map(fn {block, index} -> %{block | index: index} end)
+  end
+
+  # The working set to write, and the held blocks left out of it: blocks added
+  # in this session that are still empty, each with its position so it can go
+  # back on the page after the save reloads the record. Heading and quote text
+  # is required, so an empty one would fail the whole write — and an empty
+  # paragraph is not worth a version. Only NEW blocks are held: an existing
+  # heading emptied by its author still fails the save as before, rather than
+  # quietly disappearing from the page.
+  defp split_held(socket) do
+    new_ids = socket.assigns.new_block_ids
+
+    socket.assigns.block_inputs
+    |> Enum.zip(socket.assigns.blocks)
+    |> Enum.with_index()
+    |> Enum.reduce({[], []}, fn {{input, descriptor}, index}, {inputs, held} ->
+      if MapSet.member?(new_ids, to_string(input["id"])) and blank_block?(input) do
+        {inputs, [{index, input, descriptor} | held]}
+      else
+        {[input | inputs], held}
+      end
+    end)
+    |> then(fn {inputs, held} -> {Enum.reverse(inputs), Enum.reverse(held)} end)
+  end
+
+  # Put held blocks back at their positions, in ascending order so each index
+  # is right once the ones before it are in.
+  defp restore_held(socket, held) do
+    Enum.reduce(held, socket, fn {index, input, descriptor}, socket ->
+      index = min(index, length(socket.assigns.blocks))
+      insert_block(socket, index, input, descriptor)
+    end)
+  end
+
+  defp blank_block?(%{"_type" => "rich_text"} = input) do
+    blank_text?(KilnCMS.Blocks.PortableText.to_plain_text(input["body"])) and
+      blank_text?(input["legacy_html"])
+  end
+
+  defp blank_block?(%{"_type" => type} = input) when type in ["heading", "quote"],
+    do: blank_text?(input["text"])
+
+  defp blank_block?(_input), do: false
+
+  defp blank_text?(value) when is_binary(value), do: String.trim(value) == ""
+  defp blank_text?(_value), do: true
+
+  # The block types the add menu offers, in the order shown.
+  defp add_choices do
+    [
+      {"rich_text", gettext("Paragraph"), "hero-bars-3-bottom-left"},
+      {"heading", gettext("Heading"), "hero-hashtag"},
+      {"quote", gettext("Quote"), "hero-chat-bubble-bottom-center-text"}
+    ]
+  end
+
+  defp added_label("heading"), do: gettext("Added a heading")
+  defp added_label("quote"), do: gettext("Added a quote")
+  defp added_label(_type), do: gettext("Added a paragraph")
+
   defp redirect_to_editor(socket, message) do
     socket |> put_flash(:error, message) |> push_navigate(to: ~p"/editor")
   end
@@ -440,11 +594,7 @@ defmodule KilnCMSWeb.InContextEditLive do
         <h1 class="public-title text-3xl font-bold tracking-tight">{@record.title}</h1>
 
         <p :if={@blocks == []} class="mt-6 text-base-content/70">
-          {gettext("This page has no text blocks to edit inline yet.")}
-          <.link navigate={~p"/editor/content/#{@kind}/#{@record.id}"} class="underline">
-            {gettext("Open the full editor")}
-          </.link>
-          {gettext("to add blocks.")}
+          {gettext("This page has no blocks yet. Add one below.")}
         </p>
 
         <%!-- Announces keyboard reorder moves to screen readers (mirrors #171). --%>
@@ -489,10 +639,32 @@ defmodule KilnCMSWeb.InContextEditLive do
                   <.icon name="hero-chevron-down" class="size-4" />
                 </button>
               </div>
+              <button
+                :if={MapSet.member?(@new_block_ids, to_string(block.id))}
+                type="button"
+                phx-click="remove_block"
+                phx-value-id={block.id}
+                aria-label={gettext("Remove this new block")}
+                title={gettext("Remove this new block")}
+                class="text-base-content/40 hover:text-error"
+              >
+                <.icon name="hero-trash" class="size-4" />
+              </button>
             </div>
             <.block block={block} region_version={@region_version} />
+            <%!-- Inside the wrap, not beside it: the Sortable container's
+                  direct children are the draggable blocks. --%>
+            <.add_control at={to_string(block.id)} add_at={@add_at} kind={@kind} record={@record} />
           </div>
         </div>
+
+        <.add_control
+          at="end"
+          add_at={@add_at}
+          kind={@kind}
+          record={@record}
+          prominent
+        />
       </article>
     </Layouts.public>
     """
@@ -571,6 +743,90 @@ defmodule KilnCMSWeb.InContextEditLive do
     """
   end
 
+  # "Add a block" (#1801): a button that opens a small menu of the block types
+  # that can be written in place, at one position. Between blocks it stays
+  # quiet until the block is hovered or focused; at the end of the page
+  # (`prominent`) it is always visible, since that is where authors look.
+  attr :at, :string, required: true
+  attr :add_at, :string, default: nil
+  attr :kind, :any, required: true
+  attr :record, :any, required: true
+  attr :prominent, :boolean, default: false
+
+  defp add_control(%{add_at: at, at: at} = assigns) do
+    ~H"""
+    <div
+      id={"add-menu-#{@at}"}
+      role="group"
+      aria-label={gettext("Add a block")}
+      phx-window-keydown="close_add"
+      phx-key="Escape"
+      class="not-prose mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-base-content/15 bg-base-100 p-2 text-sm shadow-sm"
+    >
+      <span class="px-1 text-base-content/60">{gettext("Add:")}</span>
+      <button
+        :for={{type, label, icon} <- add_choices()}
+        type="button"
+        phx-click="add_block"
+        phx-value-type={type}
+        phx-value-at={@at}
+        class="btn btn-sm btn-default"
+      >
+        <.icon name={icon} class="size-4" /> {label}
+      </button>
+      <.link
+        navigate={~p"/editor/content/#{@kind}/#{@record.id}"}
+        class="px-1 text-base-content/70 underline hover:text-base-content"
+      >
+        {gettext("Other block types (full editor)")}
+      </.link>
+      <button
+        type="button"
+        phx-click="close_add"
+        aria-label={gettext("Close")}
+        class="ml-auto text-base-content/50 hover:text-base-content"
+      >
+        <.icon name="hero-x-mark" class="size-4" />
+      </button>
+    </div>
+    """
+  end
+
+  defp add_control(assigns) do
+    ~H"""
+    <div class={
+      [
+        "not-prose",
+        if(@prominent,
+          do: "mt-6",
+          # Absolutely placed in the gap below the block, so the page being
+          # edited keeps the live page's spacing until the author reaches for it.
+          else:
+            "absolute left-0 top-full z-10 -translate-y-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100"
+        )
+      ]
+    }>
+      <button
+        id={"add-block-#{@at}"}
+        type="button"
+        phx-click="open_add"
+        phx-value-at={@at}
+        class={[
+          "inline-flex items-center gap-1.5 rounded text-sm transition-colors",
+          if(@prominent,
+            do:
+              "w-full justify-center border border-dashed border-base-content/25 px-3 py-2 text-base-content/70 hover:border-primary/60 hover:text-base-content",
+            else: "bg-base-100 px-1.5 py-0.5 text-base-content/50 shadow-sm hover:text-base-content"
+          )
+        ]}
+      >
+        <.icon name="hero-plus" class="size-4" />
+        {if @prominent, do: gettext("Add a block"), else: gettext("Add a block here")}
+      </button>
+    </div>
+    """
+  end
+
   attr :block, :map, required: true
   attr :region_version, :integer, required: true
 
@@ -586,7 +842,8 @@ defmodule KilnCMSWeb.InContextEditLive do
         role="textbox"
         aria-label={gettext("Edit heading")}
         data-kiln-block-id={@block.id}
-        class="text-xl font-bold outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2"
+        data-placeholder={gettext("Type a heading")}
+        class="min-h-[1.5em] text-xl font-bold outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 empty:before:text-base-content/40 empty:before:content-[attr(data-placeholder)]"
       >{@block.value}</h2>
     </div>
     """
@@ -603,7 +860,8 @@ defmodule KilnCMSWeb.InContextEditLive do
         role="textbox"
         aria-label={gettext("Edit quote")}
         data-kiln-block-id={@block.id}
-        class="border-l-4 border-base-300 pl-3 italic outline-none focus:ring-2 focus:ring-primary/40"
+        data-placeholder={gettext("Type a quote")}
+        class="min-h-[1.5em] border-l-4 border-base-300 pl-3 italic outline-none focus:ring-2 focus:ring-primary/40 empty:before:text-base-content/40 empty:before:content-[attr(data-placeholder)]"
       >{@block.value}</blockquote>
     </div>
     """

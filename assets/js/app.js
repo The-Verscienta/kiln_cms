@@ -109,8 +109,13 @@ const Hooks = {
   // exactly on the field the user clicked in their external front end.
   FocusBlock: {
     mounted() {
+      // A block just added in place (#1801) is focused the same way, so the
+      // author can start typing into it straight away.
+      this.handleEvent("kiln:focus-block", ({id}) => this.focusBlock(id))
       const id = this.el.dataset.kilnFocus
-      if (!id) return
+      if (id) this.focusBlock(id)
+    },
+    focusBlock(id) {
       // Defer a frame so the block regions (phx-update="ignore") have mounted.
       requestAnimationFrame(() => {
         const wrap = document.getElementById(`block-wrap-${id}`)
@@ -118,8 +123,15 @@ const Hooks = {
         wrap.scrollIntoView({behavior: "smooth", block: "center"})
         wrap.classList.add("kiln-focus-pulse")
         setTimeout(() => wrap.classList.remove("kiln-focus-pulse"), 1600)
-        const editable = wrap.querySelector("[data-kiln-block-id][contenteditable]")
-        if (editable) editable.focus()
+        // A rich-text region's editor (TipTap) mounts asynchronously, so give
+        // it a few frames to appear before giving up.
+        let tries = 20
+        const focus = () => {
+          const editable = wrap.querySelector("[contenteditable=true]")
+          if (editable) editable.focus()
+          else if (tries-- > 0) requestAnimationFrame(focus)
+        }
+        focus()
       })
     },
   },

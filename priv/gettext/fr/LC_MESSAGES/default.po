@@ -1440,6 +1440,16 @@ msgstr "Ajouter %{count} élément(s)"
 msgid "Add %{kind}"
 msgstr "Ajouter une %{kind}"
 
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add a block"
+msgstr "Ajouter un bloc"
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add a block here"
+msgstr "Ajouter un bloc ici"
+
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add a domain"
@@ -1674,6 +1684,11 @@ msgstr "Ajouter le webhook"
 msgid "Add your first block below to start building this page."
 msgstr "Ajoutez votre premier bloc ci-dessous pour commencer à construire cette page."
 
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add:"
+msgstr "Ajouter :"
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format
 msgid "Added"
@@ -1693,6 +1708,21 @@ msgstr "%{count} élément(s) ajouté(s) ; %{skipped} ignoré(s) — déjà dans
 #, elixir-autogen, elixir-format
 msgid "Added %{date}"
 msgstr "Ajouté le %{date}"
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Added a heading"
+msgstr "Titre ajouté"
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Added a paragraph"
+msgstr "Paragraphe ajouté"
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Added a quote"
+msgstr "Citation ajoutée"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -2488,6 +2518,11 @@ msgstr "Éditeur de blocs"
 msgid "Block instance"
 msgstr "Bloquer l'instance"
 
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Block removed"
+msgstr "Bloc supprimé"
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Block this actor? Its follow is removed and future follows are refused."
@@ -3150,6 +3185,7 @@ msgstr "Secret client"
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Close"
@@ -6626,6 +6662,11 @@ msgstr "HTML de l'en-tête"
 msgid "Header menu"
 msgstr "Menu d'en-tête"
 
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Heading"
+msgstr "Titre"
+
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "Heading (optional)"
@@ -9332,7 +9373,6 @@ msgstr "Les tâches ouvertes restent ouvertes lors de la publication de leur con
 msgid "Open the editor's Compliance panel"
 msgstr "Ouvrir le panneau Conformité de l’éditeur"
 
-#: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Open the full editor"
@@ -9439,6 +9479,11 @@ msgstr "Champs orphelins"
 #, elixir-autogen, elixir-format
 msgid "Other"
 msgstr "Autre"
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Other block types (full editor)"
+msgstr "Autres types de bloc (éditeur complet)"
 
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
@@ -9567,6 +9612,11 @@ msgstr "Contenu du panneau"
 #, elixir-autogen, elixir-format
 msgid "Panel title"
 msgstr "Titre du panneau"
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Paragraph"
+msgstr "Paragraphe"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -10262,6 +10312,7 @@ msgid "Question"
 msgstr "Question"
 
 #: lib/kiln_cms_web/live/content_editor/block_params.ex
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
 msgid "Quote"
 msgstr "Citation"
@@ -10782,6 +10833,11 @@ msgstr "Retirer cet élément du lancement ?"
 #, elixir-autogen, elixir-format
 msgid "Remove this member from the site?"
 msgstr "Retirer ce membre du site ?"
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove this new block"
+msgstr "Retirer ce nouveau bloc"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -14282,8 +14338,8 @@ msgstr "Cet article est réservé aux membres"
 
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
-msgid "This page has no text blocks to edit inline yet."
-msgstr "Cette page n'a pas encore de blocs de texte modifiables sur place."
+msgid "This page has no blocks yet. Add one below."
+msgstr "Cette page n’a pas encore de bloc. Ajoutez-en un ci-dessous."
 
 #: lib/kiln_cms_web/controllers/offline_controller.ex
 #, elixir-autogen, elixir-format
@@ -14805,6 +14861,16 @@ msgstr "Tapez / pour mettre en forme ce texte ou insérer un bloc ci-dessous."
 #, elixir-autogen, elixir-format
 msgid "Type @ to bring someone in."
 msgstr "Tapez @ pour inviter quelqu'un."
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Type a heading"
+msgstr "Saisissez un titre"
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Type a quote"
+msgstr "Saisissez une citation"
 
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
@@ -17101,11 +17167,6 @@ msgstr "ces compteurs semblent erronés"
 #, elixir-autogen, elixir-format
 msgid "this is you"
 msgstr "c'est vous"
-
-#: lib/kiln_cms_web/live/in_context_edit_live.ex
-#, elixir-autogen, elixir-format
-msgid "to add blocks."
-msgstr "pour ajouter des blocs."
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
