@@ -223,6 +223,9 @@ Every summary line below that was shortened links to its own entry there.
   the body.**
   ([#1758](https://github.com/The-Verscienta/kiln_cms/issues/1758) · [long form](docs/changelog/unreleased.md#a-search-highlight-names-the-title-once))
 
+- **A page in the public search results shows why it matched.**
+  ([#1766](https://github.com/The-Verscienta/kiln_cms/issues/1766) · [long form](docs/changelog/unreleased.md#a-page-in-public-search-results-shows-why-it-matched))
+
 ### Security
 
 - **Changing or resetting a password now signs out every other session and

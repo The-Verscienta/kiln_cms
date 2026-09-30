@@ -541,6 +541,15 @@ carries the reasoning.
   at once
   ([#1758](https://github.com/The-Verscienta/kiln_cms/issues/1758)).
 
+<a id="a-page-in-public-search-results-shows-why-it-matched"></a>
+
+- **A page in the public search results shows why it matched.** `/search`
+  listed a page hit as its title alone; posts and custom content show their
+  excerpt, and a page has none. A page hit now shows the search highlight
+  with the matched words marked, escaped except for the marks, and falls back
+  to its meta description when the match gives no highlight
+  ([#1766](https://github.com/The-Verscienta/kiln_cms/issues/1766)).
+
 ## Security
 
 <a id="password-rotation-revokes-every-session"></a>

@@ -25,6 +25,20 @@ defmodule KilnCMSWeb.ContentHTML do
   end
 
   @doc """
+  The line under a page hit on `/search` (#1766): the search highlight — why
+  it matched, escaped except for its `<mark>` tags — or, when the match gave
+  none, the page's meta description. `nil` when there is neither.
+  """
+  def search_snippet(%{highlight: highlight}) when is_binary(highlight) and highlight != "",
+    do: KilnCMS.Search.Highlight.to_safe_html(highlight)
+
+  def search_snippet(%{seo_description: description})
+      when is_binary(description) and description != "",
+      do: description
+
+  def search_snippet(_record), do: nil
+
+  @doc """
   Long-form published date, localized: the format string and month names both
   flow through gettext (`Calendar.strftime`'s `%B` is English-only), so
   `/fr/blog/…` can render "2 juillet 2026" instead of "July 2, 2026".
