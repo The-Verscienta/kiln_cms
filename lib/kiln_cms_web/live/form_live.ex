@@ -4,7 +4,9 @@ defmodule KilnCMSWeb.FormLive do
   duplicate, and delete public forms. Building a form — its fields, settings,
   embed code, and entries — happens in the visual builder
   (`KilnCMSWeb.FormBuilderLive`, `/editor/forms/:id`). Public rendering
-  happens through the `:form` content block; submissions arrive via
+  happens through the `:form` content block or the hosted embed page
+  (`GET /forms/:slug/embed`, which each active form's row links to alongside
+  its embed snippet and `GET /api/forms/:slug`); submissions arrive via
   `POST /forms/:slug` (see `KilnCMS.Forms`).
   """
   use KilnCMSWeb, :live_view
@@ -87,6 +89,10 @@ defmodule KilnCMSWeb.FormLive do
     end
   end
 
+  # Pushed by the `Clipboard` hook once the embed snippet is on the clipboard.
+  def handle_event("copied", _params, socket),
+    do: {:noreply, put_flash(socket, :info, gettext("Embed code copied to clipboard."))}
+
   def handle_event("delete_form", %{"id" => id}, socket) when is_binary(id) do
     opts = actor_opts(socket)
 
@@ -118,6 +124,13 @@ defmodule KilnCMSWeb.FormLive do
       )
     )
   end
+
+  # The addresses that actually answer for an active form (#1783): the hosted
+  # embed page (`GET /forms/:slug/embed`, also fine as a top-level page) and the
+  # headless schema (`GET /api/forms/:slug`). On the org's own host, like the
+  # embed snippet (#557).
+  defp hosted_url(form, org), do: KilnCMSWeb.Tenant.base_url(org) <> "/forms/#{form.slug}/embed"
+  defp api_url(form, org), do: KilnCMSWeb.Tenant.base_url(org) <> "/api/forms/#{form.slug}"
 
   # A slug not yet taken by any listed form: `contact-copy`, `contact-copy-2`, …
   # Every attribute the create action accepts, read off the resource rather than
@@ -217,39 +230,104 @@ defmodule KilnCMSWeb.FormLive do
             {gettext("Create a form above to start collecting submissions.")}
           </.empty_state>
           <ul :if={@forms != []} class="card divide-y divide-base-content/10 overflow-hidden">
-            <li :for={form <- @forms} class="flex items-center justify-between gap-3 p-3">
-              <.link
-                navigate={~p"/editor/forms/#{form.id}"}
-                class="min-w-0 flex-1 text-left hover:underline"
+            <li :for={form <- @forms} id={"form-row-#{form.id}"} class="space-y-2 p-3">
+              <div class="flex items-center justify-between gap-3">
+                <.link
+                  navigate={~p"/editor/forms/#{form.id}"}
+                  class="min-w-0 flex-1 truncate text-left font-medium hover:underline"
+                >
+                  {form.name}
+                </.link>
+                <span :if={!form.active} class="rounded bg-base-200 px-1.5 py-0.5 text-xs">
+                  {gettext("Inactive")}
+                </span>
+                <span class="text-xs text-base-content/60">
+                  {gettext("%{count} submissions", count: form.submission_count)}
+                </span>
+                <button
+                  type="button"
+                  phx-click="duplicate_form"
+                  phx-value-id={form.id}
+                  aria-label={gettext("Duplicate %{name}", name: form.name)}
+                  title={gettext("Duplicate %{name}", name: form.name)}
+                  class="btn btn-sm btn-ghost"
+                >
+                  <.icon name="hero-square-2-stack" class="size-4" />
+                </button>
+                <button
+                  type="button"
+                  phx-click="delete_form"
+                  phx-value-id={form.id}
+                  data-confirm={gettext("Delete %{name} and all its submissions?", name: form.name)}
+                  aria-label={gettext("Delete %{name}", name: form.name)}
+                  title={gettext("Delete %{name}", name: form.name)}
+                  class="btn btn-sm btn-ghost hover:text-error"
+                >
+                  <.icon name="hero-trash" class="size-4" />
+                </button>
+              </div>
+              <%!-- #1783: only addresses that answer. There is no HTML page at
+                    `/forms/:slug` (GET there is nothing; the schema lives under
+                    `/api`), so the list names the hosted embed page, the
+                    embed snippet, and the JSON API — each labelled for what
+                    it is. An inactive form answers 404 on all three, so it
+                    advertises none of them. --%>
+              <div
+                :if={form.active}
+                id={"form-links-#{form.id}"}
+                class="space-y-2 text-xs text-base-content/70"
               >
-                <span class="font-medium">{form.name}</span>
-                <code class="ml-2 text-xs text-base-content/60">/forms/{form.slug}</code>
-              </.link>
-              <span :if={!form.active} class="rounded bg-base-200 px-1.5 py-0.5 text-xs">
-                {gettext("Inactive")}
-              </span>
-              <span class="text-xs text-base-content/60">
-                {gettext("%{count} submissions", count: form.submission_count)}
-              </span>
-              <button
-                type="button"
-                phx-click="duplicate_form"
-                phx-value-id={form.id}
-                aria-label={gettext("Duplicate form")}
-                class="btn btn-sm btn-ghost"
+                <dl class="grid gap-x-3 gap-y-1 sm:grid-cols-[auto_1fr]">
+                  <dt class="font-medium">{gettext("Hosted form")}</dt>
+                  <dd class="min-w-0">
+                    <a
+                      href={hosted_url(form, @current_org)}
+                      target="_blank"
+                      rel="noopener"
+                      data-role="hosted-form"
+                      class="break-all font-mono hover:underline"
+                    >
+                      {hosted_url(form, @current_org)}
+                      <span class="sr-only">{gettext("(opens in a new tab)")}</span>
+                    </a>
+                  </dd>
+                  <dt class="font-medium">{gettext("JSON API")}</dt>
+                  <dd class="min-w-0">
+                    <code data-role="json-api" class="break-all">
+                      {api_url(form, @current_org)}
+                    </code>
+                  </dd>
+                </dl>
+                <div class="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readonly
+                    value={KilnCMSWeb.Embed.form_snippet(form.slug, @current_org)}
+                    aria-label={gettext("Embed code for %{name}", name: form.name)}
+                    class="field-input min-w-0 flex-1 font-mono text-xs"
+                  />
+                  <button
+                    type="button"
+                    id={"copy-embed-#{form.id}"}
+                    phx-hook="Clipboard"
+                    data-clipboard-text={KilnCMSWeb.Embed.form_snippet(form.slug, @current_org)}
+                    aria-label={gettext("Copy embed code for %{name}", name: form.name)}
+                    class="btn btn-sm btn-default shrink-0"
+                  >
+                    <.icon name="hero-clipboard-document" class="size-4" />
+                    {gettext("Copy")}
+                  </button>
+                </div>
+              </div>
+              <p
+                :if={!form.active}
+                id={"form-links-#{form.id}"}
+                class="text-xs text-base-content/60"
               >
-                <.icon name="hero-square-2-stack" class="size-4" />
-              </button>
-              <button
-                type="button"
-                phx-click="delete_form"
-                phx-value-id={form.id}
-                data-confirm={gettext("Delete this form and all its submissions?")}
-                aria-label={gettext("Delete form")}
-                class="btn btn-sm btn-ghost hover:text-error"
-              >
-                <.icon name="hero-trash" class="size-4" />
-              </button>
+                {gettext(
+                  "Not public yet: activate it in the form builder to get its hosted page, embed code and API address."
+                )}
+              </p>
             </li>
           </ul>
         </section>

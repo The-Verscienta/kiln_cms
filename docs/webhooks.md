@@ -22,6 +22,15 @@ resets (see [Auto-disable](#auto-disable) below).
 
 Deleting an endpoint takes its delivery history with it.
 
+The form starts with the default subscription ticked, the same list an
+endpoint created over code or AshAdmin gets when it names no events: the
+"Subscribed by default" rows of the table below, plus `form.submitted`. The
+events that carry unpublished content are marked **includes unpublished
+content** and start unticked. **Select all**, **Clear** and **Reset to
+defaults** act on the whole list, and each group (one per content type, plus
+tasks, releases, experiments and memberships) has its own toggle. An endpoint
+that receives unpublished content says so on its row.
+
 ## Event names & payload
 
 An event name is `<type>.<verb>`. Every registered content type — built-in and

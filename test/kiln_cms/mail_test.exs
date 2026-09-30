@@ -157,6 +157,37 @@ defmodule KilnCMS.MailTest do
     assert Mail.domain_of("a@b.test") == "b.test"
   end
 
+  # #1779: the admin test-send panel phrases a failure from this instead of
+  # rendering the raw term, so each gen_smtp shape must land on its sentence.
+  describe "failure_kind/1" do
+    test "classifies each gen_smtp failure shape" do
+      assert Mail.failure_kind(
+               {:send, {:permanent_failure, ~c"mx", "550 5.1.1 <x@example.com>: no such user"}}
+             ) == :recipient
+
+      assert Mail.failure_kind({:no_more_hosts, {:permanent_failure, ~c"relay", :auth_failed}}) ==
+               :relay
+
+      assert Mail.failure_kind({:send, {:permanent_failure, ~c"mx", "554 5.6.0 spam"}}) ==
+               :message
+
+      assert Mail.failure_kind(
+               {:retries_exceeded, {:network_failure, ~c"relay", {:error, :econnrefused}}}
+             ) == :connection
+
+      assert Mail.failure_kind({:send, {:temporary_failure, ~c"mx", "451 4.7.1 greylisted"}}) ==
+               :transient
+
+      assert Mail.failure_kind({:site_relay, :missing_password}) == :site_relay
+    end
+
+    test "redact_failure/1 scrubs addresses from the logged term" do
+      logged = Mail.redact_failure({:send, {:permanent_failure, ~c"mx", "550 <a@b.example>"}})
+      refute logged =~ "a@b.example"
+      assert logged =~ "address redacted"
+    end
+  end
+
   describe "deliver_for_worker/2" do
     test "returns :ok on successful delivery" do
       assert :ok = Mail.deliver_for_worker(email())

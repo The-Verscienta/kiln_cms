@@ -81,6 +81,31 @@ defmodule KilnCMSWeb.SiteMailLiveTest do
   end
 
   describe "saving" do
+    # #1780: an unconfigured integration's toggle started CHECKED while the
+    # status copy said it was inactive — one save away from switching it on.
+    test "an unconfigured site starts with the enable toggle off", %{conn: conn, org: org} do
+      lv = mount_as_admin(conn, org)
+
+      assert has_element?(lv, ~s(#site-mail-form input[type=checkbox][name="relay[enabled]"]))
+
+      refute has_element?(
+               lv,
+               ~s(#site-mail-form input[type=checkbox][name="relay[enabled]"][checked])
+             )
+    end
+
+    test "a saved, enabled integration still shows its toggle on", %{conn: conn, org: org} do
+      lv = mount_as_admin(conn, org)
+      save(lv, @valid)
+
+      lv = mount_as_admin(conn, org)
+
+      assert has_element?(
+               lv,
+               ~s(#site-mail-form input[type=checkbox][name="relay[enabled]"][checked])
+             )
+    end
+
     test "stores the password encrypted and never renders it", %{conn: conn, org: org} do
       lv = mount_as_admin(conn, org)
       html = save(lv, @valid)

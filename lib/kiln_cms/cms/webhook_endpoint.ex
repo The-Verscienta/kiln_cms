@@ -35,6 +35,11 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   # mirror that never hears about a deletion keeps serving it.
   @default_verbs ~w(published unpublished updated archived deleted restored)
 
+  # The complement: the verbs whose events carry an unpublished body. Every
+  # surface that lists events (the console's "includes unpublished content"
+  # hint, #1776) reads this rather than keeping its own copy.
+  @draft_verbs @verbs -- @default_verbs
+
   # Domain events that are NOT a content type crossed with a verb. Editorial
   # tasks (#501) and content releases (#500) dispatch through the same
   # `KilnCMS.Webhooks.dispatch/3` funnel with a literal type segment, so they are
@@ -51,6 +56,26 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
 
   @doc "The lifecycle verbs every content type can emit."
   def verbs, do: @verbs
+
+  @doc """
+  The lifecycle verbs whose events carry the full body of a document that is
+  not published: `created`, `in_review` and `returned_to_draft`. They are left
+  out of `default_events/1`, so an endpoint receives them only when an admin
+  selects them.
+  """
+  def draft_verbs, do: @draft_verbs
+
+  @doc """
+  Whether `event` (e.g. `"page.in_review"`) carries unpublished content: a
+  content-type event whose verb is one of `draft_verbs/0`.
+  """
+  @spec carries_drafts?(String.t()) :: boolean()
+  def carries_drafts?(event) when is_binary(event) do
+    case String.split(event, ".", parts: 2) do
+      [_type, verb] -> verb in @draft_verbs
+      _ -> false
+    end
+  end
 
   @doc """
   Every selectable event name: each registered content type — compiled and
@@ -83,14 +108,16 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   `returned_to_draft`, #375) and `created` carry unpublished draft bodies and
   are therefore **opt-in only** — select them explicitly on the endpoint.
 
-  Arity 0 on purpose: this is an attribute `default`, which Ash evaluates with
-  no access to the changeset's tenant, so it can only resolve the default org's
-  dynamic types. The console never relies on it — its create form submits an
-  explicit `events` list built from `events/1` for the request's org — so this
-  only applies to tenant-less programmatic creates.
+  `org` (an organization, its id, or `nil` for the default org) decides which
+  dynamic types are included. This is the one source of the default: the
+  `:create` action fills it in for the changeset's tenant when no `events` are
+  given, so the code interface, AshAdmin and any other programmatic create get
+  it, and the console's new-webhook form pre-checks exactly this list (#1776).
+  The attribute `default` calls it with no org, because Ash evaluates an
+  attribute default without the tenant; the `:create` change replaces it.
   """
-  def default_events do
-    types = KilnCMS.CMS.ContentTypes.all_for_org(nil)
+  def default_events(org \\ nil) do
+    types = KilnCMS.CMS.ContentTypes.all_for_org(org)
     content = for ct <- types, verb <- @default_verbs, do: "#{ct.type}.#{verb}"
     content ++ ["form.submitted"]
   end
@@ -113,6 +140,21 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
 
     create :create do
       primary? true
+      # No `events` given: subscribe to the defaults for THIS tenant's types.
+      # The attribute default can only see the default org's (see
+      # `default_events/1`).
+      change fn changeset, _context ->
+        if Ash.Changeset.changing_attribute?(changeset, :events) do
+          changeset
+        else
+          Ash.Changeset.force_change_attribute(
+            changeset,
+            :events,
+            default_events(changeset.tenant)
+          )
+        end
+      end
+
       # A receiver-shared signing secret, generated once and stored encrypted.
       change set_attribute(:secret_encrypted, &__MODULE__.generate_encrypted_secret/0)
       validate KilnCMS.CMS.Validations.WebhookUrl
@@ -201,7 +243,7 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
       constraints: [max_length: KilnCMS.Limits.url()]
 
     # Subscribed event names; defaults to the published-content lifecycle only
-    # (`default_events/0`) — draft-carrying review events are explicit opt-in.
+    # (`default_events/1`) — draft-carrying review events are explicit opt-in.
     attribute :events, {:array, :string} do
       default &KilnCMS.CMS.WebhookEndpoint.default_events/0
       public? true

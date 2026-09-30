@@ -98,6 +98,23 @@ carries the reasoning.
   any such slug is left
   ([#1710](https://github.com/The-Verscienta/kiln_cms/issues/1710)).
 
+<a id="review-webhook-endpoints-that-receive-unpublished-content"></a>
+
+- **Review webhook endpoints marked *Receives unpublished content* under
+  `/editor/webhooks`; untick the draft events on any that shouldn't get drafts.**
+  Until this release the new-webhook form ticked every event, including
+  `<type>.created`, `<type>.in_review` and `<type>.returned_to_draft`, which
+  send the full body of unpublished and embargoed documents. An endpoint added
+  in the console without unticking them has been receiving drafts. Upgrading
+  changes no endpoint's events, because some receivers want drafts (a preview
+  build, a review tool). Open `/editor/webhooks` in each organization after
+  upgrading: every endpoint that receives one of those events is marked on its
+  row. Edit any that should mirror only published content, **Reset to
+  defaults** or untick the marked events, and save. If drafts reached a third
+  party that should not have had them, treat that receiver as holding
+  unpublished content
+  ([#1776](https://github.com/The-Verscienta/kiln_cms/issues/1776)).
+
 ## Breaking
 
 <a id="on-a-multi-org-install-with-kiln_console_host-set-each-non-default-orgs-console"></a>
@@ -356,6 +373,28 @@ carries the reasoning.
   task's moduledoc and in `docs/policy-matrix.md`
   ([#1739](https://github.com/The-Verscienta/kiln_cms/issues/1739)).
 
+<a id="a-stale-local-asset-build-is-reported-in-development"></a>
+
+- **In development, a stale or missing asset build is reported at boot and on
+  the console, with the command that rebuilds it.** `mix phx.server` still
+  boots when a Tailwind or esbuild watcher dies, for example when macOS kills
+  a downloaded Tailwind binary it no longer trusts (exit 137), or when
+  `assets/node_modules` is missing. The browser then got whatever build was
+  left on disk. Beta testers running from source met a months-old stylesheet
+  and reported a broken console. Twenty seconds after a dev boot, long enough
+  for the watchers' first build, `KilnCMSWeb.DevAssets` now checks the build.
+  It looks for a missing stylesheet or script bundle, a stylesheet that lacks
+  a custom property `assets/css/app.css` declares, and a missing
+  `assets/node_modules`. The stylesheet check reads content, not timestamps,
+  because Tailwind does not rewrite an output that comes out the same. What it
+  finds is logged as a warning and drawn as a banner across the console. Both
+  name the fix: `mix assets.build`, with `mix assets.setup` first when
+  `node_modules` is missing, or re-signing the Tailwind binary after an exit
+  137. Only a dev build carries the check; every other build compiles it to
+  nothing. `docs/beta-testing.md` now tells facilitators to run the published
+  image, and how to recover a local build
+  ([#1761](https://github.com/The-Verscienta/kiln_cms/issues/1761)).
+
 ## Fixed
 
 <a id="a-custom-field-whose-content-type-no-longer-exists-no-longer-crashes-the-fields"></a>
@@ -376,6 +415,64 @@ carries the reasoning.
   values. The column and its stored values are unchanged, so there is no
   migration.
   ([#1770](https://github.com/The-Verscienta/kiln_cms/issues/1770))
+
+<a id="a-new-api-key-acts-as-the-signed-in-admin-by-default"></a>
+
+- **A new API key acts as the signed-in admin unless another owner is
+  picked.** The owner select on `/editor/api-keys` rendered only user
+  options, so the browser silently selected whichever account
+  `list_users` returned first, and an admin could mint a key that
+  authenticates as someone else without noticing. The select, now labelled
+  *Acts as*, preselects the signed-in admin (marked "you"), explains that the
+  key gets that account's role, and still lists every user for a deliberate
+  choice. A blank owner is refused with a message
+  ([#1771](https://github.com/The-Verscienta/kiln_cms/issues/1771)).
+
+<a id="the-forms-list-shows-addresses-that-answer"></a>
+
+- **The Forms list shows each form's addresses that actually answer.** It
+  used to print `/forms/:slug` as if it were the public page, but nothing
+  serves an HTML `GET` there (the form's schema lives at `/api/forms/:slug`
+  and only the submission `POST` is at the root), so visitors got a 404. Each
+  active form's row now links its hosted page (`/forms/:slug/embed`, which
+  also works as a standalone page), shows its JSON API address labelled as
+  such, and carries the same embed snippet as the form builder with a Copy
+  button named for the form. An inactive form shows none of them, since all
+  three answer 404 until it is activated
+  ([#1783](https://github.com/The-Verscienta/kiln_cms/issues/1783)).
+
+<a id="unconfigured-integrations-show-their-enable-toggle-off"></a>
+
+- **A site integration with no saved settings shows its enable toggle off.**
+  The site storage, mail relay, SSO, search and AI pages rendered their
+  enable checkbox checked while the status above it said the integration was
+  not in use, so saving a half-filled form would switch it on. With nothing
+  saved the toggle now starts off; a saved configuration still shows its own
+  state ([#1780](https://github.com/The-Verscienta/kiln_cms/issues/1780)).
+
+<a id="the-mail-test-send-reports-in-a-sentence"></a>
+
+- **Sending a test email from Mail reports the outcome in a sentence.** The
+  panel printed the delivery adapter's raw return value (`ok` over
+  `%{id: "…"}`). It now says "Test email sent to …", or which side refused
+  the message (the recipient's server, the relay, the network), using the
+  same failure classification the mail queue acts on. The raw result is
+  written to the server log, with addresses redacted
+  ([#1779](https://github.com/The-Verscienta/kiln_cms/issues/1779)).
+
+<a id="admin-console-wording-fixes-from-beta-round-2"></a>
+
+- **Admin console wording fixes from beta round 2.** Home's backup notices
+  no longer send admins to Backups "to set a schedule": that page has no
+  schedule controls, because scheduled backups are the operator's cron job.
+  The notices say so and link both the Backups page and `docs/backups.md`
+  ([#1772](https://github.com/The-Verscienta/kiln_cms/issues/1772)). Content types (`/editor/types`) now sets its browser
+  title (WCAG 2.4.2,
+  [#1773](https://github.com/The-Verscienta/kiln_cms/issues/1773)). Funnels' back link
+  goes to Configure's Capture section, where the page is listed, instead of
+  Analytics ([#1778](https://github.com/The-Verscienta/kiln_cms/issues/1778)). The
+  Forms list's duplicate and delete buttons name the form they act on, part
+  of [#1774](https://github.com/The-Verscienta/kiln_cms/issues/1774).
 
 <a id="mix-kiln-gen-content-from-works-under-strict-tenancy"></a>
 
@@ -519,6 +616,45 @@ carries the reasoning.
   row is not rewritten. Every row the backfill corpus says it must refuse is
   now delivered in a test.
   ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543))
+
+<a id="an-overlays-composed-suite-no-longer-fails-the-configured-domains-test"></a>
+
+- **An overlay that registers its own domain through its plugin no longer fails
+  the core's "configured domains" test in its composed suite.**
+  The test compared `:ash_domains` minus the name `Example.Catalog` against
+  the domains compiled from `lib/kiln_cms/`, so it held only for the in-tree
+  example overlay. A downstream overlay that lists its own domain in
+  `:ash_domains`, as `c:Kiln.Plugin.domains/0` asks it to, failed it on a
+  correct configuration once its suite composed with the core's. The test now
+  subtracts every domain the installed plugins declare. Test-only; nothing
+  changes at runtime.
+
+<a id="the-reconnect-toasts-come-down-with-the-error-they-report"></a>
+
+- **The reconnect toasts come down with the error they report; "We can't find
+  the internet" no longer stays up beside "Something went wrong!".** LiveView
+  raises each toast with a one-shot `phx-disconnected` command and lowers it
+  with a one-shot `phx-connected` one. A view can leave an error state
+  without the second arriving. When the line came back but the view's rejoin
+  failed, LiveView swapped `phx-client-error` for `phx-server-error`, and
+  nothing lowered the first toast, so both stood on the page until a reload.
+  A stylesheet rule now keeps each toast hidden unless the view's container
+  carries its error class, which LiveView always keeps current. Raising a
+  toast is still the command's job, so a line that drops and comes straight
+  back still shows nothing. `e2e/tests/reconnect_toasts.spec.js` cuts the
+  line, refuses the rejoin, and runs the liveness watchdog's rebuild of a
+  quiet line
+  ([#1784](https://github.com/The-Verscienta/kiln_cms/issues/1784)).
+
+<a id="the-console-keeps-its-two-columns-without-the-sidebar-width-token"></a>
+
+- **The console keeps its two columns when the stylesheet lacks the sidebar
+  width token.** The console's grid read its sidebar column from `--side-w`,
+  which `assets/css/app.css` defines. A stylesheet built before the token
+  existed made the whole column list invalid: one full-width column, with the
+  workspace pushed below the fold. The grid now falls back to the expanded
+  width, `16rem`
+  ([#1755](https://github.com/The-Verscienta/kiln_cms/issues/1755)).
 
 ## Security
 
@@ -1219,3 +1355,23 @@ carries the reasoning.
   user-visible behaviour
   changes: every caller keeps exactly the actions it already made
   ([#1747](https://github.com/The-Verscienta/kiln_cms/issues/1747)).
+
+<a id="a-webhook-added-in-the-console-no-longer-receives-unpublished-drafts"></a>
+
+- **A webhook added in the console no longer receives unpublished drafts
+  unless an admin selects those events.** `WebhookEndpoint.default_events/0`
+  has always left out `<type>.created`, `<type>.in_review` and
+  `<type>.returned_to_draft`, because their payload is the full body of a
+  document that is not published, draft or embargoed. The new-webhook form at
+  `/editor/webhooks` did not use it: it ticked every event, so an endpoint
+  added without reading the list was sent drafts. The form now starts with
+  exactly the resource's default for the site's own content types. Those
+  three events are marked *includes unpublished content*, and any endpoint
+  subscribed to one says *Receives unpublished content* on its row. The form
+  also has **Select all**, **Clear**, **Reset to defaults** and a toggle per
+  event group, all buttons. A create through the code interface or AshAdmin
+  that names no events now gets the default for its own organization's types
+  rather than the default organization's. Webhooks have no JSON:API or
+  GraphQL route, so there is no other create path. Existing endpoints keep
+  their events; see the upgrade note
+  ([#1776](https://github.com/The-Verscienta/kiln_cms/issues/1776)).

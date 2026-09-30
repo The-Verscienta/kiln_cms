@@ -210,7 +210,9 @@ defmodule KilnCMSWeb.SiteStorageLive do
           "access_key_id" => profile.access_key_id
         }
       else
-        %{"enabled" => true, "region" => "us-east-1"}
+        # Unconfigured: the toggle starts OFF, agreeing with the status copy
+        # above it; saving a half-filled form must not quietly enable it (#1780).
+        %{"enabled" => false, "region" => "us-east-1"}
       end
 
     socket

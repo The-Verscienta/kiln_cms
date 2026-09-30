@@ -99,9 +99,14 @@ defmodule KilnCMSWeb.FunnelLive do
     >
       <div class="space-y-8">
         <div>
-          <.link navigate={~p"/editor/analytics"} class="text-sm text-base-content/60 hover:underline">
-            &larr; {gettext("Analytics")}
-          </.link>
+          <%!-- #1778: Funnels sits under Configure → Capture, so its crumb comes
+                from the same map as the sidebar rather than a hard-coded
+                "← Analytics". --%>
+          <Layouts.console_crumb
+            current_user={@current_user}
+            current_org={@current_org}
+            active={:funnels}
+          />
           <h1 class="mt-1 text-2xl font-semibold">{gettext("Funnels")}</h1>
           <p class="text-sm text-base-content/70">
             {gettext(

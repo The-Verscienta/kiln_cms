@@ -597,6 +597,39 @@ defmodule KilnCMS.Mail do
   end
 
   @doc """
+  What a `deliver_now/2` failure was about, for a person rather than a log
+  (#1779): the admin "send test email" panel maps this to a sentence and keeps
+  the raw term (see `redact_failure/1`) for the log only.
+
+    * `:recipient` — the receiving server refused that address;
+    * `:relay` — the relay refused us (session, AUTH, sender, SPF/DKIM/DMARC);
+    * `:message` — any other permanent refusal;
+    * `:connection` — never reached an SMTP dialog (DNS, connect, dropped);
+    * `:site_relay` — the site's own relay is set but unusable;
+    * `:transient` — anything else temporary (a 4xx, greylisting).
+
+  The same classification the mail worker acts on, so the panel and the queue
+  cannot disagree about whose fault a failure is.
+  """
+  @spec failure_kind(term()) ::
+          :recipient | :relay | :message | :connection | :site_relay | :transient
+  def failure_kind({:site_relay, _reason}), do: :site_relay
+
+  def failure_kind(reason) do
+    case failure_class(reason) do
+      :transient -> if connection_class?(reason), do: :connection, else: :transient
+      class -> class
+    end
+  end
+
+  @doc """
+  An error term as a log-safe string: inspected, with anything address-shaped
+  scrubbed (a 5xx reject text often quotes the recipient).
+  """
+  @spec redact_failure(term()) :: String.t()
+  def redact_failure(reason), do: redact_reason(reason)
+
+  @doc """
   Retry delay for mail workers: `attempt` is 1-based; attempts past the table
   reuse its last entry.
   """
