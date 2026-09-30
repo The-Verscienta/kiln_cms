@@ -3636,7 +3636,7 @@ msgstr "No se pudo añadir a ese lanzamiento: %{reason}"
 #: lib/kiln_cms_web/live/content_editor/inline_terms.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't add that category."
-msgstr ""
+msgstr "No se pudo añadir esa categoría."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -3656,7 +3656,7 @@ msgstr "No se pudo añadir a ese miembro: ¿ya forma parte de este sitio?"
 #: lib/kiln_cms_web/live/content_editor/inline_terms.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't add that tag."
-msgstr ""
+msgstr "No se pudo añadir esa etiqueta."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -4189,7 +4189,7 @@ msgstr "Crear lanzamiento"
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Create tag “%{name}”"
-msgstr ""
+msgstr "Crear etiqueta “%{name}”"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -6151,7 +6151,7 @@ msgstr "Encuentra contenido existente que trata lo mismo."
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Find or add a tag…"
-msgstr ""
+msgstr "Buscar o añadir una etiqueta…"
 
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
@@ -8169,12 +8169,12 @@ msgstr "Crear %{type}"
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "New category"
-msgstr ""
+msgstr "Nueva categoría"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "New category name"
-msgstr ""
+msgstr "Nombre de la nueva categoría"
 
 #: lib/kiln_cms_web/notification_text.ex
 #, elixir-autogen, elixir-format
@@ -8785,7 +8785,7 @@ msgstr "Aún no hay etiquetas."
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "No tags yet. Type a name below to add one."
-msgstr ""
+msgstr "Aún no hay etiquetas. Escribe un nombre abajo para añadir una."
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -9443,7 +9443,7 @@ msgstr "Opciones: una por línea"
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Or type a name below to add one."
-msgstr ""
+msgstr "O escribe un nombre abajo para añadir una."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
@@ -10696,7 +10696,7 @@ msgstr "Vuelve a cargar la página antes de cambiar las etiquetas."
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reload the page before changing the category."
-msgstr ""
+msgstr "Recarga la página antes de cambiar la categoría."
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
@@ -15799,7 +15799,7 @@ msgstr "Aún no tienes una suscripción que gestionar."
 #: lib/kiln_cms_web/live/content_editor/inline_terms.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to add categories."
-msgstr ""
+msgstr "No tienes permiso para añadir categorías."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -15809,7 +15809,7 @@ msgstr "No tiene permiso para añadir imágenes aquí."
 #: lib/kiln_cms_web/live/content_editor/inline_terms.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to add tags."
-msgstr ""
+msgstr "No tienes permiso para añadir etiquetas."
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/experiments_live.ex
