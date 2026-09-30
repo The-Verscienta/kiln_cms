@@ -13,7 +13,7 @@ carries the reasoning.
   from 0.12.0, after 0.12's own upgrade steps.** `mix kiln.update` refuses a
   move across a major version unless you pass `--allow-major`, and a plain
   update never targets a release candidate, so try one with
-  `mix kiln.update --to v1.0.0-rc.1 --allow-major`. Go through 0.12.0 first,
+  `mix kiln.update --to v1.0.0-rc.2 --allow-major` (the newest candidate). Go through 0.12.0 first,
   not straight from an older release: 1.0 removes what 0.12 deprecated, and
   0.12 is the release that migrates it. On 0.12, run
   `mix kiln.blocks.backfill` and `mix kiln.deprecations --migrate-audiences`,
