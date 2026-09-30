@@ -240,6 +240,11 @@ defmodule KilnCMS.Beta.RoundTest do
       assert [post] = post_by_slug("beta-r#{round}-#{handle(tester.email)}-post")
       assert post.state == :published
       assert post.author_id == user(tester.email).id
+
+      # The template prints the title as the h1; a heading block repeating it
+      # printed it twice (#1767).
+      refute Enum.any?(post.blocks, &match?(%Ash.Union{type: :heading}, &1)),
+             "the seeded post repeats its title as a heading block"
     end
 
     test "testers sharing an email local part each get their own content" do

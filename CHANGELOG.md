@@ -174,6 +174,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **The seeded demo page and post, and the beta-round sandbox posts, no longer
+  print their title twice.**
+  ([#1767](https://github.com/The-Verscienta/kiln_cms/issues/1767) · [long form](docs/changelog/unreleased.md#seeded-content-no-longer-prints-its-title-twice))
+
 - **Submitting the same piece for review twice no longer leaves the reviewer
   two identical inbox rows.**
   ([#1785](https://github.com/The-Verscienta/kiln_cms/issues/1785) · [long form](docs/changelog/unreleased.md#a-repeated-review-request-is-one-inbox-row-while-unread))

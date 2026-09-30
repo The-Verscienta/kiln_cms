@@ -358,6 +358,18 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="seeded-content-no-longer-prints-its-title-twice"></a>
+
+- **The seeded demo page and post, and the beta-round sandbox posts, no longer
+  print their title twice.** `priv/repo/seeds.exs` (`/welcome`,
+  `/blog/hello-world`) and `mix kiln.beta.round` gave each record a first
+  heading block repeating its title, and the public templates already print
+  the title as the page's `h1`, so readers saw it twice. The seeds now start
+  with the body text. Seeding skips records that already exist, so a
+  database seeded before this keeps the old blocks; delete the heading block
+  in the editor, or drop and re-seed a development database
+  ([#1767](https://github.com/The-Verscienta/kiln_cms/issues/1767)).
+
 <a id="a-repeated-review-request-is-one-inbox-row-while-unread"></a>
 
 - **Submitting the same piece for review twice no longer leaves the reviewer

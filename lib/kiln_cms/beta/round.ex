@@ -364,8 +364,9 @@ defmodule KilnCMS.Beta.Round do
             title: "#{display}'s sandbox post",
             slug: slug,
             excerpt: "Yours for this round — edit it, break it, tell us what happened.",
+            # No heading block repeating the title: the post template already
+            # prints the title as its h1 (#1767).
             blocks: [
-              %{"_type" => "heading", "text" => "#{display}'s sandbox post", "level" => 1},
               prose(
                 "This post is seeded for beta round #{round}. Nothing here is precious — change anything."
               )
