@@ -10,17 +10,20 @@ carries the reasoning.
 <a id="upgrade-to-1-0-with-allow-major-from-0-12"></a>
 
 - **1.0 is a major version: move to it with `mix kiln.update --allow-major`,
-  from 0.12.0, after 0.12's own upgrade steps.** `mix kiln.update` refuses a
+  from 0.12.1, after 0.12's own upgrade steps.** `mix kiln.update` refuses a
   move across a major version unless you pass `--allow-major`, and a plain
   update never targets a release candidate, so try one with
-  `mix kiln.update --to v1.0.0-rc.2 --allow-major` (the newest candidate). Go through 0.12.0 first,
+  `mix kiln.update --to v1.0.0-rc.2 --allow-major` (the newest candidate).
+  Go through 0.12.1, the latest 0.12.x, first (`mix kiln.update --to v0.12.1`),
   not straight from an older release: 1.0 removes what 0.12 deprecated, and
-  0.12 is the release that migrates it. On 0.12, run
+  0.12 is the release that migrates it. 0.12.1 adds no upgrade steps of its
+  own, only security fixes, so a site already on 0.12.0 just rebuilds on it.
+  On 0.12, run
   `mix kiln.blocks.backfill` and `mix kiln.deprecations --migrate-audiences`,
   and let webhook and newsletter jobs queued before 0.12 drain; the notes
   below say what each removal needs. A project pinned to 0.11 or older runs a
   `mix kiln.update` that shows none of these notes (0.8.0 and older show none
-  at all), which is another reason to stop at 0.12.0 on the way
+  at all), which is another reason to stop at 0.12.1 on the way
   ([#1545](https://github.com/The-Verscienta/kiln_cms/issues/1545)).
 
 <a id="set-deployment-specific-session-salts"></a>
