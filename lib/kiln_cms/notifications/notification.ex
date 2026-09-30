@@ -59,6 +59,18 @@ defmodule KilnCMS.Notifications.Notification do
   that could not otherwise know. The create side is announced by
   `KilnCMS.Notifications.record_in_app/1`, its only caller.
 
+  ## A document-level event is waiting once, not once per repeat
+
+  A review request, publish notice or return to draft that is still **unread**
+  for the same recipient and document is not recorded a second time (#1785):
+  an editor submitting the same page twice left the reviewer two identical
+  "asked for a review" rows. `KilnCMS.Notifications.record_in_app/1` checks
+  with `:unread_about` under a transaction-scoped advisory lock on
+  (tenant, recipient, event, document), so two submits racing each other
+  still leave one row. Once the row is read, the next occurrence is new
+  again. Comment, mention and task events are never collapsed: each is a
+  different thing to read.
+
   `:notify` is the counterpart: system-only, because it writes a row addressed
   to somebody *other* than whoever acted. It is gated by `forbid_if
   actor_present()` rather than called with `authorize?: false`, so the policy
@@ -139,6 +151,21 @@ defmodule KilnCMS.Notifications.Notification do
       prepare build(sort: [inserted_at: :desc])
     end
 
+    read :unread_about do
+      description "An unread document-level row for one recipient, event and document (system-only — see the moduledoc)."
+
+      argument :user_id, :uuid, allow_nil?: false
+      argument :event, :atom, allow_nil?: false
+      argument :content_id, :uuid, allow_nil?: false
+
+      filter expr(
+               user_id == ^arg(:user_id) and event == ^arg(:event) and
+                 content_id == ^arg(:content_id) and is_nil(block_id) and is_nil(read_at)
+             )
+
+      prepare build(limit: 1)
+    end
+
     update :mark_read do
       description "Mark one notification read. Idempotent: re-marking keeps the first timestamp."
       accept []
@@ -175,8 +202,20 @@ defmodule KilnCMS.Notifications.Notification do
 
   policies do
     # Self-only, and nothing above it. No admin bypass — see the moduledoc.
-    policy action_type(:read) do
+    # Named rather than `action_type(:read)` so the notifier's own duplicate
+    # check below is not also held to "is the recipient"; a read action added
+    # later matches no policy and is refused until it is given one.
+    policy action([:read, :for_user, :unread_for_user]) do
       authorize_if expr(user_id == ^actor(:id))
+    end
+
+    # The notifier's check for an unread row it is about to repeat (#1785).
+    # Actor-less on the same terms as `:notify`, which it runs next to: it
+    # answers "is this already waiting?" for a recipient who is not the
+    # caller, so it is refused to any request carrying an actor.
+    policy action(:unread_about) do
+      forbid_if actor_present()
+      authorize_if always()
     end
 
     # The recipient's own read state. Named rather than `action_type(:update)`

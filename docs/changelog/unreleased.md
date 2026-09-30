@@ -358,6 +358,22 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="a-repeated-review-request-is-one-inbox-row-while-unread"></a>
+
+- **Submitting the same piece for review twice no longer leaves the reviewer
+  two identical inbox rows.** Every review request, publish notice and return
+  to draft wrote a new in-app notification, so an editor who submitted a page,
+  took it back and submitted it again left each reviewer two unread "asked for
+  a review" rows for one document. While one of those is still unread for the
+  same recipient and document, a repeat is no longer written; once it is read,
+  the next one is new again. The check and the write run under a
+  transaction-scoped advisory lock on (site, recipient, event, document), so
+  two submits racing each other still leave one row. There is no migration.
+  A partial unique index would have failed to build over the duplicates
+  already in the table. Comments, mentions and task assignments are never
+  collapsed, and email and Web Push are unchanged
+  ([#1785](https://github.com/The-Verscienta/kiln_cms/issues/1785)).
+
 <a id="a-newsletter-with-no-confirmed-subscriber-is-refused"></a>
 
 - **A newsletter with no confirmed subscriber to send to is refused, and the

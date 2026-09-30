@@ -174,6 +174,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Submitting the same piece for review twice no longer leaves the reviewer
+  two identical inbox rows.**
+  ([#1785](https://github.com/The-Verscienta/kiln_cms/issues/1785) · [long form](docs/changelog/unreleased.md#a-repeated-review-request-is-one-inbox-row-while-unread))
+
 - **A newsletter with no confirmed subscriber to send to is refused, and the
   Send button says so.**
   ([#1775](https://github.com/The-Verscienta/kiln_cms/issues/1775) · [long form](docs/changelog/unreleased.md#a-newsletter-with-no-confirmed-subscriber-is-refused))

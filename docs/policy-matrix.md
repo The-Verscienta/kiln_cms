@@ -906,6 +906,7 @@ document, drafts included — so they are simply editor-and-up.
 | read (`read`, `for_user`, `unread_for_user`) | ✅ | 🔎 nothing | 🔎 nothing |
 | `mark_read`, `mark_unread` | ✅ | ❌ | ❌ |
 | `notify` (create) | ❌ | ❌ | ⚙️ actor-less only |
+| `unread_about` (the notifier's duplicate check, #1785) | ❌ | ❌ | ⚙️ actor-less only |
 
 `authorize_if expr(user_id == ^actor(:id))` is the whole read policy, and this
 is the one resource in the tree with **no admin bypass at all**. A notification
@@ -921,7 +922,15 @@ calling it with `authorize?: false`, it is gated `forbid_if actor_present()` +
 authenticated caller that reaches the action is refused by a rule a reader can
 see. `KilnCMS.Notifications.record_in_app/1` is the only caller.
 
-An actor-less *read* is fail-closed for free: `^actor(:id)` templates to `nil`,
+`unread_about` is the one read on the same terms, and for the same reason: before
+writing a review request, publish notice or return to draft, the notifier asks
+whether that recipient already has the same one waiting unread for the same
+document, and writes nothing if so (#1785). It answers about a recipient who is
+not the caller, so it is actor-less only. The self-only read policy names its
+three actions rather than `action_type(:read)`, so a read added later matches
+no policy and is refused until it gets one.
+
+An actor-less *read* (of the three self-only reads) is fail-closed for free: `^actor(:id)` templates to `nil`,
 the filter reduces to `user_id == NULL`, and no row satisfies it.
 
 Org-scoped (`multitenancy strategy :attribute, attribute :org_id`) — a user who
