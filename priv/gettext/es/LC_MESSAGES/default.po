@@ -1425,6 +1425,7 @@ msgstr "Actor"
 msgid "Acts as"
 msgstr "Actúa como"
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add"
@@ -2821,8 +2822,8 @@ msgstr "Solo metadatos de catálogo: no aporta nada a esta instancia."
 msgid "Categories"
 msgstr "Categorías"
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
-#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
 msgid "Category"
@@ -3668,6 +3669,11 @@ msgstr "No se pudo añadir a ese lanzamiento."
 msgid "Couldn't add it to that release: %{reason}"
 msgstr "No se pudo añadir a ese lanzamiento: %{reason}"
 
+#: lib/kiln_cms_web/live/content_editor/inline_terms.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't add that category."
+msgstr "No se pudo añadir esa categoría."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't add that field."
@@ -3682,6 +3688,11 @@ msgstr "No se pudo añadir ese elemento."
 #, elixir-autogen, elixir-format
 msgid "Couldn't add that member — are they already on this site?"
 msgstr "No se pudo añadir a ese miembro: ¿ya forma parte de este sitio?"
+
+#: lib/kiln_cms_web/live/content_editor/inline_terms.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't add that tag."
+msgstr "No se pudo añadir esa etiqueta."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -4210,6 +4221,11 @@ msgstr "Crear redirección para %{path}"
 #, elixir-autogen, elixir-format
 msgid "Create release"
 msgstr "Crear lanzamiento"
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Create tag “%{name}”"
+msgstr "Crear etiqueta “%{name}”"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -6167,6 +6183,11 @@ msgstr "Referencia de filtrado"
 #, elixir-autogen, elixir-format
 msgid "Find existing content that covers the same ground."
 msgstr "Encuentra contenido existente que trata lo mismo."
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Find or add a tag…"
+msgstr "Buscar o añadir una etiqueta…"
 
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
@@ -8186,6 +8207,16 @@ msgstr "Nombre de la nueva %{kind}"
 msgid "New %{type}"
 msgstr "Crear %{type}"
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "New category"
+msgstr "Nueva categoría"
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "New category name"
+msgstr "Nombre de la nueva categoría"
+
 #: lib/kiln_cms_web/notification_text.ex
 #, elixir-autogen, elixir-format
 msgid "New comment"
@@ -8791,6 +8822,11 @@ msgstr "Ninguna etiqueta coincide con ese filtro."
 #, elixir-autogen, elixir-format
 msgid "No tags yet."
 msgstr "Aún no hay etiquetas."
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "No tags yet. Type a name below to add one."
+msgstr "Aún no hay etiquetas. Escribe un nombre abajo para añadir una."
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -9444,6 +9480,11 @@ msgstr "Opciones (una por línea — solo para tipo selección)"
 msgid "Options — one per line"
 msgstr "Opciones: una por línea"
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Or type a name below to add one."
+msgstr "O escribe un nombre abajo para añadir una."
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
@@ -10094,6 +10135,13 @@ msgstr "Sondeando…"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
+msgid "Processing %{count} file… This can take a moment."
+msgid_plural "Processing %{count} files… This can take a moment."
+msgstr[0] "Procesando %{count} archivo… Puede tardar un momento."
+msgstr[1] "Procesando %{count} archivos… Puede tardar un momento."
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
 msgid "Processing…"
 msgstr "Procesando…"
 
@@ -10702,6 +10750,11 @@ msgstr "Recargar la última versión"
 #, elixir-autogen, elixir-format
 msgid "Reload the page before changing tags."
 msgstr "Vuelve a cargar la página antes de cambiar las etiquetas."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reload the page before changing the category."
+msgstr "Recarga la página antes de cambiar la categoría."
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
@@ -15062,6 +15115,11 @@ msgstr "Sin título"
 msgid "Unused"
 msgstr "Sin usar"
 
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Up to %{max} files at a time"
+msgstr "Hasta %{max} archivos a la vez"
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Up to date"
@@ -15160,6 +15218,11 @@ msgstr "Subido hasta"
 #, elixir-autogen, elixir-format
 msgid "Uploading %{name}… %{pct}%"
 msgstr "Subiendo %{name}… %{pct} %"
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "Uploading…"
+msgstr "Subiendo…"
 
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
@@ -15816,10 +15879,20 @@ msgstr "No puedes compartir una vista previa de este documento."
 msgid "You don't have a membership to manage yet."
 msgstr "Aún no tienes una suscripción que gestionar."
 
+#: lib/kiln_cms_web/live/content_editor/inline_terms.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to add categories."
+msgstr "No tienes permiso para añadir categorías."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to add images here."
 msgstr "No tiene permiso para añadir imágenes aquí."
+
+#: lib/kiln_cms_web/live/content_editor/inline_terms.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to add tags."
+msgstr "No tienes permiso para añadir etiquetas."
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/experiments_live.ex
@@ -15983,6 +16056,13 @@ msgstr "Necesita acceso de administrador para ver esa página."
 #, elixir-autogen, elixir-format
 msgid "You need editor access to view that page."
 msgstr "Necesita acceso de editor para ver esa página."
+
+#: lib/kiln_cms_web/live/media_live.ex
+#, elixir-autogen, elixir-format
+msgid "You picked %{count} file, but you can upload up to %{max} at a time. Remove some, then upload the rest afterwards."
+msgid_plural "You picked %{count} files, but you can upload up to %{max} at a time. Remove some, then upload the rest afterwards."
+msgstr[0] "Ha elegido %{count} archivo, pero puede subir hasta %{max} a la vez. Quite algunos y suba el resto después."
+msgstr[1] "Ha elegido %{count} archivos, pero puede subir hasta %{max} a la vez. Quite algunos y suba el resto después."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -17174,19 +17254,10 @@ msgid "today"
 msgstr "hoy"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "too large (max %{mb} MB)"
 msgstr "demasiado grande (máx. %{mb} MB)"
-
-#: lib/kiln_cms_web/live/media_live.ex
-#, elixir-autogen, elixir-format
-msgid "too large (max 10 MB)"
-msgstr "demasiado grande (máx. 10 MB)"
-
-#: lib/kiln_cms_web/live/media_live.ex
-#, elixir-autogen, elixir-format
-msgid "too many files (max 10)"
-msgstr "demasiados archivos (máx. 10)"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format

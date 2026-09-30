@@ -145,6 +145,9 @@ Every summary line below that was shortened links to its own entry there.
   the end of the page.**
   ([#1801](https://github.com/The-Verscienta/kiln_cms/issues/1801) · [long form](docs/changelog/unreleased.md#editing-in-place-can-add-blocks))
 
+- **Add a new tag or category without leaving the content editor.**
+  ([#1805](https://github.com/The-Verscienta/kiln_cms/issues/1805) · [long form](docs/changelog/unreleased.md#add-tags-and-categories-from-the-editor))
+
 ### Changed
 
 - **Keep `RichText.legacy_html` as a fallback instead of removing it;
@@ -193,6 +196,11 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#coolify-build-records-its-commit))
 
 ### Fixed
+
+- **The media library says how many files one upload takes, shows that
+  uploaded files are still being processed, and ties its URL field to its
+  label.**
+  ([#1802](https://github.com/The-Verscienta/kiln_cms/issues/1802), [#1803](https://github.com/The-Verscienta/kiln_cms/issues/1803), [#1804](https://github.com/The-Verscienta/kiln_cms/issues/1804) · [long form](docs/changelog/unreleased.md#media-uploads-state-their-limit-and-show-processing))
 
 - **Accessibility: repeated row actions in the console name the record they act
   on, the Translations table names each control's content and locale, and the
