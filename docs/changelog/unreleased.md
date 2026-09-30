@@ -5,6 +5,21 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Fixed
+
+<a id="an-overlays-composed-suite-no-longer-fails-the-configured-domains-test"></a>
+
+- **An overlay that registers its own domain through its plugin no longer fails
+  the core's "configured domains" test in its composed suite.**
+  The test compared `:ash_domains` minus the name `Example.Catalog` against
+  the domains compiled from `lib/kiln_cms/`, so it held only for the in-tree
+  example overlay. A downstream overlay that lists its own domain in
+  `:ash_domains`, as `c:Kiln.Plugin.domains/0` asks it to, failed it on a
+  correct configuration once its suite composed with the core's. The test now
+  subtracts every domain the installed plugins declare. Test-only; nothing
+  changes at runtime
+  ([#1786](https://github.com/The-Verscienta/kiln_cms/pull/1786)).
+
 ## Security
 
 <a id="mint-1110-closes-three-advisories-http1-response-smuggling-and-two-http2"></a>
