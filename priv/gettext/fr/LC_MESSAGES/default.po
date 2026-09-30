@@ -1000,6 +1000,11 @@ msgstr "Certaines choses restent du ressort de l'opérateur"
 msgid "A flagged phrase"
 msgstr "Une expression signalée"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "A form built under Forms, e.g. a contact or sign-up form"
+msgstr "Un formulaire créé dans Formulaires, p. ex. de contact ou d’inscription"
+
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
 msgid "A form is submitted"
@@ -2426,6 +2431,11 @@ msgstr "Sauvegardes"
 #, elixir-autogen, elixir-format
 msgid "Backups aren't set up yet — turn them on before you go live."
 msgstr "Les sauvegardes ne sont pas encore configurées — activez-les avant la mise en ligne."
+
+#: lib/kiln_cms_web/live/search_palette_live.ex
+#, elixir-autogen, elixir-format
+msgid "Best match"
+msgstr "Meilleure correspondance"
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -9440,6 +9450,11 @@ msgstr "Remplace le titre dans les résultats de recherche et les onglets du nav
 msgid "POST a signed payload to external services when content is published, updated, or unpublished."
 msgstr "Envoyer une charge utile signée (POST) à des services externes lorsque du contenu est publié, mis à jour ou dépublié."
 
+#: lib/kiln_cms_web/live/search_palette_live.ex
+#, elixir-autogen, elixir-format
+msgid "Page"
+msgstr "Page"
+
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex
 #: lib/kiln_cms_web/controllers/content_html/event_index.html.heex
 #: lib/kiln_cms_web/live/accounts_live.ex
@@ -9804,6 +9819,11 @@ msgstr "Contenu enrichi Portable Text"
 #, elixir-autogen, elixir-format
 msgid "Position"
 msgstr "Position"
+
+#: lib/kiln_cms_web/live/search_palette_live.ex
+#, elixir-autogen, elixir-format
+msgid "Post"
+msgstr "Article"
 
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #, elixir-autogen, elixir-format
@@ -11031,6 +11051,11 @@ msgstr "Nouvelle tentative"
 #, elixir-autogen, elixir-format
 msgid "Return"
 msgstr "Renvoyer"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reusable content kept in one place — edit it once, every page using it updates"
+msgstr "Contenu réutilisable conservé en un seul endroit — modifiez-le une fois, chaque page qui l’utilise est mise à jour"
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format

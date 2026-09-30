@@ -94,6 +94,57 @@ defmodule KilnCMSWeb.SearchPaletteLiveTest do
     assert html =~ term
   end
 
+  # #1781: sections render in a fixed order with up to eight hits each, so an
+  # exact post title sat ninth, behind eight loosely matching pages.
+  describe "best match" do
+    test "an exact title leads, above every section, and is drawn once", %{conn: conn} do
+      editor = authed_user(:editor)
+      tag = "beta#{System.unique_integer([:positive])}"
+
+      for n <- 1..8 do
+        CMS.create_page!(%{title: "#{tag} R2 T#{n}'s scratch page", slug: slug()}, actor: editor)
+      end
+
+      post =
+        CMS.create_post!(%{title: "#{tag} R2 T5’s sandbox post", slug: slug()}, actor: editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/search")
+
+      # Typed with a straight apostrophe and stray spacing; stored with a curly one.
+      html =
+        lv
+        |> form("#palette-search", %{q: "  #{String.upcase(tag)} R2  T5's sandbox post"})
+        |> render_change()
+
+      assert has_element?(
+               lv,
+               ~s(#palette-best-match a[href="#{~p"/editor/content/post/#{post.id}"}"])
+             )
+
+      hrefs =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query(~s(main a[href^="/editor/content/"]))
+        |> Enum.map(&(&1 |> LazyHTML.attribute("href") |> List.first()))
+
+      # First of every content link, and not repeated in the Posts section.
+      assert hd(hrefs) == ~p"/editor/content/post/#{post.id}"
+      assert Enum.count(hrefs, &(&1 == ~p"/editor/content/post/#{post.id}")) == 1
+    end
+
+    test "no best match row when no title equals the query", %{conn: conn} do
+      editor = authed_user(:editor)
+      tag = "near#{System.unique_integer([:positive])}"
+      CMS.create_page!(%{title: "#{tag} studio notes", slug: slug()}, actor: editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/search")
+      html = lv |> form("#palette-search", %{q: "#{tag} studio"}) |> render_change()
+
+      assert html =~ "#{tag} studio notes"
+      refute has_element?(lv, "#palette-best-match")
+    end
+  end
+
   test "discloses that searches are logged and the retention window (#220)", %{conn: conn} do
     editor = authed_user(:editor)
     {:ok, _lv, html} = conn |> log_in(editor) |> live(~p"/editor/search")

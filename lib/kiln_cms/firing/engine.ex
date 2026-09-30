@@ -173,7 +173,7 @@ defmodule KilnCMS.Firing.Engine do
   # `expanded` equals `typed` and the recomputed text already matches).
   defp reindex_search_text(document, org_id, expanded) do
     search_text =
-      KilnCMS.CMS.Changes.SetSearchText.compute(document, body_text(expanded))
+      KilnCMS.CMS.Changes.SetSearchText.compute(document, block_texts(expanded))
 
     if search_text != Map.get(document, :search_text) do
       document
@@ -530,11 +530,13 @@ defmodule KilnCMS.Firing.Engine do
   # The document's plain text, from the already-typed blocks. `:json_ld` wants
   # paragraph separation; the computed-field context (`word_count`,
   # `reading_time`) only counts words, so the separator is immaterial there.
-  defp body_text(typed, separator \\ " ") do
+  defp body_text(typed, separator \\ " "), do: typed |> block_texts() |> Enum.join(separator)
+
+  # Per block, so `SetSearchText.compute/2` can see where the first one ends.
+  defp block_texts(typed) do
     typed
     |> Enum.map(&Blocks.search_text/1)
     |> Enum.reject(&(&1 == ""))
-    |> Enum.join(separator)
   end
 
   # Normalize a block's `:json_ld` render (nil | node map | list of nodes) to a

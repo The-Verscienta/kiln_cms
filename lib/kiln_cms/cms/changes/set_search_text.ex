@@ -6,6 +6,19 @@ defmodule KilnCMS.CMS.Changes.SetSearchText do
   `seo_description`, `excerpt` exist) with the plain text of the embedded block
   tree. Runs before the action so it sees the effective (merged) values on both
   create and update.
+
+  ## Each distinct value once (#1758)
+
+  A field value equal to one already written (case- and whitespace-blind) is
+  left out, and so is a body whose **first block** repeats one — the page whose
+  `seo_title` is its title and whose body opens with that title as an H1. The
+  `highlight` snippet is a `ts_headline` over this text, and it read the title
+  back two or three times before reaching a word of body. Nothing is lost to
+  ranking: `title` has its own `A`-weighted leg in `search_vector`, and this
+  text still carries it once.
+
+  A stored row is rewritten on its next save, or on its next fire for a
+  published document (`mix kiln.refire_all` sweeps every one).
   """
   use Ash.Resource.Change
 
@@ -24,14 +37,16 @@ defmodule KilnCMS.CMS.Changes.SetSearchText do
       |> Enum.filter(&Ash.Resource.Info.attribute(changeset.resource, &1))
       |> Enum.map(&Ash.Changeset.get_attribute(changeset, &1))
 
-    blocks_text = BlockText.to_text(Ash.Changeset.get_attribute(changeset, :blocks))
+    block_texts = BlockText.block_texts(Ash.Changeset.get_attribute(changeset, :blocks))
 
-    Ash.Changeset.force_change_attribute(changeset, :search_text, join(field_text, blocks_text))
+    Ash.Changeset.force_change_attribute(changeset, :search_text, join(field_text, block_texts))
   end
 
   @doc """
   The same `search_text` computation as `change/3`, over a loaded **struct**
-  and pre-derived block text rather than a changeset (#910).
+  and pre-derived block text rather than a changeset (#910). `blocks_text` is
+  the per-block texts in order — what lets a leading block that repeats the
+  title be recognised — or one already-joined string.
 
   For `KilnCMS.Firing.Engine.fire/2`, whose `blocks_text` comes from the
   fragment-expanded tree (`body_text/1` there) rather than `record.blocks`
@@ -40,7 +55,7 @@ defmodule KilnCMS.CMS.Changes.SetSearchText do
   it against the expanded tree. Kept in this module rather than duplicated so
   `@text_fields` has one definition either way a caller arrives.
   """
-  @spec compute(struct(), String.t()) :: String.t()
+  @spec compute(struct(), String.t() | [String.t()]) :: String.t()
   def compute(record, blocks_text) do
     field_text =
       @text_fields
@@ -50,9 +65,29 @@ defmodule KilnCMS.CMS.Changes.SetSearchText do
     join(field_text, blocks_text)
   end
 
-  defp join(field_text, blocks_text) do
-    (field_text ++ [blocks_text])
-    |> Enum.reject(&(&1 in [nil, ""]))
-    |> Enum.join(" ")
+  defp join(field_text, blocks_text) when is_binary(blocks_text),
+    do: join(field_text, [blocks_text])
+
+  defp join(field_text, block_texts) do
+    fields = field_text |> Enum.reject(&blank?/1) |> Enum.uniq_by(&normalize/1)
+    seen = MapSet.new(fields, &normalize/1)
+
+    body =
+      case Enum.reject(block_texts, &blank?/1) do
+        [first | rest] ->
+          if MapSet.member?(seen, normalize(first)), do: rest, else: [first | rest]
+
+        [] ->
+          []
+      end
+
+    Enum.join(fields ++ body, " ")
   end
+
+  defp blank?(value), do: value in [nil, ""]
+
+  # Case- and whitespace-blind: "Welcome to  KilnCMS" and "welcome to kilncms"
+  # are one value to a reader of the snippet.
+  defp normalize(value),
+    do: value |> String.trim() |> String.replace(~r/\s+/u, " ") |> String.downcase()
 end

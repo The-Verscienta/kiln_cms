@@ -194,6 +194,92 @@ defmodule KilnCMS.CMS.ContentSearchTest do
     assert published.id in editor_ids
   end
 
+  # #1758: title, seo_title and a leading H1 carrying the same words were all
+  # written into `search_text`, and the highlight read the title back two or
+  # three times before a word of body.
+  describe "each distinct value once" do
+    test "an seo_title and a leading heading equal to the title are written once" do
+      admin = admin()
+      title = "Welcome to Kiln #{System.unique_integer([:positive])}"
+
+      page =
+        CMS.create_page!(
+          %{
+            title: title,
+            seo_title: "  #{String.upcase(title)} ",
+            seo_description: "A world-class CMS.",
+            slug: slug(),
+            blocks:
+              typed_blocks([
+                %{type: :heading, content: title, order: 0},
+                %{type: :rich_text, content: "<p>This page is new.</p>", order: 1}
+              ])
+          },
+          actor: admin
+        )
+
+      assert page.search_text == "#{title} A world-class CMS. This page is new."
+    end
+
+    test "the highlight names the title once" do
+      admin = admin()
+      word = "welcomeword#{System.unique_integer([:positive])}"
+      title = "#{word} to Kiln"
+
+      CMS.create_page!(
+        %{
+          title: title,
+          seo_title: title,
+          slug: slug(),
+          blocks:
+            typed_blocks([
+              %{type: :heading, content: title, order: 0},
+              %{type: :rich_text, content: "<p>Body text follows here.</p>", order: 1}
+            ])
+        },
+        actor: admin
+      )
+
+      [hit] =
+        CMS.search_pages!(word,
+          actor: admin,
+          load: [highlight: %{query: word, locale: KilnCMS.I18n.default_locale()}]
+        )
+
+      assert length(String.split(hit.highlight, "<mark>#{word}</mark>")) == 2
+    end
+
+    # Only a *leading* block is the title repeated as a heading; the same words
+    # later in the body are body, and a first block that differs is kept whole.
+    test "a heading equal to the title is kept when it is not the first block" do
+      admin = admin()
+      title = "Kiln notes #{System.unique_integer([:positive])}"
+
+      page =
+        CMS.create_page!(
+          %{
+            title: title,
+            slug: slug(),
+            blocks:
+              typed_blocks([
+                %{type: :rich_text, content: "<p>Opening line.</p>", order: 0},
+                %{type: :heading, content: title, order: 1}
+              ])
+          },
+          actor: admin
+        )
+
+      assert page.search_text == "#{title} Opening line. #{title}"
+    end
+
+    test "compute/2 applies the same rule to per-block text" do
+      record = %KilnCMS.CMS.Page{title: "Same", seo_title: "same", seo_description: nil}
+
+      assert KilnCMS.CMS.Changes.SetSearchText.compute(record, ["Same", "Body"]) == "Same Body"
+      assert KilnCMS.CMS.Changes.SetSearchText.compute(record, "Body") == "Same Body"
+    end
+  end
+
   test "search_text updates when content changes" do
     admin = admin()
     old = "aardvark#{System.unique_integer([:positive])}"

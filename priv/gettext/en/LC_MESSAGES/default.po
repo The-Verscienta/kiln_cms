@@ -1000,6 +1000,11 @@ msgstr ""
 msgid "A flagged phrase"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "A form built under Forms, e.g. a contact or sign-up form"
+msgstr ""
+
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
 msgid "A form is submitted"
@@ -2425,6 +2430,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Backups aren't set up yet — turn them on before you go live."
+msgstr ""
+
+#: lib/kiln_cms_web/live/search_palette_live.ex
+#, elixir-autogen, elixir-format
+msgid "Best match"
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
@@ -9440,6 +9450,11 @@ msgstr ""
 msgid "POST a signed payload to external services when content is published, updated, or unpublished."
 msgstr ""
 
+#: lib/kiln_cms_web/live/search_palette_live.ex
+#, elixir-autogen, elixir-format
+msgid "Page"
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex
 #: lib/kiln_cms_web/controllers/content_html/event_index.html.heex
 #: lib/kiln_cms_web/live/accounts_live.ex
@@ -9803,6 +9818,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Position"
+msgstr ""
+
+#: lib/kiln_cms_web/live/search_palette_live.ex
+#, elixir-autogen, elixir-format
+msgid "Post"
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
@@ -11030,6 +11050,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Return"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reusable content kept in one place — edit it once, every page using it updates"
 msgstr ""
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex

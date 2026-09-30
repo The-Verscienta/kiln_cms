@@ -3205,6 +3205,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> mark_dirty(:settings)
   end
 
+  # A library pick carries the item's alt text, the same as a paste or upload
+  # does through `insert_image_block/4` (#1782) — the editor wrote that
+  # description once, in the library, and dropping it here made the publish
+  # gate ask for it again.
   defp apply_pick(socket, :new, media_id, url) do
     form =
       AshPhoenix.Form.add_form(socket.assigns.form, socket.assigns.form.name <> "[blocks]",
@@ -3212,7 +3216,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
           "_union_type" => "image",
           "id" => Ash.UUID.generate(),
           "url" => url,
-          "media_id" => media_id
+          "media_id" => media_id,
+          "alt" => library_alt(socket, media_id)
         }
       )
 
@@ -3236,7 +3241,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         blocks =
           socket.assigns.form
           |> full_blocks_input()
-          |> List.update_at(index, &Map.merge(&1, %{"url" => url, "media_id" => media_id}))
+          |> List.update_at(index, &fill_picked_image(&1, socket, media_id, url))
 
         params =
           socket.assigns.form
@@ -3246,6 +3251,36 @@ defmodule KilnCMSWeb.ContentEditorLive do
         socket = revalidate(socket, params)
         broadcast_preview(socket)
         mark_dirty(socket)
+    end
+  end
+
+  # The block's own alt wins: one the editor already typed is a per-placement
+  # description and is never overwritten by the library's. Only a blank alt is
+  # seeded from `MediaItem.alt`, the rule `insert_image_block/4` applies to a
+  # paste or upload (#1782).
+  defp fill_picked_image(block, socket, media_id, url) do
+    block = Map.merge(block, %{"url" => url, "media_id" => media_id})
+
+    if blank_alt?(block["alt"]),
+      do: Map.put(block, "alt", library_alt(socket, media_id)),
+      else: block
+  end
+
+  defp blank_alt?(alt), do: not is_binary(alt) or String.trim(alt) == ""
+
+  # The picked item's library alt text, read server-side from the
+  # actor-authorized `MediaItem` rather than trusted from the click payload —
+  # the same reasoning as `pick_file`. An item the actor cannot read (or one
+  # deleted since the grid rendered) contributes nothing, not an error.
+  defp library_alt(_socket, media_id) when not is_binary(media_id), do: ""
+
+  defp library_alt(socket, media_id) do
+    case CMS.get_media_item(media_id,
+           actor: socket.assigns.actor,
+           tenant: socket.assigns.current_org
+         ) do
+      {:ok, %{alt: alt}} when is_binary(alt) -> alt
+      _ -> ""
     end
   end
 
@@ -5141,46 +5176,63 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp block_icon("faq"), do: "hero-question-mark-circle"
   defp block_icon("how_to"), do: "hero-list-bullet"
   defp block_icon("claim"), do: "hero-check-badge"
+  defp block_icon("form"), do: "hero-clipboard-document-list"
+  defp block_icon("fragment"), do: "hero-square-2-stack"
   defp block_icon("custom"), do: "hero-puzzle-piece"
   defp block_icon(_), do: "hero-squares-2x2"
 
-  # One-line description shown under the label in the inserter menu.
-  defp block_description("rich_text"), do: gettext("Formatted text with bold, italic, and lists")
-  defp block_description("heading"), do: gettext("Section title")
-  defp block_description("quote"), do: gettext("Highlighted quotation")
-  defp block_description("image"), do: gettext("Picture with alt text and caption")
-  defp block_description("file"), do: gettext("Downloadable document, e.g. a PDF")
+  # One-line description shown under the label in the inserter menu. Public
+  # (`@doc false`) so a test can hold every core block type to a real
+  # description — `form` and `fragment` fell through to the generic line for
+  # as long as nothing checked (#1760). A plugin block still gets the generic
+  # line: `Kiln.Block` has no description for this menu to read.
+  @doc false
+  @spec block_description(String.t()) :: String.t()
+  def block_description("rich_text"), do: gettext("Formatted text with bold, italic, and lists")
+  def block_description("heading"), do: gettext("Section title")
+  def block_description("quote"), do: gettext("Highlighted quotation")
+  def block_description("image"), do: gettext("Picture with alt text and caption")
+  def block_description("file"), do: gettext("Downloadable document, e.g. a PDF")
 
   # Says what it is NOT, for the same reason `accordion` does: `embed` also
   # produces a video player, and the difference an editor cares about is where
   # the file lives, not what the block looks like.
-  defp block_description("video"),
+  def block_description("video"),
     do: gettext("Video from your media library — use Embed for YouTube or Vimeo")
 
-  defp block_description("audio"), do: gettext("Audio from your media library, e.g. a podcast")
-  defp block_description("embed"), do: gettext("Embedded HTML or external content")
-  defp block_description("divider"), do: gettext("Visual separator between sections")
-  defp block_description("columns"), do: gettext("Side-by-side columns holding nested blocks")
-  defp block_description("portable_text"), do: gettext("Portable Text rich content")
+  def block_description("audio"), do: gettext("Audio from your media library, e.g. a podcast")
+  def block_description("embed"), do: gettext("Embedded HTML or external content")
+  def block_description("divider"), do: gettext("Visual separator between sections")
+  def block_description("columns"), do: gettext("Side-by-side columns holding nested blocks")
+  def block_description("portable_text"), do: gettext("Portable Text rich content")
 
-  defp block_description("gallery"),
+  def block_description("gallery"),
     do: gettext("Several images with captions, published with image-gallery structured data")
 
   # Says what it is NOT, because that is the only difference an editor can see:
   # this and the FAQ block draw the same collapsing panels, and picking the wrong
   # one publishes a claim that the page is a list of questions and answers.
-  defp block_description("accordion"),
+  def block_description("accordion"),
     do: gettext("Collapsible panels with no structured data — use FAQ for questions and answers")
 
-  defp block_description("faq"),
+  def block_description("faq"),
     do: gettext("Q&A list, published with question-and-answer structured data")
 
-  defp block_description("how_to"),
+  def block_description("how_to"),
     do: gettext("Step-by-step guide, published with how-to structured data")
 
-  defp block_description("claim"), do: gettext("Sourced claim with citation metadata")
-  defp block_description("custom"), do: gettext("Custom block payload")
-  defp block_description(_), do: gettext("Insert a block")
+  def block_description("claim"), do: gettext("Sourced claim with citation metadata")
+
+  def block_description("form"),
+    do: gettext("A form built under Forms, e.g. a contact or sign-up form")
+
+  # Says what editing it does, because that is the surprise: the block is a
+  # pointer, and a change to the fragment reaches every page that embeds it.
+  def block_description("fragment"),
+    do: gettext("Reusable content kept in one place — edit it once, every page using it updates")
+
+  def block_description("custom"), do: gettext("Custom block payload")
+  def block_description(_), do: gettext("Insert a block")
 
   # HTML the TipTap editor hydrates from. Canonical Portable Text (`body` —
   # what imports, visual editing, and the MCP tools write) takes precedence,
