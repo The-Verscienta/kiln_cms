@@ -132,9 +132,28 @@ defmodule KilnCMSWeb.PasswordRevealTest do
       [click] = LazyHTML.attribute(button, "phx-click")
       ops = Jason.decode!(click)
 
-      assert ["toggle_attr", %{"attr" => ["type", "password", "text"], "to" => "#" <> ^target}] in ops
-      assert ["toggle_attr", %{"attr" => ["aria-pressed", "false", "true"]}] in ops
-      assert ["toggle_attr", %{"attr" => ["aria-label", "Show password", "Hide password"]}] in ops
+      to = "#" <> target
+
+      assert Enum.any?(
+               ops,
+               &match?(
+                 ["toggle_attr", %{"attr" => ["type", "password", "text"], "to" => ^to}],
+                 &1
+               )
+             )
+
+      assert Enum.any?(
+               ops,
+               &match?(["toggle_attr", %{"attr" => ["aria-pressed", "false", "true"]}], &1)
+             )
+
+      assert Enum.any?(
+               ops,
+               &match?(
+                 ["toggle_attr", %{"attr" => ["aria-label", "Show password", "Hide password"]}],
+                 &1
+               )
+             )
 
       target
     end)

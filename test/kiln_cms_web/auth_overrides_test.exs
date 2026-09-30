@@ -91,8 +91,9 @@ defmodule KilnCMSWeb.AuthOverridesTest do
       assert upstream =~ ">#{@upstream_label}</button>"
       assert kiln =~ ">#{@kiln_label}</button>"
 
-      assert String.replace(kiln, ">#{@kiln_label}</button>", ">#{@upstream_label}</button>") ==
-               upstream
+      assert kiln
+             |> String.replace(">#{@kiln_label}</button>", ">#{@upstream_label}</button>")
+             |> squash() == squash(upstream)
     end
   end
 
@@ -108,7 +109,8 @@ defmodule KilnCMSWeb.AuthOverridesTest do
           ] do
         assigns = Map.merge(password_form_assigns(id), %{password_reveal: false})
 
-        assert render_component(kiln, assigns) == render_component(upstream, assigns),
+        assert squash(render_component(kiln, assigns)) ==
+                 squash(render_component(upstream, assigns)),
                "#{inspect(kiln)} drifted from #{inspect(upstream)}"
       end
     end
@@ -142,6 +144,10 @@ defmodule KilnCMSWeb.AuthOverridesTest do
       overrides: [AuthOverrides]
     }
   end
+
+  # Whitespace between tags is template layout, not markup: the copied field
+  # branches on the eye button, so its indentation cannot match upstream's.
+  defp squash(html), do: String.replace(html, ~r/>\s+</, "><")
 
   defp undeclared(overrides) do
     overrides

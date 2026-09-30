@@ -20,7 +20,7 @@ defmodule KilnCMSWeb.AuthPasswordInput do
   Every setting is still read under upstream's name, through
   `KilnCMSWeb.AuthOverrides.override_for/4`, so the `override Components.Password.Input`
   block in `KilnCMSWeb.AuthOverrides` keeps styling these boxes. With
-  `reveal={false}` the markup is byte-identical to upstream's, and
+  `reveal={false}` the markup is upstream's (up to whitespace between tags), and
   `KilnCMSWeb.AuthOverridesTest` holds each form to that: an upstream change to
   a field fails the test rather than going stale here.
   """
