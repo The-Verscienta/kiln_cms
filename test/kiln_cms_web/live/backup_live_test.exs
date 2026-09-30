@@ -286,12 +286,41 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       assert has_element?(
                lv,
-               "#overview-backup-setup[href='/editor/backups']",
+               "#overview-backup-setup",
                "Backups aren't set up yet — turn them on before you go live."
+             )
+
+      assert has_element?(
+               lv,
+               "#overview-backup-setup a[data-role=open-backups][href='/editor/backups']"
              )
 
       refute has_element?(lv, "#overview-backup-warning")
       refute render(lv) =~ "No backup has ever been recorded"
+    end
+
+    # #1772: the Backups panel has no schedule controls — the schedule is the
+    # operator's cron job. The strip must not promise one there, and must point
+    # at the guide that does explain it.
+    test "neither strip promises a schedule control the Backups page does not have",
+         %{conn: conn, dir: dir} do
+      {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      refute html =~ "set a schedule"
+      assert has_element?(lv, "#overview-backup-setup", "set up by whoever runs this server")
+
+      assert has_element?(
+               lv,
+               ~s(#overview-backup-setup a[data-role=backup-guide][href$="docs/backups.md"][target=_blank])
+             )
+
+      seed_manifest!(dir, ok: false)
+      {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      refute html =~ "check the schedule"
+      assert has_element?(lv, "#overview-backup-warning", "the server's cron job")
+      assert has_element?(lv, "#overview-backup-warning a[data-role=backup-guide]")
+      assert has_element?(lv, "#overview-backup-warning a[data-role=open-backups]")
     end
 
     test "a failed backup is the red alarm", %{conn: conn, dir: dir} do

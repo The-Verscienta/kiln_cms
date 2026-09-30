@@ -27,6 +27,38 @@ review workflow, taxonomy, releases, and the admin configuration surfaces.
 - **Scope of a beta:** one release candidate at a time. Freeze the editor
   surface for the duration of a beta round so every tester hits the same build.
 
+## Facilitator setup: run the published image
+
+Run the round against the published release image
+(`ghcr.io/the-verscienta/kiln_cms:<tag>`, deployed as in
+[deploy.md](deploy.md)), pinned to the tag under test. Every tester then sees
+the same build, with assets that were built and digested once, in CI.
+
+A source checkout serves whatever is in `priv/static/assets/`, and
+`mix phx.server` still boots when the Tailwind or esbuild watcher fails. In
+round 2 that left testers on a stylesheet months older than the code. The
+console collapsed to one column and the sign-in forms ran full width, and both
+were filed as product bugs
+([#1755](https://github.com/The-Verscienta/kiln_cms/issues/1755),
+[#1761](https://github.com/The-Verscienta/kiln_cms/issues/1761)).
+
+If you must run from source:
+
+1. `mix setup` on a fresh checkout. After pulling, run `mix assets.setup` when
+   `assets/package-lock.json` changed (a missing `assets/node_modules` breaks
+   the editor bundle), then `mix assets.build`.
+2. About twenty seconds after `mix phx.server` starts, a dev build checks its
+   own assets. A stale or missing stylesheet or bundle, or a missing
+   `node_modules`, is logged as a warning and shown as a banner across the top
+   of the console, with the command that fixes it. Don't start a session while
+   that banner is up.
+3. If `mix tailwind kiln_cms` exits with **137** on macOS, the OS killed the
+   downloaded Tailwind binary because it no longer trusts its signature.
+   Re-sign it with `codesign --force -s - _build/tailwind-*`, then run
+   `mix assets.build` again.
+4. Hard-reload the browser (or open a new private window) so it drops the old
+   stylesheet.
+
 ## Set the roles up first — there are two gates, not one
 
 **This is the setup step that most often wastes a session**, because the two

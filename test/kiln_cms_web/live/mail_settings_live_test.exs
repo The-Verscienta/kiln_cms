@@ -191,6 +191,15 @@ defmodule KilnCMSWeb.MailSettingsLiveTest do
       render_async(lv, 2_000)
       # Test adapter accepts everything — the point is the outcome rendering.
       assert lv |> element(~s{[data-test-result="ok"]}) |> has_element?()
+
+      # #1779: a sentence for the admin, not the adapter's receipt term.
+      assert has_element?(
+               lv,
+               ~s{[data-test-result="ok"]},
+               "Test email sent to probe@example.com."
+             )
+
+      refute render(lv) =~ "%{"
     end
 
     test "a blank recipient is rejected without crashing the LiveView", %{conn: conn} do

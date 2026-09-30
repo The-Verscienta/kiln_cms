@@ -1091,6 +1091,22 @@
   100% { opacity: 1; }
 }
 
+/* The two reconnect toasts (`Layouts.flash_group/1`) may only be on screen
+   while the view is in the matching error state (#1784). LiveView shows them
+   with a one-shot `phx-disconnected` command and hides them with a one-shot
+   `phx-connected` one, and a view can leave an error state without the second
+   ever arriving: a rejoin that fails swaps `phx-client-error` for
+   `phx-server-error`, and nothing hid "We can't find the internet", so both
+   stood on the page. The container's classes are the one thing LiveView keeps
+   current, so the toasts answer to them; `!important` because a toast that was
+   shown carries LiveView's inline `display`. Showing is left to the command,
+   which keeps its half-second grace for a line that drops and comes straight
+   back. */
+[data-phx-main]:not(.phx-client-error) #client-error,
+[data-phx-main]:not(.phx-server-error) #server-error {
+  display: none !important;
+}
+
 /* TipTap (ProseMirror) rich-text editor in the block editor */
 .ProseMirror {
   min-height: 6rem;
