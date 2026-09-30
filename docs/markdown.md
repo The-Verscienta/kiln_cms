@@ -80,6 +80,14 @@ Front matter is the usual block of `key: value` lines between `---` fences at
 the very top of the file. Keys other than those three are ignored, and front
 matter is never imported as text.
 
+An import splits the file into blocks the way you would lay it out by hand:
+each heading becomes a **heading block** at the same level, each `---` a
+**divider block**, and the paragraphs, lists, quotes, tables and code
+between them one **text block** per section. The editor's Markdown view does
+the same when you switch back to Blocks. A heading block holds plain text,
+so bold or italic in a heading is dropped; a heading with a link (other than
+a bare URL) or an image in it stays in the text, where the link survives.
+
 Unlike a paste, an import keeps images: a standalone image becomes an **image
 block** (its alt text and its `"title"` as the caption), and a YouTube or Vimeo
 link on a line of its own becomes an **embed block**. Imported images still
@@ -93,14 +101,14 @@ document, the same as every other editor control.
 
 | Markdown | Becomes |
 |---|---|
-| `#` … `######` headings (and underlined setext headings) | Headings, same level |
+| `#` … `######` headings (and underlined setext headings) | Headings, same level: heading blocks (import), headings in the text (paste and API) |
 | `**bold**`, `*italic*`, `~~strike~~`, `` `code` `` | The same marks |
 | `[text](url)` and bare `https://…` links | Links (see below for which URLs are kept) |
 | `-`/`*`/`+` and `1.` lists, nested | Bullet and numbered lists, nesting kept |
 | GFM tables | Tables, with the header row |
 | Fenced code (` ```elixir `) and indented code | Code blocks, language kept |
 | `>` quotes | Blockquotes |
-| `---` / `***` | Dividers |
+| `---` / `***` | Dividers: divider blocks (import), rules in the text (paste and API) |
 | `![alt](url "caption")` on its own line | An image block (import and API); a link (paste) |
 | A YouTube or Vimeo URL on its own line | An embed block (import and API) |
 | `&copy;`, `&#8212;` … | The characters they name |
@@ -170,7 +178,9 @@ second one, for example in a script that publishes a folder of `.md` files:
   `%{title:, slug:, excerpt:, front_matter:, blocks:}`, following the
   title/H1 rules above.
 - `KilnCMS.Markdown.to_blocks/2` — the body as `block_tree`-ready block maps.
-  Pass `:media_resolver` to point images at media-library items you sideloaded.
+  Pass `:media_resolver` to point images at media-library items you sideloaded,
+  and `sections: true` for heading and divider blocks (as the editor's import
+  does) instead of one text block per run of prose (as `body_markdown` does).
 - `KilnCMS.Markdown.to_html/2` — sanitized HTML.
 - `KilnCMS.Markdown.to_tiptap/1` — prose-only TipTap JSON, the paste shape.
 

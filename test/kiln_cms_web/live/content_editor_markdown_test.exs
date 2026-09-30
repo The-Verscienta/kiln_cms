@@ -144,15 +144,17 @@ defmodule KilnCMSWeb.ContentEditorMarkdownTest do
 
       stored = saved(page)
       assert {stored.title, stored.slug} == {"Imported guide", slug}
-      assert types(stored) == ["rich_text", "image", "rich_text"]
+      # A heading in the file is a heading block (#1800), not a line of prose.
+      assert types(stored) == ["rich_text", "image", "heading", "rich_text"]
 
-      [intro, image, details] = stored.blocks
+      [intro, image, heading, details] = stored.blocks
       assert prose(intro) == "Intro paragraph."
 
       assert {image.value.url, image.value.alt, image.value.caption} ==
                {"https://img.example.com/map.png", "A map", "The map"}
 
-      assert [%{"style" => "h2"}, %{"_type" => "table"}] = details.value.body
+      assert {heading.value.text, heading.value.level} == {"Details", 2}
+      assert [%{"_type" => "table"}] = details.value.body
     end
 
     test "append keeps the existing blocks ahead of the imported ones", %{conn: conn} do
@@ -274,14 +276,15 @@ defmodule KilnCMSWeb.ContentEditorMarkdownTest do
       save(lv)
 
       stored = saved(page)
-      assert types(stored) == ["quote", "rich_text", "image"]
+      assert types(stored) == ["quote", "heading", "rich_text", "divider", "image"]
 
-      [kept, prose, image] = stored.blocks
+      [kept, heading, prose, _divider, image] = stored.blocks
 
       assert {kept.value.id, kept.value.text, kept.value.citation} ==
                {quote.value.id, "Said so", "Someone"}
 
-      assert [%{"style" => "h2"}, %{"style" => "normal"}, %{"_type" => "hr"}] = prose.value.body
+      assert {heading.value.text, heading.value.level} == {"New section", 2}
+      assert [%{"style" => "normal"}] = prose.value.body
       assert image.value.caption == "The map"
     end
 
@@ -307,6 +310,33 @@ defmodule KilnCMSWeb.ContentEditorMarkdownTest do
       assert types(saved(page)) == ["heading", "rich_text"]
       assert Enum.map(after_, & &1.value.id) == Enum.map(before, & &1.value.id)
       assert Enum.map(after_, &prose_or_text/1) == Enum.map(before, &prose_or_text/1)
+    end
+
+    test "an edit keeps heading, divider and prose blocks what they were, ids and all (#1800)",
+         %{conn: conn} do
+      {lv, page} =
+        open(conn, [
+          %{"_type" => "heading", "text" => "Chapter one", "level" => 2},
+          rich("<p>First words.</p><ul><li>a</li><li>b</li></ul>"),
+          %{"_type" => "divider"},
+          %{"_type" => "heading", "text" => "Chapter two", "level" => 4},
+          rich("<p>Second words.</p>")
+        ])
+
+      before = saved(page).blocks
+      enter(lv)
+      type_markdown(lv, String.replace(source(lv), "Second words.", "Second, edited."))
+      lv |> element("#editor-mode-blocks") |> render_click()
+      save(lv)
+
+      stored = saved(page)
+      assert types(stored) == ["heading", "rich_text", "divider", "heading", "rich_text"]
+      assert Enum.map(stored.blocks, & &1.value.id) == Enum.map(before, & &1.value.id)
+
+      assert Enum.map(stored.blocks, &prose_or_text/1) ==
+               Enum.map(before, &prose_or_text/1) |> List.replace_at(4, "Second, edited.")
+
+      assert Enum.at(stored.blocks, 3).value.level == 4
     end
 
     test "a placeholder that is deleted drops its block", %{conn: conn} do
@@ -351,6 +381,7 @@ defmodule KilnCMSWeb.ContentEditorMarkdownTest do
     end
 
     defp prose_or_text(%Ash.Union{value: %{text: text}}), do: text
-    defp prose_or_text(block), do: prose(block)
+    defp prose_or_text(%Ash.Union{value: %{body: _}} = block), do: prose(block)
+    defp prose_or_text(%Ash.Union{}), do: nil
   end
 end

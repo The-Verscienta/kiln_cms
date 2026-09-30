@@ -229,6 +229,29 @@ defmodule KilnCMS.MarkdownTest do
     end
   end
 
+  describe "to_blocks/2 with sections: true (#1800)" do
+    test "headings and rules are blocks; body_markdown's default keeps one prose block" do
+      markdown = "## One\n\nText with a [link](https://x.com).\n\n---\n\n### Two\n\n- a\n- b"
+
+      assert Markdown.to_blocks(markdown, sections: true) |> Enum.map(& &1["type"]) ==
+               ["heading", "rich_text", "divider", "heading", "rich_text"]
+
+      assert Markdown.to_blocks(markdown) |> Enum.map(& &1["type"]) == ["rich_text"]
+    end
+
+    test "parse_document/2 takes the option too, after the leading H1 became the title" do
+      doc = Markdown.parse_document("# Title\n\nIntro.\n\n## Part\n\nMore.", sections: true)
+
+      assert doc.title == "Title"
+
+      assert [
+               %{"type" => "rich_text"},
+               %{"type" => "heading", "value" => %{"text" => "Part", "level" => 2}},
+               %{"type" => "rich_text"}
+             ] = doc.blocks
+    end
+  end
+
   describe "parse_document/2" do
     test "front matter supplies title, slug and excerpt; a repeated H1 is dropped" do
       doc =

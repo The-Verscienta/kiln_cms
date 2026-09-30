@@ -93,6 +93,91 @@ defmodule KilnCMSWeb.ContentEditorMarkdownModeTest do
              MarkdownMode.to_source([merged])
   end
 
+  describe "a pasted document (#1800)" do
+    @specimen File.read!("test/support/fixtures/markdown/beta_1800_specimen.md")
+
+    defp shape(blocks) do
+      Enum.map(blocks, fn
+        %{"_union_type" => "heading", "level" => level, "text" => text} -> {:h, level, text}
+        %{"_union_type" => type} -> String.to_atom(type)
+      end)
+    end
+
+    test "the beta tester's specimen becomes headings, dividers and a prose block per section" do
+      blocks = MarkdownMode.from_source(@specimen, %{})
+
+      assert shape(blocks) == [
+               {:h, 1, "Lorem Ipsum: A Comprehensive Markdown Specimen"},
+               {:h, 2, "Preface"},
+               :rich_text,
+               :divider,
+               {:h, 2, "Chapter I: Foundations of Placeholder Text"},
+               {:h, 3, "Origins and Usage"},
+               :rich_text,
+               {:h, 4, "Nested Heading Example (H4)"},
+               :rich_text,
+               {:h, 5, "Even Deeper (H5)"},
+               :rich_text,
+               {:h, 6, "The Smallest Heading (H6)"},
+               :rich_text,
+               {:h, 3, "Unordered Lists"},
+               :rich_text,
+               {:h, 3, "Ordered Lists"},
+               :rich_text,
+               {:h, 3, "Task Lists"},
+               :rich_text,
+               :divider,
+               {:h, 2, "Chapter II: Quotations, Code, and Data"},
+               :rich_text,
+               {:h, 3, "Comparison Table"},
+               :rich_text,
+               :divider,
+               {:h, 2, "Chapter III: Media, Links, and Cross References"},
+               :rich_text,
+               # The standalone image. Before #1800 it was the only thing that
+               # split the document: prose, this image, prose.
+               :image,
+               :rich_text,
+               {:h, 3, "Definition-Style Notes"},
+               :rich_text,
+               :divider,
+               {:h, 2, "Chapter IV: Extended Body Copy"},
+               :rich_text,
+               {:h, 3, "Closing Remarks"},
+               :rich_text,
+               :divider,
+               :rich_text
+             ]
+
+      # Lists stay in their section's prose: there is no list block.
+      lists = Enum.at(blocks, 14)["body"]
+      assert Enum.count(lists, &(&1["listItem"] == "bullet" and &1["level"] == 2)) == 5
+    end
+
+    test "Blocks → Markdown → Blocks gives back the same blocks, ids included" do
+      blocks = MarkdownMode.from_source(@specimen, %{})
+      {source, kept} = MarkdownMode.to_source(blocks)
+
+      assert kept == %{}
+      ids = for %{"_union_type" => type, "id" => id} <- blocks, do: {type, id}
+      assert MarkdownMode.from_source(source, kept, ids) == blocks
+    end
+  end
+
+  test "heading blocks read back as heading blocks, whatever their text" do
+    for text <- [
+          "A *b* <a href=x>y</a> [l](u)",
+          "See https://example.com/x",
+          "A & B < C",
+          "1. Not a list"
+        ] do
+      heading = %{"_union_type" => "heading", "id" => "h", "text" => text, "level" => 5}
+      {source, %{}} = MarkdownMode.to_source([heading])
+
+      assert MarkdownMode.from_source(source, %{}, [{"heading", "h"}]) == [heading]
+    end
+  end
+
   test "parsed blocks take the previous ids by position and type" do
     blocks =
       MarkdownMode.from_source(

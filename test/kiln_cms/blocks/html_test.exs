@@ -324,6 +324,58 @@ defmodule KilnCMS.Blocks.HtmlTest do
     end
   end
 
+  describe "to_blocks/2 with sections: true (#1800)" do
+    defp sections(html), do: Html.to_blocks(html, sections: true)
+
+    test "headings and rules are their own blocks; the prose between is one block per section" do
+      html =
+        "<h1>Title</h1><p>a</p><ul><li>b</li></ul><blockquote><p>c</p></blockquote>" <>
+          "<hr><h6>Small</h6><p>d</p><p>e</p>"
+
+      assert [
+               %{"type" => "heading", "value" => %{"text" => "Title", "level" => 1}},
+               %{"type" => "rich_text", "value" => %{"body" => first}},
+               %{"type" => "divider", "value" => %{}},
+               %{"type" => "heading", "value" => %{"text" => "Small", "level" => 6}},
+               %{"type" => "rich_text", "value" => %{"body" => second}}
+             ] = sections(html)
+
+      assert Enum.map(first, &(&1["listItem"] || &1["style"])) == [
+               "normal",
+               "bullet",
+               "blockquote"
+             ]
+
+      assert Enum.map(second, & &1["style"]) == ["normal", "normal"]
+    end
+
+    test "a heading's marks are dropped and a bare URL in it is just text" do
+      html =
+        ~s(<h2>The <em>big</em> <code>idea</code> at <a href="https://x.com/a">https://x.com/a</a></h2>)
+
+      assert [%{"type" => "heading", "value" => %{"text" => "The big idea at https://x.com/a"}}] =
+               sections(html)
+    end
+
+    test "a heading with a labelled link or an image stays in the prose, where they survive" do
+      for html <- [
+            ~s(<h2>See <a href="https://x.com">the docs</a></h2><p>body</p>),
+            ~s(<h2>Logo <img src="https://x.com/a.png"></h2><p>body</p>)
+          ] do
+        assert [%{"type" => "rich_text", "value" => %{"body" => [%{"style" => "h2"} | _]}}] =
+                 sections(html)
+      end
+    end
+
+    test "an empty heading is not a heading block" do
+      assert sections("<h2> </h2><p>body</p>") |> Enum.map(& &1["type"]) == ["rich_text"]
+    end
+
+    test "without the option a run of prose is still one block" do
+      assert types("<h2>A</h2><p>a</p><hr><h3>B</h3><p>b</p>") == ["rich_text"]
+    end
+  end
+
   describe "empty and nil input" do
     test "nil and empty produce nothing" do
       assert Html.to_portable_text(nil) == []

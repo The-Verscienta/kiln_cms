@@ -107,7 +107,9 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownImport do
         put_flash(socket, :error, gettext("That file isn't UTF-8 text, so it can't be imported."))
 
       true ->
-        doc = Markdown.parse_document(text)
+        # Sections (#1800): the file's headings and rules become heading and
+        # divider blocks, as in the Markdown view.
+        doc = Markdown.parse_document(text, sections: true)
 
         if doc.blocks == [] and is_nil(doc.title) do
           put_flash(socket, :error, gettext("That file has nothing in it to import."))

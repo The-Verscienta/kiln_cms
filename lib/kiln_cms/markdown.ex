@@ -100,7 +100,11 @@ defmodule KilnCMS.Markdown do
   for a content write's `block_tree` — prose runs become `rich_text`, a
   standalone image an `image`, a bare YouTube/Vimeo link an `embed`.
 
-  Options: `:media_resolver`, as in `KilnCMS.Blocks.Html.to_blocks/2`.
+  Options: `:media_resolver` and `:sections`, as in
+  `KilnCMS.Blocks.Html.to_blocks/2`. With `sections: true` each top-level
+  heading becomes a `heading` block and each `---` a `divider`, and the prose
+  between them a `rich_text` block per section; without it (the API's
+  `body_markdown`) all of that is one `rich_text` block.
   """
   @spec to_blocks(String.t() | nil, keyword()) :: [Html.block_input()]
   def to_blocks(markdown, opts \\ [])
@@ -135,7 +139,7 @@ defmodule KilnCMS.Markdown do
   front of it: the title is rendered by the page, and keeping it would print
   it twice.
 
-  Options: `:media_resolver`, as in `to_blocks/2`.
+  Options: `:media_resolver` and `:sections`, as in `to_blocks/2`.
   """
   @spec parse_document(String.t() | nil, keyword()) :: document()
   def parse_document(markdown, opts \\ [])
@@ -271,7 +275,10 @@ defmodule KilnCMS.Markdown do
   # already marked, and the shortcode passes would delete prose such as
   # `[x=1]` or a literal `[embed]`.
   defp html_opts(opts),
-    do: opts |> Keyword.take([:media_resolver]) |> Keyword.merge(autop: false, shortcodes: false)
+    do:
+      opts
+      |> Keyword.take([:media_resolver, :sections])
+      |> Keyword.merge(autop: false, shortcodes: false)
 
   # ── Rendering ──────────────────────────────────────────────────────────────
 
