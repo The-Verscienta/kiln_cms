@@ -44,8 +44,10 @@ test.describe("password reveal toggle (#1806)", () => {
     await page.goto("/register");
     await waitForLiveConnected(page);
 
-    const box = page.locator("input[name='user[password]']");
-    const eye = page.locator(`#${await box.getAttribute("id")}-reveal`);
+    // /register renders the sign-in form too (hidden), so address by id.
+    const box = page.locator("#user-password-register-with-password_password");
+    const confirmation = page.locator("#user-password-register-with-password_password_confirmation");
+    const eye = page.locator("#user-password-register-with-password_password-reveal");
 
     await eye.click();
     await expect(box).toHaveAttribute("type", "text");
@@ -53,7 +55,7 @@ test.describe("password reveal toggle (#1806)", () => {
     // Type into the other boxes too, so the phx-change debounce fires and a
     // patch lands (the confirmation box's "does not match" is that patch).
     await box.pressSequentially("abc-typed");
-    await page.locator("input[name='user[password_confirmation]']").pressSequentially("xyz");
+    await confirmation.pressSequentially("xyz");
     await expect(page.getByText("does not match")).toBeVisible();
 
     await holdsAcross(
@@ -67,9 +69,6 @@ test.describe("password reveal toggle (#1806)", () => {
     );
 
     // The confirmation box has its own toggle and was never pressed.
-    await expect(page.locator("input[name='user[password_confirmation]']")).toHaveAttribute(
-      "type",
-      "password",
-    );
+    await expect(confirmation).toHaveAttribute("type", "password");
   });
 });
