@@ -92,6 +92,10 @@ Every summary line below that was shortened links to its own entry there.
   backfill and `mix kiln.deprecations --migrate-audiences`, and drain the queue.**
   ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543) · [long form](docs/changelog/unreleased.md#on-012-before-upgrading-to-10))
 
+- **Review webhook endpoints marked *Receives unpublished content* under
+  `/editor/webhooks`; untick the draft events on any that shouldn't get drafts.**
+  ([#1776](https://github.com/The-Verscienta/kiln_cms/issues/1776) · [long form](docs/changelog/unreleased.md#review-webhook-endpoints-that-receive-unpublished-content))
+
 ### Breaking
 
 - **On a multi-org install with `KILN_CONSOLE_HOST` set, each non-default
@@ -172,6 +176,10 @@ Every summary line below that was shortened links to its own entry there.
   counts.**
   ([#1739](https://github.com/The-Verscienta/kiln_cms/issues/1739) · [long form](docs/changelog/unreleased.md#authz-check-requires-a-marker))
 
+- **In development, a stale or missing asset build is reported at boot and on
+  the console, with the command that rebuilds it.**
+  ([#1761](https://github.com/The-Verscienta/kiln_cms/issues/1761) · [long form](docs/changelog/unreleased.md#a-stale-local-asset-build-is-reported-in-development))
+
 ### Fixed
 
 - **On a multi-locale site, `/fr/blog` lists the posts `/fr/blog/<slug>`
@@ -189,6 +197,28 @@ Every summary line below that was shortened links to its own entry there.
 - **A newsletter with no confirmed subscriber to send to is refused, and the
   Send button says so.**
   ([#1775](https://github.com/The-Verscienta/kiln_cms/issues/1775) · [long form](docs/changelog/unreleased.md#a-newsletter-with-no-confirmed-subscriber-is-refused))
+
+- **A new API key acts as the signed-in admin unless another owner is picked;
+  it no longer defaults to whichever account is listed first.**
+  ([#1771](https://github.com/The-Verscienta/kiln_cms/issues/1771) · [long form](docs/changelog/unreleased.md#a-new-api-key-acts-as-the-signed-in-admin-by-default))
+
+- **The Forms list shows each form's addresses that actually answer — the
+  hosted page, a copyable embed snippet and the JSON API — instead of a
+  `/forms/:slug` that 404s.**
+  ([#1783](https://github.com/The-Verscienta/kiln_cms/issues/1783) · [long form](docs/changelog/unreleased.md#the-forms-list-shows-addresses-that-answer))
+
+- **A site integration with no saved settings (storage, mail, SSO, search, AI)
+  shows its enable toggle off, matching its status.**
+  ([#1780](https://github.com/The-Verscienta/kiln_cms/issues/1780) · [long form](docs/changelog/unreleased.md#unconfigured-integrations-show-their-enable-toggle-off))
+
+- **Sending a test email from Mail says "Test email sent to …" or why it failed,
+  instead of printing the delivery adapter's raw result.**
+  ([#1779](https://github.com/The-Verscienta/kiln_cms/issues/1779) · [long form](docs/changelog/unreleased.md#the-mail-test-send-reports-in-a-sentence))
+
+- **Admin console wording: Home's backup notice says schedules are set by the
+  operator, Content types has a browser title, Funnels' back link goes to
+  Capture, and form row buttons name their form.**
+  ([#1772](https://github.com/The-Verscienta/kiln_cms/issues/1772) · [long form](docs/changelog/unreleased.md#admin-console-wording-fixes-from-beta-round-2))
 
 - **`mix kiln.gen.content --from` works under strict tenancy, and takes
   `--org SLUG`.**
@@ -228,6 +258,18 @@ Every summary line below that was shortened links to its own entry there.
 - **An old newsletter confirmation link no longer re-subscribes a reader who
   unsubscribed.**
   ([#1690](https://github.com/The-Verscienta/kiln_cms/issues/1690) · [long form](docs/changelog/unreleased.md#an-old-newsletter-confirmation-link-no-longer-re-subscribes))
+
+- **An overlay that registers its own domain through its plugin no longer fails
+  the core's "configured domains" test in its composed suite.**
+  ([long form](docs/changelog/unreleased.md#an-overlays-composed-suite-no-longer-fails-the-configured-domains-test))
+
+- **The reconnect toasts come down with the error they report; "We can't find
+  the internet" no longer stays up beside "Something went wrong!".**
+  ([#1784](https://github.com/The-Verscienta/kiln_cms/issues/1784) · [long form](docs/changelog/unreleased.md#the-reconnect-toasts-come-down-with-the-error-they-report))
+
+- **The console keeps its two columns when the stylesheet lacks the sidebar
+  width token.**
+  ([#1755](https://github.com/The-Verscienta/kiln_cms/issues/1755) · [long form](docs/changelog/unreleased.md#the-console-keeps-its-two-columns-without-the-sidebar-width-token))
 
 ### Security
 
@@ -320,6 +362,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Each system-actor grant now names the subsystems it admits.** One worker's
   grant is no longer every worker's; no behaviour changes for users.
   ([#1747](https://github.com/The-Verscienta/kiln_cms/issues/1747) · [long form](docs/changelog/unreleased.md#each-system-actor-grant-now-names-the-subsystems-it-admits))
+
+- **A webhook added in the console no longer receives unpublished drafts
+  unless an admin selects those events.** The form ticked every event.
+  ([#1776](https://github.com/The-Verscienta/kiln_cms/issues/1776) · [long form](docs/changelog/unreleased.md#a-webhook-added-in-the-console-no-longer-receives-unpublished-drafts))
 
 ## [0.12.0] - 2026-09-27
 

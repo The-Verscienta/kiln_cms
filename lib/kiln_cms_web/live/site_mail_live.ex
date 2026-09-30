@@ -222,7 +222,9 @@ defmodule KilnCMSWeb.SiteMailLive do
           "from_name" => row.from_name
         }
       else
-        %{"enabled" => true, "port" => 587, "security" => "starttls"}
+        # Unconfigured: the toggle starts OFF, agreeing with the status copy
+        # above it; saving a half-filled form must not quietly enable it (#1780).
+        %{"enabled" => false, "port" => 587, "security" => "starttls"}
       end
 
     socket

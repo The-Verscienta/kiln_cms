@@ -89,6 +89,31 @@ defmodule KilnCMSWeb.SiteSearchLiveTest do
   end
 
   describe "saving" do
+    # #1780: an unconfigured integration's toggle started CHECKED while the
+    # status copy said it was inactive — one save away from switching it on.
+    test "an unconfigured site starts with the enable toggle off", %{conn: conn, org: org} do
+      lv = mount_as_admin(conn, org)
+
+      assert has_element?(lv, ~s(#site-search-form input[type=checkbox][name="search[enabled]"]))
+
+      refute has_element?(
+               lv,
+               ~s(#site-search-form input[type=checkbox][name="search[enabled]"][checked])
+             )
+    end
+
+    test "a saved, enabled integration still shows its toggle on", %{conn: conn, org: org} do
+      lv = mount_as_admin(conn, org)
+      save(lv, @valid)
+
+      lv = mount_as_admin(conn, org)
+
+      assert has_element?(
+               lv,
+               ~s(#site-search-form input[type=checkbox][name="search[enabled]"][checked])
+             )
+    end
+
     test "stores the key encrypted, never renders it, and says where content goes",
          %{conn: conn, org: org} do
       lv = mount_as_admin(conn, org)

@@ -425,11 +425,16 @@ defmodule KilnCMSWeb.OverviewLive do
               callers rely on "never" counting as stale — so the branch is
               here, on `@backup_state`. A backup that ran and failed, or went
               stale, is the red strip below. --%>
+        <%!-- #1772: the schedule is NOT set in the product. Scheduled backups
+              are the operator's cron job (`scripts/backup.sh`, docs/backups.md);
+              `/editor/backups` can take one now and read the manifest, nothing
+              more. So the copy says who sets the schedule, and the strip is a
+              plain box with two links — the panel, and the guide — rather than
+              one link promising a control that page does not have. --%>
         <.overview_strip
           :if={@platform_admin? and @backup_state == :never}
           id="overview-backup-setup"
-          navigate={~p"/editor/backups"}
-          tone_class="border-base-content/20 bg-base-200/40 hover:bg-base-200/60"
+          tone_class="border-base-content/20 bg-base-200/40"
           icon="hero-information-circle"
           icon_class="text-base-content/60"
         >
@@ -437,22 +442,27 @@ defmodule KilnCMSWeb.OverviewLive do
             {gettext("Backups aren't set up yet — turn them on before you go live.")}
           </span>
           <span class="block text-xs text-base-content/70">
-            {gettext("Open Backups to set a schedule or take the first one.")}
+            {gettext(
+              "Scheduled backups are a cron job set up by whoever runs this server. You can take the first one now from Backups."
+            )}
           </span>
+          <.backup_strip_links />
         </.overview_strip>
 
         <.overview_strip
           :if={@platform_admin? and @backup_state == :alarm}
           id="overview-backup-warning"
-          navigate={~p"/editor/backups"}
-          tone_class="border-error/30 bg-error/5 hover:bg-error/10"
+          tone_class="border-error/30 bg-error/5"
           icon="hero-exclamation-triangle"
           icon_class="text-error"
         >
           <span class="block text-sm font-medium">{@backup_headline}</span>
           <span class="block text-xs text-base-content/70">
-            {gettext("Open Backups to check the schedule or take one now.")}
+            {gettext(
+              "Scheduled backups run from the server's cron job — ask whoever runs this server to check it, or take one now from Backups."
+            )}
           </span>
+          <.backup_strip_links />
         </.overview_strip>
 
         <%!-- An experiment that cannot convert (#1008). Distinct from the
@@ -791,6 +801,32 @@ defmodule KilnCMSWeb.OverviewLive do
   # rather than per render, and only the two values the strip needs, so the
   # whole `Backups.status/0` map isn't held in the socket for a banner that is
   # usually absent.
+
+  # The two ways forward from a backup strip (#1772): the panel (back up now,
+  # read the manifest) and the operator guide that owns the schedule.
+  @backup_guide_url "https://github.com/The-Verscienta/kiln_cms/blob/main/docs/backups.md"
+
+  defp backup_strip_links(assigns) do
+    assigns = assign(assigns, :guide_url, @backup_guide_url)
+
+    ~H"""
+    <span class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs font-medium">
+      <.link navigate={~p"/editor/backups"} data-role="open-backups" class="underline">
+        {gettext("Open Backups")}
+      </.link>
+      <a
+        href={@guide_url}
+        target="_blank"
+        rel="noopener"
+        data-role="backup-guide"
+        class="underline"
+      >
+        {gettext("How scheduled backups are set up")}
+        <span class="sr-only">{gettext("(opens in a new tab)")}</span>
+      </a>
+    </span>
+    """
+  end
 
   attr :id, :string, required: true
   attr :icon, :string, required: true

@@ -189,6 +189,8 @@ defmodule KilnCMSWeb.ConsoleKitConsistencyTest do
           {"/editor/types", @hub <> "content_model"},
           {"/editor/fields", @hub <> "content_model"},
           {"/editor/forms", @hub <> "capture"},
+          # #1778: it said "← Analytics" while living under Capture.
+          {"/editor/funnels", @hub <> "capture"},
           {"/editor/social", @hub <> "delivery"},
           {"/editor/newsletter", @hub <> "delivery"},
           {"/editor/trash", @hub <> "organization"},

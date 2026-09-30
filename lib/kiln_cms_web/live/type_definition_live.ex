@@ -20,6 +20,10 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
     {:ok,
      socket
      |> assign(:actor, actor)
+     # The root layout's title tag reads this assign; passing it only to the
+     # console layout left the browser tab titled plain "KilnCMS" (#1773,
+     # WCAG 2.4.2).
+     |> assign(:page_title, gettext("Content types"))
      |> assign(:edit, nil)
      |> assign(:form, create_form(actor, org))
      |> load_definitions()}
@@ -161,7 +165,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
       flash={@flash}
       current_user={@current_user}
       current_org={@current_org}
-      page_title={gettext("Content types")}
+      page_title={@page_title}
       active={:types}
     >
       <div class="space-y-8">

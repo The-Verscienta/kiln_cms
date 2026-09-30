@@ -169,7 +169,9 @@ defmodule KilnCMSWeb.SiteSsoLive do
           "label" => row.label
         }
       else
-        %{"enabled" => true}
+        # Unconfigured: the toggle starts OFF, agreeing with the status copy
+        # above it; saving a half-filled form must not quietly enable it (#1780).
+        %{"enabled" => false}
       end
 
     domains = list_domains(socket)

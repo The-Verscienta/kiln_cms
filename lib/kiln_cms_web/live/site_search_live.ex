@@ -139,7 +139,9 @@ defmodule KilnCMSWeb.SiteSearchLive do
       if row do
         %{"enabled" => row.enabled, "url" => row.url, "index" => row.index}
       else
-        %{"enabled" => true, "index" => "kiln_content"}
+        # Unconfigured: the toggle starts OFF, agreeing with the status copy
+        # above it; saving a half-filled form must not quietly enable it (#1780).
+        %{"enabled" => false, "index" => "kiln_content"}
       end
 
     socket
