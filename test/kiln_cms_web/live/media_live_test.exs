@@ -41,6 +41,13 @@ defmodule KilnCMSWeb.MediaLiveTest do
     user
   end
 
+  # Uploads are ingested in a `start_async` task (#1803): submit, then wait for
+  # the batch to finish and return the page as it is afterwards.
+  defp submit_upload(lv) do
+    lv |> element("#upload-form") |> render_submit()
+    render_async(lv, 5_000)
+  end
+
   defp log_in(conn, user) do
     conn
     |> Phoenix.ConnTest.init_test_session(%{})
@@ -434,6 +441,18 @@ defmodule KilnCMSWeb.MediaLiveTest do
       html = lv |> element(~s(button[phx-click="select_all"])) |> render_click()
 
       assert html =~ "1 of them is used by published documents."
+    end
+
+    # #1804: Chrome flags a form field with neither id nor name, and the label
+    # wasn't tied to the field.
+    test "the drawer's URL field has an id and name, and its label points at it", %{
+      conn: conn
+    } do
+      item = typed_media("url-field.png", "image/png")
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media?id=#{item.id}")
+
+      assert has_element?(lv, ~s(input#media-item-url[name="media_item_url"][readonly]))
+      assert has_element?(lv, ~s(label[for="media-item-url"]))
     end
 
     test "an open drawer refreshes after a bulk tag pass", %{conn: conn} do
@@ -940,7 +959,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       assert render_upload(input, "fake.png")
 
-      html = lv |> element("#upload-form") |> render_submit()
+      html = submit_upload(lv)
       # The flash names the file and the reason, not just a count (audit U-M5).
       # "unsupported file format", not "...image format" (#481): the content
       # fails BOTH ImageProcessor and DocumentProcessor now, and the reason
@@ -950,6 +969,79 @@ defmodule KilnCMSWeb.MediaLiveTest do
       assert html =~ "unsupported file format"
       refute Enum.any?(CMS.list_media_items!(actor: editor))
       refute File.exists?(Path.join(root, "fake.png"))
+    end
+
+    # #1802: the batch limit is stated before anyone trips over it.
+    test "the drop zone states how many files fit in one upload", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+
+      assert lv |> element("#upload-batch-limit") |> render() =~ "Up to 10 files at a time"
+    end
+
+    # #1802: picking too many says how many were picked, how many fit, and
+    # what to do — and the Upload button can't be pressed until it's fixed.
+    test "picking more files than fit names both numbers and blocks the upload", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/media")
+
+      files =
+        for i <- 1..14, do: %{name: "photo-#{i}.png", content: @png, type: "image/png"}
+
+      input = file_input(lv, "#upload-form", :media, files)
+      assert {:error, _} = render_upload(input, "photo-1.png")
+
+      error = lv |> element("#upload-error") |> render()
+      assert error =~ "You picked 14 files, but you can upload up to 10 at a time."
+      assert has_element?(lv, "#upload-submit[disabled]")
+    end
+
+    # #1803: after the bytes arrive the files are still being processed; the
+    # page says so (in a polite live region) and the button can't re-submit.
+    test "a submitted batch shows a processing state until it is ingested", %{conn: conn} do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      input =
+        file_input(lv, "#upload-form", :media, [
+          %{name: "one.png", content: @png, type: "image/png"},
+          %{name: "two.png", content: @png, type: "image/png"}
+        ])
+
+      assert render_upload(input, "one.png")
+      assert render_upload(input, "two.png")
+      assert has_element?(lv, ~s(#upload-submit[phx-disable-with="Uploading…"]))
+
+      # The event's own reply renders before the ingest task can report back.
+      lv |> element("#upload-form") |> render_submit()
+      status = lv |> element("#upload-status") |> render()
+      assert status =~ ~s(aria-live="polite")
+      assert status =~ "Processing 2 files… This can take a moment."
+      assert has_element?(lv, "#upload-submit[disabled]")
+      refute has_element?(lv, ~s(button[phx-click="cancel"]))
+
+      html = render_async(lv, 5_000)
+      assert html =~ "Uploaded 2 files."
+      refute lv |> element("#upload-status") |> render() =~ "Processing"
+
+      assert CMS.list_media_items!(actor: editor) |> Enum.map(& &1.filename) |> Enum.sort() ==
+               ["one.png", "two.png"]
+    end
+
+    # #1803: files are ingested a few at a time now; each one's refusal still
+    # reaches the flash by name, next to the count of the ones that landed.
+    test "a mixed batch reports each failed file and counts the rest", %{conn: conn} do
+      editor = authed_user(:editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media")
+
+      files =
+        [%{name: "bad.png", content: "not-a-png", type: "image/png"}] ++
+          for i <- 1..5, do: %{name: "good-#{i}.png", content: @png, type: "image/png"}
+
+      input = file_input(lv, "#upload-form", :media, files)
+      for %{name: name} <- files, do: assert(render_upload(input, name))
+
+      html = submit_upload(lv)
+      assert html =~ "Uploaded 5. Failed: bad.png (unsupported file format)"
+      assert length(CMS.list_media_items!(actor: editor)) == 5
     end
 
     # #178: the upload progress bar exposes progressbar semantics.
@@ -980,7 +1072,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       assert render_upload(input, "pixel.png")
 
-      html = lv |> element("#upload-form") |> render_submit()
+      html = submit_upload(lv)
       assert html =~ "pixel.png"
 
       assert [item] = CMS.list_media_items!(actor: editor)
@@ -1017,7 +1109,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       assert render_upload(input, "brochure.pdf")
 
-      html = lv |> element("#upload-form") |> render_submit()
+      html = submit_upload(lv)
       assert html =~ "brochure.pdf"
 
       assert [item] = CMS.list_media_items!(actor: editor)
@@ -1041,7 +1133,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       assert render_upload(input, "fake.pdf")
 
-      html = lv |> element("#upload-form") |> render_submit()
+      html = submit_upload(lv)
       assert html =~ "Upload failed"
       assert html =~ "fake.pdf"
       refute Enum.any?(CMS.list_media_items!(actor: editor))
@@ -1075,7 +1167,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       assert render_upload(input, "report.docx")
 
-      html = lv |> element("#upload-form") |> render_submit()
+      html = submit_upload(lv)
       assert html =~ "report.docx"
 
       assert [item] = CMS.list_media_items!(actor: editor)
@@ -1135,7 +1227,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       assert render_upload(input, "bomb.zip")
 
-      html = lv |> element("#upload-form") |> render_submit()
+      html = submit_upload(lv)
       assert html =~ "Upload failed"
       assert html =~ "bomb.zip"
       refute Enum.any?(CMS.list_media_items!(actor: editor))
@@ -1164,7 +1256,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       assert render_upload(input, "big.pdf")
 
-      html = lv |> element("#upload-form") |> render_submit()
+      html = submit_upload(lv)
       assert html =~ "big.pdf"
       refute html =~ "Upload failed"
 
@@ -1191,7 +1283,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       assert render_upload(input, "big.png")
 
-      html = lv |> element("#upload-form") |> render_submit()
+      html = submit_upload(lv)
       assert html =~ "Upload failed"
       assert html =~ "big.png"
       refute Enum.any?(CMS.list_media_items!(actor: editor))
@@ -1216,7 +1308,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       assert render_upload(input, "clip.mp4")
 
-      html = lv |> element("#upload-form") |> render_submit()
+      html = submit_upload(lv)
       assert html =~ "clip.mp4"
       refute html =~ "Upload failed"
 
@@ -1244,7 +1336,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
         ])
 
       assert render_upload(input, "pixel.png")
-      lv |> element("#upload-form") |> render_submit()
+      submit_upload(lv)
 
       assert [%Oban.Job{worker: "KilnCMS.Media.VariantWorker"}] = media_jobs()
     end
@@ -1259,7 +1351,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
         ])
 
       assert render_upload(input, "captions.vtt")
-      lv |> element("#upload-form") |> render_submit()
+      submit_upload(lv)
 
       # "No job" means no MEDIA job (#1354) — global emptiness is a claim
       # about every other test's leftovers, not about this upload.
@@ -1288,7 +1380,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
         ])
 
       assert render_upload(input, "pixel.png")
-      lv |> element("#upload-form") |> render_submit()
+      submit_upload(lv)
 
       assert [item] = CMS.list_media_items!(actor: editor)
       assert item.byte_size == File.stat!(Path.join(root, item.storage_key)).size
@@ -1307,7 +1399,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       assert render_upload(input, "episode.mp3")
 
-      html = lv |> element("#upload-form") |> render_submit()
+      html = submit_upload(lv)
       refute html =~ "Upload failed"
 
       assert [item] = CMS.list_media_items!(actor: editor)
@@ -1327,7 +1419,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       assert render_upload(input, "captions.vtt")
 
-      html = lv |> element("#upload-form") |> render_submit()
+      html = submit_upload(lv)
       refute html =~ "Upload failed"
 
       assert [item] = CMS.list_media_items!(actor: editor)
@@ -1347,7 +1439,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       assert render_upload(input, "fake.mp4")
 
-      html = lv |> element("#upload-form") |> render_submit()
+      html = submit_upload(lv)
       assert html =~ "Upload failed"
       assert html =~ "fake.mp4"
       refute Enum.any?(CMS.list_media_items!(actor: editor))
@@ -1371,7 +1463,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       assert render_upload(input, "master.mp4")
 
-      html = lv |> element("#upload-form") |> render_submit()
+      html = submit_upload(lv)
       assert html =~ "Upload failed"
       refute Enum.any?(CMS.list_media_items!(actor: editor))
     end
@@ -1391,7 +1483,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       assert render_upload(input, "huge.vtt")
 
-      html = lv |> element("#upload-form") |> render_submit()
+      html = submit_upload(lv)
       assert html =~ "Upload failed"
       refute Enum.any?(CMS.list_media_items!(actor: editor))
     end

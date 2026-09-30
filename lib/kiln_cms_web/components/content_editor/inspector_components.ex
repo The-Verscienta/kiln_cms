@@ -99,6 +99,10 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   attr :tag_query, :string, default: ""
   attr :tags_capped?, :boolean, default: false
   attr :tag_limit, :integer, default: 500
+  # Whether the editor may add a tag from the filter box (#1805) — the
+  # `CMS.can_create_tag?/3` answer, so a role the Taxonomy policies refuse is
+  # never offered a button that would only fail.
+  attr :can_create?, :boolean, default: false
 
   def tag_picker(assigns) do
     # A **MapSet**, not a list (#528). Membership is tested three times per tag
@@ -118,6 +122,14 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       |> assign(:selected, selected)
       |> assign(:sections, sections)
       |> assign(:filtering?, filtering?)
+      # "Create tag “…”" (#1805) is offered while the query names no tag the
+      # picker is showing. A name that does exist elsewhere (a group scoped to
+      # another type) is still safe to submit: the server ticks that tag
+      # rather than making a second one.
+      |> assign(
+        :offer_create?,
+        assigns.can_create? and filtering? and not exact_tag?(sections, assigns.tag_query)
+      )
       # The checkboxes still post under `tag_ids[]`; `merge_tag_params/2`
       # rewrites that into `add_tag_ids`/`remove_tag_ids` at submit time, so the
       # wire name the browser posts and the argument the changeset takes are
@@ -144,7 +156,9 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     <fieldset id="tag-picker" phx-hook="TagFilter" data-tag-filter>
       <legend class="mb-1 block text-sm font-medium text-base-content">{gettext("Tags")}</legend>
       <p :if={@empty_reason == :no_tags} class="text-xs text-base-content/70">
-        {gettext("No tags yet.")}
+        {if @can_create?,
+          do: gettext("No tags yet. Type a name below to add one."),
+          else: gettext("No tags yet.")}
       </p>
       <%!-- Says only what is observable. `tag_sections/5` drops an *applicable*
             group that happens to be empty exactly as it drops a non-applicable
@@ -157,9 +171,10 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
           navigate={~p"/editor/taxonomy"}
           class="underline"
         >{gettext("taxonomy")}</.link>.
+        <span :if={@can_create?}>{gettext("Or type a name below to add one.")}</span>
       </p>
 
-      <div :if={@sections != [] or @filtering?} class="space-y-2">
+      <div :if={@sections != [] or @filtering? or @can_create?} class="space-y-2">
         <%!-- Unnamed so it never serializes into the changeset, and wrapped in
               phx-update="ignore" so a re-render can't clobber what's typed.
               The TagFilter hook stops form propagation and pushes `filter_tags`
@@ -169,7 +184,9 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
           <input
             type="search"
             data-tag-filter-input
-            placeholder={gettext("Filter tags…")}
+            placeholder={
+              if @can_create?, do: gettext("Find or add a tag…"), else: gettext("Filter tags…")
+            }
             aria-label={gettext("Filter tags")}
             autocomplete="off"
             class="field-input w-full"
@@ -229,11 +246,115 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
           </div>
         </details>
 
-        <p :if={@empty_reason == :no_match} class="text-xs text-base-content/70">
+        <p
+          :if={@empty_reason == :no_match and not @offer_create?}
+          class="text-xs text-base-content/70"
+        >
           {gettext("No tags match that filter.")}
         </p>
+
+        <%!-- Inline create (#1805). Enter in the filter box does the same
+              (the TagFilter hook). Only the tag is created here; it is ticked
+              like any other, and reaches the entry on Save. --%>
+        <button
+          :if={@offer_create?}
+          type="button"
+          id="tag-picker-create"
+          phx-click="create_tag"
+          phx-value-name={@tag_query}
+          class="btn btn-ghost btn-sm"
+        >
+          <.icon name="hero-plus" class="size-4" />
+          {gettext("Create tag “%{name}”", name: @tag_query)}
+        </button>
       </div>
     </fieldset>
+    """
+  end
+
+  defp exact_tag?(sections, query) do
+    wanted = query |> String.trim() |> String.downcase()
+    Enum.any?(sections, fn section -> Enum.any?(section.tags, &(&1.filter == wanted)) end)
+  end
+
+  # The Category select, plus "New category" (#1805): a small inline name field
+  # that creates the category and selects it. Plain inputs with their own
+  # `phx-change`/`phx-click`, never a nested `<form>` — this renders inside the
+  # editor's form (see `InspectorSettingsComponent`). The name field is named
+  # outside `form[...]`, so it never reaches the changeset.
+  attr :form, :any, required: true
+  attr :categories, :list, required: true
+  attr :can_create?, :boolean, default: false
+  # `nil` while the inline field is closed; the typed name while it is open.
+  attr :draft, :string, default: nil
+  attr :error, :string, default: nil
+
+  def category_field(assigns) do
+    ~H"""
+    <div id="category-field" class="space-y-2">
+      <.input
+        field={@form[:category_id]}
+        type="select"
+        label={gettext("Category")}
+        prompt={gettext("— None —")}
+        options={Enum.map(@categories, &{&1.name, &1.id})}
+      />
+
+      <button
+        :if={@can_create? and is_nil(@draft)}
+        type="button"
+        id="category-new"
+        phx-click="category_new_open"
+        class="btn btn-ghost btn-sm"
+      >
+        <.icon name="hero-plus" class="size-4" />
+        {gettext("New category")}
+      </button>
+
+      <div
+        :if={@can_create? and is_binary(@draft)}
+        id="category-new-field"
+        phx-hook="InlineCreate"
+        class="space-y-1"
+      >
+        <label for="category-new-name" class="block text-xs font-medium text-base-content/80">
+          {gettext("New category name")}
+        </label>
+        <div class="flex items-center gap-2">
+          <input
+            type="text"
+            id="category-new-name"
+            name="new_category_name"
+            value={@draft}
+            phx-change="category_new_draft"
+            phx-mounted={JS.focus()}
+            data-inline-create-input
+            autocomplete="off"
+            aria-invalid={@error && "true"}
+            aria-describedby={@error && "category-new-error"}
+            class="field-input min-w-0 flex-1"
+          />
+          <button
+            type="button"
+            id="category-new-add"
+            phx-click="create_category"
+            class="btn btn-primary btn-sm"
+          >
+            {gettext("Add")}
+          </button>
+          <button
+            type="button"
+            id="category-new-cancel"
+            phx-click="category_new_cancel"
+            data-inline-create-cancel
+            class="btn btn-ghost btn-sm"
+          >
+            {gettext("Cancel")}
+          </button>
+        </div>
+        <p :if={@error} id="category-new-error" class="text-xs text-error">{@error}</p>
+      </div>
+    </div>
     """
   end
 

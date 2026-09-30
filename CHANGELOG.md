@@ -141,6 +141,9 @@ Every summary line below that was shortened links to its own entry there.
   as bullet characters (a PDF, an email), or pasted from Word with nesting kept.**
   ([#1729](https://github.com/The-Verscienta/kiln_cms/pull/1729))
 
+- **Add a new tag or category without leaving the content editor.**
+  ([#1805](https://github.com/The-Verscienta/kiln_cms/issues/1805) · [long form](docs/changelog/unreleased.md#add-tags-and-categories-from-the-editor))
+
 ### Changed
 
 - **Keep `RichText.legacy_html` as a fallback instead of removing it;
@@ -193,6 +196,11 @@ Every summary line below that was shortened links to its own entry there.
 - **Markdown switched back to Blocks, or imported from a `.md` file, becomes
   heading, divider and one text block per section, not one long text block.**
   ([#1800](https://github.com/The-Verscienta/kiln_cms/issues/1800) · [long form](docs/changelog/unreleased.md#markdown-becomes-heading-divider-and-text-blocks))
+
+- **The media library says how many files one upload takes, shows that
+  uploaded files are still being processed, and ties its URL field to its
+  label.**
+  ([#1802](https://github.com/The-Verscienta/kiln_cms/issues/1802), [#1803](https://github.com/The-Verscienta/kiln_cms/issues/1803), [#1804](https://github.com/The-Verscienta/kiln_cms/issues/1804) · [long form](docs/changelog/unreleased.md#media-uploads-state-their-limit-and-show-processing))
 
 - **Accessibility: repeated row actions in the console name the record they act
   on, the Translations table names each control's content and locale, and the
