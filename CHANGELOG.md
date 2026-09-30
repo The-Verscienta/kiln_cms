@@ -285,10 +285,6 @@ Every summary line below that was shortened links to its own entry there.
 - **A page in the public search results shows why it matched.**
   ([#1766](https://github.com/The-Verscienta/kiln_cms/issues/1766) · [long form](docs/changelog/unreleased.md#a-page-in-public-search-results-shows-why-it-matched))
 
-- **An overlay that registers its own domain through its plugin no longer fails
-  the core's "configured domains" test in its composed suite.**
-  ([long form](docs/changelog/unreleased.md#an-overlays-composed-suite-no-longer-fails-the-configured-domains-test))
-
 - **The reconnect toasts come down with the error they report; "We can't find
   the internet" no longer stays up beside "Something went wrong!".**
   ([#1784](https://github.com/The-Verscienta/kiln_cms/issues/1784) · [long form](docs/changelog/unreleased.md#the-reconnect-toasts-come-down-with-the-error-they-report))
@@ -381,10 +377,6 @@ Every summary line below that was shortened links to its own entry there.
   of mailing nobody and marking the campaign sent.
   ([#1659](https://github.com/The-Verscienta/kiln_cms/issues/1659) · [long form](docs/changelog/unreleased.md#the-newsletter-send-pipeline-runs-under-the-policies-which-empties-the-authz-backlog))
 
-- **`mint` 1.11.0 closes three advisories: HTTP/1 response smuggling and two
-  HTTP/2 client memory exhaustions (EEF-CVE-2026-91043 HIGH, -92103, -94194).**
-  ([#1722](https://github.com/The-Verscienta/kiln_cms/pull/1722) · [long form](docs/changelog/unreleased.md#mint-1110-closes-three-advisories-http1-response-smuggling-and-two-http2))
-
 - **Each system-actor grant now names the subsystems it admits.** One worker's
   grant is no longer every worker's; no behaviour changes for users.
   ([#1747](https://github.com/The-Verscienta/kiln_cms/issues/1747) · [long form](docs/changelog/unreleased.md#each-system-actor-grant-now-names-the-subsystems-it-admits))
@@ -392,6 +384,24 @@ Every summary line below that was shortened links to its own entry there.
 - **A webhook added in the console no longer receives unpublished drafts
   unless an admin selects those events.** The form ticked every event.
   ([#1776](https://github.com/The-Verscienta/kiln_cms/issues/1776) · [long form](docs/changelog/unreleased.md#a-webhook-added-in-the-console-no-longer-receives-unpublished-drafts))
+
+## [0.12.1] - 2026-09-30
+
+Long form: [docs/changelog/v0.12.1.md](docs/changelog/v0.12.1.md) —
+the 0.12.1 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
+### Fixed
+
+- **An overlay that registers its own domain through its plugin no longer fails
+  the core's "configured domains" test in its composed suite.**
+  ([#1786](https://github.com/The-Verscienta/kiln_cms/pull/1786) · [long form](docs/changelog/v0.12.1.md#an-overlays-composed-suite-no-longer-fails-the-configured-domains-test))
+
+### Security
+
+- **`mint` 1.11.0 closes three advisories: HTTP/1 response smuggling and two
+  HTTP/2 client memory exhaustions (EEF-CVE-2026-91043 HIGH, -92103, -94194).**
+  ([#1722](https://github.com/The-Verscienta/kiln_cms/pull/1722) · [long form](docs/changelog/v0.12.1.md#mint-1110-closes-three-advisories-http1-response-smuggling-and-two-http2))
 
 ## [0.12.0] - 2026-09-27
 
