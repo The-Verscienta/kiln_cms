@@ -114,6 +114,19 @@ defmodule KilnCMSWeb.Embed do
   @source_pattern ~r{\A[A-Za-z0-9.\-*:/\[\]]+\z}
 
   @doc """
+  The one-line snippet an embedder pastes on their site for form `slug`.
+
+  Must be the **org's own host** (#557) — `embed.js` derives the iframe origin
+  from this script's `src` unless `data-kiln-origin` is set, so the global
+  endpoint host here would point every tenant's embed at the default org.
+  Shared by the forms list and the form builder so the two cannot disagree.
+  """
+  @spec form_snippet(String.t(), term()) :: String.t()
+  def form_snippet(slug, org) do
+    ~s(<script src="#{KilnCMSWeb.Tenant.base_url(org)}/embed.js" data-kiln-form="#{slug}"></script>)
+  end
+
+  @doc """
   A form's **own** allowlist, or `:deployment` when it has none (#648).
 
   The only place the attribute's shape is read. Everything else here — the
