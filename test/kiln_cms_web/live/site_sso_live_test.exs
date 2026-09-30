@@ -80,6 +80,31 @@ defmodule KilnCMSWeb.SiteSsoLiveTest do
   end
 
   describe "the provider form" do
+    # #1780: an unconfigured integration's toggle started CHECKED while the
+    # status copy said it was inactive — one save away from switching it on.
+    test "an unconfigured site starts with the enable toggle off", %{conn: conn, org: org} do
+      lv = elem(mount_as_admin(conn, org), 1)
+
+      assert has_element?(lv, ~s(#site-sso-form input[type=checkbox][name="provider[enabled]"]))
+
+      refute has_element?(
+               lv,
+               ~s(#site-sso-form input[type=checkbox][name="provider[enabled]"][checked])
+             )
+    end
+
+    test "a saved, enabled integration still shows its toggle on", %{conn: conn, org: org} do
+      lv = elem(mount_as_admin(conn, org), 1)
+      lv |> form("#site-sso-form", provider: @valid) |> render_submit()
+
+      lv = elem(mount_as_admin(conn, org), 1)
+
+      assert has_element?(
+               lv,
+               ~s(#site-sso-form input[type=checkbox][name="provider[enabled]"][checked])
+             )
+    end
+
     test "saves, shows the callback URL, and never renders the secret",
          %{conn: conn, org: org} do
       {:ok, lv, html} = conn |> mount_as_admin(org)

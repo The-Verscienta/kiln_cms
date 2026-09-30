@@ -178,6 +178,28 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **A new API key acts as the signed-in admin unless another owner is picked;
+  it no longer defaults to whichever account is listed first.**
+  ([#1771](https://github.com/The-Verscienta/kiln_cms/issues/1771) · [long form](docs/changelog/unreleased.md#a-new-api-key-acts-as-the-signed-in-admin-by-default))
+
+- **The Forms list shows each form's addresses that actually answer — the
+  hosted page, a copyable embed snippet and the JSON API — instead of a
+  `/forms/:slug` that 404s.**
+  ([#1783](https://github.com/The-Verscienta/kiln_cms/issues/1783) · [long form](docs/changelog/unreleased.md#the-forms-list-shows-addresses-that-answer))
+
+- **A site integration with no saved settings (storage, mail, SSO, search, AI)
+  shows its enable toggle off, matching its status.**
+  ([#1780](https://github.com/The-Verscienta/kiln_cms/issues/1780) · [long form](docs/changelog/unreleased.md#unconfigured-integrations-show-their-enable-toggle-off))
+
+- **Sending a test email from Mail says "Test email sent to …" or why it failed,
+  instead of printing the delivery adapter's raw result.**
+  ([#1779](https://github.com/The-Verscienta/kiln_cms/issues/1779) · [long form](docs/changelog/unreleased.md#the-mail-test-send-reports-in-a-sentence))
+
+- **Admin console wording: Home's backup notice says schedules are set by the
+  operator, Content types has a browser title, Funnels' back link goes to
+  Capture, and form row buttons name their form.**
+  ([#1772](https://github.com/The-Verscienta/kiln_cms/issues/1772) · [long form](docs/changelog/unreleased.md#admin-console-wording-fixes-from-beta-round-2))
+
 - **`mix kiln.gen.content --from` works under strict tenancy, and takes
   `--org SLUG`.**
   ([#1743](https://github.com/The-Verscienta/kiln_cms/issues/1743) · [long form](docs/changelog/unreleased.md#mix-kiln-gen-content-from-works-under-strict-tenancy))

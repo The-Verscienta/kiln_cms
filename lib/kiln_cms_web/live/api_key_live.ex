@@ -28,7 +28,7 @@ defmodule KilnCMSWeb.ApiKeyLive do
        |> assign(:actor, actor)
        |> assign(:page_title, gettext("API keys"))
        |> assign(:durations, @durations)
-       |> assign(:users, Accounts.list_users!(actor: actor))
+       |> assign_users(actor)
        |> assign(:new_key, nil)
        |> load_keys()}
     else
@@ -47,7 +47,7 @@ defmodule KilnCMSWeb.ApiKeyLive do
         %{"user_id" => user_id, "name" => name, "days" => days} = params,
         socket
       )
-      when is_binary(user_id) and is_binary(name) and is_binary(days) do
+      when is_binary(user_id) and user_id != "" and is_binary(name) and is_binary(days) do
     actor = socket.assigns.actor
     expires_at = DateTime.add(DateTime.utc_now(), duration_days(days), :day)
     access = access_scope(params["access"])
@@ -68,6 +68,15 @@ defmodule KilnCMSWeb.ApiKeyLive do
     end
   end
 
+  def handle_event("mint", _params, socket),
+    do:
+      {:noreply,
+       put_flash(
+         socket,
+         :error,
+         gettext("Choose which user the key acts as, and give it a name.")
+       )}
+
   def handle_event("dismiss_new_key", _params, socket),
     do: {:noreply, assign(socket, :new_key, nil)}
 
@@ -84,6 +93,19 @@ defmodule KilnCMSWeb.ApiKeyLive do
 
     {:noreply, socket}
   end
+
+  defp assign_users(socket, actor) do
+    users = Accounts.list_users!(actor: actor)
+
+    socket
+    |> assign(:users, users)
+    |> assign(:actor_listed?, Enum.any?(users, &(&1.id == actor.id)))
+  end
+
+  defp owner_label(%{id: id} = user, %{id: id}),
+    do: gettext("%{email} (%{role}) — you", email: user.email, role: user.role)
+
+  defp owner_label(user, _actor), do: "#{user.email} (#{user.role})"
 
   defp load_keys(socket) do
     keys =
@@ -169,16 +191,30 @@ defmodule KilnCMSWeb.ApiKeyLive do
               />
             </label>
             <label class="text-sm">
-              <span class="mb-1 block font-medium">{gettext("User")}</span>
+              <span class="mb-1 block font-medium">{gettext("Acts as")}</span>
+              <%!-- The owner defaults to the signed-in admin, never to whoever sorts
+                    first in the user list (#1771): a key authenticates as its
+                    owner, so minting for someone else must be a visible,
+                    deliberate choice. --%>
               <select
+                id="new-api-key-owner"
                 name="user_id"
                 required
+                aria-describedby="new-api-key-owner-hint"
                 class="w-full rounded border border-base-content/30 px-2 py-1.5 text-sm"
               >
-                <option :for={user <- @users} value={user.id}>
-                  {user.email} ({user.role})
+                <option value="" disabled selected={!@actor_listed?}>
+                  {gettext("Choose a user…")}
+                </option>
+                <option :for={user <- @users} value={user.id} selected={user.id == @actor.id}>
+                  {owner_label(user, @actor)}
                 </option>
               </select>
+              <span id="new-api-key-owner-hint" class="mt-1 block text-xs text-base-content/60">
+                {gettext(
+                  "The key authenticates as this account and gets its role. It defaults to you; pick another user only to mint a key on their behalf."
+                )}
+              </span>
             </label>
             <label class="text-sm">
               <span class="mb-1 block font-medium">{gettext("Expires in")}</span>

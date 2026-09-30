@@ -380,6 +380,64 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="a-new-api-key-acts-as-the-signed-in-admin-by-default"></a>
+
+- **A new API key acts as the signed-in admin unless another owner is
+  picked.** The owner select on `/editor/api-keys` rendered only user
+  options, so the browser silently selected whichever account
+  `list_users` returned first, and an admin could mint a key that
+  authenticates as someone else without noticing. The select, now labelled
+  *Acts as*, preselects the signed-in admin (marked "you"), explains that the
+  key gets that account's role, and still lists every user for a deliberate
+  choice. A blank owner is refused with a message
+  ([#1771](https://github.com/The-Verscienta/kiln_cms/issues/1771)).
+
+<a id="the-forms-list-shows-addresses-that-answer"></a>
+
+- **The Forms list shows each form's addresses that actually answer.** It
+  used to print `/forms/:slug` as if it were the public page, but nothing
+  serves an HTML `GET` there (the form's schema lives at `/api/forms/:slug`
+  and only the submission `POST` is at the root), so visitors got a 404. Each
+  active form's row now links its hosted page (`/forms/:slug/embed`, which
+  also works as a standalone page), shows its JSON API address labelled as
+  such, and carries the same embed snippet as the form builder with a Copy
+  button named for the form. An inactive form shows none of them, since all
+  three answer 404 until it is activated
+  ([#1783](https://github.com/The-Verscienta/kiln_cms/issues/1783)).
+
+<a id="unconfigured-integrations-show-their-enable-toggle-off"></a>
+
+- **A site integration with no saved settings shows its enable toggle off.**
+  The site storage, mail relay, SSO, search and AI pages rendered their
+  enable checkbox checked while the status above it said the integration was
+  not in use, so saving a half-filled form would switch it on. With nothing
+  saved the toggle now starts off; a saved configuration still shows its own
+  state ([#1780](https://github.com/The-Verscienta/kiln_cms/issues/1780)).
+
+<a id="the-mail-test-send-reports-in-a-sentence"></a>
+
+- **Sending a test email from Mail reports the outcome in a sentence.** The
+  panel printed the delivery adapter's raw return value (`ok` over
+  `%{id: "…"}`). It now says "Test email sent to …", or which side refused
+  the message (the recipient's server, the relay, the network), using the
+  same failure classification the mail queue acts on. The raw result is
+  written to the server log, with addresses redacted
+  ([#1779](https://github.com/The-Verscienta/kiln_cms/issues/1779)).
+
+<a id="admin-console-wording-fixes-from-beta-round-2"></a>
+
+- **Admin console wording fixes from beta round 2.** Home's backup notices
+  no longer send admins to Backups "to set a schedule": that page has no
+  schedule controls, because scheduled backups are the operator's cron job.
+  The notices say so and link both the Backups page and `docs/backups.md`
+  ([#1772](https://github.com/The-Verscienta/kiln_cms/issues/1772)). Content types (`/editor/types`) now sets its browser
+  title (WCAG 2.4.2,
+  [#1773](https://github.com/The-Verscienta/kiln_cms/issues/1773)). Funnels' back link
+  goes to Configure's Capture section, where the page is listed, instead of
+  Analytics ([#1778](https://github.com/The-Verscienta/kiln_cms/issues/1778)). The
+  Forms list's duplicate and delete buttons name the form they act on, part
+  of [#1774](https://github.com/The-Verscienta/kiln_cms/issues/1774).
+
 <a id="mix-kiln-gen-content-from-works-under-strict-tenancy"></a>
 
 - **`mix kiln.gen.content --from` works under strict tenancy, and takes
