@@ -129,6 +129,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Every password box on the sign-in, register, reset-password, setup and
+  change-password forms has an eye button that shows what you typed.**
+  ([#1806](https://github.com/The-Verscienta/kiln_cms/issues/1806) · [long form](docs/changelog/unreleased.md#password-reveal-toggle))
+
 - **The content editor has a Blocks | Markdown switch: edit the body as
   Markdown, and it comes back as blocks.**
   ([long form](docs/changelog/unreleased.md#editor-markdown-view))

@@ -250,6 +250,25 @@ carries the reasoning.
 
 ## Added
 
+<a id="password-reveal-toggle"></a>
+
+- **Every password box on the sign-in, register, reset-password, setup and
+  change-password forms has an eye button that shows what you typed.** A beta
+  tester signing up could not check what they had typed so far. The button
+  sits inside the right edge of each box: pressing it shows the password as
+  plain text, pressing it again hides it. It is a real button
+  (`type="button"`, so it never submits the form) that screen readers
+  announce as "Show password" or "Hide password" with its pressed state, and
+  it works with the keyboard. It runs entirely in the browser through
+  LiveView JS commands, so nothing is sent to the server, and the shown state
+  survives the validation that runs as you type. The sign-in and register
+  forms are now Kiln's own copies of the library's
+  (`KilnCMSWeb.AuthSignInForm`, `KilnCMSWeb.AuthRegisterForm`), like the
+  reset form already was, because the library's password box has no place to
+  add a button; a test holds each copy to the library's markup. Elsewhere,
+  `<.input type="password" reveal>` adds the same button
+  ([#1806](https://github.com/The-Verscienta/kiln_cms/issues/1806)).
+
 <a id="editor-markdown-view"></a>
 
 - **The content editor has a Blocks | Markdown switch.** Markdown shows the

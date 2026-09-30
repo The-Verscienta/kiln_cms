@@ -24,6 +24,19 @@ defmodule KilnCMSWeb.SetupLiveTest do
       assert html =~ "Create your admin account"
     end
 
+    test "both admin password boxes have a show/hide toggle (#1806)", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/setup")
+
+      for id <- ["setup-admin-password", "setup-admin-password-confirmation"] do
+        assert has_element?(lv, ~s(#setup-admin-form input[type=password]##{id}))
+
+        assert has_element?(
+                 lv,
+                 ~s(button##{id}-reveal[type=button][aria-controls="#{id}"][aria-pressed=false][aria-label="Show password"])
+               )
+      end
+    end
+
     test "opens on the same brand row as the sign-in pages (#1681)", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/setup")
 
