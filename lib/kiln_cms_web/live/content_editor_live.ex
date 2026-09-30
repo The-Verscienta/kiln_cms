@@ -5176,46 +5176,63 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp block_icon("faq"), do: "hero-question-mark-circle"
   defp block_icon("how_to"), do: "hero-list-bullet"
   defp block_icon("claim"), do: "hero-check-badge"
+  defp block_icon("form"), do: "hero-clipboard-document-list"
+  defp block_icon("fragment"), do: "hero-square-2-stack"
   defp block_icon("custom"), do: "hero-puzzle-piece"
   defp block_icon(_), do: "hero-squares-2x2"
 
-  # One-line description shown under the label in the inserter menu.
-  defp block_description("rich_text"), do: gettext("Formatted text with bold, italic, and lists")
-  defp block_description("heading"), do: gettext("Section title")
-  defp block_description("quote"), do: gettext("Highlighted quotation")
-  defp block_description("image"), do: gettext("Picture with alt text and caption")
-  defp block_description("file"), do: gettext("Downloadable document, e.g. a PDF")
+  # One-line description shown under the label in the inserter menu. Public
+  # (`@doc false`) so a test can hold every core block type to a real
+  # description — `form` and `fragment` fell through to the generic line for
+  # as long as nothing checked (#1760). A plugin block still gets the generic
+  # line: `Kiln.Block` has no description for this menu to read.
+  @doc false
+  @spec block_description(String.t()) :: String.t()
+  def block_description("rich_text"), do: gettext("Formatted text with bold, italic, and lists")
+  def block_description("heading"), do: gettext("Section title")
+  def block_description("quote"), do: gettext("Highlighted quotation")
+  def block_description("image"), do: gettext("Picture with alt text and caption")
+  def block_description("file"), do: gettext("Downloadable document, e.g. a PDF")
 
   # Says what it is NOT, for the same reason `accordion` does: `embed` also
   # produces a video player, and the difference an editor cares about is where
   # the file lives, not what the block looks like.
-  defp block_description("video"),
+  def block_description("video"),
     do: gettext("Video from your media library — use Embed for YouTube or Vimeo")
 
-  defp block_description("audio"), do: gettext("Audio from your media library, e.g. a podcast")
-  defp block_description("embed"), do: gettext("Embedded HTML or external content")
-  defp block_description("divider"), do: gettext("Visual separator between sections")
-  defp block_description("columns"), do: gettext("Side-by-side columns holding nested blocks")
-  defp block_description("portable_text"), do: gettext("Portable Text rich content")
+  def block_description("audio"), do: gettext("Audio from your media library, e.g. a podcast")
+  def block_description("embed"), do: gettext("Embedded HTML or external content")
+  def block_description("divider"), do: gettext("Visual separator between sections")
+  def block_description("columns"), do: gettext("Side-by-side columns holding nested blocks")
+  def block_description("portable_text"), do: gettext("Portable Text rich content")
 
-  defp block_description("gallery"),
+  def block_description("gallery"),
     do: gettext("Several images with captions, published with image-gallery structured data")
 
   # Says what it is NOT, because that is the only difference an editor can see:
   # this and the FAQ block draw the same collapsing panels, and picking the wrong
   # one publishes a claim that the page is a list of questions and answers.
-  defp block_description("accordion"),
+  def block_description("accordion"),
     do: gettext("Collapsible panels with no structured data — use FAQ for questions and answers")
 
-  defp block_description("faq"),
+  def block_description("faq"),
     do: gettext("Q&A list, published with question-and-answer structured data")
 
-  defp block_description("how_to"),
+  def block_description("how_to"),
     do: gettext("Step-by-step guide, published with how-to structured data")
 
-  defp block_description("claim"), do: gettext("Sourced claim with citation metadata")
-  defp block_description("custom"), do: gettext("Custom block payload")
-  defp block_description(_), do: gettext("Insert a block")
+  def block_description("claim"), do: gettext("Sourced claim with citation metadata")
+
+  def block_description("form"),
+    do: gettext("A form built under Forms, e.g. a contact or sign-up form")
+
+  # Says what editing it does, because that is the surprise: the block is a
+  # pointer, and a change to the fragment reaches every page that embeds it.
+  def block_description("fragment"),
+    do: gettext("Reusable content kept in one place — edit it once, every page using it updates")
+
+  def block_description("custom"), do: gettext("Custom block payload")
+  def block_description(_), do: gettext("Insert a block")
 
   # HTML the TipTap editor hydrates from. Canonical Portable Text (`body` —
   # what imports, visual editing, and the MCP tools write) takes precedence,

@@ -1447,6 +1447,23 @@ defmodule KilnCMSWeb.EditorLiveTest do
     end
   end
 
+  # #1760: `form` and `fragment` fell through to the generic "Insert a block"
+  # line, and nothing noticed. Every core type is held to a real description
+  # here, so the next block added to `KilnCMS.Blocks` can't slip past either.
+  # Plugin blocks are left out: `Kiln.Block` has no description to show.
+  describe "block picker descriptions" do
+    test "every core block type has its own description" do
+      generic = KilnCMSWeb.ContentEditorLive.block_description("no-such-block")
+
+      for type <- KilnCMS.Blocks.core_types() do
+        description = KilnCMSWeb.ContentEditorLive.block_description(to_string(type))
+
+        assert description != generic,
+               "the #{type} block shows the generic #{inspect(generic)} in the picker"
+      end
+    end
+  end
+
   describe "media library browser (editor chrome)" do
     test "opening from chrome and picking inserts a new image block", %{conn: conn} do
       media = Ash.Seed.seed!(MediaItem, %{filename: "hero.jpg", url: "/uploads/hero"})

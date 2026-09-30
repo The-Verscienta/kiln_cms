@@ -993,6 +993,11 @@ msgstr ""
 msgid "A flagged phrase"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "A form built under Forms, e.g. a contact or sign-up form"
+msgstr ""
+
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
 msgid "A form is submitted"
@@ -10943,6 +10948,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Return"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reusable content kept in one place — edit it once, every page using it updates"
 msgstr ""
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex

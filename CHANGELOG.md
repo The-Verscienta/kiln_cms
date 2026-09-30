@@ -216,6 +216,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Picking an image from the media library keeps the alt text written on it.**
   ([#1782](https://github.com/The-Verscienta/kiln_cms/issues/1782) · [long form](docs/changelog/unreleased.md#picking-a-library-image-keeps-its-alt-text))
 
+- **The Form and Fragment blocks say what they are in the block picker.**
+  ([#1760](https://github.com/The-Verscienta/kiln_cms/issues/1760) · [long form](docs/changelog/unreleased.md#form-and-fragment-blocks-say-what-they-are-in-the-block-picker))
+
 ### Security
 
 - **Changing or resetting a password now signs out every other session and

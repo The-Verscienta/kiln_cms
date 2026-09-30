@@ -515,6 +515,17 @@ carries the reasoning.
   descriptions are asked for by the publish gate, on purpose
   ([#1782](https://github.com/The-Verscienta/kiln_cms/issues/1782)).
 
+<a id="form-and-fragment-blocks-say-what-they-are-in-the-block-picker"></a>
+
+- **The Form and Fragment blocks say what they are in the block picker.**
+  Both fell through to the generic "Insert a block" line. Form now reads as a
+  form built under *Forms*, and Fragment as reusable content that updates
+  every page using it when edited once. A test holds every core block type to
+  its own description, so the next block added can't slip through. A block a
+  plugin contributes still shows the generic line: `Kiln.Block` has no
+  description for the picker to read
+  ([#1760](https://github.com/The-Verscienta/kiln_cms/issues/1760)).
+
 ## Security
 
 <a id="password-rotation-revokes-every-session"></a>
