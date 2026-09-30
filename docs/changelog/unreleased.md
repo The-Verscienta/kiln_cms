@@ -373,6 +373,18 @@ carries the reasoning.
   task's moduledoc and in `docs/policy-matrix.md`
   ([#1739](https://github.com/The-Verscienta/kiln_cms/issues/1739)).
 
+<a id="the-search-palette-leads-with-an-exact-title-match"></a>
+
+- **The ⌘K search palette leads with a *Best match* row when a title is
+  exactly what was typed.** The palette draws pages, posts and custom content
+  in a fixed order with up to eight hits each, so an exact post title came
+  ninth behind eight pages that shared a few words with it. A hit whose title
+  equals the query, ignoring case, spacing and straight or curly quotes, now
+  moves out of its section into a row above everything else, labelled with its
+  type. The row only reorders what the search returned; the search ranking
+  itself is unchanged
+  ([#1781](https://github.com/The-Verscienta/kiln_cms/issues/1781)).
+
 <a id="a-stale-local-asset-build-is-reported-in-development"></a>
 
 - **In development, a stale or missing asset build is reported at boot and on
@@ -423,6 +435,25 @@ carries the reasoning.
   ([#1774](https://github.com/The-Verscienta/kiln_cms/issues/1774),
   [#1768](https://github.com/The-Verscienta/kiln_cms/issues/1768),
   [#1769](https://github.com/The-Verscienta/kiln_cms/issues/1769))
+
+<a id="a-custom-field-whose-content-type-no-longer-exists-no-longer-crashes-the-fields"></a>
+
+- **A custom field whose content type no longer exists no longer crashes the
+  Fields screen; it is listed as orphaned, with a delete.** A field
+  definition stores its compiled content type's name as text and read it
+  back as an atom, refusing any name with no atom behind it. A write can
+  only store a registered type, but an upgraded site can still hold a
+  row for a type that is gone (a removed plugin, a renamed or deleted
+  type, a row from early dynamic-type testing), and every read that met
+  it failed, taking `/editor/fields` down with `cannot load "…" as type
+  Ash.Type.Atom`. Such a name now loads as an orphan marker instead,
+  without creating an atom. `/editor/fields` lists these fields under
+  *Orphaned fields* with a delete button (admins only, as before). Search's
+  name-field leg skips them, and they never resolve to a content type, not
+  even a dynamic type with the same name, so deleting one purges no stored
+  values. The column and its stored values are unchanged, so there is no
+  migration.
+  ([#1770](https://github.com/The-Verscienta/kiln_cms/issues/1770))
 
 <a id="a-new-api-key-acts-as-the-signed-in-admin-by-default"></a>
 
@@ -624,6 +655,55 @@ carries the reasoning.
   row is not rewritten. Every row the backfill corpus says it must refuse is
   now delivered in a test.
   ([#1543](https://github.com/The-Verscienta/kiln_cms/issues/1543))
+
+<a id="picking-a-library-image-keeps-its-alt-text"></a>
+
+- **Picking an image from the media library keeps the alt text written on
+  it.** Choosing *Choose from library* for a new or an empty image block filled
+  the URL and left *Alt text* blank, so the editor raised "1 image has no alt
+  text" for a description the library already held. A pasted or uploaded
+  image always carried it. A library pick now fills the block's alt from the
+  media item when the block has none; an alt the block already has is its
+  own, per-placement description and is never overwritten. The alt is read
+  from the media item on the server, not taken from the click. A gallery
+  still starts each picked image with a blank alt: its per-image
+  descriptions are asked for by the publish gate, on purpose
+  ([#1782](https://github.com/The-Verscienta/kiln_cms/issues/1782)).
+
+<a id="form-and-fragment-blocks-say-what-they-are-in-the-block-picker"></a>
+
+- **The Form and Fragment blocks say what they are in the block picker.**
+  Both fell through to the generic "Insert a block" line. Form now reads as a
+  form built under *Forms*, and Fragment as reusable content that updates
+  every page using it when edited once. A test holds every core block type to
+  its own description, so the next block added can't slip through. A block a
+  plugin contributes still shows the generic line: `Kiln.Block` has no
+  description for the picker to read
+  ([#1760](https://github.com/The-Verscienta/kiln_cms/issues/1760)).
+
+<a id="a-search-highlight-names-the-title-once"></a>
+
+- **A search highlight names the title once, not two or three times before
+  the body.** The denormalized `search_text` joined the title, `seo_title`,
+  `seo_description` and the block text as they were, so a page whose SEO title
+  is its title and whose body opens with it as a heading carried it three
+  times, and the `highlight` in `/api/search` and the palette read it back
+  that way. A field value equal to one already written (ignoring case and
+  spacing) is now left out, and so is a first block that repeats one. Ranking
+  loses nothing: the title keeps its own weighted leg. Stored rows are
+  rewritten on their next save, and a published one on its next fire, so no
+  step is required; `mix kiln.refire_all` rewrites every published document
+  at once
+  ([#1758](https://github.com/The-Verscienta/kiln_cms/issues/1758)).
+
+<a id="a-page-in-public-search-results-shows-why-it-matched"></a>
+
+- **A page in the public search results shows why it matched.** `/search`
+  listed a page hit as its title alone; posts and custom content show their
+  excerpt, and a page has none. A page hit now shows the search highlight
+  with the matched words marked, escaped except for the marks, and falls back
+  to its meta description when the match gives no highlight
+  ([#1766](https://github.com/The-Verscienta/kiln_cms/issues/1766)).
 
 <a id="an-overlays-composed-suite-no-longer-fails-the-configured-domains-test"></a>
 

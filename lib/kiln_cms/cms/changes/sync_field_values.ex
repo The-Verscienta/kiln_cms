@@ -71,7 +71,18 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
 
   defp operation(_changeset, _definition), do: nil
 
+  # An orphaned definition (#1770) governs no table: its content type is gone,
+  # so there is no record of it left to purge, and nothing to warn about when
+  # an admin clears it away.
   defp run(op, definition, result) do
+    if KilnCMS.CMS.FieldDefinition.orphaned?(definition) do
+      result
+    else
+      run_on_target(op, definition, result)
+    end
+  end
+
+  defp run_on_target(op, definition, result) do
     case target(definition) do
       {:ok, table, filter, params} ->
         execute(op, table, filter, params)

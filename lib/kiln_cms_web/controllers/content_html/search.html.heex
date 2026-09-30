@@ -104,12 +104,23 @@
       {gettext("Pages")}
     </h2>
     <ul class="mt-3 space-y-4">
+      <%!-- A page has no excerpt, so it showed its title and nothing else —
+           no way to tell why it matched (#1766). The search highlight says
+           exactly that; a page whose match gives no highlight falls back to
+           its meta description. `to_safe_html/1` escapes everything but the
+           `<mark>` tags `ts_headline` adds. --%>
       <li :for={page <- @results.pages}>
         <a
           href={KilnCMS.I18n.localized_path(@locale, ~p"/#{page.slug}")}
-          class="font-medium hover:underline"
+          class="group block"
         >
-          {page.title}
+          <span class="font-medium group-hover:underline">{page.title}</span>
+          <p
+            :if={search_snippet(page)}
+            class="search-snippet mt-1 text-sm text-base-content/70 [&_mark]:rounded-sm [&_mark]:bg-warning/30 [&_mark]:px-0.5 [&_mark]:text-base-content"
+          >
+            {search_snippet(page)}
+          </p>
         </a>
       </li>
     </ul>
