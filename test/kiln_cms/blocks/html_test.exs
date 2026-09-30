@@ -350,8 +350,10 @@ defmodule KilnCMS.Blocks.HtmlTest do
     end
 
     test "a heading's marks are dropped and a bare URL in it is just text" do
+      # A no-break space between the two tags, as `KilnCMS.Markdown` renders
+      # it: the HTML parser drops a whitespace-only text node there.
       html =
-        ~s(<h2>The <em>big</em> <code>idea</code> at <a href="https://x.com/a">https://x.com/a</a></h2>)
+        ~s(<h2>The <em>big</em> <code>idea</code> at <a href="https://x.com/a">https://x.com/a</a></h2>)
 
       assert [%{"type" => "heading", "value" => %{"text" => "The big idea at https://x.com/a"}}] =
                sections(html)
