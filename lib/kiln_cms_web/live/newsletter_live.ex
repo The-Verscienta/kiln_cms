@@ -28,7 +28,8 @@ defmodule KilnCMSWeb.NewsletterLive do
        |> load_segments()
        |> load_subscribers()
        |> load_posts()
-       |> load_sends()}
+       |> load_sends()
+       |> load_recipients()}
     else
       {:ok,
        socket
@@ -65,7 +66,12 @@ defmodule KilnCMSWeb.NewsletterLive do
     socket =
       with {:ok, segment} <- Newsletter.get_segment(id, actor: socket.assigns.actor, tenant: org),
            :ok <- Newsletter.destroy_segment(segment, actor: socket.assigns.actor, tenant: org) do
-        socket |> load_segments() |> load_posts() |> put_flash(:info, gettext("Segment deleted."))
+        socket
+        |> forget_segment(id)
+        |> load_segments()
+        |> load_posts()
+        |> load_recipients()
+        |> put_flash(:info, gettext("Segment deleted."))
       else
         _ -> put_flash(socket, :error, gettext("Couldn't delete that segment."))
       end
@@ -95,6 +101,7 @@ defmodule KilnCMSWeb.NewsletterLive do
            subscriber_form(socket.assigns.actor, socket.assigns.current_org)
          )
          |> load_subscribers()
+         |> load_recipients()
          |> put_flash(:info, gettext("Subscriber added (pending confirmation)."))}
 
       {:error, form} ->
@@ -110,7 +117,10 @@ defmodule KilnCMSWeb.NewsletterLive do
              Newsletter.get_subscriber(id, actor: socket.assigns.actor, tenant: org),
            {:ok, _} <-
              Newsletter.confirm_subscriber(subscriber, actor: socket.assigns.actor, tenant: org) do
-        socket |> load_subscribers() |> put_flash(:info, gettext("Subscriber confirmed."))
+        socket
+        |> load_subscribers()
+        |> load_recipients()
+        |> put_flash(:info, gettext("Subscriber confirmed."))
       else
         _ -> put_flash(socket, :error, gettext("Couldn't confirm that subscriber."))
       end
@@ -125,7 +135,10 @@ defmodule KilnCMSWeb.NewsletterLive do
       with {:ok, subscriber} <-
              Newsletter.get_subscriber(id, actor: socket.assigns.actor, tenant: org),
            :ok <- Ash.destroy(subscriber, actor: socket.assigns.actor, tenant: org) do
-        socket |> load_subscribers() |> put_flash(:info, gettext("Subscriber removed."))
+        socket
+        |> load_subscribers()
+        |> load_recipients()
+        |> put_flash(:info, gettext("Subscriber removed."))
       else
         _ -> put_flash(socket, :error, gettext("Couldn't remove that subscriber."))
       end
@@ -155,6 +168,17 @@ defmodule KilnCMSWeb.NewsletterLive do
   # The tier is the per-org one — the right question, since the post and the
   # segment both resolve off `document.org_id`, and escalating to a platform
   # admin would lock a site's own admin out of their own newsletter.
+  # Keeps the chosen segment's recipient check live (#1775): the Send button
+  # is disabled while the audience has no confirmed subscriber.
+  def handle_event("change_send", %{"send" => params}, socket) when is_map(params) do
+    params = Map.take(params, ["post_id", "segment_id", "subject"])
+
+    {:noreply,
+     socket
+     |> assign(:send_params, Map.merge(socket.assigns.send_params, params))
+     |> load_recipients()}
+  end
+
   def handle_event("send", %{"send" => params}, socket) when is_map(params) do
     with {:ok, %{} = actor} <- KilnCMSWeb.SocketReauth.reload_actor(socket.assigns.actor),
          :admin <-
@@ -186,10 +210,11 @@ defmodule KilnCMSWeb.NewsletterLive do
             socket
             |> assign(:send_params, %{"post_id" => "", "segment_id" => "", "subject" => ""})
             |> load_sends()
+            |> load_recipients()
             |> put_flash(:info, gettext("Newsletter queued for delivery."))
 
           {:error, reason} ->
-            put_flash(socket, :error, send_error(reason))
+            socket |> load_recipients() |> put_flash(:error, send_error(reason))
         end
       end
 
@@ -203,6 +228,12 @@ defmodule KilnCMSWeb.NewsletterLive do
       )
 
   defp send_error(:no_such_segment), do: gettext("That segment no longer exists.")
+
+  defp send_error(:no_recipients),
+    do:
+      gettext(
+        "Nobody would receive this — the audience has no confirmed subscribers. Add subscribers below and confirm them first."
+      )
 
   defp send_error(:not_published), do: gettext("Only published posts can be sent.")
 
@@ -236,6 +267,27 @@ defmodule KilnCMSWeb.NewsletterLive do
     socket
     |> assign(:subscribers, subscribers)
     |> assign(:confirmed_count, Enum.count(subscribers, &(&1.status == :confirmed)))
+  end
+
+  # Whether the audience the send form targets has a confirmed subscriber
+  # (#1775). `Newsletter.send_as_newsletter/2` refuses an empty audience on its
+  # own; this only disables the button and explains why. A refused or failed
+  # read leaves the button enabled, so the server's answer is what the admin
+  # sees, not a guess.
+  defp load_recipients(socket) do
+    segment_id = presence(socket.assigns.send_params["segment_id"])
+
+    recipients? =
+      case Newsletter.has_recipients?(
+             KilnCMSWeb.Tenant.current_org_id(socket),
+             segment_id,
+             socket.assigns.actor
+           ) do
+        {:ok, false} -> false
+        _ -> true
+      end
+
+    assign(socket, :recipients?, recipients?)
   end
 
   # Only published, world-readable posts can be newslettered (gated/embargoed
@@ -294,6 +346,12 @@ defmodule KilnCMSWeb.NewsletterLive do
     |> to_form()
   end
 
+  # The send form must not keep targeting a segment that is gone.
+  defp forget_segment(%{assigns: %{send_params: %{"segment_id" => id} = params}} = socket, id),
+    do: assign(socket, :send_params, %{params | "segment_id" => ""})
+
+  defp forget_segment(socket, _id), do: socket
+
   defp presence(nil), do: nil
   defp presence(""), do: nil
   defp presence(value), do: value
@@ -328,7 +386,12 @@ defmodule KilnCMSWeb.NewsletterLive do
 
         <section class="space-y-4">
           <h2 class="text-lg font-medium">{gettext("Send a newsletter")}</h2>
-          <form phx-submit="send" class="card card-pad space-y-4">
+          <form
+            id="newsletter-send-form"
+            phx-change="change_send"
+            phx-submit="send"
+            class="card card-pad space-y-4"
+          >
             <label class="block">
               <span class="text-sm font-medium">{gettext("Published post")}</span>
               <select name="send[post_id]" class="field-select mt-1 w-full" required>
@@ -350,7 +413,13 @@ defmodule KilnCMSWeb.NewsletterLive do
               <span class="text-sm font-medium">{gettext("Segment")}</span>
               <select name="send[segment_id]" class="field-select mt-1 w-full">
                 <option value="">{gettext("All confirmed subscribers")}</option>
-                <option :for={segment <- @segments} value={segment.id}>{segment.name}</option>
+                <option
+                  :for={segment <- @segments}
+                  value={segment.id}
+                  selected={@send_params["segment_id"] == segment.id}
+                >
+                  {segment.name}
+                </option>
               </select>
             </label>
 
@@ -361,7 +430,32 @@ defmodule KilnCMSWeb.NewsletterLive do
               label={gettext("Subject (optional — defaults to the post title)")}
             />
 
-            <.button type="submit" variant="primary">{gettext("Send newsletter")}</.button>
+            <div class="flex flex-wrap items-center gap-3">
+              <.button
+                id="newsletter-send-button"
+                type="submit"
+                variant="primary"
+                disabled={!@recipients?}
+                aria-describedby={!@recipients? && "newsletter-no-recipients"}
+              >
+                {gettext("Send newsletter")}
+              </.button>
+              <p
+                :if={!@recipients?}
+                id="newsletter-no-recipients"
+                class="text-sm text-base-content/70"
+              >
+                {if @send_params["segment_id"] in [nil, ""],
+                  do:
+                    gettext(
+                      "No confirmed subscribers yet. Add subscribers below and confirm them to send."
+                    ),
+                  else:
+                    gettext(
+                      "This segment has no confirmed subscribers. Pick another segment, or add and confirm subscribers first."
+                    )}
+              </p>
+            </div>
           </form>
         </section>
 

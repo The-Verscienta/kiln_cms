@@ -8262,6 +8262,11 @@ msgstr[1] "No se encontraron problemas de alegaciones en %{count} verificaciones
 msgid "No comments on this block yet."
 msgstr "Todavía no hay comentarios en este bloque."
 
+#: lib/kiln_cms_web/live/newsletter_live.ex
+#, elixir-autogen, elixir-format
+msgid "No confirmed subscribers yet. Add subscribers below and confirm them to send."
+msgstr "Todavía no hay suscriptores confirmados. Añade suscriptores abajo y confírmalos para poder enviar."
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "No consent recorded for this content."
@@ -8658,6 +8663,11 @@ msgstr "Aún no hay webhooks"
 #, elixir-autogen, elixir-format
 msgid "Nobody follows this site yet."
 msgstr "Nadie sigue este sitio todavía."
+
+#: lib/kiln_cms_web/live/newsletter_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nobody would receive this — the audience has no confirmed subscribers. Add subscribers below and confirm them first."
+msgstr "Nadie lo recibiría: la audiencia no tiene suscriptores confirmados. Añade suscriptores abajo y confírmalos primero."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -14114,6 +14124,11 @@ msgstr "Esta regla:"
 #, elixir-autogen, elixir-format
 msgid "This runs code on your public site."
 msgstr "Esto ejecuta código en tu sitio público."
+
+#: lib/kiln_cms_web/live/newsletter_live.ex
+#, elixir-autogen, elixir-format
+msgid "This segment has no confirmed subscribers. Pick another segment, or add and confirm subscribers first."
+msgstr "Este segmento no tiene suscriptores confirmados. Elige otro segmento, o añade y confirma suscriptores primero."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format

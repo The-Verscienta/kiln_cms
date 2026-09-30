@@ -113,7 +113,10 @@ defmodule KilnCMS.Newsletter do
   `%Ash.Error.Forbidden{}` when the actor may not create the campaign or read
   the segment it names,
   `:gated` — a non-public audience with no entitled tier segment targeted,
-  `:no_such_segment`, or `:not_fired` when no `:web` artifact exists yet).
+  `:no_such_segment`, `:no_recipients` when the audience has no confirmed
+  subscriber (#1775 — nothing is recorded, so the publish revision's
+  automation ledger entry is not spent on an empty campaign), or `:not_fired`
+  when no `:web` artifact exists yet).
 
   Gated content may be sent **only** to a tier-backed segment whose tier grants
   exactly that audience (#337 Phase 2); a hand-built segment is always refused. Actual delivery happens asynchronously via the fan-out worker.
@@ -125,6 +128,7 @@ defmodule KilnCMS.Newsletter do
 
     with {:ok, segment} <- resolve_segment(opts[:segment_id], document.org_id, opts[:actor]),
          :ok <- ensure_sendable(document, segment),
+         :ok <- ensure_recipients(document.org_id, opts[:segment_id], opts[:actor]),
          {:ok, _html} <- artifact_html(document) do
       # Ledger row + fan-out job commit in ONE transaction (Oban jobs are
       # Postgres rows), so a crash between them can't strand a campaign that
@@ -274,6 +278,56 @@ defmodule KilnCMS.Newsletter do
       {:error, _reason} -> {:error, :no_such_segment}
     end
   end
+
+  @doc """
+  Whether the audience a campaign would target has at least one confirmed
+  subscriber (#1775).
+
+  `segment_id` is the campaign's segment, or `nil` for every confirmed
+  subscriber on the site. Read as `actor` — the sender — with
+  `authorize_with: :error` (#1659): a refused read under the filter would
+  answer an empty list, which is indistinguishable from "nobody to send to",
+  so a refusal comes back as `{:error, %Ash.Error.Forbidden{}}` instead of
+  `{:ok, false}`.
+
+  A one-row probe, not a count: `Ash.count/2` cannot tell a refusal from zero.
+  """
+  @spec has_recipients?(Ash.UUID.t(), Ash.UUID.t() | nil, term()) ::
+          {:ok, boolean()} | {:error, term()}
+  def has_recipients?(org_id, segment_id, actor) do
+    case confirmed_subscribers(segment_id,
+           actor: actor,
+           authorize_with: :error,
+           tenant: org_id,
+           query: [limit: 1, select: [:id]]
+         ) do
+      {:ok, recipients} -> {:ok, recipients != []}
+      {:error, _error} = error -> error
+    end
+  end
+
+  # Refuse a campaign with nobody to send it to (#1775). Checked before the
+  # ledger row is written: an empty campaign used to be recorded, queued and
+  # marked `:sent` to zero recipients, and for an automation rule it spent
+  # the one send per publish revision, so confirming subscribers afterwards
+  # could not send that revision. Fails CLOSED on a refused read (see
+  # `has_recipients?/3`). The fan-out worker re-resolves the list when it
+  # runs, so this is a preflight, not the recipient set.
+  #
+  # A person is read as themselves. The automation's system actor opens
+  # campaigns but holds no grant on subscribers (#1747 gives each subsystem
+  # only its own actions), so its preflight reads as the newsletter's own
+  # actor — the one `SendWorker` resolves the same list with a moment later.
+  defp ensure_recipients(org_id, segment_id, actor) do
+    case has_recipients?(org_id, segment_id, recipient_reader(actor)) do
+      {:ok, true} -> :ok
+      {:ok, false} -> {:error, :no_recipients}
+      {:error, _error} = error -> error
+    end
+  end
+
+  defp recipient_reader(%KilnCMS.SystemActor{}), do: system()
+  defp recipient_reader(actor), do: actor
 
   # The email body is the already-fired, immutable published HTML — never the
   # live editable tree (same guarantee as public delivery).

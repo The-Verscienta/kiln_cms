@@ -358,6 +358,22 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="a-newsletter-with-no-confirmed-subscriber-is-refused"></a>
+
+- **A newsletter with no confirmed subscriber to send to is refused, and the
+  Send button says so.** `Newsletter.send_as_newsletter/2` recorded and
+  queued a campaign whatever its audience held, so a site with nobody
+  confirmed got a campaign marked sent to zero people. For an automation
+  rule that also spent the one send each publish revision gets, so
+  confirming subscribers afterwards could not send that revision. It now
+  answers `{:error, :no_recipients}` before anything is written when the
+  segment, or the whole site, has no confirmed subscriber. The check reads
+  as the sender and fails closed: a refused read is a `Forbidden`, not "no
+  recipients", so an automation rule retries it, and settles a real
+  `:no_recipients` without retrying. On `/editor/newsletter` the Send button
+  is disabled, with a line saying why, while the chosen audience is empty
+  ([#1775](https://github.com/The-Verscienta/kiln_cms/issues/1775)).
+
 <a id="mix-kiln-gen-content-from-works-under-strict-tenancy"></a>
 
 - **`mix kiln.gen.content --from` works under strict tenancy, and takes

@@ -174,6 +174,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **A newsletter with no confirmed subscriber to send to is refused, and the
+  Send button says so.**
+  ([#1775](https://github.com/The-Verscienta/kiln_cms/issues/1775) · [long form](docs/changelog/unreleased.md#a-newsletter-with-no-confirmed-subscriber-is-refused))
+
 - **`mix kiln.gen.content --from` works under strict tenancy, and takes
   `--org SLUG`.**
   ([#1743](https://github.com/The-Verscienta/kiln_cms/issues/1743) · [long form](docs/changelog/unreleased.md#mix-kiln-gen-content-from-works-under-strict-tenancy))
