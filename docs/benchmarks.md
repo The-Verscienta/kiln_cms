@@ -250,7 +250,7 @@ What it did and did not record:
   measurable to "an editor builds a page in under 5 minutes" or to "positive
   beta feedback", and it cannot count toward the five-author minimum.
 
-**Round 2** (#59) runs against `v1.0.0-rc.1`. For these metrics to be met it
+**Round 2** (#59) runs against `v1.0.0-rc.2` (re-run; rc.1 sessions partly used a local build). For these metrics to be met it
 has to record, per tester, the Scenario A time (first click in the editor to
 Submit), whether the tester is non-technical, and the 0–10 rating. With round
 1 unrecorded, round 2 alone must supply all five authors, unless round 1's
