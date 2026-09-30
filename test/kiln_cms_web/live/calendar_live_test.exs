@@ -15,6 +15,7 @@ defmodule KilnCMSWeb.CalendarLiveTest do
   alias KilnCMS.Accounts.Organization
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
+  alias KilnCMS.Test.AccessibleNames
 
   @password "password123456"
 
@@ -412,6 +413,23 @@ defmodule KilnCMSWeb.CalendarLiveTest do
         conn |> log_in(admin) |> live(~p"/editor/calendar?kind=not_a_lane")
 
       assert html =~ page.title
+    end
+
+    test "each filter is named by its label alone, not its options (#1769)", %{conn: conn} do
+      {:ok, _lv, html} = conn |> log_in(authed_admin()) |> live(~p"/editor/calendar")
+
+      assert AccessibleNames.names(html, "form[phx-change='filter'] select") == [
+               "Type",
+               "Lane",
+               "Health"
+             ]
+
+      # A wrapping <label> folds every option's text into the name; the
+      # explicit for/id pairing is what keeps it short.
+      assert html
+             |> LazyHTML.from_document()
+             |> LazyHTML.query("form[phx-change='filter'] label select")
+             |> Enum.empty?()
     end
   end
 

@@ -606,7 +606,11 @@ defmodule KilnCMSWeb.TeamLive do
                   {gettext(
                     "Admin on every site through their account role, so there is no site tier to set here."
                   )}
-                  <.link navigate={~p"/editor/accounts/#{user.id}"} class="link">
+                  <.link
+                    navigate={~p"/editor/accounts/#{user.id}"}
+                    aria-label={gettext("Manage account %{email}", email: user.email)}
+                    class="link"
+                  >
                     {gettext("Manage account")}
                   </.link>
                 </p>
@@ -643,6 +647,7 @@ defmodule KilnCMSWeb.TeamLive do
                     type="button"
                     phx-click="edit_member"
                     phx-value-id={membership.id}
+                    aria-label={gettext("Edit %{email}", email: membership.user.email)}
                     class="btn btn-sm btn-default"
                   >
                     {gettext("Edit")}
@@ -652,7 +657,7 @@ defmodule KilnCMSWeb.TeamLive do
                     phx-click="remove_member"
                     phx-value-id={membership.id}
                     data-confirm={gettext("Remove this member from the site?")}
-                    aria-label={gettext("Remove member")}
+                    aria-label={gettext("Remove %{email}", email: membership.user.email)}
                     class="btn btn-sm btn-ghost text-base-content/60 hover:text-error"
                   >
                     <.icon name="hero-trash" class="size-4" />
@@ -756,6 +761,7 @@ defmodule KilnCMSWeb.TeamLive do
                     type="button"
                     phx-click="edit_role"
                     phx-value-id={role.id}
+                    aria-label={gettext("Edit role %{name}", name: role.name)}
                     class="btn btn-sm btn-default"
                   >
                     {gettext("Edit")}
@@ -767,7 +773,7 @@ defmodule KilnCMSWeb.TeamLive do
                     data-confirm={
                       gettext("Delete this role? Members keep their tier and direct scope.")
                     }
-                    aria-label={gettext("Delete role")}
+                    aria-label={gettext("Delete role %{name}", name: role.name)}
                     class="btn btn-sm btn-ghost text-base-content/60 hover:text-error"
                   >
                     <.icon name="hero-trash" class="size-4" />

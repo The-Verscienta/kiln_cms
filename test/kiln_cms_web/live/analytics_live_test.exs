@@ -13,6 +13,7 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
 
   alias KilnCMS.Analytics
   alias KilnCMS.CMS
+  alias KilnCMS.Test.AccessibleNames
 
   @password "password123456"
 
@@ -64,6 +65,30 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
     assert html =~ "Total views"
     assert html =~ "Tracked Page"
     assert html =~ "2"
+  end
+
+  test "each row's public link names the content it opens (#1774)", %{conn: conn} do
+    pages =
+      for title <- ["Viewed One", "Viewed Two"] do
+        page =
+          CMS.create_page!(
+            %{title: title, slug: "ana-#{System.unique_integer([:positive])}"},
+            authorize?: false
+          )
+
+        Analytics.record_view!("page", page.id, authorize?: false)
+        page
+      end
+
+    {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
+    html = render(lv)
+
+    for page <- pages do
+      assert AccessibleNames.name(html, ~s(a[target="_blank"][href$="/#{page.slug}"])) ==
+               "View #{page.title} on the site (opens in a new tab)"
+    end
+
+    assert AccessibleNames.repeated(html, "tbody a") == []
   end
 
   test "visiting a published page records both a total and a daily bucket", %{conn: conn} do

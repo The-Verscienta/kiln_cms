@@ -11,6 +11,7 @@ defmodule KilnCMSWeb.TaxonomyLiveTest do
   alias KilnCMS.CMS.Category
   alias KilnCMS.CMS.Tag
   alias KilnCMS.CMS.TagGroup
+  alias KilnCMS.Test.AccessibleNames
 
   @password "password123456"
 
@@ -273,6 +274,30 @@ defmodule KilnCMSWeb.TaxonomyLiveTest do
       lv |> form("#edit-category-#{cat.id}", taxonomy: %{name: "New name"}) |> render_submit()
 
       assert CMS.get_category!(cat.id, authorize?: false).name == "New name"
+    end
+
+    test "each row's Edit and Delete name the record they act on (#1774)", %{conn: conn} do
+      a = seed_category(%{name: "Adaptogen"})
+      b = seed_category(%{name: "Tonic"})
+      t = seed_tag(%{name: "Bitter"})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/taxonomy")
+      html = render(lv)
+
+      for record <- [a, b, t] do
+        assert AccessibleNames.name(
+                 html,
+                 ~s(button[phx-click="edit"][phx-value-id="#{record.id}"])
+               ) ==
+                 "Edit #{record.name}"
+
+        assert AccessibleNames.name(
+                 html,
+                 ~s(button[phx-click="delete"][phx-value-id="#{record.id}"])
+               ) == "Delete #{record.name}"
+      end
+
+      assert AccessibleNames.repeated(html, "li button") == []
     end
   end
 

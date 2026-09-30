@@ -683,6 +683,11 @@ msgstr "%{size} · %{count} fichier(s) · %{trigger}"
 msgid "%{tasks} on this block"
 msgstr "%{tasks} sur ce bloc"
 
+#: lib/kiln_cms_web/live/translations_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{title}, %{locale}:"
+msgstr "%{title}, %{locale} :"
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{type} (unknown)"
@@ -777,7 +782,6 @@ msgstr "(exclu des envois)"
 msgid "(no link)"
 msgstr "(sans lien)"
 
-#: lib/kiln_cms_web/live/analytics_live.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
@@ -4108,6 +4112,11 @@ msgstr "Créer un lien d'aperçu"
 msgid "Create redirect"
 msgstr "Créer une redirection"
 
+#: lib/kiln_cms_web/live/redirect_live.ex
+#, elixir-autogen, elixir-format
+msgid "Create redirect for %{path}"
+msgstr "Créer une redirection pour %{path}"
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Create release"
@@ -4423,15 +4432,19 @@ msgid "Delete permanently"
 msgstr "Supprimer définitivement"
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
-#: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delete redirect"
 msgstr "Supprimer la redirection"
 
+#: lib/kiln_cms_web/live/redirect_live.ex
+#, elixir-autogen, elixir-format
+msgid "Delete redirect from %{path}"
+msgstr "Supprimer la redirection depuis %{path}"
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
-msgid "Delete role"
-msgstr "Supprimer le rôle"
+msgid "Delete role %{name}"
+msgstr "Supprimer le rôle %{name}"
 
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
@@ -5091,10 +5104,20 @@ msgstr "Chaque niveau accorde une audience. Configurez le prix dans le tableau d
 msgid "Edit"
 msgstr "Modifier"
 
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Edit %{email}"
+msgstr "Modifier %{email}"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Edit %{kind}"
 msgstr "Modifier : %{kind}"
+
+#: lib/kiln_cms_web/live/taxonomy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Edit %{name}"
+msgstr "Modifier %{name}"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -5135,6 +5158,11 @@ msgstr "Modifier la citation"
 #, elixir-autogen, elixir-format
 msgid "Edit rich text"
 msgstr "Modifier le texte enrichi"
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Edit role %{name}"
+msgstr "Modifier le rôle %{name}"
 
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
@@ -5756,6 +5784,11 @@ msgstr "Exporter"
 #, elixir-autogen, elixir-format
 msgid "Export %{count} selected"
 msgstr "Exporter %{count} sélectionnées"
+
+#: lib/kiln_cms_web/live/translations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Export %{title} to %{locale}"
+msgstr "Exporter %{title} vers %{locale}"
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
@@ -7522,10 +7555,20 @@ msgstr "Garantit que les visiteurs voient tout de suite la dernière version."
 msgid "Manage"
 msgstr "Gérer"
 
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Manage %{email}"
+msgstr "Gérer %{email}"
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Manage account"
 msgstr "Gérer le compte"
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Manage account %{email}"
+msgstr "Gérer le compte %{email}"
 
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
@@ -10527,6 +10570,16 @@ msgstr "Retirer"
 msgid "Remove %{domain}?"
 msgstr "Supprimer %{domain} ?"
 
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove %{email}"
+msgstr "Retirer %{email}"
+
+#: lib/kiln_cms_web/live/redirect_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove %{path} from the 404 list"
+msgstr "Retirer %{path} de la liste des 404"
+
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -10544,20 +10597,10 @@ msgstr "Supprimer la colonne"
 msgid "Remove from release"
 msgstr "Retirer du lancement"
 
-#: lib/kiln_cms_web/live/redirect_live.ex
-#, elixir-autogen, elixir-format
-msgid "Remove from the 404 list"
-msgstr "Retirer de la liste des 404"
-
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "Remove image"
 msgstr "Supprimer l'image"
-
-#: lib/kiln_cms_web/live/team_live.ex
-#, elixir-autogen, elixir-format
-msgid "Remove member"
-msgstr "Retirer le membre"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -14394,6 +14437,11 @@ msgstr "Vues totales"
 msgid "Trail"
 msgstr "Piste d'audit"
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Trail for %{title}"
+msgstr "Piste d'audit de %{title}"
+
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Translation vendors (XLIFF)"
@@ -15069,6 +15117,11 @@ msgstr "Vidéo : MP4, WebM jusqu'à 500 Mo · Audio : MP3, M4A jusqu'à 100 Mo �
 msgid "View"
 msgstr "Voir"
 
+#: lib/kiln_cms_web/live/analytics_live.ex
+#, elixir-autogen, elixir-format
+msgid "View %{title} on the site (opens in a new tab)"
+msgstr "Voir %{title} sur le site (s'ouvre dans un nouvel onglet)"
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "View as of then"
@@ -15436,6 +15489,11 @@ msgstr "Rédigez votre page d'accueil"
 #, elixir-autogen, elixir-format
 msgid "Writes new prose from your instruction. Describe what this section should say."
 msgstr "Rédige un nouveau texte à partir de votre consigne. Décrivez ce que cette section doit dire."
+
+#: lib/kiln_cms_web/live/translations_live.ex
+#, elixir-autogen, elixir-format
+msgid "XLIFF file to import"
+msgstr "Fichier XLIFF à importer"
 
 #: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
 #, elixir-autogen, elixir-format
@@ -16950,6 +17008,11 @@ msgstr "échec du téléversement"
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
+msgid "view"
+msgstr "voir"
+
+#: lib/kiln_cms_web/live/analytics_live.ex
+#, elixir-autogen, elixir-format
 msgid "vs. previous step"
 msgstr "par rapport à l'étape précédente"
 
@@ -17003,6 +17066,11 @@ msgstr "— Choisir un type —"
 #, elixir-autogen, elixir-format
 msgid "— Ungrouped —"
 msgstr "— Sans groupe —"
+
+#: lib/kiln_cms_web/live/translations_live.ex
+#, elixir-autogen, elixir-format
+msgid "— create the %{locale} translation of %{title}"
+msgstr "— créer la traduction %{locale} de %{title}"
 
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format

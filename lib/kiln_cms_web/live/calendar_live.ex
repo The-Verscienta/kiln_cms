@@ -728,13 +728,17 @@ defmodule KilnCMSWeb.CalendarLive do
 
   defp filter_bar(assigns) do
     ~H"""
-    <form phx-change="filter" class="flex flex-wrap items-end gap-3">
+    <%!-- Explicit `for`/`id`, not a wrapping `<label>` (#1769): an implicit
+          label's name is built from its whole subtree, and browsers folded
+          every option of the nested `<select>` into it — the filter was
+          announced as "Type All types Page Post" instead of "Type". --%>
+    <form id="calendar-filters" phx-change="filter" class="flex flex-wrap items-end gap-3">
       <input type="hidden" name="view" value={@view} />
       <input type="hidden" name="at" value={Date.to_iso8601(@at)} />
 
-      <label class="flex flex-col gap-1 text-xs text-base-content/70">
-        {gettext("Type")}
-        <select name="type" class="field-select w-auto py-1">
+      <div class="flex flex-col gap-1 text-xs text-base-content/70">
+        <label for="calendar-filter-type">{gettext("Type")}</label>
+        <select id="calendar-filter-type" name="type" class="field-select w-auto py-1">
           <option value="all" selected={is_nil(@filters.types)}>{gettext("All types")}</option>
           <option
             :for={ct <- @content_types}
@@ -744,11 +748,11 @@ defmodule KilnCMSWeb.CalendarLive do
             {ct.label}
           </option>
         </select>
-      </label>
+      </div>
 
-      <label class="flex flex-col gap-1 text-xs text-base-content/70">
-        {gettext("Lane")}
-        <select name="kind" class="field-select w-auto py-1">
+      <div class="flex flex-col gap-1 text-xs text-base-content/70">
+        <label for="calendar-filter-kind">{gettext("Lane")}</label>
+        <select id="calendar-filter-kind" name="kind" class="field-select w-auto py-1">
           <option value="all" selected={is_nil(@filters.kinds)}>{gettext("All lanes")}</option>
           <option
             :for={kind <- KilnCMS.CMS.Calendar.kinds()}
@@ -758,11 +762,11 @@ defmodule KilnCMSWeb.CalendarLive do
             {lane_label(kind)}
           </option>
         </select>
-      </label>
+      </div>
 
-      <label class="flex flex-col gap-1 text-xs text-base-content/70">
-        {gettext("Health")}
-        <select name="health" class="field-select w-auto py-1">
+      <div class="flex flex-col gap-1 text-xs text-base-content/70">
+        <label for="calendar-filter-health">{gettext("Health")}</label>
+        <select id="calendar-filter-health" name="health" class="field-select w-auto py-1">
           <option value="all" selected={is_nil(@filters.health)}>{gettext("Any health")}</option>
           <option
             :for={health <- [:due_soon, :due, :overdue, :expired, :fresh]}
@@ -772,7 +776,7 @@ defmodule KilnCMSWeb.CalendarLive do
             {health_label(health)}
           </option>
         </select>
-      </label>
+      </div>
     </form>
     """
   end

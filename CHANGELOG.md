@@ -174,6 +174,11 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Accessibility: repeated row actions in the console name the record they act
+  on, the Translations table names each control's content and locale, and the
+  calendar filters are announced by their label alone.**
+  ([#1774](https://github.com/The-Verscienta/kiln_cms/issues/1774) · [long form](docs/changelog/unreleased.md#repeated-row-actions-name-the-record-they-act-on))
+
 - **`mix kiln.gen.content --from` works under strict tenancy, and takes
   `--org SLUG`.**
   ([#1743](https://github.com/The-Verscienta/kiln_cms/issues/1743) · [long form](docs/changelog/unreleased.md#mix-kiln-gen-content-from-works-under-strict-tenancy))

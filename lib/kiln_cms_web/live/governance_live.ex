@@ -599,6 +599,7 @@ defmodule KilnCMSWeb.GovernanceLive do
           </div>
           <.link
             navigate={~p"/editor/governance/#{item.type}/#{item.id}"}
+            aria-label={gettext("Trail for %{title}", title: item.title)}
             class="btn btn-sm btn-default"
           >
             {gettext("Trail")}

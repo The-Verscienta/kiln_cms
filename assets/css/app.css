@@ -1038,12 +1038,28 @@
     vertical-align: middle;
     border-bottom: 1px solid color-mix(in oklch, var(--color-base-content) 8%, transparent);
   }
-  .table tbody tr:last-child td {
+  /* A row header (`<th scope="row">` in the body) names its row for
+     assistive tech but reads as an ordinary cell, not a column heading. */
+  .table tbody th {
+    padding: 0.55rem 0.75rem;
+    vertical-align: middle;
+    font-size: inherit;
+    font-weight: inherit;
+    text-transform: none;
+    letter-spacing: normal;
+    white-space: normal;
+    color: inherit;
+    border-bottom: 1px solid color-mix(in oklch, var(--color-base-content) 8%, transparent);
+  }
+  .table tbody tr:last-child td,
+  .table tbody tr:last-child th {
     border-bottom: 0;
   }
+  .table tbody tr:hover th,
   .table tbody tr:hover td {
     background: color-mix(in oklch, var(--color-base-200) 55%, transparent);
   }
+  .table-zebra tbody tr:nth-child(2n) th,
   .table-zebra tbody tr:nth-child(2n) td {
     background: color-mix(in oklch, var(--color-base-200) 32%, transparent);
   }

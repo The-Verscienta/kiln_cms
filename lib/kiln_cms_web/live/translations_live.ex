@@ -464,6 +464,9 @@ defmodule KilnCMSWeb.TranslationsLive do
               phx-submit="import_xliff"
               class="flex max-w-full flex-wrap items-center gap-2 sm:ml-auto sm:border-l sm:border-base-content/10 sm:pl-4"
             >
+              <label for={@uploads.xliff.ref} class="sr-only">
+                {gettext("XLIFF file to import")}
+              </label>
               <.live_file_input
                 upload={@uploads.xliff}
                 class="max-w-full text-sm file:mr-3 file:rounded file:border-0 file:bg-base-content/10 file:px-3 file:py-1.5 file:text-sm file:text-base-content hover:file:bg-base-content/20"
@@ -552,12 +555,12 @@ defmodule KilnCMSWeb.TranslationsLive do
           <table class="table">
             <thead>
               <tr>
-                <th :if={@vendor_locales != []} class="w-8">
+                <th :if={@vendor_locales != []} scope="col" class="w-8">
                   <span class="sr-only">{gettext("Export")}</span>
                 </th>
-                <th>{gettext("Content")}</th>
-                <th>{gettext("Type")}</th>
-                <th :for={locale <- @locales} class="font-mono">{locale}</th>
+                <th scope="col">{gettext("Content")}</th>
+                <th scope="col">{gettext("Type")}</th>
+                <th :for={locale <- @locales} scope="col" class="font-mono">{locale}</th>
               </tr>
             </thead>
             <tbody>
@@ -568,6 +571,12 @@ defmodule KilnCMSWeb.TranslationsLive do
                     class="size-4 rounded border border-base-content/30 accent-primary disabled:cursor-not-allowed disabled:opacity-30"
                     checked={MapSet.member?(@selected, row_key(row))}
                     disabled={not exportable?(row, @default_locale, @vendor_locale)}
+                    aria-label={
+                      gettext("Export %{title} to %{locale}",
+                        title: row.title,
+                        locale: @vendor_locale
+                      )
+                    }
                     title={
                       if(exportable?(row, @default_locale, @vendor_locale),
                         do: gettext("Include in the XLIFF export"),
@@ -579,7 +588,7 @@ defmodule KilnCMSWeb.TranslationsLive do
                     phx-value-key={row_key(row)}
                   />
                 </td>
-                <td class="max-w-64 truncate font-medium">{row.title}</td>
+                <th scope="row" class="max-w-64 truncate font-medium">{row.title}</th>
                 <td class="text-xs uppercase tracking-wide text-base-content/60">
                   {row.label}
                 </td>
@@ -592,6 +601,9 @@ defmodule KilnCMSWeb.TranslationsLive do
                       chip_class(cell.status)
                     ]}
                   >
+                    <span class="sr-only">
+                      {gettext("%{title}, %{locale}:", title: row.title, locale: cell.locale)}
+                    </span>
                     {status_label(cell.status)}
                     <span
                       :if={cell.stale?}
@@ -613,7 +625,13 @@ defmodule KilnCMSWeb.TranslationsLive do
                       chip_class(:missing)
                     ]}
                   >
-                    + {status_label(:missing)}
+                    <span aria-hidden="true">+</span> {status_label(:missing)}
+                    <span class="sr-only">
+                      {gettext("— create the %{locale} translation of %{title}",
+                        locale: cell.locale,
+                        title: row.title
+                      )}
+                    </span>
                   </button>
                   <span
                     :if={is_nil(cell.record) and not row.may_author?}
@@ -622,6 +640,9 @@ defmodule KilnCMSWeb.TranslationsLive do
                       chip_class(:missing)
                     ]}
                   >
+                    <span class="sr-only">
+                      {gettext("%{title}, %{locale}:", title: row.title, locale: cell.locale)}
+                    </span>
                     {status_label(:missing)}
                   </span>
                 </td>

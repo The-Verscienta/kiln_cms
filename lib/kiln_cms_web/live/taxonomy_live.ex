@@ -636,6 +636,7 @@ defmodule KilnCMSWeb.TaxonomyLive do
             phx-click="edit"
             phx-value-type={@kind.key}
             phx-value-id={@record.id}
+            aria-label={gettext("Edit %{name}", name: @record.name)}
             class="btn btn-sm btn-ghost"
           >
             {gettext("Edit")}

@@ -12,6 +12,7 @@ defmodule KilnCMSWeb.RedirectLiveTest do
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Page
+  alias KilnCMS.Test.AccessibleNames
 
   @password "password123456"
 
@@ -199,5 +200,50 @@ defmodule KilnCMSWeb.RedirectLiveTest do
 
       assert CMS.list_missed_paths!(authorize?: false) == []
     end
+
+    test "each row's actions name the path they act on (#1774)", %{conn: conn} do
+      a = missed("/named-a-#{uniq()}")
+      b = missed("/named-b-#{uniq()}")
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:admin)) |> live(~p"/editor/redirects?tab=404s")
+
+      html = render(lv)
+
+      for row <- [a, b] do
+        assert AccessibleNames.name(
+                 html,
+                 ~s(button[phx-click="redirect_missed"][phx-value-id="#{row.id}"])
+               ) == "Create redirect for #{row.path}"
+
+        assert AccessibleNames.name(
+                 html,
+                 ~s(button[phx-click="dismiss_missed"][phx-value-id="#{row.id}"])
+               ) == "Remove #{row.path} from the 404 list"
+      end
+
+      assert AccessibleNames.repeated(html, "tbody button") == []
+    end
+  end
+
+  test "each redirect's delete button names its path (#1774)", %{conn: conn} do
+    rows =
+      for _ <- 1..2 do
+        page = published_page()
+        old_slug = page.slug
+        CMS.update_page!(page, %{slug: "rl-pg-#{uniq()}"}, authorize?: false)
+        [row] = CMS.list_redirects!(authorize?: false, query: [filter: [path: "/#{old_slug}"]])
+        row
+      end
+
+    {lv, _html} = open(conn, authed_user(:admin))
+    html = render(lv)
+
+    for row <- rows do
+      assert AccessibleNames.name(html, ~s(button[phx-click="delete"][phx-value-id="#{row.id}"])) ==
+               "Delete redirect from #{row.path}"
+    end
+
+    assert AccessibleNames.repeated(html, "tbody button") == []
   end
 end

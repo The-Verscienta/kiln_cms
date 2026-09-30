@@ -11,6 +11,7 @@ defmodule KilnCMSWeb.TranslationsLiveTest do
 
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
+  alias KilnCMS.Test.AccessibleNames
 
   @password "password123456"
 
@@ -87,6 +88,52 @@ defmodule KilnCMSWeb.TranslationsLiveTest do
 
       assert fr.state == :draft
       assert fr.title == "To translate"
+    end
+
+    test "every control in a row names the content and the locale (#1768)", %{conn: conn} do
+      admin = authed_admin()
+      about = CMS.create_page!(%{title: "About Us", slug: slug(), locale: "en"}, actor: admin)
+
+      fr =
+        CMS.create_page!(%{title: "À propos", slug: about.slug, locale: "fr"}, actor: admin)
+
+      _ = CMS.publish_page!(fr, %{}, actor: admin)
+      contact = CMS.create_page!(%{title: "Contact", slug: slug(), locale: "en"}, actor: admin)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/translations")
+      html = render(lv)
+
+      for page <- [about, contact] do
+        row = ~s(tr[id$="-#{page.id}"])
+
+        # The title cell is the row header, so a screen reader announces it
+        # when moving across the locale columns.
+        assert AccessibleNames.name(html, ~s(#{row} th[scope="row"])) == page.title
+
+        assert AccessibleNames.name(html, ~s(#{row} input[type="checkbox"])) ==
+                 "Export #{page.title} to fr"
+
+        assert AccessibleNames.name(html, ~s(#{row} a[href="/editor/content/page/#{page.id}"])) ==
+                 "#{page.title}, en: draft"
+
+        assert AccessibleNames.name(html, ~s(#{row} button[phx-value-locale="es"])) ==
+                 "missing — create the es translation of #{page.title}"
+      end
+
+      assert AccessibleNames.name(html, ~s(a[href="/editor/content/page/#{fr.id}"])) ==
+               "About Us, fr: published"
+
+      assert AccessibleNames.name(
+               html,
+               ~s(button[phx-value-id="#{contact.id}"][phx-value-locale="fr"])
+             ) ==
+               "missing — create the fr translation of Contact"
+
+      assert AccessibleNames.repeated(html, "tbody a, tbody button, tbody input") == []
+
+      # The vendor file picker is labelled too, not just the button beside it.
+      assert AccessibleNames.name(html, ~s(#xliff-import input[type="file"])) ==
+               "XLIFF file to import"
     end
   end
 

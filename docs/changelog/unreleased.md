@@ -358,6 +358,33 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="repeated-row-actions-name-the-record-they-act-on"></a>
+
+- **Accessibility: repeated row actions in the console name the record they
+  act on, the Translations table names each control's content and locale,
+  and the calendar filters are announced by their label alone.** A
+  screen-reader or voice-control user met five links called *Manage*, five
+  buttons called *Edit* and thirty called *Trail*, with nothing to say which
+  row each belonged to. Each repeated action now carries its row's subject in
+  its accessible name, starting with the visible text so voice commands still
+  match (WCAG 2.5.3): *Manage admin@example.com* on Accounts; *Manage
+  account*, *Edit*, *Remove* and the role actions on Team; *Edit* on
+  Taxonomy; the public *view* link on Analytics; *Trail* on Governance; and
+  *Create redirect*, *Remove from the 404 list* and *Delete redirect* on
+  Redirects. On Translations the title cell is now the row header
+  (`<th scope="row">`), the export checkbox is named *Export About to fr*
+  instead of "on", each status chip reads *About, fr: draft*, each *+
+  missing* button says which translation it creates, and the XLIFF file
+  picker has a label. The calendar's Type, Lane and Health selects use an
+  explicit `for`/`id` label instead of a wrapping one, which had folded every
+  option into the name. Nothing looks different: the extra words are
+  `aria-label`s or `sr-only` text, and `.table` now styles a body row header
+  like any other cell. The Forms list's *Duplicate*/*Delete* buttons are
+  covered separately. (WCAG 1.3.1, 2.4.6, 4.1.2)
+  ([#1774](https://github.com/The-Verscienta/kiln_cms/issues/1774),
+  [#1768](https://github.com/The-Verscienta/kiln_cms/issues/1768),
+  [#1769](https://github.com/The-Verscienta/kiln_cms/issues/1769))
+
 <a id="mix-kiln-gen-content-from-works-under-strict-tenancy"></a>
 
 - **`mix kiln.gen.content --from` works under strict tenancy, and takes

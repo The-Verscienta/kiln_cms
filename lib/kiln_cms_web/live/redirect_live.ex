@@ -417,9 +417,10 @@ defmodule KilnCMSWeb.RedirectLive do
                     type="button"
                     phx-click="redirect_missed"
                     phx-value-id={missed.id}
+                    aria-label={gettext("Create redirect for %{path}", path: missed.path)}
                     class="btn btn-sm btn-default"
                   >
-                    {gettext("Create redirect")} &rarr;
+                    {gettext("Create redirect")} <span aria-hidden="true">&rarr;</span>
                   </button>
                   <button
                     type="button"
@@ -428,7 +429,7 @@ defmodule KilnCMSWeb.RedirectLive do
                     data-confirm={
                       gettext("Remove this path from the list? It returns if it's hit again.")
                     }
-                    aria-label={gettext("Remove from the 404 list")}
+                    aria-label={gettext("Remove %{path} from the 404 list", path: missed.path)}
                     class="btn btn-sm btn-ghost text-base-content/60 hover:text-error"
                   >
                     <.icon name="hero-x-mark" class="size-4" />
@@ -536,7 +537,7 @@ defmodule KilnCMSWeb.RedirectLive do
                   phx-click="delete"
                   phx-value-id={redirect.id}
                   data-confirm={gettext("Delete this redirect? The old URL will 404.")}
-                  aria-label={gettext("Delete redirect")}
+                  aria-label={gettext("Delete redirect from %{path}", path: redirect.path)}
                   class="btn btn-sm btn-ghost text-base-content/60 hover:text-error"
                 >
                   <.icon name="hero-trash" class="size-4" />

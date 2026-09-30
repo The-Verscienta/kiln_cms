@@ -120,6 +120,8 @@ written as a function component or a raw `class="…"` in a template.
   styling (+ `.table-zebra` for stripes). Cells keep their own alignment / width
   / colour utilities; `.table` owns padding, borders and the header treatment.
   Wrap wide tables in `overflow-x-auto`. Also styles the `<.table>` component.
+  A row header (`<th scope="row">` in the body) is styled as an ordinary cell,
+  so naming each row for assistive tech costs no visual change.
 - **Shell nav** — `.side-link` (+ `aria-current="page"` for the active item:
   a bordered, raised row with the icon in ember ink), `.side-icon` (its
   outlined icon), `.side-group` (one nav section, keyed by `data-nav-group`;

@@ -8,6 +8,7 @@ defmodule KilnCMSWeb.TeamLiveTest do
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.User
+  alias KilnCMS.Test.AccessibleNames
 
   @password "password123456"
 
@@ -100,6 +101,63 @@ defmodule KilnCMSWeb.TeamLiveTest do
       refute has_element?(view, "#site-admin-#{colleague.id}")
     end
 
+    test "each row's actions name the member or role they act on (#1774)", %{conn: conn} do
+      admin = authed_user(:admin)
+      conn = log_in(conn, admin)
+
+      memberships =
+        for _ <- 1..2 do
+          colleague = authed_user(:editor)
+
+          {:ok, membership} =
+            Accounts.create_org_membership(
+              %{user_id: colleague.id, organization_id: Accounts.default_org_id(), role: :editor},
+              authorize?: false
+            )
+
+          {membership, to_string(colleague.email)}
+        end
+
+      roles =
+        for name <- ["Blog editor", "Docs editor"] do
+          {:ok, role} =
+            Accounts.create_role(%{name: name, org_id: Accounts.default_org_id()},
+              authorize?: false
+            )
+
+          role
+        end
+
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+      html = render(view)
+
+      assert AccessibleNames.name(html, "#site-admin-#{admin.id} a") ==
+               "Manage account #{admin.email}"
+
+      for {membership, email} <- memberships do
+        assert AccessibleNames.name(
+                 html,
+                 "#member-#{membership.id} button[phx-click='edit_member']"
+               ) ==
+                 "Edit #{email}"
+
+        assert AccessibleNames.name(
+                 html,
+                 "#member-#{membership.id} button[phx-click='remove_member']"
+               ) == "Remove #{email}"
+      end
+
+      for role <- roles do
+        assert AccessibleNames.name(html, "#role-#{role.id} button[phx-click='edit_role']") ==
+                 "Edit role #{role.name}"
+
+        assert AccessibleNames.name(html, "#role-#{role.id} button[phx-click='delete_role']") ==
+                 "Delete role #{role.name}"
+      end
+
+      assert AccessibleNames.repeated(html, "li a, li button") == []
+    end
+
     test "an admin who also holds a membership is listed once, on the membership row",
          %{conn: conn} do
       other_admin = authed_user(:admin)
@@ -115,8 +173,16 @@ defmodule KilnCMSWeb.TeamLiveTest do
       refute has_element?(view, "#site-admin-#{other_admin.id}")
       assert has_element?(view, "#member-#{membership.id}", "Site admin")
 
-      occurrences = html |> String.split(to_string(other_admin.email)) |> length() |> Kernel.-(1)
-      assert occurrences == 1
+      # Counted in rows, not in raw HTML: the row's action names carry the
+      # address too (#1774), so a string count would see it three times on
+      # the one row.
+      rows =
+        html
+        |> LazyHTML.from_document()
+        |> LazyHTML.query("li[id^='site-admin-'], li[id^='member-']")
+        |> Enum.filter(&(LazyHTML.text(&1) =~ to_string(other_admin.email)))
+
+      assert length(rows) == 1
     end
 
     test "adding an unknown email flashes an error", %{conn: conn} do
