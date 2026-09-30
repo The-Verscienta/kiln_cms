@@ -9,6 +9,8 @@ defmodule KilnCMSWeb.MailSettingsLive do
   """
   use KilnCMSWeb, :live_view
 
+  require Logger
+
   alias KilnCMS.Keys
   alias KilnCMS.Mail
   alias KilnCMS.Mail.DnsCheck
@@ -31,6 +33,7 @@ defmodule KilnCMSWeb.MailSettingsLive do
        |> assign(:sending_test?, false)
        |> assign(:preflight, nil)
        |> assign(:test_result, nil)
+       |> assign(:test_recipient, nil)
        |> assign(:test_to, to_string(actor.email))
        |> load_settings(Mail.ensure_settings!())
        |> load_delivery_health()}
@@ -201,6 +204,7 @@ defmodule KilnCMSWeb.MailSettingsLive do
          socket
          |> assign(:sending_test?, true)
          |> assign(:test_to, to)
+         |> assign(:test_recipient, recipient)
          |> assign(:test_result, nil)
          |> start_async(:send_test, fn -> Mail.deliver_now(email) end)}
     end
@@ -265,22 +269,71 @@ defmodule KilnCMSWeb.MailSettingsLive do
      |> put_flash(:error, gettext("The preflight check failed unexpectedly."))}
   end
 
+  # #1779: an admin reads a sentence, never the adapter's term (`ok` over
+  # `%{id: "…"}` was what this used to render). The raw outcome, redacted of
+  # addresses, goes to the log for whoever debugs the relay.
   def handle_async(:send_test, {:ok, outcome}, socket) do
+    to = socket.assigns.test_recipient
+
     result =
       case outcome do
-        {:ok, receipt} -> %{"status" => "ok", "detail" => inspect(receipt)}
-        {:error, reason} -> %{"status" => "fail", "detail" => inspect(reason)}
+        {:ok, receipt} ->
+          Logger.info("Mail test send accepted: #{Mail.redact_failure(receipt)}")
+          %{"status" => "ok", "message" => gettext("Test email sent to %{to}.", to: to)}
+
+        {:error, reason} ->
+          Logger.warning("Mail test send failed: #{Mail.redact_failure(reason)}")
+
+          %{
+            "status" => "fail",
+            "message" => test_failure_message(Mail.failure_kind(reason), to)
+          }
       end
 
     {:noreply, socket |> assign(:sending_test?, false) |> assign(:test_result, result)}
   end
 
   def handle_async(:send_test, {:exit, reason}, socket) do
+    Logger.warning("Mail test send crashed: #{Mail.redact_failure(reason)}")
+
     {:noreply,
      socket
      |> assign(:sending_test?, false)
-     |> assign(:test_result, %{"status" => "fail", "detail" => inspect(reason)})}
+     |> assign(:test_result, %{
+       "status" => "fail",
+       "message" =>
+         gettext(
+           "The test email couldn't be sent: the send stopped unexpectedly. The server log has the details."
+         )
+     })}
   end
+
+  defp test_failure_message(:recipient, to),
+    do: gettext("The receiving mail server refused %{to}. Check the address.", to: to)
+
+  defp test_failure_message(:relay, _to),
+    do:
+      gettext(
+        "The mail relay refused to send it — check the relay's sign-in details and that this site's sender address is allowed to send."
+      )
+
+  defp test_failure_message(:connection, _to),
+    do:
+      gettext(
+        "Couldn't reach the mail server. Check the relay host and port, and that this server may make outbound connections to it."
+      )
+
+  defp test_failure_message(:site_relay, _to),
+    do: gettext("This site's own mail relay is set but can't be used. Check its settings.")
+
+  defp test_failure_message(:message, _to),
+    do: gettext("The mail server refused the message. The server log has its reply.")
+
+  defp test_failure_message(:transient, _to),
+    do:
+      gettext(
+        "The mail server couldn't take the message right now. Try again in a few minutes; the server log has its reply."
+      )
 
   # --- data ---------------------------------------------------------------------
 
@@ -651,7 +704,7 @@ defmodule KilnCMSWeb.MailSettingsLive do
                 data-test-result={@test_result["status"]}
               >
                 <.status_badge result={@test_result} />
-                <code class="break-all text-xs">{@test_result["detail"]}</code>
+                <span role="status">{@test_result["message"]}</span>
               </div>
               <p class="text-xs text-base-content/50">
                 {gettext(
