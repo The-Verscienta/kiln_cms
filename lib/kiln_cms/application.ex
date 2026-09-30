@@ -150,7 +150,10 @@ defmodule KilnCMS.Application do
       # Start to serve requests, typically the last entry
       KilnCMSWeb.Endpoint,
       {Absinthe.Subscription, KilnCMSWeb.Endpoint},
-      {AshAuthentication.Supervisor, [otp_app: :kiln_cms]}
+      {AshAuthentication.Supervisor, [otp_app: :kiln_cms]},
+      # Dev only: warns (log + console banner) when the watchers leave a stale
+      # or missing asset build behind (#1761). Starts nothing in other builds.
+      KilnCMSWeb.DevAssets
     ]
 
     # See https://elixir.hexdocs.pm/Supervisor.html
