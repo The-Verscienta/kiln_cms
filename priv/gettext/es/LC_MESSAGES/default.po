@@ -448,6 +448,11 @@ msgstr "%{domain} está verificado."
 msgid "%{domain} removed."
 msgstr "%{domain} eliminado."
 
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{email} (%{role}) — you"
+msgstr "%{email} (%{role}) — tú"
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{failed} failed in 24h · %{disabled} auto-disabled"
@@ -780,7 +785,9 @@ msgstr "(sin enlace)"
 #: lib/kiln_cms_web/live/analytics_live.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/form_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
+#: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "(opens in a new tab)"
 msgstr "(se abre en una pestaña nueva)"
@@ -1404,6 +1411,11 @@ msgstr "Actividad"
 msgid "Actor"
 msgstr "Actor"
 
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Acts as"
+msgstr "Actúa como"
+
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add"
@@ -1952,7 +1964,6 @@ msgstr "Se produjo un error inesperado de nuestro lado. Ha quedado registrado �
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/controllers/page_html.ex
 #: lib/kiln_cms_web/live/analytics_live.ex
-#: lib/kiln_cms_web/live/funnel_live.ex
 #, elixir-autogen, elixir-format
 msgid "Analytics"
 msgstr "Analíticas"
@@ -2958,6 +2969,11 @@ msgstr "Elige una etiqueta…"
 msgid "Choose a task…"
 msgstr "Elige una tarea…"
 
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose a user…"
+msgstr "Elige un usuario…"
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
 msgid "Choose a video or audio file"
@@ -3009,6 +3025,11 @@ msgstr "Elegir contenido publicado…"
 #, elixir-autogen, elixir-format
 msgid "Choose video"
 msgstr "Elegir vídeo"
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose which user the key acts as, and give it a name."
+msgstr "Elige como qué usuario actúa la clave y ponle un nombre."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/form_settings_live.ex
@@ -3530,10 +3551,16 @@ msgstr "Copiado al portapapeles."
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/form_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Copy"
 msgstr "Copiar"
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "Copy embed code for %{name}"
+msgstr "Copiar el código de inserción de %{name}"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -3769,6 +3796,11 @@ msgstr "No se pudo mover esa tarea."
 #, elixir-autogen, elixir-format
 msgid "Couldn't ping that webhook."
 msgstr "No se pudo probar ese webhook."
+
+#: lib/kiln_cms_web/live/mail_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't reach the mail server. Check the relay host and port, and that this server may make outbound connections to it."
+msgstr "No se pudo contactar con el servidor de correo. Revisa el host y el puerto del relay, y que este servidor pueda conectarse a él."
 
 #: lib/kiln_cms_web/controllers/billing_controller.ex
 #, elixir-autogen, elixir-format
@@ -4361,10 +4393,16 @@ msgstr "Eliminar"
 msgid "Delete %{email}?"
 msgstr "¿Eliminar %{email}?"
 
+#: lib/kiln_cms_web/live/form_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delete %{name}"
 msgstr "Eliminar %{name}"
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "Delete %{name} and all its submissions?"
+msgstr "¿Eliminar %{name} y todos sus envíos?"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -4395,11 +4433,6 @@ msgstr "Eliminar campo"
 #, elixir-autogen, elixir-format
 msgid "Delete field %{label}"
 msgstr "Eliminar el campo %{label}"
-
-#: lib/kiln_cms_web/live/form_live.ex
-#, elixir-autogen, elixir-format
-msgid "Delete form"
-msgstr "Eliminar formulario"
 
 #: lib/kiln_cms_web/live/funnel_live.ex
 #, elixir-autogen, elixir-format
@@ -4467,11 +4500,6 @@ msgstr "¿Eliminar este campo?"
 #, elixir-autogen, elixir-format
 msgid "Delete this field? Existing values stop being delivered."
 msgstr "¿Eliminar este campo? Los valores existentes dejarán de entregarse."
-
-#: lib/kiln_cms_web/live/form_live.ex
-#, elixir-autogen, elixir-format
-msgid "Delete this form and all its submissions?"
-msgstr "¿Eliminar este formulario y todos sus envíos?"
 
 #: lib/kiln_cms_web/live/funnel_live.ex
 #, elixir-autogen, elixir-format
@@ -4993,6 +5021,11 @@ msgstr "Vence pronto"
 msgid "Duplicate"
 msgstr "Duplicar"
 
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "Duplicate %{name}"
+msgstr "Duplicar %{name}"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Duplicate block"
@@ -5002,11 +5035,6 @@ msgstr "Duplicar bloque"
 #, elixir-autogen, elixir-format
 msgid "Duplicate field %{label}"
 msgstr "Duplicar el campo %{label}"
-
-#: lib/kiln_cms_web/live/form_live.ex
-#, elixir-autogen, elixir-format
-msgid "Duplicate form"
-msgstr "Duplicar formulario"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -5322,9 +5350,15 @@ msgid "Embed code"
 msgstr "Código de incrustación"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/form_live.ex
 #, elixir-autogen, elixir-format
 msgid "Embed code copied to clipboard."
 msgstr "Código de incrustación copiado al portapapeles."
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "Embed code for %{name}"
+msgstr "Código de inserción de %{name}"
 
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -6635,6 +6669,11 @@ msgstr "La verificación del host se activa sola en cuanto existe una segunda or
 msgid "Host or actor URI"
 msgstr "Host o URI del actor"
 
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hosted form"
+msgstr "Formulario alojado"
+
 #: lib/kiln_cms_web/live/content_editor/inspector_preview_component.ex
 #, elixir-autogen, elixir-format
 msgid "Hover a block and click Edit, or Tab to it, to change it on the page."
@@ -6659,6 +6698,11 @@ msgstr "Cómo indica cada elemento de la lista de contenido si está publicado, 
 #, elixir-autogen, elixir-format
 msgid "How often an event repeats, such as every Tuesday. Use it alongside a date & time range, which says when it starts."
 msgstr "Con qué frecuencia se repite un evento, por ejemplo cada martes. Úselo junto a un intervalo de fecha y hora, que indica cuándo empieza."
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "How scheduled backups are set up"
+msgstr "Cómo se configuran las copias programadas"
 
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
@@ -6964,6 +7008,11 @@ msgstr "Elementos"
 #, elixir-autogen, elixir-format
 msgid "Items with no recorded reference from a published document. Drafts don't count as uses; a document that published a reference keeps counting until it is published again without it."
 msgstr "Elementos sin ninguna referencia registrada desde un documento publicado. Los borradores no cuentan como usos; un documento que publicó una referencia sigue contando hasta que se publique de nuevo sin ella."
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "JSON API"
+msgstr "API JSON"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
@@ -8690,6 +8739,11 @@ msgstr "No hay datos suficientes para declarar una líder: cada variante necesit
 msgid "Not in feeds"
 msgstr "Fuera de los feeds"
 
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not public yet: activate it in the form builder to get its hosted page, embed code and API address."
+msgstr "Aún no es público: actívalo en el editor de formularios para obtener su página alojada, su código de inserción y su dirección de API."
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format
 msgid "Not restored"
@@ -9130,13 +9184,8 @@ msgstr "Abrir %{type}"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
-msgid "Open Backups to check the schedule or take one now."
-msgstr "Abre Copias de seguridad para revisar la programación o crear una ahora."
-
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "Open Backups to set a schedule or take the first one."
-msgstr "Abre Copias de seguridad para programarlas o hacer la primera."
+msgid "Open Backups"
+msgstr "Abrir Copias de seguridad"
 
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
@@ -11460,6 +11509,16 @@ msgstr "Archivado programado"
 msgid "Scheduled at"
 msgstr "Programado para"
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Scheduled backups are a cron job set up by whoever runs this server. You can take the first one now from Backups."
+msgstr "Las copias programadas son una tarea cron que configura quien administra este servidor. Puedes hacer la primera ahora desde Copias de seguridad."
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Scheduled backups run from the server's cron job — ask whoever runs this server to check it, or take one now from Backups."
+msgstr "Las copias programadas las ejecuta la tarea cron del servidor: pide a quien lo administra que la revise, o haz una ahora desde Copias de seguridad."
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Scheduled publish"
@@ -12970,6 +13029,11 @@ msgstr "Probar la conexión"
 msgid "Test email"
 msgstr "Correo de prueba"
 
+#: lib/kiln_cms_web/live/mail_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Test email sent to %{to}."
+msgstr "Correo de prueba enviado a %{to}."
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Test ping queued — see deliveries below."
@@ -13534,6 +13598,11 @@ msgstr "El Swagger UI interactivo y la especificación OpenAPI están desactivad
 msgid "The internal channel listeners subscribe to. Defaults to “automation”."
 msgstr "El canal interno al que se suscriben los oyentes. De forma predeterminada, «automation»."
 
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "The key authenticates as this account and gets its role. It defaults to you; pick another user only to mint a key on their behalf."
+msgstr "La clave se autentica como esta cuenta y obtiene su rol. Por defecto eres tú; elige a otro usuario solo para crear una clave en su nombre."
+
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
@@ -13584,6 +13653,21 @@ msgstr "El proveedor de correo y la dirección de remitente desde los que envía
 #, elixir-autogen, elixir-format
 msgid "The mail provider and From address this site's email is sent from."
 msgstr "El proveedor de correo y la dirección de remitente desde los que se envía el correo de este sitio."
+
+#: lib/kiln_cms_web/live/mail_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "The mail relay refused to send it — check the relay's sign-in details and that this site's sender address is allowed to send."
+msgstr "El relay de correo se negó a enviarlo: revisa sus credenciales y que la dirección de remitente de este sitio tenga permiso para enviar."
+
+#: lib/kiln_cms_web/live/mail_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "The mail server couldn't take the message right now. Try again in a few minutes; the server log has its reply."
+msgstr "El servidor de correo no pudo aceptar el mensaje ahora. Inténtalo de nuevo en unos minutos; el registro del servidor tiene su respuesta."
+
+#: lib/kiln_cms_web/live/mail_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "The mail server refused the message. The server log has its reply."
+msgstr "El servidor de correo rechazó el mensaje. El registro del servidor tiene su respuesta."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -13650,6 +13734,11 @@ msgstr "El bloqueo de publicación solo actúa sobre las reglas marcadas como bl
 #, elixir-autogen, elixir-format
 msgid "The push key could not be saved."
 msgstr "No se pudo guardar la clave push."
+
+#: lib/kiln_cms_web/live/mail_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "The receiving mail server refused %{to}. Check the address."
+msgstr "El servidor de correo de destino rechazó %{to}. Revisa la dirección."
 
 #: lib/kiln_cms_web/components/compliance_components.ex
 #, elixir-autogen, elixir-format
@@ -13742,6 +13831,11 @@ msgstr "Los bloques del destino se insertan donde está este bloque. Editar el d
 #, elixir-autogen, elixir-format
 msgid "The test didn't send: %{reason}"
 msgstr "La prueba no se envió: %{reason}"
+
+#: lib/kiln_cms_web/live/mail_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "The test email couldn't be sent: the send stopped unexpectedly. The server log has the details."
+msgstr "No se pudo enviar el correo de prueba: el envío se detuvo inesperadamente. El registro del servidor tiene los detalles."
 
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
@@ -14217,6 +14311,11 @@ msgstr "El correo de este sitio sale a través del relé del despliegue."
 #, elixir-autogen, elixir-format
 msgid "This site's notification key has changed. Turn notifications on again."
 msgstr "La clave de notificaciones de este sitio ha cambiado. Vuelva a activar las notificaciones."
+
+#: lib/kiln_cms_web/live/mail_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's own mail relay is set but can't be used. Check its settings."
+msgstr "El relay de correo propio de este sitio está configurado pero no se puede usar. Revisa su configuración."
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format

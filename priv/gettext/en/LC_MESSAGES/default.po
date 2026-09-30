@@ -448,6 +448,11 @@ msgstr ""
 msgid "%{domain} removed."
 msgstr ""
 
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{email} (%{role}) — you"
+msgstr ""
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{failed} failed in 24h · %{disabled} auto-disabled"
@@ -780,7 +785,9 @@ msgstr ""
 #: lib/kiln_cms_web/live/analytics_live.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/form_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
+#: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "(opens in a new tab)"
 msgstr ""
@@ -1404,6 +1411,11 @@ msgstr ""
 msgid "Actor"
 msgstr ""
 
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Acts as"
+msgstr ""
+
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add"
@@ -1952,7 +1964,6 @@ msgstr ""
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/controllers/page_html.ex
 #: lib/kiln_cms_web/live/analytics_live.ex
-#: lib/kiln_cms_web/live/funnel_live.ex
 #, elixir-autogen, elixir-format
 msgid "Analytics"
 msgstr ""
@@ -2958,6 +2969,11 @@ msgstr ""
 msgid "Choose a task…"
 msgstr ""
 
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose a user…"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
 msgid "Choose a video or audio file"
@@ -3008,6 +3024,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "Choose video"
+msgstr ""
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose which user the key acts as, and give it a name."
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -3530,9 +3551,15 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/form_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Copy"
+msgstr ""
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "Copy embed code for %{name}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -3768,6 +3795,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't ping that webhook."
+msgstr ""
+
+#: lib/kiln_cms_web/live/mail_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't reach the mail server. Check the relay host and port, and that this server may make outbound connections to it."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/billing_controller.ex
@@ -4361,9 +4393,15 @@ msgstr ""
 msgid "Delete %{email}?"
 msgstr ""
 
+#: lib/kiln_cms_web/live/form_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delete %{name}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "Delete %{name} and all its submissions?"
 msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex
@@ -4394,11 +4432,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delete field %{label}"
-msgstr ""
-
-#: lib/kiln_cms_web/live/form_live.ex
-#, elixir-autogen, elixir-format
-msgid "Delete form"
 msgstr ""
 
 #: lib/kiln_cms_web/live/funnel_live.ex
@@ -4466,11 +4499,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delete this field? Existing values stop being delivered."
-msgstr ""
-
-#: lib/kiln_cms_web/live/form_live.ex
-#, elixir-autogen, elixir-format
-msgid "Delete this form and all its submissions?"
 msgstr ""
 
 #: lib/kiln_cms_web/live/funnel_live.ex
@@ -4993,6 +5021,11 @@ msgstr "Due soon"
 msgid "Duplicate"
 msgstr ""
 
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "Duplicate %{name}"
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Duplicate block"
@@ -5001,11 +5034,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Duplicate field %{label}"
-msgstr ""
-
-#: lib/kiln_cms_web/live/form_live.ex
-#, elixir-autogen, elixir-format
-msgid "Duplicate form"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -5322,8 +5350,14 @@ msgid "Embed code"
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/form_live.ex
 #, elixir-autogen, elixir-format
 msgid "Embed code copied to clipboard."
+msgstr ""
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "Embed code for %{name}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_settings_live.ex
@@ -6635,6 +6669,11 @@ msgstr ""
 msgid "Host or actor URI"
 msgstr ""
 
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hosted form"
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor/inspector_preview_component.ex
 #, elixir-autogen, elixir-format
 msgid "Hover a block and click Edit, or Tab to it, to change it on the page."
@@ -6658,6 +6697,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "How often an event repeats, such as every Tuesday. Use it alongside a date & time range, which says when it starts."
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "How scheduled backups are set up"
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
@@ -6963,6 +7007,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Items with no recorded reference from a published document. Drafts don't count as uses; a document that published a reference keeps counting until it is published again without it."
+msgstr ""
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "JSON API"
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex
@@ -8690,6 +8739,11 @@ msgstr ""
 msgid "Not in feeds"
 msgstr ""
 
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not public yet: activate it in the form builder to get its hosted page, embed code and API address."
+msgstr ""
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format
 msgid "Not restored"
@@ -9130,12 +9184,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
-msgid "Open Backups to check the schedule or take one now."
-msgstr ""
-
-#: lib/kiln_cms_web/live/overview_live.ex
-#, elixir-autogen, elixir-format
-msgid "Open Backups to set a schedule or take the first one."
+msgid "Open Backups"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
@@ -11460,6 +11509,16 @@ msgstr "Scheduled archive"
 msgid "Scheduled at"
 msgstr ""
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Scheduled backups are a cron job set up by whoever runs this server. You can take the first one now from Backups."
+msgstr ""
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Scheduled backups run from the server's cron job — ask whoever runs this server to check it, or take one now from Backups."
+msgstr ""
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Scheduled publish"
@@ -12970,6 +13029,11 @@ msgstr ""
 msgid "Test email"
 msgstr ""
 
+#: lib/kiln_cms_web/live/mail_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Test email sent to %{to}."
+msgstr ""
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Test ping queued — see deliveries below."
@@ -13534,6 +13598,11 @@ msgstr ""
 msgid "The internal channel listeners subscribe to. Defaults to “automation”."
 msgstr ""
 
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "The key authenticates as this account and gets its role. It defaults to you; pick another user only to mint a key on their behalf."
+msgstr ""
+
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
@@ -13583,6 +13652,21 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "The mail provider and From address this site's email is sent from."
+msgstr ""
+
+#: lib/kiln_cms_web/live/mail_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "The mail relay refused to send it — check the relay's sign-in details and that this site's sender address is allowed to send."
+msgstr ""
+
+#: lib/kiln_cms_web/live/mail_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "The mail server couldn't take the message right now. Try again in a few minutes; the server log has its reply."
+msgstr ""
+
+#: lib/kiln_cms_web/live/mail_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "The mail server refused the message. The server log has its reply."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -13649,6 +13733,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
 msgid "The push key could not be saved."
+msgstr ""
+
+#: lib/kiln_cms_web/live/mail_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "The receiving mail server refused %{to}. Check the address."
 msgstr ""
 
 #: lib/kiln_cms_web/components/compliance_components.ex
@@ -13741,6 +13830,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "The test didn't send: %{reason}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/mail_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "The test email couldn't be sent: the send stopped unexpectedly. The server log has the details."
 msgstr ""
 
 #: lib/kiln_cms_web/live/site_storage_live.ex
@@ -14216,6 +14310,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site's notification key has changed. Turn notifications on again."
+msgstr ""
+
+#: lib/kiln_cms_web/live/mail_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's own mail relay is set but can't be used. Check its settings."
 msgstr ""
 
 #: lib/kiln_cms_web/live/compliance_live.ex
