@@ -213,6 +213,10 @@ Every summary line below that was shortened links to its own entry there.
   unsubscribed.**
   ([#1690](https://github.com/The-Verscienta/kiln_cms/issues/1690) · [long form](docs/changelog/unreleased.md#an-old-newsletter-confirmation-link-no-longer-re-subscribes))
 
+- **An overlay that registers its own domain through its plugin no longer fails
+  the core's "configured domains" test in its composed suite.**
+  ([long form](docs/changelog/unreleased.md#an-overlays-composed-suite-no-longer-fails-the-configured-domains-test))
+
 ### Security
 
 - **Changing or resetting a password now signs out every other session and

@@ -258,9 +258,14 @@ defmodule Kiln.PluginsTest do
       assert problem =~ "core domain KilnCMS.Notifications is missing from :ash_domains"
     end
 
+    # A downstream overlay registers its own domains through its plugin
+    # (`Kiln.Plugin.domains/0`), so those are subtracted by what the installed
+    # plugins declare rather than by name: `Example.Catalog` here, a project's
+    # own catalog domain in an overlay's composed suite.
     test "the core's configured domains are exactly the ones it compiles" do
-      assert Enum.sort(Application.get_env(:kiln_cms, :ash_domains)) --
-               [Example.Catalog] ==
+      plugin_domains = Enum.flat_map(Kiln.Plugins.all(), & &1.domains())
+
+      assert Enum.sort(Application.get_env(:kiln_cms, :ash_domains)) -- plugin_domains ==
                Mix.Tasks.Kiln.Plugins.Doctor.core_domains()
     end
 
