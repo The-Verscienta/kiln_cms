@@ -527,6 +527,14 @@ curl -s http://localhost:4000/api/json/posts \
 `custom_fields` / scheduling attributes are all writable. Relationship arrays
 (`tag_ids`, `related_post_ids`) are passed as attributes.
 
+`scheduled_at` takes publish rights (an admin, or an editor on a site that lets
+editors publish). Without them, write **`proposed_publish_at`** instead: a date
+you are asking for, which publishes nothing until someone with publish rights
+sets `scheduled_at` (which clears the proposal, as publishing does). Like the
+body's `blocks`, it is write-only on the APIs: no read returns it. It is an
+editorial request, not something a reader of the content should see
+([content lifecycles](content-lifecycles.md#proposed-publish-dates)).
+
 ### Discovering dynamic types
 
 An entry of an admin-defined type is created on `/api/json/entries` with the

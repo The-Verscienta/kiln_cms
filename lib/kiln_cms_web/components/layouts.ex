@@ -1307,35 +1307,42 @@ defmodule KilnCMSWeb.Layouts do
       <.flash kind={:info} flash={@flash} />
       <.flash kind={:error} flash={@flash} />
 
-      <.flash
-        id="client-error"
-        kind={:error}
-        title={gettext("We can't find the internet")}
-        phx-disconnected={
-          show(".phx-client-error #client-error")
-          |> JS.remove_attribute("hidden", to: ".phx-client-error #client-error")
-        }
-        phx-connected={hide("#client-error") |> JS.set_attribute({"hidden", ""})}
-        hidden
-      >
-        {gettext("Attempting to reconnect")}
-        <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
-      </.flash>
+      <.connection_notice id="client-error" title={gettext("We can't find the internet")} />
+      <.connection_notice id="server-error" title={gettext("Something went wrong!")} />
+    </div>
+    """
+  end
 
-      <.flash
-        id="server-error"
-        kind={:error}
-        title={gettext("Something went wrong!")}
-        phx-disconnected={
-          show(".phx-server-error #server-error")
-          |> JS.remove_attribute("hidden", to: ".phx-server-error #server-error")
-        }
-        phx-connected={hide("#server-error") |> JS.set_attribute({"hidden", ""})}
-        hidden
-      >
-        {gettext("Attempting to reconnect")}
-        <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
-      </.flash>
+  # The two connection notices (#1784, #1821). They are rendered hidden and
+  # stay that way until `assets/js/connection_notice.js` has watched the view
+  # sit in the matching error state (`phx-client-error` / `phx-server-error`)
+  # for a few seconds without a break, so a first connection that takes a
+  # moment, or a line that drops and comes straight back, never flashes one.
+  # The module also takes them down the moment the view is connected again,
+  # and runs the "Try again" button: a fresh connection now for a line that is
+  # down, a reload for a page the server could not open.
+  #
+  # Not a `<.flash>`: a flash is dismissed by clicking anywhere on it, and that
+  # click would swallow the button's.
+  attr :id, :string, required: true
+  attr :title, :string, required: true
+
+  defp connection_notice(assigns) do
+    ~H"""
+    <div id={@id} role="alert" class="connection-notice fixed top-3 right-3 z-50" hidden>
+      <div class="flex items-start gap-3 rounded-lg border border-error/30 bg-base-100 px-4 py-3 text-base-content shadow-lg w-80 sm:w-96 max-w-80 sm:max-w-96 text-wrap">
+        <.icon name="hero-exclamation-circle" class="size-5 shrink-0 text-error" />
+        <div class="flex-1">
+          <p class="font-semibold">{@title}</p>
+          <p>
+            {gettext("Attempting to reconnect")}
+            <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
+          </p>
+        </div>
+        <.button type="button" size="sm" class="self-center" data-connection-retry>
+          {gettext("Try again")}
+        </.button>
+      </div>
     </div>
     """
   end

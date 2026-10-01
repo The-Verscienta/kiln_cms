@@ -462,6 +462,8 @@ defmodule KilnCMSWeb.CoreComponents do
     * `:dialog` — centred, the shape a comparison or a confirmation wants.
     * `:drawer` — full-height on the right, the shape a picker wants; it dims the
       page it is beside rather than covering it, so the scrim is lighter.
+    * `:compact` — a small centred dialog sized to its content, for a short
+      choice (the calendar's "new on this day" type picker).
 
   The scrim, the trap and the ARIA wiring are not overridable, because those are
   the reason this exists. Neither is the panel's own layout: an earlier `class`
@@ -478,7 +480,7 @@ defmodule KilnCMSWeb.CoreComponents do
   """
   attr :id, :string, required: true, doc: "id of the dialog panel; `-title` labels it"
   attr :on_close, :string, required: true, doc: "event pushed by Escape, the scrim and the ✕"
-  attr :variant, :atom, default: :dialog, values: [:dialog, :drawer]
+  attr :variant, :atom, default: :dialog, values: [:dialog, :drawer, :compact]
   attr :rest, :global
 
   slot :title, required: true
@@ -531,11 +533,16 @@ defmodule KilnCMSWeb.CoreComponents do
   # A drawer sits BESIDE the page rather than over it, so its scrim only dims —
   # the editor stays readable while you pick from the library next to it.
   defp scrim_class(:drawer), do: "bg-black/20"
-  defp scrim_class(:dialog), do: "bg-black/40"
+  defp scrim_class(_dialog), do: "bg-black/40"
 
   defp panel_class(:drawer) do
     "drawer-in absolute inset-y-0 right-0 flex w-full max-w-md flex-col " <>
       "border-l border-base-content/10 bg-base-100 shadow-xl"
+  end
+
+  defp panel_class(:compact) do
+    "absolute inset-x-4 top-24 mx-auto flex max-h-[calc(100%-8rem)] max-w-sm flex-col " <>
+      "overflow-hidden rounded-lg border border-base-content/10 bg-base-100 shadow-xl"
   end
 
   defp panel_class(:dialog) do

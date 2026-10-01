@@ -67,6 +67,8 @@ defmodule KilnCMSWeb.EditorLive do
     :state,
     :updated_at,
     :scheduled_at,
+    # A proposed publish date (#1812) is shown to the reviewer on the row.
+    :proposed_publish_at,
     :unpublish_at,
     :working_copy_at
   ]
@@ -211,13 +213,11 @@ defmodule KilnCMSWeb.EditorLive do
   # row actions all offered work the create policy would refuse — an editor
   # scoped to `editable_types: ["post"]` saw a Duplicate button on every page row
   # whose only possible outcome was an error flash (#926).
-  defp editable_types(org_id, actor) do
-    org_id
-    |> ContentTypes.all_for_org()
-    # The same question the create policy asks, shared with the unsaved-editor
-    # mount so the button and the page it opens cannot disagree.
-    |> Enum.filter(&NewDraft.may_author?(actor, org_id, &1))
-  end
+  #
+  # The same question the create policy asks, shared with the unsaved-editor
+  # mount and the calendar's "new on this day" picker, so the button and the
+  # page it opens cannot disagree.
+  defp editable_types(org_id, actor), do: NewDraft.authorable_types(actor, org_id)
 
   # The types this page pulls rows from: every editable type, or just the one
   # the `type` filter names. Filtering here rather than after the merge keeps
@@ -398,6 +398,38 @@ defmodule KilnCMSWeb.EditorLive do
 
   def handle_event("unarchive", params, socket),
     do: {:noreply, transition(socket, params, "unarchive")}
+
+  # "Confirm date" on a row with a proposed publish date (#1812): the
+  # proposal becomes `scheduled_at`. It is an ordinary write of `scheduled_at`
+  # — the content policy authorizes it exactly as it does setting a publish
+  # date anywhere else, and `Changes.ClearProposedPublishAt` clears the
+  # proposal in the same write.
+  def handle_event("confirm_proposed_date", %{"kind" => kind, "id" => id}, socket)
+      when is_binary(kind) and is_binary(id) do
+    %{actor: actor, current_org: org} = socket.assigns
+    record = get!(kind, id, actor, org)
+
+    with %DateTime{} = at <- record.proposed_publish_at,
+         {:ok, _record} <-
+           ContentTypes.update(kind, record, %{scheduled_at: at}, actor: actor, tenant: org) do
+      {:noreply,
+       socket
+       |> load_items()
+       |> put_flash(
+         :info,
+         gettext("Scheduled to publish on %{date} UTC.",
+           date: Calendar.strftime(at, "%-d %B %Y, %H:%M")
+         )
+       )}
+    else
+      nil ->
+        {:noreply, load_items(socket)}
+
+      {:error, _error} ->
+        {:noreply,
+         put_flash(socket, :error, gettext("You can't set the publish date of this content."))}
+    end
+  end
 
   # Clone a row into a new draft and land the editor in it (#471) — the same
   # verb the content editor's own Duplicate button runs.
@@ -1049,6 +1081,23 @@ defmodule KilnCMSWeb.EditorLive do
                 datetime={DateTime.to_iso8601(record.scheduled_at)}
               >{Calendar.strftime(record.scheduled_at, "%Y-%m-%d %H:%M")} UTC</time>
             </span>
+            <%!-- A date someone without publish rights proposed (#1812). Drawn
+                  apart from the real schedule above — dashed, and saying who
+                  decides — so a reviewer cannot mistake it for one. --%>
+            <span
+              :if={record.proposed_publish_at && record.state in [:draft, :in_review]}
+              id={"proposed-#{kind}-#{record.id}"}
+              class="flex items-center gap-1 rounded border border-dashed border-base-content/40 px-1.5 text-xs text-base-content/70"
+              title={gettext("Proposed publish date — an admin confirms it")}
+            >
+              <.icon name="hero-calendar-days" class="size-3.5" />
+              <span>{gettext("Proposed")}</span>
+              <time
+                id={"proposed-time-#{kind}-#{record.id}"}
+                phx-hook="LocalTime"
+                datetime={DateTime.to_iso8601(record.proposed_publish_at)}
+              >{Calendar.strftime(record.proposed_publish_at, "%Y-%m-%d %H:%M")} UTC</time>
+            </span>
             <span
               :if={record.unpublish_at && record.state == :published}
               class="flex items-center gap-1 text-xs text-base-content/60"
@@ -1079,6 +1128,19 @@ defmodule KilnCMSWeb.EditorLive do
               >
                 {gettext("Awaiting admin approval")}
               </span>
+              <button
+                :if={
+                  not is_nil(record.proposed_publish_at) and record.state in [:draft, :in_review] and
+                    (@tier == :admin or (@tier == :editor and @editors_can_publish))
+                }
+                type="button"
+                phx-click="confirm_proposed_date"
+                phx-value-kind={kind}
+                phx-value-id={record.id}
+                class="btn btn-sm btn-default"
+              >
+                {gettext("Confirm date")}
+              </button>
               <button
                 :if={
                   record.state in [:draft, :in_review] and
