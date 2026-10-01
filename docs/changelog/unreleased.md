@@ -470,6 +470,29 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="connection-notices-wait-out-a-slow-first-connection"></a>
+
+- **"We can't find the internet" and "Something went wrong!" no longer flash on
+  a first page load; they wait until a connection problem has lasted a few
+  seconds, and offer *Try again*.** Beta testers saw both messages on first
+  load of the rc.2 image, then saw them go away after a refresh. The cause was
+  Phoenix's WebSocket-to-longpoll fallback. When a page's first connection
+  took more than 2.5 seconds to answer (a slow network, a proxy, a cold
+  server), the browser switched to longpoll. The WebSocket it gave up on then
+  closed late and tore down the new connection. The page sat in an error
+  state, showing one message or the other, until LiveView reloaded it 5–10
+  seconds later. Phoenix 1.8.15 fixes the fallback, and the page now joins
+  over longpoll without a reload. The messages also have a grace period. A
+  message comes up only after the page has been disconnected, or unable to
+  open, for 2.5 seconds without a break, so a slow first connection or a line
+  that drops and comes straight back shows nothing. As before
+  ([#1784](https://github.com/The-Verscienta/kiln_cms/issues/1784)), only the
+  message for the current problem is shown, and it goes as soon as the page
+  is connected again. Each message now has a **Try again** button. When the
+  connection is down, it reconnects at once instead of waiting for the next
+  automatic attempt. When the server could not open the page, it reloads the
+  page ([#1821](https://github.com/The-Verscienta/kiln_cms/issues/1821)).
+
 <a id="markdown-becomes-heading-divider-and-text-blocks"></a>
 
 - **Markdown switched back to Blocks, or imported from a `.md` file, becomes

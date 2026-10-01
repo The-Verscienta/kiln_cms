@@ -201,6 +201,11 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **"We can't find the internet" and "Something went wrong!" no longer flash on
+  a first page load; they wait until a connection problem has lasted a few
+  seconds, and offer *Try again*.**
+  ([#1821](https://github.com/The-Verscienta/kiln_cms/issues/1821) · [long form](docs/changelog/unreleased.md#connection-notices-wait-out-a-slow-first-connection))
+
 - **Markdown switched back to Blocks, or imported from a `.md` file, becomes
   heading, divider and one text block per section, not one long text block.**
   ([#1800](https://github.com/The-Verscienta/kiln_cms/issues/1800) · [long form](docs/changelog/unreleased.md#markdown-becomes-heading-divider-and-text-blocks))
