@@ -284,7 +284,7 @@ KilnCMS defaults. All four are read only under `:prod`; for dev or test, set
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
 | `DATABASE_SSL` | `true` | Encrypt the Postgres connection. Set to an off-spelling only for a provider that genuinely cannot offer TLS — an unrecognized value keeps TLS on rather than silently downgrading to plaintext (#606). | [`config/runtime/prod/database.exs:28`](../config/runtime/prod/database.exs#L28) |
-| `DATABASE_SSL_CACERTFILE` | unset | Path to the provider's CA bundle. When set, the server cert is verified (`verify_peer`); unset — or blank, like every variable above — leaves the connection encrypted but `verify_none`. | [`config/runtime/prod/database.exs:36`](../config/runtime/prod/database.exs#L36) |
+| `DATABASE_SSL_CACERTFILE` | unset | Path to the provider's CA bundle. When set, the server cert is verified (`verify_peer`) and must name the host in `DATABASE_URL` (Postgrex's HTTPS-style hostname match; a wildcard certificate passes, an IP address or an unlisted internal name does not); unset — or blank, like every variable above — leaves the connection encrypted but `verify_none`. | [`config/runtime/prod/database.exs:36`](../config/runtime/prod/database.exs#L36) |
 
 ### object storage (S3-compatible)
 

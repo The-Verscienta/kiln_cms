@@ -1109,12 +1109,16 @@ carries the reasoning.
   `config/runtime/prod/database.exs` passed TLS settings as `ssl: true` plus
   `ssl_opts:`, a pair Postgrex has deprecated. It now passes them on `:ssl`
   itself. Postgrex merges `:ssl` options over its secure defaults rather than
-  using `:ssl_opts` verbatim, so the connection is unchanged in practice: with
-  no `DATABASE_SSL_CACERTFILE` it still encrypts without verifying
-  (`verify: :verify_none` overrides the default), and with one it still
-  verifies the chain, now through Postgrex's HTTPS-style hostname match,
-  which also accepts a wildcard certificate. `DATABASE_SSL=false` still turns
-  TLS off.
+  using `:ssl_opts` verbatim. With no `DATABASE_SSL_CACERTFILE` nothing
+  changes: the connection still encrypts without verifying (`verify:
+  :verify_none` overrides the default). With one, the chain is still
+  verified, and Postgrex's defaults now **also check that the server
+  certificate names the host in `DATABASE_URL`** (an HTTPS-style match, so a
+  wildcard certificate passes); the old `:ssl_opts` path never did. A
+  deployment that verifies and reaches Postgres by IP address, or by a name
+  the certificate does not carry, fails its TLS handshake at boot after this
+  change — connect by a hostname the certificate names. `DATABASE_SSL=false`
+  still turns TLS off.
 
 ## Security
 
