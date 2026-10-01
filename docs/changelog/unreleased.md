@@ -469,6 +469,28 @@ carries the reasoning.
   gets the same slug the Taxonomy page would give it.
   ([#1805](https://github.com/The-Verscienta/kiln_cms/issues/1805))
 
+<a id="settings-lists-your-active-sessions"></a>
+
+- **Settings lists where you are signed in, and signs out one session or every
+  other one.** A beta tester could not see where else they were signed in or
+  sign out elsewhere; the only ways were changing the password or asking an
+  admin. *Active sessions* on Your settings lists each browser signed in to
+  the account (for example "Firefox on macOS"), when it was last active, when
+  it signed in, and which one is this one. *Sign out* ends one session and
+  *Sign out of all other sessions* ends every one but this. Signing a session
+  out revokes its token, so that browser's next request is signed out; it also
+  revokes the remember-me cookie issued to the same browser, which would
+  otherwise sign it straight back in; and it sends that session's open pages
+  to the sign-in screen at once. A held two-factor sign-in elsewhere ends with
+  the others. You can see and end only your own sessions; admins keep *Sign
+  out everywhere* on the Accounts page for other accounts. The browser and
+  system names are reduced from the user agent at sign-in, which is not
+  stored, and no IP address is recorded. Last use is written at most every
+  five minutes. On the shared demo account the list is replaced by the demo
+  note, like the password and passkey forms. The migration adds four nullable
+  columns to `tokens`.
+  ([#1823](https://github.com/The-Verscienta/kiln_cms/issues/1823))
+
 ## Changed
 
 <a id="a-new-content-type-goes-straight-on-to-its-fields"></a>
@@ -648,6 +670,23 @@ carries the reasoning.
   for any other. With no console host it stays `/` on the current host,
   which is that site
   ([#1827](https://github.com/The-Verscienta/kiln_cms/issues/1827)).
+
+<a id="settings-profile-and-passkey-feedback"></a>
+
+- **Settings says what the display name is for and confirms a save beside the
+  button; Passkeys says whether any are set up and shows the browser prompt.**
+  Beta testers found the *Display name* box empty with no hint whether it was
+  needed, and saw no reply to *Save profile* (the flash was easy to miss). The
+  field is now labelled optional, says where the name appears (bylines,
+  comments, and to people editing at the same time) and has a placeholder;
+  a *Saved.* line appears beside the button until the next edit. Passkeys
+  said nothing when none were registered, and the name box's placeholder read
+  "Passkey" as if one existed. It now says "No passkeys yet" or how many are
+  set up, shows *Waiting for your device…* with a Cancel button while the
+  browser's prompt is open, and reports the result of adding or removing one
+  in the section itself.
+  ([#1828](https://github.com/The-Verscienta/kiln_cms/issues/1828),
+  [#1829](https://github.com/The-Verscienta/kiln_cms/issues/1829))
 
 <a id="the-url-segment-follows-the-machine-name"></a>
 
@@ -1193,6 +1232,24 @@ carries the reasoning.
   workspace pushed below the fold. The grid now falls back to the expanded
   width, `16rem`
   ([#1755](https://github.com/The-Verscienta/kiln_cms/issues/1755)).
+
+<a id="the-database-connection-no-longer-logs-ssl-opts-deprecated"></a>
+
+- **The database connection no longer logs `:ssl_opts is deprecated` on every
+  boot and every `bin/kiln_cms eval`.**
+  `config/runtime/prod/database.exs` passed TLS settings as `ssl: true` plus
+  `ssl_opts:`, a pair Postgrex has deprecated. It now passes them on `:ssl`
+  itself. Postgrex merges `:ssl` options over its secure defaults rather than
+  using `:ssl_opts` verbatim. With no `DATABASE_SSL_CACERTFILE` nothing
+  changes: the connection still encrypts without verifying (`verify:
+  :verify_none` overrides the default). With one, the chain is still
+  verified, and Postgrex's defaults now **also check that the server
+  certificate names the host in `DATABASE_URL`** (an HTTPS-style match, so a
+  wildcard certificate passes); the old `:ssl_opts` path never did. A
+  deployment that verifies and reaches Postgres by IP address, or by a name
+  the certificate does not carry, fails its TLS handshake at boot after this
+  change — connect by a hostname the certificate names. `DATABASE_SSL=false`
+  still turns TLS off.
 
 ## Security
 

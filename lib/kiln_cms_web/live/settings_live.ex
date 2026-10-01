@@ -2,7 +2,8 @@ defmodule KilnCMSWeb.SettingsLive do
   @moduledoc """
   Per-user account settings (`/editor/settings`): the sidebar preset, the
   content list's status marks (#1323), display-name profile, password change
-  (#141), workflow notification preferences (#46), and a data export.
+  (#141), two-factor and passkeys, the account's active sessions (#1823),
+  workflow notification preferences (#46), and a data export.
   Each signed-in user manages only their own account. Editor/admin only
   (`:live_editor_required`).
   """
@@ -11,6 +12,7 @@ defmodule KilnCMSWeb.SettingsLive do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Errors.DemoAccountLocked
   alias KilnCMS.Accounts.Errors.SecondFactorThrottled
+  alias KilnCMS.Accounts.Sessions
   alias KilnCMS.Accounts.Totp
   alias KilnCMS.Accounts.WebAuthn
   alias KilnCMS.Push
@@ -29,6 +31,9 @@ defmodule KilnCMSWeb.SettingsLive do
      |> assign(:page_title, gettext("Your settings"))
      |> assign(:form, prefs_form(user))
      |> assign(:profile_form, profile_form(user))
+     # A "Saved" line beside the button (#1828), cleared by the next edit: the
+     # flash alone was easy to miss on a long page.
+     |> assign(:profile_saved?, false)
      |> assign(:password_form, password_form(user))
      # Demo mode (docs/demo-mode.md): the shared account's password, 2FA and
      # passkeys are fixed, so their forms give way to a note saying why. The
@@ -47,6 +52,12 @@ defmodule KilnCMSWeb.SettingsLive do
      # challenge (parked in LV state between the JS create() round-trip).
      |> assign(:passkeys, WebAuthn.list(user))
      |> assign(:passkey_challenge, nil)
+     # The outcome of the last attempt, shown in the section itself (#1829):
+     # `{:ok | :error, message}` or nil.
+     |> assign(:passkey_status, nil)
+     # The account's own active sessions (#1823). `:current_session_jti` is
+     # assigned by `KilnCMSWeb.SessionTracking` on every signed-in mount.
+     |> assign(:sessions, Sessions.list(user))
      # Web Push (#628). `push_available?` is the *server* half — this site has
      # a VAPID key, its own (#1560) or the deployment's; `push_supported?` is
      # the browser half, which only the hook can answer, so it starts
@@ -85,6 +96,7 @@ defmodule KilnCMSWeb.SettingsLive do
     {:noreply,
      socket
      |> assign(:passkey_challenge, challenge)
+     |> assign(:passkey_status, nil)
      |> push_event("passkey-register", %{
        publicKey: WebAuthn.registration_options(challenge, user),
        name: params["name"] || ""
@@ -103,31 +115,41 @@ defmodule KilnCMSWeb.SettingsLive do
 
         case WebAuthn.register_passkey(user, challenge, payload) do
           {:ok, _passkey} ->
+            message = gettext("Passkey added — you can sign in with it now.")
+
             {:noreply,
              socket
              |> assign(:passkeys, WebAuthn.list(user))
-             |> put_flash(:info, gettext("Passkey added — you can sign in with it now."))}
+             |> assign(:passkey_status, {:ok, message})
+             |> put_flash(:info, message)}
 
           {:error, reason} ->
+            message = refusal_or(reason, gettext("Couldn't verify that passkey — try again."))
+
             {:noreply,
-             put_flash(
-               socket,
-               :error,
-               refusal_or(reason, gettext("Couldn't verify that passkey — try again."))
-             )}
+             socket
+             |> assign(:passkey_status, {:error, message})
+             |> put_flash(:error, message)}
         end
     end
   end
 
   def handle_event("passkey_error", _params, socket) do
+    message = gettext("Passkey setup was cancelled or isn't supported by this browser.")
+
     {:noreply,
      socket
      |> assign(:passkey_challenge, nil)
-     |> put_flash(
-       :error,
-       gettext("Passkey setup was cancelled or isn't supported by this browser.")
-     )}
+     |> assign(:passkey_status, {:error, message})
+     |> put_flash(:error, message)}
   end
+
+  # The browser's prompt can be dismissed without the hook ever hearing back
+  # (a closed window, a stalled authenticator), which would leave the button
+  # waiting for good. The challenge is single-use and server-side, so dropping
+  # it here is all "cancel" needs.
+  def handle_event("passkey_cancel", _params, socket),
+    do: {:noreply, socket |> assign(:passkey_challenge, nil) |> assign(:passkey_status, nil)}
 
   def handle_event("remove_passkey", %{"id" => id}, socket) when is_binary(id) do
     user = socket.assigns.current_user
@@ -137,6 +159,7 @@ defmodule KilnCMSWeb.SettingsLive do
            :ok <- Accounts.remove_passkey(passkey, actor: user) do
         socket
         |> assign(:passkeys, WebAuthn.list(user))
+        |> assign(:passkey_status, {:ok, gettext("Passkey removed.")})
         |> put_flash(:info, gettext("Passkey removed."))
       else
         error ->
@@ -144,6 +167,73 @@ defmodule KilnCMSWeb.SettingsLive do
       end
 
     {:noreply, socket}
+  end
+
+  # --- active sessions (#1823) ------------------------------------------------
+  #
+  # Both refuse on the shared demo account, like the credential forms: one
+  # visitor signing out "all other sessions" would sign out every other visitor.
+
+  def handle_event(
+        "sign_out_session",
+        _params,
+        %{assigns: %{credentials_locked?: true}} = socket
+      ),
+      do: {:noreply, put_flash(socket, :error, demo_locked_message())}
+
+  def handle_event("sign_out_session", %{"id" => jti}, socket) when is_binary(jti) do
+    user = socket.assigns.current_user
+
+    socket =
+      case Sessions.revoke(user, jti) do
+        :ok -> put_flash(socket, :info, gettext("Signed out of that session."))
+        {:error, _error} -> put_flash(socket, :error, gettext("That session has already ended."))
+      end
+
+    {:noreply, assign(socket, :sessions, Sessions.list(user))}
+  end
+
+  def handle_event(
+        "sign_out_other_sessions",
+        _params,
+        %{assigns: %{credentials_locked?: true}} = socket
+      ),
+      do: {:noreply, put_flash(socket, :error, demo_locked_message())}
+
+  # Without the jti of this session there is no way to keep it, and "sign out
+  # everything" is not what the button says.
+  def handle_event(
+        "sign_out_other_sessions",
+        _params,
+        %{assigns: %{current_session_jti: nil}} = socket
+      ),
+      do: {:noreply, put_flash(socket, :error, sign_out_others_failed())}
+
+  def handle_event("sign_out_other_sessions", _params, socket) do
+    %{current_user: user, current_session_jti: current} = socket.assigns
+
+    socket =
+      case Sessions.revoke_others(user, current) do
+        {:ok, 0} ->
+          put_flash(socket, :info, gettext("You weren't signed in anywhere else."))
+
+        {:ok, count} ->
+          put_flash(
+            socket,
+            :info,
+            ngettext(
+              "Signed out of %{count} other session.",
+              "Signed out of %{count} other sessions.",
+              count,
+              count: count
+            )
+          )
+
+        {:error, _error} ->
+          put_flash(socket, :error, sign_out_others_failed())
+      end
+
+    {:noreply, assign(socket, :sessions, Sessions.list(user))}
   end
 
   # --- two-factor authentication (#331) --------------------------------------
@@ -303,7 +393,9 @@ defmodule KilnCMSWeb.SettingsLive do
 
   def handle_event("validate_profile", %{"user" => params}, socket) when is_map(params) do
     {:noreply,
-     assign(socket, :profile_form, AshPhoenix.Form.validate(socket.assigns.profile_form, params))}
+     socket
+     |> assign(:profile_form, AshPhoenix.Form.validate(socket.assigns.profile_form, params))
+     |> assign(:profile_saved?, false)}
   end
 
   def handle_event("save_profile", %{"user" => params}, socket) when is_map(params) do
@@ -313,12 +405,14 @@ defmodule KilnCMSWeb.SettingsLive do
          socket
          |> assign(:current_user, user)
          |> assign(:profile_form, profile_form(user))
+         |> assign(:profile_saved?, true)
          |> put_flash(:info, gettext("Profile updated."))}
 
       {:error, form} ->
         {:noreply,
          socket
          |> assign(:profile_form, form)
+         |> assign(:profile_saved?, false)
          |> put_flash(:error, gettext("Couldn't update your profile."))}
     end
   end
@@ -621,7 +715,7 @@ defmodule KilnCMSWeb.SettingsLive do
             <section id="settings-profile" class="card card-pad max-w-xl scroll-mt-24">
               <h2 class="mb-1 text-lg font-medium">{gettext("Profile")}</h2>
               <p class="mb-4 text-sm text-base-content/60">
-                {gettext("Your display name is used as the author byline on content you publish.")}
+                {gettext("How your name appears to readers and to the people you work with.")}
               </p>
 
               <.form
@@ -631,8 +725,29 @@ defmodule KilnCMSWeb.SettingsLive do
                 phx-submit="save_profile"
                 class="space-y-3"
               >
-                <.input field={@profile_form[:name]} type="text" label={gettext("Display name")} />
-                <.button type="submit" variant="primary">{gettext("Save profile")}</.button>
+                <.input
+                  field={@profile_form[:name]}
+                  type="text"
+                  label={gettext("Display name (optional)")}
+                  placeholder={gettext("e.g. Alex Rivera")}
+                  autocomplete="name"
+                  hint={
+                    gettext(
+                      "Shown as the author of content you publish, on your comments, and to people editing at the same time as you."
+                    )
+                  }
+                />
+                <div class="flex items-center gap-3">
+                  <.button type="submit" variant="primary" phx-disable-with={gettext("Saving…")}>
+                    {gettext("Save profile")}
+                  </.button>
+                  <p id="profile-saved" role="status" class="text-sm text-success">
+                    <span :if={@profile_saved?} class="flex items-center gap-1">
+                      <.icon name="hero-check-circle" class="size-4" />
+                      {gettext("Saved.")}
+                    </span>
+                  </p>
+                </div>
               </.form>
             </section>
 
@@ -821,6 +936,30 @@ defmodule KilnCMSWeb.SettingsLive do
                 )}
               </p>
 
+              <%!-- Whether any are set up, said in words (#1829): the list alone
+                left "is a passkey active?" to be inferred from an empty space. --%>
+              <p
+                :if={@passkeys == []}
+                id="passkeys-none"
+                class="mb-4 flex items-center gap-1.5 text-sm text-base-content/70"
+              >
+                <.icon name="hero-key" class="size-4 shrink-0" />
+                {gettext("No passkeys yet. You sign in with your password.")}
+              </p>
+              <p
+                :if={@passkeys != []}
+                id="passkeys-count"
+                class="mb-2 flex items-center gap-1.5 text-sm font-medium text-success"
+              >
+                <.icon name="hero-shield-check" class="size-4 shrink-0" />
+                {ngettext(
+                  "You have %{count} passkey set up.",
+                  "You have %{count} passkeys set up.",
+                  length(@passkeys),
+                  count: length(@passkeys)
+                )}
+              </p>
+
               <ul :if={@passkeys != []} class="mb-4 divide-y divide-base-content/10">
                 <li
                   :for={passkey <- @passkeys}
@@ -856,7 +995,7 @@ defmodule KilnCMSWeb.SettingsLive do
 
               <.demo_locked_note :if={@credentials_locked?} />
               <form
-                :if={!@credentials_locked?}
+                :if={!@credentials_locked? && !@passkey_challenge}
                 phx-submit="passkey_begin"
                 class="flex items-end gap-2"
                 id="add-passkey-form"
@@ -865,14 +1004,126 @@ defmodule KilnCMSWeb.SettingsLive do
                   name="name"
                   value=""
                   type="text"
-                  label={gettext("Name (e.g. \"MacBook Touch ID\")")}
-                  placeholder={gettext("Passkey")}
+                  label={gettext("Name this passkey (optional)")}
+                  placeholder={gettext("e.g. MacBook Touch ID")}
                 />
-                <.button type="submit" variant="primary">{gettext("Add a passkey")}</.button>
+                <.button type="submit" variant="primary" phx-disable-with={gettext("Starting…")}>
+                  {gettext("Add a passkey")}
+                </.button>
               </form>
+              <%!-- While the browser's own prompt is open (#1829). Server state,
+                not a client spinner: the challenge is set from `passkey_begin`
+                until the hook reports back, either way. --%>
+              <div
+                :if={!@credentials_locked? && @passkey_challenge}
+                id="passkey-waiting"
+                class="flex flex-wrap items-center gap-3 rounded-lg border border-base-content/10 bg-base-200/50 p-3"
+              >
+                <.icon name="hero-arrow-path" class="size-4 shrink-0 motion-safe:animate-spin" />
+                <p class="flex-1 text-sm" role="status">
+                  {gettext("Waiting for your device… Follow your browser's prompt to finish.")}
+                </p>
+                <button type="button" phx-click="passkey_cancel" class="btn btn-sm btn-default">
+                  {gettext("Cancel")}
+                </button>
+              </div>
               <p :if={!@credentials_locked?} class="mt-2 text-xs text-base-content/60">
                 {gettext("Your browser will prompt you to confirm with this device's screen lock.")}
               </p>
+              <p
+                :if={@passkey_status}
+                id="passkey-status"
+                role="status"
+                class={[
+                  "mt-3 flex items-center gap-1.5 text-sm",
+                  elem(@passkey_status, 0) == :ok && "text-success",
+                  elem(@passkey_status, 0) == :error && "text-error"
+                ]}
+              >
+                <.icon
+                  name={
+                    if elem(@passkey_status, 0) == :ok,
+                      do: "hero-check-circle",
+                      else: "hero-exclamation-circle"
+                  }
+                  class="size-4 shrink-0"
+                />
+                {elem(@passkey_status, 1)}
+              </p>
+            </section>
+
+            <section id="settings-sessions" class="card card-pad max-w-xl scroll-mt-24">
+              <h2 class="mb-1 text-lg font-medium">{gettext("Active sessions")}</h2>
+              <p class="mb-4 text-sm text-base-content/60">
+                {gettext(
+                  "The browsers and devices signed in to your account. If you don't recognize one, sign it out and change your password."
+                )}
+              </p>
+
+              <.demo_locked_note :if={@credentials_locked?} />
+
+              <div :if={!@credentials_locked?}>
+                <ul id="session-list" class="mb-4 divide-y divide-base-content/10">
+                  <li
+                    :for={session <- sessions_current_first(@sessions, @current_session_jti)}
+                    id={"session-#{session_dom_id(session)}"}
+                    class="flex items-center justify-between gap-3 py-2"
+                  >
+                    <div class="flex min-w-0 items-start gap-3">
+                      <.icon
+                        name={session_icon(session)}
+                        class="mt-0.5 size-5 shrink-0 text-base-content/60"
+                      />
+                      <div class="min-w-0">
+                        <p class="flex flex-wrap items-center gap-2 text-sm font-medium">
+                          <span class="truncate">{session_label(session)}</span>
+                          <.badge :if={session.jti == @current_session_jti} variant="success">
+                            {gettext("This session")}
+                          </.badge>
+                        </p>
+                        <p class="text-xs text-base-content/60">
+                          {session_activity(session, @current_session_jti)} · {gettext(
+                            "signed in %{date}",
+                            date: Calendar.strftime(session.created_at, "%Y-%m-%d")
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      :if={session.jti != @current_session_jti}
+                      type="button"
+                      phx-click="sign_out_session"
+                      phx-value-id={session.jti}
+                      phx-disable-with={gettext("Signing out…")}
+                      aria-label={gettext("Sign out %{device}", device: session_label(session))}
+                      class="btn btn-sm btn-default"
+                    >
+                      {gettext("Sign out")}
+                    </button>
+                  </li>
+                </ul>
+
+                <p
+                  :if={Enum.all?(@sessions, &(&1.jti == @current_session_jti))}
+                  id="sessions-only-this"
+                  class="text-sm text-base-content/70"
+                >
+                  {gettext("You're not signed in anywhere else.")}
+                </p>
+                <button
+                  :if={Enum.any?(@sessions, &(&1.jti != @current_session_jti))}
+                  id="sign-out-other-sessions"
+                  type="button"
+                  phx-click="sign_out_other_sessions"
+                  phx-disable-with={gettext("Signing out…")}
+                  data-confirm={
+                    gettext("Sign out every other browser and device? This one stays signed in.")
+                  }
+                  class="btn btn-sm btn-danger"
+                >
+                  {gettext("Sign out of all other sessions")}
+                </button>
+              </div>
             </section>
 
             <section id="settings-email-notifications" class="card card-pad max-w-xl scroll-mt-24">
@@ -1026,6 +1277,7 @@ defmodule KilnCMSWeb.SettingsLive do
         {"settings-password", gettext("Password")},
         {"settings-two-factor", gettext("Two-factor authentication")},
         {"passkeys", gettext("Passkeys")},
+        {"settings-sessions", gettext("Active sessions")},
         {"settings-email-notifications", gettext("Email notifications")},
         push_available? && {"push-settings", gettext("Push notifications")},
         {"settings-data", gettext("Your data")}
@@ -1033,6 +1285,46 @@ defmodule KilnCMSWeb.SettingsLive do
       &(&1 == false)
     )
   end
+
+  defp sign_out_others_failed,
+    do: gettext("Couldn't sign out of your other sessions. Try again.")
+
+  # --- the session list (#1823) ----------------------------------------------
+
+  # This session first, then the rest most recently used first (the read's
+  # own order).
+  defp sessions_current_first(sessions, current_jti) do
+    {current, others} = Enum.split_with(sessions, &(&1.jti == current_jti))
+    current ++ others
+  end
+
+  # The jti is the row's identity, but it is a bearer secret's name rather than
+  # something to scatter through the DOM's ids; a short hash is unique enough
+  # for a list of one person's sessions and says nothing.
+  defp session_dom_id(%{jti: jti}),
+    do: :crypto.hash(:sha256, jti) |> binary_part(0, 6) |> Base.url_encode64(padding: false)
+
+  defp session_label(%{browser: browser, platform: platform})
+       when is_binary(browser) and is_binary(platform),
+       do: gettext("%{browser} on %{platform}", browser: browser, platform: platform)
+
+  defp session_label(%{browser: browser}) when is_binary(browser), do: browser
+  defp session_label(%{platform: platform}) when is_binary(platform), do: platform
+  defp session_label(_session), do: gettext("Unknown browser")
+
+  defp session_icon(%{platform: platform}) when platform in ["iOS", "Android"],
+    do: "hero-device-phone-mobile"
+
+  defp session_icon(_session), do: "hero-computer-desktop"
+
+  # "Active now" for the page you are reading; otherwise the last recorded use,
+  # which is written at most every few minutes and so is said approximately.
+  defp session_activity(%{jti: jti}, jti), do: gettext("Active now")
+
+  defp session_activity(%{last_used_at: %DateTime{} = at}, _current),
+    do: gettext("last active %{ago} ago", ago: ago(at))
+
+  defp session_activity(_session, _current), do: gettext("no recent activity recorded")
 
   # A spent second-factor budget (#727) and a wrong code are opposite advice:
   # "check your authenticator" sends someone to type five more codes into a

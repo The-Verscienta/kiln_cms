@@ -173,6 +173,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Add a new tag or category without leaving the content editor.**
   ([#1805](https://github.com/The-Verscienta/kiln_cms/issues/1805) · [long form](docs/changelog/unreleased.md#add-tags-and-categories-from-the-editor))
 
+- **Settings lists where you are signed in, and signs out one session or every
+  other one.**
+  ([#1823](https://github.com/The-Verscienta/kiln_cms/issues/1823) · [long form](docs/changelog/unreleased.md#settings-lists-your-active-sessions))
+
 - **Start new content from a day on the calendar: press its "+", choose a type,
   and the editor opens with that day as the publish date (a proposed date, for
   editors who may not publish, that an admin confirms).**
@@ -240,6 +244,10 @@ Every summary line below that was shortened links to its own entry there.
 - **"View site" opens the public site in a new tab and says so, including
   on a deployment with its own console host.**
   ([#1827](https://github.com/The-Verscienta/kiln_cms/issues/1827) · [long form](docs/changelog/unreleased.md#view-site-opens-the-site))
+
+- **Settings says what the display name is for and confirms a save beside the
+  button; Passkeys says whether any are set up and shows the browser prompt.**
+  ([#1828](https://github.com/The-Verscienta/kiln_cms/issues/1828), [#1829](https://github.com/The-Verscienta/kiln_cms/issues/1829) · [long form](docs/changelog/unreleased.md#settings-profile-and-passkey-feedback))
 
 - **A content type's URL segment keeps following its machine name until you
   edit the segment yourself.**
@@ -377,6 +385,10 @@ Every summary line below that was shortened links to its own entry there.
 - **The console keeps its two columns when the stylesheet lacks the sidebar
   width token.**
   ([#1755](https://github.com/The-Verscienta/kiln_cms/issues/1755) · [long form](docs/changelog/unreleased.md#the-console-keeps-its-two-columns-without-the-sidebar-width-token))
+
+- **The database connection no longer logs `:ssl_opts is deprecated` on every
+  boot and every `bin/kiln_cms eval`.**
+  ([long form](docs/changelog/unreleased.md#the-database-connection-no-longer-logs-ssl-opts-deprecated))
 
 ### Security
 

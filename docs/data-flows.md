@@ -35,7 +35,7 @@ your deployment.
 | RBAC role | `users.role` | No | `:admin` / `:editor` / `:viewer`. |
 | Notification preferences | `users.notify_on_*` | No | Per-user opt-out (issue #46). |
 | In-app notifications | `notifications` | Yes | One row per recipient (#1320): event, content title, a comment excerpt, and the acting user's display name (`actor_name`) plus `actor_id`. Readable only by the recipient — no admin bypass. Deleted with the recipient's account row; `actor_name`/`actor_id` nulled when the *actor* is erased. No retention purge yet. |
-| Auth tokens | `tokens` | Pseudonymous | jti, subject (`user?id=<uuid>`), purpose, expiry. See [Auth tokens](#auth-token-retention-218). |
+| Auth tokens | `tokens` | Pseudonymous | jti, subject (`user?id=<uuid>`), purpose, expiry; for a session, browser and OS family and last use. See [Auth tokens](#auth-token-retention-218). |
 | Audit / version history | `document_events`, AshPaperTrail versions | Pseudonymous | Carries `actor_id`. See [Audit trail vs erasure](#audit-trail-vs-user-erasure-219). |
 | Recorded search queries | `search_queries` | Possibly | Query text only — **no** actor/IP. See *Search query retention (#213) + disclosure (#220)* below. |
 | Consumer audiences | `users.audiences`, `org_memberships.audiences` | No | Which gated content a reader may see. Granted by an admin or by an active paid membership. Cleared on erasure. |
@@ -151,6 +151,14 @@ out — which is also why the two will not sum to the same number.
 link, confirmation, and the revocation markers) is persisted in `tokens` so it can
 be individually verified and revoked. Each row holds the jti, subject
 (`user?id=<uuid>`), purpose, expiry, and any `extra_data`.
+
+A sign-in session's row also carries what the *Active sessions* list in
+settings shows (#1823): a browser family and an operating system name
+(`"Firefox"`, `"macOS"` — reduced from the user agent, which is not stored),
+when the session was last used (written at most every five minutes), and the
+jti of the remember-me cookie issued to the same browser, so signing that
+session out retires the cookie too. No IP address is recorded. These fields
+live and die with the row: the nightly sweep below removes them with it.
 
 One row in that table is **not** an issued token: `purpose: "pending_sign_in"`
 (#743), written once per completed *headless* two-factor sign-in to make the
