@@ -138,6 +138,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Reorder a content type's custom fields by dragging them, or with the
+  arrow buttons, on `/editor/fields`; the editor shows them in that order.**
+  ([#1818](https://github.com/The-Verscienta/kiln_cms/issues/1818) · [long form](docs/changelog/unreleased.md#reorder-custom-fields-by-dragging-them))
+
 - **The logo, favicon, social image and app icon on the Branding page can be
   chosen from the media library or uploaded there, with a thumbnail.**
   ([#1811](https://github.com/The-Verscienta/kiln_cms/issues/1811) · [long form](docs/changelog/unreleased.md#branding-images-from-the-media-library))
@@ -171,6 +175,11 @@ Every summary line below that was shortened links to its own entry there.
   ([#1812](https://github.com/The-Verscienta/kiln_cms/issues/1812) · [long form](docs/changelog/unreleased.md#new-content-on-a-calendar-day))
 
 ### Changed
+
+- **Creating a content type goes straight on to its fields, with the new type
+  ticked; the fields form shows Options and Default value only for the field
+  types that use them.**
+  ([#1817](https://github.com/The-Verscienta/kiln_cms/issues/1817), [#1819](https://github.com/The-Verscienta/kiln_cms/issues/1819), [#1820](https://github.com/The-Verscienta/kiln_cms/issues/1820) · [long form](docs/changelog/unreleased.md#a-new-content-type-goes-straight-on-to-its-fields))
 
 - **Keep `RichText.legacy_html` as a fallback instead of removing it;
   the nested column editor now stores Portable Text.**
@@ -218,6 +227,10 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#coolify-build-records-its-commit))
 
 ### Fixed
+
+- **A content type's URL segment keeps following its machine name until you
+  edit the segment yourself.**
+  ([#1816](https://github.com/The-Verscienta/kiln_cms/issues/1816) · [long form](docs/changelog/unreleased.md#the-url-segment-follows-the-machine-name))
 
 - **Production sitemaps, feeds, canonical links, preview links and newsletter
   confirmation emails link to `https://<PHX_HOST>`, not `http://localhost:4000`.**

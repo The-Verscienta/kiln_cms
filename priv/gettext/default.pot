@@ -4023,6 +4023,11 @@ msgstr ""
 msgid "Couldn't save that item."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save the new order of fields."
+msgstr ""
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't save the new order."
@@ -5133,9 +5138,15 @@ msgid "Drafts that have never been published are not listed."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
 msgid "Drag to reorder"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Drag to reorder %{label}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -6141,6 +6152,11 @@ msgstr ""
 msgid "Fields"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Fields appear in the editor in this order. Drag a field by its handle, or use the arrows, to move it."
+msgstr ""
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -6155,6 +6171,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Filled in from the label until you change it."
+msgstr ""
+
+#: lib/kiln_cms_web/live/type_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Filled in from the machine name until you change it."
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
@@ -8091,6 +8112,16 @@ msgstr[1] ""
 msgid "Move %{count} selected item(s) to trash? Admins can restore them from Trash for 30 days."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Move %{label} down"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Move %{label} up"
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
@@ -9356,6 +9387,11 @@ msgstr ""
 msgid "One choice from a fixed list, which you type into Options below. For a size, a status or a category."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "One choice per line. Editors pick one of these."
+msgstr ""
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "One item can't ship as it stands, so the whole release would fail. Fix or remove it first."
@@ -9576,11 +9612,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Options"
-msgstr ""
-
-#: lib/kiln_cms_web/live/field_definition_live.ex
-#, elixir-autogen, elixir-format
-msgid "Options (one per line — select only)"
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -10071,7 +10102,6 @@ msgid "Portable Text rich content"
 msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex
-#: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Position"
@@ -14875,6 +14905,11 @@ msgstr ""
 msgid "Tick every type that should carry this field. Each gets its own copy under the same machine name, which you can then change on its own."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Ticked by default"
+msgstr ""
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "Tier deleted."
@@ -15184,11 +15219,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "URL segment"
-msgstr ""
-
-#: lib/kiln_cms_web/live/type_definition_live.ex
-#, elixir-autogen, elixir-format
-msgid "URL segment (defaults to machine name + \"s\")"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
@@ -15577,6 +15607,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "Used to open checkout and billing-portal sessions. Starts with sk_ or rk_."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Used when an editor leaves this field empty."
 msgstr ""
 
 #: lib/kiln_cms_web/live/api_key_live.ex
@@ -17661,6 +17696,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "—"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "— No default —"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
