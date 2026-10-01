@@ -709,7 +709,10 @@ defmodule KilnCMSWeb.BrandingLive do
               <span class="text-xs font-medium underline" style={"color:#{link}"}>
                 {gettext("A link")}
               </span>
-              <span class="ml-auto text-[11px]" style={"color:#{if mode == "dark", do: "#c9ced6", else: "#5b6270"}"}>
+              <span
+                class="ml-auto text-[11px]"
+                style={"color:#{if mode == "dark", do: "#c9ced6", else: "#5b6270"}"}
+              >
                 {label}
               </span>
             </div>

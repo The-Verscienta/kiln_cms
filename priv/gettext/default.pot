@@ -1039,6 +1039,11 @@ msgstr ""
 msgid "A key that can write documents and settings to this index. Stored encrypted and never shown again."
 msgstr ""
 
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "A link"
+msgstr ""
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "A link is labelled with its own URL — a descriptive phrase carries more signal."
@@ -1091,11 +1096,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "A passphrase is set. Leave blank to keep it."
-msgstr ""
-
-#: lib/kiln_cms_web/live/branding_live.ex
-#, elixir-autogen, elixir-format
-msgid "A path from the media library (/uploads/…), or an https:// URL on an allowed host."
 msgstr ""
 
 #: lib/kiln_cms_web/live/taxonomy_live.ex
@@ -2132,7 +2132,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
-msgid "App icon URL"
+msgid "App icon"
 msgstr ""
 
 #: lib/kiln_cms_web/live/social_live.ex
@@ -2697,6 +2697,11 @@ msgstr ""
 msgid "Bundle a campaign's publishes and unpublishes and ship them as one coordinated change. A release goes live all at once, or not at all."
 msgstr ""
 
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Button"
+msgstr ""
+
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Button label"
@@ -2959,9 +2964,19 @@ msgstr ""
 msgid "Choose a caption track"
 msgstr ""
 
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose a favicon"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
 msgid "Choose a file"
+msgstr ""
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose a logo"
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
@@ -3000,6 +3015,7 @@ msgid "Choose a published post to send."
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
+#: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "Choose a social image"
 msgstr ""
@@ -3034,6 +3050,11 @@ msgstr ""
 msgid "Choose an XLIFF file first."
 msgstr ""
 
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose an app icon"
+msgstr ""
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "Choose an editor…"
@@ -3042,6 +3063,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
 msgid "Choose an image"
+msgstr ""
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose an image from the media library or upload one. To use an image stored elsewhere, paste its https:// address."
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
@@ -3055,6 +3081,7 @@ msgid "Choose files"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -4056,6 +4083,7 @@ msgstr ""
 msgid "Couldn't update your profile."
 msgstr ""
 
+#: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't upload %{name}: %{reason}"
@@ -4377,10 +4405,14 @@ msgid "Daily buckets use UTC calendar days; today's bar is still filling. Histor
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex
-#: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Dark"
+msgstr ""
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Dark mode"
 msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -4426,7 +4458,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
-msgid "Default social image URL"
+msgid "Default social image"
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -4762,11 +4794,6 @@ msgstr ""
 msgid "Derived from the snippets above when you saved. If a script you pasted isn't listed, the browser will block it."
 msgstr ""
 
-#: lib/kiln_cms_web/live/branding_live.ex
-#, elixir-autogen, elixir-format
-msgid "Derived tokens"
-msgstr ""
-
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Describe the image for screen readers"
@@ -4910,6 +4937,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
 #: lib/kiln_cms_web/live/api_key_live.ex
+#: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -5980,7 +6008,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
-msgid "Favicon URL"
+msgid "Favicon"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
@@ -7511,10 +7539,14 @@ msgid "Library (%{count})"
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex
-#: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Light"
+msgstr ""
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Light mode"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
@@ -7657,7 +7689,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
-msgid "Logo URL"
+msgid "Logo"
 msgstr ""
 
 #: lib/kiln_cms_web/components/seo_components.ex
@@ -10048,6 +10080,7 @@ msgid "Press Publish in the editor. Until then, only people signed in to the con
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
@@ -10778,6 +10811,7 @@ msgid "Reloaded the latest version."
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
@@ -13426,6 +13460,11 @@ msgstr ""
 msgid "That experiment doesn't exist."
 msgstr ""
 
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "That file can't be used here. Choose a PNG, JPEG, WebP or GIF image."
+msgstr ""
+
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "That file could not be uploaded."
@@ -13459,6 +13498,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "That funnel doesn't exist."
+msgstr ""
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "That image is no longer in the media library."
 msgstr ""
 
 #: lib/kiln_cms_web/live/calendar_live.ex
@@ -13638,6 +13682,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
+msgid "The app icon must be a PNG or JPEG image."
+msgstr ""
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
 msgid "The app icon was saved but isn't installable yet: %{reason}"
 msgstr ""
 
@@ -13792,6 +13841,11 @@ msgstr ""
 msgid "The entry limit is deployment-wide and not configurable per site: it bounds the work a feed request costs the server, rather than expressing a publishing choice."
 msgstr ""
 
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "The favicon must be a PNG image."
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor/markdown_import.ex
 #, elixir-autogen, elixir-format
 msgid "The file converts to %{count} block."
@@ -13889,7 +13943,6 @@ msgstr[1] ""
 msgid "The last save was at %{time}."
 msgstr ""
 
-#: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "The light and dark variants, and the text colour on buttons, are derived from this so they always meet WCAG AA."
@@ -14055,6 +14108,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "The slug doesn't contain the focus keyphrase."
+msgstr ""
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "The small icon in the browser tab. Use a square PNG. For an .ico or .svg file, paste its address."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
@@ -15165,6 +15223,11 @@ msgstr ""
 msgid "Updates"
 msgstr ""
 
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Upload"
+msgstr ""
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Upload %{count} file"
@@ -15232,6 +15295,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Uploading…"
+msgstr ""
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Uploading… %{percent}%"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/page_html.ex
@@ -15324,6 +15392,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Used by"
+msgstr ""
+
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "Used for buttons, links and highlights, on the public site and here in the editor. Kiln adjusts it slightly if needed so text on it stays readable. In dark mode a lighter shade is used."
 msgstr ""
 
 #: lib/kiln_cms_web/live/branding_live.ex
@@ -16458,12 +16531,14 @@ msgstr ""
 msgid "control"
 msgstr ""
 
+#: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "couldn't be saved"
 msgstr ""
 
+#: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -16627,6 +16702,7 @@ msgstr ""
 msgid "field grants: %{types}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -16665,6 +16741,7 @@ msgstr ""
 msgid "hybrid keyword + semantic search across all content types."
 msgstr ""
 
+#: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -17253,6 +17330,11 @@ msgstr ""
 msgid "these counters look wrong"
 msgstr ""
 
+#: lib/kiln_cms_web/live/branding_live.ex
+#, elixir-autogen, elixir-format
+msgid "this file type can't be used here"
+msgstr ""
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "this is you"
@@ -17263,6 +17345,7 @@ msgstr ""
 msgid "today"
 msgstr ""
 
+#: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -17340,6 +17423,7 @@ msgstr ""
 msgid "unreadable — it was encrypted under a SECRET_KEY_BASE this server no longer has. Delete and re-create the endpoint."
 msgstr ""
 
+#: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -17351,6 +17435,7 @@ msgstr ""
 msgid "unsupported type"
 msgstr ""
 
+#: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "upload failed"
@@ -17366,6 +17451,7 @@ msgstr ""
 msgid "vs. previous step"
 msgstr ""
 
+#: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format

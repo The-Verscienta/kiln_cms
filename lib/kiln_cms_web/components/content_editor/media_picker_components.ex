@@ -5,6 +5,10 @@ defmodule KilnCMSWeb.ContentEditor.MediaPickerComponents do
   A/V picker that serves a video block's media, poster and caption-track
   fields. Moved verbatim from `KilnCMSWeb.ContentEditorLive`; events stay
   untargeted, so they keep landing on the enclosing LiveView.
+
+  `image_picker/1` is also the Branding page's library drawer (#1811):
+  `KilnCMSWeb.BrandingLive` handles the same `pick_image`, `search_media` and
+  `close_picker` events, with the Unsplash tab off.
   """
 
   use KilnCMSWeb, :html

@@ -250,6 +250,23 @@ carries the reasoning.
 
 ## Added
 
+<a id="branding-images-from-the-media-library"></a>
+
+- **The logo, favicon, social image and app icon on the Branding page can be
+  chosen from the media library or uploaded there, with a thumbnail.** A beta
+  tester had to upload a logo on the Media page, copy its address and paste it
+  into Branding. Each image field now has *Choose from library*, which opens
+  the same image drawer the content editor uses, and *Upload*, which adds the
+  file to the media library and fills the field. A thumbnail shows the current
+  image, and *Remove* empties the field. The address box stays, for an image
+  stored elsewhere. Uploads go through the media library's usual processing
+  under the signed-in admin. Each field offers only the formats it can use: a
+  favicon must be a PNG and an app icon a PNG or JPEG, checked against the
+  file's contents, not its name. The media library does not take `.ico` or
+  `.svg` files, so a favicon in those formats is still added by pasting its
+  address. Nothing is saved until *Save branding*
+  ([#1811](https://github.com/The-Verscienta/kiln_cms/issues/1811)).
+
 <a id="editing-in-place-can-add-blocks"></a>
 
 - **Editing in place can add a paragraph, heading or quote between blocks or at
@@ -469,6 +486,22 @@ carries the reasoning.
   has no Coolify equivalent and stays unset unless you set it.
 
 ## Fixed
+
+<a id="brand-colour-shows-on-save"></a>
+
+- **A new brand colour shows as soon as Branding is saved, with a button and
+  link preview in light and dark mode and help text that says where it is
+  used.** A beta tester changed the brand colour to `#333333` and saw nothing
+  change: not the buttons, not the notification badge. The colour was saved,
+  but it is drawn by the page's outer layout, which the Branding page did not
+  reload, so the old colour stayed until a manual refresh. Saving (and
+  *Reset to defaults*) now reloads the page, so the new colour, logo, favicon
+  and site name show at once. The colour box's help text now says it is used
+  for buttons, links and highlights on the public site and in the editor, and
+  that dark mode uses a lighter shade, which is why a dark grey looks light
+  grey there. The preview under the box shows a button and a link on a light
+  and a dark page as you type
+  ([#1810](https://github.com/The-Verscienta/kiln_cms/issues/1810)).
 
 <a id="markdown-becomes-heading-divider-and-text-blocks"></a>
 
