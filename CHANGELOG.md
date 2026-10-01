@@ -96,6 +96,10 @@ Every summary line below that was shortened links to its own entry there.
   `/editor/webhooks`; untick the draft events on any that shouldn't get drafts.**
   ([#1776](https://github.com/The-Verscienta/kiln_cms/issues/1776) · [long form](docs/changelog/unreleased.md#review-webhook-endpoints-that-receive-unpublished-content))
 
+- **Public links now use `https://<PHX_HOST>`; set `PUBLIC_BASE_URL` if your
+  public site is served from a different origin.**
+  ([#1833](https://github.com/The-Verscienta/kiln_cms/issues/1833) · [long form](docs/changelog/unreleased.md#public-links-now-use-phx-host))
+
 ### Breaking
 
 - **On a multi-org install with `KILN_CONSOLE_HOST` set, each non-default
@@ -200,6 +204,10 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#coolify-build-records-its-commit))
 
 ### Fixed
+
+- **Production sitemaps, feeds, canonical links, preview links and newsletter
+  confirmation emails link to `https://<PHX_HOST>`, not `http://localhost:4000`.**
+  ([#1833](https://github.com/The-Verscienta/kiln_cms/issues/1833) · [long form](docs/changelog/unreleased.md#production-public-links-use-phx-host))
 
 - **Markdown switched back to Blocks, or imported from a `.md` file, becomes
   heading, divider and one text block per section, not one long text block.**
