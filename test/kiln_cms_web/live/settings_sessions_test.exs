@@ -236,6 +236,7 @@ defmodule KilnCMSWeb.SettingsSessionsTest do
           confirmed_at: DateTime.utc_now(),
           role: :admin
         })
+
       other = account("member")
       theirs = sign_in(other, @chrome_windows)
 

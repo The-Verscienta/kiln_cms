@@ -44,8 +44,9 @@ defmodule KilnCMS.Accounts.Sessions do
   alias KilnCMS.Accounts.SessionEviction
   alias KilnCMS.Accounts.Token
 
-  # The `record_*` writes: no actor to ask (see the moduledoc), one atomic
-  # UPDATE keyed by jti, and errors returned rather than raised.
+  # The `record_*` writes: one atomic UPDATE keyed by jti, errors returned
+  # rather than raised.
+  # authorize?: false — session bookkeeping has no actor; both actions forbid every caller
   @bookkeeping [authorize?: false, bulk_options: [strategy: :atomic, return_errors?: true]]
 
   @doc "The account's own active sessions, most recently used first."

@@ -496,6 +496,26 @@ The domain names them (`spend_pending_sign_in`, `hold_first_factor_token`,
 name is not an opening here: no policy matches `:read` either, so every one of
 them is refused without the `authorize?: false` only that module passes.
 
+**Your own sessions (#1823).** The settings page's session list adds three
+self-service actions, all scoped by `KilnCMS.Accounts.Checks.OwnsToken` — a
+filter check matching rows whose `subject` is the actor's own. A row of another
+account is filtered out rather than refused, so a jti naming someone else's
+session lists nothing and revokes nothing. There is no admin bypass: an admin
+signs another account out with *Sign out everywhere* on the Accounts page.
+
+| Action | Who | What it is for |
+|---|---|---|
+| `:own_sessions` | the token's owner | The account's usable `"user"` rows — the list |
+| `:own_tokens` | the token's owner | Every row it owns; the read the revocation's bulk update runs through |
+| `:revoke_own_session` | the token's owner | Flips a `"user"`, `"remember_me"` or held row to `"revocation"` |
+
+Two more are bookkeeping and `forbid_if always()`, like the three above:
+`:record_sign_in` (the browser a session signed in from and its remember-me
+cookie's jti, by `KilnCMSWeb.Plugs.SessionTracking`) and `:record_session_use`
+(`last_used_at`, at most every five minutes, from a signed-in mount).
+`KilnCMS.Accounts.Sessions` calls both with `authorize?: false`, keyed by the jti
+in the signed session.
+
 ## Platform accounts — `Organization`, `OrgMembership`, `Role`, `ApiKey`, `Passkey`, `UserIdentity`
 
 These five resources gate on the **platform** role

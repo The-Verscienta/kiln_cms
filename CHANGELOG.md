@@ -152,6 +152,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Add a new tag or category without leaving the content editor.**
   ([#1805](https://github.com/The-Verscienta/kiln_cms/issues/1805) · [long form](docs/changelog/unreleased.md#add-tags-and-categories-from-the-editor))
 
+- **Settings lists where you are signed in, and signs out one session or every
+  other one.**
+  ([#1823](https://github.com/The-Verscienta/kiln_cms/issues/1823) · [long form](docs/changelog/unreleased.md#settings-lists-your-active-sessions))
+
 ### Changed
 
 - **Keep `RichText.legacy_html` as a fallback instead of removing it;
@@ -200,6 +204,10 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#coolify-build-records-its-commit))
 
 ### Fixed
+
+- **Settings says what the display name is for and confirms a save beside the
+  button; Passkeys says whether any are set up and shows the browser prompt.**
+  ([#1828](https://github.com/The-Verscienta/kiln_cms/issues/1828), [#1829](https://github.com/The-Verscienta/kiln_cms/issues/1829) · [long form](docs/changelog/unreleased.md#settings-profile-and-passkey-feedback))
 
 - **Markdown switched back to Blocks, or imported from a `.md` file, becomes
   heading, divider and one text block per section, not one long text block.**
