@@ -243,17 +243,16 @@ defmodule KilnCMS.CMS.WorkingCopy do
   # A loaded `belongs_to` over a key the copy moved would name the live record
   # beside the held id; nothing shown beats the wrong thing shown.
   defp drop_stale(record, attribute) do
-    record.__struct__
-    |> belongs_to_over(attribute)
-    |> case do
-      nil ->
-        record
+    case belongs_to_over(record.__struct__, attribute) do
+      nil -> record
+      relationship -> drop_if_stale(record, relationship, Map.get(record, attribute))
+    end
+  end
 
-      relationship ->
-        case Map.get(record, relationship) do
-          %{id: id} -> if id == Map.get(record, attribute), do: record, else: Map.put(record, relationship, nil)
-          _not_loaded_or_nil -> record
-        end
+  defp drop_if_stale(record, relationship, key) do
+    case Map.get(record, relationship) do
+      %{id: id} when id != key -> Map.put(record, relationship, nil)
+      _matching_not_loaded_or_nil -> record
     end
   end
 
