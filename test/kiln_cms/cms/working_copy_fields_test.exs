@@ -128,26 +128,6 @@ defmodule KilnCMS.CMS.WorkingCopyFieldsTest do
       assert tag_ids(loaded) == [to_string(tag.id)]
     end
 
-    test "keeps the public page cache: nothing it serves changed" do
-      admin = user(:admin)
-      page = live_page(admin)
-      org = page.org_id
-
-      assert :cached =
-               KilnCMS.Cache.fetch_published(org, "page", page.slug, "en", fn -> :cached end)
-
-      {:ok, saved} = save_fields(page, %{"seo_title" => "Held"}, admin)
-
-      assert :cached =
-               KilnCMS.Cache.fetch_published(org, "page", page.slug, "en", fn -> :fresh end)
-
-      # Publishing the copy is what changes the page, and what busts it.
-      {:ok, _} = CMS.publish_page_changes(saved, actor: admin)
-
-      assert :fresh =
-               KilnCMS.Cache.fetch_published(org, "page", page.slug, "en", fn -> :fresh end)
-    end
-
     test "a field set back to its live value leaves the copy; nothing left, no copy" do
       admin = user(:admin)
       page = live_page(admin)

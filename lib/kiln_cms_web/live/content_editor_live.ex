@@ -3081,7 +3081,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # The lost-update guard's panel (#1815): one choice per field, or one for
   # all, then publish. Only keys the panel was opened with can be chosen.
   def handle_event("conflict_choose", %{"key" => key, "choice" => choice}, socket)
-      when choice in ["mine", "theirs"] do
+      when is_binary(key) and choice in ["mine", "theirs"] do
     if key in (socket.assigns.publish_conflicts || []) do
       {:noreply, update(socket, :conflict_choices, &Map.put(&1, key, choice))}
     else
@@ -4014,17 +4014,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> inject_children(socket.assigns.block_children)
       |> inject_rich_bodies(socket.assigns.rich_bodies)
 
-    with {:ok, socket} <- flush_working_copy(socket, params) do
-      case WorkingCopy.reconcile(socket.assigns.record).conflicts do
-        [] ->
-          publish_changes(socket, %{})
-
-        keys ->
-          socket
-          |> assign(:publish_conflicts, keys)
-          |> assign(:conflict_choices, %{})
-      end
-    else
+    case flush_working_copy(socket, params) do
+      {:ok, socket} -> publish_or_ask(socket)
       {:error, socket} -> socket
     end
   end
@@ -4043,6 +4034,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp run_workflow(socket, _action), do: socket
+
+  # The lost-update guard (#1815): publish straight away when nothing on the
+  # live page moved under the draft, else ask which version to keep.
+  defp publish_or_ask(socket) do
+    case WorkingCopy.reconcile(socket.assigns.record).conflicts do
+      [] ->
+        publish_changes(socket, %{})
+
+      keys ->
+        socket
+        |> assign(:publish_conflicts, keys)
+        |> assign(:conflict_choices, %{})
+    end
+  end
 
   # "Publish changes" with the lost-update guard's decisions (#1815). Through
   # a form on the row, the way Save writes, because the decisions are an
