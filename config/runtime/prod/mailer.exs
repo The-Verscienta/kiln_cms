@@ -45,8 +45,8 @@ alias KilnCMS.Config.Env
 # mailbox with no delivery, and no supervised storage process outside `mix
 # phx.server`. All outbound email is queued through KilnCMS.Mail onto the
 # Oban :mail queue, so with no real adapter configured in production the
-# triggering requests still succeed but every delivery job fails and retries
-# in Oban (visible in the oban_jobs table / logs) — no email actually leaves.
+# triggering requests still succeed but every delivery job is held, retrying,
+# with "No outgoing mail server is configured" (#1843) — no email leaves.
 #
 # Two real-delivery modes (docs/direct-email-delivery-plan.md):
 #

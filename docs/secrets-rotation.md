@@ -220,6 +220,13 @@ is neither that type nor explained, so the list cannot fall behind the code.
 | `secret_access_key_encrypted` | `KilnCMS.CMS.StorageProfile` (one per bucket a site has stored files in) | That site's uploads are **refused**, and its files in that bucket can't be read, derived or deleted (downloads 404, variant jobs retry). Nothing is written to, or read from, the operator's storage instead | `/editor/site-storage` on each such site: enter the secret access key again. A profile the site has since moved away from has no form; move the site back to that bucket, re-enter the key, then move it forward again |
 | `private_key_encrypted` | `KilnCMS.Federation.SiteFederation` | The site can no longer sign ActivityPub deliveries | `/editor/federation` → *Re-key*, or `mix kiln.federation rekey`. See [Re-keying the ActivityPub actor](#re-keying-the-activitypub-actor) |
 
+One more thing is sealed under this secret but is not a column: the subject
+and body of each **queued** mail job (`KilnCMS.Mail.open_args/1`, #1843).
+`mix kiln.vault.reencrypt` does not walk them, because a mail job lives at
+most about 16 hours. Keep `PREVIOUS_SECRET_KEY_BASE` set for a day after the
+switch. A job that still cannot be opened is cancelled with "message could
+not be opened", never sent blank; the person asks for the mail again.
+
 **You should never need the last column.** Two pieces make the rotation
 lossless:
 

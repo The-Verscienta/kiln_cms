@@ -143,6 +143,27 @@ carries the reasoning.
   default) to each content table
   ([#1815](https://github.com/The-Verscienta/kiln_cms/issues/1815)).
 
+<a id="treat-sign-in-links-in-old-mail-errors-as-exposed"></a>
+
+- **Treat sign-in links shown in mail delivery errors from an earlier release
+  as exposed.** Before 1.0, a mailer that crashed instead of answering an
+  error had the whole email stored as the job's error, sign-in link included.
+  That happened on every deployment with no outgoing mail server configured:
+  the stock local adapter has no mailbox in a release, so each delivery
+  exited. Those errors were shown on *Mail* and *Outgoing mail*, kept in
+  `oban_jobs`, printed to the log and sent to Sentry. The upgrade runs a data
+  migration that rewrites them and drops the message from every finished
+  mail and newsletter job (`KilnCMS.Mail.Scrub`; it touches no other queue).
+  It cannot reach your logs or Sentry, so delete those events there, and act
+  on any link they show: a password reset link works until it expires, so
+  reset that account's password again; an account confirmation link, confirm
+  that account yourself or let it expire; a newsletter confirmation link never
+  expires, so check that subscriber really asked to be on the list. After
+  restoring a backup taken before the upgrade, run `mix kiln.mail.scrub`
+  (`bin/kiln_cms eval 'KilnCMS.Release.scrub_mail_jobs()'` in a release).
+  Mail queued before the upgrade still goes out
+  ([#1843](https://github.com/The-Verscienta/kiln_cms/issues/1843)).
+
 ## Breaking
 
 <a id="on-a-multi-org-install-with-kiln_console_host-set-each-non-default-orgs-console"></a>
@@ -1761,3 +1782,25 @@ carries the reasoning.
   GraphQL route, so there is no other create path. Existing endpoints keep
   their events; see the upgrade note
   ([#1776](https://github.com/The-Verscienta/kiln_cms/issues/1776)).
+
+<a id="sign-in-links-no-longer-leak-into-mail-job-errors"></a>
+
+- **Sign-in links no longer leak into stored mail job errors, logs or
+  Sentry.** Account confirmations, password resets, magic links and
+  newsletter confirmations go out through the `:mail` queue. When the mailer
+  crashed rather than returned an error, Oban stored the crash, and the
+  crash quoted the email it was sending. In a release with no mail server
+  configured every send crashed that way, and an admin could read live links
+  on *Mail* and *Outgoing mail*. Four changes close it. The adapter call is
+  guarded: a raise, exit or throw becomes a `KilnCMS.Mail.MailerCrashError`
+  that names only what crashed ("mailer crashed: noproc"), and the job
+  retries. With no mail server at all, the mail is held with "No outgoing
+  mail server is configured — see Mail settings", and the test send on
+  *Mail* says so too. A site's own relay is unaffected. A queued job's
+  subject and body are now sealed with `KilnCMS.Keys.Vault`, so Oban's log
+  lines and Sentry's job context hold ciphertext, and a finished job drops
+  them. Sentry events are also scrubbed of mail bodies, and the delivery
+  panels show only the first line of an error, with links and addresses
+  removed. A job sealed under a `SECRET_KEY_BASE` the deployment no longer
+  has cancels with a reason rather than sending a blank message
+  ([#1843](https://github.com/The-Verscienta/kiln_cms/issues/1843)).

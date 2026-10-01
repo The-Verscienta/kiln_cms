@@ -8784,6 +8784,11 @@ msgstr "Aucune tâche ouverte ne vous est assignée."
 msgid "No open tasks."
 msgstr "Aucune tâche ouverte."
 
+#: lib/kiln_cms_web/live/mail_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "No outgoing mail server is set up, so nothing can be sent. Set MAIL_MODE (or SMTP_HOST) and restart."
+msgstr "Aucun serveur de courrier sortant n'est configuré, donc rien ne peut être envoyé. Définissez MAIL_MODE (ou SMTP_HOST) puis redémarrez."
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
