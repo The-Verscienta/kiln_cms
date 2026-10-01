@@ -484,6 +484,9 @@ defmodule KilnCMS.CMS.Content do
           :audience,
           :custom_fields,
           :scheduled_at,
+          # A date an editor without publish rights asks for (#1812). Not a
+          # schedule: nothing fires on it. See the attribute.
+          :proposed_publish_at,
           :unpublish_at,
           # Lifecycle (docs/content-lifecycles.md): the review cadence and what the
           # embargo end does when it fires. `last_reviewed_at` is deliberately
@@ -3100,6 +3103,10 @@ defmodule KilnCMS.CMS.Content do
         # pass untouched; admins are exempt (see the change module).
         change KilnCMS.CMS.Changes.EnforceFieldGrants, on: [:update]
 
+        # A proposed publish date (#1812) is answered by a real one: setting
+        # `scheduled_at`, or publishing, clears the proposal.
+        change KilnCMS.CMS.Changes.ClearProposedPublishAt, on: [:update]
+
         # Block field policies (#51): `editable_by` on a `Kiln.Block` field was
         # enforced only by the editor filtering the fields it renders, so the
         # write API / MCP / GraphQL could set an admin-only field as an editor.
@@ -3486,6 +3493,21 @@ defmodule KilnCMS.CMS.Content do
         # When set in the future, the AshOban scheduler publishes this record once
         # the time passes (cleared on publish).
         attribute :scheduled_at, :utc_datetime_usec, public?: true
+
+        # A publish date PROPOSED by someone who may not set `scheduled_at`
+        # (#1812) — an editor on a site where only admins publish. Nothing
+        # fires on it: no scheduler trigger reads it, and it never publishes
+        # anything by itself. It becomes `scheduled_at` when someone with
+        # publish rights schedules or publishes the record (or confirms the
+        # proposal, which is the same write), and
+        # `Changes.ClearProposedPublishAt` clears it then. Writable by anyone
+        # who may update the record, which is the point: the policy on
+        # `scheduled_at` does not apply to it.
+        #
+        # Internal, like the other editor-only workflow columns
+        # (`working_title`): never on the public APIs or in a delivery
+        # projection — a reader has no use for a date nobody has agreed to.
+        attribute :proposed_publish_at, :utc_datetime_usec, public?: false
 
         # The embargo end: when set, the AshOban scheduler retires this record
         # once the time passes. What "retires" means is `expiry_action` below;
