@@ -272,6 +272,29 @@ defmodule KilnCMSWeb.ContentEditorWorkingCopyTest do
     assert KilnCMS.CMS.Releases.classify(item, authorize?: false, tenant: page.org_id) == :apply
   end
 
+  test "a ticked tag is held: the picker shows it, readers do not", %{conn: conn} do
+    admin = authed_user(:admin)
+    page = live_page(admin)
+    tag = CMS.create_tag!(%{name: "Held tag", slug: slug()}, actor: admin)
+    {:ok, lv, _html} = open(conn, admin, page)
+
+    lv
+    |> form("#page-editor")
+    |> render_submit(%{"form" => %{"tag_ids" => [tag.id]}})
+
+    live_tags = CMS.get_page!(page.id, authorize?: false, tenant: page.org_id, load: [:tags]).tags
+    assert live_tags == []
+    assert WorkingCopy.held_ids(reload(page), :tag_ids) == [to_string(tag.id)]
+
+    # Ticked in the picker, from the copy.
+    assert has_element?(lv, ~s(input[type="checkbox"][value="#{tag.id}"][checked]))
+
+    lv |> element("#publish-changes") |> render_click()
+
+    live_tags = CMS.get_page!(page.id, authorize?: false, tenant: page.org_id, load: [:tags]).tags
+    assert Enum.map(live_tags, & &1.id) == [tag.id]
+  end
+
   test "Publish changes asks for a Save when settings are still unsaved", %{conn: conn} do
     editor = authed_user(:editor)
     page = live_page(authed_user(:admin))

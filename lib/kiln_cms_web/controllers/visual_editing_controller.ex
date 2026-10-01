@@ -123,7 +123,7 @@ defmodule KilnCMSWeb.VisualEditingController do
            ),
          true <- record.slug == slug,
          true <- is_nil(locale) or record.locale == locale do
-      {:ok, WorkingCopy.view(record)}
+      {:ok, WorkingCopy.load_view(record, authorize?: false, tenant: org_id)}
     else
       _ -> {:error, :invalid_preview}
     end

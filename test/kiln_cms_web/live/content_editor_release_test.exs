@@ -157,6 +157,21 @@ defmodule KilnCMSWeb.ContentEditorReleaseTest do
     assert html =~ ~s{/editor/releases/#{rel.id}}
   end
 
+  test "a live record in a release says saved changes go live with it", %{conn: conn} do
+    admin = authed_user(:admin)
+    rel = CMS.create_release!(%{name: "Launch"}, actor: admin)
+    page = admin |> page!() |> CMS.publish_page!(%{}, actor: admin)
+
+    {:ok, _item} =
+      CMS.add_release_item(
+        %{release_id: rel.id, content_type: "page", content_id: page.id},
+        actor: admin
+      )
+
+    {:ok, _lv, html} = open(conn, admin, page)
+    assert html =~ "Live now. Changes you save go live with the release."
+  end
+
   test "a refused add surfaces the reason, not a generic failure", %{conn: conn} do
     admin = authed_user(:admin)
     editor = authed_user(:editor)

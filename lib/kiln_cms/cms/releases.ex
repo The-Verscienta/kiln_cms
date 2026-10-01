@@ -276,7 +276,10 @@ defmodule KilnCMS.CMS.Releases do
 
   defp records_for_type(type, rows, opts) do
     ids = rows |> Enum.map(& &1.content_id) |> Enum.uniq()
-    query = [filter: [id: [in: ids]], select: [:id, :state]]
+    # `working_copy_at` because a `:publish` of a live record is decided by it
+    # (`classify_record/2`): selected out, every live item read as "nothing
+    # to publish" on the console even with changes saved (#1815).
+    query = [filter: [id: [in: ids]], select: [:id, :state, :working_copy_at]]
 
     found =
       type
