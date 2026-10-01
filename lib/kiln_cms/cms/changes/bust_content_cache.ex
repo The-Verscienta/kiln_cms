@@ -17,7 +17,17 @@ defmodule KilnCMS.CMS.Changes.BustContentCache do
 
   alias KilnCMS.Cache
 
+  # The working copy's own writes (docs/working-copy.md) touch only the working
+  # columns, which no delivery read serves — so a save to a live document
+  # leaves its cached page alone (#1815). Publishing the copy goes through
+  # `:publish_changes`, which busts like any live edit.
+  @working_copy_actions [:save_working_copy, :discard_changes]
+
   @impl true
+  def change(%{action: %{name: name}} = changeset, _opts, _context)
+      when name in @working_copy_actions,
+      do: changeset
+
   def change(changeset, _opts, _context) do
     Ash.Changeset.after_action(changeset, fn changeset, record ->
       if published_involved?(changeset, record), do: bust(changeset, record)
