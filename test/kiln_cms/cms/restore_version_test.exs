@@ -204,11 +204,12 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
       # reference fields have their own test — they need real records. So does
       # the working copy of a live document (docs/working-copy.md): it only
       # restores onto a PUBLISHED record, and `KilnCMS.CMS.WorkingCopyTest`
-      # round-trips it there by restoring a discarded copy.
+      # round-trips it there by restoring a discarded copy, and
+      # `KilnCMS.CMS.WorkingCopyFieldsTest` does the same for its held fields.
       covered =
         Map.keys(original) ++
           [:blocks, :category_id, :featured_image_id] ++
-          [:working_title, :working_blocks, :working_copy_at]
+          [:working_title, :working_blocks, :working_copy_at, :working_fields]
 
       assert Enum.sort(VersionFields.restorable_fields(KilnCMS.CMS.Page)) == Enum.sort(covered)
     end
@@ -229,7 +230,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
                ~w(title working_title slug path_alias excerpt audience locale
                   seo_title seo_description seo_keywords seo_image canonical_url
                   category_id featured_image_id custom_fields blocks
-                  working_blocks working_copy_at)a
+                  working_blocks working_copy_at working_fields)a
     end
 
     test "restorable? answers about the resource, not about a name in the abstract" do

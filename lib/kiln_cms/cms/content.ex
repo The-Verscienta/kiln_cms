@@ -2423,24 +2423,33 @@ defmodule KilnCMS.CMS.Content do
         end
 
         # The working copy of a live document (docs/working-copy.md). The
-        # editor's autosave on a PUBLISHED row: writes `working_title` /
-        # `working_blocks` and nothing else, so readers, search, feeds and the
-        # artifacts keep serving the published text. The exact complement of
+        # editor's autosave and Save on a PUBLISHED row: writes the working
+        # columns and nothing else, so readers, search, feeds and the
+        # artifacts keep serving the published content. The exact complement of
         # `:autosave`'s `state == :draft` filter, and a row-level CAS for the
         # same reason (#1015): a struct that predates an unpublish must be
         # refused at the row, not judged by a stale `state`.
         #
-        # `StampWorkingCopy` sets `working_copy_at`, or clears all three when
-        # the text saved is the text that is live — a working copy exists only
+        # `StampWorkingCopy` sets `working_copy_at`, or clears the copy when
+        # nothing in it differs from the live row — a working copy exists only
         # while it runs ahead. Coalesced like `:autosave`, since it fires per
-        # debounce. No `DeriveSlug`, no tag verbs, no `ApplyCustomFields`:
-        # everything outside the title and body is single-state and saves
-        # through `:update`.
+        # debounce.
+        #
+        # `fields` holds the rest of the content (#1815): the held settings —
+        # SEO, custom fields, category, featured image, tags, related content,
+        # slug — in the params `:update` takes, judged by `:update` itself
+        # through a probe changeset and stored as `working_fields`
+        # (`Changes.StageWorkingFields`; the list is
+        # `KilnCMS.CMS.WorkingCopy.held_param_keys/1`). Operational settings —
+        # audience, the passphrase, schedule, lifecycle — are not accepted
+        # here and still save through `:update`.
         update :save_working_copy do
           require_atomic? false
           accept [:working_title, :working_blocks]
+          argument :fields, :map
           change filter(expr(^ref(:state) == :published))
           change optimistic_lock(:lock_version)
+          change KilnCMS.CMS.Changes.StageWorkingFields
           change KilnCMS.CMS.Changes.StampWorkingCopy
           change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
         end
@@ -2467,11 +2476,20 @@ defmodule KilnCMS.CMS.Content do
           change filter(expr(^ref(:state) == :published and not is_nil(^ref(:working_copy_at))))
 
           change KilnCMS.CMS.Changes.PromoteWorkingCopy
+          # A held rename leaves its 301 now, when the new address goes live.
+          change KilnCMS.CMS.Changes.RecordSlugRedirect
+          # AFTER `PromoteWorkingCopy`: held custom fields move the schedule.
+          change KilnCMS.CMS.Changes.SetNextOccurrence
 
           validate {KilnCMS.CMS.Validations.MediaAltText, only_new: true},
             where: [changing(:blocks)]
 
           validate {KilnCMS.CMS.Validations.ComplianceClaims, only_new: true}
+          # Held values were valid when saved; a slug or alias may have been
+          # claimed since.
+          validate KilnCMS.CMS.Validations.SlugAvailable
+          validate KilnCMS.CMS.Validations.PathAliasValid
+          validate KilnCMS.CMS.Validations.SeoUrls
           change KilnCMS.CMS.Changes.SetSearchText
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.EnqueueOEmbed
@@ -2494,6 +2512,7 @@ defmodule KilnCMS.CMS.Content do
 
           change set_attribute(:working_title, nil)
           change set_attribute(:working_blocks, [])
+          change set_attribute(:working_fields, %{})
           change set_attribute(:working_copy_at, nil)
         end
 
@@ -3477,6 +3496,18 @@ defmodule KilnCMS.CMS.Content do
         # the sentinel; an empty tree here says nothing on its own.
         attribute :working_blocks, {:array, KilnCMS.CMS.BlockUnion} do
           default []
+          allow_nil? false
+          public? false
+        end
+
+        # The rest of the working copy (#1815): every held field that differs
+        # from the live row — SEO, custom fields, category, featured image,
+        # slug, tags, related content — keyed by attribute (or relationship
+        # argument) name, JSON-native. `%{}` means nothing beyond the text is
+        # held, which is what every existing row is. See
+        # `KilnCMS.CMS.WorkingCopy` for which fields are held and why.
+        attribute :working_fields, :map do
+          default %{}
           allow_nil? false
           public? false
         end

@@ -181,10 +181,14 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
   # onto the draft it has since become would leave a shadow the draft's own
   # autosave never clears. `state` is not restorable, so `changeset.data.state`
   # is the effective one.
-  @working_copy_fields [:working_title, :working_blocks, :working_copy_at]
+  @working_copy_fields [:working_title, :working_blocks, :working_fields, :working_copy_at]
+
+  defp restorable_value(%{data: %{state: :published}}, :working_fields, value),
+    do: value || %{}
 
   defp restorable_value(%{data: %{state: :published}}, _name, value), do: value
   defp restorable_value(_changeset, :working_blocks, _value), do: []
+  defp restorable_value(_changeset, :working_fields, _value), do: %{}
   defp restorable_value(_changeset, name, _value) when name in @working_copy_fields, do: nil
   defp restorable_value(_changeset, _name, value), do: value
 
