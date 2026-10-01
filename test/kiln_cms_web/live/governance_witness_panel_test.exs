@@ -61,7 +61,25 @@ defmodule KilnCMSWeb.GovernanceWitnessPanelTest do
 
       {:ok, _view, html} = live(log_in(conn, admin), ~p"/editor/governance")
 
-      assert html =~ "not been published to the witness"
+      # #1845: with nothing refused the backlog reads as waiting, not failing,
+      # but it is still counted, and the typo case is still named.
+      assert html =~ "1 checkpoint will be published once a witness is configured."
+      assert html =~ "an unrecognised value falls back to none"
+      refute html =~ "not been published to the witness"
+    end
+
+    test "names the setting and links the guide when no witness is configured", %{conn: conn} do
+      use_adapter(Witness.None)
+
+      {:ok, view, _html} = live(log_in(conn, authed_user(:admin)), ~p"/editor/governance")
+
+      assert has_element?(view, "#witness-setup code", "KILN_GOVERNANCE_WITNESS=file|s3|http")
+
+      assert has_element?(
+               view,
+               ~s(#witness-setup a[href$="docs/governance-dashboard.md"][target="_blank"]),
+               "Learn more"
+             )
     end
 
     test "reports the last checkpoint's sequence, coverage and publication time", %{conn: conn} do
@@ -110,6 +128,8 @@ defmodule KilnCMSWeb.GovernanceWitnessPanelTest do
       {:ok, _view, html} = live(log_in(conn, admin), ~p"/editor/governance")
 
       assert html =~ "not been published to the witness"
+      refute html =~ "once a witness is configured"
+      refute html =~ ~s(id="witness-setup")
       assert html =~ "witness_dir_not_configured"
       refute html =~ "Every checkpoint has been published"
     end

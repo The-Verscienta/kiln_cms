@@ -406,6 +406,54 @@ defmodule KilnCMSWeb.OverviewLiveTest do
     assert html =~ ~s(id="overview-center")
   end
 
+  # #1841: "0 taxonomy terms" never said whether to add some, and "Open" never
+  # said where it went.
+  describe "the structure tile" do
+    test "says there are no terms yet and offers to add them", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/overview")
+
+      assert has_element?(lv, "#overview-structure-note", "No taxonomy terms yet")
+
+      assert has_element?(
+               lv,
+               ~s(#overview-structure-note a[href="/editor/taxonomy"]),
+               "Add terms"
+             )
+
+      # An editor cannot open the types screen, so the link names taxonomy.
+      assert has_element?(
+               lv,
+               ~s(#overview-structure > a[href="/editor/taxonomy"]),
+               "Manage taxonomy"
+             )
+
+      refute has_element?(lv, "#overview-structure", "Manage content types")
+    end
+
+    test "names the types screen for an admin and drops the note once terms exist",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+
+      CMS.create_category!(
+        %{name: "News", slug: "ov-cat-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+
+      refute has_element?(lv, "#overview-structure-note")
+
+      assert has_element?(
+               lv,
+               ~s(#overview-structure > a[href="/editor/types"]),
+               "Manage content types"
+             )
+
+      # The label names the destination, so it is the accessible name too.
+      refute has_element?(lv, ~s(#overview-structure a[aria-label]))
+    end
+  end
+
   describe "tenant scoping (#336)" do
     test "the structure tile counts THIS site's dynamic content types", %{conn: conn} do
       admin = authed_user(:admin)

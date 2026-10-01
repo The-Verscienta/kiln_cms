@@ -674,8 +674,12 @@
     background: var(--color-sidebar-raised);
     box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.25);
   }
-  .side-menu > a {
+  .side-menu > a,
+  .side-menu > button {
     display: flex;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
     align-items: center;
     gap: 0.6rem;
     padding: 0.45rem 0.6rem;
@@ -683,7 +687,8 @@
     font-size: 0.875rem;
     color: color-mix(in oklch, var(--color-base-content) 82%, transparent);
   }
-  .side-menu > a:hover {
+  .side-menu > a:hover,
+  .side-menu > button:hover {
     background: color-mix(in oklch, var(--color-sidebar-line) 55%, transparent);
     color: var(--color-base-content);
   }
@@ -696,7 +701,8 @@
   .side-icon-btn:focus-visible,
   .side-theme > button:focus-visible,
   .side-account-row:focus-visible,
-  .side-menu > a:focus-visible {
+  .side-menu > a:focus-visible,
+  .side-menu > button:focus-visible {
     outline: 2px solid color-mix(in oklch, var(--color-primary) 60%, transparent);
     outline-offset: 1px;
   }
@@ -1020,6 +1026,29 @@
       position-area: bottom span-right;
       position-try-fallbacks: flip-block, flip-inline;
     }
+  }
+
+  /* ---- Keyboard shortcuts dialog (#1839) ---------------------------------
+     The console's shortcut reference, opened from the account menu or "?".
+     A native `popover` like the help tips, so Escape and a click outside close
+     it; centred in the viewport rather than anchored, since it is a page-level
+     panel, not a note beside one control. */
+  .shortcuts-panel {
+    width: min(30rem, calc(100vw - 2rem));
+    max-height: calc(100vh - 4rem);
+    overflow-y: auto;
+    margin: auto;
+    padding: 1rem 1.125rem;
+    border: 1px solid color-mix(in oklch, var(--color-base-content) 12%, transparent);
+    border-radius: var(--radius-lg);
+    background: var(--color-base-100);
+    color: var(--color-base-content);
+    box-shadow: 0 16px 40px rgb(0 0 0 / 0.22);
+    font-size: 0.875rem;
+    line-height: 1.45;
+  }
+  .shortcuts-panel::backdrop {
+    background: rgb(0 0 0 / 0.25);
   }
 
   /* ---- Tabs (segmented control) ----------------------------------------

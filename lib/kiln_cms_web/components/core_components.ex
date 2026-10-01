@@ -262,8 +262,14 @@ defmodule KilnCMSWeb.CoreComponents do
       |> assign(:label, health_label(assigns.health))
 
     ~H"""
-    <span :if={@health not in [:fresh, nil]} title={health_title(@health, @due_at)}>
+    <span
+      :if={@health not in [:fresh, nil]}
+      title={health_title(@health, @due_at)}
+    >
       <.badge variant={@variant} class={@class}>{@label}</.badge>
+      <%!-- A `title` reaches a mouse, not a screen reader or a keyboard
+            (#1839): the same sentence, spoken after the label. --%>
+      <span class="sr-only">{health_title(@health, @due_at)}</span>
     </span>
     """
   end
@@ -280,14 +286,34 @@ defmodule KilnCMSWeb.CoreComponents do
     end
   end
 
-  # The badge says what; the tooltip says when, because "Overdue" without a
-  # date leaves the editor to open the record to find out how overdue.
+  # The badge says what; the tooltip says what it means and when, because
+  # "Overdue" without a date leaves the editor to open the record to find out
+  # how overdue — and a bare "Due soon" never said what was due (#1839).
   defp health_title(:expired, _due_at), do: gettext("Past its unpublish date and still published")
 
-  defp health_title(_health, %DateTime{} = due_at),
-    do: gettext("Review due %{date}", date: Calendar.strftime(due_at, "%Y-%m-%d"))
+  defp health_title(health, %DateTime{} = due_at),
+    do:
+      gettext("%{meaning} Review date: %{date}.",
+        meaning: health_meaning(health),
+        date: Calendar.strftime(due_at, "%Y-%m-%d")
+      )
 
-  defp health_title(_health, _due_at), do: nil
+  defp health_title(health, _due_at), do: health_meaning(health)
+
+  @doc """
+  One plain sentence on what a lifecycle `health` asks of the editor — the
+  badge's tooltip and screen-reader text, and the calendar's health key.
+  """
+  def health_meaning(:due_soon), do: gettext("Its review date is coming up.")
+
+  def health_meaning(:due),
+    do: gettext("Its review date has arrived: check it is still accurate.")
+
+  def health_meaning(:overdue),
+    do: gettext("Its review date passed over a week ago: check it now.")
+
+  def health_meaning(:expired), do: gettext("Past its unpublish date and still published")
+  def health_meaning(_health), do: nil
 
   @doc "Returns a translated human label for a content workflow state atom."
   def state_label(state) do

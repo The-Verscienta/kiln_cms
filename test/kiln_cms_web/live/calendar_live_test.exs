@@ -1129,6 +1129,29 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       refute has_element?(lv, "label[for=calendar-filter-kind] button")
       refute has_element?(lv, "label[for=calendar-filter-health] button")
     end
+
+    # #1839: a swatch and two words never said what a lane means — least of
+    # all the Proposed lane, which publishes nothing on its own.
+    test "the colour key explains every lane and the health pills", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/calendar")
+
+      assert has_element?(
+               lv,
+               ~s(button#calendar-legend-help-button[popovertarget="calendar-legend-help"][aria-label="What the colours mean"])
+             )
+
+      panel = ~s(#calendar-legend-help[popover][role="dialog"])
+
+      for says <- [
+            "Proposed publish",
+            "Nothing is published until an admin confirms it",
+            "Release failed",
+            "Health pills",
+            "Its review date has arrived"
+          ] do
+        assert has_element?(lv, panel, says)
+      end
+    end
   end
 
   describe "new content on a day (#1812)" do

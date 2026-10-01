@@ -464,6 +464,28 @@ defmodule KilnCMSWeb.GovernanceLive do
         )}
       </p>
 
+      <%!-- How to turn it on (#1845): "none" is the shipped default, with no
+            safe automatic choice, so the panel names the setting rather than
+            leaving the reader to find it. --%>
+      <p
+        :if={@witness.checkpointing? and not @witness.witnessing?}
+        id="witness-setup"
+        class="text-sm text-base-content/70"
+      >
+        {gettext("To publish checkpoints outside the database, set this on the server:")}
+        <code class="font-mono text-xs">KILN_GOVERNANCE_WITNESS=file|s3|http</code>
+        <a
+          href={docs_url("governance-dashboard.md")}
+          target="_blank"
+          rel="noopener"
+          class="link inline-flex items-center gap-1 font-medium text-primary-ink"
+        >
+          {gettext("Learn more")}
+          <.icon name="hero-arrow-top-right-on-square" class="size-3.5" />
+          <span class="sr-only">{gettext("(opens in a new tab)")}</span>
+        </a>
+      </p>
+
       <p
         :if={@witness.checkpointing? and is_nil(@witness.latest)}
         class="text-sm text-base-content/60"
@@ -512,7 +534,23 @@ defmodule KilnCMSWeb.GovernanceLive do
           )
         ]}
       >
-        <p class="font-medium">
+        <%!-- With no witness and nothing refused, the backlog is waiting, not
+              failing (#1845) — but still counted, and the typo case is named,
+              since an unrecognised value lands here too. --%>
+        <p :if={awaiting_witness?(@witness)} class="font-medium">
+          {ngettext(
+            "%{count} checkpoint will be published once a witness is configured.",
+            "%{count} checkpoints will be published once a witness is configured.",
+            @witness.unwitnessed_count,
+            count: backlog_count(@witness)
+          )}
+        </p>
+        <p :if={awaiting_witness?(@witness)} class="mt-1">
+          {gettext(
+            "If KILN_GOVERNANCE_WITNESS is already set, check its value: an unrecognised value falls back to none."
+          )}
+        </p>
+        <p :if={not awaiting_witness?(@witness)} class="font-medium">
           {ngettext(
             "%{count} checkpoint has not been published to the witness.",
             "%{count} checkpoints have not been published to the witness.",
@@ -547,6 +585,10 @@ defmodule KilnCMSWeb.GovernanceLive do
     </section>
     """
   end
+
+  # No sink configured and no publication refused: the backlog is queued for a
+  # witness that does not exist yet, which is the shipped default (#1845).
+  defp awaiting_witness?(witness), do: not witness.witnessing? and is_nil(witness.error)
 
   # "50+" past the probe bound, rather than loading a year of rows to be exact
   # about a number nobody acts on.

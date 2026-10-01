@@ -1156,6 +1156,21 @@ window.addEventListener("keydown", e => {
   }
 })
 
+// "?" opens the console's keyboard shortcut list (#1839) — the panel the
+// account menu's "Keyboard shortcuts" item opens with `popovertarget`. Same
+// guard as ⌘K and "/": never while typing in a field, where "?" is a character.
+window.addEventListener("keydown", e => {
+  if (e.key !== "?" || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return
+  const t = e.target
+  const tag = (t.tagName || "").toLowerCase()
+  if (tag === "input" || tag === "textarea" || tag === "select" || t.isContentEditable) return
+  const panel = document.getElementById("keyboard-shortcuts")
+  if (!panel || typeof panel.showPopover !== "function" || panel.matches(":popover-open")) return
+  e.preventDefault()
+  panel.showPopover()
+  document.getElementById("keyboard-shortcuts-close")?.focus()
+})
+
 // A page without a LiveView socket gets the platform cue here; LiveView pages
 // get it (and keep it across navigations) from the `SearchKbd` hook.
 document.querySelectorAll("[data-kiln-search-kbd]").forEach(setSearchKbdCue)

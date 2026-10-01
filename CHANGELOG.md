@@ -134,6 +134,11 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A keyboard shortcut list opens from the account menu or with "?", and
+  the calendar's colour key has a "?" that explains every lane and health
+  pill.**
+  ([#1839](https://github.com/The-Verscienta/kiln_cms/issues/1839) · [long form](docs/changelog/unreleased.md#keyboard-shortcuts-and-calendar-key))
+
 - **The calendar's Lane and Health filters and the Tasks page's Anchored to
   filter each have a "?" button that explains them in a sentence or two.**
   ([#1822](https://github.com/The-Verscienta/kiln_cms/issues/1822) · [long form](docs/changelog/unreleased.md#console-help-tips))
@@ -171,6 +176,11 @@ Every summary line below that was shortened links to its own entry there.
   ([#1812](https://github.com/The-Verscienta/kiln_cms/issues/1812) · [long form](docs/changelog/unreleased.md#new-content-on-a-calendar-day))
 
 ### Changed
+
+- **The console points the way when something is empty or unset: Tasks,
+  the overview's Structure card, the account menu's API links and the
+  governance witness panel each say what to do next.**
+  ([#1840](https://github.com/The-Verscienta/kiln_cms/issues/1840), [#1841](https://github.com/The-Verscienta/kiln_cms/issues/1841), [#1842](https://github.com/The-Verscienta/kiln_cms/issues/1842), [#1845](https://github.com/The-Verscienta/kiln_cms/issues/1845) · [long form](docs/changelog/unreleased.md#console-next-steps))
 
 - **Keep `RichText.legacy_html` as a fallback instead of removing it;
   the nested column editor now stores Portable Text.**

@@ -177,6 +177,7 @@ defmodule KilnCMSWeb.OverviewLive do
     |> assign(:media_count, count(MediaItem, actor, org))
     |> assign(:views, total_views(actor, org))
     |> assign(:taxonomy_terms, count(Category, actor, org) + count(Tag, actor, org))
+    |> assign(:can_add_terms?, CMS.can_create_category?(actor, %{}, tenant: org))
     |> assign(:types_count, length(types))
     |> assign(:plugins_count, length(Kiln.Plugins.all()))
     |> assign(:fields_count, if(admin?, do: count(FieldDefinition, actor, org)))
@@ -758,13 +759,27 @@ defmodule KilnCMSWeb.OverviewLive do
           >
             {@tile.description}
           </p>
+          <%!-- A part of the tile with nothing in it yet (#1841): said in
+                words, with the first step for someone who may take it. --%>
+          <div :if={@tile[:note]} id={"overview-#{@tile.key}-note"} class="text-xs">
+            <p class="font-medium text-base-content/80">{@tile.note.text}</p>
+            <.link
+              :if={@tile.note[:path]}
+              navigate={@tile.note.path}
+              class="font-medium text-primary-ink hover:underline"
+            >
+              {@tile.note.cta} <span aria-hidden="true">→</span>
+            </.link>
+          </div>
+          <%!-- A tile may name where its link goes (#1841); the generic "Open"
+                takes the tile's title as its accessible name instead. --%>
           <.link
             :if={@tile.path}
             navigate={@tile.path}
-            aria-label={gettext("Open %{title}", title: @tile.title)}
+            aria-label={!@tile[:link_label] && gettext("Open %{title}", title: @tile.title)}
             class="mt-auto pt-1 text-xs font-medium text-primary-ink hover:underline"
           >
-            {gettext("Open")} <span aria-hidden="true">→</span>
+            {@tile[:link_label] || gettext("Open")} <span aria-hidden="true">→</span>
           </.link>
       <% end %>
     </div>
@@ -1112,6 +1127,21 @@ defmodule KilnCMSWeb.OverviewLive do
               terms: assigns.taxonomy_terms
             ),
           else: gettext("content types · %{terms} taxonomy terms", terms: assigns.taxonomy_terms)
+        ),
+      # No terms yet is said, not left as a "0" to puzzle over (#1841).
+      note:
+        assigns.taxonomy_terms == 0 &&
+          %{
+            text: gettext("No taxonomy terms yet"),
+            cta: gettext("Add terms"),
+            path: assigns.can_add_terms? && ~p"/editor/taxonomy"
+          },
+      # `fields_count` is the admin-only number, so it doubles as "this viewer
+      # can open the types screen", the same split the path makes.
+      link_label:
+        if(assigns.fields_count,
+          do: gettext("Manage content types"),
+          else: gettext("Manage taxonomy")
         ),
       path: if(assigns.fields_count, do: ~p"/editor/types", else: ~p"/editor/taxonomy")
     }
