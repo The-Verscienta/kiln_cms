@@ -39,6 +39,7 @@ defmodule KilnCMS.Accounts do
       # `KilnCMS.Accounts.Sessions`, which also drops the live sockets.
       define :list_own_sessions, action: :own_sessions
       define :get_own_session, action: :own_sessions, get_by: [:jti]
+      define :list_own_tokens, action: :own_tokens
       define :revoke_own_sessions, action: :revoke_own_session
       # System bookkeeping (`forbid_if always()`); `KilnCMS.Accounts.Sessions`
       # passes `authorize?: false`.

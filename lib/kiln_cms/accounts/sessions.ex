@@ -135,7 +135,15 @@ defmodule KilnCMS.Accounts.Sessions do
   defp revoke_rows(user, query) do
     case Accounts.revoke_own_sessions(query, %{},
            actor: user,
-           bulk_options: [strategy: :atomic, return_records?: true, return_errors?: true]
+           bulk_options: [
+             strategy: :atomic,
+             # The rows are found through the actor's own tokens, so the
+             # query half of the bulk update is authorized by the same
+             # `OwnsToken` filter as the write.
+             read_action: :own_tokens,
+             return_records?: true,
+             return_errors?: true
+           ]
          ) do
       %Ash.BulkResult{status: :success, records: records} -> {:ok, records || []}
       %Ash.BulkResult{errors: errors} -> {:error, errors}

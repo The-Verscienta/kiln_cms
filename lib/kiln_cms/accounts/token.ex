@@ -13,8 +13,8 @@ defmodule KilnCMS.Accounts.Token do
   `KilnCMS.Accounts.PendingSignIn` can neither make a pending sign-in single-use
   nor withhold the token it carries.
 
-  The session list on the settings page (#1823) adds four more, and four
-  columns: `:own_sessions` / `:revoke_own_session` (the account's own, by
+  The session list on the settings page (#1823) adds five more, and four
+  columns: `:own_sessions` / `:own_tokens` / `:revoke_own_session` (the account's own, by
   `KilnCMS.Accounts.Checks.OwnsToken`) and `:record_sign_in` /
   `:record_session_use` (system bookkeeping), plus `browser`, `platform`,
   `last_used_at` and `remember_me_jti`. See `KilnCMS.Accounts.Sessions`.
@@ -313,6 +313,13 @@ defmodule KilnCMS.Accounts.Token do
       prepare build(sort: [last_used_at: :desc_nils_last, created_at: :desc])
     end
 
+    # Every row the actor owns, whatever its purpose — the read the revocation
+    # below runs through (`read_action:` on the bulk update), since a session's
+    # remember-me row is not a `"user"` row and `:own_sessions` would not see it.
+    read :own_tokens do
+      description "Every stored token row the actor owns."
+    end
+
     # Sign out one of the actor's sessions, or the remember-me cookie that
     # would otherwise sign that browser straight back in. The same verdict
     # AshAuthentication's own revocations write: the row's purpose becomes
@@ -369,8 +376,10 @@ defmodule KilnCMS.Accounts.Token do
                )
              )
 
-      change set_attribute(:browser, arg(:browser))
-      change set_attribute(:platform, arg(:platform))
+      # Only when the socket said: a mount that could not read a user agent
+      # keeps the label the sign-in wrote rather than blanking it.
+      change set_attribute(:browser, arg(:browser)), where: present(:browser)
+      change set_attribute(:platform, arg(:platform)), where: present(:platform)
       change atomic_update(:last_used_at, expr(now()))
     end
 
@@ -422,7 +431,7 @@ defmodule KilnCMS.Accounts.Token do
     # administrator signs another account out with "Sign out everywhere" on the
     # Accounts page (`:log_out_everywhere`), not by reading its device list.
     # A filter check, so a jti naming another account's row matches nothing.
-    policy action([:own_sessions, :revoke_own_session]) do
+    policy action([:own_sessions, :own_tokens, :revoke_own_session]) do
       authorize_if KilnCMS.Accounts.Checks.OwnsToken
     end
 

@@ -148,7 +148,8 @@ defmodule KilnCMSWeb.LiveUserAuth do
            |> KilnCMSWeb.NavPreset.attach()
            |> KilnCMSWeb.SessionTracking.attach(session)}
 
-        halt -> halt
+        halt ->
+          halt
       end
     end
   end
