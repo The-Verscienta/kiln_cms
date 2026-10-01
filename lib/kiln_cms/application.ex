@@ -485,7 +485,7 @@ defmodule KilnCMS.Application do
   # Warn loudly at boot if a :prod release has no real mailer configured. All
   # outbound mail is queued, so registration/reset requests now *succeed* even
   # with no adapter (the Local adapter's storage process isn't started in a
-  # release, so every delivery job just fails and retries) — which means a
+  # release, so every delivery job is held and retried, #1843) — which means a
   # missing MAIL_MODE/SMTP_HOST is otherwise silent. A warning (not a hard
   # raise) keeps genuinely mail-less deployments bootable.
   defp warn_if_no_mailer_in_prod do

@@ -84,4 +84,41 @@ defmodule KilnCMS.SentryFilterTest do
       assert SentryFilter.before_send(passed) == passed
     end
   end
+
+  describe "mail bodies (#1843)" do
+    test "drops a mail job's message from the Oban integration's extra args" do
+      args = %{
+        "to" => ["", "reader@example.com"],
+        "sealed" => "c2VhbGVk",
+        "html_body" => ~s(<a href="https://cms.example/password-reset/LEAKED">x</a>),
+        "text_body" => "https://cms.example/password-reset/LEAKED"
+      }
+
+      event = event(extra: %{args: args, attempt: 1, queue: "mail"})
+      scrubbed = SentryFilter.before_send(event)
+
+      assert scrubbed.extra.args == %{"to" => ["", "reader@example.com"]}
+      assert scrubbed.extra.attempt == 1
+      refute inspect(scrubbed) =~ "LEAKED"
+    end
+
+    test "withholds a message or exception value that quotes a rendered email" do
+      dump = ~s({:push, %Swoosh.Email{html_body: "/password-reset/LEAKED"}})
+
+      message =
+        event(
+          message: %Sentry.Interfaces.Message{
+            formatted: "Oban job exited: " <> dump,
+            message: "Oban job exited: %s",
+            params: [dump]
+          }
+        )
+
+      exception =
+        event(exception: [%Sentry.Interfaces.Exception{type: "Oban.CrashError", value: dump}])
+
+      refute inspect(SentryFilter.before_send(message)) =~ "LEAKED"
+      refute inspect(SentryFilter.before_send(exception)) =~ "LEAKED"
+    end
+  end
 end
