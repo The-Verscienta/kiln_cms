@@ -134,6 +134,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **The logo, favicon, social image and app icon on the Branding page can be
+  chosen from the media library or uploaded there, with a thumbnail.**
+  ([#1811](https://github.com/The-Verscienta/kiln_cms/issues/1811) · [long form](docs/changelog/unreleased.md#branding-images-from-the-media-library))
+
 - **Every password box on the sign-in, register, reset-password, setup and
   change-password forms has an eye button that shows what you typed.**
   ([#1806](https://github.com/The-Verscienta/kiln_cms/issues/1806) · [long form](docs/changelog/unreleased.md#password-reveal-toggle))
@@ -209,6 +213,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Save draft on a published entry no longer puts any field live; *Publish
   changes* or a release publishes every saved change at once.**
   ([#1815](https://github.com/The-Verscienta/kiln_cms/issues/1815) · [long form](docs/changelog/unreleased.md#save-draft-on-a-published-entry-holds-every-content-field))
+
+- **A new brand colour shows as soon as Branding is saved, with a button and
+  link preview in light and dark mode and help text that says where it is used.**
+  ([#1810](https://github.com/The-Verscienta/kiln_cms/issues/1810) · [long form](docs/changelog/unreleased.md#brand-colour-shows-on-save))
 
 - **Markdown switched back to Blocks, or imported from a `.md` file, becomes
   heading, divider and one text block per section, not one long text block.**
