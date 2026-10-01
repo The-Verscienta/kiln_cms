@@ -1253,6 +1253,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
       # (docs/content-lifecycles.md).
       load: [:category, :featured_image, :tags, :health, :due_at, related_name(kind)]
     )
+    # The pickers show the working copy's tags and related content (#1815);
+    # the attributes stay the row's, which every save is judged against.
+    |> WorkingCopy.with_held_relationships(actor: actor, tenant: org)
   end
 
   # Other content of the same kind, for the "related content" picker. Bounded to
@@ -1468,41 +1471,93 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  # Save on a LIVE document (docs/working-copy.md): the text goes to the working
-  # copy, the settings go live. Two writes, in that order — a pending text edit
-  # is flushed through the same path the debounce takes, then everything but
-  # the title and body is submitted through `:update`.
+  # Save on a LIVE document (docs/working-copy.md): nothing readers see moves
+  # (#1815). Up to three writes, in this order: a pending text edit is flushed
+  # through the same path the debounce takes; the held settings — SEO, custom
+  # fields, category, featured image, tags, related content, slug — go to the
+  # working copy through `:save_working_copy`'s `fields`; and the operational
+  # ones — audience, passphrase, schedule, lifecycle — go live through
+  # `:update`, as they always have, and only when one of them actually
+  # changed (an `:update` on a live row re-fires its artifacts and its
+  # `updated` webhook).
   #
-  # NOT through `@form`. That form's data is the working view — the title and
-  # body the editor is typing — and `:update`'s pipeline reads the text it does
+  # Neither write goes through `@form`. That form's data is the working view —
+  # the copy the editor is typing — and `:update`'s pipeline reads what it does
   # not receive in params off `changeset.data`: `SetSearchText` would index the
   # draft's words on the live row, and the fired artifacts would carry them.
-  # A throwaway form on the row itself, without the block sub-forms (nothing
-  # here writes blocks), keeps `:update` reading the published text.
+  # Throwaway forms on the row itself keep both writes judged against the
+  # published record.
   defp save_live(socket, params) do
-    case flush_working_copy(socket, params) do
-      {:ok, socket} ->
-        form =
-          AshPhoenix.Form.for_update(socket.assigns.record, :update,
-            actor: socket.assigns.actor,
-            tenant: socket.assigns.record.org_id
-          )
+    {held, operational} = WorkingCopy.split_params(resource(socket), params)
 
-        settings = Map.drop(params, ["title", "blocks"])
-
-        result =
-          EditorTelemetry.span(:save, %{kind: socket.assigns.kind}, fn ->
-            AshPhoenix.Form.submit(form, params: settings)
-          end)
-
-        case result do
-          {:ok, record} -> {:noreply, saved(socket, record)}
-          {:error, form} -> {:noreply, settings_refused(socket, form, params)}
-        end
-
-      {:error, socket} ->
-        {:noreply, socket}
+    with {:ok, socket} <- flush_working_copy(socket, params),
+         {:ok, record} <- save_held(socket, socket.assigns.record, held),
+         {:ok, record} <- save_operational(socket, record, operational) do
+      {:noreply, saved(socket, record)}
+    else
+      {:error, %Phoenix.LiveView.Socket{} = socket} -> {:noreply, socket}
+      {:error, form} -> {:noreply, settings_refused(socket, form, params)}
     end
+  end
+
+  defp resource(socket), do: socket.assigns.record.__struct__
+
+  defp save_held(_socket, record, held) when map_size(held) == 0, do: {:ok, record}
+
+  defp save_held(socket, record, held) do
+    form =
+      AshPhoenix.Form.for_update(record, :save_working_copy,
+        actor: socket.assigns.actor,
+        tenant: record.org_id
+      )
+
+    EditorTelemetry.span(:save, %{kind: socket.assigns.kind}, fn ->
+      AshPhoenix.Form.submit(form, params: %{"fields" => held})
+    end)
+  end
+
+  defp save_operational(socket, record, operational) do
+    if operational_change?(socket, record, operational) do
+      form =
+        AshPhoenix.Form.for_update(record, :update,
+          actor: socket.assigns.actor,
+          tenant: record.org_id
+        )
+
+      EditorTelemetry.span(:save, %{kind: socket.assigns.kind}, fn ->
+        AshPhoenix.Form.submit(form, params: operational)
+      end)
+    else
+      {:ok, record}
+    end
+  end
+
+  # Whether the operational params move anything on the row. Judged by an
+  # unsubmitted `:update` changeset, so the comparison is on cast values (a
+  # posted `"members"` against a stored `:members`). A passphrase is never
+  # stored where a comparison could see it, so supplying one counts, and so
+  # does a param that does not cast: the submit is what reports it.
+  defp operational_change?(socket, record, operational) do
+    if passphrase_supplied?(operational) do
+      true
+    else
+      changeset =
+        Ash.Changeset.for_update(record, :update, operational,
+          actor: socket.assigns.actor,
+          tenant: record.org_id
+        )
+
+      not changeset.valid? or
+        Enum.any?(Map.keys(operational), fn key ->
+          attribute = Ash.Resource.Info.attribute(record.__struct__, key)
+          attribute != nil and Ash.Changeset.changing_attribute?(changeset, attribute.name)
+        end)
+    end
+  end
+
+  defp passphrase_supplied?(params) do
+    params["access_password"] not in [nil, ""] or
+      params["remove_access_password"] in ["true", true]
   end
 
   # The errors belong on the form that is showing. Re-validating it with the
@@ -1529,7 +1584,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> broadcast_saved()
     |> mark_saved()
     |> assign(:settings_dirty?, false)
-    |> put_flash(:info, gettext("Saved."))
+    |> put_flash(:info, saved_message(reloaded))
+  end
+
+  # A live document's Save holds its changes back (#1815) — say where they went.
+  defp saved_message(record) do
+    if WorkingCopy.pending?(record),
+      do: gettext("Saved. Readers see these changes once you publish them."),
+      else: gettext("Saved.")
   end
 
   # Write whatever text is waiting for the debounce into the working copy now,
@@ -3802,6 +3864,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # working copy over. Re-fetched rather than adopting the action's result, as
   # `mark_reviewed` does: `health`/`due_at` are calculations the result does
   # not carry.
+  # Settings edited but not saved would be left behind by a publish that ships
+  # the saved copy — so they are saved first, by the person, on purpose.
+  defp run_workflow(%{assigns: %{settings_dirty?: true}} = socket, "publish_changes") do
+    put_flash(socket, :error, gettext("Save draft first, then publish your changes."))
+  end
+
   defp run_workflow(socket, "publish_changes") do
     params =
       socket.assigns.form

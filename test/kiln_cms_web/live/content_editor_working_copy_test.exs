@@ -2,8 +2,9 @@ defmodule KilnCMSWeb.ContentEditorWorkingCopyTest do
   @moduledoc """
   The content editor on a LIVE document (docs/working-copy.md): typing moves the
   working copy alone, the pill turns to "Live · draft" and the primary button to
-  "Publish changes"; the menu offers "Discard the changes"; settings still save
-  through Save and go live at once, without touching the text.
+  "Publish changes"; the menu offers "Discard the changes". Save holds the
+  content settings in the working copy too (#1815) — nothing readers see moves
+  until the changes are published.
   """
   use KilnCMSWeb.ConnCase, async: false
 
@@ -184,9 +185,14 @@ defmodule KilnCMSWeb.ContentEditorWorkingCopyTest do
            )
   end
 
-  test "Save writes settings live and leaves the text to the working copy", %{conn: conn} do
+  # #1815: Save on a live document used to put every setting live at once,
+  # so a release found nothing to publish. Now a content setting joins the
+  # working copy and nothing readers see moves until the changes are published.
+  test "Save holds content settings in the working copy, beside the text", %{conn: conn} do
     editor = authed_user(:editor)
-    page = live_page(authed_user(:admin))
+    admin = authed_user(:admin)
+    page = live_page(admin)
+    category = CMS.create_category!(%{name: "Held cat", slug: slug()}, actor: admin)
     {:ok, lv, _html} = open(conn, editor, page)
 
     type_title(lv, "Still a draft")
@@ -203,23 +209,106 @@ defmodule KilnCMSWeb.ContentEditorWorkingCopyTest do
 
     assert html =~ "Unsaved changes"
 
-    html = lv |> form("#page-editor") |> render_submit()
-    assert html =~ "Saved."
+    html =
+      lv
+      |> form("#page-editor")
+      |> render_submit(%{"form" => %{"category_id" => category.id}})
+
+    assert html =~ "Readers see these changes once you publish them."
     refute html =~ "Unsaved changes"
 
     saved = reload(page)
-    # The setting went live at once …
-    assert saved.seo_title == "Search title"
-    # … the published text did not move, and neither did the working copy.
-    assert saved.title == "Live title"
-    assert heading_texts(saved.blocks) == ["Published heading"]
+    # Nothing readers get moved: not the setting, not the text …
+    delivered = CMS.get_published_page_by_slug!(page.slug, page.locale)
+    assert delivered.seo_title == nil
+    assert delivered.category_id == nil
+    assert delivered.title == "Live title"
+    assert saved.seo_title == nil
+    refute saved.search_text =~ "Search title"
+    # … the copy holds all of it.
     assert saved.working_title == "Still a draft"
+    assert WorkingCopy.view(saved).seo_title == "Search title"
+    assert WorkingCopy.view(saved).category_id == category.id
     assert WorkingCopy.pending?(saved)
-    refute saved.search_text =~ "Still a draft"
 
-    # And the editor still shows the working copy.
+    # The editor shows the copy.
     assert has_element?(lv, ~s(input[name="form[title]"][value="Still a draft"]))
+    assert has_element?(lv, ~s(input[name="form[seo_title]"][value="Search title"]))
     assert has_element?(lv, "#publish-changes")
+
+    # And Publish changes ships all of it at once.
+    html = lv |> element("#publish-changes") |> render_click()
+    assert html =~ "Published your changes."
+
+    delivered = CMS.get_published_page_by_slug!(page.slug, page.locale)
+    assert delivered.title == "Still a draft"
+    assert delivered.seo_title == "Search title"
+    assert delivered.category_id == category.id
+    refute WorkingCopy.pending?(reload(page))
+  end
+
+  test "a settings-only Save starts a working copy a release will publish", %{conn: conn} do
+    admin = authed_user(:admin)
+    page = live_page(admin)
+    {:ok, lv, _html} = open(conn, admin, page)
+
+    lv
+    |> form("#page-editor")
+    |> render_submit(%{"form" => %{"seo_description" => "For the launch"}})
+
+    saved = reload(page)
+    assert WorkingCopy.pending?(saved)
+    assert saved.working_title == "Live title"
+    assert saved.seo_description == nil
+
+    release = CMS.create_release!(%{name: "Launch #{slug()}"}, actor: admin)
+
+    {:ok, item} =
+      CMS.add_release_item(
+        %{release_id: release.id, content_type: "page", content_id: page.id, action: :publish},
+        actor: admin
+      )
+
+    assert KilnCMS.CMS.Releases.classify(item, authorize?: false, tenant: page.org_id) == :apply
+  end
+
+  test "Publish changes asks for a Save when settings are still unsaved", %{conn: conn} do
+    editor = authed_user(:editor)
+    page = live_page(authed_user(:admin))
+    {:ok, lv, _html} = open(conn, editor, page)
+
+    type_title(lv, "Edited")
+    autosave(lv)
+
+    lv
+    |> form("#page-editor")
+    |> render_change(%{
+      "form" => %{"seo_title" => "Not saved yet"},
+      "_target" => ["form", "seo_title"]
+    })
+
+    html = lv |> element("#publish-changes") |> render_click()
+    assert html =~ "Save draft first, then publish your changes."
+    assert reload(page).title == "Live title"
+  end
+
+  test "Discard the changes puts the published settings back too", %{conn: conn} do
+    editor = authed_user(:editor)
+    page = live_page(authed_user(:admin))
+    {:ok, lv, _html} = open(conn, editor, page)
+
+    lv
+    |> form("#page-editor")
+    |> render_submit(%{"form" => %{"seo_title" => "Thrown away"}})
+
+    assert has_element?(lv, ~s(input[name="form[seo_title]"][value="Thrown away"]))
+
+    lv |> element("#live-draft-menu button", "Discard the changes") |> render_click()
+
+    discarded = reload(page)
+    refute WorkingCopy.pending?(discarded)
+    assert discarded.working_fields == %{}
+    refute has_element?(lv, ~s(input[name="form[seo_title]"][value="Thrown away"]))
   end
 
   test "Save flushes a text edit still waiting for the debounce into the copy", %{conn: conn} do
