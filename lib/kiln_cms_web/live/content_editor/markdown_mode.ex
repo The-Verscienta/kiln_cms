@@ -31,8 +31,15 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownMode do
   Text that matches what entering wrote restores the blocks exactly as they
   were (ids, block types, everything): an author who looks at the Markdown and
   switches back without editing loses nothing. An edit is a re-parse, and
-  Markdown's shape wins — prose between placeholders becomes one rich-text
-  block, and a heading block comes back as a heading inside that prose.
+  Markdown's shape wins (#1800): a top-level heading becomes a heading block
+  (same level) and a `---` rule a divider block, and the prose between them —
+  paragraphs, lists, quotes, tables, code — becomes one rich-text block per
+  section. So heading, divider and rich-text blocks read back as the blocks
+  they were, and two rich-text blocks with nothing between them come back as
+  one. A heading with a link in it (other than a bare URL) or an image stays
+  in the prose, since a heading block holds plain text; bold or italic in a
+  heading is dropped. A standalone image or video link still becomes its own
+  block, splitting the section around it.
 
   Every event is gated on `@may_write?`, the editor's own write gate; the
   record's policies re-check the eventual save.
@@ -270,7 +277,8 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownMode do
   Markdown (as written by `to_source/1`, then edited) back into union input
   maps. A placeholder line whose id is in `kept` brings that block back as it
   was — once; a copy, or an id it doesn't know, is dropped. Every run of
-  Markdown between them goes through `KilnCMS.Markdown.to_blocks/2`.
+  Markdown between them goes through `KilnCMS.Markdown.to_blocks/2` with
+  `sections: true`: headings and rules become their own blocks.
 
   The blocks the Markdown parses to take their ids from `prose_ids`
   (`{type, id}` in order, from the previous parse) by position, where the
@@ -307,8 +315,10 @@ defmodule KilnCMSWeb.ContentEditor.MarkdownMode do
 
   defp segment_blocks({:markdown, lines}, used, _kept),
     do:
-      {lines |> Enum.join("\n") |> Markdown.to_blocks() |> Enum.map(&html_block_params(&1, nil)),
-       used}
+      {lines
+       |> Enum.join("\n")
+       |> Markdown.to_blocks(sections: true)
+       |> Enum.map(&html_block_params(&1, nil)), used}
 
   # Lines → `{:markdown, lines}` runs and `{:keep, id}` placeholders. A
   # placeholder-shaped line inside a fenced code block is code, not a block.

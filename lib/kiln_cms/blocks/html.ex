@@ -130,6 +130,16 @@ defmodule KilnCMS.Blocks.Html do
       for every image. An importer that sideloads media passes one so the block
       points at the `MediaItem` it created; without one the block keeps the
       source URL, which still renders but hotlinks the old site.
+    * `:sections` — split prose at its top-level headings and rules (default
+      `false`). A heading becomes a `heading` block (same level) and an `<hr>`
+      a `divider`; the prose between them stays one `rich_text` block per run,
+      lists and quotes included. A heading whose words carry a link to
+      somewhere other than its own text, or an image, stays in the prose: the
+      heading block holds plain text, and turning it into one would drop them.
+      Bold, italic and code marks in a heading are dropped. Off, a whole run of
+      prose — headings and rules too — is one `rich_text` block, which is what
+      the WordPress and portability importers want; the editor's Markdown view
+      and `.md` import turn it on (#1800).
   """
   @spec to_blocks(String.t() | nil, keyword()) :: [block_input()]
   def to_blocks(html, opts \\ [])
@@ -139,6 +149,7 @@ defmodule KilnCMS.Blocks.Html do
     html
     |> parse(opts)
     |> Enum.flat_map(&split_top_level/1)
+    |> maybe_sections(Keyword.get(opts, :sections, false))
     |> group_runs()
     |> Enum.flat_map(&run_to_block(&1, opts))
     |> Enum.reject(&is_nil/1)
@@ -519,6 +530,56 @@ defmodule KilnCMS.Blocks.Html do
     end)
   end
 
+  # `:sections` (#1800): a top-level heading or rule leaves the prose run it
+  # would otherwise sit in, so `group_runs/1` closes the run in front of it and
+  # opens a new one after it — one rich_text block per section.
+  defp maybe_sections(items, true), do: Enum.map(items, &section_item/1)
+  defp maybe_sections(items, _false), do: items
+
+  defp section_item({:prose, {tag, _attrs, children} = node}) when tag in @heading_tags do
+    case heading_text(node, children) do
+      nil -> {:prose, node}
+      text -> {:heading, tag |> String.trim_leading("h") |> String.to_integer(), text}
+    end
+  end
+
+  defp section_item({:prose, {"hr", _attrs, _children}}), do: :divider
+  defp section_item(item), do: item
+
+  # The heading's words as plain text, or `nil` when the heading block could
+  # not hold them: empty, an image (which `inline/2` would drop), or a link
+  # whose text is not its own URL. A bare URL (Markdown autolinks one) is
+  # still just its text — and a heading block's own text reads back that way,
+  # so the Markdown view's round trip keeps it a heading.
+  defp heading_text(node, children) do
+    nodes = inline(children, [])
+
+    text =
+      nodes
+      |> Enum.map_join(fn
+        %{"type" => "text", "text" => text} -> text
+        _break -> " "
+      end)
+      |> normalize_space()
+      |> String.trim()
+
+    cond do
+      text == "" -> nil
+      Floki.find([node], "img") != [] -> nil
+      Enum.any?(nodes, &labelled_link?/1) -> nil
+      true -> text
+    end
+  end
+
+  defp labelled_link?(%{"text" => text, "marks" => marks}) do
+    Enum.any?(marks, fn
+      %{"type" => "link", "attrs" => %{"href" => href}} -> String.trim(text) != href
+      _mark -> false
+    end)
+  end
+
+  defp labelled_link?(_node), do: false
+
   # Consecutive prose nodes become ONE rich_text block. Emitting one block per
   # paragraph would turn a ten-paragraph post into ten blocks the editor has to
   # scroll past, and would break prose that PT represents as sibling blocks
@@ -571,6 +632,11 @@ defmodule KilnCMS.Blocks.Html do
         [%{"type" => "image", "value" => value}]
     end
   end
+
+  defp run_to_block({:heading, level, text}, _opts),
+    do: [%{"type" => "heading", "value" => %{"text" => text, "level" => level}}]
+
+  defp run_to_block(:divider, _opts), do: [%{"type" => "divider", "value" => %{}}]
 
   defp run_to_block({:media, _node, _caption}, _opts), do: []
   defp run_to_block({:embed, url}, _opts), do: [%{"type" => "embed", "value" => %{"url" => url}}]

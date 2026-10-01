@@ -453,6 +453,29 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="markdown-becomes-heading-divider-and-text-blocks"></a>
+
+- **Markdown switched back to Blocks, or imported from a `.md` file, becomes
+  heading, divider and one text block per section, not one long text block.**
+  A beta tester pasted a long Markdown document into the editor's Markdown
+  view and switched to Blocks. Every heading, list and paragraph landed in one
+  text block, and the only split came from the document's one standalone
+  image, which cut the text in two. Now each top-level heading becomes a
+  heading block at its own level, each `---` becomes a divider block, and the
+  paragraphs, lists, quotes, tables and code between them become one text
+  block per section. There is no list block, so lists stay inside their
+  section's text. One block per section rather than per paragraph keeps a
+  long document to a few blocks an author can move by section. A heading
+  block holds plain text, so bold or italic in a heading is dropped, and a
+  heading with a link (other than a bare URL) or an image in it stays in the
+  text, where the link survives. Blocks written as Markdown and read back
+  without an edit are unchanged, and after an edit heading, divider and text
+  blocks come back as the same blocks with the same ids. The **Import
+  Markdown** dialog splits the same way. Pasting Markdown into a text block
+  (which holds text only), the API's `body_markdown` and the WordPress and
+  portability importers still produce one text block per run of prose
+  ([#1800](https://github.com/The-Verscienta/kiln_cms/issues/1800)).
+
 <a id="media-uploads-state-their-limit-and-show-processing"></a>
 
 - **The media library says how many files one upload takes, shows that

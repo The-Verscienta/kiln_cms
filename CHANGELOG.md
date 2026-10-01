@@ -197,6 +197,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Markdown switched back to Blocks, or imported from a `.md` file, becomes
+  heading, divider and one text block per section, not one long text block.**
+  ([#1800](https://github.com/The-Verscienta/kiln_cms/issues/1800) · [long form](docs/changelog/unreleased.md#markdown-becomes-heading-divider-and-text-blocks))
+
 - **The media library says how many files one upload takes, shows that
   uploaded files are still being processed, and ties its URL field to its
   label.**
