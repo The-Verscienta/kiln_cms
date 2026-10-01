@@ -787,6 +787,7 @@ msgstr "(exclu des envois)"
 msgid "(no link)"
 msgstr "(sans lien)"
 
+#: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/form_live.ex
@@ -1168,6 +1169,11 @@ msgstr "Un envoi dont le texte contient l'un de ces mots ou expressions est not�
 msgid "A takeover stops that mid-sentence: the field turns read-only on their side, and a note there says who took it."
 msgstr "Une reprise interrompt cela en pleine phrase : le champ passe en lecture seule de leur côté, et une note y indique qui l'a repris."
 
+#: lib/kiln_cms_web/live/task_live.ex
+#, elixir-autogen, elixir-format
+msgid "A task can be pinned to one block of a document, such as a paragraph or an image, or to the whole document. A block task links straight to that block's discussion. To create one, open a block's discussion in the editor and choose Create task."
+msgstr "Une tâche peut être rattachée à un bloc d'un document, comme un paragraphe ou une image, ou au document entier. Une tâche de bloc mène directement à la discussion de ce bloc. Pour en créer une, ouvrez la discussion d'un bloc dans l'éditeur et choisissez Créer une tâche."
+
 #: lib/kiln_cms_web/live/automation_live/preview.ex
 #, elixir-autogen, elixir-format
 msgid "A task for %{person}, due %{date}"
@@ -1277,6 +1283,21 @@ msgstr "Clé secrète d'API"
 #, elixir-autogen, elixir-format
 msgid "About %{percentage}% of sentences look passive (guideline: %{max}%). This is an estimate — passive voice is often the right choice."
 msgstr "Environ %{percentage}% des phrases semblent passives (recommandation : %{max}%). Il s'agit d'une estimation : la voix passive est souvent le bon choix."
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "About health"
+msgstr "À propos de l'état"
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "About lanes"
+msgstr "À propos des voies"
+
+#: lib/kiln_cms_web/live/task_live.ex
+#, elixir-autogen, elixir-format
+msgid "About task anchoring"
+msgstr "À propos du rattachement des tâches"
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -1507,6 +1528,7 @@ msgstr "Ajouter une étiquette"
 msgid "Add a tag…"
 msgstr "Ajouter une étiquette…"
 
+#: lib/kiln_cms_web/live/overview_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add a webhook"
@@ -1769,6 +1791,11 @@ msgstr "Routes d'administration"
 #, elixir-autogen, elixir-format
 msgid "Admins can always publish. You can change this later under Team."
 msgstr "Les administrateurs peuvent toujours publier. Vous pourrez changer cela plus tard dans Équipe."
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Admins manage this. Ask one if you need a change."
+msgstr "Ce sont les administrateurs qui gèrent ceci. Demandez à l'un d'eux si vous avez besoin d'un changement."
 
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
@@ -4096,6 +4123,11 @@ msgstr "Couverture par langue pour chaque contenu. Cliquez sur une pastille pour
 msgid "Covering"
 msgstr "Couvre"
 
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Create a form"
+msgstr "Créer un formulaire"
+
 #: lib/kiln_cms_web/live/form_live.ex
 #, elixir-autogen, elixir-format
 msgid "Create a form above to start collecting submissions."
@@ -5185,6 +5217,11 @@ msgstr "Chaque code vous connecte une seule fois si vous perdez votre applicatio
 msgid "Each feature sends content to the provider: a page's text for suggestions, a block and the editor's instruction for assist, and published passages plus a visitor's question for answers. Answers are requested by anonymous visitors."
 msgstr "Chaque fonction envoie du contenu au fournisseur : le texte d'une page pour les suggestions, un bloc et la consigne du rédacteur pour l'assistant, et des passages publiés avec la question d'un visiteur pour les réponses. Les réponses sont demandées par des visiteurs anonymes."
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Each lane is one kind of date: scheduled publishing, content going live, reviews coming due, task deadlines and releases. Pick a lane to see only those dates. The colours in the key match the calendar."
+msgstr "Chaque voie est un type de date : publications planifiées, contenus mis en ligne, révisions attendues, échéances de tâches et lancements. Choisissez une voie pour ne voir que ces dates. Les couleurs de la légende sont celles du calendrier."
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Each page and post gets an audit trail here once it exists."
@@ -5768,6 +5805,7 @@ msgid "Every screen stays in search (⌘K) either way; this only decides what th
 msgstr "Dans les deux cas, chaque écran reste accessible par la recherche (⌘K) ; ce choix ne décide que de ce que liste la barre latérale."
 
 #: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Every settings screen, and what each one is for."
 msgstr "Chaque écran de paramètres, et à quoi il sert."
@@ -6739,6 +6777,11 @@ msgstr "Diffusion headless"
 msgid "Health"
 msgstr "État"
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Health says whether published content still needs a check. It is due when its review date arrives and overdue a week later; expired means it has passed its unpublish date. Pick one to find the content that needs attention."
+msgstr "L'état indique si un contenu publié doit être revérifié. Il est attendu quand sa date de révision arrive, et en retard une semaine plus tard ; expiré signifie que sa date de dépublication est passée. Choisissez-en un pour trouver les contenus qui demandent de l'attention."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -7321,6 +7364,11 @@ msgstr "Libellé seul"
 msgid "Lane"
 msgstr "Voie"
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Lanes"
+msgstr "Voies"
+
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "Language"
@@ -7413,6 +7461,11 @@ msgstr "Derniers articles."
 #, elixir-autogen, elixir-format
 msgid "Layout"
 msgstr "Disposition"
+
+#: lib/kiln_cms_web/components/core_components.ex
+#, elixir-autogen, elixir-format
+msgid "Learn more"
+msgstr "En savoir plus"
 
 #: lib/kiln_cms_web/live/automation_live/recipes.ex
 #, elixir-autogen, elixir-format
@@ -8575,6 +8628,7 @@ msgid "No focus keyphrase set — the first SEO keyword becomes the focus keyphr
 msgstr "Aucune expression clé cible définie — le premier mot-clé SEO devient l'expression clé cible."
 
 #: lib/kiln_cms_web/live/form_live.ex
+#: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "No forms yet"
 msgstr "Aucun formulaire pour le moment"
@@ -8865,6 +8919,7 @@ msgstr[1] "Aucune vue sur les %{count} derniers jours."
 msgid "No views recorded yet."
 msgstr "Aucune vue enregistrée pour le moment."
 
+#: lib/kiln_cms_web/live/overview_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "No webhooks yet"
@@ -10204,6 +10259,7 @@ msgid "Public URL"
 msgstr "URL publique"
 
 #: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Public forms and the submissions they collect."
 msgstr "Les formulaires publics et les réponses qu'ils recueillent."
@@ -12415,6 +12471,7 @@ msgid "Signal plugins and dashboards listening inside Kiln."
 msgstr "Signale les plugins et tableaux de bord à l’écoute dans Kiln."
 
 #: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Signed POSTs to other services when content changes."
 msgstr "Des POST signés vers d'autres services quand le contenu change."
@@ -15483,6 +15540,11 @@ msgstr "Voir la version publiée"
 #, elixir-autogen, elixir-format
 msgid "View site"
 msgstr "Voir le site"
+
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "View site (opens in a new tab)"
+msgstr "Voir le site (s'ouvre dans un nouvel onglet)"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format

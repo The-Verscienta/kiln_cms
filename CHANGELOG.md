@@ -129,6 +129,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **The calendar's Lane and Health filters and the Tasks page's Anchored to
+  filter each have a "?" button that explains them in a sentence or two.**
+  ([#1822](https://github.com/The-Verscienta/kiln_cms/issues/1822) · [long form](docs/changelog/unreleased.md#console-help-tips))
+
 - **Every password box on the sign-in, register, reset-password, setup and
   change-password forms has an eye button that shows what you typed.**
   ([#1806](https://github.com/The-Verscienta/kiln_cms/issues/1806) · [long form](docs/changelog/unreleased.md#password-reveal-toggle))
@@ -200,6 +204,15 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#coolify-build-records-its-commit))
 
 ### Fixed
+
+- **The overview's Forms and Webhooks cards say what each feature is, and
+  show a count, a first step, or that an admin runs it, instead of a blank
+  "—".**
+  ([#1825](https://github.com/The-Verscienta/kiln_cms/issues/1825) · [long form](docs/changelog/unreleased.md#overview-cards-explain-themselves))
+
+- **"View site" opens the public site in a new tab and says so, including
+  on a deployment with its own console host.**
+  ([#1827](https://github.com/The-Verscienta/kiln_cms/issues/1827) · [long form](docs/changelog/unreleased.md#view-site-opens-the-site))
 
 - **Markdown switched back to Blocks, or imported from a `.md` file, becomes
   heading, divider and one text block per section, not one long text block.**

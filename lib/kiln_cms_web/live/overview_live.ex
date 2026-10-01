@@ -744,7 +744,7 @@ defmodule KilnCMSWeb.OverviewLive do
             {@tile.cta} <span aria-hidden="true">→</span>
           </.link>
         <% true -> %>
-          <%!-- One line on purpose: tests (and screen readers) read `>N<`. --%>
+          <%!-- One line on purpose: the tests match the number as `>N<`. --%>
           <p :if={number?(@tile)} class="text-3xl font-semibold tabular-nums">{@tile.value || "—"}</p>
           <p :if={@tile.subtitle} class="text-xs text-base-content/60">{@tile.subtitle}</p>
           <p

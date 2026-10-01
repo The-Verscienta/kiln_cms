@@ -1106,4 +1106,28 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       refute after_click =~ "Mark reviewed"
     end
   end
+
+  # #1822: lanes and health were filters an author had to guess at.
+  describe "help tips" do
+    test "the Lane and Health filters each explain themselves", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/calendar")
+
+      for {id, label, says} <- [
+            {"calendar-lanes-help", "About lanes", "Each lane is one kind of date"},
+            {"calendar-health-help", "About health", "still needs a check"}
+          ] do
+        assert has_element?(
+                 lv,
+                 ~s(button##{id}-button[type="button"][popovertarget="#{id}"][aria-label="#{label}"])
+               )
+
+        assert has_element?(lv, ~s(##{id}[popover][role="dialog"]), says)
+        assert has_element?(lv, ~s(##{id} a[href*="content-lifecycles.md#"][rel="noopener"]))
+      end
+
+      # Beside the label, not inside it: the select keeps its one-word name.
+      refute has_element?(lv, "label[for=calendar-filter-kind] button")
+      refute has_element?(lv, "label[for=calendar-filter-health] button")
+    end
+  end
 end

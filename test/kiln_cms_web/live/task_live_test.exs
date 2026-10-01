@@ -74,6 +74,28 @@ defmodule KilnCMSWeb.TaskLiveTest do
     assert html =~ "No open tasks assigned to you."
   end
 
+  # #1822: "Anchored to" is a filter nobody had explained.
+  test "the Anchored to filter carries a help tip", %{conn: conn} do
+    {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/tasks")
+
+    assert has_element?(
+             lv,
+             ~s(button#tasks-anchor-help-button[popovertarget="tasks-anchor-help"][aria-label="About task anchoring"])
+           )
+
+    assert has_element?(
+             lv,
+             ~s(#tasks-anchor-help[popover][role="dialog"][aria-labelledby="tasks-anchor-help-title"]),
+             "pinned to one block"
+           )
+
+    assert has_element?(
+             lv,
+             ~s(#tasks-anchor-help a[href$="docs/comments.md#from-a-discussion-to-a-task"][target="_blank"]),
+             "Learn more"
+           )
+  end
+
   test "team workload groups tasks by assignee", %{conn: conn} do
     editor = authed_user(:editor)
     alice = authed_user(:editor)
