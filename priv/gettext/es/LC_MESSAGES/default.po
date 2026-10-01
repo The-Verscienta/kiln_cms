@@ -1961,6 +1961,11 @@ msgstr "Ya existe una cuenta con este correo electrónico. Hemos enviado un enla
 msgid "An admin approves everything"
 msgstr "Un administrador aprueba todo"
 
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "An admin confirms the date. Nothing is published until then."
+msgstr "Un administrador confirma la fecha. No se publica nada hasta entonces."
+
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "An administrator can switch it on."
@@ -3109,6 +3114,16 @@ msgstr "Elegir contenido publicado…"
 msgid "Choose video"
 msgstr "Elegir vídeo"
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose what to create. It is scheduled to publish that day at 09:00 UTC."
+msgstr "Elige qué crear. Se programará para publicarse ese día a las 09:00 UTC."
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose what to create. That day at 09:00 UTC is proposed as its publish date, and an admin confirms it."
+msgstr "Elige qué crear. Ese día a las 09:00 UTC se propone como fecha de publicación, y un administrador la confirma."
+
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
 msgid "Choose which user the key acts as, and give it a name."
@@ -3406,6 +3421,11 @@ msgstr "Configurada"
 #, elixir-autogen, elixir-format
 msgid "Confirm"
 msgstr "Confirmar"
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm date"
+msgstr "Confirmar fecha"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -8300,6 +8320,11 @@ msgstr "Nombre de la nueva categoría"
 msgid "New comment"
 msgstr "Nuevo comentario"
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "New content on %{date}"
+msgstr "Nuevo contenido el %{date}"
+
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "New content type"
@@ -8319,6 +8344,11 @@ msgstr "Nuevo experimento"
 #, elixir-autogen, elixir-format
 msgid "New menu"
 msgstr "Nuevo menú"
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "New on %{date}"
+msgstr "Nuevo el %{date}"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -10250,6 +10280,42 @@ msgstr "Promover la ganadora al documento"
 msgid "Propose tags for an editor to accept."
 msgstr "Propone etiquetas para que un editor las acepte."
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Proposed"
+msgstr "Propuesta"
+
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Proposed for %{date} UTC."
+msgstr "Propuesta para el %{date} UTC."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Proposed for %{date}, %{time} UTC — an admin confirms the date."
+msgstr "Propuesta para el %{date}, %{time} UTC; un administrador confirma la fecha."
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Proposed publish"
+msgstr "Publicación propuesta"
+
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Proposed publish date"
+msgstr "Fecha de publicación propuesta"
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Proposed publish date — an admin confirms it"
+msgstr "Fecha de publicación propuesta; la confirma un administrador"
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Proposed:"
+msgstr "Propuesta:"
+
 #: lib/kiln_cms_web/controllers/content_html/lock.html.heex
 #, elixir-autogen, elixir-format
 msgid "Protected"
@@ -10942,6 +11008,11 @@ msgstr "Quitar etiqueta"
 #, elixir-autogen, elixir-format
 msgid "Remove tag %{name}"
 msgstr "Quitar la etiqueta %{name}"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove the date"
+msgstr "Quitar la fecha"
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -11859,6 +11930,16 @@ msgstr "Publicación programada para"
 #, elixir-autogen, elixir-format
 msgid "Scheduled to publish"
 msgstr "Programado para publicarse"
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Scheduled to publish on %{date} UTC."
+msgstr "Programado para publicarse el %{date} UTC."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Scheduled to publish on %{date} at %{time} UTC."
+msgstr "Programado para publicarse el %{date} a las %{time} UTC."
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -13505,6 +13586,11 @@ msgstr "No se pudo encontrar ese contenido."
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
+msgid "That day has passed. Choose a later one."
+msgstr "Ese día ya ha pasado. Elige uno posterior."
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
 msgid "That day is not on this calendar — nothing moved."
 msgstr "Ese día no está en este calendario: no se movió nada."
 
@@ -14938,6 +15024,7 @@ msgstr "Trigramas"
 msgid "Trigram glyphs: three lines per item — published at the bottom, translated in the middle, scheduled on top; solid means yes. Hover one for its reading."
 msgstr "Trigramas: tres líneas por elemento — publicado abajo, traducido en medio, programado arriba; una línea continua significa sí. Pasa el cursor sobre uno para ver su lectura."
 
+#: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/controllers/offline_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Try again"
@@ -15451,6 +15538,11 @@ msgstr "Usar el valor por defecto del despliegue"
 #, elixir-autogen, elixir-format
 msgid "Use the operator defaults"
 msgstr "Usar los valores del operador"
+
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Use this date"
+msgstr "Usar esta fecha"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -16029,6 +16121,11 @@ msgstr "No puedes crear contenido de tipo %{type}."
 #, elixir-autogen, elixir-format
 msgid "You can't create this content."
 msgstr "No puedes crear este contenido."
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "You can't set the publish date of this content."
+msgstr "No puedes fijar la fecha de publicación de este contenido."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -17150,6 +17247,11 @@ msgstr "entrada — vacío = todos"
 #, elixir-autogen, elixir-format
 msgid "post, page — empty = all"
 msgstr "entrada, página — vacío = todos"
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "proposed to publish — an admin confirms"
+msgstr "propuesta de publicación; la confirma un administrador"
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/translations_live.ex

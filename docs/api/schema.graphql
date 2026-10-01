@@ -182,6 +182,7 @@ input CreateEntryInput {
   audience: String
   customFields: JsonString
   scheduledAt: DateTime
+  proposedPublishAt: DateTime
   unpublishAt: DateTime
   expiryAction: String
   reviewAfterDays: Int
@@ -218,6 +219,7 @@ input CreatePageInput {
   audience: String
   customFields: JsonString
   scheduledAt: DateTime
+  proposedPublishAt: DateTime
   unpublishAt: DateTime
   expiryAction: String
   reviewAfterDays: Int
@@ -254,6 +256,7 @@ input CreatePostInput {
   audience: String
   customFields: JsonString
   scheduledAt: DateTime
+  proposedPublishAt: DateTime
   unpublishAt: DateTime
   expiryAction: String
   reviewAfterDays: Int
@@ -298,6 +301,7 @@ input DeleteEntryInput {
   audience: String
   customFields: JsonString
   scheduledAt: DateTime
+  proposedPublishAt: DateTime
   unpublishAt: DateTime
   expiryAction: String
   reviewAfterDays: Int
@@ -329,6 +333,7 @@ input DeletePageInput {
   audience: String
   customFields: JsonString
   scheduledAt: DateTime
+  proposedPublishAt: DateTime
   unpublishAt: DateTime
   expiryAction: String
   reviewAfterDays: Int
@@ -360,6 +365,7 @@ input DeletePostInput {
   audience: String
   customFields: JsonString
   scheduledAt: DateTime
+  proposedPublishAt: DateTime
   unpublishAt: DateTime
   expiryAction: String
   reviewAfterDays: Int
@@ -3813,6 +3819,7 @@ input UpdateEntryInput {
   audience: String
   customFields: JsonString
   scheduledAt: DateTime
+  proposedPublishAt: DateTime
   unpublishAt: DateTime
   expiryAction: String
   reviewAfterDays: Int
@@ -3874,6 +3881,7 @@ input UpdatePageInput {
   audience: String
   customFields: JsonString
   scheduledAt: DateTime
+  proposedPublishAt: DateTime
   unpublishAt: DateTime
   expiryAction: String
   reviewAfterDays: Int
@@ -3915,6 +3923,7 @@ input UpdatePostInput {
   audience: String
   customFields: JsonString
   scheduledAt: DateTime
+  proposedPublishAt: DateTime
   unpublishAt: DateTime
   expiryAction: String
   reviewAfterDays: Int

@@ -165,6 +165,11 @@ Every summary line below that was shortened links to its own entry there.
 - **Add a new tag or category without leaving the content editor.**
   ([#1805](https://github.com/The-Verscienta/kiln_cms/issues/1805) · [long form](docs/changelog/unreleased.md#add-tags-and-categories-from-the-editor))
 
+- **Start new content from a day on the calendar: press its "+", choose a type,
+  and the editor opens with that day as the publish date (a proposed date, for
+  editors who may not publish, that an admin confirms).**
+  ([#1812](https://github.com/The-Verscienta/kiln_cms/issues/1812) · [long form](docs/changelog/unreleased.md#new-content-on-a-calendar-day))
+
 ### Changed
 
 - **Keep `RichText.legacy_html` as a fallback instead of removing it;
@@ -217,6 +222,11 @@ Every summary line below that was shortened links to its own entry there.
 - **Production sitemaps, feeds, canonical links, preview links and newsletter
   confirmation emails link to `https://<PHX_HOST>`, not `http://localhost:4000`.**
   ([#1833](https://github.com/The-Verscienta/kiln_cms/issues/1833) · [long form](docs/changelog/unreleased.md#production-public-links-use-phx-host))
+
+- **"We can't find the internet" and "Something went wrong!" no longer flash on
+  a first page load; they wait until a connection problem has lasted a few
+  seconds, and offer *Try again*.**
+  ([#1821](https://github.com/The-Verscienta/kiln_cms/issues/1821) · [long form](docs/changelog/unreleased.md#connection-notices-wait-out-a-slow-first-connection))
 
 - **Save draft on a published entry no longer puts any field live; *Publish
   changes* or a release publishes every saved change at once.**

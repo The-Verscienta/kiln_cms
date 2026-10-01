@@ -15,6 +15,7 @@ defmodule KilnCMSWeb.ContentEditor.NewDraft do
 
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.EditorialSettings
   alias KilnCMS.Slug
 
   @doc """
@@ -35,6 +36,80 @@ defmodule KilnCMSWeb.ContentEditor.NewDraft do
     end
   end
 
+  @doc """
+  Every content type `actor` may start a new document of in `org` — the site's
+  types filtered by `may_author?/3`. The content list's New buttons and the
+  calendar's "new on this day" picker both offer exactly this list.
+  """
+  def authorable_types(actor, org) do
+    org_id = KilnCMS.Accounts.org_id(org)
+
+    org
+    |> ContentTypes.all_for_org()
+    |> Enum.filter(&may_author?(actor, org_id, &1))
+  end
+
+  @doc """
+  Whether `actor` may give a new document a publish date in `org_id`.
+
+  A publish date IS a publish — the content policy gates `scheduled_at` like
+  Publish — so this is an admin, or an editor on a site that lets editors
+  publish. The editor's own schedule field asks the same question.
+  """
+  def may_schedule?(actor, org_id) do
+    case Scoping.effective_tier(actor, org_id) do
+      :admin -> true
+      :editor -> EditorialSettings.editors_can_publish?(org_id)
+      _ -> false
+    end
+  end
+
+  @doc """
+  The publish date a `/new?scheduled_at=` link asks for, or `nil`.
+
+  Accepts an ISO 8601 timestamp with an offset (the calendar sends UTC, `Z`).
+  Anything else — garbage, a bare date, a time already past — is `nil`, so a
+  stale or hand-edited link opens an ordinary unscheduled draft rather than
+  failing.
+  """
+  @spec parse_scheduled_at(term()) :: DateTime.t() | nil
+  def parse_scheduled_at(value) when is_binary(value) do
+    with {:ok, at, _offset} <- DateTime.from_iso8601(value),
+         true <- DateTime.after?(at, DateTime.utc_now()) do
+      DateTime.truncate(at, :second)
+    else
+      _ -> nil
+    end
+  end
+
+  def parse_scheduled_at(_value), do: nil
+
+  @doc """
+  What a `/new?scheduled_at=` link becomes on the new draft, for `actor`:
+
+    * `{:scheduled_at, at}` — a writer who may set a publish date
+      (`may_schedule?/2`) gets a real schedule;
+    * `{:proposed_publish_at, at}` — anyone else gets a *proposed* date, which
+      publishes nothing until someone with publish rights confirms it;
+    * `nil` — the value is not a future timestamp (`parse_scheduled_at/1`).
+  """
+  @spec publish_date(term(), term(), Ash.UUID.t()) ::
+          {:scheduled_at | :proposed_publish_at, DateTime.t()} | nil
+  def publish_date(value, actor, org_id) do
+    case parse_scheduled_at(value) do
+      nil -> nil
+      at -> {publish_date_field(actor, org_id), at}
+    end
+  end
+
+  @doc """
+  The field a publish date chosen by `actor` lands in: `:scheduled_at` when
+  they may set one, `:proposed_publish_at` otherwise.
+  """
+  @spec publish_date_field(term(), Ash.UUID.t()) :: :scheduled_at | :proposed_publish_at
+  def publish_date_field(actor, org_id),
+    do: if(may_schedule?(actor, org_id), do: :scheduled_at, else: :proposed_publish_at)
+
   # `editable_types` groups every dynamic type under `entry` (see
   # docs/granular-rbac.md) — deliberately, unlike field grants.
   defp type_name_of(%{source: :dynamic}), do: "entry"
@@ -46,13 +121,16 @@ defmodule KilnCMSWeb.ContentEditor.NewDraft do
   site as tenant — so authorization, per-type defaults and slug handling are
   exactly what they were when the click did this.
 
+  `extra` carries what the link that opened the editor asked for — today only
+  a `scheduled_at` from the calendar (see `parse_scheduled_at/1`).
+
   The title is the scaffold on purpose. The writer's own title arrives through
   the editor's normal `validate` right after, which re-derives the slug from it
   (an `untitled-…` slug counts as underived) and autosaves — a title that fails
   validation then shows as a field error instead of refusing the create.
   """
-  def create(kind, actor, org) do
-    attrs = %{
+  def create(kind, actor, org, extra \\ %{}) do
+    scaffold = %{
       title: "Untitled #{kind}",
       # NOT `System.unique_integer/1` (#834): that counter resets on every VM
       # start, while the `untitled-N` rows it must miss live in Postgres and
@@ -62,7 +140,7 @@ defmodule KilnCMSWeb.ContentEditor.NewDraft do
       slug: "untitled-#{Slug.random_suffix()}"
     }
 
-    {:ok, ContentTypes.create!(kind, attrs, actor: actor, tenant: org)}
+    {:ok, ContentTypes.create!(kind, Map.merge(scaffold, extra), actor: actor, tenant: org)}
   rescue
     error in [Ash.Error.Forbidden, Ash.Error.Invalid] -> {:error, error}
   end
