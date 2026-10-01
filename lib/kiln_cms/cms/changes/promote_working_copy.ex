@@ -25,6 +25,17 @@ defmodule KilnCMS.CMS.Changes.PromoteWorkingCopy do
   (`ApplyCustomFields.apply_restored/2`) at promotion, so a definition removed
   since the save does not come back to life on the public API.
 
+  ## The lost-update guard
+
+  The copy records the live value each held key was based on
+  (`working_base`; `KilnCMS.CMS.WorkingCopy.reconcile/1`). A key whose live
+  value has changed since — an API `PATCH`, in-context editing — and that the
+  copy also changed is a conflict, and is never promoted silently: the
+  `resolve` argument decides it (`"mine"` / `"theirs"` per key, or `"*"`), and
+  without a decision the publish is refused naming the keys. A key the copy
+  never changed (the title carried along while only the body was edited)
+  keeps whatever is live.
+
   A record with no working copy is refused here with a field error as well as
   at the row (`change filter`): the row filter is the race guard, this is the
   message.
@@ -36,15 +47,13 @@ defmodule KilnCMS.CMS.Changes.PromoteWorkingCopy do
   @impl true
   def change(changeset, _opts, context) do
     case changeset.data do
-      %{working_copy_at: %DateTime{}, working_title: title, working_blocks: blocks} = data ->
-        %{attributes: attributes, relationships: relationships} = WorkingCopy.promotion(data)
+      %{working_copy_at: %DateTime{}} = data ->
+        resolve = resolutions(Ash.Changeset.get_argument(changeset, :resolve))
 
-        changeset
-        |> Ash.Changeset.force_change_attribute(:title, title)
-        |> Ash.Changeset.force_change_attribute(:blocks, blocks || [])
-        |> promote_attributes(attributes, context)
-        |> promote_relationships(relationships)
-        |> clear()
+        case keys_to_promote(WorkingCopy.reconcile(data), resolve) do
+          {:ok, keys} -> promote(changeset, data, keys, context)
+          {:conflicts, keys} -> refuse(changeset, keys)
+        end
 
       _no_working_copy ->
         Ash.Changeset.add_error(changeset,
@@ -52,6 +61,56 @@ defmodule KilnCMS.CMS.Changes.PromoteWorkingCopy do
           message: "has no unpublished changes to publish"
         )
     end
+  end
+
+  # The lost-update guard (`WorkingCopy.reconcile/1`). A conflicting key goes
+  # live only on a decision: `"mine"` promotes the copy's value over the live
+  # one, `"theirs"` keeps the live one and drops the copy's; `"*"` answers
+  # every key not decided one by one. Undecided conflicts refuse the whole
+  # publish. A release has nobody to ask, so it is refused too — `Releases`
+  # reports the item as blocked before it gets here.
+  defp keys_to_promote(%{promote: promote, conflicts: conflicts}, resolve) do
+    case Enum.reject(conflicts, &choice(resolve, &1)) do
+      [] -> {:ok, promote ++ Enum.filter(conflicts, &(choice(resolve, &1) == "mine"))}
+      undecided -> {:conflicts, undecided}
+    end
+  end
+
+  defp resolutions(%{} = resolve),
+    do: Map.new(resolve, fn {key, choice} -> {to_string(key), to_string(choice)} end)
+
+  defp resolutions(_none), do: %{}
+
+  defp choice(resolve, key) do
+    case Map.get(resolve, key) || Map.get(resolve, "*") do
+      choice when choice in ["mine", "theirs"] -> choice
+      _undecided -> nil
+    end
+  end
+
+  defp promote(changeset, data, keys, context) do
+    %{attributes: attributes, relationships: relationships} = WorkingCopy.promotion(data, keys)
+
+    changeset
+    |> promote_text(:title, "title" in keys, data.working_title)
+    |> promote_text(:blocks, "blocks" in keys, data.working_blocks || [])
+    |> promote_attributes(attributes, context)
+    |> promote_relationships(relationships)
+    |> clear()
+  end
+
+  defp promote_text(changeset, name, true, value),
+    do: Ash.Changeset.force_change_attribute(changeset, name, value)
+
+  defp promote_text(changeset, _name, false, _value), do: changeset
+
+  defp refuse(changeset, keys) do
+    Ash.Changeset.add_error(changeset,
+      field: :working_copy_at,
+      message:
+        "conflicts with a change made on the live page after the draft was saved (%{fields})",
+      vars: [fields: Enum.join(keys, ", ")]
+    )
   end
 
   @doc false
@@ -81,6 +140,7 @@ defmodule KilnCMS.CMS.Changes.PromoteWorkingCopy do
     |> Ash.Changeset.force_change_attribute(:working_title, nil)
     |> Ash.Changeset.force_change_attribute(:working_blocks, [])
     |> Ash.Changeset.force_change_attribute(:working_fields, %{})
+    |> Ash.Changeset.force_change_attribute(:working_base, %{})
     |> Ash.Changeset.force_change_attribute(:working_copy_at, nil)
   end
 end

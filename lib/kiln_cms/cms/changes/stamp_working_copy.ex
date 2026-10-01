@@ -41,13 +41,32 @@ defmodule KilnCMS.CMS.Changes.StampWorkingCopy do
       |> Ash.Changeset.force_change_attribute(:working_title, nil)
       |> Ash.Changeset.force_change_attribute(:working_blocks, [])
       |> Ash.Changeset.force_change_attribute(:working_fields, %{})
+      |> Ash.Changeset.force_change_attribute(:working_base, %{})
       |> Ash.Changeset.force_change_attribute(:working_copy_at, nil)
     else
       changeset
       |> Ash.Changeset.force_change_attribute(:working_title, title)
       |> Ash.Changeset.force_change_attribute(:working_blocks, List.wrap(blocks))
+      |> record_text_base()
       |> Ash.Changeset.force_change_attribute(:working_copy_at, DateTime.utc_now())
     end
+  end
+
+  # A copy starting now is based on the live text now: what the lost-update
+  # guard (`WorkingCopy.reconcile/1`) compares the live title and body with at
+  # publish time. A copy that already existed keeps the base it started from.
+  defp record_text_base(%{data: %{working_copy_at: %DateTime{}}} = changeset), do: changeset
+
+  defp record_text_base(changeset) do
+    live = changeset.data
+    base = Ash.Changeset.get_attribute(changeset, :working_base) || %{}
+
+    text = %{
+      "title" => WorkingCopy.live_fingerprint(live, "title"),
+      "blocks" => WorkingCopy.live_fingerprint(live, "blocks")
+    }
+
+    Ash.Changeset.force_change_attribute(changeset, :working_base, Map.merge(base, text))
   end
 
   # SUPPLIED, not "changing": Ash elides a value equal to `changeset.data`, so

@@ -514,7 +514,11 @@ defmodule KilnCMSWeb.ReleaseLive do
   defp readiness_note(_item, _record, {:skip, :already_in_state}),
     do: {"outline", gettext("Already unpublished — will be skipped")}
 
-  defp readiness_note(_item, _record, {:error, reason}), do: {"error", reason}
+  defp readiness_note(_item, _record, {:error, reason}) do
+    if reason == Releases.live_changed(),
+      do: {"error", gettext("Live page changed since the draft — review before releasing")},
+      else: {"error", reason}
+  end
 
   # --- render ----------------------------------------------------------------
 

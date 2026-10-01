@@ -276,10 +276,12 @@ defmodule KilnCMS.CMS.Releases do
 
   defp records_for_type(type, rows, opts) do
     ids = rows |> Enum.map(& &1.content_id) |> Enum.uniq()
-    # `working_copy_at` because a `:publish` of a live record is decided by it
-    # (`classify_record/2`): selected out, every live item read as "nothing
-    # to publish" on the console even with changes saved (#1815).
-    query = [filter: [id: [in: ids]], select: [:id, :state, :working_copy_at]]
+    # The whole row, not `[:id, :state]`: a `:publish` of a live record is
+    # decided by its working copy (`classify_record/2`) — whether one is
+    # pending, and whether the live page moved under it — and with those
+    # selected out every live item read as "nothing to publish" on the
+    # console even with changes saved (#1815).
+    query = [filter: [id: [in: ids]]]
 
     found =
       type
@@ -559,8 +561,21 @@ defmodule KilnCMS.CMS.Releases do
   # a no-op — the release's desired end state holds either way. Unless the live
   # record carries a working copy (docs/working-copy.md): then "publish" means
   # publish the changes, and the release is how those go live on the day.
+  #
+  # A live record whose page changed after its draft was saved (an API edit to
+  # a field the draft also changed — `WorkingCopy.reconcile/1`) is an error,
+  # not a skip and not an apply: publishing would overwrite the newer live
+  # value with nobody to ask, and skipping would ship the release without the
+  # draft the editor queued. So the item blocks the release, exactly as an
+  # unpublishable item does — the console counts it and withholds go-live,
+  # and a scheduled go-live fails as a whole, changing nothing — until someone
+  # resolves it in the editor.
   defp classify_record(%{action: :publish}, %{state: :published} = record) do
-    if WorkingCopy.pending?(record), do: :apply, else: {:skip, :already_in_state}
+    cond do
+      not WorkingCopy.pending?(record) -> {:skip, :already_in_state}
+      WorkingCopy.reconcile(record).conflicts != [] -> {:error, live_changed()}
+      true -> :apply
+    end
   end
 
   defp classify_record(%{action: :unpublish}, %{state: state}) when state != :published,
@@ -572,6 +587,14 @@ defmodule KilnCMS.CMS.Releases do
   end
 
   defp classify_record(_item, _record), do: :apply
+
+  @doc """
+  The reason a `:publish` item is blocked when its live page changed after the
+  draft was saved — a constant, so the console can say it in the reader's
+  language.
+  """
+  @spec live_changed() :: String.t()
+  def live_changed, do: "live page changed since the draft — review before releasing"
 
   # --- shared helpers --------------------------------------------------------
 

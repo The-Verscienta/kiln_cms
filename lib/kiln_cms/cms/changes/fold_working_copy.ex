@@ -40,13 +40,27 @@ defmodule KilnCMS.CMS.Changes.FoldWorkingCopy do
   defp fold(changeset, context) do
     case current_working_copy(changeset) do
       {:ok, %{working_copy_at: %DateTime{}} = row} ->
+        current = %{
+          changeset.data
+          | working_title: row.working_title,
+            working_blocks: row.working_blocks,
+            working_fields: row.working_fields,
+            working_base: row.working_base,
+            working_copy_at: row.working_copy_at
+        }
+
+        # The lost-update guard, unasked: an unpublish cannot stop to ask, so
+        # a key the live page changed after the draft was saved keeps the live
+        # value (the draft's is still in history, as the version that saved it).
+        %{promote: keys} = WorkingCopy.reconcile(current)
+
         %{attributes: attributes, relationships: relationships} =
-          WorkingCopy.promotion(%{changeset.data | working_fields: row.working_fields})
+          WorkingCopy.promotion(current, keys)
 
         changeset
         |> adopt(row)
-        |> Ash.Changeset.force_change_attribute(:title, row.working_title)
-        |> Ash.Changeset.force_change_attribute(:blocks, row.working_blocks || [])
+        |> fold_text(:title, "title" in keys, row.working_title)
+        |> fold_text(:blocks, "blocks" in keys, row.working_blocks || [])
         |> PromoteWorkingCopy.promote_attributes(attributes, context)
         |> keep_address_if_taken(context)
         |> PromoteWorkingCopy.promote_relationships(relationships)
@@ -56,6 +70,11 @@ defmodule KilnCMS.CMS.Changes.FoldWorkingCopy do
         changeset
     end
   end
+
+  defp fold_text(changeset, name, true, value),
+    do: Ash.Changeset.force_change_attribute(changeset, name, value)
+
+  defp fold_text(changeset, _name, false, _value), do: changeset
 
   # A held slug or path alias another record has claimed since it was saved
   # must not fail the transition: an unpublish has to happen, and the
@@ -79,7 +98,7 @@ defmodule KilnCMS.CMS.Changes.FoldWorkingCopy do
   # The caller's struct may predate the working copy entirely, and Ash drops a
   # change whose value equals what `changeset.data` already holds — so clearing
   # `working_copy_at` against a struct that never saw it set would write
-  # nothing and leave the row's stamp in place. Bring the four columns on
+  # nothing and leave the row's stamp in place. Bring the working columns on
   # `data` up to the row first, so the clears below register as changes.
   defp adopt(changeset, row) do
     data = %{
@@ -87,6 +106,7 @@ defmodule KilnCMS.CMS.Changes.FoldWorkingCopy do
       | working_title: row.working_title,
         working_blocks: row.working_blocks,
         working_fields: row.working_fields,
+        working_base: row.working_base,
         working_copy_at: row.working_copy_at
     }
 
@@ -99,14 +119,20 @@ defmodule KilnCMS.CMS.Changes.FoldWorkingCopy do
   defp current_working_copy(%{data: %{id: id, org_id: org_id}, resource: resource}) do
     # authorize?: false — #1402's content-read argument: this is the row the
     # caller's own transition was already authorized to write, re-read under a
-    # lock for four of its own columns, and nothing read leaves the changeset.
+    # lock for its own working columns, and nothing read leaves the changeset.
     # The transition's caller is often the AshOban scheduler
     # (`:archive_scheduled`), which has no read grant on content, and a
     # `SystemActor` content-read grant would hand every system caller the
     # whole corpus, drafts included.
     resource
     |> Ash.Query.filter(id == ^id)
-    |> Ash.Query.select([:working_title, :working_blocks, :working_fields, :working_copy_at])
+    |> Ash.Query.select([
+      :working_title,
+      :working_blocks,
+      :working_fields,
+      :working_base,
+      :working_copy_at
+    ])
     |> Ash.Query.lock(:for_update)
     |> Ash.read_one(authorize?: false, tenant: org_id)
   end

@@ -328,13 +328,13 @@ defmodule KilnCMS.CMS.WorkingCopy do
   The held attributes as values ready to write — `{name, value}` per stored
   key, cast back from storage — and the held relationship id sets.
   """
-  @spec promotion(content()) :: %{
+  @spec promotion(content(), [key()] | :all) :: %{
           attributes: [{atom(), term()}],
           relationships: [{atom(), [String.t()]}]
         }
-  def promotion(record) do
+  def promotion(record, keys \\ :all) do
     resource = record.__struct__
-    held = held_fields(record)
+    held = record |> held_fields() |> only(keys)
 
     attributes =
       for name <- held_attributes(resource),
@@ -343,12 +343,15 @@ defmodule KilnCMS.CMS.WorkingCopy do
 
     relationships =
       for {argument, relationship} <- held_relationships(resource),
-          ids = held_ids(record, argument),
+          {:ok, ids} <- [Map.fetch(held, to_string(argument))],
           is_list(ids),
           do: {relationship, ids}
 
     %{attributes: attributes, relationships: relationships}
   end
+
+  defp only(held, :all), do: held
+  defp only(held, keys), do: Map.take(held, keys)
 
   @doc """
   An attribute value as `working_fields` stores it: the attribute type's
@@ -374,6 +377,166 @@ defmodule KilnCMS.CMS.WorkingCopy do
       _error -> stored
     end
   end
+
+  # ── The lost-update guard ─────────────────────────────────────────────────
+
+  @typedoc """
+  A held key: `"title"`, `"blocks"`, a held attribute's name, or a held
+  relationship's argument name (`"tag_ids"`, …).
+  """
+  @type key :: String.t()
+
+  @typedoc """
+  What publishing the copy does with each held key (`reconcile/1`):
+
+    * `promote` — the copy's value goes live (the live value has not moved
+      since the copy was based on it, or the key has no recorded base);
+    * `keep_live` — the copy never changed it (a title carried along while
+      only the body was edited), so whatever is live now stays;
+    * `conflicts` — both moved: the live value changed after the draft was
+      saved (an API `PATCH`, in-context editing) and the copy holds a
+      different value. Never promoted without a decision.
+  """
+  @type reconciliation :: %{promote: [key()], keep_live: [key()], conflicts: [key()]}
+
+  @doc """
+  The fingerprint of a held key's value — what `working_base` records and
+  `reconcile/1` compares. A SHA-256 over the value as the data layer stores
+  it (block trees dumped, link ids sorted), with Erlang's deterministic term
+  encoding: if that encoding ever changed across OTP releases the result is a
+  reported conflict, never a silent overwrite.
+  """
+  @spec fingerprint(module(), key(), term()) :: String.t()
+  def fingerprint(resource, key, value) do
+    comparable =
+      cond do
+        key == "blocks" -> dump_blocks(resource, value)
+        link_key?(resource, key) -> value |> List.wrap() |> Enum.map(&to_string/1) |> Enum.sort()
+        attribute = attribute_named(resource, key) -> dump(resource, attribute, value)
+        true -> value
+      end
+
+    :sha256
+    |> :crypto.hash(:erlang.term_to_binary(comparable, [:deterministic]))
+    |> Base.encode16(case: :lower)
+  end
+
+  @doc """
+  The fingerprint of the live value of `key` on `record` — the row's own
+  column, or for a held relationship the ids linked now.
+  """
+  @spec live_fingerprint(content(), key()) :: String.t()
+  def live_fingerprint(record, key) do
+    resource = record.__struct__
+    fingerprint(resource, key, live_value(record, key))
+  end
+
+  @doc """
+  Sorts a pending copy's held keys into what publishing it promotes, what it
+  leaves live, and what conflicts — see `t:reconciliation/0`. Keys with no
+  recorded base (a copy saved before 1.0 recorded them) promote, as they
+  always did.
+  """
+  @spec reconcile(content()) :: reconciliation()
+  def reconcile(record) do
+    if pending?(record) do
+      base = base_fingerprints(record)
+
+      record
+      |> held_keys()
+      |> Enum.reduce(%{promote: [], keep_live: [], conflicts: []}, fn key, acc ->
+        verdict = verdict(record, key, Map.get(base, key))
+        Map.update!(acc, verdict, &(&1 ++ [key]))
+      end)
+    else
+      %{promote: [], keep_live: [], conflicts: []}
+    end
+  end
+
+  defp verdict(_record, _key, nil), do: :promote
+
+  defp verdict(record, key, base) do
+    cond do
+      held_fingerprint(record, key) == base -> :keep_live
+      live_fingerprint(record, key) == base -> :promote
+      true -> :conflicts
+    end
+  end
+
+  @doc "The recorded base fingerprints, by held key."
+  @spec base_fingerprints(content()) :: %{key() => String.t()}
+  def base_fingerprints(%{working_base: %{} = base}), do: base
+  def base_fingerprints(_record), do: %{}
+
+  defp held_keys(record) do
+    ["title", "blocks"] ++ (record |> held_fields() |> Map.keys() |> Enum.sort())
+  end
+
+  defp held_fingerprint(record, "title"),
+    do: fingerprint(record.__struct__, "title", record.working_title)
+
+  defp held_fingerprint(record, "blocks"),
+    do: fingerprint(record.__struct__, "blocks", record.working_blocks || [])
+
+  defp held_fingerprint(record, key) do
+    resource = record.__struct__
+    stored = Map.get(held_fields(record), key)
+
+    case attribute_named(resource, key) do
+      nil -> fingerprint(resource, key, stored)
+      name -> fingerprint(resource, key, cast(resource, name, stored))
+    end
+  end
+
+  defp live_value(record, "blocks"), do: record.blocks || []
+
+  defp live_value(record, key) do
+    resource = record.__struct__
+
+    case Enum.find(held_relationships(resource), fn {argument, _} ->
+           to_string(argument) == key
+         end) do
+      {_argument, relationship} -> linked_ids(record, relationship)
+      nil -> Map.get(record, attribute_named(resource, key) || :title)
+    end
+  end
+
+  # Read fresh, never off a loaded list: the editor's `@record` carries the
+  # COPY's links (`with_held_relationships/2`), not the live ones.
+  defp linked_ids(record, relationship) do
+    record
+    # authorize?: false — link ids of a record the caller is already writing
+    # or publishing; only a fingerprint of them leaves this function.
+    |> Ash.load!(relationship, authorize?: false, tenant: record.org_id, lazy?: false)
+    |> Map.fetch!(relationship)
+    |> Enum.map(&to_string(&1.id))
+  end
+
+  defp link_key?(resource, key),
+    do:
+      Enum.any?(held_relationships(resource), fn {argument, _} -> to_string(argument) == key end)
+
+  # The atom for a held attribute's name, from the fixed held list — never
+  # built from the string.
+  defp attribute_named(resource, key),
+    do: Enum.find(held_attributes(resource) ++ [:title], &(to_string(&1) == key))
+
+  @doc """
+  The held relationship for a held key (`"tag_ids"` → `:tags`), or `nil`.
+  """
+  @spec relationship_for(module(), key()) :: atom() | nil
+  def relationship_for(resource, key) do
+    Enum.find_value(held_relationships(resource), fn {argument, relationship} ->
+      if to_string(argument) == key, do: relationship
+    end)
+  end
+
+  @doc """
+  The held attribute for a held key (`"seo_title"` → `:seo_title`), or `nil`.
+  """
+  @spec attribute_for(module(), key()) :: atom() | nil
+  def attribute_for(resource, key),
+    do: Enum.find(held_attributes(resource), &(to_string(&1) == key))
 
   @doc """
   Whether two block trees carry the same content.

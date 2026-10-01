@@ -2471,6 +2471,10 @@ defmodule KilnCMS.CMS.Content do
         update :publish_changes do
           require_atomic? false
           accept []
+          # The lost-update guard's decisions (#1815): `%{"seo_title" =>
+          # "mine" | "theirs", ...}` or `%{"*" => ...}` for a key the live page
+          # changed after the draft was saved. See `Changes.PromoteWorkingCopy`.
+          argument :resolve, :map
           change optimistic_lock(:lock_version)
 
           change filter(expr(^ref(:state) == :published and not is_nil(^ref(:working_copy_at))))
@@ -2513,6 +2517,7 @@ defmodule KilnCMS.CMS.Content do
           change set_attribute(:working_title, nil)
           change set_attribute(:working_blocks, [])
           change set_attribute(:working_fields, %{})
+          change set_attribute(:working_base, %{})
           change set_attribute(:working_copy_at, nil)
         end
 
@@ -3507,6 +3512,19 @@ defmodule KilnCMS.CMS.Content do
         # held, which is what every existing row is. See
         # `KilnCMS.CMS.WorkingCopy` for which fields are held and why.
         attribute :working_fields, :map do
+          default %{}
+          allow_nil? false
+          public? false
+        end
+
+        # The lost-update guard's record (#1815): for each key the copy holds
+        # (`"title"`, `"blocks"`, a held field), a fingerprint of the LIVE
+        # value it was based on. "Publish changes" compares it with the live
+        # value then, so an API edit made after the draft was saved is never
+        # overwritten silently. `%{}` (every existing row) means no base was
+        # recorded, and such a key promotes as it always did.
+        # `KilnCMS.CMS.WorkingCopy.reconcile/1`.
+        attribute :working_base, :map do
           default %{}
           allow_nil? false
           public? false

@@ -66,11 +66,42 @@ defmodule KilnCMS.CMS.Changes.StageWorkingFields do
           |> stage_attributes(resource, live, probe)
           |> stage_relationships(resource, live, probe, held_params)
 
-        Ash.Changeset.force_change_attribute(changeset, :working_fields, held)
+        changeset
+        |> Ash.Changeset.force_change_attribute(:working_fields, held)
+        |> Ash.Changeset.force_change_attribute(:working_base, bases(live, held))
       else
         Ash.Changeset.add_error(changeset, probe.errors)
       end
     end
+  end
+
+  # The lost-update guard's record (`WorkingCopy.reconcile/1`): for every key
+  # the copy holds, the fingerprint of the live value it was based on. A key
+  # the copy already held keeps the base it had — the draft was built on THAT
+  # live value, and a live edit since is exactly what the guard is for — and
+  # a key newly held is based on the live value now. A key that left the copy
+  # takes its base with it. The text's bases ("title", "blocks") are
+  # `StampWorkingCopy`'s and pass through untouched.
+  defp bases(live, held) do
+    old_held = WorkingCopy.held_fields(live)
+    old_base = WorkingCopy.base_fingerprints(live)
+    text = Map.take(old_base, ["title", "blocks"])
+
+    held
+    |> Map.keys()
+    |> Enum.reduce(text, fn key, acc ->
+      cond do
+        not Map.has_key?(old_held, key) ->
+          Map.put(acc, key, WorkingCopy.live_fingerprint(live, key))
+
+        Map.has_key?(old_base, key) ->
+          Map.put(acc, key, Map.fetch!(old_base, key))
+
+        # Held before 1.0 recorded bases: no base, so it promotes as it did.
+        true ->
+          acc
+      end
+    end)
   end
 
   # The slug identity is a unique index, which only a submitted write meets —

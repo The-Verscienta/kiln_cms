@@ -68,9 +68,10 @@ defmodule KilnCMS.CMS.VersionFields do
   # discarded working copy's title is exactly the kind of thing the panel is
   # opened to find. `working_fields` (#1815) is a map of held settings keyed
   # by attribute name — a raw dump beside rows that already name each field.
-  # All four restore: restoring the `:save_working_copy` version a discard
-  # left behind is how the discarded copy comes back.
-  @not_a_row [:blocks, :working_blocks, :working_fields, :working_copy_at]
+  # `working_base` is the lost-update guard's fingerprints, for the same
+  # reason. All of them restore: restoring the `:save_working_copy` version a
+  # discard left behind is how the discarded copy comes back.
+  @not_a_row [:blocks, :working_blocks, :working_fields, :working_base, :working_copy_at]
 
   # Reported by the diff, deliberately untouched by a restore. See the moduledoc.
   @not_restorable ~w(
