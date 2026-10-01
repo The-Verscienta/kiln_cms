@@ -211,6 +211,14 @@ if branding_config != [] do
   config :kiln_cms, :branding, branding_config
 end
 
+# The public base URL every absolute public link is built from — sitemap,
+# feeds, canonical tags, newsletter emails, preview links (#1833). Until this
+# line nothing set it in a release, which kept config.exs's
+# `http://localhost:4000`. Derived from the same host as the endpoint `url:`
+# below (`https://<PHX_HOST>`) unless PUBLIC_BASE_URL says otherwise; an
+# unusable value raises at boot. See KilnCMS.Config.PublicBaseUrl.
+config :kiln_cms, :public_base_url, KilnCMS.Config.PublicBaseUrl.from_env()
+
 config :kiln_cms, KilnCMSWeb.Endpoint,
   url: [host: host, port: 443, scheme: "https"],
   check_origin: check_origin,

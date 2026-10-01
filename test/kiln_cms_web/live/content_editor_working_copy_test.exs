@@ -2,8 +2,9 @@ defmodule KilnCMSWeb.ContentEditorWorkingCopyTest do
   @moduledoc """
   The content editor on a LIVE document (docs/working-copy.md): typing moves the
   working copy alone, the pill turns to "Live · draft" and the primary button to
-  "Publish changes"; the menu offers "Discard the changes"; settings still save
-  through Save and go live at once, without touching the text.
+  "Publish changes"; the menu offers "Discard the changes". Save holds the
+  content settings in the working copy too (#1815) — nothing readers see moves
+  until the changes are published.
   """
   use KilnCMSWeb.ConnCase, async: false
 
@@ -184,9 +185,14 @@ defmodule KilnCMSWeb.ContentEditorWorkingCopyTest do
            )
   end
 
-  test "Save writes settings live and leaves the text to the working copy", %{conn: conn} do
+  # #1815: Save on a live document used to put every setting live at once,
+  # so a release found nothing to publish. Now a content setting joins the
+  # working copy and nothing readers see moves until the changes are published.
+  test "Save holds content settings in the working copy, beside the text", %{conn: conn} do
     editor = authed_user(:editor)
-    page = live_page(authed_user(:admin))
+    admin = authed_user(:admin)
+    page = live_page(admin)
+    category = CMS.create_category!(%{name: "Held cat", slug: slug()}, actor: admin)
     {:ok, lv, _html} = open(conn, editor, page)
 
     type_title(lv, "Still a draft")
@@ -203,23 +209,242 @@ defmodule KilnCMSWeb.ContentEditorWorkingCopyTest do
 
     assert html =~ "Unsaved changes"
 
-    html = lv |> form("#page-editor") |> render_submit()
-    assert html =~ "Saved."
+    html =
+      lv
+      |> form("#page-editor")
+      |> render_submit(%{"form" => %{"category_id" => category.id}})
+
+    assert html =~ "Readers see these changes once you publish them."
     refute html =~ "Unsaved changes"
 
     saved = reload(page)
-    # The setting went live at once …
-    assert saved.seo_title == "Search title"
-    # … the published text did not move, and neither did the working copy.
-    assert saved.title == "Live title"
-    assert heading_texts(saved.blocks) == ["Published heading"]
+    # Nothing readers get moved: not the setting, not the text …
+    delivered = CMS.get_published_page_by_slug!(page.slug, page.locale)
+    assert delivered.seo_title == nil
+    assert delivered.category_id == nil
+    assert delivered.title == "Live title"
+    assert saved.seo_title == nil
+    refute saved.search_text =~ "Search title"
+    # … the copy holds all of it.
     assert saved.working_title == "Still a draft"
+    assert WorkingCopy.view(saved).seo_title == "Search title"
+    assert WorkingCopy.view(saved).category_id == category.id
     assert WorkingCopy.pending?(saved)
-    refute saved.search_text =~ "Still a draft"
 
-    # And the editor still shows the working copy.
+    # The editor shows the copy.
     assert has_element?(lv, ~s(input[name="form[title]"][value="Still a draft"]))
+    assert has_element?(lv, ~s(input[name="form[seo_title]"][value="Search title"]))
     assert has_element?(lv, "#publish-changes")
+
+    # And Publish changes ships all of it at once.
+    html = lv |> element("#publish-changes") |> render_click()
+    assert html =~ "Published your changes."
+
+    delivered = CMS.get_published_page_by_slug!(page.slug, page.locale)
+    assert delivered.title == "Still a draft"
+    assert delivered.seo_title == "Search title"
+    assert delivered.category_id == category.id
+    refute WorkingCopy.pending?(reload(page))
+  end
+
+  test "a settings-only Save starts a working copy a release will publish", %{conn: conn} do
+    admin = authed_user(:admin)
+    page = live_page(admin)
+    {:ok, lv, _html} = open(conn, admin, page)
+
+    lv
+    |> form("#page-editor")
+    |> render_submit(%{"form" => %{"seo_description" => "For the launch"}})
+
+    saved = reload(page)
+    assert WorkingCopy.pending?(saved)
+    assert saved.working_title == "Live title"
+    assert saved.seo_description == nil
+
+    release = CMS.create_release!(%{name: "Launch #{slug()}"}, actor: admin)
+
+    {:ok, item} =
+      CMS.add_release_item(
+        %{release_id: release.id, content_type: "page", content_id: page.id, action: :publish},
+        actor: admin
+      )
+
+    assert KilnCMS.CMS.Releases.classify(item, authorize?: false, tenant: page.org_id) == :apply
+  end
+
+  test "a ticked tag is held: the picker shows it, readers do not", %{conn: conn} do
+    admin = authed_user(:admin)
+    page = live_page(admin)
+    tag = CMS.create_tag!(%{name: "Held tag", slug: slug()}, actor: admin)
+    {:ok, lv, _html} = open(conn, admin, page)
+
+    lv
+    |> form("#page-editor")
+    |> render_submit(%{"form" => %{"tag_ids" => [tag.id]}})
+
+    live_tags = CMS.get_page!(page.id, authorize?: false, tenant: page.org_id, load: [:tags]).tags
+    assert live_tags == []
+    assert WorkingCopy.held_ids(reload(page), :tag_ids) == [to_string(tag.id)]
+
+    # Ticked in the picker, from the copy.
+    assert has_element?(lv, ~s(input[type="checkbox"][value="#{tag.id}"][checked]))
+
+    lv |> element("#publish-changes") |> render_click()
+
+    live_tags = CMS.get_page!(page.id, authorize?: false, tenant: page.org_id, load: [:tags]).tags
+    assert Enum.map(live_tags, & &1.id) == [tag.id]
+  end
+
+  test "a custom type's fields are held until the changes are published", %{conn: conn} do
+    admin = authed_user(:admin)
+
+    type =
+      CMS.create_type_definition!(
+        %{name: "dyn#{System.unique_integer([:positive])}", label: "Recipe"},
+        actor: admin
+      )
+
+    CMS.create_field_definition!(
+      %{type_definition_id: type.id, name: "servings", label: "Servings", field_type: :integer},
+      actor: admin
+    )
+
+    entry =
+      KilnCMS.CMS.ContentTypes.create!(
+        type.name,
+        %{title: "Pancakes", slug: slug(), custom_fields: %{"servings" => 2}},
+        actor: admin
+      )
+
+    {:ok, entry} = KilnCMS.CMS.ContentTypes.transition(type.name, "publish", entry, actor: admin)
+
+    {:ok, lv, _html} =
+      conn |> log_in(admin) |> live(~p"/editor/content/#{type.name}/#{entry.id}")
+
+    lv
+    |> form("##{type.name}-editor")
+    |> render_submit(%{"form" => %{"custom_fields" => %{"servings" => "6"}}})
+
+    public = CMS.get_published_entry_by_slug!(entry.slug, entry.locale, type.id)
+    assert public.custom_fields["servings"] == 2
+    assert has_element?(lv, ~s(input[name="form[custom_fields][servings]"][value="6"]))
+
+    lv |> element("#publish-changes") |> render_click()
+
+    public = CMS.get_published_entry_by_slug!(entry.slug, entry.locale, type.id)
+    assert public.custom_fields["servings"] == 6
+  end
+
+  # The lost-update guard (#1815): an API edit to a field the draft also
+  # changed is not overwritten by "Publish changes" without a decision.
+  describe "a live edit after the draft was saved" do
+    setup %{conn: conn} do
+      admin = authed_user(:admin)
+      page = live_page(admin)
+      {:ok, lv, _html} = open(conn, admin, page)
+
+      lv
+      |> form("#page-editor")
+      |> render_submit(%{"form" => %{"seo_title" => "Mine", "seo_description" => "My words"}})
+
+      # What a PATCH through the API does after the draft was saved; the
+      # editor opened (or reloaded) since sees the live row as it is now.
+      CMS.update_page!(reload(page), %{seo_title: "Theirs"}, actor: admin)
+      {:ok, lv, _html} = open(conn, admin, page)
+      %{admin: admin, page: page, lv: lv}
+    end
+
+    test "Publish changes asks instead of overwriting", %{page: page, lv: lv} do
+      html = lv |> element("#publish-changes") |> render_click()
+
+      assert html =~ "Someone changed the live page after you saved your draft"
+      assert has_element?(lv, "#publish-conflict-seo_title", "SEO title")
+      refute has_element?(lv, "#publish-conflict-seo_description")
+      assert has_element?(lv, "#publish-conflicts-confirm[disabled]")
+
+      # Nothing went live yet.
+      live = CMS.get_published_page_by_slug!(page.slug, page.locale)
+      assert live.seo_title == "Theirs"
+      assert live.seo_description == nil
+    end
+
+    test "keeping the live version publishes the rest", %{page: page, lv: lv} do
+      lv |> element("#publish-changes") |> render_click()
+
+      lv
+      |> element(~s(#publish-conflict-seo_title button[phx-value-choice="theirs"]))
+      |> render_click()
+
+      html = lv |> element("#publish-conflicts-confirm") |> render_click()
+      assert html =~ "Published your changes."
+      refute has_element?(lv, "#publish-conflicts")
+
+      live = CMS.get_published_page_by_slug!(page.slug, page.locale)
+      assert live.seo_title == "Theirs"
+      assert live.seo_description == "My words"
+      refute WorkingCopy.pending?(reload(page))
+    end
+
+    test "using mine for all overwrites, as chosen", %{page: page, lv: lv} do
+      lv |> element("#publish-changes") |> render_click()
+
+      lv
+      |> element(~s(button[phx-click="conflict_choose_all"][phx-value-choice="mine"]))
+      |> render_click()
+
+      lv |> element("#publish-conflicts-confirm") |> render_click()
+
+      live = CMS.get_published_page_by_slug!(page.slug, page.locale)
+      assert live.seo_title == "Mine"
+      assert live.seo_description == "My words"
+    end
+
+    test "Cancel closes the question and publishes nothing", %{page: page, lv: lv} do
+      lv |> element("#publish-changes") |> render_click()
+      lv |> element(~s(button[phx-click="conflict_cancel"])) |> render_click()
+
+      refute has_element?(lv, "#publish-conflicts")
+      assert WorkingCopy.pending?(reload(page))
+    end
+  end
+
+  test "Publish changes asks for a Save when settings are still unsaved", %{conn: conn} do
+    editor = authed_user(:editor)
+    page = live_page(authed_user(:admin))
+    {:ok, lv, _html} = open(conn, editor, page)
+
+    type_title(lv, "Edited")
+    autosave(lv)
+
+    lv
+    |> form("#page-editor")
+    |> render_change(%{
+      "form" => %{"seo_title" => "Not saved yet"},
+      "_target" => ["form", "seo_title"]
+    })
+
+    html = lv |> element("#publish-changes") |> render_click()
+    assert html =~ "Save draft first, then publish your changes."
+    assert reload(page).title == "Live title"
+  end
+
+  test "Discard the changes puts the published settings back too", %{conn: conn} do
+    editor = authed_user(:editor)
+    page = live_page(authed_user(:admin))
+    {:ok, lv, _html} = open(conn, editor, page)
+
+    lv
+    |> form("#page-editor")
+    |> render_submit(%{"form" => %{"seo_title" => "Thrown away"}})
+
+    assert has_element?(lv, ~s(input[name="form[seo_title]"][value="Thrown away"]))
+
+    lv |> element("#live-draft-menu button", "Discard the changes") |> render_click()
+
+    discarded = reload(page)
+    refute WorkingCopy.pending?(discarded)
+    assert discarded.working_fields == %{}
+    refute has_element?(lv, ~s(input[name="form[seo_title]"][value="Thrown away"]))
   end
 
   test "Save flushes a text edit still waiting for the debounce into the copy", %{conn: conn} do

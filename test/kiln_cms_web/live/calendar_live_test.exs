@@ -1106,4 +1106,165 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       refute after_click =~ "Mark reviewed"
     end
   end
+
+  describe "new content on a day (#1812)" do
+    defp new_button(%Date{} = day),
+      do: ~s{button[phx-click="new_on_day"][phx-value-date="#{Date.to_iso8601(day)}"]}
+
+    defp allow_editors_to_publish! do
+      {:ok, _} =
+        KilnCMS.CMS.EditorialSettings.save(%{editors_can_publish: true},
+          actor: authed_admin(),
+          tenant: KilnCMS.Accounts.default_org_id()
+        )
+    end
+
+    test "a future day's + opens a picker of types; choosing one opens a new document scheduled for that day",
+         %{conn: conn} do
+      day = soon()
+      {:ok, lv, _html} = conn |> log_in(authed_admin()) |> live(calendar_at(day))
+
+      button = element(lv, new_button(day))
+      assert render(button) =~ ~s{aria-label="New content on #{Calendar.strftime(day, "%-d %B")}"}
+      refute has_element?(lv, "#calendar-new-dialog")
+
+      html = render_click(button)
+
+      assert has_element?(lv, ~s{#calendar-new-dialog[role="dialog"]})
+      assert html =~ "New on #{Calendar.strftime(day, "%-d %B")}"
+
+      expected = "/editor/content/page/new?scheduled_at=#{Date.to_iso8601(day)}T09%3A00%3A00Z"
+
+      assert {:error, {:live_redirect, %{to: ^expected}}} =
+               lv |> element("#calendar-new-dialog a", "Page") |> render_click()
+    end
+
+    test "the picker lists every type the admin may author, and closes", %{conn: conn} do
+      day = soon()
+      {:ok, lv, _html} = conn |> log_in(authed_admin()) |> live(calendar_at(day))
+
+      lv |> element(new_button(day)) |> render_click()
+
+      assert has_element?(lv, "#calendar-new-dialog a", "Page")
+      assert has_element?(lv, "#calendar-new-dialog a", "Post")
+
+      render_click(lv, "close_new_on_day", %{})
+      refute has_element?(lv, "#calendar-new-dialog")
+    end
+
+    test "an empty month still shows its grid so a day can be started on", %{conn: conn} do
+      # Far enough out that nothing another test seeded lands on it.
+      day = Date.shift(soon(), month: 7)
+      {:ok, lv, html} = conn |> log_in(authed_admin()) |> live(calendar_at(day))
+
+      assert html =~ "Nothing scheduled in this window"
+      assert has_element?(lv, new_button(day))
+    end
+
+    test "past days offer no +, and a forged click on one is refused", %{conn: conn} do
+      day = recently()
+      {:ok, lv, _html} = conn |> log_in(authed_admin()) |> live(calendar_at(day))
+
+      refute has_element?(lv, new_button(day))
+      refute has_element?(lv, new_button(Date.add(Date.utc_today(), -1)))
+
+      html = render_click(lv, "new_on_day", %{"date" => Date.to_iso8601(day)})
+      assert html =~ "That day has passed"
+      refute has_element?(lv, "#calendar-new-dialog")
+
+      html = render_click(lv, "new_on_day", %{"date" => "not-a-date"})
+      refute has_element?(lv, "#calendar-new-dialog")
+      assert html =~ "not a date"
+    end
+
+    test "chips keep linking to their record, not to the picker", %{conn: conn} do
+      admin = authed_admin()
+      day = soon()
+
+      page =
+        CMS.create_page!(
+          %{title: "Chip #{System.unique_integer([:positive])}", slug: slug()},
+          actor: admin
+        )
+
+      CMS.update_page!(page, %{scheduled_at: DateTime.new!(day, ~T[10:00:00])}, actor: admin)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(calendar_at(day))
+
+      assert {:error, {:live_redirect, %{to: to}}} =
+               lv |> element(~s{li[data-event-id="#{page.id}"] a}) |> render_click()
+
+      assert to == ~p"/editor/content/page/#{page.id}"
+    end
+
+    test "an editor who may not set a publish date gets a + that proposes the date",
+         %{conn: conn} do
+      day = soon()
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(calendar_at(day))
+
+      html = lv |> element(new_button(day)) |> render_click()
+
+      # Same link as an admin's: the editor decides what the date becomes.
+      assert html =~ "proposed as its publish date"
+      expected = "/editor/content/page/new?scheduled_at=#{Date.to_iso8601(day)}T09%3A00%3A00Z"
+
+      assert {:error, {:live_redirect, %{to: ^expected}}} =
+               lv |> element("#calendar-new-dialog a", "Page") |> render_click()
+    end
+
+    test "a proposed date is its own outlined lane, labelled, and not draggable",
+         %{conn: conn} do
+      admin = authed_admin()
+      day = soon()
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Proposal #{System.unique_integer([:positive])}",
+            slug: slug(),
+            proposed_publish_at: DateTime.new!(day, ~T[09:00:00])
+          },
+          actor: authed_user(:editor)
+        )
+
+      {:ok, lv, html} = conn |> log_in(admin) |> live(calendar_at(day))
+
+      chip = ~s{li[data-event-id="#{page.id}"][data-event-kind="proposed"]}
+      assert has_element?(lv, chip)
+      # Not offered a drag handle, and the visible text says what it is.
+      refute has_element?(lv, chip <> "[data-reschedulable]")
+      assert lv |> element(chip) |> render() =~ "Proposed:"
+      assert lv |> element(chip <> " a") |> render() =~ "border-dashed"
+      # The legend names the lane.
+      assert html =~ "Proposed publish"
+
+      # A forged move is refused like any undraggable lane, and nothing moves.
+      html =
+        render_hook(lv, "reschedule", %{
+          "id" => page.id,
+          "type" => "page",
+          "kind" => "proposed",
+          "date" => Date.to_iso8601(Date.add(day, 1))
+        })
+
+      assert html =~ "be moved by dragging"
+      reloaded = KilnCMS.CMS.ContentTypes.get_record!("page", page.id, actor: admin)
+      assert DateTime.to_date(reloaded.proposed_publish_at) == day
+      assert reloaded.scheduled_at == nil
+    end
+
+    test "an editor on a site that lets editors publish is offered only the types they author",
+         %{conn: conn} do
+      allow_editors_to_publish!()
+      day = soon()
+      post_only = authed_user(:editor, %{editable_types: ["post"]})
+
+      {:ok, lv, _html} = conn |> log_in(post_only) |> live(calendar_at(day))
+
+      lv |> element(new_button(day)) |> render_click()
+
+      assert has_element?(lv, "#calendar-new-dialog a", "Post")
+      refute has_element?(lv, "#calendar-new-dialog a", "Page")
+    end
+  end
 end

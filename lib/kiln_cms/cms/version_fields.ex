@@ -23,7 +23,8 @@ defmodule KilnCMS.CMS.VersionFields do
   `@not_restorable` *is* editorial content and is reported by the diff, but a
   restore deliberately leaves it alone:
 
-    * `state`, `published_at`, `scheduled_at`, `unpublish_at` — workflow. A
+    * `state`, `published_at`, `scheduled_at`, `proposed_publish_at`,
+      `unpublish_at` — workflow. A
       restore is an edit to the document, not a publish or an unpublish; moving
       `state` here would let it bypass `AshStateMachine`'s transitions and the
       consent gate on `:publish` (#356).
@@ -66,13 +67,16 @@ defmodule KilnCMS.CMS.VersionFields do
   # of the field rows for the same reason — a second AST dump — and because the
   # stamp is a timestamp nobody reads; `working_title` IS a row, since a
   # discarded working copy's title is exactly the kind of thing the panel is
-  # opened to find. All three restore: restoring the `:save_working_copy`
-  # version a discard left behind is how the discarded text comes back.
-  @not_a_row [:blocks, :working_blocks, :working_copy_at]
+  # opened to find. `working_fields` (#1815) is a map of held settings keyed
+  # by attribute name — a raw dump beside rows that already name each field.
+  # `working_base` is the lost-update guard's fingerprints, for the same
+  # reason. All of them restore: restoring the `:save_working_copy` version a
+  # discard left behind is how the discarded copy comes back.
+  @not_a_row [:blocks, :working_blocks, :working_fields, :working_base, :working_copy_at]
 
   # Reported by the diff, deliberately untouched by a restore. See the moduledoc.
   @not_restorable ~w(
-    state published_at scheduled_at unpublish_at author_id
+    state published_at scheduled_at proposed_publish_at unpublish_at author_id
     expiry_action review_after_days last_reviewed_at
   )a
 
@@ -88,7 +92,7 @@ defmodule KilnCMS.CMS.VersionFields do
   @field_order ~w(
     title working_title slug path_alias excerpt state audience locale
     seo_title seo_description seo_keywords seo_image canonical_url
-    published_at scheduled_at unpublish_at expiry_action
+    published_at scheduled_at proposed_publish_at unpublish_at expiry_action
     review_after_days last_reviewed_at
     author_id category_id featured_image_id custom_fields
   )a

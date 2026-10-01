@@ -23,6 +23,10 @@ defmodule KilnCMS.CMS.Calendar do
   Each event carries a `:kind`, which is what the UI colours and filters by:
 
     * `:publish` — a draft/in-review record with a `scheduled_at` in the window.
+    * `:proposed` — a draft/in-review record with a `proposed_publish_at` in
+      the window (#1812): a date an editor without publish rights asked for.
+      Not a schedule — nothing fires on it — so it is its own lane, drawn
+      differently, and never draggable.
     * `:unpublish` / `:archive` / `:expire` — a published record whose embargo
       end falls in the window, split by its `expiry_action` so the calendar says
       what will actually happen rather than "unpublish" three times. `:expire`
@@ -71,6 +75,7 @@ defmodule KilnCMS.CMS.Calendar do
 
   @type kind ::
           :publish
+          | :proposed
           | :unpublish
           | :archive
           | :expire
@@ -108,6 +113,7 @@ defmodule KilnCMS.CMS.Calendar do
   def kinds,
     do: [
       :publish,
+      :proposed,
       :published,
       :unpublish,
       :archive,
@@ -167,18 +173,13 @@ defmodule KilnCMS.CMS.Calendar do
       actor: actor,
       tenant: org,
       query: [
-        filter:
-          expr(
-            (scheduled_at >= ^from and scheduled_at < ^to) or
-              (unpublish_at >= ^from and unpublish_at < ^to) or
-              (published_at >= ^from and published_at < ^to) or
-              (due_at >= ^from and due_at < ^to)
-          ),
+        filter: in_window_filter(from, to),
         select: [
           :id,
           :title,
           :state,
           :scheduled_at,
+          :proposed_publish_at,
           :unpublish_at,
           :published_at,
           :expiry_action
@@ -195,12 +196,40 @@ defmodule KilnCMS.CMS.Calendar do
     |> Enum.flat_map(&record_events(ct, &1, from, to))
   end
 
+  # Any of the dates a content lane plots falls in the half-open window.
+  # Split by lane group, then OR-ed, so no single expression carries every
+  # lane's bounds (credo counts each `and`/`or` towards one function's
+  # complexity).
+  defp in_window_filter(from, to) do
+    planned = planned_in_window(from, to)
+    happened = happened_in_window(from, to)
+    expr(^planned or ^happened)
+  end
+
+  # The forward-looking dates: scheduled and proposed publishes, embargo ends.
+  defp planned_in_window(from, to) do
+    expr(
+      (scheduled_at >= ^from and scheduled_at < ^to) or
+        (proposed_publish_at >= ^from and proposed_publish_at < ^to) or
+        (unpublish_at >= ^from and unpublish_at < ^to)
+    )
+  end
+
+  # Went live, and review due.
+  defp happened_in_window(from, to) do
+    expr(
+      (published_at >= ^from and published_at < ^to) or
+        (due_at >= ^from and due_at < ^to)
+    )
+  end
+
   # A record's events: each date field that falls in the window, while the
   # record is in a state where that date still means anything. A scheduled
   # publish on an already-published record is history, not a plan.
   defp record_events(ct, record, from, to) do
     for {kind, at, states} <- [
           {:publish, record.scheduled_at, [:draft, :in_review]},
+          {:proposed, record.proposed_publish_at, [:draft, :in_review]},
           {expiry_kind(record.expiry_action), record.unpublish_at, [:published]},
           {:published, record.published_at, [:published]},
           {:review_due, record.due_at, [:published]}

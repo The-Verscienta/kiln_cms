@@ -118,6 +118,53 @@ carries the reasoning.
   unpublished content
   ([#1776](https://github.com/The-Verscienta/kiln_cms/issues/1776)).
 
+<a id="public-links-now-use-phx-host"></a>
+
+- **Public links now use `https://<PHX_HOST>`; set `PUBLIC_BASE_URL` if your
+  public site is served from a different origin.** Until now a release never
+  set the public base URL, so sitemaps, feeds, canonical tags, preview links
+  and newsletter confirmation emails pointed at `http://localhost:4000` (fixed
+  below). After upgrading they use `https://` and your `PHX_HOST`, the same
+  host and scheme the endpoint already uses, and other organizations get
+  `https://<slug>.<PHX_HOST>`. Nothing to do if that is where your public
+  site lives. If it is served from somewhere else (another host, a
+  non-default port, or plain `http`), set `PUBLIC_BASE_URL` to that origin,
+  for example `PUBLIC_BASE_URL=https://www.example.com`. It must be an origin
+  only: a path or query string stops the release from booting, with a
+  message naming the variable. If you set `config :kiln_cms, :public_base_url`
+  in your own compile-time config (`config/project.exs` or `config/prod.exs`),
+  the runtime value now replaces it: move it to `PUBLIC_BASE_URL`, or edit
+  nothing if it was already `https://<PHX_HOST>`. Once it is right, resubmit
+  your sitemap to search engines; feed readers pick up the new links on their
+  next fetch
+  ([#1833](https://github.com/The-Verscienta/kiln_cms/issues/1833); see
+  `docs/environment-variables.md`).
+
+<a id="save-draft-holds-content-fields-until-publish-changes"></a>
+
+- **Tell authors that Save draft on a published entry now holds every content
+  field until *Publish changes*; a webhook receiver hears `<type>.updated`
+  when the changes are published, not when they are saved.** Until this
+  release, Save draft on a live page, post or entry held back only its title
+  and body: the SEO fields, custom fields, category, featured image, tags,
+  related content, slug, path alias and locale went live on the spot. Now
+  they wait in the unpublished changes with the text, and the entry shows
+  *Live · draft* until someone clicks *Publish changes* or a release
+  publishes them. An author used to seeing a new SEO title live right after
+  Save draft has to publish the changes now. The audience, the access
+  passphrase and the publish, unpublish and review dates still apply on
+  Save draft. What a webhook receiver sees changes in timing only: the event
+  names and payloads are the same, but an editor's change to one of those
+  fields now sends `<type>.updated` when it is published, as a title edit
+  already did, instead of at every Save draft. A `PATCH` through `/api/json`
+  or GraphQL is unchanged and still edits the live entry directly; a later
+  *Publish changes* that would overwrite such an edit now asks first, and a
+  release holding one is blocked until someone decides. Entries with
+  unpublished title or body changes from an earlier release keep them; the
+  upgrade adds two columns (`working_fields` and `working_base`, empty by
+  default) to each content table
+  ([#1815](https://github.com/The-Verscienta/kiln_cms/issues/1815)).
+
 ## Breaking
 
 <a id="on-a-multi-org-install-with-kiln_console_host-set-each-non-default-orgs-console"></a>
@@ -249,6 +296,57 @@ carries the reasoning.
   `confirmed_at`. (#1690)
 
 ## Added
+
+<a id="new-content-on-a-calendar-day"></a>
+
+- **Start new content from a day on the calendar.** A beta tester clicked a
+  day on the calendar expecting to plan something there, and nothing
+  happened. Each day in the month and week grids now has a "+" button beside
+  its number (a real button, announced as "New content on 14 October").
+  It opens a small dialog listing the content types you may create, the same
+  list as the content page's New buttons. Choosing one opens the editor on a
+  new, unsaved document with that day at 09:00 UTC as its publish date. The
+  draft is created with that date as soon as you give it a title or press
+  Save draft, and *Remove the date* drops it. 09:00 is in UTC because the
+  calendar groups days in UTC, so the new item always lands on the day you
+  clicked. Days whose 09:00 UTC has passed offer no "+". The editor's new
+  `?scheduled_at=` link parameter ignores anything that is not a future
+  timestamp and opens an ordinary draft instead.
+
+  Setting a publish date takes the same permission as publishing. So for an
+  admin, or an editor on a site that lets editors publish, the day becomes
+  the scheduled publish date. Any other editor gets the "+" too, but their
+  day becomes a **proposed** publish date: a new internal column,
+  `proposed_publish_at`, that publishes nothing by itself. They can change it
+  in the editor's schedule area ("An admin confirms the date"). The calendar
+  draws it in its own dashed "Proposed" lane that cannot be dragged, and the
+  content list shows it on the row, so a reviewer sees it with the
+  submission. Someone who may publish turns it into the schedule with
+  *Confirm date* on that row, or with *Use this date* in the editor and Save.
+  Setting any publish date, or publishing, clears the proposal. No API read
+  returns the column, and a version restore leaves it alone. Like the body's
+  `blocks`, it is a write input on the JSON:API and GraphQL content
+  create/update actions (an addition to `docs/api`), so an API client without
+  publish rights can propose a date too. It is a new nullable column on every content table (an
+  expand-only migration, including the example overlay's tables)
+  ([#1812](https://github.com/The-Verscienta/kiln_cms/issues/1812)).
+
+<a id="branding-images-from-the-media-library"></a>
+
+- **The logo, favicon, social image and app icon on the Branding page can be
+  chosen from the media library or uploaded there, with a thumbnail.** A beta
+  tester had to upload a logo on the Media page, copy its address and paste it
+  into Branding. Each image field now has *Choose from library*, which opens
+  the same image drawer the content editor uses, and *Upload*, which adds the
+  file to the media library and fills the field. A thumbnail shows the current
+  image, and *Remove* empties the field. The address box stays, for an image
+  stored elsewhere. Uploads go through the media library's usual processing
+  under the signed-in admin. Each field offers only the formats it can use: a
+  favicon must be a PNG and an app icon a PNG or JPEG, checked against the
+  file's contents, not its name. The media library does not take `.ico` or
+  `.svg` files, so a favicon in those formats is still added by pasting its
+  address. Nothing is saved until *Save branding*
+  ([#1811](https://github.com/The-Verscienta/kiln_cms/issues/1811)).
 
 <a id="editing-in-place-can-add-blocks"></a>
 
@@ -469,6 +567,98 @@ carries the reasoning.
   has no Coolify equivalent and stays unset unless you set it.
 
 ## Fixed
+
+<a id="production-public-links-use-phx-host"></a>
+
+- **Production sitemaps, feeds, canonical links, preview links and newsletter
+  confirmation emails link to `https://<PHX_HOST>`, not `http://localhost:4000`.**
+  Every absolute public URL Kiln builds starts from the `:public_base_url`
+  setting, and nothing set it in a release, so production kept the
+  development value. The default organization's links went to
+  `http://localhost:4000`, and every other organization's to
+  `http://<slug>.<host>:4000`. That covered the sitemap and `robots.txt`,
+  RSS/Atom feeds, canonical tags and JSON-LD, `llms.txt`, the schema and
+  event index endpoints, embed snippets, preview links, site SSO callbacks,
+  newsletter confirmation emails, social sharing, federation, static export
+  and the provenance origin. The production config now sets it from the new
+  `PUBLIC_BASE_URL` variable, or, unset, from `PHX_HOST` the way the
+  endpoint's own URL is (`https`, port 443). The value is checked at boot:
+  anything but a bare `http(s)` origin stops the release with a message
+  naming the variable, and a value that resolves to `localhost` logs a
+  warning (and reaches Sentry) at boot
+  ([#1833](https://github.com/The-Verscienta/kiln_cms/issues/1833)).
+
+<a id="connection-notices-wait-out-a-slow-first-connection"></a>
+
+- **"We can't find the internet" and "Something went wrong!" no longer flash on
+  a first page load; they wait until a connection problem has lasted a few
+  seconds, and offer *Try again*.** Beta testers saw both messages on first
+  load of the rc.2 image, then saw them go away after a refresh. The cause was
+  Phoenix's WebSocket-to-longpoll fallback. When a page's first connection
+  took more than 2.5 seconds to answer (a slow network, a proxy, a cold
+  server), the browser switched to longpoll. The WebSocket it gave up on then
+  closed late and tore down the new connection. The page sat in an error
+  state, showing one message or the other, until LiveView reloaded it 5–10
+  seconds later. Phoenix 1.8.15 fixes the fallback, and the page now joins
+  over longpoll without a reload. The messages also have a grace period. A
+  message comes up only after the page has been disconnected, or unable to
+  open, for 2.5 seconds without a break, so a slow first connection or a line
+  that drops and comes straight back shows nothing. As before
+  ([#1784](https://github.com/The-Verscienta/kiln_cms/issues/1784)), only the
+  message for the current problem is shown, and it goes as soon as the page
+  is connected again. Each message now has a **Try again** button. When the
+  connection is down, it reconnects at once instead of waiting for the next
+  automatic attempt. When the server could not open the page, it reloads the
+  page ([#1821](https://github.com/The-Verscienta/kiln_cms/issues/1821)).
+
+<a id="save-draft-on-a-published-entry-holds-every-content-field"></a>
+
+- **Save draft on a published entry no longer puts any field live; *Publish
+  changes* or a release publishes every saved change at once.** A beta tester added a published entry to a release, edited
+  it, saved the draft, and the release page said the entry was "already in
+  that state — will be skipped". The release was right about what it saw:
+  Save draft had held back only the title and body, and had already put
+  every other field live, so there was nothing left to publish. Now the
+  unpublished changes of a live entry cover every field a reader sees on or
+  about it: the title and body, the excerpt and SEO fields, the custom fields
+  (on a custom content type that is most of the entry), the category,
+  featured image, tags and related content, and the slug, path alias and
+  locale. A slug change leaves its redirect from the old address when it is
+  published, not when it is saved. *Publish changes*, or a release, publishes
+  all of them at once; *Discard the changes* drops all of them; unpublishing
+  keeps them in the draft. Settings about who may read the entry and when it
+  changes state (the audience, the access passphrase, the publish, unpublish
+  and review dates) still apply on Save draft, so locking a page is never
+  waiting on a publish. The release page also read every live item as
+  having nothing to publish, even one with title changes saved, because its
+  readiness check never looked at the unpublished changes. It now says
+  *Live — publishes the saved changes* or *Live, no unpublished changes —
+  nothing to publish*, and the editor's Release panel on a live entry says
+  that saved changes go live with the release. Publishing a draft also no
+  longer overwrites a live change made after it was saved: if an API edit or
+  in-context editing changed a field the draft also changed, *Publish
+  changes* asks, field by field, whether to keep the live version or use the
+  draft's, and a release holding such an item is blocked ("Live page changed
+  since the draft — review before releasing") until someone decides in the
+  editor. A field the draft never touched keeps its newer live value without
+  asking. `docs/working-copy.md` lists which fields are held and why
+  ([#1815](https://github.com/The-Verscienta/kiln_cms/issues/1815)).
+
+<a id="brand-colour-shows-on-save"></a>
+
+- **A new brand colour shows as soon as Branding is saved, with a button and
+  link preview in light and dark mode and help text that says where it is
+  used.** A beta tester changed the brand colour to `#333333` and saw nothing
+  change: not the buttons, not the notification badge. The colour was saved,
+  but it is drawn by the page's outer layout, which the Branding page did not
+  reload, so the old colour stayed until a manual refresh. Saving (and
+  *Reset to defaults*) now reloads the page, so the new colour, logo, favicon
+  and site name show at once. The colour box's help text now says it is used
+  for buttons, links and highlights on the public site and in the editor, and
+  that dark mode uses a lighter shade, which is why a dark grey looks light
+  grey there. The preview under the box shows a button and a link on a light
+  and a dark page as you type
+  ([#1810](https://github.com/The-Verscienta/kiln_cms/issues/1810)).
 
 <a id="markdown-becomes-heading-divider-and-text-blocks"></a>
 

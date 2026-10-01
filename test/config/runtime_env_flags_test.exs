@@ -66,6 +66,8 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_IMAGE_TRANSFORM_KEY KILN_IMAGE_TRANSFORM_UNSIGNED
             KILN_IMAGE_TRANSFORM_AUTO_AVIF
             KILN_METRICS_ENABLED KILN_METRICS_PORT KILN_METRICS_BIND KILN_METRICS_TOKEN
+            PUBLIC_BASE_URL PHX_HOST TENANT_BASE_HOST
+            RENDER_EXTERNAL_HOSTNAME RAILWAY_PUBLIC_DOMAIN FLY_APP_NAME
           ) ++ Map.keys(@prod_env)
 
   setup do
@@ -988,6 +990,75 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
                %{"VISUAL_EDITING_ENABLED" => "ture"},
                :test
              )
+    end
+  end
+
+  describe "the public base URL (#1833)" do
+    # Every absolute public link — sitemap, feeds, canonical tags, newsletter
+    # confirmation emails — is built from this through `Tenant.base_url/1`.
+    # Until #1833 no runtime fragment set it, so a release linked to
+    # config.exs's `http://localhost:4000`.
+    defp public_base_url(vars, env \\ :prod),
+      do: vars |> eval(env) |> get_in([:kiln_cms, :public_base_url])
+
+    test "a production boot derives it from PHX_HOST, as the endpoint's url: does" do
+      config = eval(%{"PHX_HOST" => "cms.example.com"})
+
+      assert get_in(config, [:kiln_cms, :public_base_url]) == "https://cms.example.com"
+      # The endpoint it must agree with.
+      assert get_in(config, [:kiln_cms, KilnCMSWeb.Endpoint, :url]) ==
+               [host: "cms.example.com", port: 443, scheme: "https"]
+    end
+
+    test "PHX_HOST written as a URL still yields the bare origin" do
+      assert public_base_url(%{"PHX_HOST" => "https://CMS.example.com/"}) ==
+               "https://cms.example.com"
+    end
+
+    test "with PHX_HOST unset it follows the platform hostname, never localhost" do
+      assert public_base_url(%{"RENDER_EXTERNAL_HOSTNAME" => "kiln.onrender.com"}) ==
+               "https://kiln.onrender.com"
+
+      refute public_base_url(%{}) =~ "localhost"
+    end
+
+    test "PUBLIC_BASE_URL overrides the derivation, normalized" do
+      vars = %{"PHX_HOST" => "cms.example.com", "PUBLIC_BASE_URL" => "https://www.Example.org/"}
+      assert public_base_url(vars) == "https://www.example.org"
+    end
+
+    test "PUBLIC_BASE_URL keeps a non-default port and an http scheme" do
+      assert public_base_url(%{"PUBLIC_BASE_URL" => "http://intranet.example:8080"}) ==
+               "http://intranet.example:8080"
+    end
+
+    test "a blank PUBLIC_BASE_URL counts as unset" do
+      vars = %{"PHX_HOST" => "cms.example.com", "PUBLIC_BASE_URL" => "  "}
+      assert public_base_url(vars) == "https://cms.example.com"
+    end
+
+    test "a PUBLIC_BASE_URL that is not a bare origin refuses to boot, naming it" do
+      for bad <- [
+            "cms.example.com",
+            "ftp://cms.example.com",
+            "https://cms.example.com/blog",
+            "https://cms.example.com?x=1",
+            "https://user:pw@cms.example.com",
+            "https://"
+          ] do
+        assert_raise RuntimeError,
+                     ~r/PUBLIC_BASE_URL does not give a usable public base URL/,
+                     fn ->
+                       eval(%{"PUBLIC_BASE_URL" => bad})
+                     end
+      end
+    end
+
+    test "dev and test keep config.exs's localhost value" do
+      # Not written outside :prod — this reads runtime.exs alone, without
+      # config.exs, so the key is simply absent from what it returns.
+      assert public_base_url(%{"PUBLIC_BASE_URL" => "https://cms.example.com"}, :test) == nil
+      assert Application.get_env(:kiln_cms, :public_base_url) == "http://localhost:4000"
     end
   end
 end
