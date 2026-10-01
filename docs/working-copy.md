@@ -64,6 +64,46 @@ once — so a release found nothing left to publish.
   the version that was live before (tags and related content are not in
   version history, so a rollback leaves them as the release set them).
 
+## When the live page changes under a draft
+
+An API `PATCH` or in-context editing still edits a live entry directly. If it
+changes a field the saved draft also changed, *Publish changes* used to put
+the draft's value over it without a word. It no longer does (#1815):
+
+- When a field joins the draft, the draft records a fingerprint of the
+  **live value it was based on** (`working_base`). The title and body are
+  recorded when the draft starts.
+- At publish time each held field is one of three things
+  (`WorkingCopy.reconcile/1`):
+  - the live value has not moved → the draft's value goes live, as before;
+  - the draft never changed it (the title, carried along while only the body
+    was edited) → whatever is live now stays;
+  - **both moved** → a conflict.
+- **In the editor**, *Publish changes* with a conflict opens a panel —
+  *Someone changed the live page after you saved your draft* — listing the
+  fields, each with *Keep the live version* / *Use mine* (or one choice for
+  all). Nothing is published until every field has a choice. The editor
+  needs to be looking at the current page: one opened before the API edit
+  gets the usual "changed elsewhere, reload" banner first.
+- **`:publish_changes`** takes the decisions as `resolve`
+  (`%{"seo_title" => "theirs", "*" => "mine"}`); undecided conflicts refuse
+  the publish with an error naming the fields.
+- **A release** cannot ask anyone, so the item is **blocked**: the release
+  page says *Live page changed since the draft — review before releasing*,
+  counts it with the other blockers and withholds go-live. A scheduled
+  go-live fails as a whole and changes nothing, the same contract as any
+  other unpublishable item — it never skips the item (that would ship the
+  release without the draft) and never promotes it (that would overwrite the
+  newer live value). Resolve it with *Publish changes* in the editor, or
+  remove the item.
+- **Unpublishing or archiving** cannot ask either; a conflicting field keeps
+  the live value, and the draft's value stays in history as the version that
+  saved it.
+- A draft saved before 1.0 recorded no bases; its fields promote as they
+  always did. The fingerprint is a SHA-256 over the stored value; if it ever
+  read differently after an upgrade, the result is a reported conflict, never
+  a silent overwrite.
+
 ## Data model
 
 Four columns on the published row itself — no shadow row, no `draft_of`:
@@ -73,6 +113,7 @@ Four columns on the published row itself — no shadow row, no `draft_of`:
 | `working_title` | text | the draft title, `NULL` when nothing is pending |
 | `working_blocks` | block union array, `[]` default | the draft body |
 | `working_fields` | map, `{}` default | every other held field that differs from the live row, keyed by attribute name (`tag_ids` / `related_<type>_ids` for the links) |
+| `working_base` | map, `{}` default | for each held key (`title`, `blocks`, a held field), a fingerprint of the live value the draft was based on — the lost-update guard |
 | `working_copy_at` | timestamp | **the sentinel**: set exactly while a copy is pending |
 
 Why a pair of typed columns rather than one JSONB map: the block union's cast
@@ -94,8 +135,10 @@ like `:autosave`'s `state == :draft`), `:publish_changes` and
 (below). A draft never carries a stale shadow of itself.
 
 **Migration and upcast.** `add_working_copy` adds the three columns;
-`working_copy_every_field` (1.0) adds `working_fields`, `NOT NULL DEFAULT '{}'`,
-so a row with a pending text copy keeps it and holds no fields. Existing
+`working_copy_every_field` (1.0) adds `working_fields` and `working_copy_base`
+adds `working_base`, both `NOT NULL DEFAULT '{}'`, so a row with a pending text
+copy keeps it, holds no fields, and has no recorded base (it promotes as it
+always did). Existing
 rows read as *nothing pending* — `NULL` stamp, `[]` body — so no data migration
 and no upcast is needed; a deployment can roll the pin back and the columns
 sit unused.
@@ -179,8 +222,8 @@ published text back over it.
 - **In-context editing** (`InContextEditLive`) and the write API's `PATCH`
   still edit a live document directly through `:update` — kept on purpose: an
   integration writing through the API has no *Publish changes* step to wait
-  for. A pending working copy survives such an edit, and *Publish changes*
-  would then overwrite the fields the copy holds.
+  for. A pending working copy survives such an edit; the lost-update guard
+  above stops *Publish changes* from overwriting it silently.
 - **Restoring an older version onto a live document** still goes live at once
   (and clears the copy, since the fold has none). Landing a restore in the
   working copy instead is a product decision this change does not make.

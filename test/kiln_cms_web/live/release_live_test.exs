@@ -154,6 +154,30 @@ defmodule KilnCMSWeb.ReleaseLiveTest do
     refute html =~ "nothing to publish"
   end
 
+  test "a live item whose page changed since the draft blocks the release", %{conn: conn} do
+    admin = authed_user(:admin)
+    rel = release(admin)
+    page = CMS.create_page!(%{title: "Live page", slug: slug()}, actor: admin)
+    page = CMS.publish_page!(page, %{}, actor: admin)
+
+    {:ok, page} =
+      CMS.save_page_working_copy(page, %{fields: %{"seo_title" => "Draft SEO"}},
+        actor: admin,
+        tenant: page.org_id
+      )
+
+    CMS.update_page!(page, %{seo_title: "Edited live"}, actor: admin)
+
+    {:ok, _} =
+      CMS.add_release_item(
+        %{release_id: rel.id, content_type: "page", content_id: page.id, action: :publish},
+        actor: admin
+      )
+
+    {:ok, _view, html} = conn |> log_in(admin) |> live(~p"/editor/releases/#{rel.id}")
+    assert html =~ "Live page changed since the draft — review before releasing"
+  end
+
   test "an unpublish of something not live says it will be skipped", %{conn: conn} do
     admin = authed_user(:admin)
     rel = release(admin)

@@ -135,10 +135,12 @@ carries the reasoning.
   names and payloads are the same, but an editor's change to one of those
   fields now sends `<type>.updated` when it is published, as a title edit
   already did, instead of at every Save draft. A `PATCH` through `/api/json`
-  or GraphQL is unchanged and still edits the live entry directly. Entries
-  with unpublished title or body changes from an earlier release keep them;
-  the upgrade adds one column (`working_fields`, empty by default) to each
-  content table
+  or GraphQL is unchanged and still edits the live entry directly; a later
+  *Publish changes* that would overwrite such an edit now asks first, and a
+  release holding one is blocked until someone decides. Entries with
+  unpublished title or body changes from an earlier release keep them; the
+  upgrade adds two columns (`working_fields` and `working_base`, empty by
+  default) to each content table
   ([#1815](https://github.com/The-Verscienta/kiln_cms/issues/1815)).
 
 ## Breaking
@@ -516,8 +518,14 @@ carries the reasoning.
   readiness check never looked at the unpublished changes. It now says
   *Live — publishes the saved changes* or *Live, no unpublished changes —
   nothing to publish*, and the editor's Release panel on a live entry says
-  that saved changes go live with the release. `docs/working-copy.md` lists
-  which fields are held and why
+  that saved changes go live with the release. Publishing a draft also no
+  longer overwrites a live change made after it was saved: if an API edit or
+  in-context editing changed a field the draft also changed, *Publish
+  changes* asks, field by field, whether to keep the live version or use the
+  draft's, and a release holding such an item is blocked ("Live page changed
+  since the draft — review before releasing") until someone decides in the
+  editor. A field the draft never touched keeps its newer live value without
+  asking. `docs/working-copy.md` lists which fields are held and why
   ([#1815](https://github.com/The-Verscienta/kiln_cms/issues/1815)).
 
 <a id="markdown-becomes-heading-divider-and-text-blocks"></a>

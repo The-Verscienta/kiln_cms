@@ -37,6 +37,15 @@ defmodule KilnCMS.CMS.WorkingCopy do
       not what it says, and the schedulers read them off the row.
     * `type_definition_id` — which type an entry is; not content either.
 
+  ## The lost-update guard
+
+  An API `PATCH` or in-context editing still edits the live row. So that a
+  later publish of the copy cannot silently overwrite such an edit, the copy
+  records, per held key, a fingerprint of the live value it was based on
+  (`working_base`), and `reconcile/1` sorts the keys at publish time into
+  promote / keep live / conflict. `Changes.PromoteWorkingCopy` refuses an
+  undecided conflict; `KilnCMS.CMS.Releases` blocks the item.
+
   ## The invariant
 
   The working columns are set only while the record is published.

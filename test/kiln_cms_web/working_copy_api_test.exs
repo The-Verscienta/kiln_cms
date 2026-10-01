@@ -88,6 +88,26 @@ defmodule KilnCMSWeb.WorkingCopyApiTest do
     refute Map.has_key?(attributes, "working_fields")
   end
 
+  # The lost-update guard (#1815): the PATCH stays a live edit, and a later
+  # "Publish changes" may not overwrite it without someone deciding to.
+  test "a PATCH to a field the draft holds is not overwritten by Publish changes", ctx do
+    {:ok, _} =
+      CMS.save_page_working_copy(ctx.page, %{fields: %{"seo_title" => "Held SEO"}},
+        actor: ctx.admin,
+        tenant: ctx.page.org_id
+      )
+
+    assert {200, _body} =
+             req(:patch, "/api/json/pages/#{ctx.page.id}", ctx.key, %{seo_title: "From the API"})
+
+    page = CMS.get_page!(ctx.page.id, authorize?: false, tenant: ctx.page.org_id)
+    assert WorkingCopy.pending?(page)
+    assert {:error, _} = CMS.publish_page_changes(page, actor: ctx.admin)
+
+    page = CMS.get_page!(ctx.page.id, authorize?: false, tenant: ctx.page.org_id)
+    assert page.seo_title == "From the API"
+  end
+
   test "a PATCH to a published record is still a live edit", ctx do
     assert {200, _body} =
              req(:patch, "/api/json/pages/#{ctx.page.id}", ctx.key, %{seo_title: "From the API"})

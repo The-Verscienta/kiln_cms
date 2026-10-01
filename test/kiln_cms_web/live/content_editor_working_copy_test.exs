@@ -335,6 +335,79 @@ defmodule KilnCMSWeb.ContentEditorWorkingCopyTest do
     assert public.custom_fields["servings"] == 6
   end
 
+  # The lost-update guard (#1815): an API edit to a field the draft also
+  # changed is not overwritten by "Publish changes" without a decision.
+  describe "a live edit after the draft was saved" do
+    setup %{conn: conn} do
+      admin = authed_user(:admin)
+      page = live_page(admin)
+      {:ok, lv, _html} = open(conn, admin, page)
+
+      lv
+      |> form("#page-editor")
+      |> render_submit(%{"form" => %{"seo_title" => "Mine", "seo_description" => "My words"}})
+
+      # What a PATCH through the API does after the draft was saved; the
+      # editor opened (or reloaded) since sees the live row as it is now.
+      CMS.update_page!(reload(page), %{seo_title: "Theirs"}, actor: admin)
+      {:ok, lv, _html} = open(conn, admin, page)
+      %{admin: admin, page: page, lv: lv}
+    end
+
+    test "Publish changes asks instead of overwriting", %{page: page, lv: lv} do
+      html = lv |> element("#publish-changes") |> render_click()
+
+      assert html =~ "Someone changed the live page after you saved your draft"
+      assert has_element?(lv, "#publish-conflict-seo_title", "SEO title")
+      refute has_element?(lv, "#publish-conflict-seo_description")
+      assert has_element?(lv, "#publish-conflicts-confirm[disabled]")
+
+      # Nothing went live yet.
+      live = CMS.get_published_page_by_slug!(page.slug, page.locale)
+      assert live.seo_title == "Theirs"
+      assert live.seo_description == nil
+    end
+
+    test "keeping the live version publishes the rest", %{page: page, lv: lv} do
+      lv |> element("#publish-changes") |> render_click()
+
+      lv
+      |> element(~s(#publish-conflict-seo_title button[phx-value-choice="theirs"]))
+      |> render_click()
+
+      html = lv |> element("#publish-conflicts-confirm") |> render_click()
+      assert html =~ "Published your changes."
+      refute has_element?(lv, "#publish-conflicts")
+
+      live = CMS.get_published_page_by_slug!(page.slug, page.locale)
+      assert live.seo_title == "Theirs"
+      assert live.seo_description == "My words"
+      refute WorkingCopy.pending?(reload(page))
+    end
+
+    test "using mine for all overwrites, as chosen", %{page: page, lv: lv} do
+      lv |> element("#publish-changes") |> render_click()
+
+      lv
+      |> element(~s(button[phx-click="conflict_choose_all"][phx-value-choice="mine"]))
+      |> render_click()
+
+      lv |> element("#publish-conflicts-confirm") |> render_click()
+
+      live = CMS.get_published_page_by_slug!(page.slug, page.locale)
+      assert live.seo_title == "Mine"
+      assert live.seo_description == "My words"
+    end
+
+    test "Cancel closes the question and publishes nothing", %{page: page, lv: lv} do
+      lv |> element("#publish-changes") |> render_click()
+      lv |> element(~s(button[phx-click="conflict_cancel"])) |> render_click()
+
+      refute has_element?(lv, "#publish-conflicts")
+      assert WorkingCopy.pending?(reload(page))
+    end
+  end
+
   test "Publish changes asks for a Save when settings are still unsaved", %{conn: conn} do
     editor = authed_user(:editor)
     page = live_page(authed_user(:admin))

@@ -291,6 +291,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # A live document's settings edited since the last Save
     # (docs/working-copy.md) — its text autosaves, its settings do not.
     |> assign(:settings_dirty?, false)
+    # The lost-update guard's question (#1815): the keys the live page changed
+    # after the draft was saved, and what the editor chose for each, while the
+    # "Publish changes" panel is open. `nil` when it is closed.
+    |> assign(:publish_conflicts, nil)
+    |> assign(:conflict_choices, %{})
     # When the record was last written, by anyone: the stamp the save
     # line shows between saves (`SavedTicker`). Follows `updated_at` so
     # two tabs agree on it.
@@ -852,6 +857,102 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> load_translations()
     |> load_fragment_options()
     |> load_redirects()
+  end
+
+  attr :keys, :list, required: true
+  attr :choices, :map, required: true
+  attr :resource, :atom, required: true
+
+  # The lost-update guard's question (#1815), asked before "Publish changes"
+  # would overwrite a live value someone changed after the draft was saved.
+  # Buttons, not a form: this renders inside the editor's own form.
+  defp publish_conflicts(assigns) do
+    ~H"""
+    <div
+      id="publish-conflicts"
+      role="alertdialog"
+      aria-labelledby="publish-conflicts-title"
+      class="card card-pad border border-warning/40 bg-warning/5"
+    >
+      <h2 id="publish-conflicts-title" class="text-sm font-medium">
+        {gettext("Someone changed the live page after you saved your draft")}
+      </h2>
+      <p class="mt-1 text-sm text-base-content/70">
+        {gettext(
+          "These fields were changed on the live page since then. For each one, keep the live version or publish yours."
+        )}
+      </p>
+      <ul class="mt-3 divide-y divide-base-content/10">
+        <li
+          :for={key <- @keys}
+          id={"publish-conflict-#{key}"}
+          class="flex flex-wrap items-center justify-between gap-2 py-2"
+        >
+          <span class="text-sm font-medium">{held_key_label(@resource, key)}</span>
+          <span class="flex gap-1">
+            <button
+              type="button"
+              phx-click="conflict_choose"
+              phx-value-key={key}
+              phx-value-choice="theirs"
+              aria-pressed={to_string(@choices[key] == "theirs")}
+              class={[
+                "btn btn-sm",
+                if(@choices[key] == "theirs", do: "btn-primary", else: "btn-default")
+              ]}
+            >
+              {gettext("Keep the live version")}
+            </button>
+            <button
+              type="button"
+              phx-click="conflict_choose"
+              phx-value-key={key}
+              phx-value-choice="mine"
+              aria-pressed={to_string(@choices[key] == "mine")}
+              class={[
+                "btn btn-sm",
+                if(@choices[key] == "mine", do: "btn-primary", else: "btn-default")
+              ]}
+            >
+              {gettext("Use mine")}
+            </button>
+          </span>
+        </li>
+      </ul>
+      <div class="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          phx-click="conflict_choose_all"
+          phx-value-choice="theirs"
+          class="btn btn-sm btn-default"
+        >
+          {gettext("Keep all live versions")}
+        </button>
+        <button
+          type="button"
+          phx-click="conflict_choose_all"
+          phx-value-choice="mine"
+          class="btn btn-sm btn-default"
+        >
+          {gettext("Use all of mine")}
+        </button>
+        <span class="ml-auto flex gap-2">
+          <button type="button" phx-click="conflict_cancel" class="btn btn-sm btn-default">
+            {gettext("Cancel")}
+          </button>
+          <button
+            id="publish-conflicts-confirm"
+            type="button"
+            phx-click="conflict_publish"
+            disabled={map_size(@choices) < length(@keys)}
+            class="btn btn-sm btn-primary"
+          >
+            {gettext("Publish changes")}
+          </button>
+        </span>
+      </div>
+    </div>
+    """
   end
 
   # Whether the actor may WRITE this record — the authorization both AI-assist
@@ -2977,6 +3078,37 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, run_workflow(socket, action)}
   end
 
+  # The lost-update guard's panel (#1815): one choice per field, or one for
+  # all, then publish. Only keys the panel was opened with can be chosen.
+  def handle_event("conflict_choose", %{"key" => key, "choice" => choice}, socket)
+      when choice in ["mine", "theirs"] do
+    if key in (socket.assigns.publish_conflicts || []) do
+      {:noreply, update(socket, :conflict_choices, &Map.put(&1, key, choice))}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("conflict_choose_all", %{"choice" => choice}, socket)
+      when choice in ["mine", "theirs"] do
+    choices = Map.new(socket.assigns.publish_conflicts || [], &{&1, choice})
+    {:noreply, assign(socket, :conflict_choices, choices)}
+  end
+
+  def handle_event("conflict_cancel", _params, socket), do: {:noreply, close_conflicts(socket)}
+
+  def handle_event("conflict_publish", _params, socket) do
+    keys = socket.assigns.publish_conflicts || []
+    choices = Map.take(socket.assigns.conflict_choices, keys)
+
+    if map_size(choices) == length(keys) do
+      {:noreply, publish_changes(socket, choices)}
+    else
+      {:noreply,
+       put_flash(socket, :error, gettext("Choose which version to keep for each field first."))}
+    end
+  end
+
   # A human attests the content is still correct (docs/content-lifecycles.md).
   # Its own event rather than a `workflow` action, because it is not one: `state`
   # does not move, and `run_workflow`'s flash ("Updated to published") would be
@@ -3882,12 +4014,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> inject_children(socket.assigns.block_children)
       |> inject_rich_bodies(socket.assigns.rich_bodies)
 
-    case flush_working_copy(socket, params) do
-      {:ok, socket} ->
-        live_transition(socket, "publish_changes", gettext("Published your changes."))
+    with {:ok, socket} <- flush_working_copy(socket, params) do
+      case WorkingCopy.reconcile(socket.assigns.record).conflicts do
+        [] ->
+          publish_changes(socket, %{})
 
-      {:error, socket} ->
-        socket
+        keys ->
+          socket
+          |> assign(:publish_conflicts, keys)
+          |> assign(:conflict_choices, %{})
+      end
+    else
+      {:error, socket} -> socket
     end
   end
 
@@ -3905,6 +4043,69 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp run_workflow(socket, _action), do: socket
+
+  # "Publish changes" with the lost-update guard's decisions (#1815). Through
+  # a form on the row, the way Save writes, because the decisions are an
+  # argument the shared `transition/4` dispatch does not carry.
+  defp publish_changes(socket, resolve) do
+    %{kind: kind, record: record, actor: actor} = socket.assigns
+
+    form =
+      AshPhoenix.Form.for_update(record, :publish_changes, actor: actor, tenant: record.org_id)
+
+    result =
+      EditorTelemetry.span(:workflow, %{kind: kind, action: "publish_changes"}, fn ->
+        AshPhoenix.Form.submit(form, params: %{"resolve" => resolve})
+      end)
+
+    case result do
+      {:ok, updated} ->
+        socket
+        |> close_conflicts()
+        |> assign_record(fetch!(kind, updated.id, actor, record.org_id))
+        |> broadcast_saved()
+        |> mark_saved()
+        |> reset_editors()
+        |> put_flash(:info, gettext("Published your changes."))
+
+      {:error, form} ->
+        if stale_conflict?(form),
+          do: flag_conflict(socket),
+          else: put_flash(socket, :error, live_transition_error(form.source.errors))
+    end
+  end
+
+  defp close_conflicts(socket) do
+    socket
+    |> assign(:publish_conflicts, nil)
+    |> assign(:conflict_choices, %{})
+  end
+
+  @doc false
+  # The label of a held key in the conflict panel, in the reader's language:
+  # an attribute through the history panel's own labels, the text and the
+  # links by name. Never an atom built from the key.
+  def held_key_label(resource, key) do
+    case key do
+      "title" -> VersionDiffComponents.field_label(:title)
+      "blocks" -> gettext("Body")
+      "tag_ids" -> gettext("Tags")
+      _other -> held_field_label(resource, key)
+    end
+  end
+
+  defp held_field_label(resource, key) do
+    cond do
+      attribute = WorkingCopy.attribute_for(resource, key) ->
+        VersionDiffComponents.field_label(attribute)
+
+      WorkingCopy.relationship_for(resource, key) ->
+        gettext("Related content")
+
+      true ->
+        key
+    end
+  end
 
   defp settle_before_workflow(%{assigns: %{save_state: state}} = socket)
        when state in [:pending, :error] do
@@ -5805,6 +6006,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
           actor={@actor}
           word_count={@seo_body_stats.word_count}
           a11y_report={@a11y_report}
+        />
+
+        <.publish_conflicts
+          :if={@publish_conflicts}
+          keys={@publish_conflicts}
+          choices={@conflict_choices}
+          resource={@record.__struct__}
         />
 
         <div class={[

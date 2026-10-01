@@ -209,7 +209,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
       covered =
         Map.keys(original) ++
           [:blocks, :category_id, :featured_image_id] ++
-          [:working_title, :working_blocks, :working_copy_at, :working_fields]
+          [:working_title, :working_blocks, :working_copy_at, :working_fields, :working_base]
 
       assert Enum.sort(VersionFields.restorable_fields(KilnCMS.CMS.Page)) == Enum.sort(covered)
     end
@@ -230,7 +230,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
                ~w(title working_title slug path_alias excerpt audience locale
                   seo_title seo_description seo_keywords seo_image canonical_url
                   category_id featured_image_id custom_fields blocks
-                  working_blocks working_copy_at working_fields)a
+                  working_base working_blocks working_copy_at working_fields)a
     end
 
     test "restorable? answers about the resource, not about a name in the abstract" do

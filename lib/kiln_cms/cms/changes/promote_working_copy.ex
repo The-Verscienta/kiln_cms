@@ -108,8 +108,8 @@ defmodule KilnCMS.CMS.Changes.PromoteWorkingCopy do
     Ash.Changeset.add_error(changeset,
       field: :working_copy_at,
       message:
-        "conflicts with a change made on the live page after the draft was saved (%{fields})",
-      vars: [fields: Enum.join(keys, ", ")]
+        "conflicts with a change made on the live page after the draft was saved (" <>
+          Enum.join(keys, ", ") <> ")"
     )
   end
 
