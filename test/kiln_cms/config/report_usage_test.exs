@@ -35,6 +35,7 @@ defmodule KilnCMS.Config.ReportUsageTest do
 
     expected = ~w(
       warn_if_no_mailer_in_prod
+      warn_if_public_base_url_local
       warn_if_strict_host_false_ignored
       warn_if_console_shares_origin
       warn_if_console_host_outside_rp_id
