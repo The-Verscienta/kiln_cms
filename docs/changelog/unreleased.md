@@ -912,6 +912,20 @@ carries the reasoning.
   width, `16rem`
   ([#1755](https://github.com/The-Verscienta/kiln_cms/issues/1755)).
 
+<a id="the-database-connection-no-longer-logs-ssl-opts-deprecated"></a>
+
+- **The database connection no longer logs `:ssl_opts is deprecated` on every
+  boot and every `bin/kiln_cms eval`.**
+  `config/runtime/prod/database.exs` passed TLS settings as `ssl: true` plus
+  `ssl_opts:`, a pair Postgrex has deprecated. It now passes them on `:ssl`
+  itself. Postgrex merges `:ssl` options over its secure defaults rather than
+  using `:ssl_opts` verbatim, so the connection is unchanged in practice: with
+  no `DATABASE_SSL_CACERTFILE` it still encrypts without verifying
+  (`verify: :verify_none` overrides the default), and with one it still
+  verifies the chain, now through Postgrex's HTTPS-style hostname match,
+  which also accepts a wildcard certificate. `DATABASE_SSL=false` still turns
+  TLS off.
+
 ## Security
 
 <a id="password-rotation-revokes-every-session"></a>

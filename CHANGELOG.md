@@ -317,6 +317,10 @@ Every summary line below that was shortened links to its own entry there.
   width token.**
   ([#1755](https://github.com/The-Verscienta/kiln_cms/issues/1755) · [long form](docs/changelog/unreleased.md#the-console-keeps-its-two-columns-without-the-sidebar-width-token))
 
+- **The database connection no longer logs `:ssl_opts is deprecated` on every
+  boot and every `bin/kiln_cms eval`.**
+  ([long form](docs/changelog/unreleased.md#the-database-connection-no-longer-logs-ssl-opts-deprecated))
+
 ### Security
 
 - **Changing or resetting a password now signs out every other session and

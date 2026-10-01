@@ -119,6 +119,12 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
     %{"DATABASE_SSL" => value} |> eval() |> get_in([:kiln_cms, KilnCMS.Repo, :ssl])
   end
 
+  # TLS is on when `:ssl` carries its options (a keyword list), off when `false`.
+  defp encrypts?(value) do
+    ssl = repo_ssl(value)
+    is_list(ssl) and ssl != []
+  end
+
   describe "image transforms" do
     defp transforms(vars), do: vars |> eval() |> get_in([:kiln_cms, :image_transforms])
 
@@ -155,14 +161,14 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
 
   describe "DATABASE_SSL (#606)" do
     test "unset encrypts — the safe default is unchanged" do
-      assert repo_ssl(nil) == true
+      assert encrypts?(nil)
     end
 
     test "every on-spelling encrypts, whatever the case or padding" do
       # The regression: `True`, `TRUE` and `" true "` all fell through to
       # `false` and silently downgraded the connection to plaintext.
       for value <- ["true", "True", "TRUE", " true ", "1", "yes", "on", "On"] do
-        assert repo_ssl(value) == true,
+        assert encrypts?(value),
                "DATABASE_SSL=#{inspect(value)} must not disable Postgres TLS"
       end
     end
@@ -175,18 +181,18 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
 
     test "an unrecognized value keeps TLS on and warns, rather than downgrading" do
       for value <- ["enabled", ~s("true"), "y", "maybe"] do
-        assert repo_ssl(value) == true,
+        assert encrypts?(value),
                "DATABASE_SSL=#{inspect(value)} must not be read as a request for plaintext"
       end
     end
 
-    test "ssl_opts are attached whenever TLS is on, and omitted when it is off" do
-      # Regression guard for the `++ if(database_ssl?, ...)` tail: a mismatch
-      # between the `ssl:` flag and `ssl_opts:` would either error at connect
-      # or silently drop peer verification.
+    test "TLS options ride on `:ssl` when TLS is on, and `:ssl` is false when off" do
+      # Postgrex takes its TLS options on `:ssl` and merges them over its secure
+      # defaults; the deprecated `:ssl_opts` key is used verbatim and logs a
+      # warning on every connect, so it must not come back.
       on = eval(%{"DATABASE_SSL" => "True"}) |> get_in([:kiln_cms, KilnCMS.Repo])
-      assert on[:ssl] == true
-      assert on[:ssl_opts] == [verify: :verify_none]
+      assert on[:ssl] == [verify: :verify_none]
+      refute Keyword.has_key?(on, :ssl_opts)
 
       off = eval(%{"DATABASE_SSL" => "false"}) |> get_in([:kiln_cms, KilnCMS.Repo])
       assert off[:ssl] == false
@@ -195,7 +201,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
   end
 
   describe "DATABASE_SSL_CACERTFILE" do
-    defp ssl_opts(vars), do: vars |> eval() |> get_in([:kiln_cms, KilnCMS.Repo, :ssl_opts])
+    defp ssl_opts(vars), do: vars |> eval() |> get_in([:kiln_cms, KilnCMS.Repo, :ssl])
 
     test "a path switches on peer verification" do
       opts = ssl_opts(%{"DATABASE_SSL_CACERTFILE" => "/etc/ssl/ca.pem"})
