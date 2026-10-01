@@ -456,14 +456,18 @@ defmodule KilnCMS.Mail do
         raise MailerCrashError, message: "mailer crashed: #{what}"
 
       {relay, email, {:error, reason}} ->
-        safe_reason = redact_reason(reason)
+        handle_failure(email, reason, relay, org_id)
+    end
+  end
 
-        case failure_class(reason) do
-          :recipient -> cancel_permanent(email, safe_reason, true, relay, org_id)
-          :message -> cancel_permanent(email, safe_reason, false, relay, org_id)
-          :relay -> retry_relay_refused(email, safe_reason, relay)
-          :transient -> retry_transient(email, reason, safe_reason, relay)
-        end
+  defp handle_failure(email, reason, relay, org_id) do
+    safe_reason = redact_reason(reason)
+
+    case failure_class(reason) do
+      :recipient -> cancel_permanent(email, safe_reason, true, relay, org_id)
+      :message -> cancel_permanent(email, safe_reason, false, relay, org_id)
+      :relay -> retry_relay_refused(email, safe_reason, relay)
+      :transient -> retry_transient(email, reason, safe_reason, relay)
     end
   end
 
@@ -479,11 +483,7 @@ defmodule KilnCMS.Mail do
   defp route(email, org_id, config) do
     case SiteRelay.route(email, org_id) do
       {:operator, email} ->
-        if operator_unconfigured?(config) do
-          :not_configured
-        else
-          {:operator, email, guard_crash(fn -> Mailer.deliver(email, config) end)}
-        end
+        route_operator(email, config)
 
       {:site, email, site_config} ->
         site_config = Keyword.merge(site_config, config)
@@ -492,6 +492,12 @@ defmodule KilnCMS.Mail do
       {:error, reason} ->
         {:held, reason}
     end
+  end
+
+  defp route_operator(email, config) do
+    if operator_unconfigured?(config),
+      do: :not_configured,
+      else: {:operator, email, guard_crash(fn -> Mailer.deliver(email, config) end)}
   end
 
   # The one place a mail adapter runs. A crash's own term is dropped here, in
