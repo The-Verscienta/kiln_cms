@@ -497,13 +497,28 @@ defmodule KilnCMSWeb.ReleaseLive do
   defp view_label("published"), do: gettext("Published")
   defp view_label("closed"), do: gettext("Closed")
 
-  defp readiness_note(nil), do: nil
-  defp readiness_note(:apply), do: nil
+  # Said per item and per record, because "already in that state" read as a
+  # bug on a live page someone had just edited (#1815): a publish of a live
+  # record either ships its saved changes or has nothing to ship, and the note
+  # says which.
+  defp readiness_note(_item, _record, nil), do: nil
 
-  defp readiness_note({:skip, :already_in_state}),
-    do: {"outline", gettext("already in that state — will be skipped")}
+  defp readiness_note(%{action: :publish}, %{state: :published}, :apply),
+    do: {"info", gettext("Live — publishes the saved changes")}
 
-  defp readiness_note({:error, reason}), do: {"error", reason}
+  defp readiness_note(_item, _record, :apply), do: nil
+
+  defp readiness_note(%{action: :publish}, _record, {:skip, :already_in_state}),
+    do: {"outline", gettext("Live, no unpublished changes — nothing to publish")}
+
+  defp readiness_note(_item, _record, {:skip, :already_in_state}),
+    do: {"outline", gettext("Already unpublished — will be skipped")}
+
+  defp readiness_note(_item, _record, {:error, reason}) do
+    if reason == Releases.live_changed(),
+      do: {"error", gettext("Live page changed since the draft — review before releasing")},
+      else: {"error", reason}
+  end
 
   # --- render ----------------------------------------------------------------
 
@@ -700,7 +715,10 @@ defmodule KilnCMSWeb.ReleaseLive do
                     <% else %>
                       <span class="text-base-content/60">{gettext("Content no longer exists")}</span>
                     <% end %>
-                    <p :if={note = readiness_note(@readiness[item.id])} class="mt-1">
+                    <p
+                      :if={note = readiness_note(item, @titles[item.id], @readiness[item.id])}
+                      class="mt-1"
+                    >
                       <.badge variant={elem(note, 0)}>{elem(note, 1)}</.badge>
                     </p>
                   </td>
