@@ -43,14 +43,16 @@ database_ssl_opts =
 
 config :kiln_cms,
        KilnCMS.Repo,
-       [
-         url: database_url,
-         # Shared by web requests and Oban workers (~34 concurrent across the
-         # split queues) — size up from 10 in production. See the pool-sizing
-         # formula in docs/performance.md.
-         pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
-         # For machines with several cores, consider starting multiple pools of `pool_size`
-         # pool_count: 4,
-         socket_options: maybe_ipv6,
-         ssl: database_ssl?
-       ] ++ if(database_ssl?, do: [ssl_opts: database_ssl_opts], else: [])
+       url: database_url,
+       # Shared by web requests and Oban workers (~34 concurrent across the
+       # split queues) — size up from 10 in production. See the pool-sizing
+       # formula in docs/performance.md.
+       pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
+       # For machines with several cores, consider starting multiple pools of `pool_size`
+       # pool_count: 4,
+       socket_options: maybe_ipv6,
+       # Postgrex takes TLS options on `:ssl` itself and merges them over its
+       # secure defaults (`verify: :verify_peer` plus an HTTPS-style hostname
+       # check). The old `ssl: true, ssl_opts: …` pair is deprecated and logs a
+       # warning on every boot and every `bin/kiln_cms eval`.
+       ssl: if(database_ssl?, do: database_ssl_opts, else: false)

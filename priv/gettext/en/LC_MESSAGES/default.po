@@ -51,6 +51,11 @@ msgstr ""
 msgid "%{action}: %{count} updated, %{skipped} skipped"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{browser} on %{platform}"
+msgstr ""
+
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{checked} links checked, %{waiting} still to check."
@@ -1443,6 +1448,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Active (accepting submissions)"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Active now"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Active sessions"
 msgstr ""
 
 #: lib/kiln_cms_web/live/federation_live.ex
@@ -4152,6 +4167,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
+msgid "Couldn't sign out of your other sessions. Try again."
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
 msgid "Couldn't start two-factor setup."
 msgstr ""
 
@@ -5098,11 +5118,11 @@ msgid "Dismiss"
 msgstr ""
 
 #: lib/kiln_cms_web/live/federation_live.ex
-#: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Display name"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Display name (optional)"
@@ -7065,6 +7085,11 @@ msgstr ""
 msgid "How this instance sends email, and its DNS records."
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "How your name appears to readers and to the people you work with."
+msgstr ""
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "I have a team — review before publishing"
@@ -8426,11 +8451,6 @@ msgstr ""
 msgid "Name"
 msgstr ""
 
-#: lib/kiln_cms_web/live/settings_live.ex
-#, elixir-autogen, elixir-format
-msgid "Name (e.g. \"MacBook Touch ID\")"
-msgstr ""
-
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
 msgid "Name (optional)"
@@ -8439,6 +8459,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Name it"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Name this passkey (optional)"
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -9009,6 +9034,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "No open tasks."
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "No passkeys yet. You sign in with your password."
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
@@ -10013,11 +10043,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Paragraph text"
-msgstr ""
-
-#: lib/kiln_cms_web/live/settings_live.ex
-#, elixir-autogen, elixir-format
-msgid "Passkey"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -12069,6 +12094,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
+#: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
@@ -12104,6 +12130,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/locale_settings_live.ex
+#: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #: lib/kiln_cms_web/live/site_push_live.ex
@@ -12745,6 +12772,11 @@ msgstr ""
 msgid "Shown as the author byline on what you publish."
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Shown as the author of content you publish, on your comments, and to people editing at the same time as you."
+msgstr ""
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "Shown in the header, the page title, and sign-in emails."
@@ -12805,13 +12837,29 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/auth_page_title.ex
+#: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Sign out"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sign out %{device}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sign out every other browser and device? This one stays signed in."
 msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Sign out everywhere"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sign out of all other sessions"
 msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
@@ -12840,14 +12888,31 @@ msgstr ""
 msgid "Signed in with a passkey."
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Signed out of %{count} other session."
+msgid_plural "Signed out of %{count} other sessions."
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Signed out of every session."
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Signed out of that session."
+msgstr ""
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Signing key"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Signing out…"
 msgstr ""
 
 #: lib/kiln_cms_web/live/webhook_live.ex
@@ -13206,6 +13271,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Started from “%{recipe}”. Change anything you like, then add the rule."
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Starting…"
 msgstr ""
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
@@ -13983,6 +14053,11 @@ msgstr ""
 msgid "That segment no longer exists."
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "That session has already ended."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/site_sso_controller.ex
 #, elixir-autogen, elixir-format
 msgid "That sign-in link has expired. Start again."
@@ -14096,6 +14171,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "The block this task was anchored to has been removed."
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "The browsers and devices signed in to your account. If you don't recognize one, sign it out and change your password."
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
@@ -14931,6 +15011,16 @@ msgstr ""
 msgid "This segment has no confirmed subscribers. Pick another segment, or add and confirm subscribers first."
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "This session"
+msgstr ""
+
+#: lib/kiln_cms_web/session_tracking.ex
+#, elixir-autogen, elixir-format
+msgid "This session was signed out from another device."
+msgstr ""
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "This setting applies to this form only — another site's forms are unaffected by what you allow here."
@@ -15508,6 +15598,11 @@ msgstr ""
 msgid "Unknown"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Unknown browser"
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/content_html/lock.html.heex
 #, elixir-autogen, elixir-format
 msgid "Unlock"
@@ -16043,6 +16138,11 @@ msgstr ""
 msgid "Visual separator between sections"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Waiting for your device… Follow your browser's prompt to finish."
+msgstr ""
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Warning"
@@ -16537,6 +16637,13 @@ msgstr ""
 msgid "You don't have permission to view this page."
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "You have %{count} passkey set up."
+msgid_plural "You have %{count} passkeys set up."
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/controllers/auth_controller.ex
 #, elixir-autogen, elixir-format
 msgid "You have already signed in another way, but have not confirmed your account. You can confirm your account using the link we sent to you, or by resetting your password."
@@ -16611,6 +16718,11 @@ msgstr ""
 msgid "You were mentioned"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "You weren't signed in anywhere else."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
 #, elixir-autogen, elixir-format
 msgid "You won't receive further newsletters at %{email}."
@@ -16624,6 +16736,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
 msgid "You're not receiving the newsletter."
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "You're not signed in anywhere else."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/offline_controller.ex
@@ -16691,11 +16808,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Your data"
-msgstr ""
-
-#: lib/kiln_cms_web/live/settings_live.ex
-#, elixir-autogen, elixir-format
-msgid "Your display name is used as the author byline on content you publish."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/auth_controller.ex
@@ -17130,6 +17242,16 @@ msgstr ""
 msgid "e.g. Acme staff"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "e.g. Alex Rivera"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "e.g. MacBook Touch ID"
+msgstr ""
+
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "e.g. fr, en"
@@ -17382,6 +17504,11 @@ msgstr ""
 msgid "larger than the %{max} MB limit"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "last active %{ago} ago"
+msgstr ""
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "last checked"
@@ -17460,6 +17587,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "no key — mail goes out unsigned"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "no recent activity recorded"
 msgstr ""
 
 #: lib/kiln_cms_web/components/core_components.ex
@@ -17736,6 +17868,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "signed by a key we no longer hold"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "signed in %{date}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex

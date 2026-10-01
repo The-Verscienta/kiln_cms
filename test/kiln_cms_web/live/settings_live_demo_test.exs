@@ -80,14 +80,18 @@ defmodule KilnCMSWeb.SettingsLiveDemoTest do
     |> Floki.text()
   end
 
-  test "an editor sees a note in place of the password, two-factor and passkey forms",
+  test "an editor sees a note in place of the password, two-factor, passkey and session controls",
        %{conn: conn} do
     lv = open(conn, authed_user(:editor))
 
-    assert notes(lv) == [@note, @note, @note]
+    assert notes(lv) == [@note, @note, @note, @note]
     refute has_element?(lv, "#password-form")
     refute has_element?(lv, ~s(button[phx-click="start_totp"]))
     refute has_element?(lv, "#add-passkey-form")
+    # Every visitor shares the account, so its session list is everyone's
+    # browsers — and "sign out of all other sessions" would sign them all out.
+    refute has_element?(lv, "#session-list")
+    refute has_element?(lv, "#sign-out-other-sessions")
     # Everything else on the page is untouched.
     assert has_element?(lv, "#profile-form")
     assert has_element?(lv, "#notification-prefs-form")
@@ -131,5 +135,15 @@ defmodule KilnCMSWeb.SettingsLiveDemoTest do
 
     assert flash_error(lv) =~ @note
     refute_push_event(lv, "passkey-register", %{})
+  end
+
+  test "signing out other sessions sent anyway is refused with the note", %{conn: conn} do
+    lv = open(conn, authed_user(:editor))
+
+    render_hook(lv, "sign_out_other_sessions", %{})
+    assert flash_error(lv) =~ @note
+
+    render_hook(lv, "sign_out_session", %{"id" => "anything"})
+    assert flash_error(lv) =~ @note
   end
 end

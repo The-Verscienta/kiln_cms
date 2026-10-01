@@ -74,6 +74,41 @@ defmodule KilnCMS.Accounts.SessionEviction do
   def topic(user_id) when is_binary(user_id), do: "user_sockets:#{user_id}"
 
   @doc """
+  The PubSub topic one signed-in session's LiveViews listen on (#1823), keyed
+  by the jti of the session's token.
+
+  `evict/2` reaches every socket a *user* has; signing out one device from the
+  settings page must leave the others alone, so each LiveView also subscribes
+  here — see `KilnCMSWeb.SessionTracking`. The LiveView socket's own
+  `live_socket_id` stays per-user, so `evict/2` still reaches it.
+  """
+  @spec session_topic(String.t()) :: String.t()
+  def session_topic(jti) when is_binary(jti), do: "user_session:#{jti}"
+
+  @doc """
+  Close the LiveViews of one session, named by its token's jti (#1823).
+
+  Each one redirects to sign-in. Its token must already be revoked: what makes
+  this an eviction rather than a page reload is that the rejoin and the next
+  request both find the token gone and are refused. Same contract as `evict/2`:
+  always `:ok`, failures logged.
+  """
+  @spec evict_session(String.t(), atom()) :: :ok
+  def evict_session(jti, reason) when is_binary(jti) do
+    Logger.info("Evicting live sockets for one session: #{reason}")
+    Phoenix.PubSub.broadcast(KilnCMS.PubSub, session_topic(jti), {:session_revoked, jti})
+    :ok
+  rescue
+    error ->
+      Logger.warning("Session eviction failed: #{Exception.message(error)}")
+      :ok
+  catch
+    :exit, reason ->
+      Logger.warning("Session eviction exited: #{inspect(reason)}")
+      :ok
+  end
+
+  @doc """
   Drop every live socket belonging to `user_id`.
 
   Always returns `:ok`. Failures are swallowed and logged: this runs inside the

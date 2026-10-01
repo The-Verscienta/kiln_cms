@@ -12,6 +12,12 @@ defmodule KilnCMS.Accounts.Token do
   those three have to be put back** — without them
   `KilnCMS.Accounts.PendingSignIn` can neither make a pending sign-in single-use
   nor withhold the token it carries.
+
+  The session list on the settings page (#1823) adds five more, and four
+  columns: `:own_sessions` / `:own_tokens` / `:revoke_own_session` (the account's own, by
+  `KilnCMS.Accounts.Checks.OwnsToken`) and `:record_sign_in` /
+  `:record_session_use` (system bookkeeping), plus `browser`, `platform`,
+  `last_used_at` and `remember_me_jti`. See `KilnCMS.Accounts.Sessions`.
   """
   use Ash.Resource,
     otp_app: :kiln_cms,
@@ -64,9 +70,25 @@ defmodule KilnCMS.Accounts.Token do
   # sitting live for the JWT's own fourteen days.
   @second_factor_hold_ttl 360
 
+  # A remember-me cookie's row (AshAuthentication's purpose, as `"user"` is).
+  @remember_me_purpose "remember_me"
+
+  # How stale `last_used_at` must be before a page load writes it again
+  # (#1823). The list shows "last active" to the minute at best, and a write
+  # per LiveView mount would put an UPDATE on every navigation.
+  @last_used_interval_minutes 5
+
   @doc "The `purpose` a live, usable stored token carries — AshAuthentication's (#742)."
   @spec user_purpose() :: String.t()
   def user_purpose, do: @user_purpose
+
+  @doc "The `purpose` a remember-me cookie's token is stored under (#1823)."
+  @spec remember_me_purpose() :: String.t()
+  def remember_me_purpose, do: @remember_me_purpose
+
+  @doc "Minutes between two `last_used_at` writes for one session (#1823)."
+  @spec last_used_interval_minutes() :: pos_integer()
+  def last_used_interval_minutes, do: @last_used_interval_minutes
 
   @doc "The `purpose` a first-factor token is parked under while a code is owed (#742)."
   @spec second_factor_hold_purpose() :: String.t()
@@ -276,6 +298,91 @@ defmodule KilnCMS.Accounts.Token do
       change set_attribute(:expires_at, arg(:expires_at))
     end
 
+    # --- the session list on the settings page (#1823) ----------------------
+    #
+    # A browser session is a stored `"user"` token: AshAuthentication checks
+    # the row on every request (`require_token_presence_for_authentication?`),
+    # so the row's purpose IS whether the session works. These four read and
+    # write that row and nothing else. See `KilnCMS.Accounts.Sessions`.
+
+    read :own_sessions do
+      description "The actor's own signed-in sessions that can still be used."
+      # Scoped to the actor by the `OwnsToken` policy below, not here: a
+      # filter in the action would be a second, weaker statement of the rule.
+      filter expr(purpose == ^@user_purpose and expires_at > now())
+      prepare build(sort: [last_used_at: :desc_nils_last, created_at: :desc])
+    end
+
+    # Every row the actor owns, whatever its purpose — the read the revocation
+    # below runs through (`read_action:` on the bulk update), since a session's
+    # remember-me row is not a `"user"` row and `:own_sessions` would not see it.
+    read :own_tokens do
+      description "Every stored token row the actor owns."
+    end
+
+    # Sign out one of the actor's sessions, or the remember-me cookie that
+    # would otherwise sign that browser straight back in. The same verdict
+    # AshAuthentication's own revocations write: the row's purpose becomes
+    # `"revocation"`, which `IsRevoked` reads and `:get_token` no longer finds
+    # under `"user"`. The expiry is left alone — the row is collected when the
+    # JWT would have lapsed anyway.
+    update :revoke_own_session do
+      description "Sign out one of the actor's own sessions."
+      accept []
+
+      # A held first-factor sign-in (#742) is in the list so "sign out of all
+      # other sessions" also ends one waiting at the code prompt elsewhere.
+      change filter(
+               expr(
+                 purpose in ^[@user_purpose, @remember_me_purpose, @second_factor_hold_purpose]
+               )
+             )
+
+      change set_attribute(:purpose, "revocation")
+    end
+
+    # Stamped once per sign-in, by `KilnCMSWeb.Plugs.SessionTracking` on the
+    # response that established the session. Coarse labels only — never the
+    # raw user agent, never an address.
+    update :record_sign_in do
+      description "Note which browser a session signed in from, and its remember-me cookie."
+      accept []
+      argument :browser, :string, constraints: [max_length: 40]
+      argument :platform, :string, constraints: [max_length: 40]
+      argument :remember_me_jti, :string, sensitive?: true
+
+      change filter(expr(purpose == ^@user_purpose))
+      change set_attribute(:browser, arg(:browser))
+      change set_attribute(:platform, arg(:platform))
+      change set_attribute(:remember_me_jti, arg(:remember_me_jti))
+      change atomic_update(:last_used_at, expr(now()))
+    end
+
+    # Bumped by a signed-in LiveView's mount — at most once per interval, by
+    # the filter, so a burst of navigation is one write and the rest match no
+    # row. The browser labels are refreshed with it: a session whose label
+    # changes under it is a cookie being used somewhere else.
+    update :record_session_use do
+      description "Note that a session was just used, at most once per interval."
+      accept []
+      argument :browser, :string, constraints: [max_length: 40]
+      argument :platform, :string, constraints: [max_length: 40]
+
+      change filter(
+               expr(
+                 purpose == ^@user_purpose and
+                   (is_nil(last_used_at) or
+                      last_used_at < ago(^@last_used_interval_minutes, :minute))
+               )
+             )
+
+      # Only when the socket said: a mount that could not read a user agent
+      # keeps the label the sign-in wrote rather than blanking it.
+      change set_attribute(:browser, arg(:browser)), where: present(:browser)
+      change set_attribute(:platform, arg(:platform)), where: present(:platform)
+      change atomic_update(:last_used_at, expr(now()))
+    end
+
     destroy :expunge_expired do
       description "Deletes expired tokens."
       change filter(expr(expires_at < now()))
@@ -319,6 +426,22 @@ defmodule KilnCMS.Accounts.Token do
     policy action([:hold_for_second_factor, :release_second_factor_hold]) do
       forbid_if always()
     end
+
+    # Your own sessions, and nobody else's (#1823) — admins included: an
+    # administrator signs another account out with "Sign out everywhere" on the
+    # Accounts page (`:log_out_everywhere`), not by reading its device list.
+    # A filter check, so a jti naming another account's row matches nothing.
+    policy action([:own_sessions, :own_tokens, :revoke_own_session]) do
+      authorize_if KilnCMS.Accounts.Checks.OwnsToken
+    end
+
+    # Bookkeeping with no actor to authorize — the sign-in response and a
+    # mount, keyed by a jti read from the signed session. Called with
+    # `authorize?: false` by `KilnCMS.Accounts.Sessions` only; everyone else
+    # is refused by name, as with the pairs above.
+    policy action([:record_sign_in, :record_session_use]) do
+      forbid_if always()
+    end
   end
 
   attributes do
@@ -346,6 +469,29 @@ defmodule KilnCMS.Accounts.Token do
 
     attribute :extra_data, :map do
       public? true
+    end
+
+    # Session metadata for the settings page's list (#1823). All nullable: a
+    # row minted before this, an API sign-in, or a non-session purpose has
+    # none. Coarse family names ("Firefox", "macOS"), never the user agent.
+    attribute :browser, :string do
+      public? true
+      constraints max_length: 40
+    end
+
+    attribute :platform, :string do
+      public? true
+      constraints max_length: 40
+    end
+
+    attribute :last_used_at, :utc_datetime_usec do
+      public? true
+    end
+
+    # The remember-me cookie issued to the same browser, so signing that
+    # session out also stops the cookie signing it straight back in.
+    attribute :remember_me_jti, :string do
+      sensitive? true
     end
 
     create_timestamp :created_at
