@@ -187,7 +187,7 @@ test.describe("connection notices", () => {
     await page.evaluate(() => {
       const socket = /** @type {any} */ (window).liveSocket.socket;
       socket.longPollFallbackMs = 0;
-      socket.reconnectAfterMs = () => 60_000;
+      socket.reconnectTimer.timerCalc = () => 60_000;
     });
     await line?.close({ code: 4000, reason: "e2e drop" });
 
