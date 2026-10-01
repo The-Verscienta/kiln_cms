@@ -72,28 +72,26 @@ defmodule KilnCMS.Config.PublicBaseUrl do
     uri = raw |> String.trim() |> URI.parse()
     scheme = uri.scheme && String.downcase(uri.scheme)
 
+    if why = problem(uri, scheme) do
+      invalid!(raw, source, why)
+    else
+      URI.to_string(%URI{
+        scheme: scheme,
+        host: uri.host |> String.downcase() |> String.trim_trailing("."),
+        port: uri.port
+      })
+    end
+  end
+
+  # Why `uri` is not a bare http(s) origin, or nil when it is.
+  defp problem(uri, scheme) do
     cond do
-      scheme not in ["http", "https"] ->
-        invalid!(raw, source, "it must start with https:// (or http://)")
-
-      uri.host in [nil, ""] ->
-        invalid!(raw, source, "it has no host name")
-
-      uri.userinfo != nil ->
-        invalid!(raw, source, "it must not carry a user name or password")
-
-      uri.path not in [nil, "", "/"] ->
-        invalid!(raw, source, "it must not have a path (#{inspect(uri.path)})")
-
-      uri.query != nil or uri.fragment != nil ->
-        invalid!(raw, source, "it must not have a query string or fragment")
-
-      true ->
-        URI.to_string(%URI{
-          scheme: scheme,
-          host: uri.host |> String.downcase() |> String.trim_trailing("."),
-          port: uri.port
-        })
+      scheme not in ["http", "https"] -> "it must start with https:// (or http://)"
+      uri.host in [nil, ""] -> "it has no host name"
+      uri.userinfo != nil -> "it must not carry a user name or password"
+      uri.path not in [nil, "", "/"] -> "it must not have a path (#{inspect(uri.path)})"
+      uri.query != nil or uri.fragment != nil -> "it must not have a query string or fragment"
+      true -> nil
     end
   end
 
