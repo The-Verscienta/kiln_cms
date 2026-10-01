@@ -122,6 +122,7 @@ shape that silently re-enables a cadence a team deliberately cleared.
 | Lane | Comes from |
 |---|---|
 | Scheduled publish | a draft/in-review record's `scheduled_at` |
+| Proposed publish | a draft/in-review record's `proposed_publish_at` (see below) |
 | Scheduled unpublish / archive / expired | a published record's `unpublish_at`, split by `expiry_action` |
 | Went live | `published_at` |
 | Review due | the `due_at` calculation |
@@ -181,6 +182,7 @@ is a 09:00 Thursday publish.
 | Scheduled publish | `scheduled_at` |
 | Scheduled unpublish / archive / expired | `unpublish_at` |
 | Release go-live | the release's `scheduled_at` |
+| Proposed publish | — confirmed by an admin, not dragged (see below) |
 | Went live, release shipped | — history; nothing to reschedule |
 | Task due | — the chip carries the task's *content* id; reschedule from the task list |
 | Review due | — see below |
@@ -345,6 +347,24 @@ leaks.
 `review_after_days`, `expiry_action` and `unpublish_at` are ordinary accepted
 attributes on `:update`, so they are editor+admin writable exactly like
 `scheduled_at`. `mark_reviewed` is an update action and follows the same policy.
+
+### Proposed publish dates
+
+Setting `scheduled_at` takes the same permission as publishing (an admin, or
+an editor on a site that lets editors publish). An editor without it can
+still ask for a date: `proposed_publish_at` (#1812). The calendar's "+" on a
+day sets it for them, and they can change it in the editor's schedule area.
+It publishes nothing: no scheduler reads it. It is drawn on the calendar in
+its own dashed "Proposed" lane, which does not drag, and shown on the
+content list's row, so a reviewer sees it next to the submission. Someone
+who may publish turns it into the schedule with *Confirm date* on that row
+(an ordinary write of `scheduled_at`, authorized like any other), or with
+*Use this date* in the editor followed by Save. Setting any `scheduled_at`,
+or publishing, clears the proposal (`Changes.ClearProposedPublishAt`).
+
+`proposed_publish_at` is internal (`public? false`), like the working copy's
+columns: it is not on the JSON:API, GraphQL or delivery surfaces, and it is
+not restored by a version restore.
 The expiry workers run under the `AshOban` interaction bypass, as scheduled
 publishing does.
 

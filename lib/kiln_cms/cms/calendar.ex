@@ -173,14 +173,7 @@ defmodule KilnCMS.CMS.Calendar do
       actor: actor,
       tenant: org,
       query: [
-        filter:
-          expr(
-            (scheduled_at >= ^from and scheduled_at < ^to) or
-              (proposed_publish_at >= ^from and proposed_publish_at < ^to) or
-              (unpublish_at >= ^from and unpublish_at < ^to) or
-              (published_at >= ^from and published_at < ^to) or
-              (due_at >= ^from and due_at < ^to)
-          ),
+        filter: in_window_filter(from, to),
         select: [
           :id,
           :title,
@@ -201,6 +194,17 @@ defmodule KilnCMS.CMS.Calendar do
       ]
     )
     |> Enum.flat_map(&record_events(ct, &1, from, to))
+  end
+
+  # Any of the dates a content lane plots falls in the half-open window.
+  defp in_window_filter(from, to) do
+    expr(
+      (scheduled_at >= ^from and scheduled_at < ^to) or
+        (proposed_publish_at >= ^from and proposed_publish_at < ^to) or
+        (unpublish_at >= ^from and unpublish_at < ^to) or
+        (published_at >= ^from and published_at < ^to) or
+        (due_at >= ^from and due_at < ^to)
+    )
   end
 
   # A record's events: each date field that falls in the window, while the

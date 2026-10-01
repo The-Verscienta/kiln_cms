@@ -258,16 +258,29 @@ carries the reasoning.
   its number (a real button, announced as "New content on 14 October").
   It opens a small dialog listing the content types you may create, the same
   list as the content page's New buttons. Choosing one opens the editor on a
-  new, unsaved document with that day at 09:00 UTC as its scheduled publish
-  date; the draft is created with that date as soon as you give it a title or
-  press Save draft, and *Don't schedule* drops it. 09:00 is in UTC because the
+  new, unsaved document with that day at 09:00 UTC as its publish date. The
+  draft is created with that date as soon as you give it a title or press
+  Save draft, and *Remove the date* drops it. 09:00 is in UTC because the
   calendar groups days in UTC, so the new item always lands on the day you
-  clicked. Days whose 09:00 UTC has passed offer no "+". Setting a publish
-  date takes the same permission as publishing, so the button is shown only to
-  admins, and to editors on sites that let editors publish. The editor's new
+  clicked. Days whose 09:00 UTC has passed offer no "+". The editor's new
   `?scheduled_at=` link parameter ignores anything that is not a future
-  timestamp, or that the writer may not set, and opens an ordinary draft
-  instead ([#1812](https://github.com/The-Verscienta/kiln_cms/issues/1812)).
+  timestamp and opens an ordinary draft instead.
+
+  Setting a publish date takes the same permission as publishing. So for an
+  admin, or an editor on a site that lets editors publish, the day becomes
+  the scheduled publish date. Any other editor gets the "+" too, but their
+  day becomes a **proposed** publish date: a new internal column,
+  `proposed_publish_at`, that publishes nothing by itself. They can change it
+  in the editor's schedule area ("An admin confirms the date"). The calendar
+  draws it in its own dashed "Proposed" lane that cannot be dragged, and the
+  content list shows it on the row, so a reviewer sees it with the
+  submission. Someone who may publish turns it into the schedule with
+  *Confirm date* on that row, or with *Use this date* in the editor and Save.
+  Setting any publish date, or publishing, clears the proposal. The column is
+  not on the JSON:API, GraphQL or delivery APIs, and a version restore leaves
+  it alone. It is a new nullable column on every content table (an
+  expand-only migration, including the example overlay's tables)
+  ([#1812](https://github.com/The-Verscienta/kiln_cms/issues/1812)).
 
 <a id="editing-in-place-can-add-blocks"></a>
 

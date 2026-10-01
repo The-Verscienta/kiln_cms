@@ -153,7 +153,8 @@ Every summary line below that was shortened links to its own entry there.
   ([#1805](https://github.com/The-Verscienta/kiln_cms/issues/1805) · [long form](docs/changelog/unreleased.md#add-tags-and-categories-from-the-editor))
 
 - **Start new content from a day on the calendar: press its "+", choose a type,
-  and the editor opens with that day as the publish date.**
+  and the editor opens with that day as the publish date (a proposed date, for
+  editors who may not publish, that an admin confirms).**
   ([#1812](https://github.com/The-Verscienta/kiln_cms/issues/1812) · [long form](docs/changelog/unreleased.md#new-content-on-a-calendar-day))
 
 ### Changed
