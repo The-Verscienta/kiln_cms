@@ -210,6 +210,11 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **"We can't find the internet" and "Something went wrong!" no longer flash on
+  a first page load; they wait until a connection problem has lasted a few
+  seconds, and offer *Try again*.**
+  ([#1821](https://github.com/The-Verscienta/kiln_cms/issues/1821) · [long form](docs/changelog/unreleased.md#connection-notices-wait-out-a-slow-first-connection))
+
 - **Save draft on a published entry no longer puts any field live; *Publish
   changes* or a release publishes every saved change at once.**
   ([#1815](https://github.com/The-Verscienta/kiln_cms/issues/1815) · [long form](docs/changelog/unreleased.md#save-draft-on-a-published-entry-holds-every-content-field))

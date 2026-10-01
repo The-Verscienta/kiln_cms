@@ -35,6 +35,7 @@ import {SavedTicker} from "./saved_ticker"
 import {TabKeys} from "./tab_keys"
 import {BodyImageUploader} from "./body_image_uploader"
 import {watchLiveness} from "./liveness"
+import {watchConnectionNotices} from "./connection_notice"
 
 const clamp01 = (n) => Math.min(Math.max(n, 0), 1)
 
@@ -1202,6 +1203,9 @@ liveSocket.connect()
 // A line that is cut without a goodbye looks exactly like a working one; this
 // asks for itself while the page is in front and rebuilds a quiet line.
 watchLiveness(liveSocket)
+// "We can't find the internet" / "Something went wrong!" only once the trouble
+// has lasted, with a "Try again" button (#1821) — see connection_notice.js.
+watchConnectionNotices(liveSocket)
 
 // Installable editor PWA (#65). Gated on the manifest link, which the root
 // layout emits only for authorised editors/admins — so a public reader browsing
