@@ -152,18 +152,20 @@ defmodule KilnCMS.CMS.Changes.StageWorkingFields do
 
       :error ->
         name = to_string(argument)
-        added = probe |> argument_ids(:"add_#{name}") |> normalize()
-        removed = probe |> argument_ids(:"remove_#{name}") |> normalize() |> MapSet.new()
+        added = probe |> verb_ids("add_" <> name) |> normalize()
+        removed = probe |> verb_ids("remove_" <> name) |> normalize() |> MapSet.new()
 
         (base ++ added) |> Enum.uniq() |> Enum.reject(&MapSet.member?(removed, &1))
     end
   end
 
-  defp argument_ids(probe, argument) do
-    case Ash.Changeset.fetch_argument(probe, argument) do
-      {:ok, ids} -> List.wrap(ids)
-      :error -> []
-    end
+  # Looked up by name among the arguments the probe already holds rather than
+  # by building the verb's atom: the names come from the resource, but an
+  # atom made from a string is still one sobelow cannot bound.
+  defp verb_ids(probe, verb) do
+    Enum.find_value(probe.arguments, [], fn {key, ids} ->
+      if to_string(key) == verb, do: List.wrap(ids)
+    end)
   end
 
   defp normalize(ids), do: ids |> Enum.map(&to_string/1) |> Enum.uniq() |> Enum.sort()
