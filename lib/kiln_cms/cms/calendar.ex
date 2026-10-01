@@ -23,6 +23,10 @@ defmodule KilnCMS.CMS.Calendar do
   Each event carries a `:kind`, which is what the UI colours and filters by:
 
     * `:publish` — a draft/in-review record with a `scheduled_at` in the window.
+    * `:proposed` — a draft/in-review record with a `proposed_publish_at` in
+      the window (#1812): a date an editor without publish rights asked for.
+      Not a schedule — nothing fires on it — so it is its own lane, drawn
+      differently, and never draggable.
     * `:unpublish` / `:archive` / `:expire` — a published record whose embargo
       end falls in the window, split by its `expiry_action` so the calendar says
       what will actually happen rather than "unpublish" three times. `:expire`
@@ -71,6 +75,7 @@ defmodule KilnCMS.CMS.Calendar do
 
   @type kind ::
           :publish
+          | :proposed
           | :unpublish
           | :archive
           | :expire
@@ -108,6 +113,7 @@ defmodule KilnCMS.CMS.Calendar do
   def kinds,
     do: [
       :publish,
+      :proposed,
       :published,
       :unpublish,
       :archive,
@@ -170,6 +176,7 @@ defmodule KilnCMS.CMS.Calendar do
         filter:
           expr(
             (scheduled_at >= ^from and scheduled_at < ^to) or
+              (proposed_publish_at >= ^from and proposed_publish_at < ^to) or
               (unpublish_at >= ^from and unpublish_at < ^to) or
               (published_at >= ^from and published_at < ^to) or
               (due_at >= ^from and due_at < ^to)
@@ -179,6 +186,7 @@ defmodule KilnCMS.CMS.Calendar do
           :title,
           :state,
           :scheduled_at,
+          :proposed_publish_at,
           :unpublish_at,
           :published_at,
           :expiry_action
@@ -201,6 +209,7 @@ defmodule KilnCMS.CMS.Calendar do
   defp record_events(ct, record, from, to) do
     for {kind, at, states} <- [
           {:publish, record.scheduled_at, [:draft, :in_review]},
+          {:proposed, record.proposed_publish_at, [:draft, :in_review]},
           {expiry_kind(record.expiry_action), record.unpublish_at, [:published]},
           {:published, record.published_at, [:published]},
           {:review_due, record.due_at, [:published]}

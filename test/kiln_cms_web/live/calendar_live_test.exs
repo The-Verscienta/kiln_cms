@@ -1197,15 +1197,60 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       assert to == ~p"/editor/content/page/#{page.id}"
     end
 
-    test "an editor who may not set a publish date sees no +", %{conn: conn} do
+    test "an editor who may not set a publish date gets a + that proposes the date",
+         %{conn: conn} do
       day = soon()
       {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(calendar_at(day))
 
-      refute has_element?(lv, ~s{button[phx-click="new_on_day"]})
+      html = lv |> element(new_button(day)) |> render_click()
 
-      # A forged event opens nothing either.
-      render_click(lv, "new_on_day", %{"date" => Date.to_iso8601(day)})
-      refute has_element?(lv, "#calendar-new-dialog")
+      # Same link as an admin's: the editor decides what the date becomes.
+      assert html =~ "proposed as its publish date"
+      expected = "/editor/content/page/new?scheduled_at=#{Date.to_iso8601(day)}T09%3A00%3A00Z"
+
+      assert {:error, {:live_redirect, %{to: ^expected}}} =
+               lv |> element("#calendar-new-dialog a", "Page") |> render_click()
+    end
+
+    test "a proposed date is its own outlined lane, labelled, and not draggable",
+         %{conn: conn} do
+      admin = authed_admin()
+      day = soon()
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Proposal #{System.unique_integer([:positive])}",
+            slug: slug(),
+            proposed_publish_at: DateTime.new!(day, ~T[09:00:00])
+          },
+          actor: authed_user(:editor)
+        )
+
+      {:ok, lv, html} = conn |> log_in(admin) |> live(calendar_at(day))
+
+      chip = ~s{li[data-event-id="#{page.id}"][data-event-kind="proposed"]}
+      assert has_element?(lv, chip)
+      # Not offered a drag handle, and the visible text says what it is.
+      refute has_element?(lv, chip <> "[data-reschedulable]")
+      assert lv |> element(chip) |> render() =~ "Proposed:"
+      assert lv |> element(chip <> " a") |> render() =~ "border-dashed"
+      # The legend names the lane.
+      assert html =~ "Proposed publish"
+
+      # A forged move is refused like any undraggable lane, and nothing moves.
+      html =
+        render_hook(lv, "reschedule", %{
+          "id" => page.id,
+          "type" => "page",
+          "kind" => "proposed",
+          "date" => Date.to_iso8601(Date.add(day, 1))
+        })
+
+      assert html =~ "be moved by dragging"
+      reloaded = KilnCMS.CMS.ContentTypes.get_record!("page", page.id, actor: admin)
+      assert DateTime.to_date(reloaded.proposed_publish_at) == day
+      assert reloaded.scheduled_at == nil
     end
 
     test "an editor on a site that lets editors publish is offered only the types they author",

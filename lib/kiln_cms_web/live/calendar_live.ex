@@ -30,8 +30,12 @@ defmodule KilnCMSWeb.CalendarLive do
   "+" button (#1812). It opens a small dialog listing the types the editor may
   create (`KilnCMSWeb.ContentEditor.NewDraft.authorable_types/2`), each linking
   to `/editor/content/:type/new?scheduled_at=…` — an unsaved new document that
-  is created with that publish date. The button is offered only to someone who
-  may set a publish date at all (`NewDraft.may_schedule?/2`).
+  is created with that date. The button is offered to anyone who may create
+  content. For someone who may set a publish date (`NewDraft.may_schedule?/2`)
+  the date is the schedule; for an editor who may not, it is a *proposed*
+  publish date (`proposed_publish_at`), which publishes nothing and is drawn
+  in its own outlined, undraggable "Proposed" lane until an admin turns it
+  into the schedule.
 
   ## Live
 
@@ -104,6 +108,7 @@ defmodule KilnCMSWeb.CalendarLive do
      |> assign(:page_title, gettext("Calendar"))
      |> assign(:requery_pending, nil)
      |> assign(:new_types, new_types(socket.assigns))
+     |> assign(:new_date_field, new_date_field(socket.assigns))
      |> assign(:new_on, nil)
      # Present from the first render: an aria-live region inserted later is not
      # announced by every screen reader, so it has to exist (empty) up front.
@@ -396,15 +401,17 @@ defmodule KilnCMSWeb.CalendarLive do
 
   # --- new on a day (#1812) ---------------------------------------------------
 
-  # The types the day picker offers: what the content list's New buttons offer
-  # (`NewDraft.authorable_types/2`), and nothing at all for someone who may not
-  # set a publish date — the content policy gates `scheduled_at` like Publish,
-  # so for them the picker could only open an editor that drops the date.
-  defp new_types(%{current_user: actor, current_org: org}) do
-    if NewDraft.may_schedule?(actor, org.id),
-      do: NewDraft.authorable_types(actor, org),
-      else: []
-  end
+  # The types the day picker offers: exactly what the content list's New
+  # buttons offer (`NewDraft.authorable_types/2`). A viewer gets none, so no "+".
+  defp new_types(%{current_user: actor, current_org: org}),
+    do: NewDraft.authorable_types(actor, org)
+
+  # What the clicked day becomes on the new draft: a publish date for someone
+  # who may set one, a PROPOSED date for an editor who may not (the content
+  # policy gates `scheduled_at` like Publish). The editor decides the same way
+  # (`NewDraft.publish_date/3`); this only picks the picker's wording.
+  defp new_date_field(%{current_user: actor, current_org: org}),
+    do: NewDraft.publish_date_field(actor, org.id)
 
   # The publish time a new item on `date` gets. 09:00 UTC, because the
   # calendar buckets and labels days in UTC (`KilnCMS.CMS.Calendar`): a local
@@ -606,6 +613,7 @@ defmodule KilnCMSWeb.CalendarLive do
   # a sentence — "Autumn launch — Page publishes". A legend key and a filter
   # option are read on their own, where a bare verb ("publishes") is a fragment.
   defp lane_label(:publish), do: gettext("Scheduled publish")
+  defp lane_label(:proposed), do: gettext("Proposed publish")
   defp lane_label(:published), do: gettext("Went live")
   defp lane_label(:unpublish), do: gettext("Scheduled unpublish")
   defp lane_label(:archive), do: gettext("Scheduled archive")
@@ -617,6 +625,7 @@ defmodule KilnCMSWeb.CalendarLive do
   defp lane_label(:release_failed), do: gettext("Release failed")
 
   defp kind_label(:publish), do: gettext("publishes")
+  defp kind_label(:proposed), do: gettext("proposed to publish — an admin confirms")
   defp kind_label(:unpublish), do: gettext("unpublishes")
   defp kind_label(:archive), do: gettext("archives")
   defp kind_label(:expire), do: gettext("expires")
@@ -641,6 +650,9 @@ defmodule KilnCMSWeb.CalendarLive do
   # `:publish`, and a border STYLE survives being read by someone who cannot
   # separate the hues.
   defp kind_class(:publish), do: "border-warning/40 bg-warning/10"
+  # A proposal is not a plan yet (#1812): an outline on the page background,
+  # dashed and italic, so it never reads as the solid scheduled chip beside it.
+  defp kind_class(:proposed), do: "border-dashed border-base-content/50 bg-base-100 italic"
   defp kind_class(:unpublish), do: "border-error/40 bg-error/10"
   defp kind_class(:archive), do: "border-base-content/35 bg-base-content/10"
   defp kind_class(:expire), do: "border-error/70 bg-error/20 font-medium"
@@ -800,7 +812,13 @@ defmodule KilnCMSWeb.CalendarLive do
         >
           <:title>{gettext("New on %{date}", date: day_label(@new_on))}</:title>
           <:subtitle>
-            {gettext("Choose what to create. It is scheduled to publish that day at 09:00 UTC.")}
+            <%= if @new_date_field == :scheduled_at do %>
+              {gettext("Choose what to create. It is scheduled to publish that day at 09:00 UTC.")}
+            <% else %>
+              {gettext(
+                "Choose what to create. That day at 09:00 UTC is proposed as its publish date, and an admin confirms it."
+              )}
+            <% end %>
           </:subtitle>
           <ul class="flex flex-col gap-0.5 overflow-y-auto p-2">
             <li :for={ct <- @new_types}>
@@ -1011,6 +1029,9 @@ defmodule KilnCMSWeb.CalendarLive do
         >
           <span :if={@view == "week"} class="mr-1 tabular-nums opacity-70">
             {Calendar.strftime(ev.at, "%H:%M")}
+          </span>
+          <span :if={ev.kind == :proposed} class="mr-1 font-medium not-italic opacity-70">
+            {gettext("Proposed:")}
           </span>
           {ev.title}
         </.link>

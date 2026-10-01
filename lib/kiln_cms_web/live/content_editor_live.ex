@@ -128,7 +128,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           {:ok,
            socket
            |> assign_new_draft(content_type)
-           |> assign(:new_scheduled_at, new_scheduled_at(params, actor, org))}
+           |> assign(:new_publish_date, new_publish_date(params, actor, org))}
         else
           {:ok,
            socket
@@ -161,14 +161,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   @impl true
   def handle_params(_params, _uri, socket), do: {:noreply, socket}
 
-  # `?scheduled_at=` from the calendar's "new on this day" picker (#1812): kept
-  # only when it parses, is still ahead, and this writer may set a publish
-  # date at all — otherwise the draft opens unscheduled, as from the New
-  # button. Written when the row is created (`materialize_draft/1`).
-  defp new_scheduled_at(params, actor, org) do
-    if NewDraft.may_schedule?(actor, org.id),
-      do: NewDraft.parse_scheduled_at(params["scheduled_at"])
-  end
+  # `?scheduled_at=` from the calendar's "new on this day" picker (#1812): a
+  # publish date for a writer who may set one, a proposed one for a writer who
+  # may not, nothing for a value that is not a future timestamp
+  # (`NewDraft.publish_date/3`). Written when the row is created
+  # (`materialize_draft/1`).
+  defp new_publish_date(params, actor, org),
+    do: NewDraft.publish_date(params["scheduled_at"], actor, org.id)
 
   defp assign_new_draft(socket, content_type) do
     socket
@@ -197,9 +196,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
     %{kind: kind, actor: actor, current_org: org} = socket.assigns
 
     extra =
-      case socket.assigns[:new_scheduled_at] do
+      case socket.assigns[:new_publish_date] do
         nil -> %{}
-        at -> %{scheduled_at: at}
+        {field, at} -> %{field => at}
       end
 
     case NewDraft.create(kind, actor, org, extra) do
@@ -5500,20 +5499,29 @@ defmodule KilnCMSWeb.ContentEditorLive do
         </p>
 
         <p
-          :if={@new_scheduled_at}
+          :if={@new_publish_date}
           id="new-draft-scheduled-at"
+          data-date-kind={elem(@new_publish_date, 0)}
           class="flex flex-wrap items-center gap-2 text-sm"
         >
           <.icon name="hero-calendar-days" class="size-4 text-base-content/60" />
-          {gettext("Scheduled to publish on %{date} at %{time} UTC.",
-            date: Calendar.strftime(@new_scheduled_at, "%-d %B %Y"),
-            time: Calendar.strftime(@new_scheduled_at, "%H:%M")
-          )}
+          <%= case @new_publish_date do %>
+            <% {:scheduled_at, at} -> %>
+              {gettext("Scheduled to publish on %{date} at %{time} UTC.",
+                date: Calendar.strftime(at, "%-d %B %Y"),
+                time: Calendar.strftime(at, "%H:%M")
+              )}
+            <% {:proposed_publish_at, at} -> %>
+              {gettext("Proposed for %{date}, %{time} UTC — an admin confirms the date.",
+                date: Calendar.strftime(at, "%-d %B %Y"),
+                time: Calendar.strftime(at, "%H:%M")
+              )}
+          <% end %>
           <.link
             navigate={~p"/editor/content/#{@kind}/new"}
             class="link text-base-content/70 hover:text-base-content"
           >
-            {gettext("Don't schedule")}
+            {gettext("Remove the date")}
           </.link>
         </p>
 

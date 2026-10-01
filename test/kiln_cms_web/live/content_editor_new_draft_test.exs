@@ -273,19 +273,162 @@ defmodule KilnCMSWeb.ContentEditorNewDraftTest do
 
       assert [%{scheduled_at: nil}] = pages(admin)
     end
+  end
 
-    test "an editor who may not set a publish date still gets an (unscheduled) draft",
-         %{editor: editor} do
-      conn = log_in(build_conn(), editor)
-      {:ok, lv, _html} = live(conn, new_page_path(DateTime.to_iso8601(in_days(5))))
+  # An editor on a site where only admins publish may not set `scheduled_at`;
+  # their date becomes a PROPOSAL an admin confirms.
+  describe "a proposed publish date (#1812)" do
+    defp proposal_in(days) do
+      Date.utc_today() |> Date.add(days) |> DateTime.new!(~T[09:00:00], "Etc/UTC")
+    end
 
-      refute has_element?(lv, "#new-draft-scheduled-at")
-      type_title(lv, "Editor draft")
+    defp page_by(actor, id), do: ContentTypes.get_record!("page", id, actor: actor)
 
-      # Not refused: the publish-date policy is never asked, because the date
-      # was dropped at the door.
-      assert [%{scheduled_at: nil} = page] = pages(editor)
+    test "an editor who may not publish lands with a proposed date, and it is persisted",
+         %{conn: conn, editor: editor} do
+      at = proposal_in(5)
+
+      {:ok, lv, html} =
+        live(conn, ~p"/editor/content/page/new?#{[scheduled_at: DateTime.to_iso8601(at)]}")
+
+      assert has_element?(lv, ~s{#new-draft-scheduled-at[data-date-kind="proposed_publish_at"]})
+      assert html =~ "an admin confirms the date"
+
+      type_title(lv, "Editor proposal")
+
+      assert [page] = pages(editor)
       assert_patch(lv, ~p"/editor/content/page/#{page.id}")
+      assert page.scheduled_at == nil
+      assert DateTime.compare(page.proposed_publish_at, at) == :eq
+
+      # The full editor shows it in the schedule area, editable by the author,
+      # with the real publish date still closed to them.
+      assert has_element?(
+               lv,
+               ~s{input[type="hidden"][name="form[proposed_publish_at]"][value^="#{Date.to_iso8601(DateTime.to_date(at))}"]}
+             )
+
+      assert has_element?(lv, ~s{input[data-local-input][id^="scheduled-at-local"][disabled]})
+    end
+
+    test "the author can move their proposal, but a forged scheduled_at is refused",
+         %{editor: editor} do
+      page =
+        ContentTypes.create!("page", %{title: "Mine", proposed_publish_at: proposal_in(5)},
+          actor: editor
+        )
+
+      moved = proposal_in(9)
+
+      assert {:ok, %{proposed_publish_at: stored}} =
+               ContentTypes.update("page", page, %{proposed_publish_at: moved}, actor: editor)
+
+      assert DateTime.compare(stored, moved) == :eq
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               ContentTypes.update("page", page_by(editor, page.id), %{scheduled_at: moved},
+                 actor: editor
+               )
+
+      assert page_by(editor, page.id).scheduled_at == nil
+    end
+
+    test "an admin confirms it from the review queue: scheduled, proposal cleared",
+         %{conn: conn, editor: editor} do
+      at = proposal_in(6)
+
+      page =
+        ContentTypes.create!("page", %{title: "Ask", proposed_publish_at: at}, actor: editor)
+
+      {:ok, page} = ContentTypes.transition("page", "submit", page, actor: editor)
+
+      # The editor sees the proposal on their row but cannot confirm it.
+      {:ok, own, _html} = live(conn, ~p"/editor?status=in_review")
+      assert has_element?(own, "#proposed-page-#{page.id}")
+      refute has_element?(own, ~s{button[phx-click="confirm_proposed_date"]})
+
+      admin = authed_user(:admin)
+      {:ok, queue, _html} = live(log_in(build_conn(), admin), ~p"/editor?status=in_review")
+
+      # The reviewer sees the proposed date on the submitted row.
+      assert queue |> element("#proposed-page-#{page.id}") |> render() =~
+               Calendar.strftime(at, "%Y-%m-%d %H:%M")
+
+      html =
+        queue
+        |> element(~s{button[phx-click="confirm_proposed_date"][phx-value-id="#{page.id}"]})
+        |> render_click()
+
+      assert html =~ "Scheduled to publish on"
+      confirmed = page_by(admin, page.id)
+      assert DateTime.compare(confirmed.scheduled_at, at) == :eq
+      assert confirmed.proposed_publish_at == nil
+      refute has_element?(queue, "#proposed-page-#{page.id}")
+    end
+
+    test "a forged confirm from an editor who may not publish changes nothing",
+         %{conn: conn, editor: editor} do
+      page =
+        ContentTypes.create!("page", %{title: "Forged", proposed_publish_at: proposal_in(4)},
+          actor: editor
+        )
+
+      {:ok, lv, _html} = live(conn, ~p"/editor")
+
+      html = render_click(lv, "confirm_proposed_date", %{"kind" => "page", "id" => page.id})
+
+      assert html =~ "can&#39;t set the publish date"
+      reloaded = page_by(editor, page.id)
+      assert reloaded.scheduled_at == nil
+      refute reloaded.proposed_publish_at == nil
+    end
+
+    test "setting any publish date, or publishing, clears the proposal", %{editor: editor} do
+      admin = authed_user(:admin)
+
+      scheduled =
+        ContentTypes.create!("page", %{title: "A", proposed_publish_at: proposal_in(3)},
+          actor: editor
+        )
+
+      {:ok, scheduled} =
+        ContentTypes.update("page", scheduled, %{scheduled_at: proposal_in(8)}, actor: admin)
+
+      assert scheduled.proposed_publish_at == nil
+
+      published =
+        ContentTypes.create!("page", %{title: "B", proposed_publish_at: proposal_in(3)},
+          actor: editor
+        )
+
+      {:ok, published} = ContentTypes.transition("page", "publish", published, actor: admin)
+      assert published.proposed_publish_at == nil
+
+      # An edit that leaves `scheduled_at` alone keeps the proposal.
+      kept =
+        ContentTypes.create!("page", %{title: "C", proposed_publish_at: proposal_in(3)},
+          actor: editor
+        )
+
+      {:ok, kept} = ContentTypes.update("page", kept, %{title: "C2"}, actor: admin)
+      refute kept.proposed_publish_at == nil
+    end
+
+    test "an admin's editor offers the proposal as the publish date", %{editor: editor} do
+      at = proposal_in(7)
+
+      page =
+        ContentTypes.create!("page", %{title: "Offer", proposed_publish_at: at}, actor: editor)
+
+      {:ok, lv, _html} =
+        live(log_in(build_conn(), authed_user(:admin)), ~p"/editor/content/page/#{page.id}")
+
+      assert lv |> element("#proposed-publish-at-note") |> render() =~
+               Calendar.strftime(at, "%-d %B %Y, %H:%M")
+
+      assert has_element?(lv, "#use-proposed-publish-at")
+      # The admin edits the real date, not the proposal.
+      refute has_element?(lv, ~s{input[name="form[proposed_publish_at]"]})
     end
   end
 end

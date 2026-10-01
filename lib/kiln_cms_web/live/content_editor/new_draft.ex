@@ -84,6 +84,32 @@ defmodule KilnCMSWeb.ContentEditor.NewDraft do
 
   def parse_scheduled_at(_value), do: nil
 
+  @doc """
+  What a `/new?scheduled_at=` link becomes on the new draft, for `actor`:
+
+    * `{:scheduled_at, at}` — a writer who may set a publish date
+      (`may_schedule?/2`) gets a real schedule;
+    * `{:proposed_publish_at, at}` — anyone else gets a *proposed* date, which
+      publishes nothing until someone with publish rights confirms it;
+    * `nil` — the value is not a future timestamp (`parse_scheduled_at/1`).
+  """
+  @spec publish_date(term(), term(), Ash.UUID.t()) ::
+          {:scheduled_at | :proposed_publish_at, DateTime.t()} | nil
+  def publish_date(value, actor, org_id) do
+    case parse_scheduled_at(value) do
+      nil -> nil
+      at -> {publish_date_field(actor, org_id), at}
+    end
+  end
+
+  @doc """
+  The field a publish date chosen by `actor` lands in: `:scheduled_at` when
+  they may set one, `:proposed_publish_at` otherwise.
+  """
+  @spec publish_date_field(term(), Ash.UUID.t()) :: :scheduled_at | :proposed_publish_at
+  def publish_date_field(actor, org_id),
+    do: if(may_schedule?(actor, org_id), do: :scheduled_at, else: :proposed_publish_at)
+
   # `editable_types` groups every dynamic type under `entry` (see
   # docs/granular-rbac.md) — deliberately, unlike field grants.
   defp type_name_of(%{source: :dynamic}), do: "entry"
