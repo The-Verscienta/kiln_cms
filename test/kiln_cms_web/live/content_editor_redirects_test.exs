@@ -95,6 +95,11 @@ defmodule KilnCMSWeb.ContentEditorRedirectsTest do
 
     render_submit(lv, "save", %{"form" => %{"slug" => "#{page.slug}-renamed"}})
 
+    # A rename on a live page is held in the working copy (#1815): the old URL
+    # keeps serving, so there is nothing to redirect until it goes live.
+    assert redirects_for(page) == []
+    lv |> element("#publish-changes") |> render_click()
+
     assert [redirect] = redirects_for(page)
     assert redirect.path == old_path
 
