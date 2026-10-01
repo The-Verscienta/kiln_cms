@@ -43,9 +43,17 @@ defmodule KilnCMSWeb.Endpoint do
   # itself, and this is where it learns whose attempt it is. The plug above
   # rewrites `conn.remote_ip`; a socket has no conn to rewrite, so it needs the
   # raw pair instead.
+  #
+  # `:user_agent` is for the session list in settings (#1823):
+  # `KilnCMSWeb.SessionTracking` reduces it to a browser and system name when a
+  # signed-in page mounts. Neither the string nor the address is stored.
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [:uri, :peer_data, :x_headers, session: @session_options]],
-    longpoll: [connect_info: [:uri, :peer_data, :x_headers, session: @session_options]]
+    websocket: [
+      connect_info: [:uri, :peer_data, :x_headers, :user_agent, session: @session_options]
+    ],
+    longpoll: [
+      connect_info: [:uri, :peer_data, :x_headers, :user_agent, session: @session_options]
+    ]
 
   # `connect_info: [:uri]` so the socket can resolve its tenant from the
   # connecting host (epic #336) — a raw transport bypasses the SetTenant plug, so

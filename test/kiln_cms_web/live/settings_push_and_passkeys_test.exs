@@ -221,6 +221,57 @@ defmodule KilnCMSWeb.SettingsPushAndPasskeysTest do
       refute html =~ "Passkey added"
     end
 
+    # #1829: whether one is set up was left to be read off an empty space,
+    # and the name field's placeholder said "Passkey" as if one existed.
+    test "says plainly when there are none, and how many when there are", %{
+      conn: conn,
+      user: user
+    } do
+      {:ok, view, _html} = live(conn, ~p"/editor/settings")
+
+      assert has_element?(view, "#passkeys-none", "No passkeys yet")
+      refute has_element?(view, "#passkeys-count")
+      refute has_element?(view, ~s(#add-passkey-form input[placeholder="Passkey"]))
+
+      Ash.Seed.seed!(KilnCMS.Accounts.Passkey, %{
+        user_id: user.id,
+        name: "Work laptop",
+        credential_id: "settings-#{System.unique_integer([:positive])}",
+        public_key: :erlang.term_to_binary(%{stub: :cose_key}),
+        sign_count: 0
+      })
+
+      {:ok, view, _html} = live(conn, ~p"/editor/settings")
+
+      assert has_element?(view, "#passkeys-count", "You have 1 passkey set up.")
+      assert has_element?(view, "#passkeys li", "Work laptop")
+      refute has_element?(view, "#passkeys-none")
+    end
+
+    test "waits visibly while the browser prompt is open, and can be cancelled", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/settings")
+
+      view |> form("#add-passkey-form", %{"name" => ""}) |> render_submit()
+
+      assert has_element?(view, "#passkey-waiting", "Waiting for your device")
+      refute has_element?(view, "#add-passkey-form")
+
+      view |> element("#passkey-waiting button", "Cancel") |> render_click()
+
+      refute has_element?(view, "#passkey-waiting")
+      assert has_element?(view, "#add-passkey-form")
+    end
+
+    test "a refused prompt ends the wait and says why, in the section", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/settings")
+
+      view |> form("#add-passkey-form", %{"name" => ""}) |> render_submit()
+      render_hook(view, "passkey_error", %{})
+
+      refute has_element?(view, "#passkey-waiting")
+      assert has_element?(view, "#passkey-status.text-error", "cancelled or isn")
+    end
+
     test "beginning enrolment hands the browser a challenge", %{conn: conn} = ctx do
       {:ok, view, _html} = live(conn, ~p"/editor/settings")
 
@@ -251,6 +302,25 @@ defmodule KilnCMSWeb.SettingsPushAndPasskeysTest do
 
       assert html =~ "Ada Lovelace"
       assert Ash.get!(User, user.id, authorize?: false).name == "Ada Lovelace"
+    end
+
+    # #1828: the field said nothing about being optional or what it is for,
+    # and a save gave no feedback anyone noticed.
+    test "explains the field and confirms a save beside the button", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/settings")
+
+      assert has_element?(view, "#profile-form label", "Display name (optional)")
+      assert has_element?(view, "#profile-form", "Shown as the author of content you publish")
+      assert has_element?(view, ~s(#profile-form input[placeholder="e.g. Alex Rivera"]))
+      refute has_element?(view, "#profile-saved", "Saved.")
+
+      view |> form("#profile-form", user: %{name: "Grace Hopper"}) |> render_submit()
+      assert has_element?(view, "#profile-saved", "Saved.")
+
+      # The next edit takes the confirmation away, so it never vouches for
+      # something that has not been saved.
+      view |> form("#profile-form", user: %{name: "Grace H."}) |> render_change()
+      refute has_element?(view, "#profile-saved", "Saved.")
     end
   end
 end
