@@ -126,7 +126,7 @@ defmodule KilnCMSWeb.LiveUserAuth do
   # blocked on the restore's locks lands in the restored tables once they are
   # released. Sign-in is where the visitor would end up anyway — the restore
   # empties the `tokens` table.
-  def on_mount(hook, _params, _session, socket)
+  def on_mount(hook, _params, session, socket)
       when hook in [:live_user_required, :live_editor_required, :live_admin_required] do
     if KilnCMS.Demo.resetting?() do
       {:halt,
@@ -139,8 +139,15 @@ defmodule KilnCMSWeb.LiveUserAuth do
     else
       case require_signed_in(hook, socket) do
         # Every signed-in page may render the console shell, whose sidebar
-        # carries the preset switch — see `KilnCMSWeb.NavPreset`.
-        {:cont, socket} -> {:cont, KilnCMSWeb.NavPreset.attach(socket)}
+        # carries the preset switch — see `KilnCMSWeb.NavPreset`. And every one
+        # is tied to the session it was mounted from, so signing that session
+        # out from another device closes it (#1823).
+        {:cont, socket} ->
+          {:cont,
+           socket
+           |> KilnCMSWeb.NavPreset.attach()
+           |> KilnCMSWeb.SessionTracking.attach(session)}
+
         halt -> halt
       end
     end
