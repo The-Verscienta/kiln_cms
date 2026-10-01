@@ -34,8 +34,11 @@ defmodule KilnCMS.Newsletter.ConfirmationMailTest do
 
       job = queued_mail(address)
       assert job, "subscribing must queue a confirmation email"
-      assert job.args["subject"] =~ "Confirm"
-      assert job.args["html_body"] =~ "/newsletter/confirm/#{subscriber.confirm_token}"
+      # The link travels sealed (#1843): never in the job's args in the clear.
+      refute inspect(job.args) =~ subscriber.confirm_token
+      email = KilnCMS.Mail.from_args(job.args)
+      assert email.subject =~ "Confirm"
+      assert email.html_body =~ "/newsletter/confirm/#{subscriber.confirm_token}"
     end
 
     test "the mailed token is the PERSISTED one, so the link actually resolves" do
@@ -106,7 +109,11 @@ defmodule KilnCMS.Newsletter.ConfirmationMailTest do
       {:ok, subscriber} = subscribe(%{email: address})
 
       "/newsletter/confirm/" <> token =
-        Regex.run(~r{/newsletter/confirm/[^"]+}, queued_mail(address).args["html_body"]) |> hd()
+        Regex.run(
+          ~r{/newsletter/confirm/[^"]+},
+          KilnCMS.Mail.from_args(queued_mail(address).args).html_body
+        )
+        |> hd()
 
       {:ok, found} = Newsletter.subscriber_by_confirm_token(token, authorize?: false)
       {:ok, confirmed} = Newsletter.confirm_subscriber(found, authorize?: false)

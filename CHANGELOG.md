@@ -105,6 +105,11 @@ Every summary line below that was shortened links to its own entry there.
   when the changes are published, not when they are saved.**
   ([#1815](https://github.com/The-Verscienta/kiln_cms/issues/1815) · [long form](docs/changelog/unreleased.md#save-draft-holds-content-fields-until-publish-changes))
 
+- **Treat sign-in links shown in mail delivery errors from an earlier release
+  as exposed.** The upgrade scrubs them from stored jobs, but not from logs or
+  Sentry.
+  ([#1843](https://github.com/The-Verscienta/kiln_cms/issues/1843) · [long form](docs/changelog/unreleased.md#treat-sign-in-links-in-old-mail-errors-as-exposed))
+
 ### Breaking
 
 - **On a multi-org install with `KILN_CONSOLE_HOST` set, each non-default
@@ -468,6 +473,10 @@ Every summary line below that was shortened links to its own entry there.
 - **A webhook added in the console no longer receives unpublished drafts
   unless an admin selects those events.** The form ticked every event.
   ([#1776](https://github.com/The-Verscienta/kiln_cms/issues/1776) · [long form](docs/changelog/unreleased.md#a-webhook-added-in-the-console-no-longer-receives-unpublished-drafts))
+
+- **Sign-in links no longer leak into stored mail job errors, logs or
+  Sentry.** A crashing mailer recorded the whole email, link included.
+  ([#1843](https://github.com/The-Verscienta/kiln_cms/issues/1843) · [long form](docs/changelog/unreleased.md#sign-in-links-no-longer-leak-into-mail-job-errors))
 
 ## [0.12.1] - 2026-09-30
 

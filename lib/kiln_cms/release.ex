@@ -85,6 +85,29 @@ defmodule KilnCMS.Release do
   end
 
   @doc """
+  `mix kiln.mail.scrub` for a release (#1843): strip the sign-in links that
+  releases before 1.0 left in stored mail job errors and finished mail jobs.
+
+      bin/kiln_cms eval 'KilnCMS.Release.scrub_mail_jobs()'
+
+  The upgrade runs it once already; this is for a backup restored from before
+  it. Returns the counts `KilnCMS.Mail.Scrub.run/1` reports.
+  """
+  @spec scrub_mail_jobs() :: KilnCMS.Mail.Scrub.result()
+  def scrub_mail_jobs do
+    load_app()
+
+    {:ok, result, _} = Ecto.Migrator.with_repo(hd(repos()), &KilnCMS.Mail.Scrub.run/1)
+
+    IO.puts(
+      "Mail jobs scrubbed: #{result.errors_redacted} with errors redacted, " <>
+        "#{result.bodies_dropped} finished jobs' messages dropped."
+    )
+
+    result
+  end
+
+  @doc """
   `mix kiln.deprecations` for a release (#1538, #1543): report the accounts and
   queued jobs still holding data only a removed surface read, and optionally
   move the accounts onto a membership first.

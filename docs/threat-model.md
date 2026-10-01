@@ -1759,6 +1759,31 @@ because other files cite them by number.
     only, never a console route, and it is a separate session from the
     one on any console host.
 
+17. **Queued mail carries sign-in links, sealed under `SECRET_KEY_BASE`
+    (#1843).** Account confirmations, password resets, magic links and
+    newsletter confirmations are queued on the `:mail` queue with their
+    rendered message, and a newsletter confirmation link never expires.
+    Before 1.0 that message sat in the job's args in the clear, and a mailer
+    that crashed had the whole email stored as the job's error, shown on
+    *Mail* and *Outgoing mail* and sent to the log and Sentry. Now the
+    adapter call is guarded, so a crash is recorded by name only
+    (`KilnCMS.Mail.MailerCrashError`); no mail server at all holds the mail
+    with a reason instead of crashing; the subject and body travel sealed
+    with `KilnCMS.Keys.Vault` (`KilnCMS.Mail.open_args/1`) and are dropped
+    once the job finishes (`forget_body/1`); `KilnCMS.SentryFilter` strips
+    mail bodies from every event; and the delivery panels show an error's
+    first line only, with links and addresses removed
+    (`KilnCMS.Mail.display_error/1`).
+
+    What remains: anyone holding `SECRET_KEY_BASE` and read access to
+    `oban_jobs` can open a pending job's message, which is the same party
+    that can already mint sessions. The recipient address stays in the
+    clear, in the row and in Oban's job log lines, because the delivery
+    panel needs its domain. And the upgrade's scrub (`KilnCMS.Mail.Scrub`)
+    reaches only the database: links that an earlier release already wrote
+    to logs or Sentry stay there until the operator deletes them, and the
+    1.0 upgrade notes tell them to treat those links as exposed.
+
 **Not on this list, but named by the 1.0 roadmap: `/api/ask` lets an anonymous
 caller drive LLM cost** (see *Other outbound calls* above). **1.0 verdict
 (decided, #1535): still accepted at 1.0.** Generation is off by default

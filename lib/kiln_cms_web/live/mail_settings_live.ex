@@ -294,7 +294,9 @@ defmodule KilnCMSWeb.MailSettingsLive do
   end
 
   def handle_async(:send_test, {:exit, reason}, socket) do
-    Logger.warning("Mail test send crashed: #{Mail.redact_failure(reason)}")
+    # The exit's name only, never the term: an exit out of a mailer quotes
+    # the email it was sending (#1843).
+    Logger.warning("Mail test send crashed: #{Mail.exit_tag(reason)}")
 
     {:noreply,
      socket
@@ -328,6 +330,18 @@ defmodule KilnCMSWeb.MailSettingsLive do
 
   defp test_failure_message(:message, _to),
     do: gettext("The mail server refused the message. The server log has its reply.")
+
+  defp test_failure_message(:not_configured, _to),
+    do:
+      gettext(
+        "No outgoing mail server is set up, so nothing can be sent. Set MAIL_MODE (or SMTP_HOST) and restart."
+      )
+
+  defp test_failure_message(:crashed, _to),
+    do:
+      gettext(
+        "The test email couldn't be sent: the send stopped unexpectedly. The server log has the details."
+      )
 
   defp test_failure_message(:transient, _to),
     do:

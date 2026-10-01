@@ -635,7 +635,7 @@ defmodule KilnCMS.Automation.RuleWorker do
   defp deliver_as_email(subject, html_body, context) do
     send_rule_email(context.config, context.org_id, escape(subject, :text), html_body)
   rescue
-    error in [KilnCMS.Mail.TransientDeliveryError] ->
+    error in [KilnCMS.Mail.TransientDeliveryError, KilnCMS.Mail.MailerCrashError] ->
       Logger.warning(
         "Automation intelligence rule couldn't deliver its findings; dropping rather " <>
           "than retrying a generation that already ran: #{Exception.message(error)}"
