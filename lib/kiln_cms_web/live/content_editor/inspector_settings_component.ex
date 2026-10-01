@@ -514,6 +514,66 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
             {gettext("Shown in your local timezone; stored as UTC.")}
           </p>
         </div>
+        <%!-- A proposed publish date (#1812): what someone who may not set
+                the publish date asks for instead. It publishes nothing; an
+                admin turns it into the publish date. Same local/UTC pair as
+                above. Only while the document is unpublished — a proposal
+                for something already live answers nothing. --%>
+        <div
+          :if={not @may_schedule? and @record.state in [:draft, :in_review]}
+          id={"proposed-publish-at-#{@editor_version}"}
+          phx-hook="UtcDatetimeInput"
+          phx-update="ignore"
+        >
+          <label
+            for={"proposed-publish-at-local-#{@editor_version}"}
+            class="mb-1 block text-sm font-medium"
+          >
+            {gettext("Proposed publish date")}
+          </label>
+          <input
+            type="datetime-local"
+            id={"proposed-publish-at-local-#{@editor_version}"}
+            data-local-input
+            class="field-input"
+          />
+          <input
+            type="hidden"
+            name={@form[:proposed_publish_at].name}
+            value={@form[:proposed_publish_at].value && to_string(@form[:proposed_publish_at].value)}
+            data-utc-input
+          />
+          <p class="mt-1 text-xs text-base-content/60">
+            {gettext("An admin confirms the date. Nothing is published until then.")}
+          </p>
+        </div>
+        <div
+          :if={@may_schedule? and @record.proposed_publish_at}
+          id="proposed-publish-at-note"
+          class="rounded-md border border-dashed border-warning/70 bg-warning/10 p-2 text-sm"
+        >
+          <p>
+            {gettext("Proposed for %{date} UTC.",
+              date: Calendar.strftime(@record.proposed_publish_at, "%-d %B %Y, %H:%M")
+            )}
+          </p>
+          <%!-- Fills the publish date above with the proposal; Save makes it
+                the schedule (and clears the proposal). Through the form rather
+                than a direct write, so nothing unsaved is lost. --%>
+          <button
+            type="button"
+            id="use-proposed-publish-at"
+            class="btn btn-sm btn-default mt-2"
+            phx-click={
+              JS.dispatch("kiln:set-utc",
+                to: "#scheduled-at-#{@editor_version}",
+                detail: %{value: DateTime.to_iso8601(@record.proposed_publish_at)}
+              )
+            }
+          >
+            {gettext("Use this date")}
+          </button>
+        </div>
         <%!-- The embargo end — same local/UTC input pair as above. --%>
         <div
           id={"unpublish-at-#{@editor_version}"}

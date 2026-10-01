@@ -290,6 +290,40 @@ carries the reasoning.
   `position` is unchanged in the API
   ([#1818](https://github.com/The-Verscienta/kiln_cms/issues/1818)).
 
+<a id="new-content-on-a-calendar-day"></a>
+
+- **Start new content from a day on the calendar.** A beta tester clicked a
+  day on the calendar expecting to plan something there, and nothing
+  happened. Each day in the month and week grids now has a "+" button beside
+  its number (a real button, announced as "New content on 14 October").
+  It opens a small dialog listing the content types you may create, the same
+  list as the content page's New buttons. Choosing one opens the editor on a
+  new, unsaved document with that day at 09:00 UTC as its publish date. The
+  draft is created with that date as soon as you give it a title or press
+  Save draft, and *Remove the date* drops it. 09:00 is in UTC because the
+  calendar groups days in UTC, so the new item always lands on the day you
+  clicked. Days whose 09:00 UTC has passed offer no "+". The editor's new
+  `?scheduled_at=` link parameter ignores anything that is not a future
+  timestamp and opens an ordinary draft instead.
+
+  Setting a publish date takes the same permission as publishing. So for an
+  admin, or an editor on a site that lets editors publish, the day becomes
+  the scheduled publish date. Any other editor gets the "+" too, but their
+  day becomes a **proposed** publish date: a new internal column,
+  `proposed_publish_at`, that publishes nothing by itself. They can change it
+  in the editor's schedule area ("An admin confirms the date"). The calendar
+  draws it in its own dashed "Proposed" lane that cannot be dragged, and the
+  content list shows it on the row, so a reviewer sees it with the
+  submission. Someone who may publish turns it into the schedule with
+  *Confirm date* on that row, or with *Use this date* in the editor and Save.
+  Setting any publish date, or publishing, clears the proposal. No API read
+  returns the column, and a version restore leaves it alone. Like the body's
+  `blocks`, it is a write input on the JSON:API and GraphQL content
+  create/update actions (an addition to `docs/api`), so an API client without
+  publish rights can propose a date too. It is a new nullable column on every content table (an
+  expand-only migration, including the example overlay's tables)
+  ([#1812](https://github.com/The-Verscienta/kiln_cms/issues/1812)).
+
 <a id="branding-images-from-the-media-library"></a>
 
 - **The logo, favicon, social image and app icon on the Branding page can be
@@ -555,6 +589,29 @@ carries the reasoning.
   as you type, until you type into the segment yourself; clearing it hands it
   back to the machine name
   ([#1816](https://github.com/The-Verscienta/kiln_cms/issues/1816)).
+
+<a id="connection-notices-wait-out-a-slow-first-connection"></a>
+
+- **"We can't find the internet" and "Something went wrong!" no longer flash on
+  a first page load; they wait until a connection problem has lasted a few
+  seconds, and offer *Try again*.** Beta testers saw both messages on first
+  load of the rc.2 image, then saw them go away after a refresh. The cause was
+  Phoenix's WebSocket-to-longpoll fallback. When a page's first connection
+  took more than 2.5 seconds to answer (a slow network, a proxy, a cold
+  server), the browser switched to longpoll. The WebSocket it gave up on then
+  closed late and tore down the new connection. The page sat in an error
+  state, showing one message or the other, until LiveView reloaded it 5–10
+  seconds later. Phoenix 1.8.15 fixes the fallback, and the page now joins
+  over longpoll without a reload. The messages also have a grace period. A
+  message comes up only after the page has been disconnected, or unable to
+  open, for 2.5 seconds without a break, so a slow first connection or a line
+  that drops and comes straight back shows nothing. As before
+  ([#1784](https://github.com/The-Verscienta/kiln_cms/issues/1784)), only the
+  message for the current problem is shown, and it goes as soon as the page
+  is connected again. Each message now has a **Try again** button. When the
+  connection is down, it reconnects at once instead of waiting for the next
+  automatic attempt. When the server could not open the page, it reloads the
+  page ([#1821](https://github.com/The-Verscienta/kiln_cms/issues/1821)).
 
 <a id="save-draft-on-a-published-entry-holds-every-content-field"></a>
 
