@@ -211,13 +211,11 @@ defmodule KilnCMSWeb.EditorLive do
   # row actions all offered work the create policy would refuse — an editor
   # scoped to `editable_types: ["post"]` saw a Duplicate button on every page row
   # whose only possible outcome was an error flash (#926).
-  defp editable_types(org_id, actor) do
-    org_id
-    |> ContentTypes.all_for_org()
-    # The same question the create policy asks, shared with the unsaved-editor
-    # mount so the button and the page it opens cannot disagree.
-    |> Enum.filter(&NewDraft.may_author?(actor, org_id, &1))
-  end
+  #
+  # The same question the create policy asks, shared with the unsaved-editor
+  # mount and the calendar's "new on this day" picker, so the button and the
+  # page it opens cannot disagree.
+  defp editable_types(org_id, actor), do: NewDraft.authorable_types(actor, org_id)
 
   # The types this page pulls rows from: every editable type, or just the one
   # the `type` filter names. Filtering here rather than after the merge keeps

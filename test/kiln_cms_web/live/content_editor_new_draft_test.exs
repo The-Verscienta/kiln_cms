@@ -186,4 +186,106 @@ defmodule KilnCMSWeb.ContentEditorNewDraftTest do
     assert {:error, {:live_redirect, %{to: "/editor"}}} =
              live(conn, ~p"/editor/content/no-such-type/new")
   end
+
+  # `?scheduled_at=` is what the calendar's "new on this day" picker sends.
+  describe "?scheduled_at= (#1812)" do
+    defp in_days(days) do
+      Date.utc_today() |> Date.add(days) |> DateTime.new!(~T[09:00:00], "Etc/UTC")
+    end
+
+    defp new_page_path(scheduled_at),
+      do: ~p"/editor/content/page/new?#{[scheduled_at: scheduled_at]}"
+
+    setup %{conn: conn} do
+      admin = authed_user(:admin)
+      %{conn: log_in(conn, admin), admin: admin}
+    end
+
+    test "a future date is shown, and the draft is created with it", %{conn: conn, admin: admin} do
+      at = in_days(10)
+      {:ok, lv, html} = live(conn, new_page_path(DateTime.to_iso8601(at)))
+
+      assert has_element?(lv, "#new-draft-scheduled-at")
+      assert html =~ "Scheduled to publish on #{Calendar.strftime(at, "%-d %B %Y")} at 09:00 UTC"
+      assert pages(admin) == []
+
+      type_title(lv, "Planned launch")
+
+      assert [page] = pages(admin)
+      assert_patch(lv, ~p"/editor/content/page/#{page.id}")
+      assert DateTime.compare(page.scheduled_at, at) == :eq
+
+      # …and the full editor's schedule field now carries it.
+      assert has_element?(
+               lv,
+               ~s{input[name="form[scheduled_at]"][value^="#{Date.to_iso8601(DateTime.to_date(at))}"]}
+             )
+    end
+
+    test "an editor on a site that lets editors publish keeps the date", %{editor: editor} do
+      {:ok, _} =
+        KilnCMS.CMS.EditorialSettings.save(%{editors_can_publish: true},
+          actor: authed_user(:admin),
+          tenant: KilnCMS.Accounts.default_org_id()
+        )
+
+      at = in_days(4)
+      conn = log_in(build_conn(), editor)
+      {:ok, lv, _html} = live(conn, new_page_path(DateTime.to_iso8601(at)))
+
+      assert has_element?(lv, "#new-draft-scheduled-at")
+      type_title(lv, "Editor planned")
+
+      assert [page] = pages(editor)
+      assert DateTime.compare(page.scheduled_at, at) == :eq
+    end
+
+    test "Save draft also keeps the date", %{conn: conn, admin: admin} do
+      at = in_days(3)
+      {:ok, lv, _html} = live(conn, new_page_path(DateTime.to_iso8601(at)))
+
+      lv |> form("#page-editor", form: %{title: ""}) |> render_submit()
+
+      assert [page] = pages(admin)
+      assert DateTime.compare(page.scheduled_at, at) == :eq
+    end
+
+    for {label, value} <- [
+          {"garbage", "next-tuesday"},
+          {"a bare date", "2099-01-01"},
+          {"an empty value", ""}
+        ] do
+      test "#{label} is ignored and the draft is unscheduled", %{conn: conn, admin: admin} do
+        {:ok, lv, _html} = live(conn, new_page_path(unquote(value)))
+
+        refute has_element?(lv, "#new-draft-scheduled-at")
+        type_title(lv, "Unscheduled")
+
+        assert [%{scheduled_at: nil}] = pages(admin)
+      end
+    end
+
+    test "a time already past is ignored", %{conn: conn, admin: admin} do
+      {:ok, lv, _html} = live(conn, new_page_path(DateTime.to_iso8601(in_days(-2))))
+
+      refute has_element?(lv, "#new-draft-scheduled-at")
+      type_title(lv, "Too late")
+
+      assert [%{scheduled_at: nil}] = pages(admin)
+    end
+
+    test "an editor who may not set a publish date still gets an (unscheduled) draft",
+         %{editor: editor} do
+      conn = log_in(build_conn(), editor)
+      {:ok, lv, _html} = live(conn, new_page_path(DateTime.to_iso8601(in_days(5))))
+
+      refute has_element?(lv, "#new-draft-scheduled-at")
+      type_title(lv, "Editor draft")
+
+      # Not refused: the publish-date policy is never asked, because the date
+      # was dropped at the door.
+      assert [%{scheduled_at: nil} = page] = pages(editor)
+      assert_patch(lv, ~p"/editor/content/page/#{page.id}")
+    end
+  end
 end

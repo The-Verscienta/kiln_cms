@@ -24,6 +24,15 @@ defmodule KilnCMSWeb.CalendarLive do
   All three read the same `from`/`to` window off one `at` anchor, so switching
   view keeps your place.
 
+  ## New on a day
+
+  In the month and week grids, each day whose 09:00 UTC is still ahead has a
+  "+" button (#1812). It opens a small dialog listing the types the editor may
+  create (`KilnCMSWeb.ContentEditor.NewDraft.authorable_types/2`), each linking
+  to `/editor/content/:type/new?scheduled_at=…` — an unsaved new document that
+  is created with that publish date. The button is offered only to someone who
+  may set a publish date at all (`NewDraft.may_schedule?/2`).
+
   ## Live
 
   Mount subscribes to the org's calendar topic
@@ -62,6 +71,7 @@ defmodule KilnCMSWeb.CalendarLive do
 
   alias KilnCMS.CMS.Changes.BroadcastCalendar
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMSWeb.ContentEditor.NewDraft
 
   # Chips per day cell before the month grid collapses the rest into "+N more".
   # The cell is a fixed height so the grid stays a grid; four is what fits.
@@ -73,6 +83,9 @@ defmodule KilnCMSWeb.CalendarLive do
   # back-to-back writes. MediaLive coalesces its `:media_processed` broadcasts
   # the same way.
   @requery_window_ms 100
+
+  # The publish time of an item started from a day cell's "+" (see `new_at/1`).
+  @new_on_day_time ~T[09:00:00]
 
   @views ~w(month week list)
   @healths ~w(fresh due_soon due overdue expired)a
@@ -90,6 +103,8 @@ defmodule KilnCMSWeb.CalendarLive do
      socket
      |> assign(:page_title, gettext("Calendar"))
      |> assign(:requery_pending, nil)
+     |> assign(:new_types, new_types(socket.assigns))
+     |> assign(:new_on, nil)
      # Present from the first render: an aria-live region inserted later is not
      # announced by every screen reader, so it has to exist (empty) up front.
      |> assign(:announcement, nil)}
@@ -195,6 +210,25 @@ defmodule KilnCMSWeb.CalendarLive do
         # moved chip back to where the data still says it belongs.
         {:noreply, socket |> announce(message) |> put_flash(:error, message) |> load_events()}
     end
+  end
+
+  # The day cell's "+" (#1812): open the type picker for that day. The button
+  # is only rendered on days `new_on_day?/1` allows, but the date arrives from
+  # the client, so the same past check runs again here.
+  def handle_event("new_on_day", %{"date" => date}, socket) when is_binary(date) do
+    with true <- socket.assigns.new_types != [],
+         {:ok, date} <- parse_date(date),
+         true <-
+           new_on_day?(date) || {:error, gettext("That day has passed. Choose a later one.")} do
+      {:noreply, assign(socket, :new_on, date)}
+    else
+      {:error, message} -> {:noreply, socket |> announce(message) |> put_flash(:error, message)}
+      false -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("close_new_on_day", _params, socket) do
+    {:noreply, assign(socket, :new_on, nil)}
   end
 
   def handle_event("mark_reviewed", %{"id" => id, "type" => type}, socket)
@@ -359,6 +393,35 @@ defmodule KilnCMSWeb.CalendarLive do
       :ok
     end
   end
+
+  # --- new on a day (#1812) ---------------------------------------------------
+
+  # The types the day picker offers: what the content list's New buttons offer
+  # (`NewDraft.authorable_types/2`), and nothing at all for someone who may not
+  # set a publish date — the content policy gates `scheduled_at` like Publish,
+  # so for them the picker could only open an editor that drops the date.
+  defp new_types(%{current_user: actor, current_org: org}) do
+    if NewDraft.may_schedule?(actor, org.id),
+      do: NewDraft.authorable_types(actor, org),
+      else: []
+  end
+
+  # The publish time a new item on `date` gets. 09:00 UTC, because the
+  # calendar buckets and labels days in UTC (`KilnCMS.CMS.Calendar`): a local
+  # 09:00 converted to UTC can fall on the neighbouring UTC day, and the new
+  # chip would then land in a different cell from the one that was clicked.
+  # The editor's schedule field shows it in the writer's own timezone.
+  defp new_at(date), do: DateTime.new!(date, @new_on_day_time, "Etc/UTC")
+
+  # A day offers "+" only while its publish time is still ahead — the same
+  # past check a drag is held to, on the timestamp the new item would get.
+  defp new_on_day?(date), do: refuse_past(new_at(date)) == :ok
+
+  defp new_path(content_type, date) do
+    ~p"/editor/content/#{content_type.type}/new?#{[scheduled_at: DateTime.to_iso8601(new_at(date))]}"
+  end
+
+  defp day_label(date), do: Calendar.strftime(date, "%-d %B")
 
   defp moved_message(event, date) do
     gettext("Moved “%{title}” to %{date}.",
@@ -701,8 +764,20 @@ defmodule KilnCMSWeb.CalendarLive do
         <%!-- The grids are desktop-only and the list carries small screens on
               its own: seven columns on a phone is a horizontal scroll. When the
               editor has explicitly chosen List, it shows at every width. --%>
-        <div :if={@view in ["month", "week"] and @events != []} class="hidden md:block">
-          <.grid days={@days} by_day={@by_day} view={@view} at={@at} filters={@filters} />
+        <%!-- …unless the editor can start something on a day (#1812): then an
+              empty grid is still where they do that, under the empty card. --%>
+        <div
+          :if={@view in ["month", "week"] and (@events != [] or @new_types != [])}
+          class="hidden md:block"
+        >
+          <.grid
+            days={@days}
+            by_day={@by_day}
+            view={@view}
+            at={@at}
+            filters={@filters}
+            can_create?={@new_types != []}
+          />
         </div>
         <div :if={@view in ["month", "week"] and @events != []} class="md:hidden">
           <.event_list events={@events} />
@@ -716,6 +791,29 @@ defmodule KilnCMSWeb.CalendarLive do
               here. `polite`, not `assertive`: it reports what the editor just
               did, and should not cut across what they are reading next. --%>
         <p class="sr-only" role="status" aria-live="polite">{@announcement}</p>
+
+        <.modal
+          :if={@new_on}
+          id="calendar-new-dialog"
+          on_close="close_new_on_day"
+          variant={:compact}
+        >
+          <:title>{gettext("New on %{date}", date: day_label(@new_on))}</:title>
+          <:subtitle>
+            {gettext("Choose what to create. It is scheduled to publish that day at 09:00 UTC.")}
+          </:subtitle>
+          <ul class="flex flex-col gap-0.5 overflow-y-auto p-2">
+            <li :for={ct <- @new_types}>
+              <.link
+                navigate={new_path(ct, @new_on)}
+                class="flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-base-200 focus-visible:bg-base-200"
+              >
+                <.icon name="hero-document-plus" class="size-4 text-base-content/60" />
+                {ct.label}
+              </.link>
+            </li>
+          </ul>
+        </.modal>
       </div>
     </Layouts.console>
     """
@@ -797,6 +895,7 @@ defmodule KilnCMSWeb.CalendarLive do
   attr :view, :string, required: true
   attr :at, :any, required: true
   attr :filters, :map, required: true
+  attr :can_create?, :boolean, default: false
 
   defp grid(assigns) do
     ~H"""
@@ -833,8 +932,25 @@ defmodule KilnCMSWeb.CalendarLive do
                 today?(day) && "ring-1 ring-inset ring-primary"
               ]}
             >
-              <div class={["mb-1 text-xs", today?(day) && "font-bold text-primary-ink"]}>
-                {day.day}
+              <div class="group/day mb-1 flex items-center justify-between gap-1">
+                <span class={["text-xs", today?(day) && "font-bold text-primary-ink"]}>
+                  {day.day}
+                </span>
+                <%!-- "New on this day" (#1812). A real button beside the day
+                      number, not a click on the cell: the cell is also a drop
+                      target full of chip links, and a click that meant "open
+                      this chip" or "I was dragging" must not open a picker. --%>
+                <button
+                  :if={@can_create? and new_on_day?(day)}
+                  type="button"
+                  phx-click="new_on_day"
+                  phx-value-date={Date.to_iso8601(day)}
+                  aria-label={gettext("New content on %{date}", date: day_label(day))}
+                  title={gettext("New content on %{date}", date: day_label(day))}
+                  class="flex size-5 cursor-pointer items-center justify-center rounded text-base-content/60 transition hover:bg-primary/10 hover:text-primary-ink focus-visible:text-primary-ink group-hover/day:text-base-content"
+                >
+                  <.icon name="hero-plus" class="size-3.5" />
+                </button>
               </div>
               <.day_chips
                 events={Map.get(@by_day, day, [])}
