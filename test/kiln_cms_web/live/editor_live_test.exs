@@ -3135,6 +3135,58 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert has_element?(lv, ~s(aside a.side-link[data-side-tip="Media"]))
     end
 
+    # #1842: two bare "GraphQL" / "JSON:API" links read like open endpoints.
+    # One way into the API docs, and the keys page for whoever can mint keys.
+    test "the account menu offers the API docs, and API keys only to an admin", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      assert has_element?(
+               lv,
+               ~s(#side-account a#account-menu-developers[href="/developers"]),
+               "Developers / API docs"
+             )
+
+      refute has_element?(lv, ~s(#side-account a[href^="/developers#"]))
+      refute has_element?(lv, "#account-menu-api-keys")
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor")
+
+      assert has_element?(
+               lv,
+               ~s(#side-account a#account-menu-api-keys[href="/editor/api-keys"]),
+               "API keys"
+             )
+    end
+
+    # #1839: ⌘K hinted at shortcuts and nothing listed them.
+    test "the account menu opens a keyboard shortcut list", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      assert has_element?(
+               lv,
+               ~s(#side-account button#account-menu-shortcuts[type="button"][popovertarget="keyboard-shortcuts"]),
+               "Keyboard shortcuts"
+             )
+
+      dialog =
+        ~s(#keyboard-shortcuts[popover][role="dialog"][aria-labelledby="keyboard-shortcuts-title"])
+
+      assert has_element?(lv, dialog)
+      assert has_element?(lv, "#keyboard-shortcuts-title", "Keyboard shortcuts")
+
+      for action <- ["Open search", "Show this list of shortcuts", "Add a block", "Bold"] do
+        assert has_element?(lv, "#keyboard-shortcuts dt", action)
+      end
+
+      assert has_element?(lv, "#keyboard-shortcuts kbd", "Ctrl+K")
+      assert has_element?(lv, ~s(#keyboard-shortcuts a[href$="docs/editor-shortcuts.md"]))
+
+      assert has_element?(
+               lv,
+               ~s(#keyboard-shortcuts-close[popovertarget="keyboard-shortcuts"][popovertargetaction="hide"])
+             )
+    end
+
     # The mobile drawer's control is a <label> over a checkbox, so nothing about
     # it is implicit: the role, what it controls and its state are all written
     # out (app.js keeps `aria-expanded` current), and the checkbox itself leaves

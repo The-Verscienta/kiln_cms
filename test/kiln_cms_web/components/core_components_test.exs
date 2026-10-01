@@ -67,4 +67,27 @@ defmodule KilnCMSWeb.CoreComponentsTest do
       assert classes(render_button(%{})) == ~w(btn btn-default)
     end
   end
+
+  # #1839: the health pill's meaning lived in a `title`, which a screen reader
+  # and a keyboard never reach, and "Due soon" without a date had none at all.
+  describe "health_badge/1" do
+    test "explains itself in a tooltip and to a screen reader" do
+      html = render_component(&health_badge/1, health: :due_soon)
+
+      assert html =~ "Due soon"
+      assert html =~ ~s(title="Its review date is coming up.")
+      assert html =~ ~s(<span class="sr-only">Its review date is coming up.</span>)
+    end
+
+    test "adds the review date when it has one" do
+      html = render_component(&health_badge/1, health: :overdue, due_at: ~U[2026-09-01 00:00:00Z])
+
+      assert html =~
+               "Its review date passed over a week ago: check it now. Review date: 2026-09-01."
+    end
+
+    test "renders nothing for fresh content" do
+      assert render_component(&health_badge/1, health: :fresh) =~ ~r/^\s*$/
+    end
+  end
 end

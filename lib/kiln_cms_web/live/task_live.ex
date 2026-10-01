@@ -329,9 +329,9 @@ defmodule KilnCMSWeb.TaskLive do
         </div>
 
         <div :if={@view == :mine} class="card divide-y divide-base-content/10">
-          <p :if={@my_tasks == []} class="p-4 text-sm text-base-content/60" role="status">
+          <.tasks_empty :if={@my_tasks == []} id="tasks-empty-mine" class="p-4">
             {task_empty_copy(:mine, @scope)}
-          </p>
+          </.tasks_empty>
           <.task_row
             :for={task <- @my_tasks}
             task={task}
@@ -340,9 +340,9 @@ defmodule KilnCMSWeb.TaskLive do
         </div>
 
         <div :if={@view == :team} class="space-y-4">
-          <p :if={@team_tasks == []} class="text-sm text-base-content/60" role="status">
+          <.tasks_empty :if={@team_tasks == []} id="tasks-empty-team">
             {task_empty_copy(:team, @scope)}
-          </p>
+          </.tasks_empty>
           <div :for={{assignee, tasks} <- @team_tasks} class="card">
             <div class="border-b border-base-content/10 px-4 py-2 text-sm font-semibold">
               {assignee} <span class="text-base-content/50">({length(tasks)})</span>
@@ -358,6 +358,33 @@ defmodule KilnCMSWeb.TaskLive do
         </div>
       </div>
     </Layouts.console>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :class, :any, default: nil
+  slot :inner_block, required: true
+
+  # An empty list says where tasks come from and offers the way to make one
+  # (#1840): a task is always made *on* content — Assign in the content list
+  # (or the editor's Assignment panel), or Create task in a block discussion —
+  # so the step is the content list, not a form on this page.
+  defp tasks_empty(assigns) do
+    ~H"""
+    <div id={@id} class={["space-y-2", @class]}>
+      <p class="text-sm text-base-content/60" role="status">{render_slot(@inner_block)}</p>
+      <p class="text-sm text-base-content/70">
+        {gettext(
+          "Tasks are made on content: choose Assign on a document in the content list, or open a block's discussion in the editor and choose Create task."
+        )}
+      </p>
+      <.link
+        navigate={~p"/editor"}
+        class="inline-flex items-center gap-1 text-sm font-medium text-primary-ink hover:underline"
+      >
+        {gettext("Go to content")} <span aria-hidden="true">→</span>
+      </.link>
+    </div>
     """
   end
 

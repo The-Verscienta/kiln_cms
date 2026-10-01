@@ -74,6 +74,21 @@ defmodule KilnCMSWeb.TaskLiveTest do
     assert html =~ "No open tasks assigned to you."
   end
 
+  # #1840: an empty list now says where tasks come from and offers the way in.
+  test "an empty queue says where tasks come from and links to content", %{conn: conn} do
+    {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/tasks")
+
+    assert has_element?(lv, "#tasks-empty-mine [role=status]", "No open tasks assigned to you.")
+    assert has_element?(lv, "#tasks-empty-mine", "choose Assign on a document")
+    assert has_element?(lv, ~s(#tasks-empty-mine a[href="/editor"]), "Go to content")
+
+    {:ok, lv, _html} =
+      conn |> log_in(authed_user(:editor)) |> live(~p"/editor/tasks?view=team&scope=block")
+
+    assert has_element?(lv, "#tasks-empty-team", "No open tasks anchored to a block.")
+    assert has_element?(lv, ~s(#tasks-empty-team a[href="/editor"]), "Go to content")
+  end
+
   # #1822: "Anchored to" is a filter nobody had explained.
   test "the Anchored to filter carries a help tip", %{conn: conn} do
     {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/tasks")

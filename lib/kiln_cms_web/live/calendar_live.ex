@@ -624,6 +624,34 @@ defmodule KilnCMSWeb.CalendarLive do
   defp lane_label(:release_published), do: gettext("Release shipped")
   defp lane_label(:release_failed), do: gettext("Release failed")
 
+  # The legend's help tip (#1839): one plain sentence per lane, read after its
+  # `lane_label/1`.
+  defp lane_meaning(:publish), do: gettext("content set to go live on that day.")
+
+  defp lane_meaning(:proposed),
+    do:
+      gettext(
+        "a date an editor suggested. Nothing is published until an admin confirms it and it becomes a scheduled publish."
+      )
+
+  defp lane_meaning(:published), do: gettext("content that went live on that day.")
+  defp lane_meaning(:unpublish), do: gettext("content set to be taken down on that day.")
+  defp lane_meaning(:archive), do: gettext("content set to be filed away on that day.")
+
+  defp lane_meaning(:expire),
+    do: gettext("content that stays live past this date but is flagged as expired for review.")
+
+  defp lane_meaning(:review_due), do: gettext("published content due for a check on that day.")
+  defp lane_meaning(:task_due), do: gettext("a task's deadline.")
+
+  defp lane_meaning(:release_scheduled),
+    do: gettext("a release set to publish its items together.")
+
+  defp lane_meaning(:release_published), do: gettext("a release that went out.")
+
+  defp lane_meaning(:release_failed),
+    do: gettext("a release that could not publish. Open it to see why.")
+
   defp kind_label(:publish), do: gettext("publishes")
   defp kind_label(:proposed), do: gettext("proposed to publish — an admin confirms")
   defp kind_label(:unpublish), do: gettext("unpublishes")
@@ -925,11 +953,33 @@ defmodule KilnCMSWeb.CalendarLive do
 
   defp legend(assigns) do
     ~H"""
-    <p class="flex flex-wrap gap-4 text-xs text-base-content/70">
+    <p class="flex flex-wrap items-center gap-4 text-xs text-base-content/70">
       <span :for={kind <- KilnCMS.CMS.Calendar.kinds()} class="flex items-center gap-1.5">
         <span class={["inline-block size-3 rounded border", kind_class(kind)]} />
         {lane_label(kind)}
       </span>
+      <%!-- What each colour in the key means, and the health pills on the
+            list (#1839): a swatch and two words do not say that a proposal
+            publishes nothing until an admin confirms it. --%>
+      <.help_tip
+        id="calendar-legend-help"
+        label={gettext("What the colours mean")}
+        title={gettext("Calendar key")}
+        learn_more={docs_url("content-lifecycles.md#the-editorial-calendar")}
+      >
+        <span :for={kind <- KilnCMS.CMS.Calendar.kinds()} class="mt-1.5 flex items-start gap-2">
+          <span class={["mt-1 inline-block size-3 shrink-0 rounded border", kind_class(kind)]} />
+          <span>
+            <span class="font-medium text-base-content">{lane_label(kind)}:</span>
+            {lane_meaning(kind)}
+          </span>
+        </span>
+        <span class="mt-3 block font-medium text-base-content">{gettext("Health pills")}</span>
+        <span :for={health <- [:due_soon, :due, :overdue, :expired]} class="mt-1 block">
+          <span class="font-medium text-base-content">{health_label(health)}:</span>
+          {health_meaning(health)}
+        </span>
+      </.help_tip>
     </p>
     """
   end

@@ -649,6 +649,92 @@ defmodule KilnCMSWeb.Layouts do
       </div>
 
       <.flash_group flash={@flash} />
+      <.shortcuts_dialog :if={@current_user} />
+    </div>
+    """
+  end
+
+  # The console's keyboard shortcut reference (#1839): opened from the account
+  # menu's "Keyboard shortcuts" item, or by "?" outside a text field (app.js).
+  # Lists only shortcuts the console really answers to — each is wired in
+  # app.js or the rich-text editor — and links the full rich-text table in
+  # docs/editor-shortcuts.md rather than copying all of it.
+  defp shortcuts_dialog(assigns) do
+    assigns =
+      assign(assigns, :groups, [
+        {gettext("Anywhere in the console"),
+         [
+           {[gettext("Ctrl+K"), gettext("⌘K")], gettext("Open search")},
+           {["?"], gettext("Show this list of shortcuts")},
+           {[gettext("Esc")], gettext("Close an open menu, panel or the mobile menu")}
+         ]},
+        {gettext("In the content editor"),
+         [
+           {["/"], gettext("Add a block (when you are not typing in a field)")}
+         ]},
+        {gettext("While writing text"),
+         [
+           {[gettext("Ctrl+B"), gettext("⌘B")], gettext("Bold")},
+           {[gettext("Ctrl+I"), gettext("⌘I")], gettext("Italic")},
+           {[gettext("Ctrl+K"), gettext("⌘K")], gettext("Add a link")},
+           {[gettext("Ctrl+Z"), gettext("⌘Z")], gettext("Undo")},
+           {["/"],
+            gettext("At the start of an empty line: insert a heading, list, quote and more")}
+         ]}
+      ])
+
+    ~H"""
+    <div
+      id="keyboard-shortcuts"
+      popover="auto"
+      role="dialog"
+      aria-labelledby="keyboard-shortcuts-title"
+      class="shortcuts-panel"
+    >
+      <div class="flex items-start justify-between gap-3">
+        <h2 id="keyboard-shortcuts-title" class="text-base font-semibold">
+          {gettext("Keyboard shortcuts")}
+        </h2>
+        <button
+          type="button"
+          id="keyboard-shortcuts-close"
+          popovertarget="keyboard-shortcuts"
+          popovertargetaction="hide"
+          aria-label={gettext("Close")}
+          class="help-tip-button -mr-1"
+        >
+          <.icon name="hero-x-mark" class="size-5" />
+        </button>
+      </div>
+      <p class="mt-1 text-base-content/70">
+        {gettext("On a Mac, use ⌘ (Command) where Windows and Linux use Ctrl.")}
+      </p>
+      <div :for={{heading, rows} <- @groups} class="mt-4">
+        <h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/60">
+          {heading}
+        </h3>
+        <dl class="mt-1 divide-y divide-base-content/10">
+          <div :for={{keys, action} <- rows} class="flex items-center justify-between gap-4 py-1.5">
+            <dt class="text-base-content/85">{action}</dt>
+            <dd class="flex shrink-0 items-center gap-1 text-xs text-base-content/60">
+              <%= for {key, i} <- Enum.with_index(keys) do %>
+                <span :if={i > 0}>{gettext("or")}</span>
+                <kbd class="kbd">{key}</kbd>
+              <% end %>
+            </dd>
+          </div>
+        </dl>
+      </div>
+      <a
+        href={KilnCMSWeb.CoreComponents.docs_url("editor-shortcuts.md")}
+        target="_blank"
+        rel="noopener"
+        class="link mt-4 inline-flex items-center gap-1 text-sm font-medium text-primary-ink"
+      >
+        {gettext("All shortcuts for writing text")}
+        <.icon name="hero-arrow-top-right-on-square" class="size-3.5" />
+        <span class="sr-only">{gettext("(opens in a new tab)")}</span>
+      </a>
     </div>
     """
   end
@@ -1045,12 +1131,31 @@ defmodule KilnCMSWeb.Layouts do
         <.link navigate={~p"/account"}>
           <.icon name="hero-user-circle" class="size-4 shrink-0" />{gettext("Account")}
         </.link>
-        <a href="/developers#graphql">
-          <.icon name="hero-code-bracket-square" class="size-4 shrink-0" />{gettext("GraphQL")}
+        <%!-- One way into the API docs, plus the keys that unlock the APIs for
+              the people who can mint them (#1842). The APIs take an API key
+              or a bearer token, never this browser session, so the keys page
+              is where access actually comes from; it is platform-admin only,
+              so it is offered on the same predicate `ApiKeyLive` checks. --%>
+        <a id="account-menu-developers" href="/developers">
+          <.icon name="hero-code-bracket" class="size-4 shrink-0" />{gettext("Developers / API docs")}
         </a>
-        <a href="/developers#json-api">
-          <.icon name="hero-code-bracket" class="size-4 shrink-0" />{gettext("JSON:API")}
-        </a>
+        <.link
+          :if={KilnCMSWeb.LiveUserAuth.platform_admin_user?(@current_user)}
+          id="account-menu-api-keys"
+          navigate={~p"/editor/api-keys"}
+        >
+          <.icon name="hero-key" class="size-4 shrink-0" />{gettext("API keys")}
+        </.link>
+        <%!-- Opens the shortcut reference rendered once by `console/1` (#1839).
+              `popovertarget` needs no hook; "?" opens the same panel. --%>
+        <button
+          type="button"
+          id="account-menu-shortcuts"
+          popovertarget="keyboard-shortcuts"
+          aria-haspopup="dialog"
+        >
+          <.icon name="hero-command-line" class="size-4 shrink-0" />{gettext("Keyboard shortcuts")}
+        </button>
         <hr />
         <a href={~p"/sign-out"}>
           <.icon name="hero-arrow-right-start-on-rectangle" class="size-4 shrink-0" />{gettext(

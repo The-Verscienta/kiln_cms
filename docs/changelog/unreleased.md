@@ -318,6 +318,26 @@ carries the reasoning.
 
 ## Added
 
+<a id="keyboard-shortcuts-and-calendar-key"></a>
+
+- **A keyboard shortcut list opens from the account menu or with "?", and
+  the calendar's colour key has a "?" that explains every lane and health
+  pill.** A beta tester saw the ⌘K hint and found nowhere that listed the
+  console's shortcuts, and no explanation of the calendar's colours. The
+  account menu now has *Keyboard shortcuts*, which opens a panel listing the
+  shortcuts the console really answers to: Ctrl+K or ⌘K for search, "?" for
+  the list itself, Escape to close menus and panels, "/" to add a block in the
+  content editor, and the common text-editing keys, with a link to the full
+  table in `docs/editor-shortcuts.md`. Pressing "?" anywhere outside a text
+  field opens the same panel. It is the browser's own popover, like the help
+  tips, so Escape or a click elsewhere closes it. On the calendar, a "?" after
+  the colour key says what each lane means, including that a *Proposed
+  publish* publishes nothing until an admin confirms it, and what each health
+  pill asks of you. The health pills themselves now say what they mean to a
+  screen reader as well as in their tooltip, and *Due soon* and *Review due*
+  have a tooltip even when no review date is known
+  ([#1839](https://github.com/The-Verscienta/kiln_cms/issues/1839)).
+
 <a id="console-help-tips"></a>
 
 - **The calendar's Lane and Health filters and the Tasks page's Anchored to
@@ -513,6 +533,28 @@ carries the reasoning.
   ([#1823](https://github.com/The-Verscienta/kiln_cms/issues/1823))
 
 ## Changed
+
+<a id="console-next-steps"></a>
+
+- **The console points the way when something is empty or unset: Tasks,
+  the overview's Structure card, the account menu's API links and the
+  governance witness panel each say what to do next.** Four beta findings
+  about screens that stopped at a bare fact. An empty Tasks list now explains
+  that tasks are made on content (*Assign* in the content list, or *Create
+  task* in a block's discussion) and links to the content list
+  ([#1840](https://github.com/The-Verscienta/kiln_cms/issues/1840)). The overview's Structure card says *No taxonomy terms
+  yet* with an *Add terms* link for anyone who may add them, and its link says
+  where it goes: *Manage content types* for an admin, *Manage taxonomy*
+  otherwise, instead of *Open* ([#1841](https://github.com/The-Verscienta/kiln_cms/issues/1841)). The account menu's
+  separate *GraphQL* and *JSON:API* links are now one *Developers / API docs*
+  item, plus *API keys* for platform admins, the people who can mint the keys
+  those APIs require; the APIs never accept the browser session
+  ([#1842](https://github.com/The-Verscienta/kiln_cms/issues/1842)). With no history witness configured, the governance
+  panel names the setting (`KILN_GOVERNANCE_WITNESS=file|s3|http`), links the
+  governance guide, and says the waiting checkpoints *will be published once a
+  witness is configured*, with a reminder that an unrecognised value also
+  falls back to none. A configured witness that refuses publications is still
+  reported as before ([#1845](https://github.com/The-Verscienta/kiln_cms/issues/1845)).
 
 <a id="a-new-content-type-goes-straight-on-to-its-fields"></a>
 
