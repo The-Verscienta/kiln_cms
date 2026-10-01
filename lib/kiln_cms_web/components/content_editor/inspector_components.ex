@@ -801,10 +801,21 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
+  defp release_item_note(:unpublish, _live?),
+    do: gettext("Will be unpublished when the release goes live.")
+
+  defp release_item_note(_publish, true),
+    do: gettext("Live now. Changes you save go live with the release.")
+
+  defp release_item_note(_publish, _live?),
+    do: gettext("Will be published when the release goes live.")
+
   attr :item, :map, default: nil
   attr :release, :map, default: nil
   attr :releases, :list, required: true
   attr :draft, :map, required: true
+  # A live record's Save holds its changes for the release to publish (#1815).
+  attr :live?, :boolean, default: false
 
   # Content releases (#500 / #836): which release this record is queued in, or a
   # picker to put it in one — the editor-side half of "add to release", which
@@ -826,9 +837,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
             <span :if={!@release}>{gettext("In a release")}</span>
           </p>
           <p class="mt-1 text-base-content/70">
-            {if @item.action == :unpublish,
-              do: gettext("Will be unpublished when the release goes live."),
-              else: gettext("Will be published when the release goes live.")}
+            {release_item_note(@item.action, @live?)}
           </p>
           <button
             type="button"

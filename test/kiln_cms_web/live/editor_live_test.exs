@@ -671,7 +671,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert CMS.get_page!(page.id, authorize?: false).title == "Live"
       assert CMS.get_page!(page.id, authorize?: false).working_title == "Edited live"
 
-      # A setting: dirty until Save, then live.
+      # A setting: dirty until Save, then held with the text (#1815).
       changed =
         lv
         |> form("#page-editor")
@@ -686,9 +686,11 @@ defmodule KilnCMSWeb.EditorLiveTest do
       saved = lv |> form("#page-editor") |> render_submit()
       assert saved =~ ~s(data-dirty="false")
       refute saved =~ "Unsaved changes"
-      assert CMS.get_page!(page.id, authorize?: false).seo_title == "Edited SEO"
-      # Save moved the setting, not the text.
-      assert CMS.get_page!(page.id, authorize?: false).title == "Live"
+      saved_page = CMS.get_page!(page.id, authorize?: false)
+      # Save moved nothing readers get: not the setting, not the text.
+      assert saved_page.seo_title == nil
+      assert saved_page.title == "Live"
+      assert KilnCMS.CMS.WorkingCopy.view(saved_page).seo_title == "Edited SEO"
     end
 
     test "repeated autosaves coalesce into a single version (issue #32)", %{conn: conn} do

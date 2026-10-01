@@ -118,6 +118,31 @@ carries the reasoning.
   unpublished content
   ([#1776](https://github.com/The-Verscienta/kiln_cms/issues/1776)).
 
+<a id="save-draft-holds-content-fields-until-publish-changes"></a>
+
+- **Tell authors that Save draft on a published entry now holds every content
+  field until *Publish changes*; a webhook receiver hears `<type>.updated`
+  when the changes are published, not when they are saved.** Until this
+  release, Save draft on a live page, post or entry held back only its title
+  and body: the SEO fields, custom fields, category, featured image, tags,
+  related content, slug, path alias and locale went live on the spot. Now
+  they wait in the unpublished changes with the text, and the entry shows
+  *Live · draft* until someone clicks *Publish changes* or a release
+  publishes them. An author used to seeing a new SEO title live right after
+  Save draft has to publish the changes now. The audience, the access
+  passphrase and the publish, unpublish and review dates still apply on
+  Save draft. What a webhook receiver sees changes in timing only: the event
+  names and payloads are the same, but an editor's change to one of those
+  fields now sends `<type>.updated` when it is published, as a title edit
+  already did, instead of at every Save draft. A `PATCH` through `/api/json`
+  or GraphQL is unchanged and still edits the live entry directly; a later
+  *Publish changes* that would overwrite such an edit now asks first, and a
+  release holding one is blocked until someone decides. Entries with
+  unpublished title or body changes from an earlier release keep them; the
+  upgrade adds two columns (`working_fields` and `working_base`, empty by
+  default) to each content table
+  ([#1815](https://github.com/The-Verscienta/kiln_cms/issues/1815)).
+
 ## Breaking
 
 <a id="on-a-multi-org-install-with-kiln_console_host-set-each-non-default-orgs-console"></a>
@@ -534,6 +559,39 @@ carries the reasoning.
   for any other. With no console host it stays `/` on the current host,
   which is that site
   ([#1827](https://github.com/The-Verscienta/kiln_cms/issues/1827)).
+
+<a id="save-draft-on-a-published-entry-holds-every-content-field"></a>
+
+- **Save draft on a published entry no longer puts any field live; *Publish
+  changes* or a release publishes every saved change at once.** A beta tester added a published entry to a release, edited
+  it, saved the draft, and the release page said the entry was "already in
+  that state — will be skipped". The release was right about what it saw:
+  Save draft had held back only the title and body, and had already put
+  every other field live, so there was nothing left to publish. Now the
+  unpublished changes of a live entry cover every field a reader sees on or
+  about it: the title and body, the excerpt and SEO fields, the custom fields
+  (on a custom content type that is most of the entry), the category,
+  featured image, tags and related content, and the slug, path alias and
+  locale. A slug change leaves its redirect from the old address when it is
+  published, not when it is saved. *Publish changes*, or a release, publishes
+  all of them at once; *Discard the changes* drops all of them; unpublishing
+  keeps them in the draft. Settings about who may read the entry and when it
+  changes state (the audience, the access passphrase, the publish, unpublish
+  and review dates) still apply on Save draft, so locking a page is never
+  waiting on a publish. The release page also read every live item as
+  having nothing to publish, even one with title changes saved, because its
+  readiness check never looked at the unpublished changes. It now says
+  *Live — publishes the saved changes* or *Live, no unpublished changes —
+  nothing to publish*, and the editor's Release panel on a live entry says
+  that saved changes go live with the release. Publishing a draft also no
+  longer overwrites a live change made after it was saved: if an API edit or
+  in-context editing changed a field the draft also changed, *Publish
+  changes* asks, field by field, whether to keep the live version or use the
+  draft's, and a release holding such an item is blocked ("Live page changed
+  since the draft — review before releasing") until someone decides in the
+  editor. A field the draft never touched keeps its newer live value without
+  asking. `docs/working-copy.md` lists which fields are held and why
+  ([#1815](https://github.com/The-Verscienta/kiln_cms/issues/1815)).
 
 <a id="brand-colour-shows-on-save"></a>
 

@@ -1930,6 +1930,11 @@ msgstr "¿Ya eres miembro? Inicia sesión"
 msgid "Already on this item, from a group scoped to other content types."
 msgstr "Ya está en este elemento, desde un grupo limitado a otros tipos de contenido."
 
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "Already unpublished — will be skipped"
+msgstr "Ya despublicado — se omitirá"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Also attached"
@@ -2616,6 +2621,7 @@ msgstr "Bluesky: una contraseña de aplicación, nunca la contraseña de su cuen
 msgid "Bluesky: your full handle. Mastodon: for display only."
 msgstr "Bluesky: su identificador completo. Mastodon: solo para mostrar."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Body"
@@ -3134,6 +3140,11 @@ msgstr "Elegir vídeo"
 #, elixir-autogen, elixir-format
 msgid "Choose which user the key acts as, and give it a name."
 msgstr "Elige como qué usuario actúa la clave y ponle un nombre."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose which version to keep for each field first."
+msgstr "Primero elige qué versión conservar para cada campo."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/form_settings_live.ex
@@ -7273,10 +7284,20 @@ msgstr "Solo yo — publicar directamente"
 msgid "KILN_CONSOLE_HOST is unset, so the editor console answers on each organization's own host. Code an organization's admin adds to their site's head or footer runs on the same origin as the console, and can act as any editor who opens that site while signed in — a platform admin included."
 msgstr "KILN_CONSOLE_HOST no está definido, así que la consola de edición responde en el host propio de cada organización. El código que el administrador de una organización añade a la cabecera o al pie de su sitio se ejecuta en el mismo origen que la consola, y puede actuar como cualquier editor que abra ese sitio con la sesión iniciada, incluido un administrador de la plataforma."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Keep all live versions"
+msgstr "Conservar todas las versiones publicadas"
+
 #: lib/kiln_cms_web/live/automation_live/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "Keep the live site current"
 msgstr "Mantener al día el sitio publicado"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Keep the live version"
+msgstr "Conservar la versión publicada"
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
@@ -7673,6 +7694,16 @@ msgstr "Afirmaciones publicadas"
 msgid "Live mode"
 msgstr "Modo producción"
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Live now. Changes you save go live with the release."
+msgstr "Publicado. Los cambios que guardes se publicarán con el lanzamiento."
+
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "Live page changed since the draft — review before releasing"
+msgstr "La página publicada cambió desde el borrador — revísala antes del lanzamiento"
+
 #: lib/kiln_cms_web/live/content_editor/inspector_history_component.ex
 #, elixir-autogen, elixir-format
 msgid "Live published"
@@ -7682,6 +7713,16 @@ msgstr "Publicado en vivo"
 #, elixir-autogen, elixir-format
 msgid "Live · draft"
 msgstr "Publicado · borrador"
+
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "Live — publishes the saved changes"
+msgstr "Publicado — publica los cambios guardados"
+
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "Live, no unpublished changes — nothing to publish"
+msgstr "Publicado, sin cambios sin publicar — nada que publicar"
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -10324,6 +10365,7 @@ msgid "Publish %{count} selected item(s)? They go live on the site immediately."
 msgstr "¿Publicar %{count} elemento(s) seleccionado(s)? Se publican en el sitio inmediatamente."
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Publish changes"
 msgstr "Publicar cambios"
@@ -10744,6 +10786,11 @@ msgstr "Reindexando este sitio."
 #, elixir-autogen, elixir-format
 msgid "Related %{kind}s"
 msgstr "Contenido relacionado (%{kind}s)"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Related content"
+msgstr "Contenido relacionado"
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -11694,6 +11741,11 @@ msgstr "Guardar detalles"
 msgid "Save draft"
 msgstr "Guardar borrador"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Save draft first, then publish your changes."
+msgstr "Guarda primero el borrador y luego publica tus cambios."
+
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
@@ -11781,6 +11833,11 @@ msgstr "Guardado."
 #, elixir-autogen, elixir-format
 msgid "Saved. Leave blank to keep it."
 msgstr "Guardada. Déjala en blanco para conservarla."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Saved. Readers see these changes once you publish them."
+msgstr "Guardado. Los lectores verán estos cambios cuando los publiques."
 
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
@@ -12738,6 +12795,11 @@ msgstr "Algunos niveles conceden una audiencia que ya no está configurada. Rest
 msgid "Someone"
 msgstr "Alguien"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Someone changed the live page after you saved your draft"
+msgstr "Alguien cambió la página publicada después de que guardaras tu borrador"
+
 #: lib/kiln_cms_web/workflow_messages.ex
 #, elixir-autogen, elixir-format
 msgid "Someone else changed this item's status first — reload to see where it stands."
@@ -13238,6 +13300,7 @@ msgid "Tagged %{ok}; %{failed} couldn't be updated."
 msgstr "Se etiquetaron %{ok}; %{failed} no se pudieron actualizar."
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
@@ -14274,6 +14337,11 @@ msgstr "Estas direcciones rebotaron de forma permanente y se omiten en los próx
 #, elixir-autogen, elixir-format
 msgid "These fields belong to a content type that no longer exists — a removed plugin, or a type that was renamed or deleted. Nothing shows, checks or delivers them. Delete them to tidy up."
 msgstr "Estos campos pertenecen a un tipo de contenido que ya no existe: un plugin eliminado, o un tipo que se renombró o se borró. Nada los muestra, los valida ni los entrega. Elimínalos para poner orden."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "These fields were changed on the live page since then. For each one, keep the live version or publish yours."
+msgstr "Estos campos cambiaron en la página publicada desde entonces. Para cada uno, conserva la versión publicada o publica la tuya."
 
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
@@ -15394,6 +15462,11 @@ msgstr "Usar un código de recuperación"
 msgid "Use all"
 msgstr "Usar todas"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Use all of mine"
+msgstr "Usar todas las mías"
+
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "Use dark theme"
@@ -15408,6 +15481,11 @@ msgstr "Usar la imagen destacada"
 #, elixir-autogen, elixir-format
 msgid "Use light theme"
 msgstr "Usar tema claro"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Use mine"
+msgstr "Usar la mía"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
@@ -16447,11 +16525,6 @@ msgstr "se añade justo antes de </head>"
 #, elixir-autogen, elixir-format
 msgid "all confirmed subscribers"
 msgstr "todos los suscriptores confirmados"
-
-#: lib/kiln_cms_web/live/release_live.ex
-#, elixir-autogen, elixir-format
-msgid "already in that state — will be skipped"
-msgstr "ya está en ese estado: se omitirá"
 
 #: lib/kiln_cms_web/live/automation_live/preview.ex
 #, elixir-autogen, elixir-format
