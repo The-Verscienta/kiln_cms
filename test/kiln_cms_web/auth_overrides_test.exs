@@ -13,14 +13,16 @@ defmodule KilnCMSWeb.AuthOverridesTest do
   to work starts failing here instead of quietly doing nothing.
 
   The second pins the one thing the file could not say on its own — see
-  `KilnCMSWeb.AuthResetForm`.
+  `KilnCMSWeb.AuthResetForm`. The third holds the other two forms Kiln renders
+  from a copy — sign-in and register, copied to put an eye button beside their
+  password boxes (#1806) — to the same standard.
   """
   use KilnCMSWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
 
   alias AshAuthentication.Phoenix.Components
-  alias KilnCMSWeb.{AuthOverrides, AuthResetForm}
+  alias KilnCMSWeb.{AuthOverrides, AuthRegisterForm, AuthResetForm, AuthSignInForm}
 
   # What `Components.Reset.Form` labels its submit button when nobody passes it
   # one: `Phoenix.Naming.humanize/1` of the reset action's name. The whole point
@@ -79,7 +81,9 @@ defmodule KilnCMSWeb.AuthOverridesTest do
       # against the same assigns turns that into a failing test: anything
       # upstream changes in this form — a field, a class, the hidden token —
       # shows up here as a difference that is not the button's wording.
-      assigns = form_assigns()
+      # With the eye buttons (#1806) off: they are the other thing it changes,
+      # and `KilnCMSWeb.PasswordRevealTest` covers them.
+      assigns = Map.put(form_assigns(), :password_reveal, false)
 
       kiln = render_component(AuthResetForm, assigns)
       upstream = render_component(Components.Reset.Form, assigns)
@@ -87,10 +91,63 @@ defmodule KilnCMSWeb.AuthOverridesTest do
       assert upstream =~ ">#{@upstream_label}</button>"
       assert kiln =~ ">#{@kiln_label}</button>"
 
-      assert String.replace(kiln, ">#{@kiln_label}</button>", ">#{@upstream_label}</button>") ==
-               upstream
+      assert kiln
+             |> String.replace(">#{@kiln_label}</button>", ">#{@upstream_label}</button>")
+             |> squash() == squash(upstream)
     end
   end
+
+  describe "Kiln's copies of the sign-in and register forms" do
+    # Both renders are upstream's with the password boxes swapped for
+    # `KilnCMSWeb.AuthPasswordInput`'s, which with the eye button off render
+    # upstream's markup byte for byte. So with it off, the whole form must too:
+    # anything upstream changes in either form shows up here as a difference.
+    test "render exactly what upstream's do, eye buttons aside" do
+      for {kiln, upstream, id} <- [
+            {AuthSignInForm, Components.Password.SignInForm, "user-password-sign-in-form"},
+            {AuthRegisterForm, Components.Password.RegisterForm, "user-password-register-form"}
+          ] do
+        assigns = Map.merge(password_form_assigns(id), %{password_reveal: false})
+
+        assert squash(render_component(kiln, assigns)) ==
+                 squash(render_component(upstream, assigns)),
+               "#{inspect(kiln)} drifted from #{inspect(upstream)}"
+      end
+    end
+
+    test "are what the pages render, with the eye buttons on", %{conn: conn} do
+      assert AuthOverrides.override_for(
+               [AuthOverrides],
+               Components.Password,
+               :sign_in_form_module
+             ) == AuthSignInForm
+
+      assert AuthOverrides.override_for(
+               [AuthOverrides],
+               Components.Password,
+               :register_form_module
+             ) == AuthRegisterForm
+
+      {:ok, _view, html} = live(conn, ~p"/sign-in")
+      assert html =~ "data-password-reveal"
+    end
+  end
+
+  defp password_form_assigns(id) do
+    %{
+      id: id,
+      strategy: AshAuthentication.Info.strategy!(KilnCMS.Accounts.User, :password),
+      label: false,
+      auth_routes_prefix: "/auth",
+      current_tenant: nil,
+      gettext_fn: nil,
+      overrides: [AuthOverrides]
+    }
+  end
+
+  # Whitespace between tags is template layout, not markup: the copied field
+  # branches on the eye button, so its indentation cannot match upstream's.
+  defp squash(html), do: String.replace(html, ~r/>\s+</, "><")
 
   defp undeclared(overrides) do
     overrides

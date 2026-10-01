@@ -34,14 +34,17 @@ defmodule KilnCMSWeb.AuthResetForm do
   prop, which means owning the render.
 
   So this module declares the `button_text` the component it stands in for
-  lacks, and `render/1` below is upstream's with that one prop added. Everything
+  lacks, and `render/1` below is upstream's with that one prop added — and with
+  its password boxes rendered by `KilnCMSWeb.AuthPasswordInput`, which puts the
+  eye button beside each (#1806). Everything
   else in it — including the four settings `override Components.Reset.Form` in
   `KilnCMSWeb.AuthOverrides` writes — is read through
   `KilnCMSWeb.AuthOverrides.override_for/4` under upstream's name, so those
   settings keep working and the copy stays a copy.
 
   `KilnCMSWeb.AuthOverridesTest` pins it: it renders this component and upstream's
-  with the same assigns and asserts the only difference is the button's wording.
+  with the same assigns (the eye button off) and asserts the only difference is
+  the button's wording.
   An upstream change to this form fails that test rather than going stale here.
   """
   use KilnCMSWeb, :live_component
@@ -54,7 +57,7 @@ defmodule KilnCMSWeb.AuthResetForm do
 
   alias AshAuthentication.Phoenix.Components.Password.Input
   alias AshAuthentication.Phoenix.Web
-  alias KilnCMSWeb.{AuthConfirmationFeedback, AuthOverrides}
+  alias KilnCMSWeb.{AuthConfirmationFeedback, AuthOverrides, AuthPasswordInput}
 
   # Aliased, not spelled out: the template below names it, and inside `~H` a
   # `@`-prefixed name is an assign rather than a module attribute.
@@ -64,7 +67,10 @@ defmodule KilnCMSWeb.AuthResetForm do
   def update(assigns, socket) do
     {:ok, socket} = Upstream.update(assigns, socket)
 
-    {:ok, assign(socket, :submit_label, submit_label(socket.assigns.overrides))}
+    {:ok,
+     socket
+     |> assign(:submit_label, submit_label(socket.assigns.overrides))
+     |> assign_new(:password_reveal, fn -> true end)}
   end
 
   # Passed to `Input.submit` as attributes rather than as a `label={...}` that
@@ -116,19 +122,21 @@ defmodule KilnCMSWeb.AuthResetForm do
           gettext_fn={@gettext_fn}
         />
 
-        <Input.password_field
+        <AuthPasswordInput.password_field
           strategy={@strategy}
           form={form}
           overrides={@overrides}
           gettext_fn={@gettext_fn}
+          reveal={@password_reveal}
         />
 
         <%= if @strategy.confirmation_required? do %>
-          <Input.password_confirmation_field
+          <AuthPasswordInput.password_confirmation_field
             strategy={@strategy}
             form={form}
             overrides={@overrides}
             gettext_fn={@gettext_fn}
+            reveal={@password_reveal}
           />
         <% end %>
 

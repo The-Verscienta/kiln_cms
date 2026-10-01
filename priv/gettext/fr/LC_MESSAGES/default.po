@@ -6709,6 +6709,11 @@ msgstr "Texte d'aide"
 msgid "Hidden"
 msgstr "Masqué"
 
+#: lib/kiln_cms_web/components/core_components.ex
+#, elixir-autogen, elixir-format
+msgid "Hide password"
+msgstr "Masquer le mot de passe"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Highlighted quotation"
@@ -12198,6 +12203,11 @@ msgstr "Afficher tous les outils"
 #, elixir-autogen, elixir-format
 msgid "Show essentials"
 msgstr "Afficher l'essentiel"
+
+#: lib/kiln_cms_web/components/core_components.ex
+#, elixir-autogen, elixir-format
+msgid "Show password"
+msgstr "Afficher le mot de passe"
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
