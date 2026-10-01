@@ -19,6 +19,7 @@ defmodule KilnCMS.Application do
     # show up in the logs, as the mailer config comment in runtime.exs assumes.
     _ = Oban.Telemetry.attach_default_logger(level: :info)
     warn_if_no_mailer_in_prod()
+    warn_if_public_base_url_local()
     warn_if_seo_drafting_egresses()
     warn_if_assist_egresses()
     warn_if_ask_egresses()
@@ -498,6 +499,16 @@ defmodule KilnCMS.Application do
           "email — confirmations, password resets, notifications — will be queued " <>
           "but never delivered. Set MAIL_MODE=smtp (with SMTP_HOST) or MAIL_MODE=direct."
       )
+    end
+  end
+
+  # A :prod boot whose public base URL is localhost (#1833): every feed,
+  # sitemap, canonical tag and newsletter email link would point at this
+  # machine. A warning, not a raise — a production build run locally is
+  # legitimate. See KilnCMS.Config.PublicBaseUrl.
+  defp warn_if_public_base_url_local do
+    if message = KilnCMS.Config.PublicBaseUrl.boot_warning() do
+      KilnCMS.Config.Report.warn("PUBLIC_BASE_URL", message)
     end
   end
 
