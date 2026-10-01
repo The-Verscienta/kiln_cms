@@ -118,6 +118,28 @@ carries the reasoning.
   unpublished content
   ([#1776](https://github.com/The-Verscienta/kiln_cms/issues/1776)).
 
+<a id="public-links-now-use-phx-host"></a>
+
+- **Public links now use `https://<PHX_HOST>`; set `PUBLIC_BASE_URL` if your
+  public site is served from a different origin.** Until now a release never
+  set the public base URL, so sitemaps, feeds, canonical tags, preview links
+  and newsletter confirmation emails pointed at `http://localhost:4000` (fixed
+  below). After upgrading they use `https://` and your `PHX_HOST`, the same
+  host and scheme the endpoint already uses, and other organizations get
+  `https://<slug>.<PHX_HOST>`. Nothing to do if that is where your public
+  site lives. If it is served from somewhere else (another host, a
+  non-default port, or plain `http`), set `PUBLIC_BASE_URL` to that origin,
+  for example `PUBLIC_BASE_URL=https://www.example.com`. It must be an origin
+  only: a path or query string stops the release from booting, with a
+  message naming the variable. If you set `config :kiln_cms, :public_base_url`
+  in your own compile-time config (`config/project.exs` or `config/prod.exs`),
+  the runtime value now replaces it: move it to `PUBLIC_BASE_URL`, or edit
+  nothing if it was already `https://<PHX_HOST>`. Once it is right, resubmit
+  your sitemap to search engines; feed readers pick up the new links on their
+  next fetch
+  ([#1833](https://github.com/The-Verscienta/kiln_cms/issues/1833); see
+  `docs/environment-variables.md`).
+
 <a id="save-draft-holds-content-fields-until-publish-changes"></a>
 
 - **Tell authors that Save draft on a published entry now holds every content
@@ -589,6 +611,26 @@ carries the reasoning.
   as you type, until you type into the segment yourself; clearing it hands it
   back to the machine name
   ([#1816](https://github.com/The-Verscienta/kiln_cms/issues/1816)).
+
+<a id="production-public-links-use-phx-host"></a>
+
+- **Production sitemaps, feeds, canonical links, preview links and newsletter
+  confirmation emails link to `https://<PHX_HOST>`, not `http://localhost:4000`.**
+  Every absolute public URL Kiln builds starts from the `:public_base_url`
+  setting, and nothing set it in a release, so production kept the
+  development value. The default organization's links went to
+  `http://localhost:4000`, and every other organization's to
+  `http://<slug>.<host>:4000`. That covered the sitemap and `robots.txt`,
+  RSS/Atom feeds, canonical tags and JSON-LD, `llms.txt`, the schema and
+  event index endpoints, embed snippets, preview links, site SSO callbacks,
+  newsletter confirmation emails, social sharing, federation, static export
+  and the provenance origin. The production config now sets it from the new
+  `PUBLIC_BASE_URL` variable, or, unset, from `PHX_HOST` the way the
+  endpoint's own URL is (`https`, port 443). The value is checked at boot:
+  anything but a bare `http(s)` origin stops the release with a message
+  naming the variable, and a value that resolves to `localhost` logs a
+  warning (and reaches Sentry) at boot
+  ([#1833](https://github.com/The-Verscienta/kiln_cms/issues/1833)).
 
 <a id="connection-notices-wait-out-a-slow-first-connection"></a>
 
