@@ -147,6 +147,10 @@ Every summary line below that was shortened links to its own entry there.
   filter each have a "?" button that explains them in a sentence or two.**
   ([#1822](https://github.com/The-Verscienta/kiln_cms/issues/1822) · [long form](docs/changelog/unreleased.md#console-help-tips))
 
+- **Reorder a content type's custom fields by dragging them, or with the
+  arrow buttons, on `/editor/fields`; the editor shows them in that order.**
+  ([#1818](https://github.com/The-Verscienta/kiln_cms/issues/1818) · [long form](docs/changelog/unreleased.md#reorder-custom-fields-by-dragging-them))
+
 - **The logo, favicon, social image and app icon on the Branding page can be
   chosen from the media library or uploaded there, with a thumbnail.**
   ([#1811](https://github.com/The-Verscienta/kiln_cms/issues/1811) · [long form](docs/changelog/unreleased.md#branding-images-from-the-media-library))
@@ -185,6 +189,11 @@ Every summary line below that was shortened links to its own entry there.
   the overview's Structure card, the account menu's API links and the
   governance witness panel each say what to do next.**
   ([#1840](https://github.com/The-Verscienta/kiln_cms/issues/1840), [#1841](https://github.com/The-Verscienta/kiln_cms/issues/1841), [#1842](https://github.com/The-Verscienta/kiln_cms/issues/1842), [#1845](https://github.com/The-Verscienta/kiln_cms/issues/1845) · [long form](docs/changelog/unreleased.md#console-next-steps))
+
+- **Creating a content type goes straight on to its fields, with the new type
+  ticked; the fields form shows Options and Default value only for the field
+  types that use them.**
+  ([#1817](https://github.com/The-Verscienta/kiln_cms/issues/1817), [#1819](https://github.com/The-Verscienta/kiln_cms/issues/1819), [#1820](https://github.com/The-Verscienta/kiln_cms/issues/1820) · [long form](docs/changelog/unreleased.md#a-new-content-type-goes-straight-on-to-its-fields))
 
 - **Keep `RichText.legacy_html` as a fallback instead of removing it;
   the nested column editor now stores Portable Text.**
@@ -241,6 +250,10 @@ Every summary line below that was shortened links to its own entry there.
 - **"View site" opens the public site in a new tab and says so, including
   on a deployment with its own console host.**
   ([#1827](https://github.com/The-Verscienta/kiln_cms/issues/1827) · [long form](docs/changelog/unreleased.md#view-site-opens-the-site))
+
+- **A content type's URL segment keeps following its machine name until you
+  edit the segment yourself.**
+  ([#1816](https://github.com/The-Verscienta/kiln_cms/issues/1816) · [long form](docs/changelog/unreleased.md#the-url-segment-follows-the-machine-name))
 
 - **Production sitemaps, feeds, canonical links, preview links and newsletter
   confirmation emails link to `https://<PHX_HOST>`, not `http://localhost:4000`.**

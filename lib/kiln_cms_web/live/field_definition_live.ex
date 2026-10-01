@@ -24,6 +24,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   """
   use KilnCMSWeb, :live_view
 
+  # The field types a typed-in default applies to (#1820): the ones
+  # `ApplyCustomFields` coerces a default to. A media item or a reference is
+  # picked, not typed; a computed field derives its value; and the composite
+  # and plugin types take a shape a single box can't give.
+  @default_types ~w(string text url integer float boolean date datetime select)
+
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Computed
   alias KilnCMS.CMS.ContentTypes
@@ -44,6 +50,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
        |> assign(:field_types, FieldDefinition.field_types())
        |> assign(:target_types, ContentTypes.options(org))
        |> assign(:edit, nil)
+       |> assign(:default_scopes, [])
        |> reset_create_form()
        |> load_definitions()}
     else
@@ -56,6 +63,23 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     end
   end
 
+  # `?type=<scope>` arrives from the content-types screen right after a type is
+  # created (#1817), and from its "Manage fields" link: that type starts ticked,
+  # and stays ticked after each field is added. Only a scope this page offers a
+  # checkbox for is taken — anything else is ignored rather than trusted.
+  @impl true
+  def handle_params(params, _uri, %{assigns: %{content_types: _}} = socket) do
+    offered = scope_values(socket.assigns)
+    default_scopes = params |> Map.get("type") |> List.wrap() |> Enum.filter(&(&1 in offered))
+
+    {:noreply,
+     socket
+     |> assign(:default_scopes, default_scopes)
+     |> assign(:scopes, default_scopes)}
+  end
+
+  def handle_params(_params, _uri, socket), do: {:noreply, socket}
+
   # --- create ----------------------------------------------------------------
 
   @impl true
@@ -64,6 +88,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     scopes = selected_scopes(params)
     name_edited? = name_edited?(event["_target"], params, socket.assigns.name_edited?)
     params = if name_edited?, do: params, else: suggest_name(params)
+    params = drop_default_on_type_change(params, socket.assigns.form)
 
     form =
       socket.assigns.form
@@ -88,9 +113,16 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
     forms =
       Enum.map(scopes, fn scope ->
+        # A new field goes to the end of its type's list (#1818); the list's
+        # drag handles and arrows move it from there.
+        params =
+          params
+          |> normalize(scope)
+          |> Map.put("position", next_position(assigns.definitions, scope))
+
         assigns.actor
         |> create_form(assigns.current_org)
-        |> AshPhoenix.Form.validate(normalize(params, scope))
+        |> AshPhoenix.Form.validate(params)
         |> refuse_duplicates(params, scopes, assigns)
       end)
 
@@ -126,6 +158,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   def handle_event("validate_edit", %{"field_definition" => params}, socket)
       when is_map(params) do
+    params = drop_default_on_type_change(params, socket.assigns.edit.form)
+
     edit = %{
       socket.assigns.edit
       | form: AshPhoenix.Form.validate(socket.assigns.edit.form, normalize(params))
@@ -158,6 +192,34 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       end
 
     {:noreply, assign(socket, :edit, nil)}
+  end
+
+  # --- order (#1818) ---------------------------------------------------------
+
+  # Pushed by the `Sortable` hook with one type's list in its new order.
+  def handle_event("reorder", %{"order" => order}, socket) when is_list(order) do
+    {:noreply, reorder(socket, order)}
+  end
+
+  # The arrow buttons: the same reorder, one step, from a keyboard or a screen
+  # reader — dragging is the fast path, not the only one.
+  def handle_event("move_field", %{"id" => id, "dir" => dir}, socket)
+      when is_binary(id) and dir in ["up", "down"] do
+    order =
+      Enum.find_value(socket.assigns.grouped, [], fn {_scope, definitions} ->
+        ids = Enum.map(definitions, & &1.id)
+        if id in ids, do: ids
+      end)
+
+    index = Enum.find_index(order, &(&1 == id))
+    target = if dir == "up", do: (index || 0) - 1, else: (index || 0) + 1
+
+    if index && target >= 0 && target < length(order) do
+      moved = order |> List.delete_at(index) |> List.insert_at(target, id)
+      {:noreply, reorder(socket, moved)}
+    else
+      {:noreply, socket}
+    end
   end
 
   # --- create helpers --------------------------------------------------------
@@ -207,7 +269,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   defp reset_create_form(socket) do
     socket
     |> assign(:form, create_form(socket.assigns.actor, socket.assigns.current_org))
-    |> assign(:scopes, [])
+    |> assign(:scopes, socket.assigns.default_scopes)
     |> assign(:scope_error, nil)
     |> assign(:name_edited?, false)
   end
@@ -223,6 +285,74 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     do: Map.put(params, "name", FieldDefinition.name_from_label(params["label"]))
 
   defp blank?(value), do: value in [nil, ""]
+
+  # Every scope a type checkbox is rendered for.
+  defp scope_values(assigns) do
+    Enum.map(assigns.content_types, &to_string(&1.type)) ++
+      Enum.map(assigns.dynamic_types, &"def:#{&1.definition.id}")
+  end
+
+  # A default typed for one field type means nothing for another — "abc" is no
+  # number, and a select's default must be one of its options — so picking a
+  # different type starts the default over (#1820).
+  defp drop_default_on_type_change(%{"field_type" => type} = params, form)
+       when is_binary(type) do
+    if type == to_string(form[:field_type].value),
+      do: params,
+      else: Map.put(params, "default", "")
+  end
+
+  defp drop_default_on_type_change(params, _form), do: params
+
+  # --- order helpers ---------------------------------------------------------
+
+  # Positions are rewritten as 0, 1, 2… down one type's list, so the editor
+  # shows the fields in exactly the order this list does. The order must be a
+  # whole list as rendered — a stale page or a hand-made event that names some
+  # other set of ids changes nothing.
+  defp reorder(socket, order) do
+    group =
+      Enum.find_value(socket.assigns.grouped, fn {_scope, definitions} ->
+        if Enum.sort(Enum.map(definitions, & &1.id)) == Enum.sort(order), do: definitions
+      end)
+
+    case group do
+      nil ->
+        load_definitions(socket)
+
+      definitions ->
+        by_id = Map.new(definitions, &{&1.id, &1})
+        opts = [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
+
+        # Only the rows whose position moved are written.
+        failed =
+          order
+          |> Enum.with_index()
+          |> Enum.filter(fn {id, index} ->
+            by_id[id].position != index and
+              not match?(
+                {:ok, _},
+                CMS.update_field_definition(by_id[id], %{position: index}, opts)
+              )
+          end)
+
+        socket = load_definitions(socket)
+
+        if failed == [],
+          do: socket,
+          else: put_flash(socket, :error, gettext("Couldn't save the new order of fields."))
+    end
+  end
+
+  # One past the last position on a type, so a new field is listed (and shown
+  # in the editor) last.
+  defp next_position(definitions, scope) do
+    definitions
+    |> Enum.filter(&(scope_param(&1) == scope))
+    |> Enum.map(& &1.position)
+    |> Enum.max(fn -> -1 end)
+    |> Kernel.+(1)
+  end
 
   # The ticked type checkboxes. The hidden `""` keeps the key present when every
   # box is cleared.
@@ -340,20 +470,49 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   # Options are entered one-per-line (or comma-separated) in a textarea and
   # stored as a string array. Split, trim and drop blanks before they reach the
-  # attribute. Only meaningful for `:select`, harmless otherwise. `scope` — one
-  # ticked type, or nil for the edit form, which never moves a field — is
-  # unpacked into `content_type` XOR `type_definition_id` here.
+  # attribute. `scope` — one ticked type, or nil for the edit form, which never
+  # moves a field — is unpacked into `content_type` XOR `type_definition_id`
+  # here.
+  #
+  # The options and the default are only on the form for the types that use
+  # them (#1819, #1820). Their inputs leave the page when another type is
+  # picked, so whatever they held is dropped here rather than saved unseen: a
+  # field that is no longer a select keeps no options, and a type with no
+  # default keeps none. A select's default must still be one of its options.
   defp normalize(params, scope \\ nil) do
-    options =
-      params
-      |> Map.get("options", "")
-      |> to_string()
-      |> String.split(["\n", ","], trim: true)
-      |> Enum.map(&String.trim/1)
-      |> Enum.reject(&(&1 == ""))
+    type = params["field_type"]
+    options = if type in [nil, "select"], do: parse_options(params["options"]), else: []
 
-    params |> Map.delete("scopes") |> Map.put("options", options) |> unpack_scope(scope)
+    default =
+      cond do
+        is_nil(type) -> params["default"]
+        type not in @default_types -> nil
+        type == "select" and params["default"] not in options -> nil
+        true -> params["default"]
+      end
+
+    params
+    |> Map.delete("scopes")
+    |> Map.put("options", options)
+    |> Map.put("default", default)
+    |> unpack_scope(scope)
   end
+
+  defp parse_options(options) when is_binary(options) do
+    options
+    |> String.split(["\n", ","], trim: true)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp parse_options(_options), do: []
+
+  # Whether the options textarea applies: a `:select` field is the only type
+  # that reads `options` (#1819).
+  defp select?(form), do: to_string(form[:field_type].value) == "select"
+
+  # Whether the default-value input applies (#1820).
+  defp default?(form), do: to_string(form[:field_type].value) in @default_types
 
   # Whether the reference-target select applies to the form's current type.
   defp reference?(form), do: to_string(form[:field_type].value) == "reference"
@@ -506,6 +665,86 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     """
   end
 
+  attr :form, :any, required: true
+  attr :id, :string, required: true
+
+  # The choices of a `:select` field, shown only for that type (#1819).
+  defp options_field(assigns) do
+    ~H"""
+    <div :if={select?(@form)} class="sm:col-span-2">
+      <label for={@id} class="mb-1 block text-sm font-medium">
+        {gettext("Options")}
+      </label>
+      <textarea
+        id={@id}
+        name="field_definition[options]"
+        rows="3"
+        class="field-input"
+      >{options_text(@form)}</textarea>
+      <p class="mt-1 text-xs text-base-content/60">
+        {gettext("One choice per line. Editors pick one of these.")}
+      </p>
+    </div>
+    """
+  end
+
+  attr :form, :any, required: true
+
+  # The default value, for the types that take one (#1820), in the input that
+  # fits the type: a checkbox for yes-or-no, a number box for numbers, a date
+  # picker for dates, and one of the options for a select.
+  defp default_field(assigns) do
+    assigns =
+      assigns
+      |> assign(:type, to_string(assigns.form[:field_type].value))
+      |> assign(:hint, gettext("Used when an editor leaves this field empty."))
+
+    ~H"""
+    <div :if={default?(@form)} class={@type == "boolean" && "self-end"}>
+      <label :if={@type == "boolean"} class="flex items-center gap-2 text-sm">
+        <input type="hidden" name={@form[:default].name} value="" />
+        <input
+          type="checkbox"
+          id={@form[:default].id}
+          name={@form[:default].name}
+          value="true"
+          checked={@form[:default].value in [true, "true"]}
+          class="size-4 rounded border border-base-content/30 accent-primary"
+        />
+        {gettext("Ticked by default")}
+      </label>
+      <.input
+        :if={@type == "select"}
+        field={@form[:default]}
+        type="select"
+        label={gettext("Default value")}
+        options={parse_options(options_text(@form))}
+        prompt={gettext("— No default —")}
+        hint={@hint}
+      />
+      <.input
+        :if={@type not in ["boolean", "select"]}
+        field={@form[:default]}
+        type={default_input_type(@type)}
+        step={default_input_step(@type)}
+        label={gettext("Default value")}
+        hint={@hint}
+      />
+    </div>
+    """
+  end
+
+  defp default_input_type("integer"), do: "number"
+  defp default_input_type("float"), do: "number"
+  defp default_input_type("date"), do: "date"
+  defp default_input_type("datetime"), do: "datetime-local"
+  defp default_input_type("url"), do: "url"
+  defp default_input_type(_type), do: "text"
+
+  defp default_input_step("integer"), do: "1"
+  defp default_input_step("float"), do: "any"
+  defp default_input_step(_type), do: nil
+
   attr :value, :string, required: true
   attr :label, :string, required: true
   attr :scopes, :list, required: true
@@ -524,6 +763,10 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     </label>
     """
   end
+
+  # A DOM-safe id for one type's list.
+  defp group_dom_id({:compiled, type}), do: "type-#{type}"
+  defp group_dom_id({:dynamic, id}), do: "def-#{id}"
 
   defp editing?(nil, _id), do: false
   defp editing?(%{id: id}, id), do: true
@@ -618,19 +861,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             />
             <.compute_field form={@form} />
             <.input field={@form[:help_text]} label={gettext("Help text")} />
-            <.input field={@form[:position]} type="number" label={gettext("Position")} />
-            <div class="sm:col-span-2">
-              <label for="new-field-options" class="mb-1 block text-sm font-medium">
-                {gettext("Options (one per line — select only)")}
-              </label>
-              <textarea
-                id="new-field-options"
-                name="field_definition[options]"
-                rows="3"
-                class="field-input"
-              >{options_text(@form)}</textarea>
-            </div>
-            <.input field={@form[:default]} label={gettext("Default value")} />
+            <.options_field form={@form} id="new-field-options" />
+            <.default_field form={@form} />
             <label class="flex items-center gap-2 self-end text-sm">
               <input type="hidden" name="field_definition[required]" value="false" />
               <input
@@ -670,17 +902,45 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             {gettext("Add a field above to collect structured metadata on content.")}
           </.empty_state>
 
+          <p :if={@grouped != []} class="text-sm text-base-content/70">
+            {gettext(
+              "Fields appear in the editor in this order. Drag a field by its handle, or use the arrows, to move it."
+            )}
+          </p>
+
           <div :for={{scope, definitions} <- @grouped} class="space-y-3">
-            <h3 class="text-sm font-semibold text-base-content/80">
+            <h3
+              id={"fields-heading-#{group_dom_id(scope)}"}
+              class="text-sm font-semibold text-base-content/80"
+            >
               {group_heading(scope, @dynamic_types)}
             </h3>
-            <ul class="card divide-y divide-base-content/10">
-              <li :for={definition <- definitions} id={"field-#{definition.id}"} class="p-4">
+            <ul
+              id={"fields-#{group_dom_id(scope)}"}
+              phx-hook="Sortable"
+              aria-labelledby={"fields-heading-#{group_dom_id(scope)}"}
+              class="card divide-y divide-base-content/10"
+            >
+              <li
+                :for={{definition, index} <- Enum.with_index(definitions)}
+                id={"field-#{definition.id}"}
+                data-sort-id={definition.id}
+                class="p-4"
+              >
                 <div
                   :if={!editing?(@edit, definition.id)}
                   class="flex items-start justify-between gap-4"
                 >
-                  <div class="min-w-0 space-y-1">
+                  <button
+                    type="button"
+                    data-drag-handle
+                    aria-label={gettext("Drag to reorder %{label}", label: definition.label)}
+                    title={gettext("Drag to reorder")}
+                    class="-ml-1 cursor-grab rounded p-1 text-base-content/50 hover:bg-base-200 hover:text-base-content active:cursor-grabbing"
+                  >
+                    <.icon name="hero-bars-2" class="size-4" />
+                  </button>
+                  <div class="min-w-0 flex-1 space-y-1">
                     <div class="flex items-center gap-2">
                       <span class="font-medium">{definition.label}</span>
                       <code class="text-xs text-base-content/60">{definition.name}</code>
@@ -708,6 +968,28 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     </p>
                   </div>
                   <div class="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      phx-click="move_field"
+                      phx-value-id={definition.id}
+                      phx-value-dir="up"
+                      disabled={index == 0}
+                      aria-label={gettext("Move %{label} up", label: definition.label)}
+                      class="btn btn-sm btn-ghost px-1.5"
+                    >
+                      <.icon name="hero-chevron-up" class="size-4" />
+                    </button>
+                    <button
+                      type="button"
+                      phx-click="move_field"
+                      phx-value-id={definition.id}
+                      phx-value-dir="down"
+                      disabled={index == length(definitions) - 1}
+                      aria-label={gettext("Move %{label} down", label: definition.label)}
+                      class="btn btn-sm btn-ghost px-1.5"
+                    >
+                      <.icon name="hero-chevron-down" class="size-4" />
+                    </button>
                     <button
                       type="button"
                       phx-click="edit"
@@ -757,22 +1039,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                   />
                   <.compute_field form={@edit.form} />
                   <.input field={@edit.form[:help_text]} label={gettext("Help text")} />
-                  <.input field={@edit.form[:position]} type="number" label={gettext("Position")} />
-                  <div class="sm:col-span-2">
-                    <label
-                      for={"edit-field-options-#{@edit.id}"}
-                      class="mb-1 block text-sm font-medium"
-                    >
-                      {gettext("Options (one per line — select only)")}
-                    </label>
-                    <textarea
-                      id={"edit-field-options-#{@edit.id}"}
-                      name="field_definition[options]"
-                      rows="3"
-                      class="field-input"
-                    >{options_text(@edit.form)}</textarea>
-                  </div>
-                  <.input field={@edit.form[:default]} label={gettext("Default value")} />
+                  <.options_field form={@edit.form} id={"edit-field-options-#{@edit.id}"} />
+                  <.default_field form={@edit.form} />
                   <label class="flex items-center gap-2 self-end text-sm">
                     <input type="hidden" name="field_definition[required]" value="false" />
                     <input
