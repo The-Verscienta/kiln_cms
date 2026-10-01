@@ -9036,6 +9036,11 @@ msgstr ""
 msgid "No open tasks."
 msgstr ""
 
+#: lib/kiln_cms_web/live/mail_settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "No outgoing mail server is set up, so nothing can be sent. Set MAIL_MODE (or SMTP_HOST) and restart."
+msgstr ""
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "No passkeys yet. You sign in with your password."

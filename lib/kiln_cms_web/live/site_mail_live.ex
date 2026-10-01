@@ -198,6 +198,11 @@ defmodule KilnCMSWeb.SiteMailLive do
   end
 
   defp describe_failure({:site_relay, reason}), do: SiteRelay.describe_error(reason)
+
+  # An adapter crash comes back as its name only (#1843); the log has it.
+  defp describe_failure({:mailer_crashed, _what}),
+    do: gettext("The test send stopped unexpectedly.")
+
   defp describe_failure(reason), do: inspect(reason, limit: 20, printable_limit: 300)
 
   defp attrs(params) do

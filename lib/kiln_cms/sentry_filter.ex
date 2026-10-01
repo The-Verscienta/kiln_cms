@@ -56,7 +56,19 @@ defmodule KilnCMS.SentryFilter do
   belongs upstream, where the catch-all could reject a non-binary `"url"`
   rather than falling through to a function clause; until then this is the
   cheapest thing that does not lie.
+
+  ## Mail bodies (#1843)
+
+  Every event that passes is scrubbed of a mail job's message before it
+  leaves. Sentry's Oban integration attaches the failing job's `args` as the
+  event's `extra`, and a mail job's args hold the message — sealed since 1.0
+  (`KilnCMS.Mail.open_args/1`), in the clear in a job queued earlier — which
+  for a password reset or a newsletter confirmation is a live sign-in link.
+  The body keys are dropped from `extra.args`, and a message or exception
+  value that quotes a rendered `%Swoosh.Email{}` (an adapter crash, before the
+  delivery path stopped recording them) is replaced whole.
   """
+  alias KilnCMS.Mail
   alias KilnCMS.Mail.TransientDeliveryError
 
   @join_module Phoenix.LiveView.Route
@@ -79,5 +91,51 @@ defmodule KilnCMS.SentryFilter do
       }),
       do: nil
 
-  def before_send(%Sentry.Event{} = event), do: event
+  def before_send(%Sentry.Event{} = event), do: scrub_mail(event)
+
+  @email_dump ~r/%Swoosh\.Email\{|html_body|text_body/
+  @withheld "[mail message withheld]"
+
+  defp scrub_mail(%Sentry.Event{} = event) do
+    %{
+      event
+      | extra: scrub_extra(event.extra),
+        message: scrub_message(event.message),
+        exception: scrub_exceptions(event.exception)
+    }
+  end
+
+  defp scrub_extra(%{} = extra) do
+    Map.new(extra, fn
+      {key, %{} = args} when key in [:args, "args"] -> {key, Map.drop(args, Mail.body_keys())}
+      other -> other
+    end)
+  end
+
+  defp scrub_extra(extra), do: extra
+
+  defp scrub_message(%Sentry.Interfaces.Message{} = message) do
+    if dump?(message.formatted) or dump?(message.message) or
+         Enum.any?(message.params || [], &dump?/1) do
+      %{message | formatted: @withheld, message: @withheld, params: []}
+    else
+      message
+    end
+  end
+
+  defp scrub_message(message), do: message
+
+  defp scrub_exceptions(exceptions) when is_list(exceptions),
+    do: Enum.map(exceptions, &scrub_exception/1)
+
+  defp scrub_exceptions(exceptions), do: exceptions
+
+  defp scrub_exception(%Sentry.Interfaces.Exception{value: value} = exception) do
+    if dump?(value), do: %{exception | value: @withheld}, else: exception
+  end
+
+  defp scrub_exception(exception), do: exception
+
+  defp dump?(text) when is_binary(text), do: Regex.match?(@email_dump, text)
+  defp dump?(_other), do: false
 end

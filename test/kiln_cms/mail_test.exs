@@ -159,6 +159,94 @@ defmodule KilnCMS.MailTest do
 
   # #1779: the admin test-send panel phrases a failure from this instead of
   # rendering the raw term, so each gen_smtp shape must land on its sentence.
+  describe "display_error/1 (#1843)" do
+    test "keeps the first line of an ordinary error" do
+      error = """
+      ** (KilnCMS.Mail.TransientDeliveryError) transient delivery failure: {:retries_exceeded, :x}
+          (kiln_cms 1.0.0) lib/kiln_cms/mail.ex:1: KilnCMS.Mail.deliver_for_worker/2
+      """
+
+      assert Mail.display_error(error) ==
+               "** (KilnCMS.Mail.TransientDeliveryError) transient delivery failure: {:retries_exceeded, :x}"
+    end
+
+    test "removes every URL, whatever its scheme, and every address" do
+      error =
+        "** (RuntimeError) reset at https://cms.example/password-reset/SECRET?x=1 " <>
+          "or http://a.example/newsletter/confirm/SECRET2 for one@example.com"
+
+      shown = Mail.display_error(error)
+
+      refute shown =~ "SECRET"
+      refute shown =~ "one@example.com"
+      assert shown =~ "[link removed]"
+      assert shown =~ "[address redacted]"
+    end
+
+    test "withholds an error that quotes a rendered email, whichever line it is on" do
+      for error <- [
+            "** (exit) exited in: GenServer.call(x, {:push, %Swoosh.Email{html_body: \"<a>t</a>\"}}, 5000)",
+            "** (Oban.CrashError) exit\n  %{text_body: \"token\"}"
+          ] do
+        shown = Mail.display_error(error)
+        assert shown =~ "details held the message and were removed"
+        refute shown =~ "token"
+        refute shown =~ "<a>"
+      end
+    end
+
+    test "truncates a long line and passes nil through" do
+      shown = Mail.display_error(String.duplicate("x", 1_000))
+      assert String.length(shown) == 240
+      assert String.ends_with?(shown, "…")
+      assert Mail.display_error(nil) == nil
+    end
+
+    test "is what the delivery panel shows" do
+      job = %{"to" => ["", "panel@example.com"]} |> DeliveryWorker.new() |> Repo.insert!()
+
+      Repo.update_all(from(j in Oban.Job, where: j.id == ^job.id),
+        set: [
+          state: "discarded",
+          attempted_at: DateTime.utc_now(),
+          errors: [
+            %{
+              "attempt" => 1,
+              "at" => "2026-09-30T00:00:00Z",
+              "error" => "** (exit) {:push, %Swoosh.Email{html_body: \"/password-reset/LEAKED\"}}"
+            }
+          ]
+        ]
+      )
+
+      assert [%{domain: "example.com", reason: reason}] = Mail.recent_delivery_failures()
+      refute reason =~ "LEAKED"
+    end
+  end
+
+  describe "exit_tag/1 (#1843)" do
+    test "names an exit reason without quoting the term it carries" do
+      # `GenServer.call/3` on the stock local mailbox: the exit quotes the
+      # whole call, email included — only the tag may survive.
+      email = %Swoosh.Email{subject: "Reset https://kiln.test/reset/TOKEN"}
+      call = {GenServer, :call, [{:global, Memory}, {:push, email}, 5000]}
+
+      assert Mail.exit_tag({:noproc, call}) == "noproc"
+      assert Mail.exit_tag({:timeout, call}) == "timeout"
+      assert Mail.exit_tag(:shutdown) == "shutdown"
+      assert Mail.exit_tag({:shutdown, {:leak, email}}) == "shutdown"
+      assert Mail.exit_tag(email) == "exit"
+    end
+
+    test "a crashed task names the exception's module, never its message" do
+      # What `handle_async/3` sees when the test send raised.
+      exception = %RuntimeError{message: "sending https://kiln.test/reset/TOKEN"}
+
+      assert Mail.exit_tag({exception, [{Swoosh.Mailer, :deliver, 2, []}]}) == "RuntimeError"
+      assert Mail.exit_tag(exception) == "RuntimeError"
+    end
+  end
+
   describe "failure_kind/1" do
     test "classifies each gen_smtp failure shape" do
       assert Mail.failure_kind(
