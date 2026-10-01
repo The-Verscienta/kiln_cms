@@ -751,7 +751,21 @@ defmodule KilnCMSWeb.CalendarLive do
       </div>
 
       <div class="flex flex-col gap-1 text-xs text-base-content/70">
-        <label for="calendar-filter-kind">{gettext("Lane")}</label>
+        <%!-- The "?" sits beside the label, not inside it: a button nested
+              in a <label> would join the label's accessible name (#1822). --%>
+        <span class="flex items-center gap-1">
+          <label for="calendar-filter-kind">{gettext("Lane")}</label>
+          <.help_tip
+            id="calendar-lanes-help"
+            label={gettext("About lanes")}
+            title={gettext("Lanes")}
+            learn_more={docs_url("content-lifecycles.md#the-editorial-calendar")}
+          >
+            {gettext(
+              "Each lane is one kind of date: scheduled publishing, content going live, reviews coming due, task deadlines and releases. Pick a lane to see only those dates. The colours in the key match the calendar."
+            )}
+          </.help_tip>
+        </span>
         <select id="calendar-filter-kind" name="kind" class="field-select w-auto py-1">
           <option value="all" selected={is_nil(@filters.kinds)}>{gettext("All lanes")}</option>
           <option
@@ -765,7 +779,19 @@ defmodule KilnCMSWeb.CalendarLive do
       </div>
 
       <div class="flex flex-col gap-1 text-xs text-base-content/70">
-        <label for="calendar-filter-health">{gettext("Health")}</label>
+        <span class="flex items-center gap-1">
+          <label for="calendar-filter-health">{gettext("Health")}</label>
+          <.help_tip
+            id="calendar-health-help"
+            label={gettext("About health")}
+            title={gettext("Health")}
+            learn_more={docs_url("content-lifecycles.md#freshness-the-cadence-and-the-attestation")}
+          >
+            {gettext(
+              "Health says whether published content still needs a check. It is due when its review date arrives and overdue a week later; expired means it has passed its unpublish date. Pick one to find the content that needs attention."
+            )}
+          </.help_tip>
+        </span>
         <select id="calendar-filter-health" name="health" class="field-select w-auto py-1">
           <option value="all" selected={is_nil(@filters.health)}>{gettext("Any health")}</option>
           <option

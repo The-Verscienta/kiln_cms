@@ -119,6 +119,37 @@ defmodule KilnCMSWeb.Plugs.ConsoleHost do
   defp org_label(_host, _console), do: nil
 
   @doc """
+  Where the console's "View site" link sends `org`'s editors (#1827).
+
+  With the gate off the console is served on the site's own host, so `/` is
+  that site — whichever host the editor signed in on. With it on, `/` on a
+  console host redirects back to `/editor` (see the moduledoc), so the link
+  names the org's site host outright: its `custom_domain` if it has one, else
+  the base host for the default org and `<slug>.<base host>` for any other —
+  the hosts `KilnCMSWeb.Tenant` resolves to that org — on the endpoint's
+  scheme and port.
+  """
+  @spec site_url(Accounts.Organization.t() | nil) :: String.t()
+  def site_url(org) do
+    case console_host() do
+      nil -> "/"
+      _console -> url_on(site_host(org), "/")
+    end
+  end
+
+  defp site_host(%Accounts.Organization{custom_domain: domain})
+       when is_binary(domain) and domain != "",
+       do: normalize(domain)
+
+  defp site_host(%Accounts.Organization{id: id, slug: slug})
+       when is_binary(slug) and slug != "" do
+    base = KilnCMSWeb.Tenant.base_host()
+    if id == Accounts.default_org_id(), do: base, else: "#{slug}.#{base}"
+  end
+
+  defp site_host(_default_or_unresolved), do: KilnCMSWeb.Tenant.base_host()
+
+  @doc """
   The console host for `org`: the bare console host for the default org (or no
   org), `<slug>.<console host>` for any other. `nil` when the gate is off.
   """

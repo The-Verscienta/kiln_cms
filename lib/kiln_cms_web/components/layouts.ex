@@ -585,17 +585,24 @@ defmodule KilnCMSWeb.Layouts do
             <div class="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
               <%!-- The public site, one click from every console page: where an
                     editor checks that what they published is what visitors get.
-                    `/` is this host's root, so a tenant's console opens that
-                    tenant's site. --%>
+                    `ConsoleHost.site_url/1` is this host's `/` when the console
+                    shares the site's host, and the org's site host when it
+                    has a console host of its own — where `/` would only lead
+                    back to /editor (#1827). It always opens a new tab, and
+                    says so: to a sighted reader with the trailing arrow, to a
+                    screen reader in its name. --%>
               <a
                 id="console-view-site"
-                href={~p"/"}
+                href={KilnCMSWeb.Plugs.ConsoleHost.site_url(@current_org)}
                 target="_blank"
                 rel="noopener"
-                class="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-base-content/70 hover:bg-base-200 hover:text-base-content"
+                aria-label={gettext("View site (opens in a new tab)")}
+                title={gettext("View site (opens in a new tab)")}
+                class="flex items-center gap-1.5 rounded-md border border-base-content/15 px-2.5 py-1.5 text-sm text-base-content/80 hover:bg-base-200 hover:text-base-content"
               >
-                <.icon name="hero-arrow-top-right-on-square" class="size-4" />
-                <span class="sr-only sm:not-sr-only">{gettext("View site")}</span>
+                <.icon name="hero-globe-alt" class="size-4 sm:hidden" />
+                <span class="hidden sm:inline">{gettext("View site")}</span>
+                <.icon name="hero-arrow-top-right-on-square" class="size-3.5" />
               </a>
               <.link
                 navigate={~p"/editor/search"}

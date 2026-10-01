@@ -265,7 +265,19 @@ defmodule KilnCMSWeb.TaskLive do
               `All` is the default because a filter that hides work by default
               hides work. --%>
         <div class="flex flex-wrap items-center gap-2">
-          <span class="text-xs text-base-content/60">{gettext("Anchored to")}</span>
+          <span class="flex items-center gap-1">
+            <span class="text-xs text-base-content/60">{gettext("Anchored to")}</span>
+            <.help_tip
+              id="tasks-anchor-help"
+              label={gettext("About task anchoring")}
+              title={gettext("Anchored to")}
+              learn_more={docs_url("comments.md#from-a-discussion-to-a-task")}
+            >
+              {gettext(
+                "A task can be pinned to one block of a document, such as a paragraph or an image, or to the whole document. A block task links straight to that block's discussion. To create one, open a block's discussion in the editor and choose Create task."
+              )}
+            </.help_tip>
+          </span>
           <.link
             :for={
               {value, label} <- [

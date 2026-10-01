@@ -2,7 +2,7 @@ defmodule KilnCMSWeb.OverviewLiveTest do
   @moduledoc """
   The console home (`/editor/overview`): the fixed 3×3 overview grid — content
   counts in the centre tile, one headline number per surrounding domain tile,
-  and admin-only numbers rendered as “—” for editors.
+  and admin-only tiles that explain themselves to editors (#1825).
   """
   use KilnCMSWeb.ConnCase, async: true
   @moduletag :capture_log
@@ -249,7 +249,19 @@ defmodule KilnCMSWeb.OverviewLiveTest do
   test "the console top bar links to the public site", %{conn: conn} do
     {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/overview")
 
-    assert has_element?(lv, ~s(#console-view-site[href="/"][target="_blank"]), "View site")
+    # #1827: a real link to the site, in a new tab, and saying so.
+    assert has_element?(
+             lv,
+             ~s(#console-view-site[href="/"][target="_blank"][rel="noopener"]),
+             "View site"
+           )
+
+    assert has_element?(
+             lv,
+             ~s|#console-view-site[aria-label="View site (opens in a new tab)"]|
+           )
+
+    assert has_element?(lv, "#console-view-site .hero-arrow-top-right-on-square")
   end
 
   test "viewers are redirected away", %{conn: conn} do
@@ -328,20 +340,59 @@ defmodule KilnCMSWeb.OverviewLiveTest do
     assert rendered =~ "1 of 2 fully translated"
   end
 
-  test "admin-only tiles render as — for editors", %{conn: conn} do
+  # #1825: a bare "—" under an icon read as a broken, blank card. An editor
+  # sees what each admin-only feature is and who runs it — never a dash, and
+  # never a link into a page that would turn them away.
+  test "admin-only tiles explain themselves to editors instead of showing —", %{conn: conn} do
     {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/overview")
 
-    assert lv |> element("#overview-webhooks") |> render() =~ "—"
-    assert lv |> element("#overview-forms") |> render() =~ "—"
-    assert lv |> element("#overview-settings") |> render() =~ "—"
+    webhooks = lv |> element("#overview-webhooks") |> render()
+    assert webhooks =~ "Signed POSTs to other services when content changes."
+    assert webhooks =~ "Admins manage this. Ask one if you need a change."
+    refute webhooks =~ "—"
+    refute has_element?(lv, ~s(#overview-webhooks a[href="/editor/webhooks"]))
+
+    forms = lv |> element("#overview-forms") |> render()
+    assert forms =~ "Public forms and the submissions they collect."
+    assert forms =~ "Admins manage this. Ask one if you need a change."
+    refute forms =~ "—"
+    refute has_element?(lv, ~s(#overview-forms a[href="/editor/forms"]))
+
+    settings = lv |> element("#overview-settings") |> render()
+    assert settings =~ "Every settings screen, and what each one is for."
+    refute settings =~ "—"
+    assert has_element?(lv, ~s(#overview-settings a[href="/editor/settings"]))
   end
 
-  test "admins get webhook, form and key numbers", %{conn: conn} do
+  test "with nothing set up, admins get an empty state and the first step", %{conn: conn} do
     {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
 
-    assert lv |> element("#overview-webhooks") |> render() =~ ">0<"
-    assert lv |> element("#overview-forms") |> render() =~ "0 submissions this week"
+    assert has_element?(lv, "#overview-webhooks", "No webhooks yet")
+    assert has_element?(lv, ~s(#overview-webhooks a[href="/editor/webhooks"]), "Add a webhook")
+    assert has_element?(lv, "#overview-forms", "No forms yet")
+    assert has_element?(lv, ~s(#overview-forms a[href="/editor/forms"]), "Create a form")
     refute lv |> element("#overview-settings") |> render() =~ "—"
+  end
+
+  test "admins get webhook and form numbers once there are some", %{conn: conn} do
+    admin = authed_user(:admin)
+    CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+    CMS.create_form!(%{name: "Contact", slug: "ov-#{System.unique_integer([:positive])}"},
+      actor: admin
+    )
+
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+
+    webhooks = lv |> element("#overview-webhooks") |> render()
+    assert webhooks =~ ">1<"
+    assert webhooks =~ "Signed POSTs to other services when content changes."
+    refute webhooks =~ "No webhooks yet"
+
+    forms = lv |> element("#overview-forms") |> render()
+    assert forms =~ ">1<"
+    assert forms =~ "0 submissions this week"
+    refute forms =~ "No forms yet"
   end
 
   test "every tile renders", %{conn: conn} do
