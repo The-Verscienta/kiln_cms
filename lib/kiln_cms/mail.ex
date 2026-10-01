@@ -526,6 +526,14 @@ defmodule KilnCMS.Mail do
       when is_atom(module) and is_atom(function) and is_list(args),
       do: exit_tag(reason)
 
+  # A task or process that raised: `{%Exception{}, stacktrace}`, as
+  # `handle_async/3` sees it. The exception's module, never its message.
+  def exit_tag({%{__struct__: module, __exception__: true}, stacktrace})
+      when is_list(stacktrace),
+      do: inspect(module)
+
+  def exit_tag(%{__struct__: module, __exception__: true}), do: inspect(module)
+
   def exit_tag(reason) when is_atom(reason), do: Atom.to_string(reason)
 
   def exit_tag(reason) when is_tuple(reason) and is_atom(elem(reason, 0)),

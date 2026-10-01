@@ -23,7 +23,6 @@ defmodule KilnCMS.Mail.TokenRedactionTest do
   alias KilnCMS.Accounts.User.Senders.SendNewUserConfirmationEmail
   alias KilnCMS.Accounts.User.Senders.SendPasswordResetEmail
   alias KilnCMS.Mail
-  alias KilnCMS.Mail.DeliveryWorker
   alias KilnCMS.Mail.Scrub
 
   # Raises with the email in the exception's own message — a `MatchError`

@@ -224,6 +224,29 @@ defmodule KilnCMS.MailTest do
     end
   end
 
+  describe "exit_tag/1 (#1843)" do
+    test "names an exit reason without quoting the term it carries" do
+      # `GenServer.call/3` on the stock local mailbox: the exit quotes the
+      # whole call, email included — only the tag may survive.
+      email = %Swoosh.Email{subject: "Reset https://kiln.test/reset/TOKEN"}
+      call = {GenServer, :call, [{:global, Memory}, {:push, email}, 5000]}
+
+      assert Mail.exit_tag({:noproc, call}) == "noproc"
+      assert Mail.exit_tag({:timeout, call}) == "timeout"
+      assert Mail.exit_tag(:shutdown) == "shutdown"
+      assert Mail.exit_tag({:shutdown, {:leak, email}}) == "shutdown"
+      assert Mail.exit_tag(email) == "exit"
+    end
+
+    test "a crashed task names the exception's module, never its message" do
+      # What `handle_async/3` sees when the test send raised.
+      exception = %RuntimeError{message: "sending https://kiln.test/reset/TOKEN"}
+
+      assert Mail.exit_tag({exception, [{Swoosh.Mailer, :deliver, 2, []}]}) == "RuntimeError"
+      assert Mail.exit_tag(exception) == "RuntimeError"
+    end
+  end
+
   describe "failure_kind/1" do
     test "classifies each gen_smtp failure shape" do
       assert Mail.failure_kind(

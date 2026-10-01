@@ -36,11 +36,12 @@ defmodule KilnCMS.Mail.DeliveryWorker do
     # `:ok` or `{:cancel, _}`: either way this job is done with the message.
     Mail.forget_body(job)
     outcome
-  rescue
-    error ->
-      # The last attempt: Oban discards the job after this raise.
+  catch
+    # A raise, an exit or a throw alike: on the last attempt Oban discards
+    # the job after this, so the message must go now or it never does.
+    kind, reason ->
       if job.attempt >= job.max_attempts, do: Mail.forget_body(job)
-      reraise error, __STACKTRACE__
+      :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
   @impl Oban.Worker
