@@ -1441,6 +1441,16 @@ msgstr ""
 msgid "Add %{kind}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add a block"
+msgstr ""
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add a block here"
+msgstr ""
+
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add a domain"
@@ -1675,6 +1685,11 @@ msgstr ""
 msgid "Add your first block below to start building this page."
 msgstr ""
 
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add:"
+msgstr ""
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format
 msgid "Added"
@@ -1693,6 +1708,21 @@ msgstr ""
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Added %{date}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Added a heading"
+msgstr ""
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Added a paragraph"
+msgstr ""
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Added a quote"
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -2489,6 +2519,11 @@ msgstr ""
 msgid "Block instance"
 msgstr ""
 
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Block removed"
+msgstr ""
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Block this actor? Its follow is removed and future follows are refused."
@@ -3151,6 +3186,7 @@ msgstr ""
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Close"
@@ -6647,6 +6683,11 @@ msgstr ""
 msgid "Header menu"
 msgstr ""
 
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Heading"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "Heading (optional)"
@@ -9373,7 +9414,6 @@ msgstr ""
 msgid "Open the editor's Compliance panel"
 msgstr ""
 
-#: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Open the full editor"
@@ -9484,6 +9524,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
 msgid "Other"
+msgstr ""
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Other block types (full editor)"
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
@@ -9612,6 +9657,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "Panel title"
+msgstr ""
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Paragraph"
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -10315,6 +10365,7 @@ msgid "Question"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/block_params.ex
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
 msgid "Quote"
 msgstr ""
@@ -10839,6 +10890,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove this member from the site?"
+msgstr ""
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove this new block"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -14345,7 +14401,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
-msgid "This page has no text blocks to edit inline yet."
+msgid "This page has no blocks yet. Add one below."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/offline_controller.ex
@@ -14867,6 +14923,16 @@ msgstr ""
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "Type @ to bring someone in."
+msgstr ""
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Type a heading"
+msgstr ""
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "Type a quote"
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
@@ -17190,11 +17256,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "this is you"
-msgstr ""
-
-#: lib/kiln_cms_web/live/in_context_edit_live.ex
-#, elixir-autogen, elixir-format
-msgid "to add blocks."
 msgstr ""
 
 #: lib/kiln_cms_web/live/calendar_live.ex

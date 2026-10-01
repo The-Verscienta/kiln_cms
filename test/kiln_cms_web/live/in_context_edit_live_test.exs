@@ -411,6 +411,236 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
     end
   end
 
+  # #1801: a tester editing in place looked for a way to add a block and found
+  # none. The inline-editable types can now be added where the author is looking,
+  # through the same working set and save as every other in-place edit.
+  describe "adding a block (#1801)" do
+    defp stored_block(page_id, id) do
+      CMS.get_page!(page_id, authorize?: false).blocks
+      |> Enum.find(&(&1.value.id == id))
+    end
+
+    # The id of the block the add inserted: the one in the working set the page
+    # did not start with.
+    defp added_id(lv, before_ids) do
+      :sys.get_state(lv.pid).socket.assigns.blocks
+      |> Enum.map(&to_string(&1.id))
+      |> Enum.reject(&(&1 in before_ids))
+      |> then(fn [id] -> id end)
+    end
+
+    defp open_page(conn, editor, page) do
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/site/page/#{page.slug}")
+      {lv, html}
+    end
+
+    test "the page offers an Add a block control, and its menu lists the in-place types",
+         %{conn: conn} do
+      editor = authed_user(:editor)
+      {page, ids} = page_with_blocks(editor)
+      {lv, html} = open_page(conn, editor, page)
+
+      assert html =~ ~s(id="add-block-end")
+      assert html =~ ~s(id="add-block-#{ids.quote}")
+
+      menu = lv |> element("#add-block-end") |> render_click()
+      assert menu =~ ~s(id="add-menu-end")
+      assert menu =~ "Paragraph"
+      assert menu =~ "Heading"
+      assert menu =~ "Quote"
+      # The other block types are one click away, in the full editor.
+      assert menu =~ ~s(href="/editor/content/page/#{page.id}")
+
+      closed = render_click(lv, "close_add", %{})
+      refute closed =~ ~s(id="add-menu-end")
+    end
+
+    test "a heading added after a block is written, in place, once it has text",
+         %{conn: conn} do
+      editor = authed_user(:editor)
+      {page, ids} = page_with_blocks(editor)
+      {lv, _html} = open_page(conn, editor, page)
+      before_ids = Enum.map(block_order(page.id), &to_string/1)
+
+      lv |> element("#add-block-#{ids.heading}") |> render_click()
+
+      html =
+        lv
+        |> element("#add-menu-#{ids.heading} button", "Heading")
+        |> render_click()
+
+      assert html =~ "Added a heading"
+      new_id = added_id(lv, before_ids)
+      # Placed straight after the block it was added from.
+      assert html =~ ~r/block-wrap-#{ids.heading}.*block-wrap-#{new_id}.*block-wrap-#{ids.rich}/s
+
+      # Adding alone writes nothing: an empty heading is held back.
+      refute html =~ "Saving…"
+      assert stored_block(page.id, new_id) == nil
+
+      render_hook(lv, "update_block", %{"id" => new_id, "value" => "A new section"})
+      send(lv.pid, :autosave)
+      assert render(lv) =~ "All changes saved"
+
+      assert block_value(page.id, new_id, :text) == "A new section"
+
+      assert block_order(page.id) ==
+               [ids.heading, new_id, ids.rich, ids.quote, ids.image]
+    end
+
+    test "Save persists an added paragraph and quote on the page", %{conn: conn} do
+      editor = authed_user(:editor)
+      {page, ids} = page_with_blocks(editor)
+      {lv, _html} = open_page(conn, editor, page)
+      before_ids = Enum.map(block_order(page.id), &to_string/1)
+
+      render_click(lv, "add_block", %{"type" => "rich_text", "at" => "end"})
+      para_id = added_id(lv, before_ids)
+      render_click(lv, "add_block", %{"type" => "quote", "at" => "end"})
+      quote_id = added_id(lv, [para_id | before_ids])
+
+      import KilnCMS.TipTapFixtures
+      render_hook(lv, "update_block", %{"id" => para_id, "value" => doc(para("Fresh prose."))})
+      render_hook(lv, "update_block", %{"id" => quote_id, "value" => "Fresh quote"})
+
+      html = lv |> element("#in-context-edit-bar button", "Save") |> render_click()
+      assert html =~ "Saved."
+
+      assert KilnCMS.Blocks.PortableText.to_plain_text(block_value(page.id, para_id, :body)) =~
+               "Fresh prose."
+
+      assert block_value(page.id, quote_id, :text) == "Fresh quote"
+
+      assert block_order(page.id) ==
+               [ids.heading, ids.rich, ids.quote, ids.image, para_id, quote_id]
+    end
+
+    test "an empty added block survives a save of another edit, and is not written",
+         %{conn: conn} do
+      editor = authed_user(:editor)
+      {page, ids} = page_with_blocks(editor)
+      {lv, _html} = open_page(conn, editor, page)
+      before_ids = Enum.map(block_order(page.id), &to_string/1)
+
+      render_click(lv, "add_block", %{"type" => "heading", "at" => to_string(ids.rich)})
+      new_id = added_id(lv, before_ids)
+
+      # Another block is edited and saved while the new heading is still empty.
+      # An empty heading is invalid, so writing it would have failed the save.
+      render_hook(lv, "update_block", %{"id" => ids.quote, "value" => "Edited quote"})
+      html = lv |> element("#in-context-edit-bar button", "Save") |> render_click()
+
+      assert html =~ "Saved."
+      assert block_value(page.id, ids.quote, :text) == "Edited quote"
+      assert stored_block(page.id, new_id) == nil
+
+      # Still on the page, where it was, ready to be typed into.
+      assert html =~ ~r/block-wrap-#{ids.rich}.*block-wrap-#{new_id}.*block-wrap-#{ids.quote}/s
+
+      render_hook(lv, "update_block", %{"id" => new_id, "value" => "Late heading"})
+      lv |> element("#in-context-edit-bar button", "Save") |> render_click()
+
+      assert block_order(page.id) == [ids.heading, ids.rich, new_id, ids.quote, ids.image]
+    end
+
+    test "a block added in this session can be removed; an existing one cannot",
+         %{conn: conn} do
+      editor = authed_user(:editor)
+      {page, ids} = page_with_blocks(editor)
+      {lv, _html} = open_page(conn, editor, page)
+      before_ids = Enum.map(block_order(page.id), &to_string/1)
+
+      render_click(lv, "add_block", %{"type" => "quote", "at" => "end"})
+      new_id = added_id(lv, before_ids)
+      render_hook(lv, "update_block", %{"id" => new_id, "value" => "Short-lived"})
+      send(lv.pid, :autosave)
+      render(lv)
+      assert block_value(page.id, new_id, :text) == "Short-lived"
+
+      html = render(lv)
+      assert html =~ ~s(phx-click="remove_block" phx-value-id="#{new_id}")
+      refute html =~ ~s(phx-value-id="#{ids.heading}" aria-label="Remove this new block")
+
+      # A pre-existing block is not removable from here, even by a crafted event.
+      render_click(lv, "remove_block", %{"id" => to_string(ids.heading)})
+      refute render(lv) =~ "Saving…"
+
+      lv
+      |> element(~s(button[phx-click="remove_block"][phx-value-id="#{new_id}"]))
+      |> render_click()
+
+      send(lv.pid, :autosave)
+      render(lv)
+
+      assert block_order(page.id) == [ids.heading, ids.rich, ids.quote, ids.image]
+    end
+
+    test "only inline-editable types, at a real position, can be added", %{conn: conn} do
+      editor = authed_user(:editor)
+      {page, _ids} = page_with_blocks(editor)
+      {lv, _html} = open_page(conn, editor, page)
+
+      render_click(lv, "add_block", %{"type" => "image", "at" => "end"})
+      render_click(lv, "add_block", %{"type" => "heading", "at" => Ash.UUID.generate()})
+
+      assert length(:sys.get_state(lv.pid).socket.assigns.blocks) == 4
+    end
+
+    test "an empty page invites adding a first block", %{conn: conn} do
+      editor = authed_user(:editor)
+      page = CMS.create_page!(%{title: "Blank", slug: slug(), blocks: []}, actor: editor)
+      {lv, html} = open_page(conn, editor, page)
+
+      assert html =~ "This page has no blocks yet."
+      assert html =~ ~s(id="add-block-end")
+
+      render_click(lv, "add_block", %{"type" => "heading", "at" => "end"})
+      [%{id: new_id}] = :sys.get_state(lv.pid).socket.assigns.blocks
+      render_hook(lv, "update_block", %{"id" => new_id, "value" => "First words"})
+      send(lv.pid, :autosave)
+      render(lv)
+
+      assert block_value(page.id, new_id, :text) == "First words"
+    end
+
+    test "a viewer never reaches the add control", %{conn: conn} do
+      viewer = authed_user(:viewer)
+      page = elem(page_with_blocks(authed_user(:editor)), 0)
+
+      assert {:error, {:redirect, %{to: "/"}}} =
+               conn |> log_in(viewer) |> live(~p"/editor/site/page/#{page.slug}")
+    end
+
+    test "an editor who may not write this record gets no add control", %{conn: conn} do
+      admin = authed_user(:admin)
+      {page, _ids} = page_with_blocks(admin)
+      reader = authed_user(:editor)
+
+      {:ok, reader} =
+        KilnCMS.Accounts.manage_user_access(reader, %{editable_types: ["post"]}, actor: admin)
+
+      assert {:error, {:live_redirect, %{to: to}}} =
+               conn |> log_in(reader) |> live(~p"/editor/site/page/#{page.slug}")
+
+      {:ok, _lv, html} = conn |> log_in(reader) |> live(to)
+      refute html =~ "add-block-end"
+      refute html =~ "Add a block"
+    end
+
+    test "an add is refused when the write decision says no", %{conn: conn} do
+      editor = authed_user(:editor)
+      {page, _ids} = page_with_blocks(editor)
+      {lv, _html} = open_page(conn, editor, page)
+
+      :sys.replace_state(lv.pid, fn state ->
+        put_in(state.socket.assigns.may_write?, false)
+      end)
+
+      render_click(lv, "add_block", %{"type" => "heading", "at" => "end"})
+      assert length(:sys.get_state(lv.pid).socket.assigns.blocks) == 4
+    end
+  end
+
   describe "conflict handling" do
     test "a concurrent save surfaces a conflict banner and Reload recovers", %{conn: conn} do
       editor = authed_user(:editor)

@@ -145,6 +145,10 @@ Every summary line below that was shortened links to its own entry there.
   as bullet characters (a PDF, an email), or pasted from Word with nesting kept.**
   ([#1729](https://github.com/The-Verscienta/kiln_cms/pull/1729))
 
+- **Editing in place can add a paragraph, heading or quote between blocks or at
+  the end of the page.**
+  ([#1801](https://github.com/The-Verscienta/kiln_cms/issues/1801) · [long form](docs/changelog/unreleased.md#editing-in-place-can-add-blocks))
+
 - **Add a new tag or category without leaving the content editor.**
   ([#1805](https://github.com/The-Verscienta/kiln_cms/issues/1805) · [long form](docs/changelog/unreleased.md#add-tags-and-categories-from-the-editor))
 

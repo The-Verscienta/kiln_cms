@@ -250,6 +250,23 @@ carries the reasoning.
 
 ## Added
 
+<a id="editing-in-place-can-add-blocks"></a>
+
+- **Editing in place can add a paragraph, heading or quote between blocks or at
+  the end of the page.** A beta tester editing in place looked for a way to add
+  a block and found none: adding lived only in the full editor. Now *Add a
+  block* sits at the end of the page, and *Add a block here* shows under a
+  block when it is hovered or focused. Either one offers Paragraph, Heading and
+  Quote, and a link to the full editor for the other block types. The new block
+  is focused so the author can type straight away. It joins the same working
+  set as every other in-place edit and is written by the same autosave or Save,
+  so the optimistic lock, the policies and the version history apply unchanged.
+  An added block that is still empty is kept on the page but left out of the
+  write until it has text, so adding a heading and then editing another block
+  does not fail the save. A block added in the session can be removed again
+  from the same screen. Removing existing blocks stays in the full editor
+  ([#1801](https://github.com/The-Verscienta/kiln_cms/issues/1801)).
+
 <a id="password-reveal-toggle"></a>
 
 - **Every password box on the sign-in, register, reset-password, setup and
