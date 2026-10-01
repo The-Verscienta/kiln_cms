@@ -129,6 +129,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Reorder a content type's custom fields by dragging them, or with the
+  arrow buttons, on `/editor/fields`; the editor shows them in that order.**
+  ([#1818](https://github.com/The-Verscienta/kiln_cms/issues/1818) · [long form](docs/changelog/unreleased.md#reorder-custom-fields-by-dragging-them))
+
 - **Every password box on the sign-in, register, reset-password, setup and
   change-password forms has an eye button that shows what you typed.**
   ([#1806](https://github.com/The-Verscienta/kiln_cms/issues/1806) · [long form](docs/changelog/unreleased.md#password-reveal-toggle))
@@ -153,6 +157,11 @@ Every summary line below that was shortened links to its own entry there.
   ([#1805](https://github.com/The-Verscienta/kiln_cms/issues/1805) · [long form](docs/changelog/unreleased.md#add-tags-and-categories-from-the-editor))
 
 ### Changed
+
+- **Creating a content type goes straight on to its fields, with the new type
+  ticked; the fields form shows Options and Default value only for the field
+  types that use them.**
+  ([#1817](https://github.com/The-Verscienta/kiln_cms/issues/1817), [#1819](https://github.com/The-Verscienta/kiln_cms/issues/1819), [#1820](https://github.com/The-Verscienta/kiln_cms/issues/1820) · [long form](docs/changelog/unreleased.md#a-new-content-type-goes-straight-on-to-its-fields))
 
 - **Keep `RichText.legacy_html` as a fallback instead of removing it;
   the nested column editor now stores Portable Text.**
@@ -200,6 +209,10 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#coolify-build-records-its-commit))
 
 ### Fixed
+
+- **A content type's URL segment keeps following its machine name until you
+  edit the segment yourself.**
+  ([#1816](https://github.com/The-Verscienta/kiln_cms/issues/1816) · [long form](docs/changelog/unreleased.md#the-url-segment-follows-the-machine-name))
 
 - **Markdown switched back to Blocks, or imported from a `.md` file, becomes
   heading, divider and one text block per section, not one long text block.**

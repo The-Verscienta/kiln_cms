@@ -250,6 +250,21 @@ carries the reasoning.
 
 ## Added
 
+<a id="reorder-custom-fields-by-dragging-them"></a>
+
+- **Reorder a content type's custom fields by dragging them, or with the
+  arrow buttons, on `/editor/fields`; the editor shows them in that order.**
+  The fields form had a *Position* number box that took any whole number, and
+  nothing said whether a lower or a negative number put a field higher or
+  lower in the editor. A beta tester asked to move fields the way the editor
+  shows them instead. Each type's list on `/editor/fields` is now that order:
+  drag a field by its handle, or use its up and down arrows, which work from a
+  keyboard and a screen reader too. The new order is saved at once, as
+  positions 0, 1, 2… down the list, and a new field is added at the end of its
+  type's list. The *Position* box is gone from the add and edit forms;
+  `position` is unchanged in the API
+  ([#1818](https://github.com/The-Verscienta/kiln_cms/issues/1818)).
+
 <a id="editing-in-place-can-add-blocks"></a>
 
 - **Editing in place can add a paragraph, heading or quote between blocks or at
@@ -339,6 +354,24 @@ carries the reasoning.
   ([#1805](https://github.com/The-Verscienta/kiln_cms/issues/1805))
 
 ## Changed
+
+<a id="a-new-content-type-goes-straight-on-to-its-fields"></a>
+
+- **Creating a content type goes straight on to its fields, with the new type
+  ticked; the fields form shows Options and Default value only for the field
+  types that use them.** A new type has no fields, so there is nothing for an
+  author to fill in until it gets some. Creating one on `/editor/types` now
+  opens `/editor/fields` with that type already ticked, and it stays ticked
+  after each field is added. The *Manage fields* link on each type opens the
+  same way. On the fields form, *Options* shows only for a Select field, the
+  only type that reads them. *Default value* shows only for the types it is
+  used for (String, Text, Integer, Float, Boolean, Date, Datetime, Url and
+  Select), in an input that fits the type: a checkbox
+  for yes-or-no, a number box for numbers, a date picker for dates, and a
+  pick from the options for a Select. Changing a field's type clears its
+  default, and saving a field drops options and a default its type does not
+  use, rather than keeping values that are no longer on the screen
+  ([#1817](https://github.com/The-Verscienta/kiln_cms/issues/1817), [#1819](https://github.com/The-Verscienta/kiln_cms/issues/1819), [#1820](https://github.com/The-Verscienta/kiln_cms/issues/1820)).
 
 <a id="keep-legacy-html-as-a-fallback"></a>
 
@@ -469,6 +502,17 @@ carries the reasoning.
   has no Coolify equivalent and stays unset unless you set it.
 
 ## Fixed
+
+<a id="the-url-segment-follows-the-machine-name"></a>
+
+- **A content type's URL segment keeps following its machine name until you
+  edit the segment yourself.** On `/editor/types`, the URL segment was filled
+  in from the machine name once, on the first keystroke, and then kept that
+  value. A typo corrected in the machine name stayed in the URL segment, and
+  was easy to save without noticing. The segment now follows the machine name
+  as you type, until you type into the segment yourself; clearing it hands it
+  back to the machine name
+  ([#1816](https://github.com/The-Verscienta/kiln_cms/issues/1816)).
 
 <a id="markdown-becomes-heading-divider-and-text-blocks"></a>
 
