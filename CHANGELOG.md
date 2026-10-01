@@ -96,6 +96,10 @@ Every summary line below that was shortened links to its own entry there.
   `/editor/webhooks`; untick the draft events on any that shouldn't get drafts.**
   ([#1776](https://github.com/The-Verscienta/kiln_cms/issues/1776) · [long form](docs/changelog/unreleased.md#review-webhook-endpoints-that-receive-unpublished-content))
 
+- **Public links now use `https://<PHX_HOST>`; set `PUBLIC_BASE_URL` if your
+  public site is served from a different origin.**
+  ([#1833](https://github.com/The-Verscienta/kiln_cms/issues/1833) · [long form](docs/changelog/unreleased.md#public-links-now-use-phx-host))
+
 - **Tell authors that Save draft on a published entry now holds every content
   field until *Publish changes*; a webhook receiver hears `<type>.updated`
   when the changes are published, not when they are saved.**
@@ -222,6 +226,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Settings says what the display name is for and confirms a save beside the
   button; Passkeys says whether any are set up and shows the browser prompt.**
   ([#1828](https://github.com/The-Verscienta/kiln_cms/issues/1828), [#1829](https://github.com/The-Verscienta/kiln_cms/issues/1829) · [long form](docs/changelog/unreleased.md#settings-profile-and-passkey-feedback))
+
+- **Production sitemaps, feeds, canonical links, preview links and newsletter
+  confirmation emails link to `https://<PHX_HOST>`, not `http://localhost:4000`.**
+  ([#1833](https://github.com/The-Verscienta/kiln_cms/issues/1833) · [long form](docs/changelog/unreleased.md#production-public-links-use-phx-host))
 
 - **"We can't find the internet" and "Something went wrong!" no longer flash on
   a first page load; they wait until a connection problem has lasted a few
