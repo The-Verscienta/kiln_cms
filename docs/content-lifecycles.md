@@ -362,9 +362,11 @@ who may publish turns it into the schedule with *Confirm date* on that row
 *Use this date* in the editor followed by Save. Setting any `scheduled_at`,
 or publishing, clears the proposal (`Changes.ClearProposedPublishAt`).
 
-`proposed_publish_at` is internal (`public? false`), like the working copy's
-columns: it is not on the JSON:API, GraphQL or delivery surfaces, and it is
-not restored by a version restore.
+`proposed_publish_at` is `public? false`, like the body's `blocks`. No read
+returns it, on the JSON:API, GraphQL or delivery surfaces. It is an accepted
+input on the content write actions, so an API client without publish rights
+can propose a date the same way (see the [JSON:API guide](json-api.md)). A
+version restore does not restore it.
 The expiry workers run under the `AshOban` interaction bypass, as scheduled
 publishing does.
 

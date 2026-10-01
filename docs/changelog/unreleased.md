@@ -276,9 +276,11 @@ carries the reasoning.
   content list shows it on the row, so a reviewer sees it with the
   submission. Someone who may publish turns it into the schedule with
   *Confirm date* on that row, or with *Use this date* in the editor and Save.
-  Setting any publish date, or publishing, clears the proposal. The column is
-  not on the JSON:API, GraphQL or delivery APIs, and a version restore leaves
-  it alone. It is a new nullable column on every content table (an
+  Setting any publish date, or publishing, clears the proposal. No API read
+  returns the column, and a version restore leaves it alone. Like the body's
+  `blocks`, it is a write input on the JSON:API and GraphQL content
+  create/update actions (an addition to `docs/api`), so an API client without
+  publish rights can propose a date too. It is a new nullable column on every content table (an
   expand-only migration, including the example overlay's tables)
   ([#1812](https://github.com/The-Verscienta/kiln_cms/issues/1812)).
 
