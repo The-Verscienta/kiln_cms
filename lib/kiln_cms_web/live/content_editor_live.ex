@@ -3149,6 +3149,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     case result do
       {:ok, record} ->
+        # Re-read rather than adopted: a restore can bring back a working
+        # copy's held tags and related content (#1815), and the pickers show
+        # those from what `fetch!/4` loads, not from the action's result.
+        record = fetch!(socket.assigns.kind, record.id, socket.assigns.actor, record.org_id)
+
         {:noreply,
          socket
          |> assign_record(record)

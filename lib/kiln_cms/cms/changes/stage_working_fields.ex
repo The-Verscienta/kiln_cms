@@ -90,9 +90,6 @@ defmodule KilnCMS.CMS.Changes.StageWorkingFields do
     end
   end
 
-  # authorize?: false — an existence probe on the identity's own columns, the
-  # same question the unique index answers for every caller regardless of
-  # what they may read.
   defp slug_taken?(resource, live, slug, locale) do
     query = Ash.Query.filter(resource, id != ^live.id and slug == ^slug and locale == ^locale)
 
@@ -103,6 +100,9 @@ defmodule KilnCMS.CMS.Changes.StageWorkingFields do
         :error -> query
       end
 
+    # authorize?: false — an existence probe on the identity's own columns, the
+    # same question the unique index answers for every caller regardless of
+    # what they may read.
     Ash.exists?(query, authorize?: false, tenant: live.org_id)
   end
 
@@ -168,11 +168,11 @@ defmodule KilnCMS.CMS.Changes.StageWorkingFields do
 
   defp normalize(ids), do: ids |> Enum.map(&to_string/1) |> Enum.uniq() |> Enum.sort()
 
-  # authorize?: false — ids only, of the record this write is already
-  # authorized to change, and nothing read leaves the changeset (the same
-  # argument `FoldWorkingCopy` makes for its row read).
   defp live_ids(live, relationship) do
     live
+    # authorize?: false — ids only, of the record this write is already
+    # authorized to change, and nothing read leaves the changeset (the same
+    # argument `FoldWorkingCopy` makes for its row read).
     |> Ash.load!(relationship, authorize?: false, tenant: live.org_id, lazy?: false)
     |> Map.fetch!(relationship)
     |> Enum.map(&to_string(&1.id))

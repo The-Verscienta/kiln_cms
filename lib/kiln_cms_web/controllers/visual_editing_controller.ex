@@ -123,6 +123,8 @@ defmodule KilnCMSWeb.VisualEditingController do
            ),
          true <- record.slug == slug,
          true <- is_nil(locale) or record.locale == locale do
+      # authorize?: false — the verified token is the grant, as on the read
+      # above; this re-reads the held featured image of that same record.
       {:ok, WorkingCopy.load_view(record, authorize?: false, tenant: org_id)}
     else
       _ -> {:error, :invalid_preview}

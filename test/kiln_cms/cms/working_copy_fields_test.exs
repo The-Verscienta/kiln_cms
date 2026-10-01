@@ -18,13 +18,19 @@ defmodule KilnCMS.CMS.WorkingCopyFieldsTest do
   alias KilnCMS.CMS.Releases
   alias KilnCMS.CMS.WorkingCopy
 
-  defp user(role) do
-    Ash.Seed.seed!(KilnCMS.Accounts.User, %{
-      email: "wcf-#{System.unique_integer([:positive])}@example.com",
-      hashed_password: Bcrypt.hash_pwd_salt("password123456"),
-      confirmed_at: DateTime.utc_now(),
-      role: role
-    })
+  defp user(role, extra \\ %{}) do
+    Ash.Seed.seed!(
+      KilnCMS.Accounts.User,
+      Map.merge(
+        %{
+          email: "wcf-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+          confirmed_at: DateTime.utc_now(),
+          role: role
+        },
+        extra
+      )
+    )
   end
 
   defp slug, do: "wcf-#{System.unique_integer([:positive])}"
@@ -195,6 +201,17 @@ defmodule KilnCMS.CMS.WorkingCopyFieldsTest do
       refute WorkingCopy.pending?(reload(page))
 
       assert {:error, _} = save_fields(page, %{"canonical_url" => "javascript:alert(1)"}, admin)
+    end
+
+    test "an editor's field grant binds the held fields as it binds :update" do
+      page = live_page(user(:admin))
+      title_only = user(:editor, %{field_grants: %{"page" => ["title"]}})
+
+      assert {:error, error} = save_fields(page, %{"seo_title" => "Not mine"}, title_only)
+      assert Exception.message(error) =~ "field grant"
+
+      # Resending the value the copy already shows is no change, so no violation.
+      assert {:ok, _} = save_fields(page, %{"seo_title" => "Live SEO"}, title_only)
     end
 
     test "refuses operational settings: those still save through :update" do
@@ -368,6 +385,51 @@ defmodule KilnCMS.CMS.WorkingCopyFieldsTest do
 
       public = CMS.get_published_entry_by_slug!(entry.slug, entry.locale, type.id)
       assert public.custom_fields["servings"] == 6
+    end
+
+    test "a release publishes them; discarding drops them" do
+      admin = user(:admin)
+      type = entry_type!(admin)
+
+      entry =
+        ContentTypes.create!(
+          type.name,
+          %{title: "Waffles", slug: slug(), custom_fields: %{"servings" => 2}},
+          actor: admin
+        )
+
+      {:ok, entry} = ContentTypes.transition(type.name, "publish", entry, actor: admin)
+      held = %{fields: %{"custom_fields" => %{"servings" => "4"}, "seo_title" => "Held"}}
+
+      {:ok, saved} =
+        CMS.save_entry_working_copy(entry, held, actor: admin, tenant: entry.org_id)
+
+      # Discard drops every held field …
+      {:ok, discarded} =
+        ContentTypes.transition(type.name, "discard_changes", saved, actor: admin)
+
+      refute WorkingCopy.pending?(discarded)
+      assert WorkingCopy.view(discarded).custom_fields["servings"] == 2
+
+      # … and a release publishes them all.
+      {:ok, saved} =
+        CMS.save_entry_working_copy(discarded, held, actor: admin, tenant: entry.org_id)
+
+      release = CMS.create_release!(%{name: "Launch #{slug()}"}, actor: admin)
+
+      {:ok, item} =
+        CMS.add_release_item(
+          %{release_id: release.id, content_type: type.name, content_id: saved.id},
+          actor: admin
+        )
+
+      assert Releases.classify(item, authorize?: false, tenant: entry.org_id) == :apply
+      {:ok, _claimed} = CMS.start_release(release, %{}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      public = CMS.get_published_entry_by_slug!(entry.slug, entry.locale, type.id)
+      assert public.custom_fields["servings"] == 4
+      assert public.seo_title == "Held"
     end
   end
 end

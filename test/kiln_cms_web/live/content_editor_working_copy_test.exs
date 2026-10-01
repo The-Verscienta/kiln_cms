@@ -295,6 +295,46 @@ defmodule KilnCMSWeb.ContentEditorWorkingCopyTest do
     assert Enum.map(live_tags, & &1.id) == [tag.id]
   end
 
+  test "a custom type's fields are held until the changes are published", %{conn: conn} do
+    admin = authed_user(:admin)
+
+    type =
+      CMS.create_type_definition!(
+        %{name: "dyn#{System.unique_integer([:positive])}", label: "Recipe"},
+        actor: admin
+      )
+
+    CMS.create_field_definition!(
+      %{type_definition_id: type.id, name: "servings", label: "Servings", field_type: :integer},
+      actor: admin
+    )
+
+    entry =
+      KilnCMS.CMS.ContentTypes.create!(
+        type.name,
+        %{title: "Pancakes", slug: slug(), custom_fields: %{"servings" => 2}},
+        actor: admin
+      )
+
+    {:ok, entry} = KilnCMS.CMS.ContentTypes.transition(type.name, "publish", entry, actor: admin)
+
+    {:ok, lv, _html} =
+      conn |> log_in(admin) |> live(~p"/editor/content/#{type.name}/#{entry.id}")
+
+    lv
+    |> form("##{type.name}-editor")
+    |> render_submit(%{"form" => %{"custom_fields" => %{"servings" => "6"}}})
+
+    public = CMS.get_published_entry_by_slug!(entry.slug, entry.locale, type.id)
+    assert public.custom_fields["servings"] == 2
+    assert has_element?(lv, ~s(input[name="form[custom_fields][servings]"][value="6"]))
+
+    lv |> element("#publish-changes") |> render_click()
+
+    public = CMS.get_published_entry_by_slug!(entry.slug, entry.locale, type.id)
+    assert public.custom_fields["servings"] == 6
+  end
+
   test "Publish changes asks for a Save when settings are still unsaved", %{conn: conn} do
     editor = authed_user(:editor)
     page = live_page(authed_user(:admin))
