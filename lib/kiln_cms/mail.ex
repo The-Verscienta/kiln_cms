@@ -36,6 +36,7 @@ defmodule KilnCMS.Mail do
   require Ecto.Query
   require Logger
 
+  alias KilnCMS.Keys.Vault
   alias KilnCMS.Mail.DeliveryWorker
   alias KilnCMS.Mail.RelayAlert
   alias KilnCMS.Mail.SiteRelay
@@ -81,6 +82,29 @@ defmodule KilnCMS.Mail do
     """
     defexception [:message]
   end
+
+  defmodule MailerCrashError do
+    @moduledoc """
+    Raised inside mail workers when the Swoosh adapter itself crashed — raised
+    an exception or exited — instead of answering `{:error, reason}` (#1843).
+
+    The message names only what crashed (`"mailer crashed: noproc"`, or the
+    exception's module), never the term the crash carried: an exit from
+    `GenServer.call/3` quotes its whole message, which for a mailer is the
+    `%Swoosh.Email{}` with its rendered body — and that body holds the
+    sign-in link of a password reset or a confirmation. The job retries like a
+    transient failure. Unlike `TransientDeliveryError` it is not filtered from
+    Sentry: an adapter that crashes is a bug, not a greylist.
+    """
+    defexception [:message]
+  end
+
+  # What a job error says when the operator has configured no outgoing mail
+  # server (#1843): the stock `Swoosh.Adapters.Local` in a release, whose
+  # storage process isn't running. An admin reads it on /editor/mail, so it
+  # says what to do rather than what crashed.
+  @not_configured_message "No outgoing mail server is configured — see Mail settings " <>
+                            "(set MAIL_MODE or SMTP_HOST and restart)"
 
   # Greylisting windows are minutes; the tail covers relay/MX outages. Jobs
   # run `max_attempts: 8`, so the last attempt lands ~16h after the first.
@@ -228,8 +252,51 @@ defmodule KilnCMS.Mail do
       domain: failure_domain(job.args),
       state: job.state,
       at: job.attempted_at,
-      reason: last_error(job.errors)
+      reason: job.errors |> last_error() |> display_error()
     }
+  end
+
+  @display_limit 240
+
+  # A rendered `%Swoosh.Email{}` in an error text: an adapter crash recorded
+  # before #1843 quoted the whole message, sign-in links included.
+  @email_dump ~r/%Swoosh\.Email\{|html_body|text_body/
+
+  @url ~r{\b[a-z][a-z0-9+.\-]*://[^\s"'<>]+}i
+
+  @doc """
+  A stored job error made safe to show an admin (#1843): its first line only,
+  with every URL and email address removed, at most #{@display_limit}
+  characters. An error that quotes a rendered email — what an adapter crash
+  recorded before 1.0 — is withheld whole.
+
+  Defence in depth: the delivery path no longer records such text, but rows
+  written by an older release, or by a worker that is not the mail pipeline's,
+  may still hold it. A sign-in link in a password reset or a newsletter
+  confirmation is a credential, so no URL is shown at all.
+  """
+  @spec display_error(String.t() | nil) :: String.t() | nil
+  def display_error(nil), do: nil
+
+  def display_error(error) when is_binary(error) do
+    line =
+      error
+      |> String.split("\n", trim: true)
+      |> Enum.find("", &(String.trim(&1) != ""))
+      |> String.trim()
+
+    if Regex.match?(@email_dump, error) do
+      "mail delivery crashed; the details held the message and were removed"
+    else
+      line
+      |> String.replace(@url, "[link removed]")
+      |> redact_addresses()
+      |> truncate(@display_limit)
+    end
+  end
+
+  defp truncate(text, limit) do
+    if String.length(text) > limit, do: String.slice(text, 0, limit - 1) <> "…", else: text
   end
 
   defp failure_domain(%{"to" => [_name, address]}) when is_binary(address), do: domain_of(address)
@@ -375,8 +442,18 @@ defmodule KilnCMS.Mail do
         raise TransientDeliveryError,
           message: "site relay unusable, holding: #{SiteRelay.describe_error(reason)}"
 
+      # No outgoing mail server at all (#1843): held, and retried on the usual
+      # schedule, so mail queued before the operator sets one up still goes
+      # out once they do (within the retry window).
+      :not_configured ->
+        raise TransientDeliveryError, message: @not_configured_message
+
       {_relay, _email, {:ok, _receipt}} ->
         :ok
+
+      {relay, _email, {:error, {:mailer_crashed, what}}} ->
+        Logger.error("Mail adapter for the #{relay} relay crashed: #{what}")
+        raise MailerCrashError, message: "mailer crashed: #{what}"
 
       {relay, email, {:error, reason}} ->
         safe_reason = redact_reason(reason)
@@ -394,17 +471,78 @@ defmodule KilnCMS.Mail do
   # operator's (`Mailer.deliver/2`, over the app config) or the site's
   # (`Swoosh.Mailer.deliver/2`, over nothing — see `SiteRelay`'s moduledoc for
   # why the operator's config must not sit underneath it).
+  #
+  # The adapter call is guarded (`guard_crash/1`): whatever it raises or exits
+  # with comes back as a body-free `{:error, {:mailer_crashed, what}}`, never
+  # as the crash term itself, which is what Oban, Sentry and the logger would
+  # otherwise record (#1843).
   defp route(email, org_id, config) do
     case SiteRelay.route(email, org_id) do
       {:operator, email} ->
-        {:operator, email, Mailer.deliver(email, config)}
+        if operator_unconfigured?(config) do
+          :not_configured
+        else
+          {:operator, email, guard_crash(fn -> Mailer.deliver(email, config) end)}
+        end
 
       {:site, email, site_config} ->
-        {:site, email, Swoosh.Mailer.deliver(email, Keyword.merge(site_config, config))}
+        site_config = Keyword.merge(site_config, config)
+        {:site, email, guard_crash(fn -> Swoosh.Mailer.deliver(email, site_config) end)}
 
       {:error, reason} ->
         {:held, reason}
     end
+  end
+
+  # The one place a mail adapter runs. A crash's own term is dropped here, in
+  # this process, before anything can format it: an exit from a
+  # `GenServer.call/3` quotes the call's message — for `Swoosh.Adapters.Local`
+  # that is `{:push, %Swoosh.Email{}}`, rendered body and sign-in link
+  # included — and an exception's message (a `MatchError`, a `KeyError`) can
+  # quote the email just the same. What survives is the exit reason's tag
+  # (`noproc`, `timeout`) or the exception's module name.
+  defp guard_crash(deliver) do
+    deliver.()
+  rescue
+    exception -> {:error, {:mailer_crashed, inspect(exception.__struct__)}}
+  catch
+    :exit, reason -> {:error, {:mailer_crashed, exit_tag(reason)}}
+    :throw, _value -> {:error, {:mailer_crashed, "throw"}}
+  end
+
+  @doc """
+  A body-free name for an exit reason — `"noproc"`, `"timeout"`, `"shutdown"`
+  — for a log line or a job error that must not quote the term (#1843): the
+  exit of a `GenServer.call/3` carries the call's whole message.
+  """
+  @spec exit_tag(term()) :: String.t()
+  def exit_tag({reason, {module, function, args}})
+      when is_atom(module) and is_atom(function) and is_list(args),
+      do: exit_tag(reason)
+
+  def exit_tag(reason) when is_atom(reason), do: Atom.to_string(reason)
+
+  def exit_tag(reason) when is_tuple(reason) and is_atom(elem(reason, 0)),
+    do: exit_tag(elem(reason, 0))
+
+  def exit_tag(_reason), do: "exit"
+
+  # "No outgoing mail server" (#1843): the operator's adapter is still the
+  # stock `Swoosh.Adapters.Local` (or none) and there is no mailbox for it to
+  # write to — a release sets `config :swoosh, local: false`, so the storage
+  # process never starts, and every delivery would exit `:noproc`. Dev and the
+  # e2e build run the mailbox, so they still deliver into it.
+  defp operator_unconfigured?(config) do
+    mailer = Keyword.merge(Application.get_env(:kiln_cms, Mailer, []), config)
+
+    Keyword.get(mailer, :adapter) in [nil, Swoosh.Adapters.Local] and
+      Keyword.get(mailer, :storage_driver, Swoosh.Adapters.Local.Storage.Memory) ==
+        Swoosh.Adapters.Local.Storage.Memory and not local_mailbox_running?()
+  end
+
+  defp local_mailbox_running? do
+    Application.get_env(:swoosh, :local, true) != false and
+      :global.whereis_name(Swoosh.Adapters.Local.Storage.Memory) != :undefined
   end
 
   # A hard 5xx: log + emit a bounce event + (when it names the recipient)
@@ -586,12 +724,15 @@ defmodule KilnCMS.Mail do
   instead of a retrying background job.
 
   `org_id:` sends through that site's relay, as `deliver_for_worker/2` would;
-  a site relay that is set but unusable answers `{:error, {:site_relay, reason}}`.
+  a site relay that is set but unusable answers `{:error, {:site_relay, reason}}`,
+  no outgoing mail server at all `{:error, :mailer_not_configured}`, and an
+  adapter that crashed `{:error, {:mailer_crashed, what}}` (#1843).
   """
   @spec deliver_now(Swoosh.Email.t(), keyword()) :: {:ok, term()} | {:error, term()}
   def deliver_now(%Swoosh.Email{} = email, opts \\ []) do
     case route(email, Keyword.get(opts, :org_id), []) do
       {:held, reason} -> {:error, {:site_relay, reason}}
+      :not_configured -> {:error, :mailer_not_configured}
       {_relay, _email, result} -> result
     end
   end
@@ -606,14 +747,25 @@ defmodule KilnCMS.Mail do
     * `:message` — any other permanent refusal;
     * `:connection` — never reached an SMTP dialog (DNS, connect, dropped);
     * `:site_relay` — the site's own relay is set but unusable;
+    * `:not_configured` — the deployment has no outgoing mail server;
+    * `:crashed` — the mail adapter crashed (the log has what it was);
     * `:transient` — anything else temporary (a 4xx, greylisting).
 
   The same classification the mail worker acts on, so the panel and the queue
   cannot disagree about whose fault a failure is.
   """
   @spec failure_kind(term()) ::
-          :recipient | :relay | :message | :connection | :site_relay | :transient
+          :recipient
+          | :relay
+          | :message
+          | :connection
+          | :site_relay
+          | :not_configured
+          | :crashed
+          | :transient
   def failure_kind({:site_relay, _reason}), do: :site_relay
+  def failure_kind(:mailer_not_configured), do: :not_configured
+  def failure_kind({:mailer_crashed, _what}), do: :crashed
 
   def failure_kind(reason) do
     case failure_class(reason) do
@@ -654,21 +806,117 @@ defmodule KilnCMS.Mail do
 
   @doc """
   Rebuild a `Swoosh.Email` from `serialize/2` output (Oban args, so keys are
-  strings and address tuples became two-element lists).
+  strings and address tuples became two-element lists). Raises when the job
+  carries no readable message; `open_args/1` is the non-raising form.
   """
   @spec from_args(map()) :: Swoosh.Email.t()
-  def from_args(%{"from" => from, "to" => to, "subject" => subject} = args) do
+  def from_args(args) do
+    case open_args(args) do
+      {:ok, email} -> email
+      {:error, reason} -> raise ArgumentError, describe_open_error(reason)
+    end
+  end
+
+  @doc """
+  Rebuild a `Swoosh.Email` from a mail job's args (#1843).
+
+  The subject and bodies travel **sealed** (`"sealed"`, encrypted with
+  `KilnCMS.Keys.Vault`): a password reset, a magic link, an account or
+  newsletter confirmation carries a sign-in link, and job args are written to
+  `oban_jobs`, to every log line Oban's logger prints for the job, and to the
+  `extra` of any Sentry event the job raises. Only the addresses and headers
+  stay readable, for the delivery panel's recipient domain.
+
+  Args queued by a release before 1.0 hold the subject and bodies in plain
+  text, and still open.
+
+    * `{:error, :body_unreadable}` — the seal no longer opens under any
+      `secret_key_base` this deployment knows (rotated without
+      `PREVIOUS_SECRET_KEY_BASE`);
+    * `{:error, :body_unavailable}` — the job carries no message at all, as a
+      finished job does once `forget_body/1` has run.
+  """
+  @spec open_args(map()) ::
+          {:ok, Swoosh.Email.t()} | {:error, :body_unreadable | :body_unavailable}
+  def open_args(%{"sealed" => sealed} = args) when is_binary(sealed) do
+    with {:ok, ciphertext} <- Base.decode64(sealed),
+         {:ok, json} <- Vault.decrypt(ciphertext),
+         {:ok, %{"subject" => _} = content} <- Jason.decode(json) do
+      {:ok, build_email(args, content)}
+    else
+      _unreadable -> {:error, :body_unreadable}
+    end
+  end
+
+  # Queued before 1.0: the message in the clear.
+  def open_args(%{"subject" => _subject} = args) do
+    if is_binary(args["html_body"]) or is_binary(args["text_body"]),
+      do: {:ok, build_email(args, args)},
+      else: {:error, :body_unavailable}
+  end
+
+  def open_args(_args), do: {:error, :body_unavailable}
+
+  @doc "A sentence for a job `open_args/1` refused — the cancel reason an admin reads."
+  @spec describe_open_error(:body_unreadable | :body_unavailable) :: String.t()
+  def describe_open_error(:body_unreadable),
+    do:
+      "message could not be opened: it was sealed under a SECRET_KEY_BASE this " <>
+        "deployment no longer has (set PREVIOUS_SECRET_KEY_BASE)"
+
+  def describe_open_error(:body_unavailable),
+    do: "message no longer available: the job carries no subject or body"
+
+  defp build_email(%{"from" => from, "to" => to} = args, content) do
     import Swoosh.Email
 
     new()
     |> from(address(from))
     |> to(address(to))
-    |> subject(subject)
+    |> subject(content["subject"])
     |> maybe(&reply_to/2, address(args["reply_to"]))
-    |> maybe(&html_body/2, args["html_body"])
-    |> maybe(&text_body/2, args["text_body"])
+    |> maybe(&html_body/2, content["html_body"])
+    |> maybe(&text_body/2, content["text_body"])
     |> headers(args["headers"] || %{})
   end
+
+  # Every key a mail job's message has ever travelled under.
+  @body_keys ~w(sealed html_body text_body)
+
+  @doc """
+  Drop the message from a finished mail job's args (#1843), so a delivered,
+  cancelled or abandoned mail does not sit in `oban_jobs` until the Pruner
+  deletes the row. The addresses stay, for the delivery panel.
+
+  Best-effort: a failure is logged and swallowed, because the caller has
+  already delivered the mail and a raise would make Oban send it again. A job
+  that was never inserted (`id: nil`, as in `Oban.Testing.perform_job/3`) is
+  left alone.
+  """
+  @spec forget_body(Oban.Job.t()) :: :ok
+  def forget_body(%Oban.Job{id: nil}), do: :ok
+
+  def forget_body(%Oban.Job{id: id}) do
+    Ecto.Query.from(j in Oban.Job,
+      where: j.id == ^id,
+      update: [set: [args: fragment("? - ?::text[]", j.args, ^@body_keys)]]
+    )
+    |> KilnCMS.Repo.update_all([])
+
+    :ok
+  rescue
+    error ->
+      Logger.warning(
+        "Could not drop the message from mail job #{id}: #{inspect(error.__struct__)}"
+      )
+
+      :ok
+  end
+
+  @doc false
+  # The keys `forget_body/1` drops, shared with `KilnCMS.Mail.Scrub`.
+  @spec body_keys() :: [String.t()]
+  def body_keys, do: @body_keys
 
   @doc """
   Stamp a `Message-ID` header on `email` unless it already has one.
@@ -698,12 +946,21 @@ defmodule KilnCMS.Mail do
       "from" => address_args(email.from),
       "to" => address_args(recipient),
       "reply_to" => address_args(email.reply_to),
-      "subject" => email.subject,
-      "html_body" => email.html_body,
-      "text_body" => email.text_body,
-      "headers" => email.headers
+      "headers" => email.headers,
+      # Sealed (#1843; see `open_args/1`). Leaving `"subject"` out of the
+      # clear also makes a release before 1.0 refuse the job (its `from_args/1`
+      # matches on it) and retry, rather than send an empty message, while a
+      # rolling deploy runs both.
+      "sealed" =>
+        seal(%{
+          "subject" => email.subject,
+          "html_body" => email.html_body,
+          "text_body" => email.text_body
+        })
     }
   end
+
+  defp seal(content), do: content |> Jason.encode!() |> Vault.encrypt() |> Base.encode64()
 
   defp message_id(email, token) do
     id = token || Ecto.UUID.generate()
@@ -734,11 +991,10 @@ defmodule KilnCMS.Mail do
   # Scrub anything address-shaped from an inspected error term so recipient
   # PII in 5xx reject texts doesn't leak into telemetry, logs, or the stored
   # Oban cancel reason. Keeps the structure/SMTP status useful for debugging.
-  defp redact_reason(reason) do
-    reason
-    |> inspect()
-    |> String.replace(~r/[\w.!#$%&'*+\/=?^`{|}~-]+@[\w.-]+/, "[address redacted]")
-  end
+  defp redact_reason(reason), do: reason |> inspect() |> redact_addresses()
+
+  defp redact_addresses(text),
+    do: String.replace(text, ~r/[\w.!#$%&'*+\/=?^`{|}~-]+@[\w.-]+/, "[address redacted]")
 
   defp maybe_put_org(args, nil), do: args
   defp maybe_put_org(args, org_id), do: Map.put(args, "org_id", org_id)
