@@ -131,8 +131,12 @@ carries the reasoning.
   non-default port, or plain `http`), set `PUBLIC_BASE_URL` to that origin,
   for example `PUBLIC_BASE_URL=https://www.example.com`. It must be an origin
   only: a path or query string stops the release from booting, with a
-  message naming the variable. Once it is right, resubmit your sitemap to
-  search engines; feed readers pick up the new links on their next fetch
+  message naming the variable. If you set `config :kiln_cms, :public_base_url`
+  in your own compile-time config (`config/project.exs` or `config/prod.exs`),
+  the runtime value now replaces it: move it to `PUBLIC_BASE_URL`, or edit
+  nothing if it was already `https://<PHX_HOST>`. Once it is right, resubmit
+  your sitemap to search engines; feed readers pick up the new links on their
+  next fetch
   ([#1833](https://github.com/The-Verscienta/kiln_cms/issues/1833); see
   `docs/environment-variables.md`).
 

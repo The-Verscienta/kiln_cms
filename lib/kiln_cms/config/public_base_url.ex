@@ -31,7 +31,11 @@ defmodule KilnCMS.Config.PublicBaseUrl do
   value, so a stray `/blog` or `?x=1` would be silently wrong in all of them.
 
   Development and test keep `config/config.exs`'s `http://localhost:4000`;
-  this module is only called from the production runtime config.
+  this module is only called from the production runtime config. Because that
+  runs after every compile-time config file, it also replaces a
+  `:public_base_url` an overlay set in `config/project.exs` — a release's
+  config provider cannot see compile-time values while it evaluates, so
+  `PUBLIC_BASE_URL` is the one place to override it.
   """
 
   alias KilnCMS.Config.Host
