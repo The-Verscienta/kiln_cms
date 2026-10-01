@@ -100,6 +100,11 @@ Every summary line below that was shortened links to its own entry there.
   public site is served from a different origin.**
   ([#1833](https://github.com/The-Verscienta/kiln_cms/issues/1833) · [long form](docs/changelog/unreleased.md#public-links-now-use-phx-host))
 
+- **Tell authors that Save draft on a published entry now holds every content
+  field until *Publish changes*; a webhook receiver hears `<type>.updated`
+  when the changes are published, not when they are saved.**
+  ([#1815](https://github.com/The-Verscienta/kiln_cms/issues/1815) · [long form](docs/changelog/unreleased.md#save-draft-holds-content-fields-until-publish-changes))
+
 ### Breaking
 
 - **On a multi-org install with `KILN_CONSOLE_HOST` set, each non-default
@@ -212,6 +217,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Production sitemaps, feeds, canonical links, preview links and newsletter
   confirmation emails link to `https://<PHX_HOST>`, not `http://localhost:4000`.**
   ([#1833](https://github.com/The-Verscienta/kiln_cms/issues/1833) · [long form](docs/changelog/unreleased.md#production-public-links-use-phx-host))
+
+- **Save draft on a published entry no longer puts any field live; *Publish
+  changes* or a release publishes every saved change at once.**
+  ([#1815](https://github.com/The-Verscienta/kiln_cms/issues/1815) · [long form](docs/changelog/unreleased.md#save-draft-on-a-published-entry-holds-every-content-field))
 
 - **A new brand colour shows as soon as Branding is saved, with a button and
   link preview in light and dark mode and help text that says where it is used.**
