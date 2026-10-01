@@ -135,6 +135,11 @@ written as a function component or a raw `class="…"` in a template.
   System / Light / Dark switch), `.side-account` + `.side-menu` (account row
   and its menu). Panel colours are the `sidebar`, `sidebar-raised` and
   `sidebar-line` tokens.
+- **Help tips** — `.help-tip-button` + `.help-tip-panel`, drawn by
+  `<.help_tip>`: a "?" beside a label or heading that opens one to three plain
+  sentences and an optional *Learn more* link (`docs_url/1`). The panel is a
+  native `popover`, so Escape and a click outside close it with no JS. Put the
+  button beside a `<label>`, never inside it, or it joins the control's name.
 - **Misc** — `.kbd` (keyboard hint, used by the ⌘K search affordance).
 
 ### Do / Don't

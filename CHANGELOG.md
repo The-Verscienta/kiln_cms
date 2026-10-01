@@ -143,6 +143,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **The calendar's Lane and Health filters and the Tasks page's Anchored to
+  filter each have a "?" button that explains them in a sentence or two.**
+  ([#1822](https://github.com/The-Verscienta/kiln_cms/issues/1822) · [long form](docs/changelog/unreleased.md#console-help-tips))
+
 - **Reorder a content type's custom fields by dragging them, or with the
   arrow buttons, on `/editor/fields`; the editor shows them in that order.**
   ([#1818](https://github.com/The-Verscienta/kiln_cms/issues/1818) · [long form](docs/changelog/unreleased.md#reorder-custom-fields-by-dragging-them))
@@ -236,6 +240,15 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#coolify-build-records-its-commit))
 
 ### Fixed
+
+- **The overview's Forms and Webhooks cards say what each feature is, and
+  show a count, a first step, or that an admin runs it, instead of a blank
+  "—".**
+  ([#1825](https://github.com/The-Verscienta/kiln_cms/issues/1825) · [long form](docs/changelog/unreleased.md#overview-cards-explain-themselves))
+
+- **"View site" opens the public site in a new tab and says so, including
+  on a deployment with its own console host.**
+  ([#1827](https://github.com/The-Verscienta/kiln_cms/issues/1827) · [long form](docs/changelog/unreleased.md#view-site-opens-the-site))
 
 - **Settings says what the display name is for and confirms a save beside the
   button; Passkeys says whether any are set up and shows the browser prompt.**

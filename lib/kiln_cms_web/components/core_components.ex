@@ -1319,4 +1319,94 @@ defmodule KilnCMSWeb.CoreComponents do
       message -> message
     end
   end
+
+  @docs_base "https://github.com/The-Verscienta/kiln_cms/blob/main/docs/"
+
+  @doc """
+  The URL of a guide under `docs/`, for a console "Learn more" link — e.g.
+  `docs_url("comments.md#from-a-discussion-to-a-task")`. The repository copy,
+  like the backup guide the overview links: it is always there, and GitHub
+  renders the heading anchors the fragment names.
+  """
+  @spec docs_url(String.t()) :: String.t()
+  def docs_url(page), do: @docs_base <> page
+
+  @doc """
+  A "?" button that opens a short, plain-language explanation of the feature
+  beside it (#1822): calendar lanes, the health filter, task anchoring.
+
+  The panel is a native `popover` driven by `popovertarget`, so it needs no
+  hook and no inline script: the button is a real `<button>` (Tab reaches it,
+  Enter/Space open it, and the browser exposes its expanded state), Escape or a
+  click elsewhere closes the panel, and the panel follows its button in the
+  DOM, so Tab moves on into its "Learn more" link. The open state lives in the
+  browser, not in an attribute, so a LiveView patch does not shut it.
+  Positioning is `.help-tip-panel` in `app.css`; the `anchor-name` pair is per
+  tip because CSS anchor names are page-global.
+
+  `label` is the button's accessible name — say what it explains ("About
+  lanes"), since the visible mark is only a "?". `title` heads the panel and
+  names it for assistive tech. `learn_more` is an optional docs URL, opened in
+  a new tab.
+
+      <.help_tip id="calendar-lanes-help" label={gettext("About lanes")} title={gettext("Lanes")}>
+        {gettext("Each lane is one kind of date.")}
+      </.help_tip>
+  """
+  attr :id, :string, required: true, doc: "the panel's id; the button is `<id>-button`"
+  attr :label, :string, required: true, doc: "the button's accessible name"
+  attr :title, :string, required: true, doc: "the panel's heading"
+  attr :learn_more, :string, default: nil, doc: "an optional docs URL"
+  attr :class, :any, default: nil
+  slot :inner_block, required: true, doc: "one to three plain sentences"
+
+  def help_tip(assigns) do
+    ~H"""
+    <span class={["inline-flex align-middle", @class]}>
+      <button
+        type="button"
+        id={"#{@id}-button"}
+        class="help-tip-button"
+        popovertarget={@id}
+        aria-label={@label}
+        style={"anchor-name: --#{@id}"}
+      >
+        <.icon name="hero-question-mark-circle" class="size-4" />
+      </button>
+      <span
+        id={@id}
+        popover="auto"
+        role="dialog"
+        aria-labelledby={"#{@id}-title"}
+        class="help-tip-panel"
+        style={"position-anchor: --#{@id}"}
+      >
+        <span class="flex items-start justify-between gap-3">
+          <span id={"#{@id}-title"} class="block font-semibold">{@title}</span>
+          <button
+            type="button"
+            popovertarget={@id}
+            popovertargetaction="hide"
+            aria-label={gettext("Close")}
+            class="help-tip-button -mr-1 -mt-0.5"
+          >
+            <.icon name="hero-x-mark" class="size-4" />
+          </button>
+        </span>
+        <span class="mt-1 block text-base-content/80">{render_slot(@inner_block)}</span>
+        <a
+          :if={@learn_more}
+          href={@learn_more}
+          target="_blank"
+          rel="noopener"
+          class="link mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary-ink"
+        >
+          {gettext("Learn more")}
+          <.icon name="hero-arrow-top-right-on-square" class="size-3.5" />
+          <span class="sr-only">{gettext("(opens in a new tab)")}</span>
+        </a>
+      </span>
+    </span>
+    """
+  end
 end

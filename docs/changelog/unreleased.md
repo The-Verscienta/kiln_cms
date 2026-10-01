@@ -318,6 +318,24 @@ carries the reasoning.
 
 ## Added
 
+<a id="console-help-tips"></a>
+
+- **The calendar's Lane and Health filters and the Tasks page's Anchored to
+  filter each have a "?" button that explains them in a sentence or two.** A
+  beta tester found no help on the console's harder features: calendar lanes,
+  the health filter and task anchoring. Each now has a small "?" beside its
+  label. It opens a short panel that says what the filter means and how to
+  use it, with a *Learn more* link to the guide (`docs/content-lifecycles.md`
+  for the calendar, `docs/comments.md` for tasks), which opens in a new tab.
+  The panel is the browser's own popover, so it needs no script: Tab reaches
+  the button, Enter or Space opens it, Escape or a click elsewhere closes it,
+  and screen readers hear the button's name ("About lanes") and the panel's
+  title. The button sits beside the label, not inside it, so each filter is
+  still announced by its one-word name. The component is `<.help_tip>` in
+  `KilnCMSWeb.CoreComponents`, styled by `.help-tip-button` and
+  `.help-tip-panel` in `app.css`
+  ([#1822](https://github.com/The-Verscienta/kiln_cms/issues/1822)).
+
 <a id="reorder-custom-fields-by-dragging-them"></a>
 
 - **Reorder a content type's custom fields by dragging them, or with the
@@ -643,6 +661,36 @@ carries the reasoning.
   has no Coolify equivalent and stays unset unless you set it.
 
 ## Fixed
+
+<a id="overview-cards-explain-themselves"></a>
+
+- **The overview's Forms and Webhooks cards say what each feature is, and
+  show a count, a first step, or that an admin runs it, instead of a blank
+  "—".** A beta tester signed in as an editor saw both cards as an icon over a
+  dash, and took two shipped features for unfinished ones. Their numbers are
+  admin-only, and an editor got the dash with nothing to say why. Now each
+  card carries the same one-line description the sidebar gives the feature.
+  An editor reads that an admin manages it, with no link to a page that would
+  turn them away. An admin with nothing set up reads *No forms yet* or *No
+  webhooks yet* and a link to create the first one; otherwise the count, as
+  before. The *Settings & keys* card, whose key count only a platform admin
+  sees, shows its description to everyone else instead of a dash
+  ([#1825](https://github.com/The-Verscienta/kiln_cms/issues/1825)).
+
+<a id="view-site-opens-the-site"></a>
+
+- **"View site" opens the public site in a new tab and says so, including
+  on a deployment with its own console host.** A beta tester could not tell
+  what the top bar's *View site* did. It now has a border, the
+  external-link arrow after its text, and an accessible name and tooltip of
+  *View site (opens in a new tab)*; on a phone it shows a globe and the
+  arrow. The link was also wrong on a deployment with `KILN_CONSOLE_HOST`
+  set: it pointed at `/` on the console host, which redirects back to
+  `/editor`. It now names the organization's site host: its custom domain,
+  else the base host for the default organization and `<slug>.<base host>`
+  for any other. With no console host it stays `/` on the current host,
+  which is that site
+  ([#1827](https://github.com/The-Verscienta/kiln_cms/issues/1827)).
 
 <a id="settings-profile-and-passkey-feedback"></a>
 

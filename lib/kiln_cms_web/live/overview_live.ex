@@ -261,6 +261,7 @@ defmodule KilnCMSWeb.OverviewLive do
       |> count(actor, org)
 
     %{
+      total: length(endpoints),
       active: Enum.count(endpoints, & &1.active),
       disabled: Enum.count(endpoints, &(&1.auto_disabled_at != nil)),
       failed_24h: failed_24h
@@ -725,23 +726,66 @@ defmodule KilnCMSWeb.OverviewLive do
         <.icon name={@tile.icon} class="h-3.5 w-3.5" />
       </div>
       <p class="text-xs font-medium uppercase tracking-wide text-base-content/70">{@tile.title}</p>
-      <p class="text-3xl font-semibold tabular-nums">{@tile.value || "—"}</p>
-      <p :if={@tile.subtitle} class="text-xs text-base-content/60">{@tile.subtitle}</p>
-      <.link
-        :if={@tile.path}
-        navigate={@tile.path}
-        aria-label={gettext("Open %{title}", title: @tile.title)}
-        class="mt-auto pt-1 text-xs font-medium text-primary-ink hover:underline"
-      >
-        {gettext("Open")} <span aria-hidden="true">→</span>
-      </.link>
+      <%= cond do %>
+        <% tile_state(@tile) == :restricted -> %>
+          <%!-- An admin-only feature seen by an editor (#1825): say what it
+                is and who runs it, rather than a bare "—" under an icon. --%>
+          <p class="text-sm text-base-content/80">{@tile.description}</p>
+          <p class="text-xs text-base-content/60">
+            {gettext("Admins manage this. Ask one if you need a change.")}
+          </p>
+        <% tile_state(@tile) == :empty -> %>
+          <p class="text-sm font-medium">{@tile.empty}</p>
+          <p class="text-xs text-base-content/60">{@tile.description}</p>
+          <.link
+            navigate={@tile.path}
+            class="mt-auto pt-1 text-xs font-medium text-primary-ink hover:underline"
+          >
+            {@tile.cta} <span aria-hidden="true">→</span>
+          </.link>
+        <% true -> %>
+          <%!-- One line on purpose: the tests match the number as `>N<`. --%>
+          <p :if={number?(@tile)} class="text-3xl font-semibold tabular-nums">{@tile.value || "—"}</p>
+          <p :if={@tile.subtitle} class="text-xs text-base-content/60">{@tile.subtitle}</p>
+          <p
+            :if={@tile[:description]}
+            class={[
+              if(@tile.value,
+                do: "text-xs text-base-content/60",
+                else: "text-sm text-base-content/80"
+              )
+            ]}
+          >
+            {@tile.description}
+          </p>
+          <.link
+            :if={@tile.path}
+            navigate={@tile.path}
+            aria-label={gettext("Open %{title}", title: @tile.title)}
+            class="mt-auto pt-1 text-xs font-medium text-primary-ink hover:underline"
+          >
+            {gettext("Open")} <span aria-hidden="true">→</span>
+          </.link>
+      <% end %>
     </div>
     """
   end
 
+  # `:restricted` — the tile's number is admin-only and this viewer is not one
+  # (the metric is `nil` and the tile says so); `:empty` — nothing set up yet,
+  # so the tile offers the first step instead of a lone 0.
+  defp tile_state(%{restricted?: true}), do: :restricted
+  defp tile_state(%{value: 0, empty: empty}) when is_binary(empty), do: :empty
+  defp tile_state(_tile), do: :value
+
+  # The big number, or "—" when there is none and nothing better to say.
+  defp number?(tile), do: not is_nil(tile.value) or !tile[:description]
+
   # The eight outer tiles: grid positions are fixed per domain, values come
-  # from the metrics. `value: nil` renders as “—” (admin-only numbers seen by
-  # an editor, or coverage on a single-locale site).
+  # from the metrics. `value: nil` renders as “—” (coverage on a single-locale
+  # site) unless the tile carries a `description` to show instead; an
+  # admin-only number seen by an editor is `restricted?` and says who runs the
+  # feature (#1825). An `empty` sentence replaces a 0 with the first step.
   @tile_order [
     :translations,
     :analytics,
@@ -1017,6 +1061,9 @@ defmodule KilnCMSWeb.OverviewLive do
       icon: "hero-bolt",
       pos: "lg:col-start-1 lg:row-start-2",
       title: gettext("Webhooks"),
+      # The same sentence the sidebar's Webhooks entry carries (ConsoleNav).
+      description: gettext("Signed POSTs to other services when content changes."),
+      restricted?: is_nil(assigns.webhooks),
       value: assigns.webhooks && assigns.webhooks.active,
       subtitle:
         assigns.webhooks &&
@@ -1024,6 +1071,10 @@ defmodule KilnCMSWeb.OverviewLive do
             failed: assigns.webhooks.failed_24h,
             disabled: assigns.webhooks.disabled
           ),
+      # Keyed on endpoints *existing*, not on active ones: a site whose only
+      # endpoint was auto-disabled has something to fix, not nothing set up.
+      empty: assigns.webhooks && assigns.webhooks.total == 0 && gettext("No webhooks yet"),
+      cta: gettext("Add a webhook"),
       path: assigns.webhooks && ~p"/editor/webhooks"
     }
   end
@@ -1034,9 +1085,14 @@ defmodule KilnCMSWeb.OverviewLive do
       icon: "hero-clipboard-document-list",
       pos: "lg:col-start-3 lg:row-start-2",
       title: gettext("Forms"),
+      # The same sentence the sidebar's Forms entry carries (ConsoleNav).
+      description: gettext("Public forms and the submissions they collect."),
+      restricted?: is_nil(assigns.forms),
       value: assigns.forms && assigns.forms.forms,
       subtitle:
         assigns.forms && gettext("%{count} submissions this week", count: assigns.forms.recent),
+      empty: gettext("No forms yet"),
+      cta: gettext("Create a form"),
       path: assigns.forms && ~p"/editor/forms"
     }
   end
@@ -1079,6 +1135,10 @@ defmodule KilnCMSWeb.OverviewLive do
       icon: "hero-cog-6-tooth",
       pos: "lg:col-start-3 lg:row-start-3",
       title: gettext("Settings & keys"),
+      # Shown in place of the platform-admin-only key count (#1825); the
+      # sentence the sidebar's Settings entry already carries.
+      description:
+        is_nil(assigns.keys_count) && gettext("Every settings screen, and what each one is for."),
       value: assigns.keys_count,
       subtitle:
         assigns.keys_count &&

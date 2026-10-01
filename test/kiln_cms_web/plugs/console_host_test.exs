@@ -8,6 +8,7 @@ defmodule KilnCMSWeb.Plugs.ConsoleHostTest do
   """
   use KilnCMSWeb.ConnCase, async: false
 
+  alias KilnCMS.Accounts.Organization
   alias KilnCMSWeb.Plugs.ConsoleHost
   alias KilnCMSWeb.Tenant
 
@@ -116,6 +117,29 @@ defmodule KilnCMSWeb.Plugs.ConsoleHostTest do
       url = ConsoleHost.console_url("/editor")
       assert String.starts_with?(url, "http://#{@console}")
       assert String.ends_with?(url, "/editor")
+    end
+
+    # `/` on a console host redirects back to /editor, so "View site" has to
+    # name the org's own site host (#1827).
+    test "site_url/1 names each org's site host, not the console's" do
+      base = Tenant.base_host()
+      default = %Organization{id: KilnCMS.Accounts.default_org_id(), slug: "default"}
+      tenant = %Organization{id: Ecto.UUID.generate(), slug: "acme"}
+      vanity = %Organization{id: Ecto.UUID.generate(), slug: "acme", custom_domain: "Acme.Test"}
+
+      assert ConsoleHost.site_url(default) =~ ~r"^http://#{Regex.escape(base)}(:\d+)?/$"
+      assert ConsoleHost.site_url(tenant) =~ ~r"^http://acme\.#{Regex.escape(base)}(:\d+)?/$"
+      assert ConsoleHost.site_url(vanity) =~ ~r"^http://acme\.test(:\d+)?/$"
+      assert ConsoleHost.site_url(nil) =~ ~r"^http://#{Regex.escape(base)}(:\d+)?/$"
+      refute ConsoleHost.site_url(tenant) =~ @console
+    end
+  end
+
+  describe "site_url/1 with the gate off" do
+    test "is this host's root, whatever the org" do
+      Application.delete_env(:kiln_cms, :console_host)
+      assert ConsoleHost.site_url(%Organization{id: Ecto.UUID.generate(), slug: "acme"}) == "/"
+      assert ConsoleHost.site_url(nil) == "/"
     end
   end
 end
