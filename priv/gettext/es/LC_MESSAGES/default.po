@@ -3076,6 +3076,11 @@ msgstr "Elegir contenido publicado…"
 msgid "Choose video"
 msgstr "Elegir vídeo"
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "Choose what to create. It is scheduled to publish that day at 09:00 UTC."
+msgstr "Elige qué crear. Se programará para publicarse ese día a las 09:00 UTC."
+
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
 msgid "Choose which user the key acts as, and give it a name."
@@ -4981,6 +4986,11 @@ msgstr "Dominio añadido. Publica su registro DNS y luego verifícalo."
 #, elixir-autogen, elixir-format
 msgid "Domains"
 msgstr "Dominios"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Don't schedule"
+msgstr "No programar"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -8227,6 +8237,11 @@ msgstr "Nombre de la nueva categoría"
 msgid "New comment"
 msgstr "Nuevo comentario"
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "New content on %{date}"
+msgstr "Nuevo contenido el %{date}"
+
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "New content type"
@@ -8246,6 +8261,11 @@ msgstr "Nuevo experimento"
 #, elixir-autogen, elixir-format
 msgid "New menu"
 msgstr "Nuevo menú"
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "New on %{date}"
+msgstr "Nuevo el %{date}"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -11769,6 +11789,11 @@ msgstr "Publicación programada para"
 msgid "Scheduled to publish"
 msgstr "Programado para publicarse"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Scheduled to publish on %{date} at %{time} UTC."
+msgstr "Programado para publicarse el %{date} a las %{time} UTC."
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Scheduled to unpublish"
@@ -13405,6 +13430,11 @@ msgstr "Esa columna está llena. Haga espacio en ella primero."
 #, elixir-autogen, elixir-format
 msgid "That content couldn't be found."
 msgstr "No se pudo encontrar ese contenido."
+
+#: lib/kiln_cms_web/live/calendar_live.ex
+#, elixir-autogen, elixir-format
+msgid "That day has passed. Choose a later one."
+msgstr "Ese día ya ha pasado. Elige uno posterior."
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format

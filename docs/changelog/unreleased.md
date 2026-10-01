@@ -250,6 +250,25 @@ carries the reasoning.
 
 ## Added
 
+<a id="new-content-on-a-calendar-day"></a>
+
+- **Start new content from a day on the calendar.** A beta tester clicked a
+  day on the calendar expecting to plan something there, and nothing
+  happened. Each day in the month and week grids now has a "+" button beside
+  its number (a real button, announced as "New content on 14 October").
+  It opens a small dialog listing the content types you may create, the same
+  list as the content page's New buttons. Choosing one opens the editor on a
+  new, unsaved document with that day at 09:00 UTC as its scheduled publish
+  date; the draft is created with that date as soon as you give it a title or
+  press Save draft, and *Don't schedule* drops it. 09:00 is in UTC because the
+  calendar groups days in UTC, so the new item always lands on the day you
+  clicked. Days whose 09:00 UTC has passed offer no "+". Setting a publish
+  date takes the same permission as publishing, so the button is shown only to
+  admins, and to editors on sites that let editors publish. The editor's new
+  `?scheduled_at=` link parameter ignores anything that is not a future
+  timestamp, or that the writer may not set, and opens an ordinary draft
+  instead ([#1812](https://github.com/The-Verscienta/kiln_cms/issues/1812)).
+
 <a id="editing-in-place-can-add-blocks"></a>
 
 - **Editing in place can add a paragraph, heading or quote between blocks or at

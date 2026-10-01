@@ -152,6 +152,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Add a new tag or category without leaving the content editor.**
   ([#1805](https://github.com/The-Verscienta/kiln_cms/issues/1805) · [long form](docs/changelog/unreleased.md#add-tags-and-categories-from-the-editor))
 
+- **Start new content from a day on the calendar: press its "+", choose a type,
+  and the editor opens with that day as the publish date.**
+  ([#1812](https://github.com/The-Verscienta/kiln_cms/issues/1812) · [long form](docs/changelog/unreleased.md#new-content-on-a-calendar-day))
+
 ### Changed
 
 - **Keep `RichText.legacy_html` as a fallback instead of removing it;
