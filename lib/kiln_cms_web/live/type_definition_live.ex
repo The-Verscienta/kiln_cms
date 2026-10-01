@@ -11,6 +11,7 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.Changes.DefaultPathSegment
 
   @impl true
   def mount(_params, _session, socket) do
@@ -26,24 +27,37 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
      |> assign(:page_title, gettext("Content types"))
      |> assign(:edit, nil)
      |> assign(:form, create_form(actor, org))
+     |> assign(:segment_edited?, false)
      |> load_definitions()}
   end
 
   # --- create ----------------------------------------------------------------
 
+  # The URL segment follows the machine name as it is typed (#1816) until the
+  # admin edits the segment themselves; clearing it hands it back. Without the
+  # flag, the first suggestion came back in the next change event as if typed,
+  # and froze there — a typo corrected in the machine name stayed in the URL.
   @impl true
-  def handle_event("validate", %{"type_definition" => params}, socket) when is_map(params) do
-    {:noreply, assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))}
+  def handle_event("validate", %{"type_definition" => params} = event, socket)
+      when is_map(params) do
+    edited? = segment_edited?(event["_target"], params, socket.assigns.segment_edited?)
+    params = if edited?, do: params, else: suggest_segment(params)
+
+    {:noreply,
+     socket
+     |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+     |> assign(:segment_edited?, edited?)}
   end
 
   def handle_event("create", %{"type_definition" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.form, params: params) do
-      {:ok, _definition} ->
+      {:ok, definition} ->
+        # Straight on to its fields, with the new type already ticked (#1817):
+        # a type with no fields has nothing for an author to fill in.
         {:noreply,
          socket
-         |> assign(:form, create_form(socket.assigns.actor, socket.assigns.current_org))
-         |> load_definitions()
-         |> put_flash(:info, gettext("Content type created. Now add its fields."))}
+         |> put_flash(:info, gettext("Content type created. Now add its fields."))
+         |> push_navigate(to: ~p"/editor/fields?#{[type: "def:#{definition.id}"]}")}
 
       {:error, form} ->
         {:noreply, assign(socket, :form, form)}
@@ -152,6 +166,16 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
     |> to_form()
   end
 
+  defp segment_edited?(["type_definition", "path_segment"], params, _edited?),
+    do: not blank?(params["path_segment"])
+
+  defp segment_edited?(_target, _params, edited?), do: edited?
+
+  defp suggest_segment(params),
+    do: Map.put(params, "path_segment", DefaultPathSegment.for_name(params["name"]))
+
+  defp blank?(value), do: value in [nil, ""]
+
   defp editing?(nil, _id), do: false
   defp editing?(%{id: id}, id), do: true
   defp editing?(_edit, _id), do: false
@@ -205,7 +229,8 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
             />
             <.input
               field={@form[:path_segment]}
-              label={gettext("URL segment (defaults to machine name + \"s\")")}
+              label={gettext("URL segment")}
+              hint={gettext("Filled in from the machine name until you change it.")}
               placeholder="recipes"
             />
             <div class="sm:col-span-2">
@@ -332,7 +357,10 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
                       "%{count} fields",
                       length(definition.field_definitions)
                     )} &middot;
-                    <.link navigate={~p"/editor/fields"} class="hover:underline">
+                    <.link
+                      navigate={~p"/editor/fields?#{[type: "def:#{definition.id}"]}"}
+                      class="hover:underline"
+                    >
                       {gettext("Manage fields")}
                     </.link>
                   </p>

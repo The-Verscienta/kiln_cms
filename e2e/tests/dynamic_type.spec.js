@@ -76,12 +76,23 @@ test.describe("dynamic content types", () => {
     await page.fill('#new-type-form input[name="type_definition[label]"]', label);
     await page.fill('#new-type-form input[name="type_definition[plural_label]"]', `${label}s`);
     await page.fill('#new-type-form input[name="type_definition[name]"]', name);
+    // The URL segment follows the machine name: machine name + "s" (#1816).
+    await expect(page.locator('#new-type-form input[name="type_definition[path_segment]"]')).toHaveValue(
+      `${name}s`,
+    );
     await page.locator("#new-type-form").getByRole("button", { name: "Create content type" }).click();
+
+    // Creating it goes straight on to its fields, the new type ticked (#1817).
+    await expect(page).toHaveURL(/\/editor\/fields\?type=def/);
     await expect(page.locator("#flash-info")).toContainText("Content type created. Now add its fields.");
+    await expect(
+      page.locator("#new-field-form").getByRole("checkbox", { name: label, exact: true }),
+    ).toBeChecked();
+
+    await page.goto("/editor/types");
     const typeRow = page.locator("li[id^='type-']").filter({ hasText: name });
     await expect(typeRow).toBeVisible();
     await expect(typeRow).toContainText("0 fields");
-    // The URL segment defaults to machine name + "s".
     await expect(typeRow).toContainText(`/${name}s`);
 
     // Give it a string field, scoped to the new type via the "Custom" group.
