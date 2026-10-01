@@ -172,8 +172,8 @@ config :ex_aws,
   json_codec: Jason,
   http_client: KilnCMS.Storage.S3.ReqClient
 
-# Public base URL of the delivery frontend — used to build sitemap/robots URLs
-# and JSON-LD canonical URLs. Override in runtime.exs for production.
+# Public base URL of every absolute public link (sitemap, feeds, canonical). A
+# release sets it from PUBLIC_BASE_URL, else https://<PHX_HOST> (#1833).
 config :kiln_cms, :public_base_url, "http://localhost:4000"
 
 # Semantic search — pgvector storage + local Bumblebee embeddings. Disabled by
