@@ -318,6 +318,16 @@ const Hooks = {
         this.hidden.value = this.local.value ? new Date(this.local.value).toISOString() : ""
         this.hidden.dispatchEvent(new Event("input", {bubbles: true}))
       })
+
+      // Set from elsewhere on the page (#1812: "Use this date" copies a
+      // proposed publish date in). Through the same input event, so the
+      // form sees a change and Save writes it.
+      this.el.addEventListener("kiln:set-utc", e => {
+        const d = new Date(e.detail.value)
+        if (isNaN(d) || this.local.disabled) return
+        this.local.value = this.toLocalValue(d)
+        this.local.dispatchEvent(new Event("input", {bubbles: true}))
+      })
     },
     toLocalValue(d) {
       const pad = n => String(n).padStart(2, "0")

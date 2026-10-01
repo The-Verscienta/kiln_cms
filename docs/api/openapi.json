@@ -14846,6 +14846,14 @@
                               }
                             ]
                           },
+                          "proposed_publish_at": {
+                            "anyOf": [
+                              {},
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "related_entry_ids": {
                             "anyOf": [
                               {
@@ -16950,6 +16958,14 @@
                               }
                             ]
                           },
+                          "proposed_publish_at": {
+                            "anyOf": [
+                              {},
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "related_entry_ids": {
                             "anyOf": [
                               {
@@ -18990,6 +19006,14 @@
                               {
                                 "type": "string"
                               },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "proposed_publish_at": {
+                            "anyOf": [
+                              {},
                               {
                                 "type": "null"
                               }
@@ -21074,6 +21098,14 @@
                               }
                             ]
                           },
+                          "proposed_publish_at": {
+                            "anyOf": [
+                              {},
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "related_page_ids": {
                             "anyOf": [
                               {
@@ -22298,6 +22330,14 @@
                               {
                                 "type": "string"
                               },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "proposed_publish_at": {
+                            "anyOf": [
+                              {},
                               {
                                 "type": "null"
                               }
@@ -24387,6 +24427,14 @@
                               {
                                 "type": "string"
                               },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "proposed_publish_at": {
+                            "anyOf": [
+                              {},
                               {
                                 "type": "null"
                               }
