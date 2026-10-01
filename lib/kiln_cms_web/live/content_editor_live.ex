@@ -308,6 +308,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # A live document's settings edited since the last Save
     # (docs/working-copy.md) — its text autosaves, its settings do not.
     |> assign(:settings_dirty?, false)
+    # The lost-update guard's question (#1815): the keys the live page changed
+    # after the draft was saved, and what the editor chose for each, while the
+    # "Publish changes" panel is open. `nil` when it is closed.
+    |> assign(:publish_conflicts, nil)
+    |> assign(:conflict_choices, %{})
     # When the record was last written, by anyone: the stamp the save
     # line shows between saves (`SavedTicker`). Follows `updated_at` so
     # two tabs agree on it.
@@ -871,6 +876,102 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> load_redirects()
   end
 
+  attr :keys, :list, required: true
+  attr :choices, :map, required: true
+  attr :resource, :atom, required: true
+
+  # The lost-update guard's question (#1815), asked before "Publish changes"
+  # would overwrite a live value someone changed after the draft was saved.
+  # Buttons, not a form: this renders inside the editor's own form.
+  defp publish_conflicts(assigns) do
+    ~H"""
+    <div
+      id="publish-conflicts"
+      role="alertdialog"
+      aria-labelledby="publish-conflicts-title"
+      class="card card-pad border border-warning/40 bg-warning/5"
+    >
+      <h2 id="publish-conflicts-title" class="text-sm font-medium">
+        {gettext("Someone changed the live page after you saved your draft")}
+      </h2>
+      <p class="mt-1 text-sm text-base-content/70">
+        {gettext(
+          "These fields were changed on the live page since then. For each one, keep the live version or publish yours."
+        )}
+      </p>
+      <ul class="mt-3 divide-y divide-base-content/10">
+        <li
+          :for={key <- @keys}
+          id={"publish-conflict-#{key}"}
+          class="flex flex-wrap items-center justify-between gap-2 py-2"
+        >
+          <span class="text-sm font-medium">{held_key_label(@resource, key)}</span>
+          <span class="flex gap-1">
+            <button
+              type="button"
+              phx-click="conflict_choose"
+              phx-value-key={key}
+              phx-value-choice="theirs"
+              aria-pressed={to_string(@choices[key] == "theirs")}
+              class={[
+                "btn btn-sm",
+                if(@choices[key] == "theirs", do: "btn-primary", else: "btn-default")
+              ]}
+            >
+              {gettext("Keep the live version")}
+            </button>
+            <button
+              type="button"
+              phx-click="conflict_choose"
+              phx-value-key={key}
+              phx-value-choice="mine"
+              aria-pressed={to_string(@choices[key] == "mine")}
+              class={[
+                "btn btn-sm",
+                if(@choices[key] == "mine", do: "btn-primary", else: "btn-default")
+              ]}
+            >
+              {gettext("Use mine")}
+            </button>
+          </span>
+        </li>
+      </ul>
+      <div class="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          phx-click="conflict_choose_all"
+          phx-value-choice="theirs"
+          class="btn btn-sm btn-default"
+        >
+          {gettext("Keep all live versions")}
+        </button>
+        <button
+          type="button"
+          phx-click="conflict_choose_all"
+          phx-value-choice="mine"
+          class="btn btn-sm btn-default"
+        >
+          {gettext("Use all of mine")}
+        </button>
+        <span class="ml-auto flex gap-2">
+          <button type="button" phx-click="conflict_cancel" class="btn btn-sm btn-default">
+            {gettext("Cancel")}
+          </button>
+          <button
+            id="publish-conflicts-confirm"
+            type="button"
+            phx-click="conflict_publish"
+            disabled={map_size(@choices) < length(@keys)}
+            class="btn btn-sm btn-primary"
+          >
+            {gettext("Publish changes")}
+          </button>
+        </span>
+      </div>
+    </div>
+    """
+  end
+
   # Whether the actor may WRITE this record — the authorization both AI-assist
   # affordances need and a read-only viewer lacks (#550). The route's editor-tier
   # gate and the mount read-check are coarser: they admit a reviewer or a
@@ -1270,6 +1371,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
       # (docs/content-lifecycles.md).
       load: [:category, :featured_image, :tags, :health, :due_at, related_name(kind)]
     )
+    # The pickers show the working copy's tags and related content (#1815);
+    # the attributes stay the row's, which every save is judged against.
+    |> WorkingCopy.with_held_relationships(actor: actor, tenant: org)
   end
 
   # Other content of the same kind, for the "related content" picker. Bounded to
@@ -1485,41 +1589,93 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  # Save on a LIVE document (docs/working-copy.md): the text goes to the working
-  # copy, the settings go live. Two writes, in that order — a pending text edit
-  # is flushed through the same path the debounce takes, then everything but
-  # the title and body is submitted through `:update`.
+  # Save on a LIVE document (docs/working-copy.md): nothing readers see moves
+  # (#1815). Up to three writes, in this order: a pending text edit is flushed
+  # through the same path the debounce takes; the held settings — SEO, custom
+  # fields, category, featured image, tags, related content, slug — go to the
+  # working copy through `:save_working_copy`'s `fields`; and the operational
+  # ones — audience, passphrase, schedule, lifecycle — go live through
+  # `:update`, as they always have, and only when one of them actually
+  # changed (an `:update` on a live row re-fires its artifacts and its
+  # `updated` webhook).
   #
-  # NOT through `@form`. That form's data is the working view — the title and
-  # body the editor is typing — and `:update`'s pipeline reads the text it does
+  # Neither write goes through `@form`. That form's data is the working view —
+  # the copy the editor is typing — and `:update`'s pipeline reads what it does
   # not receive in params off `changeset.data`: `SetSearchText` would index the
   # draft's words on the live row, and the fired artifacts would carry them.
-  # A throwaway form on the row itself, without the block sub-forms (nothing
-  # here writes blocks), keeps `:update` reading the published text.
+  # Throwaway forms on the row itself keep both writes judged against the
+  # published record.
   defp save_live(socket, params) do
-    case flush_working_copy(socket, params) do
-      {:ok, socket} ->
-        form =
-          AshPhoenix.Form.for_update(socket.assigns.record, :update,
-            actor: socket.assigns.actor,
-            tenant: socket.assigns.record.org_id
-          )
+    {held, operational} = WorkingCopy.split_params(resource(socket), params)
 
-        settings = Map.drop(params, ["title", "blocks"])
-
-        result =
-          EditorTelemetry.span(:save, %{kind: socket.assigns.kind}, fn ->
-            AshPhoenix.Form.submit(form, params: settings)
-          end)
-
-        case result do
-          {:ok, record} -> {:noreply, saved(socket, record)}
-          {:error, form} -> {:noreply, settings_refused(socket, form, params)}
-        end
-
-      {:error, socket} ->
-        {:noreply, socket}
+    with {:ok, socket} <- flush_working_copy(socket, params),
+         {:ok, record} <- save_held(socket, socket.assigns.record, held),
+         {:ok, record} <- save_operational(socket, record, operational) do
+      {:noreply, saved(socket, record)}
+    else
+      {:error, %Phoenix.LiveView.Socket{} = socket} -> {:noreply, socket}
+      {:error, form} -> {:noreply, settings_refused(socket, form, params)}
     end
+  end
+
+  defp resource(socket), do: socket.assigns.record.__struct__
+
+  defp save_held(_socket, record, held) when map_size(held) == 0, do: {:ok, record}
+
+  defp save_held(socket, record, held) do
+    form =
+      AshPhoenix.Form.for_update(record, :save_working_copy,
+        actor: socket.assigns.actor,
+        tenant: record.org_id
+      )
+
+    EditorTelemetry.span(:save, %{kind: socket.assigns.kind}, fn ->
+      AshPhoenix.Form.submit(form, params: %{"fields" => held})
+    end)
+  end
+
+  defp save_operational(socket, record, operational) do
+    if operational_change?(socket, record, operational) do
+      form =
+        AshPhoenix.Form.for_update(record, :update,
+          actor: socket.assigns.actor,
+          tenant: record.org_id
+        )
+
+      EditorTelemetry.span(:save, %{kind: socket.assigns.kind}, fn ->
+        AshPhoenix.Form.submit(form, params: operational)
+      end)
+    else
+      {:ok, record}
+    end
+  end
+
+  # Whether the operational params move anything on the row. Judged by an
+  # unsubmitted `:update` changeset, so the comparison is on cast values (a
+  # posted `"members"` against a stored `:members`). A passphrase is never
+  # stored where a comparison could see it, so supplying one counts, and so
+  # does a param that does not cast: the submit is what reports it.
+  defp operational_change?(socket, record, operational) do
+    if passphrase_supplied?(operational) do
+      true
+    else
+      changeset =
+        Ash.Changeset.for_update(record, :update, operational,
+          actor: socket.assigns.actor,
+          tenant: record.org_id
+        )
+
+      not changeset.valid? or
+        Enum.any?(Map.keys(operational), fn key ->
+          attribute = Ash.Resource.Info.attribute(record.__struct__, key)
+          attribute != nil and Ash.Changeset.changing_attribute?(changeset, attribute.name)
+        end)
+    end
+  end
+
+  defp passphrase_supplied?(params) do
+    params["access_password"] not in [nil, ""] or
+      params["remove_access_password"] in ["true", true]
   end
 
   # The errors belong on the form that is showing. Re-validating it with the
@@ -1546,7 +1702,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> broadcast_saved()
     |> mark_saved()
     |> assign(:settings_dirty?, false)
-    |> put_flash(:info, gettext("Saved."))
+    |> put_flash(:info, saved_message(reloaded))
+  end
+
+  # A live document's Save holds its changes back (#1815) — say where they went.
+  defp saved_message(record) do
+    if WorkingCopy.pending?(record),
+      do: gettext("Saved. Readers see these changes once you publish them."),
+      else: gettext("Saved.")
   end
 
   # Write whatever text is waiting for the debounce into the working copy now,
@@ -2932,6 +3095,37 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, run_workflow(socket, action)}
   end
 
+  # The lost-update guard's panel (#1815): one choice per field, or one for
+  # all, then publish. Only keys the panel was opened with can be chosen.
+  def handle_event("conflict_choose", %{"key" => key, "choice" => choice}, socket)
+      when is_binary(key) and choice in ["mine", "theirs"] do
+    if key in (socket.assigns.publish_conflicts || []) do
+      {:noreply, update(socket, :conflict_choices, &Map.put(&1, key, choice))}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("conflict_choose_all", %{"choice" => choice}, socket)
+      when choice in ["mine", "theirs"] do
+    choices = Map.new(socket.assigns.publish_conflicts || [], &{&1, choice})
+    {:noreply, assign(socket, :conflict_choices, choices)}
+  end
+
+  def handle_event("conflict_cancel", _params, socket), do: {:noreply, close_conflicts(socket)}
+
+  def handle_event("conflict_publish", _params, socket) do
+    keys = socket.assigns.publish_conflicts || []
+    choices = Map.take(socket.assigns.conflict_choices, keys)
+
+    if map_size(choices) == length(keys) do
+      {:noreply, publish_changes(socket, choices)}
+    else
+      {:noreply,
+       put_flash(socket, :error, gettext("Choose which version to keep for each field first."))}
+    end
+  end
+
   # A human attests the content is still correct (docs/content-lifecycles.md).
   # Its own event rather than a `workflow` action, because it is not one: `state`
   # does not move, and `run_workflow`'s flash ("Updated to published") would be
@@ -3104,6 +3298,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     case result do
       {:ok, record} ->
+        # Re-read rather than adopted: a restore can bring back a working
+        # copy's held tags and related content (#1815), and the pickers show
+        # those from what `fetch!/4` loads, not from the action's result.
+        record = fetch!(socket.assigns.kind, record.id, socket.assigns.actor, record.org_id)
+
         {:noreply,
          socket
          |> assign_record(record)
@@ -3819,6 +4018,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # working copy over. Re-fetched rather than adopting the action's result, as
   # `mark_reviewed` does: `health`/`due_at` are calculations the result does
   # not carry.
+  # Settings edited but not saved would be left behind by a publish that ships
+  # the saved copy — so they are saved first, by the person, on purpose.
+  defp run_workflow(%{assigns: %{settings_dirty?: true}} = socket, "publish_changes") do
+    put_flash(socket, :error, gettext("Save draft first, then publish your changes."))
+  end
+
   defp run_workflow(socket, "publish_changes") do
     params =
       socket.assigns.form
@@ -3827,11 +4032,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> inject_rich_bodies(socket.assigns.rich_bodies)
 
     case flush_working_copy(socket, params) do
-      {:ok, socket} ->
-        live_transition(socket, "publish_changes", gettext("Published your changes."))
-
-      {:error, socket} ->
-        socket
+      {:ok, socket} -> publish_or_ask(socket)
+      {:error, socket} -> socket
     end
   end
 
@@ -3849,6 +4051,83 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp run_workflow(socket, _action), do: socket
+
+  # The lost-update guard (#1815): publish straight away when nothing on the
+  # live page moved under the draft, else ask which version to keep.
+  defp publish_or_ask(socket) do
+    case WorkingCopy.reconcile(socket.assigns.record).conflicts do
+      [] ->
+        publish_changes(socket, %{})
+
+      keys ->
+        socket
+        |> assign(:publish_conflicts, keys)
+        |> assign(:conflict_choices, %{})
+    end
+  end
+
+  # "Publish changes" with the lost-update guard's decisions (#1815). Through
+  # a form on the row, the way Save writes, because the decisions are an
+  # argument the shared `transition/4` dispatch does not carry.
+  defp publish_changes(socket, resolve) do
+    %{kind: kind, record: record, actor: actor} = socket.assigns
+
+    form =
+      AshPhoenix.Form.for_update(record, :publish_changes, actor: actor, tenant: record.org_id)
+
+    result =
+      EditorTelemetry.span(:workflow, %{kind: kind, action: "publish_changes"}, fn ->
+        AshPhoenix.Form.submit(form, params: %{"resolve" => resolve})
+      end)
+
+    case result do
+      {:ok, updated} ->
+        socket
+        |> close_conflicts()
+        |> assign_record(fetch!(kind, updated.id, actor, record.org_id))
+        |> broadcast_saved()
+        |> mark_saved()
+        |> reset_editors()
+        |> put_flash(:info, gettext("Published your changes."))
+
+      {:error, form} ->
+        if stale_conflict?(form),
+          do: flag_conflict(socket),
+          else: put_flash(socket, :error, live_transition_error(form.source.errors))
+    end
+  end
+
+  defp close_conflicts(socket) do
+    socket
+    |> assign(:publish_conflicts, nil)
+    |> assign(:conflict_choices, %{})
+  end
+
+  @doc false
+  # The label of a held key in the conflict panel, in the reader's language:
+  # an attribute through the history panel's own labels, the text and the
+  # links by name. Never an atom built from the key.
+  def held_key_label(resource, key) do
+    case key do
+      "title" -> VersionDiffComponents.field_label(:title)
+      "blocks" -> gettext("Body")
+      "tag_ids" -> gettext("Tags")
+      _other -> held_field_label(resource, key)
+    end
+  end
+
+  defp held_field_label(resource, key) do
+    cond do
+      attribute = WorkingCopy.attribute_for(resource, key) ->
+        VersionDiffComponents.field_label(attribute)
+
+      WorkingCopy.relationship_for(resource, key) ->
+        gettext("Related content")
+
+      true ->
+        key
+    end
+  end
 
   defp settle_before_workflow(%{assigns: %{save_state: state}} = socket)
        when state in [:pending, :error] do
@@ -5776,6 +6055,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
           actor={@actor}
           word_count={@seo_body_stats.word_count}
           a11y_report={@a11y_report}
+        />
+
+        <.publish_conflicts
+          :if={@publish_conflicts}
+          keys={@publish_conflicts}
+          choices={@conflict_choices}
+          resource={@record.__struct__}
         />
 
         <div class={[

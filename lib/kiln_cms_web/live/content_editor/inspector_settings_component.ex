@@ -165,6 +165,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
           release={@release_of_item}
           releases={@releases}
           draft={@release_draft}
+          live?={@record.state == :published}
         />
       </.inspector_section>
 
