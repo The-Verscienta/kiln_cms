@@ -35,6 +35,7 @@ import {SavedTicker} from "./saved_ticker"
 import {TabKeys} from "./tab_keys"
 import {BodyImageUploader} from "./body_image_uploader"
 import {watchLiveness} from "./liveness"
+import {watchConnectionNotices} from "./connection_notice"
 
 const clamp01 = (n) => Math.min(Math.max(n, 0), 1)
 
@@ -316,6 +317,16 @@ const Hooks = {
       this.local.addEventListener("input", () => {
         this.hidden.value = this.local.value ? new Date(this.local.value).toISOString() : ""
         this.hidden.dispatchEvent(new Event("input", {bubbles: true}))
+      })
+
+      // Set from elsewhere on the page (#1812: "Use this date" copies a
+      // proposed publish date in). Through the same input event, so the
+      // form sees a change and Save writes it.
+      this.el.addEventListener("kiln:set-utc", e => {
+        const d = new Date(e.detail.value)
+        if (isNaN(d) || this.local.disabled) return
+        this.local.value = this.toLocalValue(d)
+        this.local.dispatchEvent(new Event("input", {bubbles: true}))
       })
     },
     toLocalValue(d) {
@@ -1202,6 +1213,9 @@ liveSocket.connect()
 // A line that is cut without a goodbye looks exactly like a working one; this
 // asks for itself while the page is in front and rebuilds a quiet line.
 watchLiveness(liveSocket)
+// "We can't find the internet" / "Something went wrong!" only once the trouble
+// has lasted, with a "Try again" button (#1821) — see connection_notice.js.
+watchConnectionNotices(liveSocket)
 
 // Installable editor PWA (#65). Gated on the manifest link, which the root
 // layout emits only for authorised editors/admins — so a public reader browsing

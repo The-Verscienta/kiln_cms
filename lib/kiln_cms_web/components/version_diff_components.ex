@@ -298,6 +298,7 @@ defmodule KilnCMSWeb.VersionDiffComponents do
     canonical_url: "Canonical URL",
     published_at: "Published at",
     scheduled_at: "Scheduled at",
+    proposed_publish_at: "Proposed publish date",
     unpublish_at: "Unpublish at",
     expiry_action: "On expiry",
     review_after_days: "Review every (days)",

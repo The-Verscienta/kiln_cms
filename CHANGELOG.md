@@ -165,6 +165,11 @@ Every summary line below that was shortened links to its own entry there.
   other one.**
   ([#1823](https://github.com/The-Verscienta/kiln_cms/issues/1823) · [long form](docs/changelog/unreleased.md#settings-lists-your-active-sessions))
 
+- **Start new content from a day on the calendar: press its "+", choose a type,
+  and the editor opens with that day as the publish date (a proposed date, for
+  editors who may not publish, that an admin confirms).**
+  ([#1812](https://github.com/The-Verscienta/kiln_cms/issues/1812) · [long form](docs/changelog/unreleased.md#new-content-on-a-calendar-day))
+
 ### Changed
 
 - **Keep `RichText.legacy_html` as a fallback instead of removing it;
@@ -217,6 +222,11 @@ Every summary line below that was shortened links to its own entry there.
 - **Settings says what the display name is for and confirms a save beside the
   button; Passkeys says whether any are set up and shows the browser prompt.**
   ([#1828](https://github.com/The-Verscienta/kiln_cms/issues/1828), [#1829](https://github.com/The-Verscienta/kiln_cms/issues/1829) · [long form](docs/changelog/unreleased.md#settings-profile-and-passkey-feedback))
+
+- **"We can't find the internet" and "Something went wrong!" no longer flash on
+  a first page load; they wait until a connection problem has lasted a few
+  seconds, and offer *Try again*.**
+  ([#1821](https://github.com/The-Verscienta/kiln_cms/issues/1821) · [long form](docs/changelog/unreleased.md#connection-notices-wait-out-a-slow-first-connection))
 
 - **Save draft on a published entry no longer puts any field live; *Publish
   changes* or a release publishes every saved change at once.**
