@@ -197,12 +197,28 @@ defmodule KilnCMS.CMS.Calendar do
   end
 
   # Any of the dates a content lane plots falls in the half-open window.
+  # Split by lane group, then OR-ed, so no single expression carries every
+  # lane's bounds (credo counts each `and`/`or` towards one function's
+  # complexity).
   defp in_window_filter(from, to) do
+    planned = planned_in_window(from, to)
+    happened = happened_in_window(from, to)
+    expr(^planned or ^happened)
+  end
+
+  # The forward-looking dates: scheduled and proposed publishes, embargo ends.
+  defp planned_in_window(from, to) do
     expr(
       (scheduled_at >= ^from and scheduled_at < ^to) or
         (proposed_publish_at >= ^from and proposed_publish_at < ^to) or
-        (unpublish_at >= ^from and unpublish_at < ^to) or
-        (published_at >= ^from and published_at < ^to) or
+        (unpublish_at >= ^from and unpublish_at < ^to)
+    )
+  end
+
+  # Went live, and review due.
+  defp happened_in_window(from, to) do
+    expr(
+      (published_at >= ^from and published_at < ^to) or
         (due_at >= ^from and due_at < ^to)
     )
   end
