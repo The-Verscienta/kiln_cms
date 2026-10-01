@@ -709,7 +709,7 @@ defmodule KilnCMSWeb.Layouts do
       <p class="mt-1 text-base-content/70">
         {gettext("On a Mac, use ⌘ (Command) where Windows and Linux use Ctrl.")}
       </p>
-      <section :for={{heading, rows} <- @groups} class="mt-4">
+      <div :for={{heading, rows} <- @groups} class="mt-4">
         <h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/60">
           {heading}
         </h3>
@@ -724,7 +724,7 @@ defmodule KilnCMSWeb.Layouts do
             </dd>
           </div>
         </dl>
-      </section>
+      </div>
       <a
         href={KilnCMSWeb.CoreComponents.docs_url("editor-shortcuts.md")}
         target="_blank"
