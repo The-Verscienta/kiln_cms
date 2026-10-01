@@ -33,7 +33,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "testimonials_org_id_fkey",
+        "name": "entries_org_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -292,6 +292,30 @@
       ]
     },
     {
+      "allow_nil?": false,
+      "default": "%{}",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "working_fields",
+      "type": "map"
+    },
+    {
+      "allow_nil?": false,
+      "default": "%{}",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "working_base",
+      "type": "map"
+    },
+    {
       "allow_nil?": true,
       "default": "nil",
       "generated?": false,
@@ -472,6 +496,39 @@
       "type": "text"
     },
     {
+      "allow_nil?": false,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": {
+        "deferrable": false,
+        "destination_attribute": "id",
+        "destination_attribute_default": null,
+        "destination_attribute_generated": null,
+        "index?": false,
+        "index_where": null,
+        "match_tenant?": false,
+        "match_type": null,
+        "match_with": null,
+        "multitenancy": {
+          "attribute": "org_id",
+          "global": false,
+          "strategy": "attribute"
+        },
+        "name": "entries_type_definition_id_fkey",
+        "on_delete": null,
+        "on_update": null,
+        "primary_key?": true,
+        "schema": "public",
+        "table": "type_definitions"
+      },
+      "scale": null,
+      "size": null,
+      "source": "type_definition_id",
+      "type": "uuid"
+    },
+    {
       "allow_nil?": true,
       "default": "nil",
       "generated?": false,
@@ -492,7 +549,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "testimonials_author_id_fkey",
+        "name": "entries_author_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -525,7 +582,7 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "testimonials_category_id_fkey",
+        "name": "entries_category_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -558,7 +615,7 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "testimonials_featured_image_id_fkey",
+        "name": "entries_featured_image_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -590,7 +647,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "testimonials_path_alias_index",
+      "name": "entries_path_alias_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -611,7 +668,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "testimonials_embedding_hnsw_index",
+      "name": "entries_embedding_hnsw_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -632,7 +689,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "testimonials_title_trgm_index",
+      "name": "entries_title_trgm_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -653,7 +710,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "testimonials_title_lexemes_index",
+      "name": "entries_title_lexemes_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -681,7 +738,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "testimonials_slug_locale_lookup_index",
+      "name": "entries_slug_locale_lookup_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -704,7 +761,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "testimonials_next_occurrence_index",
+      "name": "entries_next_occurrence_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -727,7 +784,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "testimonials_unpublish_at_index",
+      "name": "entries_unpublish_at_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -750,7 +807,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "testimonials_last_reviewed_at_index",
+      "name": "entries_last_reviewed_at_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -761,13 +818,17 @@
   ],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "D9714E3F6D359651AC9604FBBF77F427DEB263181E2E2762D2118CF37E5A07CA",
+  "hash": "1030260929AAA681504CFE28BC6C00AB64E0EACEC773E36790B98E67752F5677",
   "identities": [
     {
       "all_tenants?": false,
       "base_filter": null,
-      "index_name": "testimonials_unique_slug_index",
+      "index_name": "entries_unique_slug_index",
       "keys": [
+        {
+          "type": "atom",
+          "value": "type_definition_id"
+        },
         {
           "type": "atom",
           "value": "slug"
@@ -789,5 +850,5 @@
   },
   "repo": "Elixir.KilnCMS.Repo",
   "schema": null,
-  "table": "testimonials"
+  "table": "entries"
 }

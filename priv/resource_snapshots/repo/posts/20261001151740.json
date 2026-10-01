@@ -33,7 +33,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "products_org_id_fkey",
+        "name": "posts_org_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -292,6 +292,30 @@
       ]
     },
     {
+      "allow_nil?": false,
+      "default": "%{}",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "working_fields",
+      "type": "map"
+    },
+    {
+      "allow_nil?": false,
+      "default": "%{}",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "working_base",
+      "type": "map"
+    },
+    {
       "allow_nil?": true,
       "default": "nil",
       "generated?": false,
@@ -492,7 +516,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "products_author_id_fkey",
+        "name": "posts_author_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -525,7 +549,7 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "products_category_id_fkey",
+        "name": "posts_category_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -558,7 +582,7 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "products_featured_image_id_fkey",
+        "name": "posts_featured_image_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -590,7 +614,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "products_path_alias_index",
+      "name": "posts_path_alias_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -611,7 +635,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "products_embedding_hnsw_index",
+      "name": "posts_embedding_hnsw_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -632,7 +656,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "products_title_trgm_index",
+      "name": "posts_title_trgm_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -653,7 +677,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "products_title_lexemes_index",
+      "name": "posts_title_lexemes_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -681,7 +705,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "products_slug_locale_lookup_index",
+      "name": "posts_slug_locale_lookup_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -704,7 +728,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "products_next_occurrence_index",
+      "name": "posts_next_occurrence_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -727,7 +751,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "products_unpublish_at_index",
+      "name": "posts_unpublish_at_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -750,7 +774,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "products_last_reviewed_at_index",
+      "name": "posts_last_reviewed_at_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -761,12 +785,12 @@
   ],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "60A41BD7C53E4F227F943143D307FF92B21F46E5E1A0D394E40D6D3DC7473FCF",
+  "hash": "DC01D8F2727E85E5D70350F135662E66BCBA5860A1951236D9D8E151B8C4BCE2",
   "identities": [
     {
       "all_tenants?": false,
       "base_filter": null,
-      "index_name": "products_unique_slug_index",
+      "index_name": "posts_unique_slug_index",
       "keys": [
         {
           "type": "atom",
@@ -789,5 +813,5 @@
   },
   "repo": "Elixir.KilnCMS.Repo",
   "schema": null,
-  "table": "products"
+  "table": "posts"
 }

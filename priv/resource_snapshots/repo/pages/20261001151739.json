@@ -33,7 +33,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "faqs_org_id_fkey",
+        "name": "pages_org_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -280,6 +280,30 @@
       ]
     },
     {
+      "allow_nil?": false,
+      "default": "%{}",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "working_fields",
+      "type": "map"
+    },
+    {
+      "allow_nil?": false,
+      "default": "%{}",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "working_base",
+      "type": "map"
+    },
+    {
       "allow_nil?": true,
       "default": "nil",
       "generated?": false,
@@ -480,7 +504,7 @@
           "global": null,
           "strategy": null
         },
-        "name": "faqs_author_id_fkey",
+        "name": "pages_author_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -513,7 +537,7 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "faqs_category_id_fkey",
+        "name": "pages_category_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -546,7 +570,7 @@
           "global": false,
           "strategy": "attribute"
         },
-        "name": "faqs_featured_image_id_fkey",
+        "name": "pages_featured_image_id_fkey",
         "on_delete": null,
         "on_update": null,
         "primary_key?": true,
@@ -578,7 +602,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "faqs_path_alias_index",
+      "name": "pages_path_alias_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -599,7 +623,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "faqs_embedding_hnsw_index",
+      "name": "pages_embedding_hnsw_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -620,7 +644,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "faqs_title_trgm_index",
+      "name": "pages_title_trgm_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -641,7 +665,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "faqs_title_lexemes_index",
+      "name": "pages_title_lexemes_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -669,7 +693,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "faqs_slug_locale_lookup_index",
+      "name": "pages_slug_locale_lookup_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -692,7 +716,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "faqs_next_occurrence_index",
+      "name": "pages_next_occurrence_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -715,7 +739,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "faqs_unpublish_at_index",
+      "name": "pages_unpublish_at_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -738,7 +762,7 @@
       "include": null,
       "include_base_filter?": true,
       "message": null,
-      "name": "faqs_last_reviewed_at_index",
+      "name": "pages_last_reviewed_at_index",
       "nulls_distinct": true,
       "prefix": null,
       "table": null,
@@ -749,12 +773,12 @@
   ],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "37950BC83BFAA221B4ED0A9F2E8C9C21498A1E3F4702AA0A5507249337F1F16C",
+  "hash": "986D72F8B5CDFBE7F07014804030A587CDB110E646830ED244786F86B71B4659",
   "identities": [
     {
       "all_tenants?": false,
       "base_filter": null,
-      "index_name": "faqs_unique_slug_index",
+      "index_name": "pages_unique_slug_index",
       "keys": [
         {
           "type": "atom",
@@ -777,5 +801,5 @@
   },
   "repo": "Elixir.KilnCMS.Repo",
   "schema": null,
-  "table": "faqs"
+  "table": "pages"
 }
