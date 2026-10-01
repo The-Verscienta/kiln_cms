@@ -124,6 +124,75 @@ defmodule KilnCMSWeb.ReleaseLiveTest do
     assert html =~ "cannot be published from archived"
   end
 
+  # #1815: a tester edited a live page, saved, and the release said "already in
+  # that state" — which read as the release ignoring the edit. The note now
+  # says whether a live item ships saved changes or has none to ship.
+  test "a live item's note says whether it has changes to publish", %{conn: conn} do
+    admin = authed_user(:admin)
+    rel = release(admin)
+    page = CMS.create_page!(%{title: "Live page", slug: slug()}, actor: admin)
+    page = CMS.publish_page!(page, %{}, actor: admin)
+
+    {:ok, _} =
+      CMS.add_release_item(
+        %{release_id: rel.id, content_type: "page", content_id: page.id, action: :publish},
+        actor: admin
+      )
+
+    {:ok, _view, html} = conn |> log_in(admin) |> live(~p"/editor/releases/#{rel.id}")
+    assert html =~ "Live, no unpublished changes — nothing to publish"
+    refute html =~ "already in that state"
+
+    {:ok, _} =
+      CMS.save_page_working_copy(page, %{fields: %{"seo_title" => "Launch"}},
+        actor: admin,
+        tenant: page.org_id
+      )
+
+    {:ok, _view, html} = conn |> log_in(admin) |> live(~p"/editor/releases/#{rel.id}")
+    assert html =~ "Live — publishes the saved changes"
+    refute html =~ "nothing to publish"
+  end
+
+  test "a live item whose page changed since the draft blocks the release", %{conn: conn} do
+    admin = authed_user(:admin)
+    rel = release(admin)
+    page = CMS.create_page!(%{title: "Live page", slug: slug()}, actor: admin)
+    page = CMS.publish_page!(page, %{}, actor: admin)
+
+    {:ok, page} =
+      CMS.save_page_working_copy(page, %{fields: %{"seo_title" => "Draft SEO"}},
+        actor: admin,
+        tenant: page.org_id
+      )
+
+    CMS.update_page!(page, %{seo_title: "Edited live"}, actor: admin)
+
+    {:ok, _} =
+      CMS.add_release_item(
+        %{release_id: rel.id, content_type: "page", content_id: page.id, action: :publish},
+        actor: admin
+      )
+
+    {:ok, _view, html} = conn |> log_in(admin) |> live(~p"/editor/releases/#{rel.id}")
+    assert html =~ "Live page changed since the draft — review before releasing"
+  end
+
+  test "an unpublish of something not live says it will be skipped", %{conn: conn} do
+    admin = authed_user(:admin)
+    rel = release(admin)
+    page = CMS.create_page!(%{title: "Draft page", slug: slug()}, actor: admin)
+
+    {:ok, _} =
+      CMS.add_release_item(
+        %{release_id: rel.id, content_type: "page", content_id: page.id, action: :unpublish},
+        actor: admin
+      )
+
+    {:ok, _view, html} = conn |> log_in(admin) |> live(~p"/editor/releases/#{rel.id}")
+    assert html =~ "Already unpublished — will be skipped"
+  end
+
   test "the preview link is minted on request and opens the release preview", %{conn: conn} do
     admin = authed_user(:admin)
     rel = release(admin, "Preview me")
