@@ -267,6 +267,25 @@ carries the reasoning.
   from the same screen. Removing existing blocks stays in the full editor
   ([#1801](https://github.com/The-Verscienta/kiln_cms/issues/1801)).
 
+<a id="password-reveal-toggle"></a>
+
+- **Every password box on the sign-in, register, reset-password, setup and
+  change-password forms has an eye button that shows what you typed.** A beta
+  tester signing up could not check what they had typed so far. The button
+  sits inside the right edge of each box: pressing it shows the password as
+  plain text, pressing it again hides it. It is a real button
+  (`type="button"`, so it never submits the form) that screen readers
+  announce as "Show password" or "Hide password" with its pressed state, and
+  it works with the keyboard. It runs entirely in the browser through
+  LiveView JS commands, so nothing is sent to the server, and the shown state
+  survives the validation that runs as you type. The sign-in and register
+  forms are now Kiln's own copies of the library's
+  (`KilnCMSWeb.AuthSignInForm`, `KilnCMSWeb.AuthRegisterForm`), like the
+  reset form already was, because the library's password box has no place to
+  add a button; a test holds each copy to the library's markup. Elsewhere,
+  `<.input type="password" reveal>` adds the same button
+  ([#1806](https://github.com/The-Verscienta/kiln_cms/issues/1806)).
+
 <a id="editor-markdown-view"></a>
 
 - **The content editor has a Blocks | Markdown switch.** Markdown shows the
@@ -450,6 +469,29 @@ carries the reasoning.
   has no Coolify equivalent and stays unset unless you set it.
 
 ## Fixed
+
+<a id="markdown-becomes-heading-divider-and-text-blocks"></a>
+
+- **Markdown switched back to Blocks, or imported from a `.md` file, becomes
+  heading, divider and one text block per section, not one long text block.**
+  A beta tester pasted a long Markdown document into the editor's Markdown
+  view and switched to Blocks. Every heading, list and paragraph landed in one
+  text block, and the only split came from the document's one standalone
+  image, which cut the text in two. Now each top-level heading becomes a
+  heading block at its own level, each `---` becomes a divider block, and the
+  paragraphs, lists, quotes, tables and code between them become one text
+  block per section. There is no list block, so lists stay inside their
+  section's text. One block per section rather than per paragraph keeps a
+  long document to a few blocks an author can move by section. A heading
+  block holds plain text, so bold or italic in a heading is dropped, and a
+  heading with a link (other than a bare URL) or an image in it stays in the
+  text, where the link survives. Blocks written as Markdown and read back
+  without an edit are unchanged, and after an edit heading, divider and text
+  blocks come back as the same blocks with the same ids. The **Import
+  Markdown** dialog splits the same way. Pasting Markdown into a text block
+  (which holds text only), the API's `body_markdown` and the WordPress and
+  portability importers still produce one text block per run of prose
+  ([#1800](https://github.com/The-Verscienta/kiln_cms/issues/1800)).
 
 <a id="media-uploads-state-their-limit-and-show-processing"></a>
 

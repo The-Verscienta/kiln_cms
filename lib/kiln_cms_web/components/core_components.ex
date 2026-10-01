@@ -704,6 +704,10 @@ defmodule KilnCMSWeb.CoreComponents do
   attr :class, :any, default: nil, doc: "the input class to use over defaults"
   attr :error_class, :any, default: nil, doc: "the input error class to use over defaults"
 
+  attr :reveal, :boolean,
+    default: false,
+    doc: "for `type=\"password\"`: adds a show/hide toggle (`password_reveal/1`); needs an id"
+
   attr :rest, :global,
     include: ~w(accept autocomplete capture cols disabled form list max maxlength min minlength
                 multiple pattern placeholder readonly required rows size step)
@@ -799,6 +803,37 @@ defmodule KilnCMSWeb.CoreComponents do
         ]}
         {@rest}
       >{Phoenix.HTML.Form.normalize_value("textarea", @value)}</textarea>
+    </.field_wrapper>
+    """
+  end
+
+  # A password box with a show/hide toggle (#1806). The toggle finds its input
+  # by id, so a revealable box without one is a caller bug, not a quiet no-op.
+  def input(%{type: "password", reveal: true, id: nil}) do
+    raise ArgumentError, "<.input type=\"password\" reveal> needs an id (or a field)"
+  end
+
+  def input(%{type: "password", reveal: true} = assigns) do
+    ~H"""
+    <.field_wrapper id={@id} label={@label} required={@required} hint={@hint} errors={@errors}>
+      <div class="relative">
+        <input
+          type="password"
+          name={@name}
+          id={@id}
+          value={Phoenix.HTML.Form.normalize_value("password", @value)}
+          required={@required}
+          aria-invalid={@errors != [] && "true"}
+          aria-describedby={@errors != [] && error_id(@id)}
+          class={[
+            @class || input_base(),
+            "pr-10",
+            @errors != [] && (@error_class || input_error_class())
+          ]}
+          {@rest}
+        />
+        <.password_reveal for={@id} />
+      </div>
     </.field_wrapper>
     """
   end
@@ -1054,6 +1089,72 @@ defmodule KilnCMSWeb.CoreComponents do
   def icon(%{name: "hero-" <> _} = assigns) do
     ~H"""
     <span class={[@name, @class]} />
+    """
+  end
+
+  @doc """
+  The eye button that shows or hides what has been typed into a password box
+  (#1806).
+
+  Render it as the password input's next sibling inside a `relative` wrapper,
+  and give the input `pr-10` so typing never runs under it — `input/1` with
+  `reveal` and `KilnCMSWeb.AuthPasswordInput` do both.
+
+  It is a `type="button"`, so pressing it never submits the form, and it works
+  entirely through `Phoenix.LiveView.JS`: one click flips the input's `type`
+  between `password` and `text`, and the button's own `aria-pressed` and
+  `aria-label` with it. Attributes set by a JS command are *sticky* — LiveView
+  re-applies them after every patch — so a server re-render (a validation
+  round trip on each keystroke) does not snap the box back to dots or the button
+  back to "Show password". Nothing is sent to the server. The icon follows
+  `aria-pressed` through CSS, so it cannot disagree with what a screen reader
+  is told.
+
+  ## Examples
+
+      <div class="relative">
+        <input type="password" id="user-password" class="... pr-10" />
+        <.password_reveal for="user-password" />
+      </div>
+  """
+  attr :for, :string, required: true, doc: "the id of the password input it controls"
+
+  def password_reveal(assigns) do
+    assigns =
+      assign(assigns,
+        show_label: gettext("Show password"),
+        hide_label: gettext("Hide password")
+      )
+
+    ~H"""
+    <button
+      type="button"
+      id={@for <> "-reveal"}
+      data-password-reveal
+      aria-controls={@for}
+      aria-pressed="false"
+      aria-label={@show_label}
+      title={@show_label}
+      phx-click={
+        JS.toggle_attribute({"type", "password", "text"}, to: "#" <> @for)
+        |> JS.toggle_attribute({"aria-pressed", "false", "true"})
+        |> JS.toggle_attribute({"aria-label", @show_label, @hide_label})
+        |> JS.toggle_attribute({"title", @show_label, @hide_label})
+      }
+      class={[
+        "group absolute inset-y-0 right-0 flex w-10 cursor-pointer items-center justify-center",
+        "rounded-r-lg text-base-content/60 transition-colors hover:text-base-content",
+        "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
+      ]}
+    >
+      <%!-- Wrapped, so `hidden` never has to out-rank the icon's own display. --%>
+      <span class="inline-flex group-aria-pressed:hidden">
+        <.icon name="hero-eye" class="size-5" />
+      </span>
+      <span class="hidden group-aria-pressed:inline-flex">
+        <.icon name="hero-eye-slash" class="size-5" />
+      </span>
+    </button>
     """
   end
 

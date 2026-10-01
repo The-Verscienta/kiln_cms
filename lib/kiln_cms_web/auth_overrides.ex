@@ -194,7 +194,9 @@ defmodule KilnCMSWeb.AuthOverrides do
     # checked on change instead of only on submit. See
     # `KilnCMSWeb.AuthRegisterForm`.
     set :register_form_module, KilnCMSWeb.AuthRegisterForm
-    set :sign_in_form_module, AshAuthentication.Phoenix.Components.Password.SignInForm
+    # Kiln's own sign-in form: upstream's, with an eye button beside the
+    # password box (#1806). See `KilnCMSWeb.AuthSignInForm`.
+    set :sign_in_form_module, KilnCMSWeb.AuthSignInForm
     set :reset_form_module, AshAuthentication.Phoenix.Components.Password.ResetForm
   end
 

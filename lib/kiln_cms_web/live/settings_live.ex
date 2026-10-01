@@ -656,18 +656,21 @@ defmodule KilnCMSWeb.SettingsLive do
                 <.input
                   field={@password_form[:current_password]}
                   type="password"
+                  reveal
                   label={gettext("Current password")}
                   autocomplete="current-password"
                 />
                 <.input
                   field={@password_form[:password]}
                   type="password"
+                  reveal
                   label={gettext("New password")}
                   autocomplete="new-password"
                 />
                 <.input
                   field={@password_form[:password_confirmation]}
                   type="password"
+                  reveal
                   label={gettext("Confirm new password")}
                   autocomplete="new-password"
                 />

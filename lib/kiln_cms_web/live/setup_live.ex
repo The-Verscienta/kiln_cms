@@ -302,16 +302,20 @@ defmodule KilnCMSWeb.SetupLive do
               hint={gettext("Shown as the author byline on what you publish.")}
             />
             <.input
+              id="setup-admin-password"
               name="admin[password]"
               type="password"
+              reveal
               value={@admin["password"]}
               label={gettext("Password")}
               autocomplete="new-password"
               hint={gettext("At least 8 characters.")}
             />
             <.input
+              id="setup-admin-password-confirmation"
               name="admin[password_confirmation]"
               type="password"
+              reveal
               value={@admin["password_confirmation"]}
               label={gettext("Password (again)")}
               autocomplete="new-password"
