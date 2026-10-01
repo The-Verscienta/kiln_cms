@@ -36,6 +36,10 @@ defmodule KilnCMSWeb.ContentEditor.MediaPickerComponents do
   attr :unsplash_searching?, :boolean, required: true
   attr :unsplash_importing, :any, required: true
 
+  attr :title, :string,
+    default: nil,
+    doc: "drawer heading; defaults to one derived from `index` (the branding page passes its own)"
+
   # Media-library browser as a right-side drawer (Theme D). It slides in beside the
   # editor rather than a full-screen modal that blanks the whole surface, so you
   # keep your place while choosing. Reachable from the editor chrome (insert a new
@@ -57,7 +61,7 @@ defmodule KilnCMSWeb.ContentEditor.MediaPickerComponents do
 
     ~H"""
     <.modal id="image-picker-dialog" on_close="close_picker" variant={:drawer}>
-      <:title>{picker_title(@index)}</:title>
+      <:title>{@title || picker_title(@index)}</:title>
 
       <div :if={@unsplash_enabled?} class="flex gap-1 border-b border-base-content/10 px-4 pt-3">
         <button
