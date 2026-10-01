@@ -32,6 +32,19 @@ defmodule KilnCMS.Accounts do
       # deployment that never stored the token in the first place. No policy
       # matches `:read` on this resource, so the name buys a caller nothing.
       define :get_stored_token_by_jti, action: :read, get_by: [:jti]
+
+      # The settings page's session list (#1823) — the actor's own sessions
+      # only, by the `OwnsToken` policy. Pass `actor: user`. Revoking takes a
+      # query (a bulk update), so one call can sign out several rows; prefer
+      # `KilnCMS.Accounts.Sessions`, which also drops the live sockets.
+      define :list_own_sessions, action: :own_sessions
+      define :get_own_session, action: :own_sessions, get_by: [:jti]
+      define :list_own_tokens, action: :own_tokens
+      define :revoke_own_sessions, action: :revoke_own_session
+      # System bookkeeping (`forbid_if always()`); `KilnCMS.Accounts.Sessions`
+      # passes `authorize?: false`.
+      define :record_session_sign_in, action: :record_sign_in
+      define :record_session_use, action: :record_session_use
     end
 
     # External IdP links for OIDC SSO (#331) — managed by AshAuthentication.

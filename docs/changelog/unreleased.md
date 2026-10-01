@@ -318,6 +318,21 @@ carries the reasoning.
 
 ## Added
 
+<a id="reorder-custom-fields-by-dragging-them"></a>
+
+- **Reorder a content type's custom fields by dragging them, or with the
+  arrow buttons, on `/editor/fields`; the editor shows them in that order.**
+  The fields form had a *Position* number box that took any whole number, and
+  nothing said whether a lower or a negative number put a field higher or
+  lower in the editor. A beta tester asked to move fields the way the editor
+  shows them instead. Each type's list on `/editor/fields` is now that order:
+  drag a field by its handle, or use its up and down arrows, which work from a
+  keyboard and a screen reader too. The new order is saved at once, as
+  positions 0, 1, 2… down the list, and a new field is added at the end of its
+  type's list. The *Position* box is gone from the add and edit forms;
+  `position` is unchanged in the API
+  ([#1818](https://github.com/The-Verscienta/kiln_cms/issues/1818)).
+
 <a id="new-content-on-a-calendar-day"></a>
 
 - **Start new content from a day on the calendar.** A beta tester clicked a
@@ -457,7 +472,47 @@ carries the reasoning.
   gets the same slug the Taxonomy page would give it.
   ([#1805](https://github.com/The-Verscienta/kiln_cms/issues/1805))
 
+<a id="settings-lists-your-active-sessions"></a>
+
+- **Settings lists where you are signed in, and signs out one session or every
+  other one.** A beta tester could not see where else they were signed in or
+  sign out elsewhere; the only ways were changing the password or asking an
+  admin. *Active sessions* on Your settings lists each browser signed in to
+  the account (for example "Firefox on macOS"), when it was last active, when
+  it signed in, and which one is this one. *Sign out* ends one session and
+  *Sign out of all other sessions* ends every one but this. Signing a session
+  out revokes its token, so that browser's next request is signed out; it also
+  revokes the remember-me cookie issued to the same browser, which would
+  otherwise sign it straight back in; and it sends that session's open pages
+  to the sign-in screen at once. A held two-factor sign-in elsewhere ends with
+  the others. You can see and end only your own sessions; admins keep *Sign
+  out everywhere* on the Accounts page for other accounts. The browser and
+  system names are reduced from the user agent at sign-in, which is not
+  stored, and no IP address is recorded. Last use is written at most every
+  five minutes. On the shared demo account the list is replaced by the demo
+  note, like the password and passkey forms. The migration adds four nullable
+  columns to `tokens`.
+  ([#1823](https://github.com/The-Verscienta/kiln_cms/issues/1823))
+
 ## Changed
+
+<a id="a-new-content-type-goes-straight-on-to-its-fields"></a>
+
+- **Creating a content type goes straight on to its fields, with the new type
+  ticked; the fields form shows Options and Default value only for the field
+  types that use them.** A new type has no fields, so there is nothing for an
+  author to fill in until it gets some. Creating one on `/editor/types` now
+  opens `/editor/fields` with that type already ticked, and it stays ticked
+  after each field is added. The *Manage fields* link on each type opens the
+  same way. On the fields form, *Options* shows only for a Select field, the
+  only type that reads them. *Default value* shows only for the types it is
+  used for (String, Text, Integer, Float, Boolean, Date, Datetime, Url and
+  Select), in an input that fits the type: a checkbox
+  for yes-or-no, a number box for numbers, a date picker for dates, and a
+  pick from the options for a Select. Changing a field's type clears its
+  default, and saving a field drops options and a default its type does not
+  use, rather than keeping values that are no longer on the screen
+  ([#1817](https://github.com/The-Verscienta/kiln_cms/issues/1817), [#1819](https://github.com/The-Verscienta/kiln_cms/issues/1819), [#1820](https://github.com/The-Verscienta/kiln_cms/issues/1820)).
 
 <a id="keep-legacy-html-as-a-fallback"></a>
 
@@ -588,6 +643,34 @@ carries the reasoning.
   has no Coolify equivalent and stays unset unless you set it.
 
 ## Fixed
+
+<a id="settings-profile-and-passkey-feedback"></a>
+
+- **Settings says what the display name is for and confirms a save beside the
+  button; Passkeys says whether any are set up and shows the browser prompt.**
+  Beta testers found the *Display name* box empty with no hint whether it was
+  needed, and saw no reply to *Save profile* (the flash was easy to miss). The
+  field is now labelled optional, says where the name appears (bylines,
+  comments, and to people editing at the same time) and has a placeholder;
+  a *Saved.* line appears beside the button until the next edit. Passkeys
+  said nothing when none were registered, and the name box's placeholder read
+  "Passkey" as if one existed. It now says "No passkeys yet" or how many are
+  set up, shows *Waiting for your device…* with a Cancel button while the
+  browser's prompt is open, and reports the result of adding or removing one
+  in the section itself.
+  ([#1828](https://github.com/The-Verscienta/kiln_cms/issues/1828),
+  [#1829](https://github.com/The-Verscienta/kiln_cms/issues/1829))
+
+<a id="the-url-segment-follows-the-machine-name"></a>
+
+- **A content type's URL segment keeps following its machine name until you
+  edit the segment yourself.** On `/editor/types`, the URL segment was filled
+  in from the machine name once, on the first keystroke, and then kept that
+  value. A typo corrected in the machine name stayed in the URL segment, and
+  was easy to save without noticing. The segment now follows the machine name
+  as you type, until you type into the segment yourself; clearing it hands it
+  back to the machine name
+  ([#1816](https://github.com/The-Verscienta/kiln_cms/issues/1816)).
 
 <a id="production-public-links-use-phx-host"></a>
 
@@ -1122,6 +1205,24 @@ carries the reasoning.
   workspace pushed below the fold. The grid now falls back to the expanded
   width, `16rem`
   ([#1755](https://github.com/The-Verscienta/kiln_cms/issues/1755)).
+
+<a id="the-database-connection-no-longer-logs-ssl-opts-deprecated"></a>
+
+- **The database connection no longer logs `:ssl_opts is deprecated` on every
+  boot and every `bin/kiln_cms eval`.**
+  `config/runtime/prod/database.exs` passed TLS settings as `ssl: true` plus
+  `ssl_opts:`, a pair Postgrex has deprecated. It now passes them on `:ssl`
+  itself. Postgrex merges `:ssl` options over its secure defaults rather than
+  using `:ssl_opts` verbatim. With no `DATABASE_SSL_CACERTFILE` nothing
+  changes: the connection still encrypts without verifying (`verify:
+  :verify_none` overrides the default). With one, the chain is still
+  verified, and Postgrex's defaults now **also check that the server
+  certificate names the host in `DATABASE_URL`** (an HTTPS-style match, so a
+  wildcard certificate passes); the old `:ssl_opts` path never did. A
+  deployment that verifies and reaches Postgres by IP address, or by a name
+  the certificate does not carry, fails its TLS handshake at boot after this
+  change — connect by a hostname the certificate names. `DATABASE_SSL=false`
+  still turns TLS off.
 
 ## Security
 

@@ -253,6 +253,10 @@ defmodule KilnCMSWeb.Router do
     # — and it covers the remember-me path, which never reaches
     # `AuthController.complete_sign_in/3` (#675).
     plug KilnCMSWeb.Plugs.LiveSocketId
+    # Notes which browser a new session signed in from, and its remember-me
+    # cookie, on the response that establishes it (#1823) — for the session
+    # list in settings, and so signing that session out retires the cookie too.
+    plug KilnCMSWeb.Plugs.SessionTracking
   end
 
   # Preview endpoint — authorized by a signed token, not a session/bearer.

@@ -143,6 +143,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Reorder a content type's custom fields by dragging them, or with the
+  arrow buttons, on `/editor/fields`; the editor shows them in that order.**
+  ([#1818](https://github.com/The-Verscienta/kiln_cms/issues/1818) · [long form](docs/changelog/unreleased.md#reorder-custom-fields-by-dragging-them))
+
 - **The logo, favicon, social image and app icon on the Branding page can be
   chosen from the media library or uploaded there, with a thumbnail.**
   ([#1811](https://github.com/The-Verscienta/kiln_cms/issues/1811) · [long form](docs/changelog/unreleased.md#branding-images-from-the-media-library))
@@ -170,12 +174,21 @@ Every summary line below that was shortened links to its own entry there.
 - **Add a new tag or category without leaving the content editor.**
   ([#1805](https://github.com/The-Verscienta/kiln_cms/issues/1805) · [long form](docs/changelog/unreleased.md#add-tags-and-categories-from-the-editor))
 
+- **Settings lists where you are signed in, and signs out one session or every
+  other one.**
+  ([#1823](https://github.com/The-Verscienta/kiln_cms/issues/1823) · [long form](docs/changelog/unreleased.md#settings-lists-your-active-sessions))
+
 - **Start new content from a day on the calendar: press its "+", choose a type,
   and the editor opens with that day as the publish date (a proposed date, for
   editors who may not publish, that an admin confirms).**
   ([#1812](https://github.com/The-Verscienta/kiln_cms/issues/1812) · [long form](docs/changelog/unreleased.md#new-content-on-a-calendar-day))
 
 ### Changed
+
+- **Creating a content type goes straight on to its fields, with the new type
+  ticked; the fields form shows Options and Default value only for the field
+  types that use them.**
+  ([#1817](https://github.com/The-Verscienta/kiln_cms/issues/1817), [#1819](https://github.com/The-Verscienta/kiln_cms/issues/1819), [#1820](https://github.com/The-Verscienta/kiln_cms/issues/1820) · [long form](docs/changelog/unreleased.md#a-new-content-type-goes-straight-on-to-its-fields))
 
 - **Keep `RichText.legacy_html` as a fallback instead of removing it;
   the nested column editor now stores Portable Text.**
@@ -223,6 +236,14 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#coolify-build-records-its-commit))
 
 ### Fixed
+
+- **Settings says what the display name is for and confirms a save beside the
+  button; Passkeys says whether any are set up and shows the browser prompt.**
+  ([#1828](https://github.com/The-Verscienta/kiln_cms/issues/1828), [#1829](https://github.com/The-Verscienta/kiln_cms/issues/1829) · [long form](docs/changelog/unreleased.md#settings-profile-and-passkey-feedback))
+
+- **A content type's URL segment keeps following its machine name until you
+  edit the segment yourself.**
+  ([#1816](https://github.com/The-Verscienta/kiln_cms/issues/1816) · [long form](docs/changelog/unreleased.md#the-url-segment-follows-the-machine-name))
 
 - **Production sitemaps, feeds, canonical links, preview links and newsletter
   confirmation emails link to `https://<PHX_HOST>`, not `http://localhost:4000`.**
@@ -356,6 +377,10 @@ Every summary line below that was shortened links to its own entry there.
 - **The console keeps its two columns when the stylesheet lacks the sidebar
   width token.**
   ([#1755](https://github.com/The-Verscienta/kiln_cms/issues/1755) · [long form](docs/changelog/unreleased.md#the-console-keeps-its-two-columns-without-the-sidebar-width-token))
+
+- **The database connection no longer logs `:ssl_opts is deprecated` on every
+  boot and every `bin/kiln_cms eval`.**
+  ([long form](docs/changelog/unreleased.md#the-database-connection-no-longer-logs-ssl-opts-deprecated))
 
 ### Security
 

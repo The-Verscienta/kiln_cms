@@ -303,9 +303,15 @@ build if a resource is ever registered without that authorizer.
   this control a claim rather than a fact, which is how an earlier revision of
   this page came to say it held "since #734" (fixed properly in #734's reopen,
   with the socket half in #1637). The session on the device that changed the
-  password is revoked too; the settings page sends the user to sign in again. An account holder
-  has no self-service "sign out other devices" affordance short of changing
-  their password.
+  password is revoked too; the settings page sends the user to sign in again.
+  Since #1823 an account holder can also do it themselves: *Active sessions* on
+  `/editor/settings` lists their own sessions and signs out one, or every one
+  but the current, through `KilnCMS.Accounts.Sessions`. That revokes the
+  session's token, the remember-me cookie issued to the same browser (its jti
+  is recorded on the session row at sign-in), and closes that session's open
+  LiveViews (`SessionEviction.evict_session/2`). It does not reach a
+  `/ws/collab` or `/ws/gql` socket already connected from that browser: those
+  are keyed per user, and close at their next reconnect or re-check.
 
   **Remember-me and the second factor.** The cookie is a completed sign-in in a
   cookie — the read plug hands it to `store_in_session/2` directly, so it never

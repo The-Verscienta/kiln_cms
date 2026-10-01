@@ -10,6 +10,10 @@ defmodule KilnCMS.CMS.TypeDefinitionTest do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
 
+  # The segment the content-types screen previews is the one a blank segment
+  # is saved as (#1816).
+  doctest KilnCMS.CMS.Changes.DefaultPathSegment
+
   defp admin do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
       email: "td-admin-#{System.unique_integer([:positive])}@example.com",
