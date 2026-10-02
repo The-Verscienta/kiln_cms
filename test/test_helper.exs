@@ -125,3 +125,10 @@ else
 end
 
 Ecto.Adapters.SQL.Sandbox.mode(KilnCMS.Repo, :manual)
+
+# Load every migration-created type (citext, vector, Oban's job state, …) into
+# Postgrex's shared type cache now, from this one process, so no async test is
+# the first to touch one. On a fresh database a first touch mid-run races the
+# other tests and fails with "type `X` can not be handled" (#1796). See
+# `KilnCMS.Test.TypeCache`.
+KilnCMS.Test.TypeCache.warm!(KilnCMS.Repo)
