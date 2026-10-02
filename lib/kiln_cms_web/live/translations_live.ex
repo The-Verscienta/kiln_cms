@@ -300,19 +300,21 @@ defmodule KilnCMSWeb.TranslationsLive do
             limit: @per_type_limit
           ]
         )
-        |> then(fn records ->
-          edited = Translations.edited_at(records, tenant: org.id)
-
-          records
-          |> Enum.group_by(& &1.slug)
-          |> Enum.map(fn {_slug, records} ->
-            row(ct, records, default, edited, may_author?(actor, org.id, ct))
-          end)
-        end)
+        |> rows(ct, default, org, may_author?(actor, org.id, ct))
       end)
       |> Enum.sort_by(& &1.updated_at, {:desc, DateTime})
 
     assign(socket, :rows, rows)
+  end
+
+  # The rows for one type. Staleness is judged by each variant's last edit,
+  # read once for the type (`Translations.edited_at/2`).
+  defp rows(records, ct, default, org, may_author?) do
+    edited = Translations.edited_at(records, tenant: org.id)
+
+    records
+    |> Enum.group_by(& &1.slug)
+    |> Enum.map(fn {_slug, records} -> row(ct, records, default, edited, may_author?) end)
   end
 
   # One dashboard row per (type, slug): the default-locale record (or the

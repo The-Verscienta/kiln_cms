@@ -99,20 +99,18 @@ defmodule KilnCMS.I18n.SharedFields do
     |> siblings()
     |> Enum.filter(&(is_nil(only) or &1.id == only))
     |> Enum.reduce_while({:ok, 0}, fn sibling, {:ok, written} ->
-      case plan(source, sibling, definitions, attributes) do
-        changes when changes == %{} ->
-          {:cont, {:ok, written}}
-
-        changes ->
-          case write(sibling, changes) do
-            {:ok, _updated} -> {:cont, {:ok, written + 1}}
-            {:error, error} -> {:halt, {:error, error}}
-          end
+      case sync_one(sibling, plan(source, sibling, definitions, attributes)) do
+        :unchanged -> {:cont, {:ok, written}}
+        {:ok, _updated} -> {:cont, {:ok, written + 1}}
+        {:error, error} -> {:halt, {:error, error}}
       end
     end)
   end
 
   def sync(_source, _definitions, _opts), do: {:ok, 0}
+
+  defp sync_one(_sibling, changes) when changes == %{}, do: :unchanged
+  defp sync_one(sibling, changes), do: write(sibling, changes)
 
   defp write(sibling, changes) do
     sibling
@@ -258,15 +256,9 @@ defmodule KilnCMS.I18n.SharedFields do
     Enum.reduce(changes, WorkingCopy.base_fingerprints(sibling), fn {name, value}, base ->
       key = to_string(name)
 
-      case Map.fetch(base, key) do
-        {:ok, fingerprint} ->
-          if fingerprint == WorkingCopy.live_fingerprint(sibling, key),
-            do: Map.put(base, key, WorkingCopy.fingerprint(resource, key, value)),
-            else: base
-
-        :error ->
-          base
-      end
+      if Map.get(base, key) == WorkingCopy.live_fingerprint(sibling, key),
+        do: Map.put(base, key, WorkingCopy.fingerprint(resource, key, value)),
+        else: base
     end)
   end
 end

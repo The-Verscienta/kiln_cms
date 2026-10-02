@@ -144,42 +144,42 @@ defmodule KilnCMS.CMS.Translations do
 
   def edited_at([%resource{} | _] = records, opts) do
     version = Module.concat(resource, Version)
-    ids = Enum.map(records, & &1.id)
-    read_opts = [tenant: Keyword.get(opts, :tenant), authorize?: false]
-
-    synced =
-      version
-      |> Ash.Query.filter(
-        version_source_id in ^ids and version_action_name == :sync_shared_fields
-      )
-      |> Ash.Query.select([:version_source_id])
-      # authorize?: false — timestamps of versions of records the caller has
-      # already read; no field value leaves this function.
-      |> Ash.read!(read_opts)
-      |> MapSet.new(& &1.version_source_id)
+    tenant = Keyword.get(opts, :tenant)
+    synced = synced_ids(version, Enum.map(records, & &1.id), tenant)
 
     if MapSet.size(synced) == 0 do
       Map.new(records, &{&1.id, &1.updated_at})
     else
-      last_edits =
-        version
-        |> Ash.Query.filter(
-          version_source_id in ^MapSet.to_list(synced) and
-            version_action_name != :sync_shared_fields
-        )
-        |> Ash.Query.select([:version_source_id, :version_inserted_at])
-        # authorize?: false — as above.
-        |> Ash.read!(read_opts)
-        |> Enum.group_by(& &1.version_source_id, & &1.version_inserted_at)
-        |> Map.new(fn {id, times} -> {id, Enum.max(times, DateTime)} end)
-
-      Map.new(records, fn record ->
-        if MapSet.member?(synced, record.id),
-          do:
-            {record.id, Map.get(last_edits, record.id, record.inserted_at || record.updated_at)},
-          else: {record.id, record.updated_at}
-      end)
+      last_edits = last_edits(version, MapSet.to_list(synced), tenant)
+      Map.new(records, &{&1.id, edit_time(&1, synced, last_edits)})
     end
+  end
+
+  defp edit_time(record, synced, last_edits) do
+    if MapSet.member?(synced, record.id),
+      do: Map.get(last_edits, record.id, record.inserted_at || record.updated_at),
+      else: record.updated_at
+  end
+
+  # The records among `ids` that a shared-field copy has written.
+  defp synced_ids(version, ids, tenant) do
+    version
+    |> Ash.Query.filter(version_source_id in ^ids and version_action_name == :sync_shared_fields)
+    |> Ash.Query.select([:version_source_id])
+    # authorize?: false — only version timestamps, of records the caller already read.
+    |> Ash.read!(tenant: tenant, authorize?: false)
+    |> MapSet.new(& &1.version_source_id)
+  end
+
+  # Each record's newest version written by anything but that copy.
+  defp last_edits(version, ids, tenant) do
+    version
+    |> Ash.Query.filter(version_source_id in ^ids and version_action_name != :sync_shared_fields)
+    |> Ash.Query.select([:version_source_id, :version_inserted_at])
+    # authorize?: false — only version timestamps, of records the caller already read.
+    |> Ash.read!(tenant: tenant, authorize?: false)
+    |> Enum.group_by(& &1.version_source_id, & &1.version_inserted_at)
+    |> Map.new(fn {id, times} -> {id, Enum.max(times, DateTime)} end)
   end
 
   @doc """

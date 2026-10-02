@@ -193,37 +193,27 @@ defmodule KilnCMS.I18n.FieldFallback do
     {blocks, filled} =
       record
       |> FieldLocalization.block_list()
-      |> Enum.map_reduce(%{}, fn block, filled ->
-        with %{id: id} = value <- block_value(block),
-             {:ok, {module, fields}} <- Map.fetch(plan, id) do
-          {value, block_filled} = fill_block(value, module, fields, donor_blocks)
-          filled = if block_filled == %{}, do: filled, else: Map.put(filled, id, block_filled)
-          {put_block_value(block, value), filled}
-        else
-          _not_planned -> {block, filled}
-        end
-      end)
+      |> Enum.map_reduce(%{}, &fill_planned_block(&1, &2, plan, donor_blocks))
 
     if filled == %{},
       do: {record, inherited},
       else: {Map.put(record, :blocks, blocks), Map.put(inherited, "blocks", filled)}
   end
 
+  defp fill_planned_block(block, filled, plan, donor_blocks) do
+    with %{id: id} = value <- block_value(block),
+         {:ok, {module, fields}} <- Map.fetch(plan, id) do
+      {value, block_filled} = fill_block(value, module, fields, donor_blocks)
+      filled = if block_filled == %{}, do: filled, else: Map.put(filled, id, block_filled)
+      {put_block_value(block, value), filled}
+    else
+      _not_planned -> {block, filled}
+    end
+  end
+
   defp fill_block(value, module, fields, donor_blocks) do
     Enum.reduce(fields, {value, %{}}, fn field, {acc, filled} ->
-      found =
-        Enum.find_value(donor_blocks, fn {locale, by_id} ->
-          case Map.get(by_id, value.id) do
-            %^module{} = donor ->
-              candidate = Map.get(donor, field)
-              if FieldLocalization.empty?(candidate), do: nil, else: {candidate, locale}
-
-            _other ->
-              nil
-          end
-        end)
-
-      case found do
+      case Enum.find_value(donor_blocks, &donor_value(&1, module, value.id, field)) do
         {candidate, locale} ->
           {Map.put(acc, field, candidate), Map.put(filled, to_string(field), locale)}
 
@@ -231,6 +221,18 @@ defmodule KilnCMS.I18n.FieldFallback do
           {acc, filled}
       end
     end)
+  end
+
+  # The donor's value for `field` of the block with `id`, if it holds that
+  # block (same id, same type) and the value is not empty.
+  defp donor_value({locale, by_id}, module, id, field) do
+    with %^module{} = donor <- Map.get(by_id, id),
+         candidate = Map.get(donor, field),
+         false <- FieldLocalization.empty?(candidate) do
+      {candidate, locale}
+    else
+      _none -> nil
+    end
   end
 
   defp blocks_by_id(donor) do
