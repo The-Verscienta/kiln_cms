@@ -10,7 +10,7 @@ decision, not an automatic blocker: the maintainer decides.
 | [An editor builds a page in under 5 minutes](#editor-page-building-and-beta-feedback) | **Met.** Beta round 2 on `v1.0.0-rc.2`: all 10 testers finished Scenario A in under 5 minutes, average 3:33, with 5 non-technical authors (testers 6–10) |
 | [Positive beta feedback](#editor-page-building-and-beta-feedback) | **Met.** Round 2 rated it mostly B+ (about 8/10) and met the v1 bar; the same testers found no issues on `v1.0.0-rc.3` |
 | [Test coverage over 80%](#test-coverage-over-80) | **Met.** 87.7% on `main` at `v1.0.0-rc.3`, against a CI floor of 85.8 |
-| [Headless API p95 under 50 ms](#headless-api-p95-under-50-ms) | **Partly met** (measured 2026-09-27). Delivery, JSON:API and GraphQL reads: p95 under 43 ms with 50 concurrent clients. Search misses from 10 clients (#1712), and the sync API initial page from 10 (#1713) |
+| [Headless API p95 under 50 ms](#headless-api-p95-under-50-ms) | **Partly met** (measured 2026-09-27). Delivery, JSON:API and GraphQL reads: p95 under 43 ms with 50 concurrent clients. Search, re-measured 2026-10-02 after #1725: 14–19 ms alone and 18–60 ms with 10 clients (a common word misses, a rare one meets), 197–231 ms with 50 ([search, after #1725](#search-after-1725)); the sync API initial page misses from 10 (#1713) |
 | [Zero-downtime releases](#zero-downtime-releases) | **Not shown.** Migrations are now held to expand/contract in CI (#1716), but no swap has been run under traffic. The maintainer accepted shipping 1.0 without it (decision 2026-10-02) |
 
 ## Headless API p95 under 50 ms
@@ -132,6 +132,59 @@ words only, in that run) 57–61 ms alone and 1.6–2.0 s with 50 clients, when
 115 client-side errors). Sync's initial page was 30–33 ms alone and
 201–238 ms with 50 clients. Load on the machine moves every number; the
 pass/miss verdicts did not change.
+
+### Search, after #1725
+
+Re-measured on 2026-10-02 with the same harness, the same corpus and the same
+settings as above, `BENCH_ENDPOINTS=search,search_common`. Each "before" is
+`main` at `cb1bd4f53`, each "after" is the #1725 branch; the two ran back to
+back, twice, in both orders, on the same machine. Load average 10–15 during
+both pairs (an earlier attempt at 40–67 is not recorded: at that load the
+numbers tracked the machine, not the code).
+
+Server p95, milliseconds, first pair (before, then after) / second pair
+(after, then before):
+
+| Endpoint | Cache | C | Before | After |
+|---|---|---|---|---|
+| search | cold | 1 | 45.2 / 26.0 | 14.0 / 15.0 |
+| search | warm | 1 | 48.1 / 25.9 | 13.5 / 15.4 |
+| search | cold | 10 | 116.4 / 94.5 | 18.3 / 18.8 |
+| search | warm | 10 | 226.6 / 98.9 | 48.1 / 47.6 |
+| search | cold | 50 | 576.2 / 337.8 | 196.5 / 201.8 |
+| search | warm | 50 | 792.7 / 353.7 | 202.3 / 210.3 |
+| search_common | cold | 1 | 44.1 / 39.5 | 18.9 / 17.4 |
+| search_common | warm | 1 | 36.1 / 36.3 | 16.8 / 16.5 |
+| search_common | cold | 10 | 121.5 / 119.6 | 25.7 / 50.5 |
+| search_common | warm | 10 | 128.6 / 128.6 | 55.4 / 59.4 |
+| search_common | cold | 50 | 529.1 / 508.8 | 225.7 / 229.0 |
+| search_common | warm | 50 | 597.7 / 574.0 | 222.8 / 231.1 |
+
+Every request answered `200` in all four runs. The profile
+(`BENCH_PROFILE=search,search_common`, 20 serial requests) went from 13
+queries and 33 ms wall per search to 10 queries and 15–19 ms.
+
+What changed (#1725):
+
+- **The query is parsed once per statement, not once per row.** Postgres
+  runs a prepared statement on a generic plan after five executions on a
+  connection, and there the query text is a parameter: every
+  `plainto_tsquery(kiln_regconfig($2), $3)` in the keyword filter's recheck
+  and in both `ts_rank` calls was evaluated for every matching row. Wrapped
+  in a scalar `(SELECT …)` each is an InitPlan, run once. The posts keyword
+  leg for a word on 1,500 posts: 17–24 ms on a generic plan before, 5 ms
+  after, measured with `PREPARE`/`EXECUTE` under `plan_cache_mode =
+  force_generic_plan`. The ranking itself was never the cost (a custom plan
+  ranks the same 1,500 rows in about 8 ms), so the candidate set was left
+  whole and the results are unchanged.
+- **No entries section on a site with no dynamic type.** Three reads per
+  search, whose hits the endpoint always dropped there.
+
+Still missing the target: a common word from 10 concurrent warm clients
+(55–59 ms) and everything at 50 clients. What is left per search is mostly
+`ts_headline` for the highlight (about 2 ms per ten documents, parsing the
+text) and the keyword legs' detoasting of every matching row's
+`search_vector`, both proportional to the work rather than wasted.
 
 ### Rerunning
 
