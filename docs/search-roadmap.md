@@ -71,6 +71,17 @@ implementation risk, not blast radius.
 `search_vector` column (`kiln_regconfig/1` + `setweight`). Migration path and
 rationale: [`search-tsvector-migration.md`](./search-tsvector-migration.md).
 
+**Accent folding (#1628).** `kiln_regconfig/1` returns `kiln_<language>`
+configurations, copies of the stock ones whose dictionary chain starts with
+Postgres's `unaccent`, so every full-text leg folds diacritics on both the
+indexed and the query side: `Zusanli` finds `Zúsānlǐ`, `creme brulee` finds
+`Crème brûlée`. Han text is unaffected. Installed by the
+`KilnCMS.Search.AccentFolding` custom extension (in
+`KilnCMS.Repo.installed_extensions/0`), whose migration also rebuilds the
+title-lexeme indexes and refolds the stored vectors of non-ASCII rows. The
+trigram legs (autocomplete, the fuzzy fallback) compare characters and do not
+fold.
+
 **Problem.** `:search`, the `search_rank` calc, the GIN index, and
 `:search_semantic` all hardcode `'english'` (`content.ex:181,247,525`). Content
 now carries a `:locale` (i18n). Two bugs: non-English content is stemmed with
@@ -182,6 +193,17 @@ name+description), not just Page/Post.
   per-type sections). Keep result shape tagged by type.
 
 **Touches.** `media_item.ex` (+ taxonomy), a global facade. Feeds #10.
+
+**Custom fields (#1585).** A custom field flagged `searchable` on its
+`FieldDefinition` has its value appended to the record's `search_text`, after
+the body, so the keyword legs find a record by a structured identity field —
+a Chinese name, a Latin binomial — that the prose never repeats. Opt-in per
+field: most `custom_fields` keys are numbers, enums and snapshots that would
+only add noise. Text inside a list or map value (a list of common names) is
+indexed, map keys and `id`s are not. Flipping the flag, or deleting a flagged
+field, re-fires the type's published documents so the index catches up; a
+draft catches up on its next save. `names_record` is separate: it makes the
+value a *name* (the alias leg's phrase match), not body text.
 
 ## 8. Reranking  ·  Effort M–L · Risk M · *shipped (Bumblebee cross-encoder adapter, applied in hybrid/global when enabled)*
 

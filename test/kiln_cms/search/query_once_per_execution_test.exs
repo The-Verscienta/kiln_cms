@@ -13,8 +13,7 @@ defmodule KilnCMS.Search.QueryOncePerExecutionTest do
 
   Structural, so it holds at any scale: the SQL Ash really issues is captured
   off the repo's telemetry, prepared, and its generic plan explained; the
-  query-side expressions must appear only inside InitPlans, which a text
-  plan never prints, so they must not appear in it at all.
+  query-side expressions may appear only inside an InitPlan's subtree.
   """
   use KilnCMS.DataCase, async: false
 
@@ -82,11 +81,30 @@ defmodule KilnCMS.Search.QueryOncePerExecutionTest do
       # A generic plan does not depend on the values, and EXPLAIN without
       # ANALYZE runs nothing, so every argument may as well be NULL.
       args = Enum.map_join(params, ", ", fn _ -> "NULL" end)
-      %{rows: rows} = Repo.query!("EXPLAIN EXECUTE kiln_generic_probe(#{args})")
-      Enum.map_join(rows, "\n", &hd/1)
+      %{rows: rows} = Repo.query!("EXPLAIN (VERBOSE) EXECUTE kiln_generic_probe(#{args})")
+      rows |> Enum.map(&hd/1) |> outside_init_plans() |> Enum.join("\n")
     after
       Repo.query!("DEALLOCATE kiln_generic_probe")
     end
+  end
+
+  # VERBOSE prints every node's output expressions — the only place a
+  # selected calculation (the highlight, the passage) shows up — including
+  # the InitPlans' own, which are exactly the once-per-execution
+  # expressions. Drop each InitPlan's subtree: what is left runs per row.
+  defp outside_init_plans(lines) do
+    {kept, _skip_below} =
+      Enum.reduce(lines, {[], nil}, fn line, {kept, skip_below} ->
+        indent = byte_size(line) - byte_size(String.trim_leading(line))
+
+        cond do
+          skip_below && indent > skip_below -> {kept, skip_below}
+          line =~ ~r/^\s*InitPlan \d+/ -> {kept, indent}
+          true -> {[line | kept], nil}
+        end
+      end)
+
+    Enum.reverse(kept)
   end
 
   test "no leg recomputes the query per row on a generic plan" do
