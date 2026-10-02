@@ -42,7 +42,7 @@ carries the reasoning.
   them from `mix ash.codegen` in the overlay, as with any index the content
   macro adds; until then their rows list exactly as before, only sorted in
   memory.
-  ([#1593](https://github.com/The-Verscienta/kiln_cms/issues/1593))
+  ([#1854](https://github.com/The-Verscienta/kiln_cms/pull/1854))
 
 ## Fixed
 

@@ -59,7 +59,7 @@ Every summary line below that was shortened links to its own entry there.
 - **The content list filters by author, category, tag, language, update date
   and review health, sorts by update, publish date or title, and saves a
   filter as a named view.**
-  ([#1593](https://github.com/The-Verscienta/kiln_cms/issues/1593) · [long form](docs/changelog/unreleased.md#the-content-list-filters-and-saves-views))
+  ([#1854](https://github.com/The-Verscienta/kiln_cms/issues/1854) · [long form](docs/changelog/unreleased.md#the-content-list-filters-and-saves-views))
 
 ### Fixed
 
