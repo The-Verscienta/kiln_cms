@@ -363,6 +363,47 @@ defmodule KilnCMSWeb.ExperimentsLiveTest do
       assert CMS.get_post!(post.id, actor: admin).title == title_before
     end
 
+    # The `<select>` offers only `@experiment.variants`, and its options cannot
+    # even go stale — `RefuseWhenRunning` freezes the arms for exactly as long as
+    # this form is on screen. So the route to a loose winner is a crafted event,
+    # which is what `render_submit/3` sends: straight to `handle_event/3`, past
+    # the DOM. The domain refuses it, and the page says so rather than showing a
+    # concluded experiment with a Promote button that could never work.
+    test "a conclude event naming a uuid that is not an arm is refused, not recorded", %{
+      conn: conn,
+      experiment: experiment,
+      post: post,
+      admin: admin
+    } do
+      title_before = CMS.get_post!(post.id, actor: admin).title
+
+      ExperimentFixtures.variant!(
+        experiment,
+        "B",
+        %{"fields" => %{"title" => "Winning title"}},
+        org_id(),
+        []
+      )
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/experiments/#{experiment.id}")
+      assert lv |> element("button", "Start") |> render_click() =~ "Experiment started."
+
+      html =
+        render_submit(lv, "conclude", %{"winner_variant_id" => Ash.UUID.generate()})
+
+      assert html =~ "is not a variant of this experiment"
+      refute html =~ "Experiment concluded"
+
+      # Still running, so the experiment can still be concluded properly — and
+      # there is no Promote button, because there is no recorded winner.
+      still = Experiments.get_experiment!(experiment.id, authorize?: false, tenant: org_id())
+
+      assert still.state == :running
+      refute still.winner_variant_id
+      refute has_element?(lv, "button", "Promote winner into document")
+      assert CMS.get_post!(post.id, actor: admin).title == title_before
+    end
+
     test "delete removes a draft and returns to the list", %{conn: conn, experiment: experiment} do
       {:ok, lv, _html} = live(conn, ~p"/editor/experiments/#{experiment.id}")
 

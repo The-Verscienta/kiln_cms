@@ -335,6 +335,37 @@ defmodule KilnCMS.Experiments.SystemActorAuthorizationTest do
                Experiments.start_experiment(experiment, actor: ctx.admin, tenant: ctx.org_id)
     end
 
+    # `:conclude` checks the winner against this experiment's arms, so it has a
+    # read behind it too — and the permissive answer is the dangerous one. A
+    # variants read that filtered to `[]` would read as "that is not an arm" and
+    # refuse a perfectly good winner; one that came back unchecked would let the
+    # loose uuid through. `authorize_with: :error` is what makes it the former's
+    # distinct message rather than either.
+    test "`:conclude` refuses rather than guessing when the arms cannot be read", ctx do
+      {experiment, _control, treatment} =
+        ExperimentFixtures.running!(page(ctx.admin), "page", %{})
+
+      assert {:error, error} =
+               Experiments.with_actor(nil, fn ->
+                 Experiments.conclude_experiment(experiment, treatment.id,
+                   actor: ctx.admin,
+                   tenant: ctx.org_id
+                 )
+               end)
+
+      assert Exception.message(error) =~ "could not read this experiment's variants"
+
+      # And the same winner concludes once the grant is back, so the refusal was
+      # the missing read and not the winner.
+      assert {:ok, %{state: :concluded, winner_variant_id: id}} =
+               Experiments.conclude_experiment(experiment, treatment.id,
+                 actor: ctx.admin,
+                 tenant: ctx.org_id
+               )
+
+      assert id == treatment.id
+    end
+
     test "a variant write whose parent cannot be read is refused", ctx do
       experiment = draft(ctx.org_id, ctx.admin)
 
