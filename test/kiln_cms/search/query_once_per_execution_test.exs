@@ -12,7 +12,7 @@ defmodule KilnCMS.Search.QueryOncePerExecutionTest do
   `(SELECT …)` it is an InitPlan, run once.
 
   Structural, so it holds at any scale: the SQL Ash really issues is captured
-  off the repo's telemetry and planned with `EXPLAIN (GENERIC_PLAN)`; the
+  off the repo's telemetry, prepared, and its generic plan explained; the
   query-side expressions must appear only inside InitPlans, which a text
   plan never prints, so they must not appear in it at all.
   """
@@ -69,10 +69,24 @@ defmodule KilnCMS.Search.QueryOncePerExecutionTest do
     end
   end
 
-  # GENERIC_PLAN ignores the values, but the protocol still binds them.
+  # The plan Postgres runs the statement on once it has gone generic. Not
+  # `EXPLAIN (GENERIC_PLAN)`: sent over the extended protocol with its
+  # parameters bound, that plans with the values folded in — a custom plan,
+  # blind to exactly this. A prepared statement under `force_generic_plan`
+  # is the real thing.
   defp generic_plan({sql, params}) do
-    %{rows: rows} = Repo.query!("EXPLAIN (GENERIC_PLAN) " <> sql, params)
-    Enum.map_join(rows, "\n", &hd/1)
+    Repo.query!("SET LOCAL plan_cache_mode = force_generic_plan")
+    Repo.query!("PREPARE kiln_generic_probe AS " <> sql)
+
+    try do
+      # A generic plan does not depend on the values, and EXPLAIN without
+      # ANALYZE runs nothing, so every argument may as well be NULL.
+      args = Enum.map_join(params, ", ", fn _ -> "NULL" end)
+      %{rows: rows} = Repo.query!("EXPLAIN EXECUTE kiln_generic_probe(#{args})")
+      Enum.map_join(rows, "\n", &hd/1)
+    after
+      Repo.query!("DEALLOCATE kiln_generic_probe")
+    end
   end
 
   test "no leg recomputes the query per row on a generic plan" do
