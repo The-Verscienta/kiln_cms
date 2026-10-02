@@ -119,6 +119,47 @@ defmodule KilnCMSWeb.SearchApiTest do
     assert hit["path"] == "/#{definition.path_segment}/#{entry.slug}"
   end
 
+  test "a site with no dynamic type renders entries: [] without reading the entries table",
+       %{conn: conn} do
+    actor = admin()
+    word = token()
+    # Three hits, so the "did you mean" (which reads every type's titles)
+    # does not run: this is about the result sections.
+    for n <- 1..3 do
+      CMS.create_page!(%{title: "Page #{n} #{word}", slug: slug()}, actor: actor)
+      |> then(&CMS.publish_page!(&1, %{}, actor: actor))
+    end
+
+    # The test env shares one default org across async tests, so another
+    # test's dynamic type could be live on it: only assert the skip when the
+    # registry is empty, which is the condition it depends on.
+    if ContentTypes.dynamic_all(nil) == [] do
+      test_pid = self()
+      handler = "sapi-entries-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler,
+        [:kiln_cms, :repo, :query],
+        fn _event, _measurements, meta, _config ->
+          mine? = self() == test_pid or test_pid in List.wrap(Process.get(:"$callers"))
+          if mine? and meta[:source] == "entries", do: send(test_pid, :entries_read)
+        end,
+        nil
+      )
+
+      body =
+        try do
+          conn |> get("/api/search?q=#{word}") |> json_response(200)
+        after
+          :telemetry.detach(handler)
+        end
+
+      assert body["results"]["entries"] == []
+      assert length(body["results"]["pages"]) == 3
+      refute_received :entries_read
+    end
+  end
+
   test "a typo gets fuzzy-rescued hits plus a did-you-mean naming the correction", %{conn: conn} do
     actor = admin()
 

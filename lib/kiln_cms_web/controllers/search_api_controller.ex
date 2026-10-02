@@ -132,7 +132,7 @@ defmodule KilnCMSWeb.SearchApiController do
             select: @hit_fields,
             # Everything but `media`, which this endpoint never returns: one
             # read per request that was run and thrown away (#960, #1712).
-            sections: Search.content_sections() ++ Keyword.keys(KilnCMS.CMS.Taxonomy.searchable())
+            sections: sections(org_id)
           ]
       )
 
@@ -157,7 +157,7 @@ defmodule KilnCMSWeb.SearchApiController do
     results =
       compiled
       |> Map.merge(taxonomy)
-      |> Map.put(:entries, Enum.flat_map(sections.entries, &entry_item(&1, locale)))
+      |> Map.put(:entries, Enum.flat_map(Map.get(sections, :entries, []), &entry_item(&1, locale)))
 
     # Content hits only — a taxonomy name match isn't a found document, so it
     # neither counts for analytics nor suppresses the "did you mean". Keyed off
@@ -181,6 +181,20 @@ defmodule KilnCMSWeb.SearchApiController do
         else: payload
 
     {payload, total}
+  end
+
+  # The sections this endpoint renders. `:entries` only on a site with a live
+  # dynamic type (#1725): `entry_item/2` drops every hit whose type does not
+  # resolve in that same registry, so on a site with none the section could
+  # only ever render `[]` — and it cost three reads (the keyword, title and,
+  # with nothing found, fuzzy legs) on every search to find that out.
+  defp sections(org_id) do
+    content =
+      if ContentTypes.dynamic_all(org_id) == [],
+        do: Search.content_sections() -- [:entries],
+        else: Search.content_sections()
+
+    content ++ Keyword.keys(KilnCMS.CMS.Taxonomy.searchable())
   end
 
   # Facet filter params → `Search` filters. Only the category facet is
