@@ -111,7 +111,7 @@ defmodule KilnCMS.CMS.Content do
         |> Enum.map(fn name ->
           Ash.Expr.expr(
             fragment(
-              "to_tsvector(kiln_regconfig(?), ?) @@ phraseto_tsquery(kiln_regconfig(?), coalesce(? ->> ?, ''))",
+              "(SELECT to_tsvector(kiln_regconfig(?), ?)) @@ phraseto_tsquery(kiln_regconfig(?), coalesce(? ->> ?, ''))",
               ^locale,
               ^text,
               ^locale,
@@ -1367,13 +1367,26 @@ defmodule KilnCMS.CMS.Content do
     # matches "database"). A prefix query matches everything the whole-word query
     # does, so nothing that matched before stops matching; what it adds is
     # scored lower (see `search_rank`).
+    #
+    # Every expression built from the query alone — the tsquery here, the
+    # ones `search_rank`/`search_rank_any`/`highlight`/`passage` rank and mark
+    # with, the query's tsvector in the title and alias legs — is wrapped in
+    # a scalar `(SELECT …)` (#1725). Uncorrelated, that is an InitPlan:
+    # computed ONCE per execution. Bare, it was computed once per *row*
+    # whenever Postgres ran the statement on a generic plan, which it switches
+    # a prepared statement to after five executions on a connection — that
+    # is, almost always in production. `plainto_tsquery` parses and stems
+    # the query text, so a common word matching 1,500 posts parsed it 4,500
+    # times (the filter's recheck and both ranks): measured on the benchmark
+    # corpus, 17–24 ms for the keyword leg on a generic plan against 5 ms
+    # with the InitPlans, whose results are the same values.
     search_read = fn name, published?, terms ->
       match_ast =
         case terms do
           :all ->
             quote do
               fragment(
-                "search_vector @@ to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'))",
+                "search_vector @@ (SELECT to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*')))",
                 ^arg(:locale),
                 ^arg(:query)
               )
@@ -1382,7 +1395,7 @@ defmodule KilnCMS.CMS.Content do
           :any ->
             quote do
               fragment(
-                "search_vector @@ to_tsquery('simple', replace(regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'), ' & ', ' | '))",
+                "search_vector @@ (SELECT to_tsquery('simple', replace(regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'), ' & ', ' | ')))",
                 ^arg(:locale),
                 ^arg(:query)
               )
@@ -1538,7 +1551,7 @@ defmodule KilnCMS.CMS.Content do
             quote(do: ^ref(:locale) == ^arg(:locale)),
             quote do
               fragment(
-                "tsvector_to_array(to_tsvector(kiln_regconfig(?), ?)) && tsvector_to_array(to_tsvector(kiln_regconfig(?), ?))",
+                "tsvector_to_array(to_tsvector(kiln_regconfig(?), ?)) && (SELECT tsvector_to_array(to_tsvector(kiln_regconfig(?), ?)))",
                 ^ref(:locale),
                 ^ref(:title),
                 ^arg(:locale),
@@ -1547,7 +1560,7 @@ defmodule KilnCMS.CMS.Content do
             end,
             quote do
               fragment(
-                "to_tsvector(kiln_regconfig(?), ?) @@ phraseto_tsquery(kiln_regconfig(?), ?)",
+                "(SELECT to_tsvector(kiln_regconfig(?), ?)) @@ phraseto_tsquery(kiln_regconfig(?), ?)",
                 ^arg(:locale),
                 ^arg(:query),
                 ^arg(:locale),
@@ -3893,7 +3906,7 @@ defmodule KilnCMS.CMS.Content do
                   :float,
                   expr(
                     fragment(
-                      "ts_rank(search_vector, plainto_tsquery(kiln_regconfig(?), ?)) + ts_rank(search_vector, to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*')))",
+                      "ts_rank(search_vector, (SELECT plainto_tsquery(kiln_regconfig(?), ?))) + ts_rank(search_vector, (SELECT to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'))))",
                       ^arg(:locale),
                       ^arg(:query),
                       ^arg(:locale),
@@ -3915,7 +3928,7 @@ defmodule KilnCMS.CMS.Content do
                   :float,
                   expr(
                     fragment(
-                      "ts_rank(search_vector, to_tsquery(kiln_regconfig(?), replace(plainto_tsquery(kiln_regconfig(?), ?)::text, ' & ', ' | '))) + ts_rank(search_vector, to_tsquery('simple', replace(regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'), ' & ', ' | ')))",
+                      "ts_rank(search_vector, (SELECT to_tsquery(kiln_regconfig(?), replace(plainto_tsquery(kiln_regconfig(?), ?)::text, ' & ', ' | ')))) + ts_rank(search_vector, (SELECT to_tsquery('simple', replace(regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'), ' & ', ' | '))))",
                       ^arg(:locale),
                       ^arg(:locale),
                       ^arg(:query),
@@ -3936,7 +3949,7 @@ defmodule KilnCMS.CMS.Content do
                   :string,
                   expr(
                     fragment(
-                      "ts_headline(kiln_regconfig(?), coalesce(search_text, ''), to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*')), 'StartSel=<mark>, StopSel=</mark>, MaxFragments=2, MaxWords=18, MinWords=5')",
+                      "ts_headline(kiln_regconfig(?), coalesce(search_text, ''), (SELECT to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'))), 'StartSel=<mark>, StopSel=</mark>, MaxFragments=2, MaxWords=18, MinWords=5')",
                       ^arg(:locale),
                       ^arg(:locale),
                       ^arg(:query)
@@ -3967,7 +3980,7 @@ defmodule KilnCMS.CMS.Content do
                   :string,
                   expr(
                     fragment(
-                      "(SELECT CASE WHEN length(h.text) >= 120 THEN h.text ELSE left(coalesce(?, ''), 300) END FROM (SELECT regexp_replace(ts_headline(kiln_regconfig(?), coalesce(?, ''), to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*')), 'StartSel=<mark>, StopSel=</mark>, MaxFragments=3, MaxWords=40, MinWords=15'), '<mark>|</mark>', '', 'g') AS text) AS h)",
+                      "(SELECT CASE WHEN length(h.text) >= 120 THEN h.text ELSE left(coalesce(?, ''), 300) END FROM (SELECT regexp_replace(ts_headline(kiln_regconfig(?), coalesce(?, ''), (SELECT to_tsquery('simple', regexp_replace(plainto_tsquery(kiln_regconfig(?), ?)::text, '''$', ''':*'))), 'StartSel=<mark>, StopSel=</mark>, MaxFragments=3, MaxWords=40, MinWords=15'), '<mark>|</mark>', '', 'g') AS text) AS h)",
                       ^ref(:search_text),
                       ^arg(:locale),
                       ^ref(:search_text),
