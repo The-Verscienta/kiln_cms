@@ -4,6 +4,8 @@
     "ash-functions",
     "citext",
     "vector",
-    "pg_trgm"
+    "pg_trgm",
+    "unaccent",
+    "kiln_accent_folding_v1"
   ]
 }
