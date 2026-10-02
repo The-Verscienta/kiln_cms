@@ -243,6 +243,8 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
           value={selected_ids(@form, @related_field, current_ids(@related_current))}
           options={Enum.map(@siblings, &{&1.title, &1.id})}
         />
+
+        <.backlinks backlinks={@backlinks} count={@backlink_count} />
       </.inspector_section>
 
       <.inspector_section :if={@field_definitions != []} title={gettext("Custom fields")}>
@@ -254,6 +256,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
           errors={custom_field_errors(@form, definition.name)}
           options={custom_field_options(definition, @media, @reference_options)}
         />
+        <.broken_references references={@broken_references} definitions={@field_definitions} />
       </.inspector_section>
 
       <%!-- Accessibility (#495) sits in its own section rather than
@@ -775,4 +778,93 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
   # vacates the same path, and "since" is what the editor is asking.
   defp redirect_since(%{inserted_at: %DateTime{} = at}), do: Calendar.strftime(at, "%Y-%m-%d")
   defp redirect_since(_redirect), do: "—"
+
+  attr :backlinks, :list, required: true
+  attr :count, :integer, required: true
+
+  # "What links here" (#1594): every record whose links point at this one —
+  # curated related content and `:reference` custom fields — from the
+  # `ContentLink` edges, as the viewing editor may see them. Absent when
+  # nothing links here, like the redirect list.
+  defp backlinks(assigns) do
+    ~H"""
+    <div :if={@backlinks != []} id="backlinks" class="text-xs">
+      <p class="text-base-content/60">
+        {ngettext(
+          "Linked from %{count} record",
+          "Linked from %{count} records",
+          @count,
+          count: @count
+        )}
+      </p>
+      <ul class="mt-1 space-y-1">
+        <li
+          :for={link <- @backlinks}
+          id={"backlink-#{link.id}-#{link.field || link.kind}"}
+          class="flex flex-wrap items-center gap-x-2 gap-y-1"
+        >
+          <.link
+            navigate={~p"/editor/content/#{link.editor_type}/#{link.id}"}
+            class="link break-all"
+          >
+            {link.title}
+          </.link>
+          <span class="text-base-content/50">{backlink_via(link)}</span>
+          <span
+            :if={link.state != :published}
+            class="rounded bg-base-content/10 px-1.5 py-0.5 text-base-content/70"
+          >
+            {gettext("not published")}
+          </span>
+        </li>
+      </ul>
+      <p :if={@count > length(@backlinks)} class="mt-1 text-base-content/50">
+        {gettext("and %{count} more", count: @count - length(@backlinks))}
+      </p>
+    </div>
+    """
+  end
+
+  defp backlink_via(%{field: field}) when is_binary(field),
+    do: gettext("via %{field}", field: field)
+
+  defp backlink_via(%{kind: :related}), do: gettext("as related content")
+  defp backlink_via(%{kind: kind}), do: gettext("as %{kind}", kind: kind)
+
+  attr :references, :list, required: true
+  attr :definitions, :list, required: true
+
+  # A reference whose target was moved to the trash or deleted (#1594). The
+  # stored snapshot still names it, so the field looks filled in; this is the
+  # only place that says the link leads nowhere. Clearing or re-pointing the
+  # field and saving removes the edge.
+  defp broken_references(assigns) do
+    ~H"""
+    <div
+      :if={@references != []}
+      id="broken-references"
+      role="status"
+      class="rounded border border-warning/40 bg-warning/10 p-2 text-xs text-warning-ink"
+    >
+      <p class="flex items-center gap-1 font-medium">
+        <.icon name="hero-exclamation-triangle" class="size-3.5" />
+        {gettext("Broken references")}
+      </p>
+      <ul class="mt-1 list-disc space-y-0.5 pl-5">
+        <li :for={ref <- @references} id={"broken-reference-#{ref.field}"}>
+          {gettext("%{field} points at a record that was deleted or moved to the trash.",
+            field: field_label(@definitions, ref.field)
+          )}
+        </li>
+      </ul>
+    </div>
+    """
+  end
+
+  defp field_label(definitions, name) do
+    case Enum.find(definitions, &(&1.name == name)) do
+      %{label: label} when is_binary(label) and label != "" -> label
+      _other -> name
+    end
+  end
 end

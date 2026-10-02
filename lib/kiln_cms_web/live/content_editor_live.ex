@@ -33,6 +33,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.ContentLinks
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.Mentions
   alias KilnCMS.CMS.PreviewToken
@@ -874,6 +875,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> load_translations()
     |> load_fragment_options()
     |> load_redirects()
+    |> load_links()
   end
 
   attr :keys, :list, required: true
@@ -1286,6 +1288,34 @@ defmodule KilnCMSWeb.ContentEditorLive do
       )
 
     assign(socket, :redirects, redirects)
+  end
+
+  # "What links here" and this record's broken references (#1594), from the
+  # `ContentLink` edges. Both are read as the actor, so an editor scoped away
+  # from a type is not shown a referrer they could not open. Reloaded with the
+  # record: a save can add or clear a reference.
+  @backlinks_shown 20
+
+  defp load_links(socket) do
+    %{record: record, actor: actor, current_org: org} = socket.assigns
+    opts = [actor: actor, tenant: org]
+    backlinks = ContentLinks.backlinks(record, opts)
+
+    socket
+    |> assign(:backlink_count, length(backlinks))
+    |> assign(:backlinks, backlinks |> Enum.take(@backlinks_shown) |> Enum.map(&backlink_row/1))
+    |> assign(:broken_references, ContentLinks.broken(record, opts))
+  end
+
+  defp backlink_row(%{link: link, source: source}) do
+    %{
+      id: source.id,
+      title: source.title,
+      state: source.state,
+      field: link.field,
+      kind: link.kind,
+      editor_type: link.source_type || ContentTypes.type_name_for(source)
+    }
   end
 
   defp load_versions(socket) do
@@ -6055,6 +6085,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           actor={@actor}
           word_count={@seo_body_stats.word_count}
           a11y_report={@a11y_report}
+          backlink_count={@backlink_count}
         />
 
         <.publish_conflicts
@@ -6669,6 +6700,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
               kind={@kind}
               content_type={@content_type}
               redirects={@redirects}
+              backlinks={@backlinks}
+              backlink_count={@backlink_count}
+              broken_references={@broken_references}
               current_org={@current_org}
               may_schedule?={@tier == :admin or (@tier == :editor and @editors_can_publish)}
               tasks={@tasks}
