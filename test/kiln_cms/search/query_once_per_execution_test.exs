@@ -46,7 +46,8 @@ defmodule KilnCMS.Search.QueryOncePerExecutionTest do
       handler,
       [:kiln_cms, :repo, :query],
       fn _event, _measurements, meta, _config ->
-        if meta[:source] == "pages", do: send(test_pid, {:page_sql, {meta[:query], meta[:params]}})
+        if meta[:source] == "pages",
+          do: send(test_pid, {:page_sql, {meta[:query], meta[:params]}})
       end,
       nil
     )
@@ -137,12 +138,17 @@ defmodule KilnCMS.Search.QueryOncePerExecutionTest do
       capture_page_queries(fn ->
         # Keyword (AND and, sparse, the OR relaxation), title, alias, fuzzy,
         # and the hydrating read with the highlight snippet.
-        Search.hybrid(:page, query, actor: admin, load: [highlight: %{query: query, locale: "en"}])
+        Search.hybrid(:page, query,
+          actor: admin,
+          load: [highlight: %{query: query, locale: "en"}]
+        )
+
         # The grounding passage `KilnCMS.Ask` loads.
         Search.global(query, actor: admin, sections: [:pages], passage: true)
       end)
 
-    searching = Enum.filter(statements, fn {sql, _} -> sql =~ "tsquery" or sql =~ "to_tsvector" end)
+    searching =
+      Enum.filter(statements, fn {sql, _} -> sql =~ "tsquery" or sql =~ "to_tsvector" end)
 
     # keyword, keyword_any, title, alias, two hydrating reads
     assert length(searching) >= 6, "captured: #{inspect(statements, pretty: true)}"

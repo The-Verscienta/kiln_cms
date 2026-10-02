@@ -78,14 +78,22 @@ defmodule KilnCMS.Search.SearchableFieldsTest do
 
     published =
       CMS.create_page!(
-        %{title: "Huang Qi", slug: slug(), custom_fields: %{"latin_name" => "Astragalus quuxensis"}},
+        %{
+          title: "Huang Qi",
+          slug: slug(),
+          custom_fields: %{"latin_name" => "Astragalus quuxensis"}
+        },
         actor: admin
       )
       |> then(&CMS.publish_page!(&1, %{}, actor: admin))
 
     draft =
       CMS.create_page!(
-        %{title: "Dang Shen", slug: slug(), custom_fields: %{"latin_name" => "Codonopsis quuxensis"}},
+        %{
+          title: "Dang Shen",
+          slug: slug(),
+          custom_fields: %{"latin_name" => "Codonopsis quuxensis"}
+        },
         actor: admin
       )
 

@@ -60,7 +60,8 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
       # reads; a draft catches up on its next save.
       Map.has_key?(record, :name) and
           (Map.has_key?(record, :content_type) or Map.has_key?(record, :type_definition_id)) ->
-        if Ash.Changeset.changing_attribute?(changeset, :name) or reindex_search?(changeset, record) do
+        if Ash.Changeset.changing_attribute?(changeset, :name) or
+             reindex_search?(changeset, record) do
           # Determine which type this field belongs to and sweep it
           type =
             cond do

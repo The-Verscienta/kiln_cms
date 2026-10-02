@@ -157,7 +157,10 @@ defmodule KilnCMSWeb.SearchApiController do
     results =
       compiled
       |> Map.merge(taxonomy)
-      |> Map.put(:entries, Enum.flat_map(Map.get(sections, :entries, []), &entry_item(&1, locale)))
+      |> Map.put(
+        :entries,
+        Enum.flat_map(Map.get(sections, :entries, []), &entry_item(&1, locale))
+      )
 
     # Content hits only — a taxonomy name match isn't a found document, so it
     # neither counts for analytics nor suppresses the "did you mean". Keyed off

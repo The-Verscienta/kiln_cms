@@ -54,7 +54,27 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Search now needs PostgreSQL's `unaccent` extension; the upgrade migration
+  installs it, refolds non-ASCII search rows and rebuilds the title indexes.**
+  ([#1628](https://github.com/The-Verscienta/kiln_cms/issues/1628) · [long form](docs/changelog/unreleased.md#search-now-needs-postgresqls-unaccent-extension))
+
+### Changed
+
+- **Search ranks faster under load: the query is parsed once per statement,
+  not once per matching row, and `/api/search` skips an empty entries section.**
+  ([#1725](https://github.com/The-Verscienta/kiln_cms/issues/1725) · [long form](docs/changelog/unreleased.md#search-ranks-faster-under-load))
+
 ### Fixed
+
+- **Search folds diacritics: `Zusanli` finds `Zúsānlǐ`, `creme brulee` finds
+  `Crème brûlée`, in every full-text leg.**
+  ([#1628](https://github.com/The-Verscienta/kiln_cms/issues/1628) · [long form](docs/changelog/unreleased.md#search-folds-diacritics))
+
+- **A custom field flagged `searchable` is indexed with the record's text, so
+  search finds a record by a Chinese name or a Latin binomial.**
+  ([#1585](https://github.com/The-Verscienta/kiln_cms/issues/1585) · [long form](docs/changelog/unreleased.md#a-custom-field-flagged-searchable-is-indexed))
 
 - **Concluding an experiment now refuses a winner that is not one of its own
   variants.**

@@ -66,7 +66,10 @@ defmodule KilnCMS.Search.AccentFoldingTest do
         )
 
       [found] =
-        Search.hybrid(:page, "creme brulee", actor: admin, load: [highlight: %{query: "creme brulee", locale: "en"}])
+        Search.hybrid(:page, "creme brulee",
+          actor: admin,
+          load: [highlight: %{query: "creme brulee", locale: "en"}]
+        )
 
       assert found.id == page.id
       assert found.highlight =~ "<mark>crème</mark>"

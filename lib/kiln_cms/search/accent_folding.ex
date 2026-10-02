@@ -59,50 +59,40 @@ defmodule KilnCMS.Search.AccentFolding do
 
   @fallback {"simple", "simple"}
 
-  @doc "The folded configuration name for a stock one (`\"english\"` → `\"kiln_english\"`)."
+  @doc "The folded configuration name for a stock one (`english` → `kiln_english`)."
   @spec config_name(String.t()) :: String.t()
   def config_name(stock), do: "kiln_" <> stock
 
   @impl true
   def install(0) do
-    """
-    execute("CREATE EXTENSION IF NOT EXISTS unaccent")
-
-    execute(\"\"\"
-    #{create_configs_sql()}
-    \"\"\")
-
-    execute(\"\"\"
-    #{regconfig_sql(&config_name/1)}
-    \"\"\")
-
-    execute(\"\"\"
-    #{reindex_sql()}
-    \"\"\")
-
-    execute(\"\"\"
-    #{backfill_sql()}
-    \"\"\")
-    """
+    Enum.join(
+      [
+        ~s|execute("CREATE EXTENSION IF NOT EXISTS unaccent")|,
+        execute(create_configs_sql()),
+        execute(regconfig_sql(&config_name/1)),
+        execute(reindex_sql()),
+        execute(backfill_sql())
+      ],
+      "\n\n"
+    )
   end
 
   @impl true
   def uninstall(1) do
     drops =
-      Enum.map_join(configs(), "\n", fn {stock, _dict} ->
+      Enum.map(configs(), fn {stock, _dict} ->
         ~s|execute("DROP TEXT SEARCH CONFIGURATION IF EXISTS #{config_name(stock)}")|
       end)
 
-    """
-    execute(\"\"\"
-    #{regconfig_sql(& &1)}
-    \"\"\")
-
-    #{drops}
-    """
+    Enum.join([execute(regconfig_sql(& &1)) | drops], "\n")
   end
 
-  defp configs, do: Enum.map(@languages, fn {_prefix, stock, dict} -> {stock, dict} end) ++ [@fallback]
+  # One migration `execute/1` call over a heredoc of `sql`, as source text.
+  @heredoc String.duplicate(~s("), 3)
+  defp execute(sql), do: "execute(#{@heredoc}\n#{sql}\n#{@heredoc})"
+
+  defp configs,
+    do: Enum.map(@languages, fn {_prefix, stock, dict} -> {stock, dict} end) ++ [@fallback]
 
   # Guarded, so a re-run (or a database restored with the configurations
   # already in it) is a no-op. Only the non-ASCII token types are remapped:
