@@ -11,9 +11,8 @@ carries the reasoning.
 
 - **1.0 is a major version: move to it with `mix kiln.update --allow-major`,
   from 0.12.1, after 0.12's own upgrade steps.** `mix kiln.update` refuses a
-  move across a major version unless you pass `--allow-major`, and a plain
-  update never targets a release candidate, so try one with
-  `mix kiln.update --to v1.0.0-rc.3 --allow-major` (the newest candidate).
+  move across a major version unless you pass `--allow-major`, so from
+  0.12.1 run `mix kiln.update --allow-major`, which targets 1.0.0.
   Go through 0.12.1, the latest 0.12.x, first (`mix kiln.update --to v0.12.1`),
   not straight from an older release: 1.0 removes what 0.12 deprecated, and
   0.12 is the release that migrates it. 0.12.1 adds no upgrade steps of its

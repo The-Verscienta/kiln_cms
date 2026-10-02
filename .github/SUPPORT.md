@@ -81,13 +81,13 @@ Honest, not discouraging:
   indefinitely. Silence on a feature request means "not scheduled", not "no" —
   and if you are willing to implement it, say so, because that changes the
   answer.
-- **KilnCMS is pre-1.0** (see the status section in
+- **Supported releases** (see the status section in
   [the README](https://github.com/The-Verscienta/kiln_cms#status--maturity)).
   Fixes land on `main` and reach you when you move your submodule pin. Only
   the latest minor release is supported; the one before it gets security
   fixes for 90 days after its successor ships, from a short-lived branch off
-  its tag, and nothing else. That rule starts at 1.0.0 and applies within a
-  major: support for 0.x ends the day 1.0.0 ships, with no 90-day window for
+  its tag, and nothing else. That rule applies within a major, from 1.0.0
+  on: support for 0.x ended the day 1.0.0 shipped, with no 90-day window for
   0.12.x. There are no long-lived maintenance branches.
   [SECURITY.md](SECURITY.md#supported-versions) has the table.
 

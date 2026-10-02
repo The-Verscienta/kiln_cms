@@ -8,6 +8,10 @@ milestones ([v0.10.0](https://github.com/The-Verscienta/kiln_cms/milestone/12), 
 not. When this page and an issue disagree, the issue wins, and this page
 needs editing.
 
+**1.0.0 has shipped.** This page stays as the record of what 1.0 promised
+and how it got there; the [changelog](../CHANGELOG.md) has what each release
+changed.
+
 ## 1.0 is a promise, not a feature list
 
 The [project plan](../KilnCMS_Project_Plan.md) defined v1.0 as a feature set,
@@ -171,13 +175,13 @@ After 0.12, the covered list changes only by deprecation.
 - Measure the project plan's own v1.0 success metrics (#1546) and write the
   results down, including any that were missed:
 
-  | Metric | Measured (2026-09-27, [`benchmarks.md`](benchmarks.md)) |
+  | Metric | Measured at 1.0.0 ([`benchmarks.md`](benchmarks.md)) |
   |---|---|
-  | An editor builds a page in under 5 minutes | Not measured yet. Round 1 (#1534) recorded no Scenario A timings; round 2 (#59) must |
-  | Headless API p95 under 50 ms | Partly met. Delivery, JSON:API and GraphQL reads stay under 43 ms p95 with 50 concurrent clients; search misses from 10 clients (#1712), the sync initial page from 10 (#1713) |
-  | Test coverage over 80% | Met: 87.1% on `main` ([CI run 36356671129](https://github.com/The-Verscienta/kiln_cms/actions/runs/36356671129)), floor 85.8 |
-  | Zero-downtime releases | Not shown. No swap has run under traffic, and no rule keeps a migration compatible with the release before it |
-  | Positive beta feedback | Not measured yet. Round 1 recorded no tester count or NPS; round 2 (#59) must |
+  | An editor builds a page in under 5 minutes | Met. Round 2 (#59, `v1.0.0-rc.2`): all 10 testers finished Scenario A in under 5 minutes, average 3:33; 5 non-technical authors |
+  | Headless API p95 under 50 ms | Partly met (2026-09-27). Delivery, JSON:API and GraphQL reads stay under 43 ms p95 with 50 concurrent clients; search misses from 10 clients (#1712), the sync initial page from 10 (#1713) |
+  | Test coverage over 80% | Met: 87.7% on `main` at `v1.0.0-rc.3` ([CI run 36945564023](https://github.com/The-Verscienta/kiln_cms/actions/runs/36945564023)), floor 85.8 |
+  | Zero-downtime releases | Not shown. Expand/contract migrations are enforced in CI (#1716), but no swap has run under traffic. The maintainer accepted shipping 1.0 without it (2026-10-02) |
+  | Positive beta feedback | Met. Round 2 rated it mostly B+ (about 8/10) and met the v1 bar; rc.3 found no issues |
 
 ## Beta exit criteria (decided, #1533)
 

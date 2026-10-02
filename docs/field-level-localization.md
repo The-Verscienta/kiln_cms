@@ -221,8 +221,8 @@ delivers the feature on the model Kiln already has.
 ## Guardrails until the feature lands
 
 None of these changes a covered surface, so none needs a pre-freeze
-decision. Each one keeps Design A additive, and a pre-1.0 change that breaks
-one should say so in review.
+decision. Each one keeps Design A additive, and a change that breaks one
+should say so in review.
 
 1. **Keep block `_id`s shared across locale variants.** `ContentCopy`'s
    `keep_ids?: true` on the translation path is what lets a shared field find

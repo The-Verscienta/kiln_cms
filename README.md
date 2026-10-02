@@ -9,7 +9,7 @@ the resolved architectural decisions (D1–D8).
 
 ## Status & maturity
 
-**Pre-1.0 (`v0.12.1`), single maintainer, and consumed as a source overlay
+**Stable (`v1.0.0`), single maintainer, and consumed as a source overlay
 rather than a package.** If you are evaluating KilnCMS for a team, read this
 section before the feature list.
 
@@ -42,7 +42,7 @@ docker pull ghcr.io/the-verscienta/kiln_cms:latest   # linux/amd64
 ```
 
 `latest` is for trying it out. For a site you keep, pin the exact version
-(`:0.12.0`), or from 1.0 the floating major (`:1`) if you want patches and
+(`:1.0.0`), or the floating major (`:1`) if you want patches and
 minor releases without editing the tag;
 [which tag to pin](docs/deploy-platforms.md#which-tag-to-pin) has the
 trade-offs.
@@ -51,7 +51,9 @@ That image is the **project-agnostic core**. An overlay builds its own from the
 same [`Dockerfile`](https://github.com/The-Verscienta/kiln_cms/blob/main/Dockerfile)
 with `--build-arg PROJECT=<name>`.
 
-**What pre-1.0 means for API stability.** Semver here is interpreted against the
+**What 1.0 means for API stability.** From 1.0.0 the covered surfaces below
+are a promise: removing one, or changing what it means, takes a major release
+and goes through the deprecation path. Semver here is interpreted against the
 overlay contract, not against every module: **major** = an overlay needs code
 changes to compile, **minor** = new capability plus possible migrations,
 **patch** = fixes (the full definition is at the top of
@@ -73,10 +75,26 @@ table:
 | **Experimental** | Incomplete, or resting on a dependency that is not stable yet. May change or be withdrawn in a minor | Semantic and hybrid search and the Meilisearch backend (both feature-flagged off, and the models need a `KILN_ML=1` build); `/api/content/:type/:slug/related`, which is empty without semantic search; the Bumblebee cross-encoder reranker (`rerank: false`; its model path is not exercised in CI); the CRDT collaborative-editing prototype (`:collab_prototype`, dev and test only); GraphQL subscriptions over `/ws/gql` (on, but built on `ash_graphql`'s subscription DSL, which is still beta) |
 <!-- surface-labels:end -->
 
-**Bus factor is one.** One maintainer, one merged external contribution
+**Bus factor is one.** KilnCMS has a single maintainer
+([@The-Verscienta](https://github.com/The-Verscienta)), and 1.0 did not wait
+for a second one. There is one merged external contribution
 ([#1445](https://github.com/The-Verscienta/kiln_cms/pull/1445)), and a
 large share of the commit history is AI-pair-programmed (every such commit is
-`Co-Authored-By`-attributed). What offsets that is mechanical rather than
+`Co-Authored-By`-attributed).
+
+The part of the system where a mistake costs most had an **outside review**
+before 1.0 ([#1536](https://github.com/The-Verscienta/kiln_cms/issues/1536),
+2026-09-29). It covered the authentication surface: sign-in with the
+first-factor hold, TOTP, passkeys and remember-me; the session cookie;
+password reset and confirmation; SSO (OIDC); API keys and bearer tokens; and
+tenant resolution. Five of the six were found sound. The sixth had two P1
+findings, both about password rotation: changing or resetting a password did
+not revoke existing sessions and remember-me tokens, and a reset did not
+disconnect open LiveViews. Both were fixed in
+[#1764](https://github.com/The-Verscienta/kiln_cms/pull/1764) before the
+first release candidate.
+
+Beyond that, what offsets a bus factor of one is mechanical rather than
 social: a `mix precommit` gate and a CI suite that includes dialyzer, sobelow,
 `mix deps.audit` and `mix hex.audit`, a policy-coverage guard that fails the build for an Ash
 resource with no authorizer, an overlay-drift job, and a release-image build.
@@ -84,7 +102,12 @@ The [issue tracker](https://github.com/The-Verscienta/kiln_cms/issues) is the
 project's real backlog, including its own audit findings. If that bus factor is
 a blocker for you, it should be — say so in an issue; the surfaces most worth a
 second pair of eyes are named in
-[`docs/threat-model.md`](docs/threat-model.md).
+[`docs/threat-model.md`](docs/threat-model.md). Concerns about the project's
+direction or maintenance go in an
+[issue](https://github.com/The-Verscienta/kiln_cms/issues); a suspected
+vulnerability goes through the private report described in
+[`.github/SECURITY.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/.github/SECURITY.md),
+never an issue.
 
 **Getting help, and reporting problems.** Questions and bugs belong in
 [issues](https://github.com/The-Verscienta/kiln_cms/issues); see
@@ -361,7 +384,7 @@ the front-end integration guide.
 **Found a vulnerability? Do not open a public issue.** Report it privately
 through this repository's [Security tab](https://github.com/The-Verscienta/kiln_cms/security)
 → **Report a vulnerability**. The full policy — what is in scope, which
-versions are supported while the project is pre-1.0, and what to expect after
+release lines are supported, and what to expect after
 you report — is [`.github/SECURITY.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/.github/SECURITY.md).
 
 <!-- That link is deliberately a full URL, not a relative path: `.github/` is
