@@ -885,6 +885,17 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               />
               {gettext("Names the record (search finds it by this value)")}
             </label>
+            <label class="flex items-center gap-2 self-end text-sm">
+              <input type="hidden" name="field_definition[searchable]" value="false" />
+              <input
+                type="checkbox"
+                name="field_definition[searchable]"
+                value="true"
+                checked={@form[:searchable].value in [true, "true"]}
+                class="size-4 rounded border border-base-content/30 accent-primary"
+              />
+              {gettext("Searchable (search indexes this value as text)")}
+            </label>
             <div class="sm:col-span-2">
               <.button type="submit" variant="primary">{gettext("Add field")}</.button>
             </div>
