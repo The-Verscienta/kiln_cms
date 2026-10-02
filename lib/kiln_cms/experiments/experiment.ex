@@ -118,6 +118,11 @@ defmodule KilnCMS.Experiments.Experiment do
       accept []
       argument :winner_variant_id, :uuid, allow_nil?: true
 
+      # The `:uuid` type is not the invariant. A well-formed uuid that is no
+      # variant — or a variant of another experiment — concludes cleanly, and
+      # the row it writes cannot be corrected afterwards by any action here.
+      validate KilnCMS.Experiments.Validations.WinnerIsAVariant
+
       change transition_state(:concluded)
       change set_attribute(:concluded_at, &DateTime.utc_now/0)
       change set_attribute(:winner_variant_id, arg(:winner_variant_id))

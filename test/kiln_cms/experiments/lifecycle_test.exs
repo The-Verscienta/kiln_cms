@@ -222,6 +222,55 @@ defmodule KilnCMS.Experiments.LifecycleTest do
       refute concluded.winner_variant_id
     end
 
+    # A winner that is no arm of this experiment is not a cosmetic mistake: the
+    # row it writes cannot be taken back. `winner_variant_id` is `writable?
+    # false`, the state machine has no `concluded -> concluded` transition, and
+    # `:update` refuses anything but a draft — so there is no action left that
+    # can correct it. The experiment then offers a Promote button that can never
+    # succeed (`Promotion` answers `:winner_missing`) while showing no `winner`
+    # badge, and ships the dangling id in its `experiment.concluded` payload.
+    # The `:uuid` type was the only gate until `Validations.WinnerIsAVariant`.
+    test "refuses a winner that is no variant at all, and leaves the experiment running", ctx do
+      bogus = Ash.UUID.generate()
+
+      assert {:error, error} =
+               Experiments.conclude_experiment(ctx.experiment, bogus,
+                 authorize?: false,
+                 tenant: ctx.org_id
+               )
+
+      assert Exception.message(error) =~ "is not a variant of this experiment"
+      assert [%{field: :winner_variant_id}] = error.errors
+
+      # Refused means refused: the transition and the timestamp are not written
+      # either, so the experiment is still measurable.
+      reread =
+        Experiments.get_experiment!(ctx.experiment.id, authorize?: false, tenant: ctx.org_id)
+
+      assert reread.state == :running
+      refute reread.winner_variant_id
+      refute reread.concluded_at
+    end
+
+    # The sharper half, and the one a plausible mistake produces: a uuid that IS
+    # a variant, of a different experiment on the same site. Nothing about it
+    # looks wrong — it resolves to a real row with a real name and a real patch —
+    # and `Promotion` still refuses it, because the winner is looked up among
+    # *this* experiment's arms.
+    test "refuses another experiment's variant as the winner", ctx do
+      other = experiment!(ctx, %{document_id: Ash.UUID.generate()})
+      ExperimentFixtures.variant!(other, "Control", %{}, ctx.org_id, control: true)
+      foreign = ExperimentFixtures.variant!(other, "B", %{}, ctx.org_id, [])
+
+      assert {:error, error} =
+               Experiments.conclude_experiment(ctx.experiment, foreign.id,
+                 authorize?: false,
+                 tenant: ctx.org_id
+               )
+
+      assert Exception.message(error) =~ "is not a variant of this experiment"
+    end
+
     test "emits experiment.concluded through the shared event funnel", ctx do
       endpoint =
         CMS.create_webhook_endpoint!(
