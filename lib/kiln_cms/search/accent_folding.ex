@@ -163,7 +163,9 @@ defmodule KilnCMS.Search.AccentFolding do
 
   # The trigger (`kiln_search_vector_refresh`) recomputes only when the title,
   # `search_text` or locale changes, so the vector is set here directly.
-  defp backfill_sql do
+  # Public for the test that re-runs it over a row stored the old way.
+  @doc false
+  def backfill_sql do
     """
     DO $kiln$
     DECLARE tbl text;
