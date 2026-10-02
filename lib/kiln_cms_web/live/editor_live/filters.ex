@@ -192,7 +192,6 @@ defmodule KilnCMSWeb.EditorLive.Filters do
   end
 
   @doc "Human label for a status filter value."
-  def status_label("all"), do: gettext("All statuses")
   def status_label("draft"), do: gettext("Draft")
   def status_label("in_review"), do: gettext("In review")
   def status_label("published"), do: gettext("Published")
