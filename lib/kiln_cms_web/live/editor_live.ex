@@ -244,17 +244,16 @@ defmodule KilnCMSWeb.EditorLive do
         {Enum.reverse(acc), taken}
 
       live ->
-        first =
-          Enum.reduce(live, fn stream, best ->
-            if Filters.before?(filters, hd(stream.rows), hd(best.rows)), do: stream, else: best
-          end)
-
+        first = Enum.reduce(live, &earliest(filters, &1, &2))
         [row | rest] = first.rows
         streams = Enum.map(streams, &if(&1.key == first.key, do: %{&1 | rows: rest}, else: &1))
         taken = Map.update(taken, first.key, [row], &[row | &1])
         merge(streams, filters, n - 1, [{first.kind, row} | acc], taken)
     end
   end
+
+  defp earliest(filters, stream, best),
+    do: if(Filters.before?(filters, hd(stream.rows), hd(best.rows)), do: stream, else: best)
 
   defp more?(cursors), do: Enum.any?(cursors, fn {_key, cursor} -> cursor != :done end)
 
