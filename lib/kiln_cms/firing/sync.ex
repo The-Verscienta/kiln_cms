@@ -74,6 +74,7 @@ defmodule KilnCMS.Firing.Sync do
   alias KilnCMS.CMS.Audiences
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Firing
+  alias KilnCMS.Firing.Cache
   alias KilnCMS.Firing.Delivery
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Firing.FireWorker
@@ -110,6 +111,11 @@ defmodule KilnCMS.Firing.Sync do
           {:initial, DateTime.t(), after_key()}
           | {:delta, DateTime.t(), DateTime.t() | nil, after_key()}
 
+  @typedoc """
+  An upsert or a tombstone. An upsert's `artifact` is the fired body, either
+  as a map or, when it came from the cache, as a `Jason.Fragment` holding its
+  JSON. Both encode to the same bytes.
+  """
   @type item :: map()
 
   @type result ::
@@ -510,8 +516,17 @@ defmodule KilnCMS.Firing.Sync do
   # the page's misses) and the whole page retried — the alternative, an upsert
   # without a body, is a copy the client can't use and won't be told about
   # again until the document next changes.
+  #
+  # A cached body comes back already encoded (`Cache.get_json/4`) and goes into
+  # the response as a `Jason.Fragment`: the same bytes encoding the body would
+  # give, without walking up to 500 artifact trees on every page (#1713).
   defp artifact(record, ctx) do
-    Delivery.read_artifact(record.org_id, Engine.document_type(record), record.id, ctx.surface)
+    type = Engine.document_type(record)
+
+    case Cache.get_json(record.org_id, type, record.id, ctx.surface) do
+      {:ok, json} -> {:ok, Jason.Fragment.new(json)}
+      :miss -> Delivery.read_artifact(record.org_id, type, record.id, ctx.surface)
+    end
   end
 
   defp upsert(record, body, ctx) do
@@ -538,9 +553,23 @@ defmodule KilnCMS.Firing.Sync do
   # Remember what was disclosed, so a later tombstone may name it. Inside the
   # page's own request: a page that answered without recording would let the
   # document vanish without a tombstone.
+  #
+  # Only what is not recorded already, or recorded under another type name (a
+  # renamed dynamic type), is written. A mirror re-reads the same pages, and
+  # an upsert of rows that are already there still takes their row locks:
+  # concurrent requests for one page queued behind each other on them while
+  # each held a pool connection (#1713). A read of the page's ids by the
+  # `(org_id, document_id)` identity takes no lock. Rows are never deleted,
+  # so a row found here is still there when the page is answered.
   defp record_exposures([], _ctx), do: :ok
 
   defp record_exposures(records, ctx) do
+    recorded =
+      records
+      |> Enum.map(& &1.id)
+      |> Firing.sync_exposures_for!(actor: SystemActor.new(:sync), tenant: ctx.org_id)
+      |> Map.new(&{&1.document_id, &1.type_name})
+
     records
     |> Enum.map(fn record ->
       %{
@@ -550,6 +579,14 @@ defmodule KilnCMS.Firing.Sync do
         type_definition_id: Map.get(record, :type_definition_id)
       }
     end)
+    |> Enum.reject(&(recorded[&1.document_id] == &1.type_name))
+    |> write_exposures(ctx)
+  end
+
+  defp write_exposures([], _ctx), do: :ok
+
+  defp write_exposures(exposures, ctx) do
+    exposures
     |> Firing.record_sync_exposure!(
       actor: SystemActor.new(:sync),
       tenant: ctx.org_id,

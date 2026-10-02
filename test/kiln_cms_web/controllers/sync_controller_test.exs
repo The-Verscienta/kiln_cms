@@ -165,6 +165,167 @@ defmodule KilnCMSWeb.SyncControllerTest do
     end
   end
 
+  # #1713: a page's artifacts come from the cache already encoded, and an
+  # exposure already recorded is not written again. Neither may change a byte
+  # of what a page says, or what a later delta may name.
+  describe "initial page served from the encoded cache" do
+    test "is byte for byte what encoding the stored artifacts gives, cold and warm",
+         %{conn: conn} = ctx do
+      posts = for _ <- 1..3, do: published_post!(ctx)
+      page = page!(ctx)
+      KilnCMS.DataCase.drain_oban()
+
+      KilnCMS.Firing.Cache.clear()
+      cold = conn |> sync(ctx, %{"initial" => "true"}) |> response(200)
+      warm = conn |> sync(ctx, %{"initial" => "true"}) |> response(200)
+
+      # The cursor carries the instant the snapshot began, so it differs by
+      # request; everything around it must not.
+      assert without_cursor(cold) == without_cursor(warm)
+
+      # Rebuilt by hand from the database: the documents' own columns and the
+      # artifact rows, encoded the way the controller always encoded them.
+      %{"cursor" => cursor} = Jason.decode!(warm)
+
+      # Scopes walk in resource-name order (Page before Post), each by id;
+      # re-read so the timestamps are the ones the database holds now.
+      docs =
+        [CMS.get_page!(page.id, actor: ctx.admin, tenant: ctx.org)] ++
+          (posts
+           |> Enum.sort_by(& &1.id)
+           |> Enum.map(&CMS.get_post!(&1.id, actor: ctx.admin, tenant: ctx.org)))
+
+      golden =
+        Jason.encode!(%{
+          items:
+            Enum.map(docs, fn doc ->
+              type = KilnCMS.Firing.Engine.document_type(doc)
+
+              %{
+                op: "upsert",
+                type: to_string(type),
+                id: doc.id,
+                slug: doc.slug,
+                locale: doc.locale,
+                published_at: doc.published_at,
+                updated_at: doc.updated_at,
+                artifact: stored_body(ctx, type, doc.id)
+              }
+            end),
+          cursor: cursor,
+          has_more: false
+        })
+
+      assert warm == golden
+    end
+
+    test "a republished document is served with its new artifact", %{conn: conn} = ctx do
+      post = published_post!(ctx)
+      {[first], _} = drain(conn, ctx, %{"initial" => "true"})
+      assert first["artifact"]["title"] == post.title
+
+      post
+      |> CMS.unpublish_post!(%{}, actor: ctx.admin, tenant: ctx.org)
+      |> CMS.update_post!(%{title: "Retitled"}, actor: ctx.admin, tenant: ctx.org)
+      |> CMS.publish_post!(%{}, actor: ctx.admin, tenant: ctx.org)
+
+      {[again], _} = drain(conn, ctx, %{"initial" => "true"})
+      assert again["artifact"]["title"] == "Retitled"
+
+      assert again["artifact"] ==
+               ctx |> stored_body(:post, post.id) |> Jason.encode!() |> Jason.decode!()
+    end
+
+    test "an unpublished document leaves the initial page", %{conn: conn} = ctx do
+      kept = published_post!(ctx)
+      gone = published_post!(ctx)
+      {items, _} = drain(conn, ctx, %{"initial" => "true"})
+      assert Enum.sort(ids(items, "upsert")) == Enum.sort([kept.id, gone.id])
+
+      unpublish(gone, ctx)
+
+      assert {[%{"id" => id}], _} = drain(conn, ctx, %{"initial" => "true"})
+      assert id == kept.id
+    end
+
+    test "another site's warm cache does not reach this site's page", %{conn: conn} = ctx do
+      mine = published_post!(ctx)
+      {[_], _} = drain(conn, ctx, %{"initial" => "true"})
+
+      other = %{ctx | org: seed_org()}
+      theirs = published_post!(other)
+
+      assert {[%{"id" => id}], _} = drain(conn, other, %{"initial" => "true"})
+      assert id == theirs.id
+
+      mine_id = mine.id
+      assert {[%{"id" => ^mine_id}], _} = drain(conn, ctx, %{"initial" => "true"})
+    end
+  end
+
+  describe "exposures on a page served again" do
+    test "are written once, and the type name is kept current", %{conn: conn} = ctx do
+      post = published_post!(ctx)
+      {[_], _} = drain(conn, ctx, %{"initial" => "true"})
+      [recorded] = exposure_rows(post.id)
+
+      # Served again: the row is left alone, not rewritten. An upsert that
+      # changed nothing would still write a new tuple, and move its `ctid`.
+      {[_], _} = drain(conn, ctx, %{"initial" => "true"})
+      assert exposure_rows(post.id) == [recorded]
+
+      # Recorded under another name (as after a dynamic type's rename): the
+      # next page that serves the document writes the current one.
+      KilnCMS.Repo.update_all(
+        from(e in "sync_exposures", where: e.document_id == type(^post.id, Ecto.UUID)),
+        set: [type_name: "renamed"]
+      )
+
+      {[_], _} = drain(conn, ctx, %{"initial" => "true"})
+      assert [%{type_name: "post"}] = exposure_rows(post.id)
+    end
+
+    test "a document first served on a later page can still be tombstoned",
+         %{conn: conn} = ctx do
+      first = published_post!(ctx)
+      {_, cursor} = drain(conn, ctx, %{"initial" => "true"})
+      second = published_post!(ctx)
+      {_, cursor} = drain(conn, ctx, %{"cursor" => cursor})
+
+      # Both served, so both may be named when they go.
+      unpublish(first, ctx)
+      unpublish(second, ctx)
+
+      {items, _} = drain(conn, ctx, %{"cursor" => cursor})
+      assert Enum.sort(ids(items, "delete")) == Enum.sort([first.id, second.id])
+    end
+  end
+
+  defp without_cursor(body), do: body |> Jason.decode!() |> Map.delete("cursor")
+
+  defp stored_body(ctx, type, id) do
+    {:ok, artifact} =
+      KilnCMS.Firing.get_artifact(type, id, :json,
+        actor: KilnCMS.SystemActor.new(:delivery),
+        tenant: ctx.org.id
+      )
+
+    artifact.body
+  end
+
+  defp exposure_rows(document_id) do
+    KilnCMS.Repo.all(
+      from(e in "sync_exposures",
+        where: e.document_id == type(^document_id, Ecto.UUID),
+        select: %{
+          id: e.id,
+          type_name: e.type_name,
+          tuple: fragment("ctid::text")
+        }
+      )
+    )
+  end
+
   describe "delta" do
     test "reports a new publish as an upsert and nothing unchanged", %{conn: conn} = ctx do
       _before = published_post!(ctx)
