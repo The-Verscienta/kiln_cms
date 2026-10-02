@@ -558,9 +558,15 @@ defmodule KilnCMS.Firing.Sync do
       {:ok, artifacts} ->
         {:ok,
          Map.new(artifacts, fn %{document_id: id, body: body} = artifact ->
+           # `put/5` has just encoded the body; serve that rather than encode
+           # it a second time for the response.
            Cache.put(org_id, type, id, surface, body)
            Engine.migrate_if_stale(org_id, type, id, artifact)
-           {id, body}
+
+           case Cache.get_json(org_id, type, id, surface) do
+             {:ok, json} -> {id, Jason.Fragment.new(json)}
+             :miss -> {id, body}
+           end
          end)}
 
       {:error, error} ->
