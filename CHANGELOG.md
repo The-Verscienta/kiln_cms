@@ -54,6 +54,13 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Added
+
+- **The content list filters by author, category, tag, language, update date
+  and review health, sorts by update, publish date or title, and saves a
+  filter as a named view.**
+  ([#1593](https://github.com/The-Verscienta/kiln_cms/issues/1593) · [long form](docs/changelog/unreleased.md#the-content-list-filters-and-saves-views))
+
 ### Fixed
 
 - **Concluding an experiment now refuses a winner that is not one of its own
