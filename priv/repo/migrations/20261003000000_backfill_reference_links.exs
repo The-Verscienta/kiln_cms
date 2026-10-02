@@ -13,11 +13,14 @@ defmodule KilnCMS.Repo.Migrations.BackfillReferenceLinks do
   naming only long-standing columns, so it still runs when an install upgrades
   past later releases in one step. Idempotent.
 
-  Runs after `ContentLinkReferenceEdges1`, which builds the unique index its
-  `ON CONFLICT DO NOTHING` relies on. `down/0` deletes the reference edges,
-  so the schema rollback after it can restore the 1.0 unique index
-  `(source, target, kind)` — which two reference fields naming the same
-  target would violate.
+  Ordering keeps `content_links` guarded by a unique index at every moment:
+  `ContentLinkReferenceEdges1` builds the new `(…, kind, field)` index
+  `CONCURRENTLY` while the 1.0 `(source, target, kind)` index still stands,
+  `DropContentLinkUniqueLinkIndex` drops the old one, and only then does this
+  run. It has to come after the drop, not between: two reference fields
+  naming the same target are two legitimate rows the old index would refuse.
+  `down/0` deletes the reference edges, so rolling back the drop can recreate
+  the 1.0 index.
   """
   use Ecto.Migration
 

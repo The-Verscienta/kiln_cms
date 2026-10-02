@@ -55,6 +55,15 @@ defmodule KilnCMS.CMS.ContentLinks.Backfill do
   # `content_type`; the shared `entries` table (D17) joins on the row's own
   # `type_definition_id`, and its type name is that definition's name.
   defp sources do
+    # `ContentTypes.all/0` keeps the domain resources that export
+    # `__kiln_content_type__/0`, and `function_exported?/3` is false for a
+    # module not yet loaded. Under `mix ecto.migrate` nothing has loaded them
+    # (code is loaded on first use), so the migration saw no compiled type and
+    # backfilled nothing. Load them first.
+    for domain <- ContentTypes.content_domains(),
+        resource <- Ash.Domain.Info.resources(domain),
+        do: Code.ensure_loaded(resource)
+
     compiled =
       for %{type: type, resource: resource} <- ContentTypes.all(), not is_nil(resource) do
         {:compiled, table(resource), to_string(type)}

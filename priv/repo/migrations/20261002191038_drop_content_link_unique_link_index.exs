@@ -1,4 +1,4 @@
-defmodule KilnCMS.Repo.Migrations.ContentLinkReferenceEdges do
+defmodule KilnCMS.Repo.Migrations.DropContentLinkUniqueLinkIndex do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 
@@ -11,21 +11,9 @@ defmodule KilnCMS.Repo.Migrations.ContentLinkReferenceEdges do
     drop_if_exists unique_index(:content_links, [:org_id, :source_id, :target_id, :kind],
                      name: "content_links_unique_link_index"
                    )
-
-    alter table(:content_links) do
-      add :field, :text
-      add :source_type, :text
-      add :target_type, :text
-    end
   end
 
   def down do
-    alter table(:content_links) do
-      remove :target_type
-      remove :source_type
-      remove :field
-    end
-
     create unique_index(:content_links, [:org_id, :source_id, :target_id, :kind],
              name: "content_links_unique_link_index"
            )
