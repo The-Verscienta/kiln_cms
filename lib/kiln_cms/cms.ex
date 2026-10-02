@@ -595,6 +595,16 @@ defmodule KilnCMS.CMS do
 
     # Editorial tasks: assignments, due dates, a workload view (#501) — the
     # ownership half of editorial collaboration (Comment above is discussion).
+    # Saved views on the content list (#1593): a named filter, private to its
+    # owner unless an admin shares it with the site.
+    resource KilnCMS.CMS.SavedView do
+      define :list_saved_views, action: :visible
+      define :get_saved_view, action: :read, get_by: [:id]
+      define :create_saved_view, action: :create
+      define :update_saved_view, action: :update
+      define :destroy_saved_view, action: :destroy
+    end
+
     resource KilnCMS.CMS.Task do
       define :assign_task, action: :assign
       define :update_task, action: :update
