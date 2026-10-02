@@ -17,7 +17,8 @@ defmodule KilnCMS.Repo.Migrations.AddSavedViews do
             name: "saved_views_org_id_fkey",
             type: :uuid,
             prefix: "public"
-          ), null: false
+          ),
+          null: false
 
       add :name, :text, null: false
       add :params, :map, null: false, default: %{}
@@ -38,7 +39,8 @@ defmodule KilnCMS.Repo.Migrations.AddSavedViews do
             type: :uuid,
             prefix: "public",
             on_delete: :delete_all
-          ), null: false
+          ),
+          null: false
     end
 
     create index(:saved_views, [:org_id, :owner_id], name: "saved_views_owner_lookup_index")
