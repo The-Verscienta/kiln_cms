@@ -5,6 +5,39 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Changed
+
+<a id="the-sync-apis-first-page-stays-under-15-ms-p95-from-10-concurrent"></a>
+
+- **The sync API's first page stays under 15 ms p95 from 10
+  concurrent clients, where it took 31–57 ms.**
+  `GET /api/sync?initial=true&limit=100` was the one headless read besides
+  search that missed the v1.0 "p95 under 50 ms" metric (#1546). Profiled,
+  most of a request was CPU: each page decoded 100 stored artifacts only to
+  encode them again for the response. Under concurrency, the page's
+  `sync_exposures` bulk upsert locked the same 100 rows for every request,
+  so requests queued on each other while holding a pool connection.
+
+  Three changes, none to what a page says. The fired-artifact cache now keeps
+  each body's JSON beside it, written in the same ETS insert and evicted with
+  it, and a sync page embeds that as a `Jason.Fragment`. A page reads which of
+  its documents are already recorded as disclosed and writes only the rest
+  (or a row whose dynamic type was renamed), so serving a page again takes no
+  row locks; exposure rows are never deleted, so the tombstone guarantee is
+  unchanged. A cold page reads its artifacts in one query per content type
+  instead of one per document, through a new `PublishedArtifact` read action,
+  `:for_documents`, with the same policies as `:get_surface`.
+
+  Re-measured with `scripts/benchmarks/api_latency.sh`: server p95 from 10
+  clients went from 34–47 ms to 4–14 ms, and the in-process profile from
+  13.6 ms and 4.3 queries a request to 3.3–6.5 ms and 2. A golden test checks
+  that a page's bytes are what encoding the stored artifacts gives, cold and
+  warm. The artifact cache's entry cap went from 10,000 to 20,000, since each
+  artifact is now two entries; it still holds 10,000 artifacts, at up to
+  twice the memory. Figures and method in
+  [`benchmarks.md`](../benchmarks.md#sync-initial-page-after-1713).
+  ([#1713](https://github.com/The-Verscienta/kiln_cms/issues/1713))
+
 ## Fixed
 
 <a id="concluding-an-experiment-now-refuses-a-winner-that-is-not-one-of-its-own"></a>
