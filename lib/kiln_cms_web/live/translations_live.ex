@@ -295,14 +295,19 @@ defmodule KilnCMSWeb.TranslationsLive do
           actor: actor,
           tenant: org,
           query: [
-            select: [:id, :title, :slug, :state, :locale, :updated_at],
+            select: [:id, :title, :slug, :state, :locale, :updated_at, :inserted_at],
             sort: [updated_at: :desc],
             limit: @per_type_limit
           ]
         )
-        |> Enum.group_by(& &1.slug)
-        |> Enum.map(fn {_slug, records} ->
-          row(ct, records, default, may_author?(actor, org.id, ct))
+        |> then(fn records ->
+          edited = Translations.edited_at(records, tenant: org.id)
+
+          records
+          |> Enum.group_by(& &1.slug)
+          |> Enum.map(fn {_slug, records} ->
+            row(ct, records, default, edited, may_author?(actor, org.id, ct))
+          end)
         end)
       end)
       |> Enum.sort_by(& &1.updated_at, {:desc, DateTime})
@@ -312,7 +317,7 @@ defmodule KilnCMSWeb.TranslationsLive do
 
   # One dashboard row per (type, slug): the default-locale record (or the
   # first variant) represents it; each configured locale gets a cell.
-  defp row(ct, records, default, may_author?) do
+  defp row(ct, records, default, edited, may_author?) do
     by_locale = Map.new(records, &{&1.locale, &1})
     source = by_locale[default] || hd(records)
 
@@ -324,9 +329,9 @@ defmodule KilnCMSWeb.TranslationsLive do
           locale: locale,
           record: variant,
           status: if(variant, do: variant.state, else: :missing),
-          stale?:
-            variant != nil and locale != default and by_locale[default] != nil and
-              DateTime.after?(by_locale[default].updated_at, variant.updated_at)
+          # Judged by the last edit, not `updated_at`: a shared-field copy
+          # (#1327) is not someone translating the variant.
+          stale?: Translations.stale?(variant, by_locale[default], edited)
         }
       end
 

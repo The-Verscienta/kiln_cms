@@ -144,6 +144,8 @@ defmodule KilnCMS.I18n.FieldLocalization do
     end
   end
 
+  def attributes(_other), do: %{shared: [], fallback: []}
+
   @doc "The custom-field modes in `definitions`, by field name, skipping `:localized`."
   @spec custom_fields([struct()]) :: %{String.t() => :shared | :fallback}
   def custom_fields(definitions) do
@@ -227,6 +229,19 @@ defmodule KilnCMS.I18n.FieldLocalization do
 
     shared != [] or fallback != [] or custom_fields(definitions) != %{} or
       Enum.any?(block_list(record), &(block_fields(block_module(&1)) != %{}))
+  end
+
+  @doc """
+  Whether a content type can inherit a value along the fallback chain: its
+  resource (`nil` for a dynamic type) declares a `fallback:` attribute, one of
+  its `definitions` is a `:fallback` custom field, or any registered block
+  declares a `localized: :fallback` field.
+  """
+  @spec inherits?(module() | nil, [struct()]) :: boolean()
+  def inherits?(resource, definitions) do
+    (resource != nil and attributes(resource).fallback != []) or
+      :fallback in Map.values(custom_fields(definitions)) or
+      Enum.any?(KilnCMS.Blocks.modules(), &(:fallback in Map.values(block_fields(&1))))
   end
 
   @doc false

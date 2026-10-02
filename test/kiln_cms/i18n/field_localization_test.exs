@@ -457,4 +457,101 @@ defmodule KilnCMS.I18n.FieldLocalizationTest do
       assert body["inherited_fields"] == %{"custom_fields" => %{"tagline" => "en"}}
     end
   end
+
+  describe "the translation workflow around it" do
+    test "a shared-value copy does not make an outdated translation look fresh" do
+      actor = admin()
+      price = field(actor, "price", :shared)
+      {en, fr} = document(actor, %{custom_fields: %{price.name => "10"}})
+
+      en =
+        CMS.update_page!(reload(en), %{title: "Product v2", custom_fields: %{price.name => "20"}},
+          actor: actor
+        )
+
+      assert stale?(en, "fr", actor)
+
+      assert :ok = run_worker(en)
+      assert reload(fr).custom_fields[price.name] == "20"
+      assert DateTime.after?(reload(fr).updated_at, reload(en).updated_at)
+      assert stale?(en, "fr", actor), "the copy is not a translator's edit"
+
+      CMS.update_page!(reload(fr), %{title: "Produit v2"}, actor: actor)
+      refute stale?(reload(en), "fr", actor)
+    end
+
+    test "XLIFF leaves shared block fields out of the file, both ways" do
+      actor = admin()
+
+      page =
+        CMS.create_page!(
+          %{title: "P", slug: slug(), locale: "en", blocks: [card(%{"caption" => "Soft"})]},
+          actor: actor
+        )
+
+      {units, _warnings} = KilnCMS.CMS.Xliff.Units.extract(reload(page))
+      fields = units |> Enum.map(& &1.id) |> Enum.map(&List.last(String.split(&1, ".")))
+
+      assert "name" in fields
+      assert "caption" in fields
+      refute "image_url" in fields
+    end
+
+    test "the schema export annotates the modes, and declares inherited_fields" do
+      actor = admin()
+      field(actor, "tagline", :fallback)
+      field(actor, "plain_note", :localized)
+
+      schema = KilnCMS.SchemaExport.json_schema()
+      card_schema = schema["$defs"]["block_product_card"]
+
+      assert card_schema["properties"]["image_url"]["x-kiln-localization"] == "shared"
+      assert card_schema["properties"]["caption"]["x-kiln-localization"] == "fallback"
+      refute Map.has_key?(card_schema["properties"]["name"], "x-kiln-localization")
+
+      page_schema = schema["$defs"]["content_page"]
+      custom = page_schema["properties"]["custom_fields"]["properties"]
+      assert custom["tagline"]["x-kiln-localization"] == "fallback"
+      refute Map.has_key?(custom["plain_note"], "x-kiln-localization")
+      assert Map.has_key?(page_schema["properties"], "inherited_fields")
+      refute "inherited_fields" in page_schema["required"]
+    end
+
+    test "saving the fallback chain re-fires the translations that can inherit" do
+      actor = admin()
+      {en, fr} = document(actor, %{blocks: [card(%{"caption" => "Soft"})]})
+      KilnCMS.DataCase.drain_oban()
+      KilnCMS.Repo.delete_all(Oban.Job)
+
+      CMS.save_site_locale_settings!(%{fallbacks: %{"fr" => []}},
+        authorize?: false,
+        tenant: fr.org_id
+      )
+
+      refire = inspect(KilnCMS.I18n.RefireInheritingWorker)
+      fire = inspect(KilnCMS.Firing.FireWorker)
+
+      assert [_job] =
+               KilnCMS.Repo.all(
+                 from(j in Oban.Job, where: j.worker == ^refire and j.state == "available")
+               )
+
+      assert %{failure: 0} = KilnCMS.DataCase.drain_oban()
+
+      fired_ids =
+        KilnCMS.Repo.all(
+          from(j in Oban.Job, where: j.worker == ^fire, select: fragment("?->>'id'", j.args))
+        )
+
+      assert fr.id in fired_ids
+      refute en.id in fired_ids
+    end
+  end
+
+  defp stale?(source, locale, actor) do
+    source
+    |> then(&Translations.coverage(:page, &1, actor: actor))
+    |> Enum.find(&(&1.locale == locale))
+    |> Map.fetch!(:stale?)
+  end
 end

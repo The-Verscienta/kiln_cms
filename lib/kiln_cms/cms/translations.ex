@@ -19,6 +19,8 @@ defmodule KilnCMS.CMS.Translations do
   and admin-defined dynamic entries (D17) behave identically.
   """
 
+  require Ash.Query
+
   alias KilnCMS.CMS.ContentCopy
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.I18n
@@ -92,6 +94,7 @@ defmodule KilnCMS.CMS.Translations do
     siblings = siblings(kind, record, opts)
     by_locale = Map.new(siblings, &{&1.locale, &1})
     source = by_locale[I18n.default_locale()]
+    edited = edited_at(siblings, tenant: record.org_id)
 
     for locale <- I18n.locales() do
       variant = by_locale[locale]
@@ -100,17 +103,83 @@ defmodule KilnCMS.CMS.Translations do
         locale: locale,
         record: variant,
         status: if(variant, do: variant.state, else: :missing),
-        stale?: stale?(variant, source, locale)
+        stale?: stale?(variant, source, edited)
       }
     end
   end
 
-  defp stale?(nil, _source, _locale), do: false
-  defp stale?(_variant, nil, _locale), do: false
+  @doc """
+  Whether `variant` is an outdated translation of `source`: the source was
+  updated after the variant was last *edited*. Never for the default locale,
+  a missing variant or a missing source.
 
-  defp stale?(variant, source, locale) do
-    locale != I18n.default_locale() and
-      DateTime.after?(source.updated_at, variant.updated_at)
+  `edited` is `edited_at/2`'s map for the variants in question; a variant not
+  in it is judged by its `updated_at`.
+  """
+  @spec stale?(struct() | nil, struct() | nil, %{optional(term()) => DateTime.t()}) :: boolean()
+  def stale?(nil, _source, _edited), do: false
+  def stale?(_variant, nil, _edited), do: false
+
+  def stale?(variant, source, edited) do
+    variant.locale != I18n.default_locale() and
+      DateTime.after?(source.updated_at, Map.get(edited, variant.id, variant.updated_at))
+  end
+
+  @doc """
+  When each record was last **edited**, by id: its `updated_at`, except for a
+  variant field-level localization has copied shared values into (#1327).
+
+  That copy (`:sync_shared_fields`) is a write, so it moves `updated_at` past
+  the source's — and the outdated heuristic would read a translation nobody
+  touched as freshly translated. For a record carrying such a copy in its
+  history, the time is its newest version written by anything else. A record
+  with none is untouched by this, so a site that shares nothing pays one
+  version query per call.
+
+  Pass `tenant:`. The version rows are read for records the caller already
+  holds, and only their timestamps leave this function.
+  """
+  @spec edited_at([struct()], keyword()) :: %{optional(term()) => DateTime.t()}
+  def edited_at([], _opts), do: %{}
+
+  def edited_at([%resource{} | _] = records, opts) do
+    version = Module.concat(resource, Version)
+    ids = Enum.map(records, & &1.id)
+    read_opts = [tenant: Keyword.get(opts, :tenant), authorize?: false]
+
+    synced =
+      version
+      |> Ash.Query.filter(
+        version_source_id in ^ids and version_action_name == :sync_shared_fields
+      )
+      |> Ash.Query.select([:version_source_id])
+      # authorize?: false — timestamps of versions of records the caller has
+      # already read; no field value leaves this function.
+      |> Ash.read!(read_opts)
+      |> MapSet.new(& &1.version_source_id)
+
+    if MapSet.size(synced) == 0 do
+      Map.new(records, &{&1.id, &1.updated_at})
+    else
+      last_edits =
+        version
+        |> Ash.Query.filter(
+          version_source_id in ^MapSet.to_list(synced) and
+            version_action_name != :sync_shared_fields
+        )
+        |> Ash.Query.select([:version_source_id, :version_inserted_at])
+        # authorize?: false — as above.
+        |> Ash.read!(read_opts)
+        |> Enum.group_by(& &1.version_source_id, & &1.version_inserted_at)
+        |> Map.new(fn {id, times} -> {id, Enum.max(times, DateTime)} end)
+
+      Map.new(records, fn record ->
+        if MapSet.member?(synced, record.id),
+          do:
+            {record.id, Map.get(last_edits, record.id, record.inserted_at || record.updated_at)},
+          else: {record.id, record.updated_at}
+      end)
+    end
   end
 
   @doc """
