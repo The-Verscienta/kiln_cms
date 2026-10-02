@@ -31,6 +31,8 @@ defmodule KilnCMS.I18n.FieldLocalization do
   This module is the one place those declarations are read back.
   """
 
+  require Logger
+
   alias KilnCMS.I18n
 
   @typedoc "A field's localization mode."
@@ -129,22 +131,63 @@ defmodule KilnCMS.I18n.FieldLocalization do
       )
 
   @doc """
-  The record-attribute modes a content resource declares, as
-  `%{shared: [atom], fallback: [atom]}`. Empty for a resource that declares
-  none, and for anything built outside the Content macro.
+  The record-attribute modes for a content resource, as
+  `%{shared: [atom], fallback: [atom]}`: what its `localization:` option
+  declares, joined with what the operator configures for its type under
+  `config :kiln_cms, :i18n, field_localization: [page: [shared: [...]]]`.
+
+  The config is how a site opts the **core** types (`page`, `post`) in, since
+  it cannot edit their `use` line. It names a compiled type by its `type`
+  atom and takes the same keyword list the option does. A malformed entry is
+  ignored with a logged warning rather than raised on: it is read at run time,
+  on delivery paths. Empty for a resource that declares nothing, and for
+  anything built outside the Content macro.
   """
   @spec attributes(module() | struct()) :: %{shared: [atom()], fallback: [atom()]}
   def attributes(%module{}), do: attributes(module)
 
   def attributes(module) when is_atom(module) do
     if Code.ensure_loaded?(module) and function_exported?(module, :__kiln_localization__, 0) do
-      module.__kiln_localization__()
+      module.__kiln_localization__() |> merge(configured(module))
     else
       %{shared: [], fallback: []}
     end
   end
 
   def attributes(_other), do: %{shared: [], fallback: []}
+
+  defp merge(declared, nil), do: declared
+
+  defp merge(declared, configured) do
+    fallback = Enum.uniq(declared.fallback ++ configured.fallback) -- declared.shared
+    shared = Enum.uniq(declared.shared ++ configured.shared) -- fallback
+    %{shared: shared, fallback: fallback}
+  end
+
+  # The operator's `field_localization:` entry for this module's type, validated
+  # like the option; nil when there is none or it does not validate.
+  defp configured(module) do
+    with true <- function_exported?(module, :__kiln_content_type__, 0),
+         config when is_list(config) <- Application.get_env(:kiln_cms, :i18n, []),
+         true <- Keyword.keyword?(config),
+         entries when is_list(entries) <- Keyword.get(config, :field_localization),
+         true <- Keyword.keyword?(entries),
+         entry when not is_nil(entry) <- Keyword.get(entries, module.__kiln_content_type__()) do
+      try do
+        validate!(entry, Ash.Resource.Info.attribute(module, :excerpt) != nil)
+      rescue
+        error in ArgumentError ->
+          Logger.warning(
+            "ignoring :i18n field_localization for #{inspect(module)}: " <>
+              Exception.message(error)
+          )
+
+          nil
+      end
+    else
+      _none -> nil
+    end
+  end
 
   @doc "The custom-field modes in `definitions`, by field name, skipping `:localized`."
   @spec custom_fields([struct()]) :: %{String.t() => :shared | :fallback}

@@ -22,7 +22,7 @@ defmodule KilnCMS.I18n.Calculations.InheritedFields do
   @impl true
   def load(query, _opts, _context) do
     Enum.filter(
-      [:slug, :locale, :audience, :custom_fields, :type_definition_id] ++
+      [:org_id, :slug, :locale, :audience, :custom_fields, :type_definition_id] ++
         KilnCMS.I18n.FieldLocalization.fallbackable_attributes(),
       &Ash.Resource.Info.attribute(query.resource, &1)
     )
