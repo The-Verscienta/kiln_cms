@@ -1046,7 +1046,7 @@ defmodule KilnCMSWeb.EditorLive do
                 type="button"
                 id="save-view"
                 phx-click="open_save_view"
-                class="btn btn-sm btn-ghost text-primary"
+                class="btn btn-sm btn-ghost text-primary-ink"
               >
                 <.icon name="hero-bookmark" class="size-4" />
                 {gettext("Save view")}
