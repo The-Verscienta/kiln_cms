@@ -158,7 +158,7 @@ defmodule KilnCMS.CMS.SavedView do
     attribute :name, :string do
       allow_nil? false
       public? true
-      constraints min_length: 1, max_length: Limits.line(), trim?: true
+      constraints min_length: 1, max_length: Limits.identifier(), trim?: true
     end
 
     # String-keyed query parameters, as the content list's URL carries them.

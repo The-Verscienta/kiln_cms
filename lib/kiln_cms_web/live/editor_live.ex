@@ -2,8 +2,13 @@ defmodule KilnCMSWeb.EditorLive do
   @moduledoc """
   Content list / editor home (`/editor`) — browse pages and posts with their
   workflow state, create new content, jump into the block editor, and
-  publish/unpublish inline, with status + content-type + title filtering.
-  Editor/admin only.
+  publish/unpublish inline. Editor/admin only.
+
+  The list filters on status, type, title, author, category, tag, locale, an
+  update-date range and review health, and sorts by update, publish date or
+  title (#1593). All of it lives in the URL (`KilnCMSWeb.EditorLive.Filters`),
+  so a link, a refresh and the back button keep it. A filter can be saved as a
+  named view (`KilnCMS.CMS.SavedView`) next to a few built-in ones.
   """
   use KilnCMSWeb, :live_view
 
@@ -15,15 +20,14 @@ defmodule KilnCMSWeb.EditorLive do
   alias KilnCMS.Compliance.Settings
   alias KilnCMS.I18n
   alias KilnCMSWeb.ContentEditor.NewDraft
-  alias KilnCMSWeb.Params
+  alias KilnCMSWeb.ContentEditor.Shared
+  alias KilnCMSWeb.EditorLive.Filters
 
   import KilnCMSWeb.ComplianceComponents, only: [compliance_grade_badge: 1]
 
-  @statuses ~w(all draft in_review published archived)
-
   # Server-side page size. Each page pulls at most @page_size rows per content
-  # type from the DB (status/search filtered there too — audit U-M2) and keeps
-  # the merged newest @page_size, so any item is reachable via Load more.
+  # type from the DB (every filter runs there too — audit U-M2) and keeps the
+  # first @page_size of the merged order, so any item is reachable via Load more.
   @page_size 50
 
   # Past this many content types, the top bar's per-type "New …" buttons
@@ -32,6 +36,9 @@ defmodule KilnCMSWeb.EditorLive do
 
   @impl true
   def mount(_params, _session, socket) do
+    actor = socket.assigns.current_user
+    org = socket.assigns.current_org
+
     {:ok,
      socket
      |> assign(:actor, socket.assigns.current_user)
@@ -50,9 +57,40 @@ defmodule KilnCMSWeb.EditorLive do
      # mount) so the type filter, the "New …" buttons and the listing query all
      # read one freshly-loaded registry per navigation.
      |> assign(:max_inline_new_buttons, @max_inline_new_buttons)
-     |> assign(:statuses, @statuses)
+     |> assign(:statuses, Filters.statuses())
      |> assign(:selected, MapSet.new())
-     |> assign(:confirming_bulk, nil)}
+     |> assign(:confirming_bulk, nil)
+     # Facet choices (#1593). Loaded once per mount: a category or tag created
+     # in another tab shows up on the next visit, as the editor's pickers do.
+     |> assign(:authors, Shared.assignable_users(org))
+     |> assign(
+       :categories,
+       CMS.list_categories!(actor: actor, tenant: org, query: [sort: [name: :asc]])
+     )
+     |> assign(:tags, CMS.list_tags!(actor: actor, tenant: org, query: [sort: [name: :asc]]))
+     |> assign(:locales, I18n.locales())
+     |> assign(:show_filters?, false)
+     |> assign(:saving_view?, false)
+     |> assign(:renaming_view, nil)
+     |> assign(:confirming_view_delete, nil)
+     |> load_saved_views()}
+  end
+
+  # The actor's own views and the site's shared ones, plus which of them this
+  # actor may rename or delete (the policy decides; the buttons follow it).
+  defp load_saved_views(socket) do
+    %{actor: actor, current_org: org} = socket.assigns
+    views = CMS.list_saved_views!(actor: actor, tenant: org)
+
+    manageable =
+      for view <- views,
+          CMS.can_update_saved_view?(actor, view, %{}, tenant: org),
+          into: MapSet.new(),
+          do: view.id
+
+    socket
+    |> assign(:saved_views, views)
+    |> assign(:manageable_views, manageable)
   end
 
   # Only what the list renders — without a select, every row drags its whole
@@ -70,7 +108,9 @@ defmodule KilnCMSWeb.EditorLive do
     # A proposed publish date (#1812) is shown to the reviewer on the row.
     :proposed_publish_at,
     :unpublish_at,
-    :working_copy_at
+    :working_copy_at,
+    # The "Last published" sort's key — selected so keyset paging can read it.
+    :published_at
   ]
 
   # Only pulled for `in_review` (see `page_query/3`): the fields the compliance
@@ -79,13 +119,15 @@ defmodule KilnCMSWeb.EditorLive do
   # what the full advisory panel does per keystroke in the editor.
   @compliance_fields [:search_text, :seo_title, :seo_description, :locale, :org_id]
 
-  # (Re)load the first page under the active status/search filter.
+  # (Re)load the first page under the active filter.
   defp load_items(socket) do
-    {items, more?} = fetch_page(socket, nil)
+    {items, cursors} = fetch_page(socket, %{})
 
     socket
     |> assign(:items, items)
-    |> assign(:more?, more?)
+    |> assign(:cursors, cursors)
+    |> assign(:more?, more?(cursors))
+    |> assign(:total, count_items(socket))
     |> assign(:compliance_settings, compliance_settings(socket, items))
     |> assign_translated()
   end
@@ -96,7 +138,7 @@ defmodule KilnCMSWeb.EditorLive do
   # the badge, and `Settings.for_org/1` is a per-org (not per-request) cache,
   # so this is a real (if small) avoided cost, not just an unread assign.
   defp compliance_settings(socket, items) do
-    if socket.assigns.status == "in_review" and items != [],
+    if socket.assigns.filters["status"] == "in_review" and items != [],
       do: Settings.for_org(socket.assigns.current_org),
       else: nil
   end
@@ -150,56 +192,94 @@ defmodule KilnCMSWeb.EditorLive do
     %{grade: grade, total: 0, passed: 0, findings: []}
   end
 
-  # One page of `{kind, record}` tuples merged across every content type,
-  # newest-updated first, from `cursor` (exclusive) downwards. Keeping the
-  # merged newest @page_size is exact: the true next page can't contain more
-  # than @page_size rows of any single type.
-  defp fetch_page(socket, cursor) do
-    actor = socket.assigns.actor
-    org = socket.assigns.current_org
-    query = page_query(socket.assigns.status, socket.assigns.query, cursor)
+  # One page of `{kind, record}` tuples merged across every content type, in
+  # the filter's order, continuing from `cursors` — per type, the keyset of the
+  # last row of that type already shown, or `:done`.
+  #
+  # Each type is read as its own keyset page and the pages are merged by always
+  # taking the earliest head, so what a type contributes is always a prefix of
+  # its page. The next cursor for that type is then exactly its last shown row:
+  # nothing is skipped or repeated whatever the sort, and a type that ran out
+  # is not queried again.
+  defp fetch_page(socket, cursors) do
+    %{actor: actor, current_org: org, filters: filters} = socket.assigns
+    query = page_query(filters, actor)
 
-    per_type =
-      Enum.map(filtered_types(socket), fn ct ->
+    streams =
+      for ct <- filtered_types(socket), Map.get(cursors, type_value(ct)) != :done do
+        cursor = Map.get(cursors, type_value(ct))
+        page_opts = if cursor, do: [limit: @page_size, after: cursor], else: [limit: @page_size]
+
         # Dispatch on the descriptor itself so a type archived between listing
         # and dispatch can't turn into a registry-lookup miss. Scoped to the
         # current site's org (epic #336) so the index only lists this org's content.
-        ct
-        |> ContentTypes.list!(actor: actor, tenant: org, query: query)
-        |> Enum.map(&{ct.type, &1})
+        page = ContentTypes.list!(ct, actor: actor, tenant: org, query: query, page: page_opts)
+        %{key: type_value(ct), kind: ct.type, rows: page.results, more?: page.more?}
+      end
+
+    {items, taken} = merge(streams, filters, @page_size, [], %{})
+
+    cursors =
+      Enum.reduce(streams, cursors, fn %{key: key} = stream, acc ->
+        shown = Map.get(taken, key, [])
+        left = length(stream.rows) - length(shown)
+
+        cond do
+          left == 0 and not stream.more? -> Map.put(acc, key, :done)
+          shown == [] -> acc
+          true -> Map.put(acc, key, hd(shown).__metadata__.keyset)
+        end
       end)
 
-    merged =
-      per_type
-      |> List.flatten()
-      |> Enum.sort_by(fn {_kind, r} -> r.updated_at end, {:desc, DateTime})
-
-    {page, rest} = Enum.split(merged, @page_size)
-
-    # More pages exist if we dropped merged rows, or any type filled its
-    # window (it may have more behind it even when everything merged fit).
-    {page, rest != [] or Enum.any?(per_type, &(length(&1) >= @page_size))}
+    {items, cursors}
   end
 
-  defp page_query(status, q, cursor) do
+  # Takes up to `n` rows off the heads of `streams` in the filter's order.
+  # `taken` holds each type's shown rows, newest-taken first.
+  defp merge(_streams, _filters, 0, acc, taken), do: {Enum.reverse(acc), taken}
+
+  defp merge(streams, filters, n, acc, taken) do
+    case Enum.filter(streams, &(&1.rows != [])) do
+      [] ->
+        {Enum.reverse(acc), taken}
+
+      live ->
+        first =
+          Enum.reduce(live, fn stream, best ->
+            if Filters.before?(filters, hd(stream.rows), hd(best.rows)), do: stream, else: best
+          end)
+
+        [row | rest] = first.rows
+        streams = Enum.map(streams, &if(&1.key == first.key, do: %{&1 | rows: rest}, else: &1))
+        taken = Map.update(taken, first.key, [row], &[row | &1])
+        merge(streams, filters, n - 1, [{first.kind, row} | acc], taken)
+    end
+  end
+
+  defp more?(cursors), do: Enum.any?(cursors, fn {_key, cursor} -> cursor != :done end)
+
+  # How many rows the filter matches across the types it reads — one count per
+  # type, through the same filters as the page (#1593).
+  defp count_items(socket) do
+    %{actor: actor, current_org: org, filters: filters} = socket.assigns
+    query = Filters.query_filters(filters, actor.id)
+
+    socket
+    |> filtered_types()
+    |> Enum.map(&ContentTypes.count!(&1, actor: actor, tenant: org, query: query))
+    |> Enum.sum()
+  end
+
+  defp page_query(filters, actor) do
     # Widened only for `in_review` (#856): the other filters never render the
     # compliance badge, so they keep the narrower select the comment on
     # `@list_fields` explains the cost of.
-    select = if status == "in_review", do: @list_fields ++ @compliance_fields, else: @list_fields
+    select =
+      if filters["status"] == "in_review",
+        do: @list_fields ++ @compliance_fields,
+        else: @list_fields
 
-    [
-      status != "all" && {:filter, [state: String.to_existing_atom(status)]},
-      q != "" && {:filter, search_filter(q)},
-      cursor && {:filter, expr(updated_at < ^cursor)}
-    ]
-    |> Enum.filter(&is_tuple/1)
-    |> Kernel.++(select: select, sort: [updated_at: :desc], limit: @page_size)
-  end
-
-  # Case-insensitive title/slug match; %, _ and \ in the input match literally.
-  defp search_filter(q) do
-    pattern = "%" <> String.replace(q, ~r/([\\%_])/, "\\\\\\1") <> "%"
-    expr(ilike(title, ^pattern) or ilike(slug, ^pattern))
+    Filters.query_filters(filters, actor.id) ++ [select: select, sort: Filters.sort(filters)]
   end
 
   # Everything editable here: compiled content types plus admin-defined dynamic
@@ -242,26 +322,125 @@ defmodule KilnCMSWeb.EditorLive do
   end
 
   # Filter state lives in the URL (audit U-M3): refresh, back button, and
-  # shared links keep the active status/search. Typing replaces the history
-  # entry so a search doesn't leave one entry per debounced keystroke.
-  # One form drives both selects, so a change to either arrives with the full
-  # filter state. The `type` select isn't rendered on a single-type site, hence
-  # the fallback to the active assign rather than a bare fetch.
-  def handle_event("filter", %{"status" => status} = params, socket) when is_binary(status) do
-    type = Map.get(params, "type", socket.assigns.type)
-    {:noreply, push_patch(socket, to: list_path(status, socket.assigns.query, type))}
+  # shared links keep the active filter. Typing replaces the history entry so
+  # a search doesn't leave one entry per debounced keystroke.
+  # One form drives every select, so a change to any arrives with the rest of
+  # the form; keys the form does not render (the `type` select on a single-type
+  # site, the panel's facets while it is closed) keep their current value.
+  # Every value is re-checked by `Filters.parse/2`, so a crafted payload can
+  # only narrow the list to nothing.
+  def handle_event("filter", params, socket) when is_map(params) do
+    form = Map.take(params, Filters.defaults() |> Map.keys() |> List.delete("q"))
+    {:noreply, patch_filters(socket, form)}
   end
 
-  # `is_binary(q)` guards the body's `String.replace/3` — a pushed `%{"q" => []}`
-  # matched this head and raised inside `search_filter/1` (#764). A wrong shape
-  # now falls through to the catch-all `KilnCMSWeb.MalformedEvent` appends.
+  # `is_binary(q)` guards against a pushed `%{"q" => []}` (#764). A wrong shape
+  # falls through to the catch-all `KilnCMSWeb.MalformedEvent` appends.
   def handle_event("search", %{"q" => q}, socket) when is_binary(q) do
-    path = list_path(socket.assigns.status, q, socket.assigns.type)
-    {:noreply, push_patch(socket, to: path, replace: true)}
+    {:noreply, patch_filters(socket, %{"q" => q}, replace: true)}
   end
 
   def handle_event("clear_filters", _params, socket) do
-    {:noreply, push_patch(socket, to: list_path("all", "", "all"), replace: true)}
+    {:noreply, push_patch(socket, to: ~p"/editor", replace: true)}
+  end
+
+  # A chip's remove button: back to that facet's default.
+  def handle_event("remove_filter", %{"key" => key}, socket) when is_binary(key) do
+    {:noreply, patch_filters(socket, %{key => Map.get(Filters.defaults(), key)})}
+  end
+
+  def handle_event("toggle_filters", _params, socket),
+    do: {:noreply, update(socket, :show_filters?, &(not &1))}
+
+  # --- saved views (#1593) ---------------------------------------------------
+
+  def handle_event("open_save_view", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:saving_view?, true)
+     |> assign(:renaming_view, nil)
+     |> assign(:confirming_view_delete, nil)}
+  end
+
+  def handle_event("cancel_save_view", _params, socket),
+    do: {:noreply, assign(socket, :saving_view?, false)}
+
+  def handle_event("save_view", %{"name" => name} = params, socket) when is_binary(name) do
+    %{actor: actor, current_org: org, filters: filters} = socket.assigns
+
+    attrs = %{
+      name: name,
+      params: Filters.to_params(filters),
+      # Only an admin is offered the box; the policy refuses it for anyone else.
+      shared: params["shared"] == "true"
+    }
+
+    case CMS.create_saved_view(attrs, actor: actor, tenant: org) do
+      {:ok, view} ->
+        {:noreply,
+         socket
+         |> assign(:saving_view?, false)
+         |> load_saved_views()
+         |> put_flash(:info, gettext("Saved the view “%{name}”.", name: view.name))}
+
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, view_error(error))}
+    end
+  end
+
+  def handle_event("start_rename_view", %{"id" => id}, socket) when is_binary(id) do
+    {:noreply,
+     socket
+     |> assign(:renaming_view, find_view(socket, id))
+     |> assign(:saving_view?, false)
+     |> assign(:confirming_view_delete, nil)}
+  end
+
+  def handle_event("cancel_rename_view", _params, socket),
+    do: {:noreply, assign(socket, :renaming_view, nil)}
+
+  def handle_event("rename_view", %{"view_id" => id, "name" => name}, socket)
+      when is_binary(id) and is_binary(name) do
+    %{actor: actor, current_org: org} = socket.assigns
+
+    with %{} = view <- find_view(socket, id),
+         {:ok, view} <- CMS.update_saved_view(view, %{name: name}, actor: actor, tenant: org) do
+      {:noreply,
+       socket
+       |> assign(:renaming_view, nil)
+       |> load_saved_views()
+       |> put_flash(:info, gettext("Renamed the view to “%{name}”.", name: view.name))}
+    else
+      nil -> {:noreply, assign(socket, :renaming_view, nil)}
+      {:error, error} -> {:noreply, put_flash(socket, :error, view_error(error))}
+    end
+  end
+
+  def handle_event("delete_view", %{"id" => id}, socket) when is_binary(id) do
+    {:noreply,
+     socket
+     |> assign(:confirming_view_delete, find_view(socket, id))
+     |> assign(:saving_view?, false)
+     |> assign(:renaming_view, nil)}
+  end
+
+  def handle_event("cancel_delete_view", _params, socket),
+    do: {:noreply, assign(socket, :confirming_view_delete, nil)}
+
+  def handle_event("confirm_delete_view", %{"id" => id}, socket) when is_binary(id) do
+    %{actor: actor, current_org: org} = socket.assigns
+
+    with %{} = view <- find_view(socket, id),
+         :ok <- CMS.destroy_saved_view(view, actor: actor, tenant: org) do
+      {:noreply,
+       socket
+       |> assign(:confirming_view_delete, nil)
+       |> load_saved_views()
+       |> put_flash(:info, gettext("Deleted the view “%{name}”.", name: view.name))}
+    else
+      nil -> {:noreply, assign(socket, :confirming_view_delete, nil)}
+      {:error, error} -> {:noreply, put_flash(socket, :error, view_error(error))}
+    end
   end
 
   def handle_event("toggle_select", %{"key" => key}, socket) when is_binary(key) do
@@ -474,13 +653,14 @@ defmodule KilnCMSWeb.EditorLive do
       nil ->
         {:noreply, assign(socket, :more?, false)}
 
-      {_kind, last} ->
-        {page, more?} = fetch_page(socket, last.updated_at)
+      {_kind, _last} ->
+        {page, cursors} = fetch_page(socket, socket.assigns.cursors)
 
         {:noreply,
          socket
          |> assign(:items, socket.assigns.items ++ page)
-         |> assign(:more?, more?)
+         |> assign(:cursors, cursors)
+         |> assign(:more?, more?(cursors))
          |> assign_translated()}
     end
   end
@@ -535,23 +715,33 @@ defmodule KilnCMSWeb.EditorLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    status = if params["status"] in @statuses, do: params["status"], else: "all"
     types = editable_types(socket.assigns.current_org.id, socket.assigns.actor)
+    socket = assign(socket, :content_types, types)
 
-    # An unknown `type` (hand-edited URL, or a type deleted/archived since the
-    # link was shared) falls back to "all" rather than listing nothing.
-    type = if params["type"] in Enum.map(types, &type_value/1), do: params["type"], else: "all"
+    # Every value is checked against what it can be (`Filters.parse/2`): an
+    # unknown `type` (hand-edited URL, or a type deleted/archived since the
+    # link was shared) falls back to "all" rather than listing nothing, and
+    # `?q[a]=1` — a MAP — reads as absent instead of raising (#764).
+    filters = Filters.parse(params, filter_ctx(socket))
 
     {:noreply,
      socket
-     |> assign(:content_types, types)
-     |> assign(:status, status)
-     |> assign(:type, type)
-     # `?q[a]=1` decodes to a MAP, which reached `search_filter/1`'s
-     # `String.replace/3` and raised (#764).
-     |> assign(:query, Params.string(params, "q", ""))
+     |> assign(:filters, filters)
+     |> assign(:status, filters["status"])
+     |> assign(:type, filters["type"])
+     |> assign(:query, filters["q"])
+     |> assign(:saving_view?, false)
+     |> assign(:renaming_view, nil)
+     |> assign(:confirming_view_delete, nil)
      |> load_releases()
      |> load_items()}
+  end
+
+  defp filter_ctx(socket) do
+    %{
+      types: Enum.map(socket.assigns.content_types, &type_value/1),
+      locales: socket.assigns.locales
+    }
   end
 
   # Releases still open for new content (#500), for the "Add to release" bulk
@@ -568,14 +758,32 @@ defmodule KilnCMSWeb.EditorLive do
     socket |> assign(:releases, releases) |> assign(:adding_to_release?, false)
   end
 
-  defp list_path(status, q, type) do
-    params =
-      [status: status, type: type, q: q]
-      |> Enum.reject(fn {k, v} -> v == "" or (k in [:status, :type] and v == "all") end)
-      |> Map.new()
+  defp list_path(filters), do: params_path(Filters.to_params(filters))
 
-    ~p"/editor?#{params}"
+  defp params_path(params) when params == %{}, do: ~p"/editor"
+  defp params_path(params), do: ~p"/editor?#{params}"
+
+  # A view's link: its params, re-read under today's types and locales so a
+  # stale view links to what it would actually show.
+  defp view_params(view, ctx), do: view.params |> Filters.parse(ctx) |> Filters.to_params()
+
+  # Patches the URL to the current filter with `changes` applied.
+  defp patch_filters(socket, changes, opts \\ []) do
+    filters =
+      socket.assigns.filters
+      |> Map.merge(changes)
+      |> Filters.parse(filter_ctx(socket))
+
+    push_patch(socket, Keyword.put(opts, :to, list_path(filters)))
   end
+
+  # Only views the actor can see are ever looked up: the id is client input.
+  defp find_view(socket, id), do: Enum.find(socket.assigns.saved_views, &(&1.id == id))
+
+  defp view_error(%Ash.Error.Forbidden{}),
+    do: gettext("You can't change that view. Only an admin can share or edit a shared view.")
+
+  defp view_error(_error), do: gettext("Give the view a name, up to 255 characters.")
 
   defp transition(socket, %{"kind" => kind, "id" => id}, verb) do
     actor = socket.assigns.actor
@@ -731,10 +939,8 @@ defmodule KilnCMSWeb.EditorLive do
 
     assigns =
       assigns
-      |> assign(
-        :filtering?,
-        assigns.status != "all" or assigns.type != "all" or assigns.query != ""
-      )
+      |> assign(:filtering?, Filters.active?(assigns.filters))
+      |> assign_views()
       |> assign(:selected_count, MapSet.size(assigns.selected))
       |> assign(:compiled_types, Enum.filter(assigns.content_types, &(&1.source == :compiled)))
       |> assign(:dynamic_types, Enum.filter(assigns.content_types, &(&1.source == :dynamic)))
@@ -799,81 +1005,416 @@ defmodule KilnCMSWeb.EditorLive do
           </p>
         </div>
 
-        <div :if={@items != [] or @filtering?} class="flex flex-wrap items-center gap-3">
-          <form id="content-filter" phx-change="filter" class="flex flex-wrap items-center gap-3">
-            <label for="content-status-filter" class="sr-only">{gettext("Filter by status")}</label>
-            <select
-              id="content-status-filter"
-              name="status"
-              aria-label={gettext("Filter by status")}
-              class="field-select w-auto"
-            >
-              <option :for={status <- @statuses} value={status} selected={status == @status}>
-                {status_filter_label(status)}
-              </option>
-            </select>
-            <%!-- Nothing to choose between on a single-type site, so the select
-                  only appears once there are at least two types. --%>
-            <label
-              :if={length(@content_types) > 1}
-              for="content-type-filter"
-              class="sr-only"
-            >
-              {gettext("Filter by type")}
-            </label>
-            <select
-              :if={length(@content_types) > 1}
-              id="content-type-filter"
-              name="type"
-              aria-label={gettext("Filter by type")}
-              class="field-select w-auto"
-            >
-              <option value="all" selected={@type == "all"}>{gettext("All types")}</option>
-              <%!-- Built-in vs admin-defined, same grouping the field-definition
-                    type picker uses. Only the "Custom" group is conditional —
-                    a site with no dynamic types shouldn't show an empty group. --%>
-              <optgroup :if={@compiled_types != []} label={gettext("Built-in")}>
-                <option
-                  :for={ct <- @compiled_types}
-                  value={type_value(ct)}
-                  selected={type_value(ct) == @type}
-                >
-                  {ct.label}
-                </option>
-              </optgroup>
-              <optgroup :if={@dynamic_types != []} label={gettext("Custom")}>
-                <option
-                  :for={ct <- @dynamic_types}
-                  value={type_value(ct)}
-                  selected={type_value(ct) == @type}
-                >
-                  {ct.label}
-                </option>
-              </optgroup>
-            </select>
-          </form>
-          <form id="content-search" phx-change="search" class="flex-1">
-            <label for="content-search-input" class="sr-only">{gettext("Search by title")}</label>
-            <input
-              id="content-search-input"
-              type="text"
-              name="q"
-              value={@query}
-              placeholder={gettext("Search by title")}
-              aria-label={gettext("Search by title")}
-              phx-debounce="200"
-              autocomplete="off"
-              class="field-input max-w-xs"
-            />
-          </form>
-          <button
-            :if={@filtering?}
-            type="button"
-            phx-click="clear_filters"
-            class="btn btn-sm btn-ghost text-base-content/70"
+        <%!-- Views (#1593): built-in filters with a name, then the actor's own
+              saved views and the site's shared ones. Each is a link to its
+              filter's URL, so it works without the socket, opens in a new
+              tab, and the back button walks between views. --%>
+        <nav
+          :if={@items != [] or @filtering? or @saved_views != []}
+          id="content-views"
+          aria-label={gettext("Views")}
+          class="space-y-2"
+        >
+          <ul class="flex flex-wrap items-center gap-1.5">
+            <li :for={view <- @default_views}>
+              <.link
+                patch={view.path}
+                id={"view-#{view.id}"}
+                aria-current={view.id == @active_view_id && "page"}
+                class="inline-flex items-center gap-1.5 rounded-full border border-base-content/15 px-3 py-1 text-sm text-base-content/80 transition-colors hover:border-base-content/30 hover:bg-base-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary aria-[current=page]:border-primary aria-[current=page]:bg-primary aria-[current=page]:text-primary-content"
+              >
+                {view.name}
+              </.link>
+            </li>
+            <li :for={view <- @saved_views}>
+              <.link
+                patch={params_path(view_params(view, @filter_ctx))}
+                id={"view-#{view.id}"}
+                aria-current={view.id == @active_view_id && "page"}
+                class="inline-flex items-center gap-1.5 rounded-full border border-base-content/15 px-3 py-1 text-sm text-base-content/80 transition-colors hover:border-base-content/30 hover:bg-base-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary aria-[current=page]:border-primary aria-[current=page]:bg-primary aria-[current=page]:text-primary-content"
+              >
+                <.icon
+                  :if={view.shared}
+                  name="hero-user-group"
+                  class="size-3.5"
+                />
+                <span :if={view.shared} class="sr-only">{gettext("Shared:")}</span>
+                {view.name}
+              </.link>
+            </li>
+            <li :if={@filtering? and is_nil(@active_view_id) and not @saving_view?}>
+              <button
+                type="button"
+                id="save-view"
+                phx-click="open_save_view"
+                class="btn btn-sm btn-ghost text-primary"
+              >
+                <.icon name="hero-bookmark" class="size-4" />
+                {gettext("Save view")}
+              </button>
+            </li>
+          </ul>
+
+          <form
+            :if={@saving_view?}
+            id="save-view-form"
+            phx-submit="save_view"
+            class="flex flex-wrap items-end gap-3 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm"
           >
-            {gettext("Clear filters")}
-          </button>
+            <div>
+              <label for="save-view-name" class="field-label">{gettext("View name")}</label>
+              <input
+                id="save-view-name"
+                type="text"
+                name="name"
+                required
+                maxlength="255"
+                autocomplete="off"
+                phx-mounted={JS.focus()}
+                class="field-input w-64"
+              />
+            </div>
+            <label :if={@tier == :admin} class="flex items-center gap-2 pb-2">
+              <input type="checkbox" name="shared" value="true" class="size-4 accent-primary" />
+              {gettext("Share with every editor on this site")}
+            </label>
+            <div class="ml-auto flex gap-2">
+              <button type="submit" class="btn btn-sm btn-primary">{gettext("Save view")}</button>
+              <button type="button" phx-click="cancel_save_view" class="btn btn-sm btn-default">
+                {gettext("Cancel")}
+              </button>
+            </div>
+          </form>
+
+          <%!-- The view on screen, when it is one this actor may change. --%>
+          <div
+            :if={@active_saved_view && MapSet.member?(@manageable_views, @active_saved_view.id)}
+            class="flex flex-wrap items-center gap-2 text-sm"
+          >
+            <span class="text-base-content/60">
+              {if @active_saved_view.shared,
+                do: gettext("Shared view, listed for every editor on this site."),
+                else: gettext("Your view. Only you can see it.")}
+            </span>
+            <button
+              :if={is_nil(@renaming_view) and is_nil(@confirming_view_delete)}
+              type="button"
+              phx-click="start_rename_view"
+              phx-value-id={@active_saved_view.id}
+              class="btn btn-sm btn-ghost"
+            >
+              {gettext("Rename")}
+            </button>
+            <button
+              :if={is_nil(@renaming_view) and is_nil(@confirming_view_delete)}
+              type="button"
+              phx-click="delete_view"
+              phx-value-id={@active_saved_view.id}
+              class="btn btn-sm btn-ghost hover:text-error"
+            >
+              {gettext("Delete view")}
+            </button>
+          </div>
+
+          <form
+            :if={@renaming_view}
+            id="rename-view-form"
+            phx-submit="rename_view"
+            class="flex flex-wrap items-end gap-3 rounded-lg border border-base-content/15 px-3 py-2 text-sm"
+          >
+            <input type="hidden" name="view_id" value={@renaming_view.id} />
+            <div>
+              <label for="rename-view-name" class="field-label">{gettext("New name")}</label>
+              <input
+                id="rename-view-name"
+                type="text"
+                name="name"
+                value={@renaming_view.name}
+                required
+                maxlength="255"
+                autocomplete="off"
+                phx-mounted={JS.focus()}
+                class="field-input w-64"
+              />
+            </div>
+            <div class="ml-auto flex gap-2">
+              <button type="submit" class="btn btn-sm btn-primary">{gettext("Rename")}</button>
+              <button type="button" phx-click="cancel_rename_view" class="btn btn-sm btn-default">
+                {gettext("Cancel")}
+              </button>
+            </div>
+          </form>
+
+          <div
+            :if={@confirming_view_delete}
+            id="delete-view-confirm"
+            role="alertdialog"
+            aria-labelledby="delete-view-prompt"
+            class="flex flex-wrap items-center gap-3 rounded border border-error/40 bg-error/10 px-3 py-2 text-sm"
+          >
+            <span id="delete-view-prompt">
+              {gettext("Delete the view “%{name}”? The content in it is not touched.",
+                name: @confirming_view_delete.name
+              )}
+            </span>
+            <div class="ml-auto flex gap-2">
+              <button
+                type="button"
+                phx-click="confirm_delete_view"
+                phx-value-id={@confirming_view_delete.id}
+                phx-mounted={JS.focus()}
+                class="btn btn-sm border-transparent bg-error text-error-content hover:opacity-90"
+              >
+                {gettext("Delete view")}
+              </button>
+              <button type="button" phx-click="cancel_delete_view" class="btn btn-sm btn-default">
+                {gettext("Cancel")}
+              </button>
+            </div>
+          </div>
+        </nav>
+
+        <div :if={@items != [] or @filtering?} class="space-y-3">
+          <div class="flex flex-wrap items-center gap-3">
+            <form id="content-search" phx-change="search" phx-submit="search" class="min-w-48 flex-1">
+              <label for="content-search-input" class="sr-only">{gettext("Search by title")}</label>
+              <input
+                id="content-search-input"
+                type="search"
+                name="q"
+                value={@query}
+                placeholder={gettext("Search by title")}
+                aria-label={gettext("Search by title")}
+                phx-debounce="200"
+                autocomplete="off"
+                class="field-input max-w-xs"
+              />
+            </form>
+            <form
+              id="content-filter"
+              phx-change="filter"
+              class="flex flex-wrap items-center gap-3"
+            >
+              <label for="content-status-filter" class="sr-only">{gettext("Filter by status")}</label>
+              <select
+                id="content-status-filter"
+                name="status"
+                aria-label={gettext("Filter by status")}
+                class="field-select w-auto"
+              >
+                <option :for={status <- @statuses} value={status} selected={status == @status}>
+                  {status_filter_label(status)}
+                </option>
+              </select>
+              <%!-- Nothing to choose between on a single-type site, so the select
+                    only appears once there are at least two types. --%>
+              <label
+                :if={length(@content_types) > 1}
+                for="content-type-filter"
+                class="sr-only"
+              >
+                {gettext("Filter by type")}
+              </label>
+              <select
+                :if={length(@content_types) > 1}
+                id="content-type-filter"
+                name="type"
+                aria-label={gettext("Filter by type")}
+                class="field-select w-auto"
+              >
+                <option value="all" selected={@type == "all"}>{gettext("All types")}</option>
+                <%!-- Built-in vs admin-defined, same grouping the field-definition
+                      type picker uses. Only the "Custom" group is conditional —
+                      a site with no dynamic types shouldn't show an empty group. --%>
+                <optgroup :if={@compiled_types != []} label={gettext("Built-in")}>
+                  <option
+                    :for={ct <- @compiled_types}
+                    value={type_value(ct)}
+                    selected={type_value(ct) == @type}
+                  >
+                    {ct.label}
+                  </option>
+                </optgroup>
+                <optgroup :if={@dynamic_types != []} label={gettext("Custom")}>
+                  <option
+                    :for={ct <- @dynamic_types}
+                    value={type_value(ct)}
+                    selected={type_value(ct) == @type}
+                  >
+                    {ct.label}
+                  </option>
+                </optgroup>
+              </select>
+              <label for="content-sort" class="sr-only">{gettext("Sort by")}</label>
+              <select
+                id="content-sort"
+                name="sort"
+                aria-label={gettext("Sort by")}
+                class="field-select w-auto"
+              >
+                <option
+                  :for={sort <- Filters.sorts()}
+                  value={sort}
+                  selected={sort == @filters["sort"]}
+                >
+                  {Filters.sort_label(sort)}
+                </option>
+              </select>
+              <button
+                type="button"
+                id="toggle-filters"
+                phx-click="toggle_filters"
+                aria-expanded={to_string(@show_filters?)}
+                aria-controls="content-facets"
+                class="btn btn-sm btn-default"
+              >
+                <.icon name="hero-adjustments-horizontal" class="size-4" />
+                {gettext("More filters")}
+                <.badge :if={@panel_count > 0} variant="primary">{@panel_count}</.badge>
+              </button>
+
+              <%!-- The facets past status and type, behind one toggle so the
+                    bar stays one row. Rendered inside the same form, so any
+                    change here arrives with the rest of the filter. --%>
+              <fieldset
+                :if={@show_filters?}
+                id="content-facets"
+                class="grid w-full grid-cols-1 gap-3 rounded-lg border border-base-content/10 bg-base-200/30 p-3 sm:grid-cols-2 lg:grid-cols-4"
+              >
+                <legend class="sr-only">{gettext("More filters")}</legend>
+                <div>
+                  <label for="content-author-filter" class="field-label">{gettext("Author")}</label>
+                  <select id="content-author-filter" name="author" class="field-select">
+                    <option value="">{gettext("Anyone")}</option>
+                    <option value="me" selected={@filters["author"] == "me"}>{gettext("Me")}</option>
+                    <option
+                      :for={{label, id} <- @authors}
+                      value={id}
+                      selected={@filters["author"] == id}
+                    >
+                      {label}
+                    </option>
+                  </select>
+                </div>
+                <div :if={@categories != []}>
+                  <label for="content-category-filter" class="field-label">
+                    {gettext("Category")}
+                  </label>
+                  <select id="content-category-filter" name="category" class="field-select">
+                    <option value="">{gettext("Any category")}</option>
+                    <option
+                      :for={category <- @categories}
+                      value={category.id}
+                      selected={@filters["category"] == category.id}
+                    >
+                      {category.name}
+                    </option>
+                  </select>
+                </div>
+                <div :if={@tags != []}>
+                  <label for="content-tag-filter" class="field-label">{gettext("Tag")}</label>
+                  <select id="content-tag-filter" name="tag" class="field-select">
+                    <option value="">{gettext("Any tag")}</option>
+                    <option :for={tag <- @tags} value={tag.id} selected={@filters["tag"] == tag.id}>
+                      {tag.name}
+                    </option>
+                  </select>
+                </div>
+                <div :if={length(@locales) > 1}>
+                  <label for="content-locale-filter" class="field-label">{gettext("Language")}</label>
+                  <select id="content-locale-filter" name="locale" class="field-select">
+                    <option value="">{gettext("Any language")}</option>
+                    <option
+                      :for={locale <- @locales}
+                      value={locale}
+                      selected={@filters["locale"] == locale}
+                    >
+                      {locale}
+                    </option>
+                  </select>
+                </div>
+                <div>
+                  <label for="content-health-filter" class="field-label">{gettext("Review")}</label>
+                  <select id="content-health-filter" name="health" class="field-select">
+                    <option value="">{gettext("Any")}</option>
+                    <option
+                      :for={health <- Filters.healths()}
+                      value={health}
+                      selected={@filters["health"] == health}
+                    >
+                      {Filters.health_label(health)}
+                    </option>
+                  </select>
+                </div>
+                <div>
+                  <label for="content-from-filter" class="field-label">
+                    {gettext("Updated from")}
+                  </label>
+                  <input
+                    id="content-from-filter"
+                    type="date"
+                    name="from"
+                    value={@filters["from"]}
+                    class="field-input"
+                  />
+                </div>
+                <div>
+                  <label for="content-to-filter" class="field-label">{gettext("Updated until")}</label>
+                  <input
+                    id="content-to-filter"
+                    type="date"
+                    name="to"
+                    value={@filters["to"]}
+                    class="field-input"
+                  />
+                </div>
+                <label class="flex items-center gap-2 self-end pb-2 text-sm">
+                  <input type="hidden" name="scheduled" value="" />
+                  <input
+                    id="content-scheduled-filter"
+                    type="checkbox"
+                    name="scheduled"
+                    value="1"
+                    checked={@filters["scheduled"] == "1"}
+                    class="size-4 accent-primary"
+                  />
+                  {gettext("Only scheduled to publish")}
+                </label>
+              </fieldset>
+            </form>
+          </div>
+
+          <%!-- One chip per active facet, each its own remove button. --%>
+          <div
+            :if={@chips != [] or @filtering?}
+            class="flex flex-wrap items-center gap-2"
+          >
+            <ul :if={@chips != []} id="content-filter-chips" class="flex flex-wrap gap-2">
+              <li :for={{key, label} <- @chips}>
+                <button
+                  type="button"
+                  phx-click="remove_filter"
+                  phx-value-key={key}
+                  aria-label={gettext("Remove filter: %{filter}", filter: label)}
+                  class="inline-flex items-center gap-1 rounded-full bg-primary/12 px-2.5 py-0.5 text-xs font-medium text-primary-ink transition-colors hover:bg-primary/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                >
+                  {label}
+                  <.icon name="hero-x-mark" class="size-3.5" />
+                </button>
+              </li>
+            </ul>
+            <span class="text-sm text-base-content/60" role="status" id="content-count">
+              {ngettext("%{count} item", "%{count} items", @total)}
+            </span>
+            <button
+              :if={@filtering?}
+              type="button"
+              phx-click="clear_filters"
+              class="btn btn-sm btn-ghost text-base-content/70"
+            >
+              {gettext("Clear filters")}
+            </button>
+          </div>
         </div>
 
         <div
@@ -1226,6 +1767,91 @@ defmodule KilnCMSWeb.EditorLive do
     </Layouts.console>
     """
   end
+
+  # The facets behind "More filters" — counted on its button.
+  @panel_keys ~w(author category tag locale health from to scheduled)
+
+  # The view on screen, if any: the first built-in or saved view whose filter
+  # is exactly the current one.
+  defp assign_views(assigns) do
+    ctx = %{types: Enum.map(assigns.content_types, &type_value/1), locales: assigns.locales}
+    current = Filters.to_params(assigns.filters)
+
+    defaults =
+      Enum.map(Filters.default_views(), fn view ->
+        Map.put(view, :path, params_path(view_params(view, ctx)))
+      end)
+
+    active_default = Enum.find(defaults, &(view_params(&1, ctx) == current))
+    active_saved = Enum.find(assigns.saved_views, &(view_params(&1, ctx) == current))
+
+    assigns
+    |> assign(:filter_ctx, ctx)
+    |> assign(:default_views, defaults)
+    |> assign(:active_saved_view, active_saved)
+    |> assign(:active_view_id, (active_default || active_saved || %{id: nil}).id)
+    |> assign(:chips, chips(assigns))
+    |> assign(
+      :panel_count,
+      assigns.filters |> Map.take(@panel_keys) |> Filters.to_params() |> map_size()
+    )
+  end
+
+  # `{key, label}` for every active facet but the sort, in a stable order.
+  defp chips(assigns) do
+    params = Filters.to_params(assigns.filters)
+
+    for key <- ~w(q status type author category tag locale health from to scheduled),
+        value = params[key],
+        not is_nil(value),
+        do: {key, chip_label(key, value, assigns)}
+  end
+
+  defp chip_label("q", q, _assigns), do: gettext("Title contains “%{text}”", text: q)
+
+  defp chip_label("status", status, _assigns),
+    do: gettext("Status: %{status}", status: Filters.status_label(status))
+
+  defp chip_label("type", type, assigns) do
+    label =
+      case Enum.find(assigns.content_types, &(type_value(&1) == type)) do
+        %{label: label} -> label
+        nil -> type
+      end
+
+    gettext("Type: %{type}", type: label)
+  end
+
+  defp chip_label("author", "me", _assigns), do: gettext("Author: me")
+
+  defp chip_label("author", id, assigns) do
+    case List.keyfind(assigns.authors, id, 1) do
+      {name, _id} -> gettext("Author: %{name}", name: name)
+      nil -> gettext("Author: a former member")
+    end
+  end
+
+  defp chip_label("category", id, assigns) do
+    case Enum.find(assigns.categories, &(&1.id == id)) do
+      %{name: name} -> gettext("Category: %{name}", name: name)
+      nil -> gettext("Category: a deleted category")
+    end
+  end
+
+  defp chip_label("tag", id, assigns) do
+    case Enum.find(assigns.tags, &(&1.id == id)) do
+      %{name: name} -> gettext("Tag: %{name}", name: name)
+      nil -> gettext("Tag: a deleted tag")
+    end
+  end
+
+  defp chip_label("locale", locale, _assigns),
+    do: gettext("Language: %{locale}", locale: locale)
+
+  defp chip_label("health", health, _assigns), do: Filters.health_label(health)
+  defp chip_label("from", date, _assigns), do: gettext("Updated from %{date}", date: date)
+  defp chip_label("to", date, _assigns), do: gettext("Updated until %{date}", date: date)
+  defp chip_label("scheduled", _value, _assigns), do: gettext("Scheduled to publish")
 
   # Humanized, localized labels for the status-filter <select> (#155). Accepts a
   # filter value string, including the "all" pseudo-state, or a workflow-state
