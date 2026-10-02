@@ -219,6 +219,28 @@ defmodule KilnCMSWeb.SyncControllerTest do
       assert warm == golden
     end
 
+    test "reads what the cache lacks in one query per type, not one per document",
+         %{conn: conn} = ctx do
+      for _ <- 1..4, do: published_post!(ctx)
+      page!(ctx)
+      KilnCMS.DataCase.drain_oban()
+      KilnCMS.Firing.Cache.clear()
+
+      # A page and the posts: two types, two queries.
+      assert {5, 2} =
+               artifact_queries(fn ->
+                 {items, _} = drain(conn, ctx, %{"initial" => "true"})
+                 length(items)
+               end)
+
+      # Warm, none.
+      assert {5, 0} =
+               artifact_queries(fn ->
+                 {items, _} = drain(conn, ctx, %{"initial" => "true"})
+                 length(items)
+               end)
+    end
+
     test "a republished document is served with its new artifact", %{conn: conn} = ctx do
       post = published_post!(ctx)
       {[first], _} = drain(conn, ctx, %{"initial" => "true"})
@@ -298,6 +320,39 @@ defmodule KilnCMSWeb.SyncControllerTest do
 
       {items, _} = drain(conn, ctx, %{"cursor" => cursor})
       assert Enum.sort(ids(items, "delete")) == Enum.sort([first.id, second.id])
+    end
+  end
+
+  # `fun`'s result, and how many queries it made of the artifact table.
+  defp artifact_queries(fun) do
+    test_pid = self()
+    handler = "sync-artifact-reads-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      handler,
+      [:kiln_cms, :repo, :query],
+      fn _event, _measurements, meta, _config ->
+        if self() == test_pid and meta[:source] == "published_artifacts",
+          do: send(test_pid, :artifact_query)
+      end,
+      nil
+    )
+
+    result =
+      try do
+        fun.()
+      after
+        :telemetry.detach(handler)
+      end
+
+    {result, count_messages(:artifact_query, 0)}
+  end
+
+  defp count_messages(message, count) do
+    receive do
+      ^message -> count_messages(message, count + 1)
+    after
+      0 -> count
     end
   end
 

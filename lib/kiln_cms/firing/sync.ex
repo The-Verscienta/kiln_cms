@@ -484,48 +484,87 @@ defmodule KilnCMS.Firing.Sync do
   # whole, the cursor does not move, and one retry after the fires land serves
   # all of it.
   #
-  # Only an outage stops the pass early: every further read would wait on the
-  # same dead database, and there is no queue to write to either.
+  # An outage answers `:unavailable` for the page: there is no queue to write
+  # to either.
   defp upserts(records, ctx) do
-    records
-    |> Enum.reduce_while({[], []}, fn record, {hits, misses} ->
-      case artifact(record, ctx) do
-        {:ok, body} -> {:cont, {[upsert(record, body, ctx) | hits], misses}}
-        :miss -> {:cont, {hits, [record | misses]}}
-        :unavailable -> {:halt, :unavailable}
-      end
-    end)
-    |> case do
+    case artifacts(records, ctx) do
       :unavailable ->
         :unavailable
 
-      {hits, []} ->
-        {:ok, Enum.reverse(hits)}
+      bodies ->
+        case Enum.reject(records, &Map.has_key?(bodies, &1.id)) do
+          [] ->
+            {:ok, Enum.map(records, &upsert(&1, Map.fetch!(bodies, &1.id), ctx))}
 
-      {_hits, misses} ->
-        misses
-        |> Enum.map(&{&1.org_id, Engine.document_type(&1), &1.id})
-        |> FireWorker.enqueue_backfill()
+          misses ->
+            misses
+            |> Enum.map(&{&1.org_id, Engine.document_type(&1), &1.id})
+            |> FireWorker.enqueue_backfill()
 
-        :backfilling
+            :backfilling
+        end
     end
   end
 
-  # The same cache-first artifact read delivery makes. A published document
-  # with no artifact yet is queued for firing (by `upserts/2`, with the rest of
-  # the page's misses) and the whole page retried — the alternative, an upsert
-  # without a body, is a copy the client can't use and won't be told about
-  # again until the document next changes.
+  # The page's artifact bodies by document id, cache first, as delivery reads
+  # them. A published document with no artifact yet is absent, so `upserts/2`
+  # queues it for firing with the rest of the page's misses and the whole page
+  # is retried — the alternative, an upsert without a body, is a copy the
+  # client can't use and won't be told about again until the document next
+  # changes.
   #
-  # A cached body comes back already encoded (`Cache.get_json/4`) and goes into
-  # the response as a `Jason.Fragment`: the same bytes encoding the body would
-  # give, without walking up to 500 artifact trees on every page (#1713).
-  defp artifact(record, ctx) do
+  # Two things keep a page cheap (#1713). A cached body comes back already
+  # encoded (`Cache.get_json/4`) and goes into the response as a
+  # `Jason.Fragment`: the same bytes encoding the body would give, without
+  # walking up to 500 artifact trees on every page. And what the cache does
+  # not hold is read in one query per content type, not one per document, then
+  # cached like delivery's own reads.
+  defp artifacts(records, ctx) do
+    {cached, uncached} = Enum.reduce(records, {%{}, []}, &cached_artifact(&1, &2, ctx))
+
+    uncached
+    |> Enum.group_by(&Engine.document_type/1, & &1.id)
+    |> Enum.reduce_while(cached, fn {type, ids}, bodies ->
+      case stored_artifacts(ctx.org_id, type, ids, ctx.surface) do
+        {:ok, stored} -> {:cont, Map.merge(bodies, stored)}
+        :unavailable -> {:halt, :unavailable}
+      end
+    end)
+  end
+
+  defp cached_artifact(record, {bodies, uncached}, ctx) do
     type = Engine.document_type(record)
 
-    case Cache.get_json(record.org_id, type, record.id, ctx.surface) do
-      {:ok, json} -> {:ok, Jason.Fragment.new(json)}
-      :miss -> Delivery.read_artifact(record.org_id, type, record.id, ctx.surface)
+    with :miss <- Cache.get_json(record.org_id, type, record.id, ctx.surface),
+         :miss <- Cache.get(record.org_id, type, record.id, ctx.surface) do
+      {bodies, [record | uncached]}
+    else
+      {:ok, json} when is_binary(json) ->
+        {Map.put(bodies, record.id, Jason.Fragment.new(json)), uncached}
+
+      {:ok, body} ->
+        {Map.put(bodies, record.id, body), uncached}
+    end
+  end
+
+  # `Delivery.read_artifact/4`'s database half, for many documents of one
+  # type: the same system actor, the same caching, the same re-fire of a stale
+  # row, and the same split of "not fired" (absent) from "database down".
+  defp stored_artifacts(org_id, type, ids, surface) do
+    case Firing.artifacts_for_documents(type, ids, surface,
+           actor: SystemActor.new(:delivery),
+           tenant: org_id
+         ) do
+      {:ok, artifacts} ->
+        {:ok,
+         Map.new(artifacts, fn %{document_id: id, body: body} = artifact ->
+           Cache.put(org_id, type, id, surface, body)
+           Engine.migrate_if_stale(org_id, type, id, artifact)
+           {id, body}
+         end)}
+
+      {:error, error} ->
+        if Delivery.db_unavailable?(error), do: :unavailable, else: {:ok, %{}}
     end
   end
 
