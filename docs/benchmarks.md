@@ -5,13 +5,13 @@ v1.0. This page records what each one measured, when, and how, including the
 ones that were missed (#1546). A missed metric is information for the 1.0
 decision, not an automatic blocker: the maintainer decides.
 
-| Metric | Result (2026-09-27) |
+| Metric | Result (at 1.0.0, 2026-10-02) |
 |---|---|
-| [Headless API p95 under 50 ms](#headless-api-p95-under-50-ms) | **Partly met.** Delivery, JSON:API and GraphQL reads: p95 under 43 ms with 50 concurrent clients. Search misses from 10 clients (#1712), and the sync API initial page from 10 (#1713) |
-| [Test coverage over 80%](#test-coverage-over-80) | **Met.** 87.1% on `main`, against a CI floor of 85.8 |
-| [Zero-downtime releases](#zero-downtime-releases) | **Not shown.** The pieces exist; no swap has been run under traffic, and no rule keeps migrations compatible with the release before them |
-| [An editor builds a page in under 5 minutes](#editor-page-building-and-beta-feedback) | **Not measured yet.** Round 1 recorded no Scenario A timings; round 2 (#59) measures it |
-| [Positive beta feedback](#editor-page-building-and-beta-feedback) | **Not measured yet.** Round 1 recorded no tester count or NPS; round 2 (#59) reports them |
+| [An editor builds a page in under 5 minutes](#editor-page-building-and-beta-feedback) | **Met.** Beta round 2 on `v1.0.0-rc.2`: all 10 testers finished Scenario A in under 5 minutes, average 3:33, with 5 non-technical authors (testers 6–10) |
+| [Positive beta feedback](#editor-page-building-and-beta-feedback) | **Met.** Round 2 rated it mostly B+ (about 8/10) and met the v1 bar; the same testers found no issues on `v1.0.0-rc.3` |
+| [Test coverage over 80%](#test-coverage-over-80) | **Met.** 87.7% on `main` at `v1.0.0-rc.3`, against a CI floor of 85.8 |
+| [Headless API p95 under 50 ms](#headless-api-p95-under-50-ms) | **Partly met** (measured 2026-09-27). Delivery, JSON:API and GraphQL reads: p95 under 43 ms with 50 concurrent clients. Search misses from 10 clients (#1712), and the sync API initial page from 10 (#1713) |
+| [Zero-downtime releases](#zero-downtime-releases) | **Not shown.** Migrations are now held to expand/contract in CI (#1716), but no swap has been run under traffic. The maintainer accepted shipping 1.0 without it (decision 2026-10-02) |
 
 ## Headless API p95 under 50 ms
 
@@ -149,12 +149,15 @@ which measured a single hot document.
 ## Test coverage over 80%
 
 **Met.** The `Coverage (full suite)` job of CI run
-[36356671129](https://github.com/The-Verscienta/kiln_cms/actions/runs/36356671129)
-on `main` at `1cc4d3c83` (2026-09-27, the v0.12.0 merge) reports
-**87.1%**: 36,356 of 41,713 relevant lines, over 1,016 files, merged from six
-shards by `mix kiln.coverage.merge`.
+[36945564023](https://github.com/The-Verscienta/kiln_cms/actions/runs/36945564023)
+on `main` at `ac52b7fcb` (2026-10-02, the `v1.0.0-rc.3` merge) reports
+**87.7%**: 39,710 of 45,270 relevant lines, over 1,050 files, merged from six
+shards by `mix kiln.coverage.merge`. At the v0.12.0 merge (`1cc4d3c83`,
+2026-09-27, run
+[36356671129](https://github.com/The-Verscienta/kiln_cms/actions/runs/36356671129))
+it was 87.1%.
 
-That is 7.1 points over the plan's 80%, and 1.3 over the floor CI enforces:
+That is 7.7 points over the plan's 80%, and 1.9 over the floor CI enforces:
 `minimum_coverage` in `coveralls.json` is 85.8 (#1526), and the job fails
 below it. The floor is set just under the measured number each time it moves,
 so coverage cannot silently slide back under the metric.
@@ -164,8 +167,12 @@ so coverage cannot silently slide back under the metric.
 The plan's wording is "deployed and stable on Coolify with zero-downtime
 releases". **This has not been shown.** Nobody has swapped one release for the
 next while traffic was flowing and counted the failed requests. The pieces a
-rolling deploy needs are mostly present. One rule is missing, and without it
-a rolling deploy is not safe.
+rolling deploy needs are present, including, since #1716, a rule that keeps
+each migration compatible with the release before it. What is missing is the
+demonstration.
+
+**The maintainer accepted shipping 1.0 without it (decision 2026-10-02).**
+The metric is recorded as missed, not as met.
 
 ### What exists
 
@@ -191,6 +198,13 @@ a rolling deploy is not safe.
 - **Platform notes.** [`deploy-platforms.md`](deploy-platforms.md) already
   says that Render's disk turns zero-downtime deploys off (the old instance
   stops before the new one starts), and how to avoid it: use object storage.
+- **Expand/contract migrations, enforced** (#1716). Every schema change
+  keeps working with the release before it: add first, stop reading, drop
+  in a later release ([`releasing.md`](releasing.md#migrations-expand-migrate-contract)).
+  `mix kiln.migrations.check` runs on every pull request and fails one that
+  adds a drop, rename, type change, `NOT NULL` tightening or blocking index
+  build without a `kiln:contract-ok` marker naming the shipped release that
+  stopped reading the old shape.
 - **Upgrade rehearsal** (#1540, `scripts/upgrade_rehearsal/`) proves that
   a database written by an older release migrates forward and reads back. It
   does not run the old and new code at the same time.
@@ -201,33 +215,29 @@ is deployed.
 
 ### What is missing
 
-1. **A migration-compatibility rule.** In a rolling deploy, the new release
-   migrates the database while the old one is still serving. Every
-   migration therefore has to work with the code of the release before it:
-   add first, stop reading, and drop in a *later* release (expand, then
-   contract). Kiln has no such rule, and has broken it: in
-   `20260919191545_drop_webhook_plaintext_secret.exs`, the commit that stopped
-   reading `webhook_endpoints.secret` also drops the column. Ash selects every
-   attribute by name, so an old replica's webhook reads fail from the moment
-   the new container has migrated until the old one is gone. Nothing in CI
-   checks for this (the upgrade rehearsal runs only the new code).
-2. **A demonstration.** Two releases behind one proxy, a request loop running,
+1. **A demonstration.** Two releases behind one proxy, a request loop running,
    the old one stopped with `SIGTERM` once the new one reports `/up`, and a
    count of non-2xx responses and connection errors. This was not done for
    #1546: the machine had no proxy (nginx, HAProxy, Caddy, Traefik) to put in
    front of them, and a hand-written proxy would test itself as much as Kiln.
-3. **The production target does not roll.** Production for this repository
+2. **The production target does not roll.** Production for this repository
    is one Coolify container, redeployed by hand
    ([`deploy.md`](deploy.md#platform-notes)). Whether Coolify overlaps the old
    and new containers depends on its rolling-update prerequisites (a health
    check, no fixed container name, no host port binding), and nobody has
    written down which ones this deployment meets. Its health check is `/live`,
    so Coolify's gate is "serving HTTP", not "database reachable".
+3. **The parts a schema rule cannot cover.** LiveView sessions reconnect,
+   jobs past the grace period are rescued and re-run, and readiness does not
+   flip before shutdown; [`releasing.md`](releasing.md#what-zero-downtime-does-and-does-not-cover)
+   lists them. The expand/contract check also judges only the migrations a
+   pull request adds: the history before #1716 is exempt, including
+   `20260919191545_drop_webhook_plaintext_secret.exs`, which dropped a
+   column in the same release that stopped reading it.
 
-The smallest honest next steps: write the expand-then-contract rule into
-[`releasing.md`](releasing.md) and the migration section of `CONTRIBUTING.md`;
-then run the demonstration above against two consecutive release images, on
-Coolify or with Docker Compose and Traefik, and record the error count here.
+The smallest honest next step: run the demonstration above against two
+consecutive release images, on Coolify or with Docker Compose and Traefik,
+and record the error count here.
 
 ## Editor page-building and beta feedback
 
@@ -250,8 +260,19 @@ What it did and did not record:
   measurable to "an editor builds a page in under 5 minutes" or to "positive
   beta feedback", and it cannot count toward the five-author minimum.
 
-**Round 2** (#59) runs against `v1.0.0-rc.2` (re-run; rc.1 sessions partly used a local build). For these metrics to be met it
-has to record, per tester, the Scenario A time (first click in the editor to
-Submit), whether the tester is non-technical, and the 0–10 rating. With round
-1 unrecorded, round 2 alone must supply all five authors, unless round 1's
-testers can still be counted from its sessions.
+**Round 2** (#59) ran against the published `v1.0.0-rc.2` image, a re-run
+after some rc.1 sessions had used a local build
+([roll-up in #59](https://github.com/The-Verscienta/kiln_cms/issues/59#issuecomment-5939367749)).
+It met the v1 bar:
+
+- **10 testers**: 1–5 technical, **6–10 non-technical authors**. With round 1
+  unrecorded, round 2 alone supplied the five-author minimum.
+- **Scenario A**: every tester finished in under 5 minutes, average **3:33**.
+  That is 100% against the bar's 80%.
+- **Rating**: mostly **B+, about 8/10**.
+- **Findings**: 0 S1; the S2 findings (#1815, #1843, and #1833, found while
+  fixing) were fixed before `v1.0.0-rc.3`, which carried every round-2 fix.
+  An earlier batch run on v0.12.1 by mistake (#1800–#1806) was fixed but not
+  counted toward the bar.
+
+The same testers then checked `v1.0.0-rc.3` and found no issues.

@@ -85,7 +85,7 @@ Deploy on Railway button for it can go in the README.
    Postgres 18 is not yet verified. The plain Railway Postgres template has
    no pgvector and will fail the first migration.
 2. **App service.** Add a service from the Docker image
-   `ghcr.io/the-verscienta/kiln_cms:0.12.1` with these variables:
+   `ghcr.io/the-verscienta/kiln_cms:1.0.0` with these variables:
 
    | Variable | Value |
    |----------|-------|
@@ -245,7 +245,7 @@ Migrations run on boot, as on any deployment.
 
 | Tag | Moves | Use it when |
 |-----|-------|-------------|
-| `0.12.0`, `1.0.3` (exact) | Never | **Recommended.** Every upgrade is a change you made and can roll back. |
+| `1.0.0`, `1.0.3` (exact) | Never | **Recommended.** Every upgrade is a change you made and can roll back. |
 | `1` (floating major, from 1.0.0) | To each new final `1.x` release: patches and minors | You want fixes without editing the tag, and accept a minor release, with its migrations, landing on the next restart or redeploy |
 | `latest` | To the highest final release, across majors | Trying Kiln out. Never for a site you keep |
 

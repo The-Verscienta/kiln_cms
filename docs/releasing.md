@@ -108,7 +108,7 @@ people to pass the flag reflexively.
    - [`.do/app.yaml`](../.do/app.yaml)
    - the Railway recipe in [`docs/deploy-platforms.md`](deploy-platforms.md)
 
-   and the `Pre-1.0 (vX.Y.Z)` line in
+   and the `Stable (vX.Y.Z)` line (and the exact-pin example below it) in
    [`README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/README.md).
    The
    `:latest` references in `README.md` and `docs/getting-started.md` float on

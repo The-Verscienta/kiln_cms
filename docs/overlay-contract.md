@@ -293,7 +293,7 @@ Stated rather than discovered later.
 
 ## Status of this document
 
-Kiln is pre-1.0. Until 1.0 the *covered* list above may itself gain and lose
-entries, and each change ships with a changelog entry saying so. At 1.0 this
-page becomes the definition of what a major bump means — and the reason a
-major is rare rather than routine.
+From 1.0.0 this page is the definition of what a major bump means — and the
+reason a major is rare rather than routine. Removing a covered surface, or
+changing what one means, takes a major release and goes through the
+deprecation path above; adding one does not.
