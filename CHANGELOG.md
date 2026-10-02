@@ -54,7 +54,17 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Added
+
+- **On Fly.io, Railway and DigitalOcean, rate limits can be per visitor:
+  `CLIENT_IP_HEADER` reads the platform proxy's own client-address header.**
+  ([#1548](https://github.com/The-Verscienta/kiln_cms/issues/1548) · [long form](docs/changelog/unreleased.md#on-fly-io-railway-and-digitalocean-rate-limits-can-be-per-visitor))
+
 ### Fixed
+
+- **CI no longer fails at random with "type `_oban_job_state` can not be
+  handled": the suite loads every database type before its first test.**
+  ([#1796](https://github.com/The-Verscienta/kiln_cms/issues/1796) · [long form](docs/changelog/unreleased.md#ci-no-longer-fails-at-random-with-type-oban-job-state-can-not-be))
 
 - **Concluding an experiment now refuses a winner that is not one of its own
   variants.**

@@ -70,16 +70,16 @@ defmodule KilnCMS.Test.TypeCache do
   def warm!(repo) do
     Ecto.Adapters.SQL.Sandbox.unboxed_run(repo, fn ->
       %{rows: rows} = repo.query!(types_sql())
-
-      case rows do
-        [] ->
-          :ok
-
-        rows ->
-          columns = Enum.map_join(rows, ", ", fn [_oid, name] -> "NULL::#{name}" end)
-          repo.query!("SELECT " <> columns)
-          :ok
-      end
+      load(repo, rows)
     end)
   end
+
+  defp load(_repo, []), do: :ok
+
+  defp load(repo, rows) do
+    repo.query!("SELECT " <> Enum.map_join(rows, ", ", &null_of/1))
+    :ok
+  end
+
+  defp null_of([_oid, name]), do: "NULL::" <> name
 end
