@@ -212,8 +212,8 @@ carries the reasoning.
   item_keys: [...]` gets a repeatable-row editor (one input per key) and a
   derived item schema; and live delivery renders a plugin block with its own
   `:web` serializer. Editing an installed plugin's `blocks/0` now recompiles
-  the registries baked from it (`Kiln.Plugins.CompileEdges`) rather than
-  needing `mix compile --force`. Blocks that define none of this render as
+  the registries baked from it (a compile-time edge from `Kiln.Plugins`)
+  rather than needing `mix compile --force`. Blocks that define none of this render as
   before. ([#1865](https://github.com/The-Verscienta/kiln_cms/pull/1865))
 
 ## Changed

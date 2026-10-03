@@ -1693,6 +1693,11 @@ msgstr "Ajouter une redirection"
 msgid "Add role"
 msgstr "Ajouter un rôle"
 
+#: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
+#, elixir-autogen, elixir-format
+msgid "Add row"
+msgstr "Ajouter une ligne"
+
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add rule"
