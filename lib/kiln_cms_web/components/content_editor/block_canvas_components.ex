@@ -22,6 +22,8 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
 
   import KilnCMSWeb.ContentEditor.Shared
 
+  alias KilnCMSWeb.ContentEditor.Localization
+
   attr :block_types, :list, required: true
   attr :id, :string, default: "block-inserter"
 
@@ -187,11 +189,20 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
   attr :locked_fields, :any, required: true
   attr :cursors, :any, required: true
 
+  # Field-level localization (#1327): a `localized: :shared` field is
+  # read-only on a translation, and an empty `localized: :fallback` field
+  # shows what it inherits. Inactive by default, which renders as before.
+  attr :localization, :map, default: nil
+  attr :kind, :any, default: nil
+
   def dsl_block_fields(assigns) do
     module = block_member(assigns.bf)
 
     assigns =
       assigns
+      |> assign(:module, module)
+      |> assign(:block_id, assigns.bf[:id].value)
+      |> assign(:localization, assigns.localization || Localization.inactive())
       |> assign(:primary, primary_field_name(module))
       |> assign(:fields, editable_scalar_fields(module, assigns.role))
 
@@ -211,7 +222,13 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
             field={@bf[field.name]}
             type="textarea"
             label={dsl_label(field.name)}
-            readonly={field_locked?(@locked_fields, @bf[field.name].name)}
+            readonly={
+              field_locked?(@locked_fields, @bf[field.name].name) or
+                Localization.locked?(@localization, {:block, @module, field.name})
+            }
+            placeholder={
+              Localization.placeholder(@localization, {:block, @module, field.name, @block_id})
+            }
             {field_attrs(@bf[field.name].name)}
           />
           <.field_cursors field={@bf[field.name].name} cursors={@cursors} />
@@ -222,6 +239,16 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
           field={@bf[field.name]}
           type={dsl_input_type(field.type)}
           label={dsl_label(field.name)}
+          readonly={Localization.locked?(@localization, {:block, @module, field.name})}
+          placeholder={
+            Localization.placeholder(@localization, {:block, @module, field.name, @block_id})
+          }
+        />
+        <Localization.localization_note
+          localization={@localization}
+          field={{:block, @module, field.name}}
+          kind={@kind}
+          inherited={Localization.inherited(@localization, {:block, @module, field.name, @block_id})}
         />
       </div>
     </div>

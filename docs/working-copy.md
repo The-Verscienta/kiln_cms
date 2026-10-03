@@ -217,6 +217,17 @@ published text back over it.
   what the copy holds.
 - *Publish changes* flushes first too, so what goes live is what is on screen.
 
+## Shared fields across locales
+
+With field-level localization (#1327, [localization workflows](localization-workflows.md)),
+a translation's `:shared` fields are copied from the default-locale variant
+when that variant publishes. The source's working copy is content like any
+other, so a shared value saved there is held until *Publish changes*. A
+translation's own pending copy is kept in step: the shared value is written
+into `working_blocks` / `working_fields` as well as the live columns, and the
+recorded base moves with it, so the copy is neither reverted by the next
+*Publish changes* nor reported as a conflict.
+
 ## Not in this change
 
 - **In-context editing** (`InContextEditLive`) and the write API's `PATCH`

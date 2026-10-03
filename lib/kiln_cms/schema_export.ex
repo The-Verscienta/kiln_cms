@@ -223,6 +223,32 @@ defmodule KilnCMS.SchemaExport do
   end
 
   defp content_schema(ct) do
+    ct
+    |> base_content_schema()
+    |> put_inherited_fields(ct)
+  end
+
+  # Field-level localization (#1327): a type that can inherit a value along
+  # the locale fallback chain fires an `inherited_fields` key naming what it
+  # filled. Optional — it is present only when something was inherited — and
+  # declared only on such a type, so every other type's schema is unchanged.
+  defp put_inherited_fields(schema, ct) do
+    if KilnCMS.I18n.FieldLocalization.inherits?(ct.resource, ct.field_definitions) do
+      put_in(schema, ["properties", "inherited_fields"], %{
+        "type" => "object",
+        "description" =>
+          "Which `:fallback` fields this variant left empty and inherited along the " <>
+            "site's locale fallback chain, and from which locale: `custom_fields` and " <>
+            "`blocks` (by block `_id`) nest, a record attribute maps straight to a " <>
+            "locale. Present only when something was inherited.",
+        "additionalProperties" => true
+      })
+    else
+      schema
+    end
+  end
+
+  defp base_content_schema(ct) do
     %{
       "type" => "object",
       "title" => document_title(ct.type),
@@ -267,8 +293,17 @@ defmodule KilnCMS.SchemaExport do
   end
 
   defp custom_field_schema(definition) do
-    base_custom_field_schema(definition.field_type, definition)
+    definition.field_type
+    |> base_custom_field_schema(definition)
+    |> put_localization(Map.get(definition, :localization))
   end
+
+  # Field-level localization (#1327), as `Kiln.Block.JsonSchema` annotates a
+  # block field: absent for the default, `:localized`.
+  defp put_localization(schema, mode) when mode in [:shared, :fallback],
+    do: Map.put(schema, "x-kiln-localization", to_string(mode))
+
+  defp put_localization(schema, _mode), do: schema
 
   defp base_custom_field_schema(:integer, _d), do: %{"type" => ["integer", "null"]}
   defp base_custom_field_schema(:float, _d), do: %{"type" => ["number", "null"]}

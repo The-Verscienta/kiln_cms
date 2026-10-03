@@ -60,6 +60,10 @@ Every summary line below that was shortened links to its own entry there.
   `CLIENT_IP_HEADER` reads the platform proxy's own client-address header.**
   ([#1548](https://github.com/The-Verscienta/kiln_cms/issues/1548) · [long form](docs/changelog/unreleased.md#on-fly-io-railway-and-digitalocean-rate-limits-can-be-per-visitor))
 
+- **Field-level localization: a field can be shared across a document's
+  locale variants, or inherited along the site's fallback chain when empty.**
+  ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) · [long form](docs/changelog/unreleased.md#field-level-localization))
+
 ### Fixed
 
 - **CI no longer fails at random with "type `_oban_job_state` can not be
