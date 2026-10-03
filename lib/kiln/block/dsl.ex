@@ -9,6 +9,7 @@ defmodule Kiln.Block.Field do
     :description,
     :editable_by,
     :translatable,
+    :localized,
     :__spark_metadata__
   ]
 
@@ -81,6 +82,18 @@ defmodule Kiln.Block.Dsl do
             "exporter cannot safely round-trip, which is *reported* rather than silently " <>
             "skipped; a **key list** names the translatable keys of an `{:array, :map}` " <>
             "field. See `Kiln.Block.Info.translatable/1`."
+      ],
+      localized: [
+        type: {:in, [:localized, :shared, :fallback]},
+        required: false,
+        doc:
+          "Whether this field's value differs between the locale variants of a document " <>
+            "(#1327). `:localized` (the default) — each variant holds its own value, as " <>
+            "always; `:shared` — one value for the document, owned by the default-locale " <>
+            "variant and copied into every sibling when it publishes; `:fallback` — an " <>
+            "empty value is filled along the site's locale fallback chain at delivery. " <>
+            "Independent of `translatable:`, which says whether a translator should see " <>
+            "the text. See `Kiln.Block.Info.localization/1`."
       ]
     ]
   }

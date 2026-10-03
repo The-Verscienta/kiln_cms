@@ -1,10 +1,11 @@
 # Field-level localization: design check
 
-**Status:** design check only. Nothing described here is built. This note is
-the v0.12 deliverable for
-[#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327). The feature
-itself was scheduled on 2026-09-18 (roadmap decision 2) to land **after 1.0,
-as an addition**. That schedule holds only if the feature can be added without
+**Status:** built in 1.1 as Design A, as an addition — see *How 1.1 built it*
+at the end, and [localization workflows](localization-workflows.md)
+for how to use it. The rest of this note is the v0.12 design check for
+[#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327), kept as it
+was written. The feature was scheduled on 2026-09-18 (roadmap decision 2) to
+land **after 1.0, as an addition**. That schedule holds only if the feature can be added without
 changing anything on the covered list in the
 [overlay contract](overlay-contract.md). This note checks whether it can.
 
@@ -240,3 +241,24 @@ should say so in review.
    not just this one. That is worth its own issue. It would be a breaking
    change for anyone already passing a junk key, so it is cheaper before the
    freeze than after, but it is not a precondition for this feature.
+
+## How 1.1 built it
+
+Design A, with no covered surface changed. Each part of the note maps to code:
+
+| The note says | 1.1 |
+|---|---|
+| A new `field` option, not `translatable:` | `localized: :localized \| :shared \| :fallback` on `Kiln.Block`'s `field`; `Kiln.Block.Info.localization/1`. `translatable:` keeps its meaning. |
+| A `localization` attribute on `FieldDefinition` | `FieldDefinition.localization` (`:localized` default), one expand-only core column; not `public?`, so the JSON:API and GraphQL field schemas are unchanged. Set on the Fields screen. |
+| A `KilnCMS.CMS.Content` option | `localization: [shared: [...], fallback: [...]]`, validated at build time, read back through a new `__kiln_localization__/0`. Core types opt in through `config :kiln_cms, :i18n, field_localization:`. |
+| Shared values copied when the source publishes, through a new internal write action | `:sync_shared_fields` (internal, unrouted, versioned, `optimistic_lock`), run by `KilnCMS.I18n.SharedFieldsWorker` as the `:localization` system actor after `:publish`, `:publish_scheduled`, `:publish_changes`, `:update` on a live row and `:restore_version`. Addressed by shared block `_id`; both trees are upcast by the union's `cast_stored`. |
+| A sibling's open working copy gets the value too | `working_blocks` / `working_fields` are patched and each matching `working_base` fingerprint moves with the live value (`KilnCMS.I18n.SharedFields`). |
+| `:fallback` filled at fire time, before render | `KilnCMS.I18n.FieldFallback.fill/2` in `Firing.Engine.fire/2`; the `:json` body gains `inherited_fields` only when something was inherited. The public page, which renders the record live, fills the same way. |
+| Staleness must not be cleared by a copy | `Translations.edited_at/2` judges a variant by its newest version not written by `:sync_shared_fields`. |
+| Re-fire fan-out | A publish re-fires the published siblings; a chain save queues `KilnCMS.I18n.RefireInheritingWorker`. |
+| An additive `x-kiln-localization` annotation | On block fields and custom fields in `KilnCMS.SchemaExport`; types that can inherit declare the optional `inherited_fields` key. |
+
+Beyond the note: JSON:API and GraphQL get the inherited values through a
+public `inherited_fields` calculation that neither serves unless asked for,
+and XLIFF leaves shared fields out.
+

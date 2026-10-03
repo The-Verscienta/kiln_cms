@@ -144,7 +144,8 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :position,
       :default,
       :compute,
-      :names_record
+      :names_record,
+      :localization
     ]
 
     create :create, primary?: true
@@ -187,7 +188,14 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # through the policy below and the bypass above.
     policy action_type(:read) do
       authorize_if {KilnCMS.Checks.SystemActor,
-                    subsystem: [:cms_bookkeeping, :cms_registry, :events, :firing, :schema_export]}
+                    subsystem: [
+                      :cms_bookkeeping,
+                      :cms_registry,
+                      :events,
+                      :firing,
+                      :localization,
+                      :schema_export
+                    ]}
 
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end
@@ -325,6 +333,25 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # matched as text, so a flag on a number or a media snapshot names
     # nothing.
     attribute :names_record, :boolean, allow_nil?: false, default: false, public?: true
+
+    # Field-level localization (#1327): whether this field's value differs
+    # between the locale variants of a document. `:localized` (the default) is
+    # what every field has always done — each variant keeps its own value.
+    # `:shared` keeps one value for the document: the default-locale variant
+    # owns it, and publishing that variant copies it into every sibling
+    # (`KilnCMS.I18n.SharedFields`). `:fallback` lets a variant leave the field
+    # empty and inherit the value along the site's fallback chain at delivery
+    # (`KilnCMS.I18n.FieldFallback`).
+    #
+    # Not `public?`: the JSON:API and GraphQL field schemas stay exactly what
+    # they were for every site, and `KilnCMS.SchemaExport` reports a
+    # non-default mode as `x-kiln-localization` instead.
+    attribute :localization, :atom do
+      allow_nil? false
+      default :localized
+      constraints one_of: [:localized, :shared, :fallback]
+      public? false
+    end
 
     # Optional default value (stored as a string, coerced to the field type when
     # an editor leaves the input blank).

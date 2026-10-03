@@ -54,9 +54,15 @@ defmodule KilnCMS.SchemaExportTest do
     test "a document schema mirrors the :json artifact's own keys", %{org: org} do
       page = SchemaExport.json_schema(org_id: org.id)["$defs"]["content_page"]
 
-      # Exactly the keys `KilnCMS.Firing.Engine.compose/4` writes for `:json`.
+      # Exactly the keys `KilnCMS.Firing.Engine.compose/4` writes for `:json`,
+      # plus the one optional key field-level localization adds (#1327):
+      # `inherited_fields` is declared on a type that can inherit along the
+      # locale fallback chain, and this suite registers a block with a
+      # `localized: :fallback` field (the fixture plugin's `product_card`).
       assert page["properties"] |> Map.keys() |> Enum.sort() ==
-               ~w(blocks custom_fields id locale slug title type)
+               ~w(blocks custom_fields id inherited_fields locale slug title type)
+
+      assert Enum.sort(page["required"]) == ~w(blocks custom_fields id locale slug title type)
 
       assert page["properties"]["type"] == %{"const" => "page"}
       assert page["properties"]["blocks"]["items"] == %{"$ref" => "#/$defs/block"}

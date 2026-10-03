@@ -61,6 +61,12 @@ Every summary line below that was shortened links to its own entry there.
   byte.
   ([#1713](https://github.com/The-Verscienta/kiln_cms/issues/1713) · [long form](docs/changelog/unreleased.md#the-sync-apis-first-page-stays-under-15-ms-p95-from-10-concurrent))
 
+### Added
+
+- **Field-level localization: a field can be shared across a document's
+  locale variants, or inherited along the site's fallback chain when empty.**
+  ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) · [long form](docs/changelog/unreleased.md#field-level-localization))
+
 ### Fixed
 
 - **Concluding an experiment now refuses a winner that is not one of its own

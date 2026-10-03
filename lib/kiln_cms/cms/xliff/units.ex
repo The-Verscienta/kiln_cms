@@ -100,6 +100,12 @@ defmodule KilnCMS.CMS.Xliff.Units do
   @spec record_fields() :: [atom()]
   def record_fields, do: @record_fields
 
+  # A record attribute the type shares across its locale variants (#1327) is
+  # not a translation job: the default-locale variant owns it, and publishing
+  # that variant overwrites whatever a translation held.
+  defp record_fields(record),
+    do: @record_fields -- KilnCMS.I18n.FieldLocalization.attributes(record).shared
+
   @doc """
   Every translation unit in `record`, in document order, plus the prose that
   was left out (see the moduledoc).
@@ -110,7 +116,7 @@ defmodule KilnCMS.CMS.Xliff.Units do
   @spec extract(struct()) :: {[unit()], [warning()]}
   def extract(record) do
     {units, warnings} =
-      Enum.reduce(@record_fields, {[], []}, fn field, acc ->
+      Enum.reduce(record_fields(record), {[], []}, fn field, acc ->
         collect(acc, record_unit(record, field))
       end)
 
@@ -156,7 +162,7 @@ defmodule KilnCMS.CMS.Xliff.Units do
     aliases = if identity_matches?(record, translations), do: %{}, else: aliases
 
     {attrs, state} =
-      Enum.reduce(@record_fields, {%{}, new_state()}, fn field, {attrs, state} ->
+      Enum.reduce(record_fields(record), {%{}, new_state()}, fn field, {attrs, state} ->
         apply_record_field(record, field, translations, attrs, state)
       end)
 
@@ -273,7 +279,15 @@ defmodule KilnCMS.CMS.Xliff.Units do
         {block, acc}
 
       module ->
-        translatable = Map.new(Kiln.Block.Info.translatable(module))
+        # A `localized: :shared` field (#1327) is not exported or imported,
+        # whatever `translatable:` says: its value is the default-locale
+        # variant's, copied into every translation when that one publishes.
+        translatable =
+          module
+          |> Kiln.Block.Info.translatable()
+          |> Map.new()
+          |> Map.drop(shared_fields(module))
+
         {walked, materialized?} = materialize_legacy_html(block, module)
 
         {walked, acc} =
@@ -291,6 +305,10 @@ defmodule KilnCMS.CMS.Xliff.Units do
   end
 
   defp walk_block(other, _index, _ctx, _fun, acc), do: {other, acc}
+
+  defp shared_fields(module) do
+    for {name, :shared} <- KilnCMS.I18n.FieldLocalization.block_fields(module), do: name
+  end
 
   # #1106. A `rich_text` block whose prose still lives in `legacy_html` (the
   # transitional stored TipTap HTML) has nothing in `body` to cut units from —
