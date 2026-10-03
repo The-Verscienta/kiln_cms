@@ -1252,12 +1252,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp fragment_ref_value(_ref), do: ""
 
   defp load_translations(socket) do
-    assign(
-      socket,
-      :translations,
+    coverage =
       KilnCMS.CMS.Translations.coverage(socket.assigns.kind, socket.assigns.record,
         actor: socket.assigns.actor,
         tenant: socket.assigns.current_org
+      )
+
+    socket
+    |> assign(:translations, coverage)
+    # Field-level localization (#1327): which fields are shared with the
+    # other locale variants (read-only on a translation) and what an empty
+    # fallback field inherits. Built from the coverage just read.
+    |> assign(
+      :localization,
+      KilnCMSWeb.ContentEditor.Localization.build(
+        socket.assigns.record,
+        Map.get(socket.assigns, :field_definitions, []),
+        coverage
       )
     )
   end
@@ -6162,8 +6173,31 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     "A short summary shown in listings and used as a fallback for social shares."
                   )
                 }
-                readonly={field_locked?(@locked_fields, "excerpt")}
+                readonly={
+                  field_locked?(@locked_fields, "excerpt") or
+                    KilnCMSWeb.ContentEditor.Localization.locked?(
+                      @localization,
+                      {:attribute, :excerpt}
+                    )
+                }
+                placeholder={
+                  KilnCMSWeb.ContentEditor.Localization.placeholder(
+                    @localization,
+                    {:attribute, :excerpt}
+                  )
+                }
                 {field_attrs("excerpt")}
+              />
+              <KilnCMSWeb.ContentEditor.Localization.localization_note
+                localization={@localization}
+                field={{:attribute, :excerpt}}
+                kind={@kind}
+                inherited={
+                  KilnCMSWeb.ContentEditor.Localization.inherited(
+                    @localization,
+                    {:attribute, :excerpt}
+                  )
+                }
               />
               <.field_cursors field="excerpt" cursors={@cursors} />
             </div>
@@ -6558,6 +6592,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           role={@tier}
                           locked_fields={@locked_fields}
                           cursors={@cursors}
+                          localization={@localization}
+                          kind={@kind}
                         />
                         <.item_rows_editor :if={row_editor_type?(block_type_string(bf))} bf={bf} />
                       </div>
@@ -6732,6 +6768,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               siblings={@siblings}
               field_definitions={@field_definitions}
               reference_options={@reference_options}
+              localization={@localization}
               a11y_report={@a11y_report}
               compliance_report={@compliance_report}
               seo_report={@seo_report}

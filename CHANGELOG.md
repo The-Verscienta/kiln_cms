@@ -66,6 +66,10 @@ Every summary line below that was shortened links to its own entry there.
   the editor, broken-reference warnings, and `incoming_links` on the API.**
   ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594) · [long form](docs/changelog/unreleased.md#reference-fields-are-also-link-edges))
 
+- **Field-level localization: a field can be shared across a document's
+  locale variants, or inherited along the site's fallback chain when empty.**
+  ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) · [long form](docs/changelog/unreleased.md#field-level-localization))
+
 ### Fixed
 
 - **Concluding an experiment now refuses a winner that is not one of its own

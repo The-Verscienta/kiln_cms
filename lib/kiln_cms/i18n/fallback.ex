@@ -58,10 +58,11 @@ defmodule KilnCMS.I18n.Fallback do
   ## Field-level localization (#1327)
 
   Resolution here is by *locale*, not by row, on purpose: `chain/4` returns the
-  ordered list of locales to try and knows nothing about documents. A
-  field-level model (one row, `%{locale => value}` per localized field) resolves
-  each field by walking the same list, so the chain a site configures now is
-  the chain its localized fields will use.
+  ordered list of locales to try and knows nothing about documents. Field-level
+  localization keeps one row per locale and fills a variant's empty
+  `:fallback` fields by walking the same list
+  (`KilnCMS.I18n.FieldFallback`), so the chain a site configures is the chain
+  its inherited fields use.
   """
 
   alias KilnCMS.I18n

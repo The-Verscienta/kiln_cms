@@ -1431,6 +1431,11 @@ msgstr ""
 msgid "Accounts belong to the whole deployment, so your provider can only sign in addresses in the domains you verify here. It can't sign in anyone who has access to another site, or who administers the deployment: they sign in with a password or an email link instead. A second factor, if the account has one, is still asked for."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Across locales"
+msgstr ""
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Action"
@@ -5731,6 +5736,11 @@ msgstr ""
 msgid "Embedded media"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor/localization.ex
+#, elixir-autogen, elixir-format
+msgid "Empty here, so readers get the %{locale} value."
+msgstr ""
+
 #: lib/kiln_cms_web/live/trash_live.ex
 #, elixir-autogen, elixir-format
 msgid "Empty trash"
@@ -7321,6 +7331,11 @@ msgstr ""
 msgid "Informational (info)"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Inherited when a translation leaves it empty"
+msgstr ""
+
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
 msgid "Inline scripts allowed by this site's policy"
@@ -7784,6 +7799,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Leave blank to use the slug URL above. Set a nested address such as /about/team and the slug URL redirects (301) to it; changing it later leaves a redirect behind on published content."
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor/localization.ex
+#, elixir-autogen, elixir-format
+msgid "Leave empty to inherit along the site's fallback chain."
 msgstr ""
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
@@ -9748,6 +9768,7 @@ msgstr ""
 msgid "Only: %{types}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor/localization.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -12701,6 +12722,28 @@ msgstr ""
 msgid "Shared draft preview — not the published page"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Shared values are copied to every translation when the default-locale version publishes."
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor/localization.ex
+#, elixir-autogen, elixir-format
+msgid "Shared with 1 other locale when you publish."
+msgid_plural "Shared with %{count} other locales when you publish."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/content_editor/localization.ex
+#, elixir-autogen, elixir-format
+msgid "Shared: edited in the %{locale} version."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Shared: one value, set in the default locale"
+msgstr ""
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Shipping a release needs admin access."
@@ -15347,6 +15390,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Trail for %{title}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Translated per locale"
 msgstr ""
 
 #: lib/kiln_cms_web/live/translations_live.ex

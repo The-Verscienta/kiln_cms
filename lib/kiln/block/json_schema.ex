@@ -347,7 +347,16 @@ defmodule Kiln.Block.JsonSchema do
     |> type_schema(!field.required)
     |> put_unless_nil("description", field.description)
     |> put_default(field.default)
+    |> put_localization(field.localized)
   end
+
+  # Field-level localization (#1327): a field that is not per-locale says so.
+  # Absent for `:localized` — the default, and every field before the option
+  # existed — so a block that declares nothing exports exactly what it did.
+  defp put_localization(schema, mode) when mode in [:shared, :fallback],
+    do: Map.put(schema, "x-kiln-localization", to_string(mode))
+
+  defp put_localization(schema, _mode), do: schema
 
   defp put_unless_nil(schema, _key, nil), do: schema
   defp put_unless_nil(schema, key, value), do: Map.put(schema, key, value)

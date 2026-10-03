@@ -37,6 +37,13 @@ defmodule KilnCMS.CMS.Content do
       and **omits** the per-type JSON:API/GraphQL surface and the
       `__kiln_content_type__` discovery hook (dynamic types are discovered
       from `TypeDefinition` rows, not modules). Default `false`.
+    * `:localization` — field-level localization of record attributes
+      (#1327), as `[shared: [...], fallback: [...]]`. A `shared:` attribute
+      has one value for the document, owned by the default-locale variant and
+      copied into its siblings when it publishes; a `fallback:` attribute left
+      empty on a variant is filled along the site's locale fallback chain at
+      delivery. See `KilnCMS.I18n.FieldLocalization` for the attributes each
+      list may name. Default: nothing shared, nothing inherited.
 
   Per-type extras (custom attributes, extra actions) are declared in the using
   module as usual — Spark merges them with what this macro injects.
@@ -61,7 +68,8 @@ defmodule KilnCMS.CMS.Content do
     :slug_pattern,
     :alias_pattern,
     :seo_title_pattern,
-    :seo_description_pattern
+    :seo_description_pattern,
+    :localization
   ]
 
   @doc false
@@ -330,6 +338,13 @@ defmodule KilnCMS.CMS.Content do
 
     seo_description_pattern =
       opts |> Keyword.get(:seo_description_pattern) |> KilnCMS.Seo.Pattern.validate!()
+
+    # Field-level localization of record attributes (#1327), e.g.
+    # `[shared: [:seo_image], fallback: [:excerpt]]` — see
+    # `KilnCMS.I18n.FieldLocalization`. Validated here, so a typo fails the
+    # build; left out, nothing is shared or inherited.
+    localization =
+      opts |> Keyword.get(:localization) |> KilnCMS.I18n.FieldLocalization.validate!(excerpt?)
 
     # Derive the per-type names from `type` by the project's naming convention.
     resource = __CALLER__.module
@@ -1752,6 +1767,17 @@ defmodule KilnCMS.CMS.Content do
         end
       end
 
+    # The record attributes this type shares across its locale variants or
+    # fills along the fallback chain (#1327) — `%{shared: [...], fallback:
+    # [...]}`, both empty unless the `localization:` option names some. On
+    # both tiers: the entry tier declares none, and answers so.
+    markers =
+      quote do
+        unquote(markers)
+
+        def __kiln_localization__, do: unquote(Macro.escape(localization))
+      end
+
     quote do
       use Ash.Resource,
         domain: unquote(domain),
@@ -2313,6 +2339,10 @@ defmodule KilnCMS.CMS.Content do
           # write-through, in-context editing) would leave the fired artifact
           # stale. `only_when: :published` keeps draft edits/autosaves silent.
           change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
+          # Field-level localization (#1327): copy shared values between the
+          # locale variants and re-fire the ones that inherit. A no-op until a
+          # type opts a field in.
+          change KilnCMS.I18n.Changes.EnqueueSharedFields
 
           unquote_splicing(merge_validations.())
 
@@ -2502,6 +2532,10 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.EnqueueOEmbed
           change KilnCMS.CMS.Changes.RecordPublishedVersion
           change KilnCMS.CMS.Changes.FireArtifacts
+          # Field-level localization (#1327): copy shared values between the
+          # locale variants and re-fire the ones that inherit. A no-op until a
+          # type opts a field in.
+          change KilnCMS.I18n.Changes.EnqueueSharedFields
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "updated"}
         end
 
@@ -2628,6 +2662,10 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.RecordPublishedVersion
           change KilnCMS.CMS.Changes.FireArtifacts
+          # Field-level localization (#1327): copy shared values between the
+          # locale variants and re-fire the ones that inherit. A no-op until a
+          # type opts a field in.
+          change KilnCMS.I18n.Changes.EnqueueSharedFields
           change KilnCMS.CMS.Changes.NotifyWebhooks
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :published}
           change KilnCMS.CMS.Changes.AutoCompleteTasks
@@ -2667,6 +2705,10 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.RecordPublishedVersion
           change KilnCMS.CMS.Changes.FireArtifacts
+          # Field-level localization (#1327): copy shared values between the
+          # locale variants and re-fire the ones that inherit. A no-op until a
+          # type opts a field in.
+          change KilnCMS.I18n.Changes.EnqueueSharedFields
           change KilnCMS.CMS.Changes.NotifyWebhooks
           change {KilnCMS.CMS.Changes.NotifyWorkflowEmail, event: :published}
           change KilnCMS.CMS.Changes.AutoCompleteTasks
@@ -2700,6 +2742,10 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.EnqueueOEmbed
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "updated", only_when: :published}
           change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
+          # Field-level localization (#1327): copy shared values between the
+          # locale variants and re-fire the ones that inherit. A no-op until a
+          # type opts a field in.
+          change KilnCMS.I18n.Changes.EnqueueSharedFields
         end
 
         update :unpublish do
@@ -3079,6 +3125,28 @@ defmodule KilnCMS.CMS.Content do
           change set_attribute(:search_text, arg(:search_text))
         end
 
+        # Internal: field-level localization's copy of a document's `:shared`
+        # values from its default-locale variant into this one (#1327), written
+        # by `KilnCMS.I18n.SharedFields` as the `:localization` system actor.
+        #
+        # Unlike the bookkeeping actions above this one changes content, so it
+        # keeps what a content change carries: it writes a version (the sync
+        # delta API reports the variant as an upsert), takes the optimistic
+        # lock (a copy racing an editor's save fails and the job retries on
+        # the fresh row), recomputes `search_text`, re-fires a published row
+        # and sends its `updated` webhook. What it does not take is input: the
+        # values ride in the changeset context (`Changes.ApplySharedFields`),
+        # so no API surface can reach it, and nothing routes it.
+        update :sync_shared_fields do
+          require_atomic? false
+          accept []
+          change optimistic_lock(:lock_version)
+          change KilnCMS.I18n.Changes.ApplySharedFields
+          change KilnCMS.CMS.Changes.SetSearchText
+          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
+          change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "updated", only_when: :published}
+        end
+
         # Internal: advance the materialized "what's on" sort key once an
         # occurrence has gone by (#766), written by `KilnCMS.Events.Sweep`.
         #
@@ -3294,12 +3362,21 @@ defmodule KilnCMS.CMS.Content do
           #     version its publish just wrote, or clears it on unpublish
           #     (`Changes.RecordPublishedVersion` / `ClearPublishedVersion`,
           #     as `KilnCMS.CMS.Bookkeeping.system/0`, #1659).
+          #   * `:sync_shared_fields` — copies the default-locale variant's
+          #     `:shared` field values into this variant (#1327,
+          #     `KilnCMS.I18n.SharedFields`). The one content write here, and
+          #     versioned like one: the values it writes are ones a person
+          #     already published on the source variant.
           #
-          # None accepts `:blocks`, all are ignored by PaperTrail, and none
-          # has a caller that is a person. Keep the list that way: an action
-          # anyone else calls does not belong in it. Each is admitted to the
-          # one subsystem that calls it (#1747).
-          forbid_unless action([:reindex_search_text, :set_embedding, :set_published_version_id])
+          # None accepts input, and none has a caller that is a person. Keep
+          # the list that way: an action anyone else calls does not belong in
+          # it. Each is admitted to the one subsystem that calls it (#1747).
+          forbid_unless action([
+                          :reindex_search_text,
+                          :set_embedding,
+                          :set_published_version_id,
+                          :sync_shared_fields
+                        ])
 
           authorize_if {KilnCMS.Checks.SystemActor,
                         subsystem: :firing, action: :reindex_search_text}
@@ -3308,6 +3385,9 @@ defmodule KilnCMS.CMS.Content do
 
           authorize_if {KilnCMS.Checks.SystemActor,
                         subsystem: :cms_bookkeeping, action: :set_published_version_id}
+
+          authorize_if {KilnCMS.Checks.SystemActor,
+                        subsystem: :localization, action: :sync_shared_fields}
         end
 
         # Publishing is an admin approval step — editors submit for review
@@ -3878,6 +3958,19 @@ defmodule KilnCMS.CMS.Content do
         # Carries no field values, so the non-`public?` `blocks` boundary and
         # `hide_inputs: [:blocks]` are untouched; drafts stay editor-scoped by
         # the row read policy.
+        # Field-level localization (#1327): the values this variant inherits
+        # along the site's locale fallback chain for the fields its type marks
+        # `:fallback`, each with the locale it came from —
+        # `%{"excerpt" => %{"value" => …, "locale" => "en"}, "custom_fields" =>
+        # %{"caption" => %{…}}}`. Empty when nothing is inherited. JSON:API and
+        # GraphQL serve it only when a client asks for it, so every existing
+        # response is unchanged; the row's own attributes are never rewritten.
+        calculate :inherited_fields, :map, KilnCMS.I18n.Calculations.InheritedFields do
+          public? true
+          filterable? false
+          sortable? false
+        end
+
         calculate :block_ids, {:array, :map}, KilnCMS.CMS.Calculations.BlockIds do
           public? true
           # No `expression/2`, so a filter or sort would raise out of AshSql as

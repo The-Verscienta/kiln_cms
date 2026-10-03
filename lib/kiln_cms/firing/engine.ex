@@ -63,6 +63,18 @@ defmodule KilnCMS.Firing.Engine do
     org_id = document.org_id
     start = System.monotonic_time()
 
+    # Field-level localization (#1327): a `:fallback` field this variant
+    # leaves empty is filled from the first sibling along the site's chain
+    # that has one, BEFORE anything renders, so every surface — and the
+    # search text recomputed below — sees the value a reader gets, in the
+    # shape the field declares. A point-in-time read (`custom_fields:
+    # :as_stored`) does not: today's siblings were not what was live then.
+    # A no-op for a type that declares no `:fallback` field.
+    {document, inherited} =
+      if Keyword.get(opts, :custom_fields, :recompute) == :recompute,
+        do: KilnCMS.I18n.FieldFallback.fill(document, actor: system_actor()),
+        else: {document, %{}}
+
     typed = document |> Map.get(:blocks) |> TypedBlocks.to_typed()
 
     # Reusable fragments are inlined here, once, before any surface renders
@@ -113,7 +125,7 @@ defmodule KilnCMS.Firing.Engine do
 
     artifacts =
       Map.new(@surfaces, fn surface ->
-        {surface, compose(document, expanded, custom, surface)}
+        {surface, document |> compose(expanded, custom, surface) |> annotate(surface, inherited)}
       end)
 
     if mode == :persist do
@@ -453,6 +465,15 @@ defmodule KilnCMS.Firing.Engine do
 
     Phoenix.PubSub.broadcast(KilnCMS.PubSub, "firing", {:fired, type, document.id})
   end
+
+  # The `:json` body names the fields it filled along the locale fallback
+  # chain, and from which locale (#1327) — additive, and absent unless
+  # something was inherited, so an artifact of a type that opted nothing in
+  # is byte-identical to what it was.
+  defp annotate(body, :json, inherited) when inherited != %{},
+    do: Map.put(body, "inherited_fields", inherited)
+
+  defp annotate(body, _surface, _inherited), do: body
 
   # ── per-surface composition (whole-doc artifact of per-block fragments, A1) ──
 

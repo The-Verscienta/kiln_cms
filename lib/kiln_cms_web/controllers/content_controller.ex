@@ -874,6 +874,12 @@ defmodule KilnCMSWeb.ContentController do
         nil
 
       record ->
+        # Field-level localization (#1327): the page renders the record live,
+        # so an empty `:fallback` field is filled here the way firing fills
+        # it for the artifacts. Cached with the rest of the payload; a
+        # sibling's publish busts every locale key of the slug.
+        {record, _inherited} = KilnCMS.I18n.FieldFallback.fill(record)
+
         %{
           record: record,
           blocks: blocks(record, org_id, audiences),
