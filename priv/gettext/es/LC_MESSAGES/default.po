@@ -12867,20 +12867,15 @@ msgstr "Compartir con todos los editores de este sitio"
 msgid "Shared draft preview — not the published page"
 msgstr "Vista previa de borrador compartida: no es la página publicada"
 
-#: lib/kiln_cms_web/live/editor_live.ex
-#, elixir-autogen, elixir-format
-msgid "Shared view, listed for every editor on this site."
-msgstr "Vista compartida, visible para todos los editores de este sitio."
-
-#: lib/kiln_cms_web/live/editor_live.ex
-#, elixir-autogen, elixir-format
-msgid "Shared:"
-msgstr "Compartida:"
-
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Shared values are copied to every translation when the default-locale version publishes."
 msgstr "Los valores compartidos se copian en cada traducción cuando se publica la versión del idioma predeterminado."
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Shared view, listed for every editor on this site."
+msgstr "Vista compartida, visible para todos los editores de este sitio."
 
 #: lib/kiln_cms_web/live/content_editor/localization.ex
 #, elixir-autogen, elixir-format
@@ -12888,6 +12883,11 @@ msgid "Shared with 1 other locale when you publish."
 msgid_plural "Shared with %{count} other locales when you publish."
 msgstr[0] "Se comparte con 1 idioma más al publicar."
 msgstr[1] "Se comparte con %{count} idiomas más al publicar."
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Shared:"
+msgstr "Compartida:"
 
 #: lib/kiln_cms_web/live/content_editor/localization.ex
 #, elixir-autogen, elixir-format

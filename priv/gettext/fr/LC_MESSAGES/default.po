@@ -12867,20 +12867,15 @@ msgstr "Partager avec tous les éditeurs de ce site"
 msgid "Shared draft preview — not the published page"
 msgstr "Aperçu de brouillon partagé — ce n'est pas la page publiée"
 
-#: lib/kiln_cms_web/live/editor_live.ex
-#, elixir-autogen, elixir-format
-msgid "Shared view, listed for every editor on this site."
-msgstr "Vue partagée, affichée pour tous les éditeurs de ce site."
-
-#: lib/kiln_cms_web/live/editor_live.ex
-#, elixir-autogen, elixir-format
-msgid "Shared:"
-msgstr "Partagée :"
-
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Shared values are copied to every translation when the default-locale version publishes."
 msgstr "Les valeurs partagées sont copiées dans chaque traduction quand la version dans la langue par défaut est publiée."
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Shared view, listed for every editor on this site."
+msgstr "Vue partagée, affichée pour tous les éditeurs de ce site."
 
 #: lib/kiln_cms_web/live/content_editor/localization.ex
 #, elixir-autogen, elixir-format
@@ -12888,6 +12883,11 @@ msgid "Shared with 1 other locale when you publish."
 msgid_plural "Shared with %{count} other locales when you publish."
 msgstr[0] "Partagé avec 1 autre langue à la publication."
 msgstr[1] "Partagé avec %{count} autres langues à la publication."
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Shared:"
+msgstr "Partagée :"
 
 #: lib/kiln_cms_web/live/content_editor/localization.ex
 #, elixir-autogen, elixir-format
