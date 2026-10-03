@@ -399,6 +399,22 @@ carries the reasoning.
   it as well. Test-only; nothing changes at runtime
   ([#1866](https://github.com/The-Verscienta/kiln_cms/pull/1866)).
 
+<a id="a-plugins-console-panels-no-longer-need-a-copy-of-the-cores-surface-test"></a>
+
+- **A plugin's console panels no longer need a copy of the core's surface test
+  in an overlay's composed suite.**
+  `SurfaceTest` pinned the console route list exactly, including the fixture
+  plugin's `/editor/fixture`, so a downstream plugin that mounts a panel
+  through `admin_routes/0` or `editor_routes/0` failed it unless the overlay
+  shipped a verbatim copy with its own path added, and re-copied it on every
+  core bump. Those routes are mounted inside the admin- and editor-gated live
+  sessions, so they are console by the router's own facts: the expected list
+  is now the core's routes plus every registered plugin's panel routes, taken
+  from `Kiln.Plugins`. Core routes stay pinned exactly, and a plugin panel
+  that stopped classifying as console still fails. An overlay can delete its
+  shadow. Test-only; nothing changes at runtime
+  ([#1864](https://github.com/The-Verscienta/kiln_cms/issues/1864)).
+
 ## Security
 
 <a id="content-links-readable-only-when-both-ends-are"></a>
