@@ -51,8 +51,21 @@ defmodule KilnCMS.SystemActorGrants do
       [resources, _actions, subsystems | _why] =
         line |> String.trim_leading("| ") |> String.split(" | ")
 
-      {Enum.map(ticked(resources), &Module.concat(KilnCMS, &1)), parse_grants(subsystems)}
+      {row_resources(resources), parse_grants(subsystems)}
     end
+  end
+
+  # The "(content)" row names the core's content types, but its grants come
+  # from `KilnCMS.CMS.Content`, which every content type an overlay registers
+  # in `:content_domains` uses too, so the row covers those types as well.
+  # Without this, a correct overlay's own content types admit subsystems "no
+  # row names".
+  defp row_resources(cell) do
+    named = Enum.map(ticked(cell), &Module.concat(KilnCMS, &1))
+
+    if String.contains?(cell, "(content)"),
+      do: Enum.uniq(named ++ Enum.map(KilnCMS.CMS.ContentTypes.all(), & &1.resource)),
+      else: named
   end
 
   defp parse_grants(cell) do
