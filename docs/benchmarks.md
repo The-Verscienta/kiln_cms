@@ -10,7 +10,7 @@ decision, not an automatic blocker: the maintainer decides.
 | [An editor builds a page in under 5 minutes](#editor-page-building-and-beta-feedback) | **Met.** Beta round 2 on `v1.0.0-rc.2`: all 10 testers finished Scenario A in under 5 minutes, average 3:33, with 5 non-technical authors (testers 6–10) |
 | [Positive beta feedback](#editor-page-building-and-beta-feedback) | **Met.** Round 2 rated it mostly B+ (about 8/10) and met the v1 bar; the same testers found no issues on `v1.0.0-rc.3` |
 | [Test coverage over 80%](#test-coverage-over-80) | **Met.** 87.7% on `main` at `v1.0.0-rc.3`, against a CI floor of 85.8 |
-| [Headless API p95 under 50 ms](#headless-api-p95-under-50-ms) | **Partly met** (measured 2026-09-27). Delivery, JSON:API and GraphQL reads: p95 under 43 ms with 50 concurrent clients. Search, re-measured 2026-10-02 after #1725: 14–19 ms alone and 18–60 ms with 10 clients (a common word misses, a rare one meets), 197–231 ms with 50 ([search, after #1725](#search-after-1725)); the sync API initial page misses from 10 (#1713) |
+| [Headless API p95 under 50 ms](#headless-api-p95-under-50-ms) | **Partly met** (measured 2026-09-27). Delivery, JSON:API and GraphQL reads: p95 under 43 ms with 50 concurrent clients. Search, re-measured 2026-10-02 after #1725: 14–19 ms alone and 18–60 ms with 10 clients (a common word misses, a rare one meets), 197–231 ms with 50 ([search, after #1725](#search-after-1725)). The sync API initial page, which missed from 10, is under 15 ms p95 from 10 since #1713 (re-measured 2026-10-02) |
 | [Zero-downtime releases](#zero-downtime-releases) | **Not shown.** Migrations are now held to expand/contract in CI (#1716), but no swap has been run under traffic. The maintainer accepted shipping 1.0 without it (decision 2026-10-02) |
 
 ## Headless API p95 under 50 ms
@@ -29,9 +29,11 @@ decision, not an automatic blocker: the maintainer decides.
   (51–79 ms). With 50 clients it takes 0.6–1.2 s, and an earlier run returned
   `500`s from pool exhaustion. The causes, with the profile and `EXPLAIN`
   output, are in #1712.
-- **Missed** by the sync API's initial page from 10 concurrent clients
-  (31–57 ms p95; 11–13 ms for one client). Sync is a mirror's replication
-  path, not a visitor-facing read, so this matters less; #1713.
+- **Met** by the sync API's initial page since #1713 (re-measured
+  2026-10-02): 3.6–14.1 ms p95 with 10 concurrent clients, where it took
+  31–57 ms. With 50 it is met warm (13–47 ms) and still missed cold
+  (220–237 ms), when every client finds the artifact cache freshly flushed
+  at once. See [Sync initial page, after #1713](#sync-initial-page-after-1713).
 
 The plan's wording is "for typical queries". A reader who counts search as
 typical should read this as *missed*.
@@ -121,6 +123,53 @@ warm. The others read PostgreSQL on every request, and their cold and warm
 rows differ mostly by noise. Search is the exception in the other
 direction: its warm runs repeat the same 50 queries, and its per-query
 analytics upsert makes concurrent identical searches wait on one row (#1712).
+
+### Sync initial page, after #1713
+
+Re-measured on 2026-10-02 with the same script, machine and corpus, and only
+the sync surface (`BENCH_ENDPOINTS=sync_initial BENCH_PROFILE=sync_initial`).
+The machine was busier than on 2026-09-27, and busier during the "after"
+runs than the "before" one; the load average is in each row.
+
+Server p95 in milliseconds:
+
+| Cache | C | Before (`cb1bd4f53`) | After, run 1 | After, run 2 |
+|---|---|---|---|---|
+| cold | 1 | 25.9 | 5.2 | 10.5 |
+| warm | 1 | 38.0 | 4.7 | 5.6 |
+| cold | 10 | 46.5 | 3.7 | 14.1 |
+| warm | 10 | 33.7 | 3.6 | 6.5 |
+| cold | 50 | 305.2 | 237.3 | 220.2 |
+| warm | 50 | 341.1 (86 × `503`) | 12.9 | 46.7 |
+| load average | | 17–20 | 19–36 | 37–46 |
+
+"After, run 1" is the change without the batched artifact read below, and
+"run 2" the change as merged. Throughput from 10 clients went from 263–345
+to 633–1,449 requests a second.
+
+The serial in-process profile (`BENCH_PROFILE=sync_initial`, 20 requests)
+went from 13.6 ms and 4.3 queries a request to 3.3–6.5 ms and 2 queries.
+What changed:
+
+- **No re-encoding.** Jason's string escaper, `escape_json_chunk`, had most of
+  the own time (9.0 M calls over 20 requests; 215 k after). Each request decoded 100
+  stored artifacts and encoded them again. The artifact cache now keeps each
+  body's JSON beside it, written in the same insert, and a page embeds it as a
+  `Jason.Fragment`.
+- **No exposure upsert for rows already there.** The `sync_exposures` bulk
+  upsert (2.1 ms a request) took a row lock on every row of the page, so
+  concurrent requests for one page waited on each other while holding a
+  connection. The page now reads which ids are recorded (0.3–0.6 ms) and
+  writes only the rest. The warm 50-client run before the change had 86
+  `503`s (pool-queue drops); neither run after it had any.
+- **One artifact query per type on a cold page**, not one per document.
+
+The `posts` read was not the problem: `EXPLAIN (ANALYZE, BUFFERS)` at the
+corpus scale (1,700 posts, after `ANALYZE`) walks `posts_pkey` in id order and
+stops after 110 rows, 0.7 ms, 113 buffers. No index was added.
+
+What remains is the cold 50-client case: 50 requests that all find the
+cache empty read and encode the same 100 artifacts at once.
 
 ### A second run
 

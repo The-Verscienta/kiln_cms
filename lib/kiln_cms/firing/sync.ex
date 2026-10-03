@@ -74,6 +74,7 @@ defmodule KilnCMS.Firing.Sync do
   alias KilnCMS.CMS.Audiences
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Firing
+  alias KilnCMS.Firing.Cache
   alias KilnCMS.Firing.Delivery
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Firing.FireWorker
@@ -110,6 +111,11 @@ defmodule KilnCMS.Firing.Sync do
           {:initial, DateTime.t(), after_key()}
           | {:delta, DateTime.t(), DateTime.t() | nil, after_key()}
 
+  @typedoc """
+  An upsert or a tombstone. An upsert's `artifact` is the fired body, either
+  as a map or, when it came from the cache, as a `Jason.Fragment` holding its
+  JSON. Both encode to the same bytes.
+  """
   @type item :: map()
 
   @type result ::
@@ -478,40 +484,94 @@ defmodule KilnCMS.Firing.Sync do
   # whole, the cursor does not move, and one retry after the fires land serves
   # all of it.
   #
-  # Only an outage stops the pass early: every further read would wait on the
-  # same dead database, and there is no queue to write to either.
+  # An outage answers `:unavailable` for the page: there is no queue to write
+  # to either.
   defp upserts(records, ctx) do
-    records
-    |> Enum.reduce_while({[], []}, fn record, {hits, misses} ->
-      case artifact(record, ctx) do
-        {:ok, body} -> {:cont, {[upsert(record, body, ctx) | hits], misses}}
-        :miss -> {:cont, {hits, [record | misses]}}
-        :unavailable -> {:halt, :unavailable}
-      end
-    end)
-    |> case do
+    case artifacts(records, ctx) do
       :unavailable ->
         :unavailable
 
-      {hits, []} ->
-        {:ok, Enum.reverse(hits)}
+      bodies ->
+        case Enum.reject(records, &Map.has_key?(bodies, &1.id)) do
+          [] ->
+            {:ok, Enum.map(records, &upsert(&1, Map.fetch!(bodies, &1.id), ctx))}
 
-      {_hits, misses} ->
-        misses
-        |> Enum.map(&{&1.org_id, Engine.document_type(&1), &1.id})
-        |> FireWorker.enqueue_backfill()
+          misses ->
+            misses
+            |> Enum.map(&{&1.org_id, Engine.document_type(&1), &1.id})
+            |> FireWorker.enqueue_backfill()
 
-        :backfilling
+            :backfilling
+        end
     end
   end
 
-  # The same cache-first artifact read delivery makes. A published document
-  # with no artifact yet is queued for firing (by `upserts/2`, with the rest of
-  # the page's misses) and the whole page retried — the alternative, an upsert
-  # without a body, is a copy the client can't use and won't be told about
-  # again until the document next changes.
-  defp artifact(record, ctx) do
-    Delivery.read_artifact(record.org_id, Engine.document_type(record), record.id, ctx.surface)
+  # The page's artifact bodies by document id, cache first, as delivery reads
+  # them. A published document with no artifact yet is absent, so `upserts/2`
+  # queues it for firing with the rest of the page's misses and the whole page
+  # is retried — the alternative, an upsert without a body, is a copy the
+  # client can't use and won't be told about again until the document next
+  # changes.
+  #
+  # Two things keep a page cheap (#1713). A cached body comes back already
+  # encoded (`Cache.get_json/4`) and goes into the response as a
+  # `Jason.Fragment`: the same bytes encoding the body would give, without
+  # walking up to 500 artifact trees on every page. And what the cache does
+  # not hold is read in one query per content type, not one per document, then
+  # cached like delivery's own reads.
+  defp artifacts(records, ctx) do
+    {cached, uncached} = Enum.reduce(records, {%{}, []}, &cached_artifact(&1, &2, ctx))
+
+    uncached
+    |> Enum.group_by(&Engine.document_type/1, & &1.id)
+    |> Enum.reduce_while(cached, fn {type, ids}, bodies ->
+      case stored_artifacts(ctx.org_id, type, ids, ctx.surface) do
+        {:ok, stored} -> {:cont, Map.merge(bodies, stored)}
+        :unavailable -> {:halt, :unavailable}
+      end
+    end)
+  end
+
+  defp cached_artifact(record, {bodies, uncached}, ctx) do
+    type = Engine.document_type(record)
+
+    with :miss <- Cache.get_json(record.org_id, type, record.id, ctx.surface),
+         :miss <- Cache.get(record.org_id, type, record.id, ctx.surface) do
+      {bodies, [record | uncached]}
+    else
+      {:ok, json} when is_binary(json) ->
+        {Map.put(bodies, record.id, Jason.Fragment.new(json)), uncached}
+
+      {:ok, body} ->
+        {Map.put(bodies, record.id, body), uncached}
+    end
+  end
+
+  # `Delivery.read_artifact/4`'s database half, for many documents of one
+  # type: the same system actor, the same caching, the same re-fire of a stale
+  # row, and the same split of "not fired" (absent) from "database down".
+  defp stored_artifacts(org_id, type, ids, surface) do
+    case Firing.artifacts_for_documents(type, ids, surface,
+           actor: SystemActor.new(:delivery),
+           tenant: org_id
+         ) do
+      {:ok, artifacts} ->
+        {:ok,
+         Map.new(artifacts, fn %{document_id: id, body: body} = artifact ->
+           # `put/5` has just encoded the body; serve that rather than encode
+           # it a second time for the response.
+           Cache.put(org_id, type, id, surface, body)
+           Engine.migrate_if_stale(org_id, type, id, artifact)
+
+           case Cache.get_json(org_id, type, id, surface) do
+             {:ok, json} -> {id, Jason.Fragment.new(json)}
+             :miss -> {id, body}
+           end
+         end)}
+
+      {:error, error} ->
+        if Delivery.db_unavailable?(error), do: :unavailable, else: {:ok, %{}}
+    end
   end
 
   defp upsert(record, body, ctx) do
@@ -538,9 +598,23 @@ defmodule KilnCMS.Firing.Sync do
   # Remember what was disclosed, so a later tombstone may name it. Inside the
   # page's own request: a page that answered without recording would let the
   # document vanish without a tombstone.
+  #
+  # Only what is not recorded already, or recorded under another type name (a
+  # renamed dynamic type), is written. A mirror re-reads the same pages, and
+  # an upsert of rows that are already there still takes their row locks:
+  # concurrent requests for one page queued behind each other on them while
+  # each held a pool connection (#1713). A read of the page's ids by the
+  # `(org_id, document_id)` identity takes no lock. Rows are never deleted,
+  # so a row found here is still there when the page is answered.
   defp record_exposures([], _ctx), do: :ok
 
   defp record_exposures(records, ctx) do
+    recorded =
+      records
+      |> Enum.map(& &1.id)
+      |> Firing.sync_exposures_for!(actor: SystemActor.new(:sync), tenant: ctx.org_id)
+      |> Map.new(&{&1.document_id, &1.type_name})
+
     records
     |> Enum.map(fn record ->
       %{
@@ -550,6 +624,14 @@ defmodule KilnCMS.Firing.Sync do
         type_definition_id: Map.get(record, :type_definition_id)
       }
     end)
+    |> Enum.reject(&(recorded[&1.document_id] == &1.type_name))
+    |> write_exposures(ctx)
+  end
+
+  defp write_exposures([], _ctx), do: :ok
+
+  defp write_exposures(exposures, ctx) do
+    exposures
     |> Firing.record_sync_exposure!(
       actor: SystemActor.new(:sync),
       tenant: ctx.org_id,
