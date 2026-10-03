@@ -715,6 +715,10 @@ defmodule KilnCMSWeb.BlockComponents do
   # an empty `<p>`. Plugin field values are stored raw (`TypedBlocks` sanitizes
   # core types only), which is why `Kiln.Block.Renderer` makes escaping the
   # plugin's job — the same trust this HTML already has when fired.
+  # Reviewed XSS.Raw: `html` is the plugin's own escaping `:web` render, the
+  # exact fragment `Kiln.Firing.Engine` publishes unmodified as the `web`
+  # surface; marking it safe here grants it no trust it doesn't already have.
+  # sobelow_skip ["XSS.Raw"]
   defp view(block) do
     if plugin_block?(block) do
       html = block |> Blocks.render(:web) |> List.wrap() |> IO.iodata_to_binary()
