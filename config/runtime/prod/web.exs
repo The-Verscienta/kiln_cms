@@ -246,3 +246,11 @@ config :kiln_cms,
   token_signing_secret:
     System.get_env("TOKEN_SIGNING_SECRET") ||
       raise("Missing environment variable `TOKEN_SIGNING_SECRET`!")
+
+# A one-click platform's own client-address header (#1548): `fly-client-ip`,
+# `x-real-ip` (Railway) or `do-connecting-ip`. Honoured only when the variables
+# that platform's runtime sets are present too; otherwise refused and logged.
+# See `KilnCMSWeb.Plugs.ClientIp.header_setting/1`.
+config :kiln_cms,
+       :client_ip_header,
+       KilnCMSWeb.Plugs.ClientIp.header_setting(System.get_env())

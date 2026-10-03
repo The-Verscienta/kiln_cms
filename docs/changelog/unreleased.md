@@ -61,6 +61,37 @@ carries the reasoning.
 
 ## Added
 
+<a id="on-fly-io-railway-and-digitalocean-rate-limits-can-be-per-visitor"></a>
+
+- **On Fly.io, Railway and DigitalOcean, rate limits can be per visitor:
+  `CLIENT_IP_HEADER` reads the platform proxy's own client-address header.**
+  Per-IP rate limits, including the brute-force protection on `/sign-in` and
+  `/api/auth/sign_in`, need the client's address. Behind a proxy Kiln takes it
+  from `X-Forwarded-For`, but only once `TRUSTED_PROXIES` names the proxy, and
+  none of the one-click platforms publishes its proxy's address range. On
+  DigitalOcean, `X-Forwarded-For` holds the ingress address anyway. So those
+  deployments had one shared bucket for every visitor.
+
+  Each of three platforms writes the client address into a header of its own:
+  `Fly-Client-IP`, Railway's `X-Real-IP`, and DigitalOcean's
+  `do-connecting-ip`. Set `CLIENT_IP_HEADER` to one of them and Kiln uses it,
+  ahead of `TRUSTED_PROXIES`. A header is trusted with no peer check, which is
+  only safe where every request comes through the platform's proxy, so Kiln
+  also requires that platform's own variables (`FLY_APP_NAME` and
+  `FLY_MACHINE_ID`; `RAILWAY_SERVICE_ID` and `RAILWAY_ENVIRONMENT_ID`; `APP_ID`
+  bound to `${APP_ID}` on App Platform). Without them, or with any other header
+  name, the setting is ignored and one error is logged, so a copy on a server
+  the internet reaches directly can't let clients choose their own bucket.
+
+  `fly.toml` and `.do/app.yaml` now set it, and the Railway recipe lists it.
+  Render documents no such header and is unchanged. One gap is left: sockets
+  only receive `x-` headers, so on Fly and DigitalOcean the `/sign-in` form,
+  which submits over the live connection, still shares a bucket per
+  deployment. A new test also parses `render.yaml`, `fly.toml` and
+  `.do/app.yaml` and checks the pinned tag, secrets, database, health check
+  and header wiring (#1529).
+  ([#1548](https://github.com/The-Verscienta/kiln_cms/issues/1548))
+
 <a id="reference-fields-are-also-link-edges"></a>
 
 - **`:reference` custom fields are also `ContentLink` edges: *Linked from* in
@@ -136,6 +167,36 @@ carries the reasoning.
   ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327))
 
 ## Fixed
+
+<a id="ci-no-longer-fails-at-random-with-type-oban-job-state-can-not-be"></a>
+
+- **CI no longer fails at random with "type `_oban_job_state` can not be
+  handled": the suite loads every database type before its first test.**
+  Postgrex keeps one cache of database types per database, shared by the
+  whole pool, and loads a type it hasn't seen the first time a query uses
+  it. It adds a batch of new types in two steps: first the rows, then how to
+  decode each. A query on another connection that lands between the two
+  steps fails with "can not be handled", and a moment later the same query
+  works. A script that aims at that window reproduces it: 376 failures
+  across 6,000 freshly created types with 30 concurrent connections.
+
+  In CI every shard starts from an empty database, and `mix test` runs
+  `ash.setup` in the same VM, so the cache is filled before the migrations
+  create anything. The types they add were then first loaded by the test
+  suite, with eight async tests starting at once. Before 2026-10-01 that
+  included Oban's job-state enum, which a publish's unique job insert uses.
+  Today it is `citext`, `vector`, `halfvec` and `sparsevec`. Locally the test
+  database is usually migrated already, which is why it only failed in CI.
+
+  `test_helper.exs` now loads every such type in one query before ExUnit
+  starts, and a new test fails if any is missing from the cache when tests
+  run. It failed on all 27 completed fresh-database runs without the
+  warm-up and passed on all 30 with it. `KilnCMS.PostgrexTypes` also
+  registers pgvector's `halfvec` and `sparsevec` codecs, so every type the
+  extension installs can be loaded. Production is unaffected: its migrations
+  run in a separate VM before the server starts, so the server's cache is
+  filled after them.
+  ([#1796](https://github.com/The-Verscienta/kiln_cms/issues/1796))
 
 <a id="concluding-an-experiment-now-refuses-a-winner-that-is-not-one-of-its-own"></a>
 

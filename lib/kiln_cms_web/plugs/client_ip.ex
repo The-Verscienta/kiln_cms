@@ -10,6 +10,28 @@ defmodule KilnCMSWeb.Plugs.ClientIp do
   this is a no-op and `remote_ip` stays the direct peer — the correct behaviour
   for an internet-facing deployment where `X-Forwarded-For` is attacker-spoofable.
 
+  ## A platform's own client-address header (#1548)
+
+  Fly.io, Railway and DigitalOcean App Platform document no address range for
+  their proxies, so `TRUSTED_PROXIES` cannot be set there without guessing
+  (and on App Platform `X-Forwarded-For` carries the ingress address, not the
+  client's). Each proxy does write the client address into a header of its
+  own: `Fly-Client-IP`, `X-Real-IP` (Railway) and `do-connecting-ip`.
+
+  `CLIENT_IP_HEADER` names one of those three. It trusts a request header with
+  no peer check, which is safe only where every request reaches the app
+  through that platform's proxy, which sets or overwrites the header. So it is
+  honoured only when the environment variables that platform's runtime sets
+  are present too (`header_setting/1`); anywhere else it is refused, logged
+  once, and the plug behaves as if it were unset. When honoured it takes
+  precedence over `TRUSTED_PROXIES`; a request without the header (or with
+  something other than one address in it) falls through to the proxy path.
+
+  Sockets see only `x-` headers (see `resolve/2`), so Railway's `X-Real-IP`
+  reaches a `/live` handshake but `Fly-Client-IP` and `do-connecting-ip` do
+  not: there, socket buckets — including the `/sign-in` form's — stay keyed on
+  the proxy's address, the coarse but safe direction.
+
   The plug wraps `RemoteIp` rather than using it directly because the endpoint
   builds plug `init/1` at compile time, while the proxy list is only known at
   runtime; options are therefore built lazily on first use and cached.
@@ -60,11 +82,44 @@ defmodule KilnCMSWeb.Plugs.ClientIp do
   # widens this with it.
   @forwarding_headers RemoteIp.Options.default(:headers)
 
+  @refused_header_key {__MODULE__, :warned_refused_header?}
+
+  # The one-click platforms whose proxy puts the client address in a header of
+  # its own (#1548), and the environment variables that platform's runtime sets
+  # in every container. `CLIENT_IP_HEADER` is honoured only when ALL of that
+  # platform's markers are present, so a value copied into a deployment
+  # anywhere else — where any client could send the header and pick its own
+  # rate-limit bucket — does nothing but log.
+  #
+  # Render is absent on purpose: it documents no such header. Its
+  # `True-Client-IP` comes from the Cloudflare layer in front of it, which
+  # Render does not promise to keep.
+  @platform_headers %{
+    # Set by Fly Proxy on every request it forwards; Fly sets both variables
+    # in every Machine.
+    "fly-client-ip" => {"Fly.io", ["FLY_APP_NAME", "FLY_MACHINE_ID"]},
+    # Railway's edge sets X-Real-IP, overwriting a client's own; Railway sets
+    # both variables in every deployment.
+    "x-real-ip" => {"Railway", ["RAILWAY_SERVICE_ID", "RAILWAY_ENVIRONMENT_ID"]},
+    # App Platform injects no variable of its own, so the marker is the
+    # app-wide `${APP_ID}` binding, which only App Platform resolves.
+    # `.do/app.yaml` binds it; `header_setting/1` also requires it to be a UUID,
+    # so a hand-typed placeholder does not pass.
+    "do-connecting-ip" => {"DigitalOcean App Platform", ["APP_ID"]}
+  }
+
   @impl true
   def init(_opts), do: []
 
   @impl true
   def call(conn, _opts) do
+    case from_platform_header(conn.req_headers) do
+      nil -> call_proxies(conn)
+      client -> %{conn | remote_ip: client}
+    end
+  end
+
+  defp call_proxies(conn) do
     case proxies() do
       [] ->
         warn_once_if_forwarded(conn.req_headers)
@@ -104,6 +159,13 @@ defmodule KilnCMSWeb.Plugs.ClientIp do
   @spec resolve([{String.t(), String.t()}], :inet.ip_address() | nil) ::
           :inet.ip_address() | nil
   def resolve(x_headers, peer_address) do
+    case from_platform_header(x_headers) do
+      nil -> resolve_proxies(x_headers, peer_address)
+      client -> client
+    end
+  end
+
+  defp resolve_proxies(x_headers, peer_address) do
     case proxies() do
       [] ->
         warn_once_if_forwarded(x_headers)
@@ -167,7 +229,9 @@ defmodule KilnCMSWeb.Plugs.ClientIp do
     all traffic, and the per-IP brute-force protection on /sign-in and \
     /api/auth/sign_in is not per-IP. If this app sits behind a reverse proxy, set \
     TRUSTED_PROXIES to that proxy's CIDRs, e.g. \
-    TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12. If it is internet-facing and a \
+    TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12. On Fly.io, Railway or \
+    DigitalOcean App Platform, set CLIENT_IP_HEADER instead (see \
+    docs/deploy-platforms.md). If it is internet-facing and a \
     client simply sent the header, ignoring it is correct and this warning needs \
     no action. Logged once per node.\
     """)
@@ -176,6 +240,102 @@ defmodule KilnCMSWeb.Plugs.ClientIp do
   end
 
   defp proxies, do: Application.get_env(:kiln_cms, :trusted_proxies, [])
+
+  @doc """
+  What `CLIENT_IP_HEADER` resolves to, given the process environment (#1548).
+  Called by `config/runtime/prod/web.exs`; the result is
+  `config :kiln_cms, :client_ip_header`.
+
+    * `nil` — unset or blank. The header path is off.
+    * `{:header, name}` — honour `name`: it is a platform header, and every
+      marker variable that platform sets is present.
+    * `{:refused, name, reason}` — set, but not honoured. The plug logs
+      `reason` once, on the first request, and behaves as if it were unset.
+
+  Refusing rather than raising is deliberate: the safe fallback (the peer, or
+  `TRUSTED_PROXIES`) is a working deployment with coarser rate limits, and a
+  boot failure over a rate-limit setting would take the site down instead.
+  """
+  @spec header_setting(%{optional(String.t()) => String.t()}) ::
+          nil | {:header, String.t()} | {:refused, String.t(), String.t()}
+  def header_setting(env) do
+    case env |> Map.get("CLIENT_IP_HEADER", "") |> String.trim() |> String.downcase() do
+      "" -> nil
+      name -> header_setting(name, Map.fetch(@platform_headers, name), env)
+    end
+  end
+
+  defp header_setting(name, :error, _env) do
+    supported = @platform_headers |> Map.keys() |> Enum.sort() |> Enum.join(", ")
+
+    {:refused, name,
+     "CLIENT_IP_HEADER=#{name} is not a header Kiln knows a platform proxy to set. " <>
+       "Supported: #{supported}. Behind any other proxy, use TRUSTED_PROXIES."}
+  end
+
+  defp header_setting(name, {:ok, {platform, markers}}, env) do
+    case Enum.reject(markers, &marker_present?(&1, env)) do
+      [] ->
+        {:header, name}
+
+      missing ->
+        {:refused, name,
+         "CLIENT_IP_HEADER=#{name} is #{platform}'s client-address header, but " <>
+           "#{Enum.join(missing, " and ")} #{if match?([_], missing), do: "is", else: "are"} " <>
+           "not set, so this does not look like " <>
+           "#{platform}. Anywhere else a client can send that header itself and " <>
+           "choose its own rate-limit bucket, so it is being ignored."}
+    end
+  end
+
+  defp marker_present?("APP_ID" = var, env) do
+    case Ecto.UUID.cast(Map.get(env, var, "")) do
+      {:ok, _} -> true
+      :error -> false
+    end
+  end
+
+  defp marker_present?(var, env), do: String.trim(Map.get(env, var, "")) != ""
+
+  # The client address from the platform's own header, or nil to fall through
+  # to the `TRUSTED_PROXIES` path. A request without the header — a health
+  # probe, or one over the platform's private network that bypassed its proxy
+  # — falls through too, as does a value that is not exactly one address: the
+  # proxy writes a single address, so anything else did not come from it.
+  defp from_platform_header(headers) do
+    case Application.get_env(:kiln_cms, :client_ip_header) do
+      {:header, name} ->
+        with {_, value} <- List.keyfind(headers, name, 0),
+             {:ok, address} <- :inet.parse_strict_address(String.to_charlist(String.trim(value))) do
+          address
+        else
+          _ -> nil
+        end
+
+      {:refused, _name, reason} ->
+        log_refused_header_once(reason)
+        nil
+
+      _ ->
+        nil
+    end
+  end
+
+  defp log_refused_header_once(reason) do
+    if :persistent_term.get(@refused_header_key, false) do
+      :ok
+    else
+      :persistent_term.put(@refused_header_key, true)
+      Logger.error(reason <> " Logged once per node.")
+    end
+  end
+
+  @doc false
+  # Tests start from a known latch state, as with `reset_forwarding_warning/0`.
+  def reset_refused_header_warning do
+    :persistent_term.erase(@refused_header_key)
+    :ok
+  end
 
   # Keyed on the proxy list, not on a bare `:opts`, so changing the list at
   # runtime rebuilds rather than serving the CIDRs the node booted with.
