@@ -108,6 +108,28 @@ defmodule KilnCMS.Release do
   end
 
   @doc """
+  `mix kiln.links.backfill` for a release (#1594): write the reference edges
+  for `:reference` custom field values that have none, and delete the ones no
+  stored value implies.
+
+      bin/kiln_cms eval 'KilnCMS.Release.backfill_reference_links()'
+
+  The upgrade to 1.1 runs it once already; this is for a backup restored from
+  before it. Returns the counts `KilnCMS.CMS.ContentLinks.Backfill.run/1`
+  reports.
+  """
+  @spec backfill_reference_links() :: KilnCMS.CMS.ContentLinks.Backfill.result()
+  def backfill_reference_links do
+    load_app()
+
+    {:ok, result, _} =
+      Ecto.Migrator.with_repo(hd(repos()), &KilnCMS.CMS.ContentLinks.Backfill.run/1)
+
+    IO.puts("Reference links: #{result.inserted} written, #{result.deleted} removed.")
+    result
+  end
+
+  @doc """
   `mix kiln.deprecations` for a release (#1538, #1543): report the accounts and
   queued jobs still holding data only a removed surface read, and optionally
   move the accounts onto a membership first.
