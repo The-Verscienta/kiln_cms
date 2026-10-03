@@ -84,6 +84,51 @@ defmodule KilnCMS.FixturePlugin.RestrictedRequiredDefaultBlock do
   def search_text(block), do: block.locked_text || ""
 end
 
+defmodule KilnCMS.FixturePlugin.ProductCardBlock do
+  @moduledoc """
+  A plugin-contributed block type (test fixture) that opts fields into
+  field-level localization (#1327): the image and price are one value for the
+  whole document (`localized: :shared`), the caption falls back along the
+  site's locale chain when a variant leaves it empty (`localized: :fallback`),
+  and the name stays per locale, as every field always was.
+  """
+  use Kiln.Block
+
+  block :product_card do
+    field :name, :string
+    field :image_url, :string, translatable: false, localized: :shared
+    field :price, :integer, localized: :shared
+    field :caption, :string, localized: :fallback
+  end
+
+  @impl Kiln.Block.Renderer
+  def render(block, :web),
+    do: [
+      ~s(<figure class="product-card"><figcaption>),
+      esc(block.name || ""),
+      " — ",
+      esc(block.caption || ""),
+      "</figcaption></figure>"
+    ]
+
+  def render(block, :json),
+    do: %{
+      "_type" => "product_card",
+      "name" => block.name,
+      "image_url" => block.image_url,
+      "price" => block.price,
+      "caption" => block.caption
+    }
+
+  def render(_block, _surface), do: nil
+
+  @impl Kiln.Block.Renderer
+  def search_text(block),
+    do: [block.name, block.caption] |> Enum.reject(&(&1 in [nil, ""])) |> Enum.join(" ")
+
+  defp esc(value), do: value |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
+end
+
 defmodule KilnCMS.FixturePlugin.FieldTypes.Rating do
   @moduledoc """
   A plugin-contributed custom field type (test fixture, D18): a 1–5 star
@@ -234,7 +279,8 @@ defmodule KilnCMS.FixturePlugin do
     do: [
       KilnCMS.FixturePlugin.CalloutBlock,
       KilnCMS.FixturePlugin.RestrictedRequiredBlock,
-      KilnCMS.FixturePlugin.RestrictedRequiredDefaultBlock
+      KilnCMS.FixturePlugin.RestrictedRequiredDefaultBlock,
+      KilnCMS.FixturePlugin.ProductCardBlock
     ]
 
   @impl true

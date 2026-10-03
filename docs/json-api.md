@@ -417,6 +417,7 @@ default. `GET /api/json/open_api` describes each of them on the resource's
 | `effective_seo_title` | string | No — the author's `seo_title`, else the type's pattern expanded (#1102) |
 | `effective_seo_description` | string | No — same as above, for `seo_description` |
 | `related_links` | array | No — curated related links, projected to `[{id, title, slug}]` |
+| `inherited_fields` | object | No — what this locale variant inherits along the site's fallback chain for its `:fallback` fields, with the source locale: `{"excerpt": {"value", "locale"}, "custom_fields": {…}}` (#1327). Served only when asked for with `fields[<type>]=…` |
 
 "No" means exactly that — not merely undocumented as a filter or sort:
 `?filter[path]=…` is a clean `400 invalid_filter`, and `?sort=path` is
