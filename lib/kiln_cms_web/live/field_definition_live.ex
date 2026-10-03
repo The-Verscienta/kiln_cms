@@ -628,7 +628,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # contract, so a hand-rolled type without it shows nothing.
   defp plugin_type_description(type) do
     module = KilnCMS.CMS.FieldTypes.get(type)
-    if module && function_exported?(module, :description, 0), do: module.description()
+
+    # `Code.ensure_loaded?` first, like every other probe of an optional
+    # FieldType callback: `get/1` hands back an atom without loading it, and in
+    # interactive mode a not-yet-loaded module answers `function_exported?`
+    # with false — so the hint silently fell back to nothing.
+    if module && Code.ensure_loaded?(module) && function_exported?(module, :description, 0),
+      do: module.description()
   end
 
   defp content_type_label(type) do

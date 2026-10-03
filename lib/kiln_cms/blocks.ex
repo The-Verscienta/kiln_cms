@@ -96,6 +96,23 @@ defmodule KilnCMS.Blocks do
   @spec registry() :: %{atom() => module()}
   def registry, do: Map.new(modules(), &{Kiln.Block.Info.name(&1), &1})
 
+  @doc """
+  A block's optional editor metadata — `:label`, `:icon` or `:description`,
+  the `Kiln.Block.Renderer` callbacks of the same names — by `_type` string or
+  atom. `nil` when the type is unregistered or the block does not define it,
+  so callers keep their own default.
+  """
+  @spec editor_meta(String.t() | atom(), :label | :icon | :description) :: String.t() | nil
+  def editor_meta(type, key) when key in [:label, :icon, :description] do
+    with type_atom when not is_nil(type_atom) <- existing_atom(type),
+         {:ok, module} <- fetch(type_atom),
+         true <- Code.ensure_loaded?(module) and function_exported?(module, key, 0) do
+      apply(module, key, [])
+    else
+      _ -> nil
+    end
+  end
+
   @doc "Look up a block module by its `_type`."
   @spec fetch(atom()) :: {:ok, module()} | :error
   def fetch(type) when is_atom(type), do: Map.fetch(registry(), type)

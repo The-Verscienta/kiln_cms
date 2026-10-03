@@ -390,7 +390,7 @@ defmodule KilnCMSWeb.SystemLiveTest do
       {:ok, _lv, html} = live(conn, ~p"/editor/system")
 
       assert contribution_counts(html) == %{
-               "Blocks" => "4",
+               "Blocks" => "5",
                "Field types" => "3",
                "Nav items" => "1",
                "Admin routes" => "1",

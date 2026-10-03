@@ -54,5 +54,22 @@ defmodule Kiln.Block.Renderer do
   """
   @callback json_schema() :: map()
 
-  @optional_callbacks json_schema: 0
+  @doc """
+  The block's name in the editor — the inserter menu and the block's header.
+  Defaults to the humanized block name (`:dosage_table` → "Dosage table").
+
+  Optional, like `icon/0` and `description/0`: core blocks have their copy in
+  the editor itself, and these three exist so a **plugin** block (D18) can say
+  what it is without a core edit — before them every plugin block appeared as
+  its raw name, a generic icon and "Insert a block".
+  """
+  @callback label() :: String.t()
+
+  @doc "A Heroicon name (`\"hero-beaker\"`) for the inserter menu. Optional."
+  @callback icon() :: String.t()
+
+  @doc "One line under the label in the inserter menu. Optional."
+  @callback description() :: String.t()
+
+  @optional_callbacks json_schema: 0, label: 0, icon: 0, description: 0
 end

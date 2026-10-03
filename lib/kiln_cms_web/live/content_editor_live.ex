@@ -5644,7 +5644,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> Enum.map(fn type ->
       %{
         type: type,
-        label: dsl_label(type),
+        label: block_label(type),
         icon: block_icon(type),
         description: block_description(type)
       }
@@ -5672,13 +5672,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp block_icon("form"), do: "hero-clipboard-document-list"
   defp block_icon("fragment"), do: "hero-square-2-stack"
   defp block_icon("custom"), do: "hero-puzzle-piece"
-  defp block_icon(_), do: "hero-squares-2x2"
+  defp block_icon(type), do: KilnCMS.Blocks.editor_meta(type, :icon) || "hero-squares-2x2"
 
   # One-line description shown under the label in the inserter menu. Public
   # (`@doc false`) so a test can hold every core block type to a real
   # description — `form` and `fragment` fell through to the generic line for
-  # as long as nothing checked (#1760). A plugin block still gets the generic
-  # line: `Kiln.Block` has no description for this menu to read.
+  # as long as nothing checked (#1760). A plugin block supplies its own through
+  # the optional `description/0` (`Kiln.Block.Renderer`); without one it gets
+  # the generic line.
   @doc false
   @spec block_description(String.t()) :: String.t()
   def block_description("rich_text"), do: gettext("Formatted text with bold, italic, and lists")
@@ -5725,7 +5726,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
     do: gettext("Reusable content kept in one place — edit it once, every page using it updates")
 
   def block_description("custom"), do: gettext("Custom block payload")
-  def block_description(_), do: gettext("Insert a block")
+
+  def block_description(type),
+    do: KilnCMS.Blocks.editor_meta(type, :description) || gettext("Insert a block")
 
   # HTML the TipTap editor hydrates from. Canonical Portable Text (`body` —
   # what imports, visual editing, and the MCP tools write) takes precedence,
@@ -6318,7 +6321,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           kit's focus ring. --%>
                       <div class="mb-2 flex items-center justify-between gap-3">
                         <span class="text-xs font-semibold text-base-content/70">
-                          {dsl_label(block_type_string(bf))}
+                          {block_label(block_type_string(bf))}
                         </span>
                         <div
                           role="group"
@@ -6596,6 +6599,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                           kind={@kind}
                         />
                         <.item_rows_editor :if={row_editor_type?(block_type_string(bf))} bf={bf} />
+                        <.declared_rows_editor bf={bf} />
                       </div>
                       <%!-- Comments (#404) are rendered here, outside every
                           per-type branch above, so they apply to any block

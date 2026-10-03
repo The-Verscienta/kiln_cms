@@ -10,6 +10,7 @@ defmodule Kiln.Block.Field do
     :editable_by,
     :translatable,
     :localized,
+    :item_keys,
     :__spark_metadata__
   ]
 
@@ -94,6 +95,16 @@ defmodule Kiln.Block.Dsl do
             "empty value is filled along the site's locale fallback chain at delivery. " <>
             "Independent of `translatable:`, which says whether a translator should see " <>
             "the text. See `Kiln.Block.Info.localization/1`."
+      ],
+      item_keys: [
+        type: {:list, :atom},
+        required: false,
+        doc:
+          "For an `{:array, :map}` field: the keys each item holds, in the order an editor " <>
+            "should fill them. The content editor then offers the field as repeatable rows " <>
+            "with one input per key, and the exported schema describes each item as an " <>
+            "object of those string keys. Without it the field has no editor input at all — " <>
+            "it is still writable through `block_tree`. See `Kiln.Block.Info.item_keys/1`."
       ]
     ]
   }

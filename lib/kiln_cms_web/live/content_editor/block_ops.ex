@@ -25,7 +25,6 @@ defmodule KilnCMSWeb.ContentEditor.BlockOps do
   # Canonical definitions live in `KilnCMSWeb.ContentEditor.BlockParams`;
   # re-materialized as module attributes so the event-head guards below can
   # keep using them (guards need compile-time values).
-  @row_fields KilnCMSWeb.ContentEditor.BlockParams.row_fields()
   @nested_child_types KilnCMSWeb.ContentEditor.BlockParams.nested_child_types()
 
   def on_mount(:default, _params, _session, socket) do
@@ -124,8 +123,10 @@ defmodule KilnCMSWeb.ContentEditor.BlockOps do
   # same targeted-update pattern as `pick_image` at an index), so there's no
   # parallel socket state to keep in sync.
 
+  # `field` is checked against the block's own row fields in `update_item_rows/4`
+  # (the core row fields, or a block's declared `item_keys:` fields).
   defp on_event("item_row_add", %{"index" => index, "field" => field}, socket)
-       when field in @row_fields and is_binary(index) do
+       when is_binary(field) and is_binary(index) do
     halt(update_item_rows(socket, index, field, &(&1 ++ [%{}])))
   end
 
@@ -134,7 +135,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockOps do
          %{"index" => index, "field" => field, "item" => item},
          socket
        )
-       when field in @row_fields and is_binary(index) and is_binary(item) do
+       when is_binary(field) and is_binary(index) and is_binary(item) do
     halt(update_item_rows(socket, index, field, &List.delete_at(&1, to_int(item))))
   end
 
@@ -521,17 +522,29 @@ defmodule KilnCMSWeb.ContentEditor.BlockOps do
         {:noreply, socket}
 
       block ->
-        current = block |> Map.get(field) |> stringify_rows()
-        blocks = List.replace_at(blocks, index, Map.put(block, field, fun.(current)))
+        update_item_rows(socket, blocks, index, block, field, fun)
+    end
+  end
 
-        params =
-          socket.assigns.form
-          |> AshPhoenix.Form.params()
-          |> Map.put("blocks", blocks)
+  defp update_item_rows(socket, blocks, index, block, field, fun) do
+    type = block["_union_type"] || block["_type"]
 
-        socket = revalidate(socket, params)
-        broadcast_preview(socket)
-        {:noreply, mark_dirty(socket)}
+    # Only a field this block actually edits as rows: a hostile or stale event
+    # must not turn an arbitrary attribute into a list.
+    if field == "images" or KilnCMSWeb.ContentEditor.BlockParams.row_field?(type, field) do
+      current = block |> Map.get(field) |> stringify_rows()
+      blocks = List.replace_at(blocks, index, Map.put(block, field, fun.(current)))
+
+      params =
+        socket.assigns.form
+        |> AshPhoenix.Form.params()
+        |> Map.put("blocks", blocks)
+
+      socket = revalidate(socket, params)
+      broadcast_preview(socket)
+      {:noreply, mark_dirty(socket)}
+    else
+      {:noreply, socket}
     end
   end
 

@@ -40,6 +40,32 @@ defmodule KilnCMSWeb.ContentEditor.BlockParams do
   # column handlers can read the bounds.
   def row_fields, do: @row_fields
   def row_editor_types, do: @row_editor_types
+
+  @doc """
+  The declared row fields of a block type: `{:array, :map}` fields with
+  `item_keys:` (`Kiln.Block.Info.item_keys/1`), as `[{field, [key]}]` strings,
+  for any block type not already edited by `item_rows_editor/1`. This is how a
+  plugin block's list field gets an editor without a core edit.
+  """
+  @spec declared_row_fields(String.t() | atom() | nil) :: [{String.t(), [String.t()]}]
+  def declared_row_fields(type) when is_binary(type) or is_atom(type) do
+    with false <- to_string(type) in @row_editor_types,
+         module when not is_nil(module) <-
+           KilnCMS.Blocks.module_for_tagged_map(%{"_type" => type}) do
+      for {field, keys} <- Kiln.Block.Info.item_keys(module),
+          do: {to_string(field), Enum.map(keys, &to_string/1)}
+    else
+      _ -> []
+    end
+  end
+
+  @doc "Whether `field` is an add/remove-able row field of a block of `type`."
+  @spec row_field?(String.t() | nil, String.t()) :: boolean()
+  def row_field?(type, field) do
+    (to_string(type) in @row_editor_types and field in @row_fields) or
+      List.keymember?(declared_row_fields(type), field, 0)
+  end
+
   def nested_child_types, do: @nested_child_types
   def max_columns, do: @max_columns
 
@@ -387,8 +413,10 @@ defmodule KilnCMSWeb.ContentEditor.BlockParams do
     # is not edited by `item_rows_editor/1` — but it is still an indexed map on
     # the wire, so it needs the same flattening or a gallery loses every image
     # on save.
+    declared = block |> block_param_type() |> declared_row_fields() |> Enum.map(&elem(&1, 0))
+
     @row_fields
-    |> Kernel.++(["images"])
+    |> Kernel.++(["images" | declared])
     |> Enum.reduce(block, fn key, block ->
       case block do
         %{^key => %{} = indexed} -> Map.put(block, key, indexed_items_to_list(indexed))
@@ -399,6 +427,9 @@ defmodule KilnCMSWeb.ContentEditor.BlockParams do
   end
 
   defp normalize_block_items(other), do: other
+
+  # A block param map names its type as `_union_type` (union input) or `_type`.
+  defp block_param_type(block), do: block["_union_type"] || block["_type"]
 
   # The fragment picker (#479) is a single `<select>`, because a reference is
   # one choice — so it posts one `"type:id"` string, which becomes the

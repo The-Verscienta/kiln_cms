@@ -102,6 +102,17 @@ defmodule Kiln.Block.Info do
     |> Enum.map(&{&1.name, &1.localized || :localized})
   end
 
+  @doc """
+  The `{:array, :map}` fields that declare `item_keys:`, as
+  `[{field_name, [key]}]` in declaration order — what the content editor's
+  row editor and the schema export read.
+  """
+  @spec item_keys(Ash.Resource.t() | map()) :: [{atom(), [atom()]}]
+  def item_keys(resource_or_dsl) do
+    for %{item_keys: [_ | _] = keys} = field <- fields(resource_or_dsl),
+        do: {field.name, keys}
+  end
+
   @doc "The block's declared schema migrations (Phase H upcasting)."
   @spec migrations(Ash.Resource.t() | map()) :: [Kiln.Block.Migration.t()]
   def migrations(resource_or_dsl) do

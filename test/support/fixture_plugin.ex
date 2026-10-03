@@ -84,6 +84,53 @@ defmodule KilnCMS.FixturePlugin.RestrictedRequiredDefaultBlock do
   def search_text(block), do: block.locked_text || ""
 end
 
+defmodule KilnCMS.FixturePlugin.ChecklistBlock do
+  @moduledoc """
+  A plugin-contributed block type (test fixture) with a table-like
+  `{:array, :map}` field declared through `item_keys:`, and the optional
+  editor metadata (`label/0`, `icon/0`, `description/0`). Exercises the
+  content editor's declared-row editor and palette copy for plugin blocks,
+  which before these seams showed no input for the rows at all and listed the
+  block as its raw name with the generic icon and description.
+  """
+  use Kiln.Block
+
+  block :checklist do
+    field :title, :string, description: "Shown above the list."
+    field :items, {:array, :map}, default: [], item_keys: [:task, :owner]
+  end
+
+  @impl Kiln.Block.Renderer
+  def render(block, :web) do
+    items =
+      for item <- List.wrap(block.items),
+          is_map(item),
+          do: ["<li>", esc(item["task"] || ""), "</li>"]
+
+    [~s(<ul class="checklist">), items, "</ul>"]
+  end
+
+  def render(block, :json),
+    do: %{"_type" => "checklist", "title" => block.title, "items" => block.items}
+
+  def render(_block, _surface), do: nil
+
+  @impl Kiln.Block.Renderer
+  def search_text(block),
+    do: block.items |> List.wrap() |> Enum.map_join(" ", &(&1["task"] || ""))
+
+  @impl Kiln.Block.Renderer
+  def label, do: "Checklist"
+
+  @impl Kiln.Block.Renderer
+  def icon, do: "hero-check-circle"
+
+  @impl Kiln.Block.Renderer
+  def description, do: "Tasks with an owner each"
+
+  defp esc(value), do: value |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
+end
+
 defmodule KilnCMS.FixturePlugin.ProductCardBlock do
   @moduledoc """
   A plugin-contributed block type (test fixture) that opts fields into
@@ -280,7 +327,8 @@ defmodule KilnCMS.FixturePlugin do
       KilnCMS.FixturePlugin.CalloutBlock,
       KilnCMS.FixturePlugin.RestrictedRequiredBlock,
       KilnCMS.FixturePlugin.RestrictedRequiredDefaultBlock,
-      KilnCMS.FixturePlugin.ProductCardBlock
+      KilnCMS.FixturePlugin.ProductCardBlock,
+      KilnCMS.FixturePlugin.ChecklistBlock
     ]
 
   @impl true
