@@ -199,6 +199,23 @@ carries the reasoning.
   opts nothing in.
   ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327))
 
+<a id="plugin-blocks-get-editor-seams"></a>
+
+- **Plugin blocks get editor seams: their own label, icon and description,
+  field hints, a row editor for `item_keys:` list fields, and live rendering.**
+  A plugin block (D18) joined storage, firing and the palette with no core
+  edit, but the editor listed it under its raw name with the generic icon,
+  gave an `{:array, :map}` field no input at all, and live delivery drew an
+  empty paragraph where the fired artifact rendered it. `Kiln.Block.Renderer`
+  gains optional `label/0`, `icon/0` and `description/0`; a field's
+  `description:` becomes its input hint; `field ..., {:array, :map},
+  item_keys: [...]` gets a repeatable-row editor (one input per key) and a
+  derived item schema; and live delivery renders a plugin block with its own
+  `:web` serializer. Editing an installed plugin's `blocks/0` now recompiles
+  the registries baked from it (`Kiln.Plugins.CompileEdges`) rather than
+  needing `mix compile --force`. Blocks that define none of this render as
+  before. ([#1865](https://github.com/The-Verscienta/kiln_cms/pull/1865))
+
 ## Changed
 
 <a id="the-sync-apis-first-page-stays-under-15-ms-p95-from-10-concurrent"></a>

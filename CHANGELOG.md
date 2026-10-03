@@ -83,6 +83,10 @@ Every summary line below that was shortened links to its own entry there.
   locale variants, or inherited along the site's fallback chain when empty.**
   ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) · [long form](docs/changelog/unreleased.md#field-level-localization))
 
+- **Plugin blocks get editor seams: their own label, icon and description,
+  field hints, a row editor for `item_keys:` list fields, and live rendering.**
+  ([#1865](https://github.com/The-Verscienta/kiln_cms/pull/1865) · [long form](docs/changelog/unreleased.md#plugin-blocks-get-editor-seams))
+
 ### Changed
 
 - **The sync API's first page stays under 15 ms p95 from 10
