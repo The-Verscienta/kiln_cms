@@ -46,6 +46,15 @@ UI" workflow, scoped to fields.
   editor's prose. (A destroy really does mean the values go: `custom_fields` is
   public, and a deleted definition must stop publishing what was under it. It
   just happens where the admin asked for it.)
+- **References are edges too**: a `:reference` value is stored as a snapshot
+  (`%{"id", "type", "slug", "title"}`) *and* as a `ContentLink` edge
+  (`kind: :reference`, `field` the field's name) written with the live value
+  (#1594, decision D20 in
+  [content-organization-plan.md](content-organization-plan.md)). The edge is
+  what answers "what links here" — the editor lists it under *Linked from*,
+  and the API serves it through `incoming_links`. A published record's
+  working copy holds draft references without edges until they are published.
+  See `KilnCMS.CMS.ContentLinks`.
 - **Edit**: the content editor renders one input per definition automatically.
 - **Deliver**: `custom_fields` is public, so headless clients get the values.
 - **Query**: list/search reads accept `custom_filter`/`custom_sort` (JSON:API)
@@ -171,6 +180,13 @@ Read the payload from either end via the `content_links` (outgoing) and
 recipe = CMS.get_page!(id, load: [:content_links], actor: actor)
 Enum.map(recipe.content_links, & &1.metadata)
 ```
+
+The same table holds the edges of `:reference` custom fields
+(`kind: :reference`), so a record's `incoming_links` include the records that
+reference it; `CMS.list_backlinks/2` reads them directly. They are kept out of
+`related_<type>s`, which stays editor-curated related content only. A link is
+readable only by someone who may read both of its ends (editors and admins see
+all of their site's).
 
 **When to use a dedicated join resource instead.** ContentLink covers the common
 case with one table. If the link attributes are numerous, strongly typed, or

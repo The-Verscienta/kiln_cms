@@ -121,6 +121,62 @@ deprecation window. The delete story needs an explicit answer — block a purge
 with inbound edges, or null the edge and flag the referrer; today neither
 happens.
 
+### Built in 1.1 — additively ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594))
+
+1.0's overlay contract made `custom_fields` and its documented shapes a
+covered surface, so 1.1 adds the edge **beside** the snapshot rather than in
+place of it. What landed:
+
+- **Dual-write.** Every live `:reference` value has a `ContentLink` row:
+  `kind: :reference`, `field` the custom field's name, `position`, and
+  `source_type` / `target_type` (new nullable columns). The snapshot is
+  written exactly as before and keeps its meaning. Edges are reconciled from
+  the *stored* value after any write that moved it
+  (`Changes.SyncReferenceLinks` → `KilnCMS.CMS.ContentLinks`), so the two
+  cannot disagree; renaming or deleting a field definition moves or deletes
+  its edges with its values. The unique identity gained `field` (NULLs not
+  distinct), so one record may reference the same target from two fields.
+- **Backfill.** A data migration (plain SQL, idempotent) writes the edges for
+  values stored before 1.1; `mix kiln.links.backfill` re-runs it.
+- **Live only.** A published record's working copy holds draft custom fields
+  in `working_fields`; a held reference has no edge until *Publish changes*.
+  What links here is what a reader could follow.
+- **Readability follows both ends.** `ContentLink` was world-readable, which
+  already let a published page's `incoming_links` name the drafts linking to
+  it. An edge is now readable only by someone who may read its source *and*
+  its target (`Checks.LinkEndsReadable`, delegating to the content read
+  policy); editors see every edge of their site.
+- **Not related content.** `related_<type>s` is a many-to-many through the
+  same table with no `kind` filter; reference edges are kept out of it (and
+  out of its managed unrelate), so its meaning is unchanged.
+- **Uses.** *Linked from* in the editor, with an unpublish that asks first
+  when anything links here; *Broken references* on a referrer whose target
+  was trashed or purged; `incoming_links` / `content_links` on the read API
+  carry the edges, with the three new attributes.
+- **Delete story.** Neither blocking a purge nor nulling: a purge removes the
+  purged record's *outgoing* edges, and edges pointing *at* it stay — they
+  are what the referrer's editor reports as broken, and they go when the
+  referrer is next saved with the field cleared or re-pointed. Trash keeps
+  every edge, so a restore needs nothing.
+
+**Why edges do not contradict D3.** D3 keeps a document's *own* structure —
+its blocks — embedded, so a document versions and restores atomically.
+References are relations *between* documents: neither side owns the other,
+and the question asked of them ("what links here") runs across every
+document, which is exactly what D3 says an embedded tree should not be made
+to answer by scanning. The snapshot stays embedded and versioned with its
+document; the edge is a derived index of it, like the search document D3
+names for cross-block queries.
+
+**Not in 1.1.** Array references (one field, many targets) — the edge model
+is ready (`position`), the field type and its editor input are not. And the
+snapshot is **not deprecated**: removing or reshaping it changes a covered
+surface, so it waits for 2.0 and goes through the deprecation path then
+(`docs/overlay-contract.md`, "When a covered surface must change") — a
+replacement documented beside it, a `### Deprecated` entry, and a warning
+where the stored rows are read. The likely 2.0 shape keeps `id` and `type` in
+the value and resolves `slug` / `title` from the edge's target at delivery.
+
 ## 5. Workstream C — one hierarchical term vocabulary ([#1595](https://github.com/The-Verscienta/kiln_cms/issues/1595))
 
 > **Proposed decision D19. Taxonomy is one hierarchical term vocabulary.**

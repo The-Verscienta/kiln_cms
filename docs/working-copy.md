@@ -21,7 +21,7 @@ once — so a release found nothing left to publish.
 | --- | --- |
 | title, body | the text |
 | excerpt, SEO title / description / keywords, social image, canonical URL | the listing and search-result text |
-| custom fields | a dynamic type's whole schema lives there |
+| custom fields | a dynamic type's whole schema lives there. A held `:reference` value has no link edge until it is published, so *Linked from* and `incoming_links` show live references only (#1594) |
 | category, featured image, tags, related content | what the page shows beside the body |
 | slug, path alias, locale | the address; a held rename leaves its 301 when it goes live, so the old URL keeps working until the new one exists |
 

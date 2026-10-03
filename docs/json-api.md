@@ -395,7 +395,23 @@ notably `author`, which stays excluded for PII redaction (#183) — is a 400.
 Link edges arrive as `content_link` compound members carrying their payload
 (`kind`, `position`, `label`, `metadata`, `source_id`, `target_id`), so a
 consumer can join outgoing/incoming relations (and e.g. per-link quantity
-metadata) without extra requests. The embedded block tree is **not**
+metadata) without extra requests.
+
+Since 1.1 every `:reference` custom field value also has an edge (#1594):
+`kind: "reference"`, with `field` naming the custom field and `source_type` /
+`target_type` naming both ends' content types (the same vocabulary as the
+snapshot's `"type"`). So `?include=incoming_links` on a record answers *what
+links here* — curated related content and references alike — and
+`?include=content_links` gives a referrer's targets by id, which stay right
+when a target is renamed, where the snapshot's `slug` and `title` may lag
+until the referrer is next saved. The snapshot in `custom_fields` is
+unchanged. `field`, `source_type` and `target_type` are `null` on curated and
+payload links, and on links written before 1.1.
+
+An edge is returned only when the reader may read **both** of its ends: an
+anonymous reader of a published page never sees the edge from a draft that
+links to it, nor an edge to a target that has been unpublished. Editors and
+admins see every edge of their site. The embedded block tree is **not**
 exposed over JSON:API for *reads* — rendered content is served as fired
 artifacts at `GET /api/content/:type/:slug`. For *writes*, send the body via the
 `block_tree` attribute (see [Writing](#writing-330)).

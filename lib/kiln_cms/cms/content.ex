@@ -3243,6 +3243,12 @@ defmodule KilnCMS.CMS.Content do
         # change module).
         change KilnCMS.CMS.Changes.ValidateFragmentReferences, on: [:create, :update]
 
+        # Reference edges (#1594): every live `:reference` custom field value
+        # also has a `ContentLink` row, so "what links here" is a lookup. Runs
+        # on every write and reconciles only when the stored map moved; the
+        # working copy's held fields are not live and write no edge.
+        change KilnCMS.CMS.Changes.SyncReferenceLinks, on: [:create, :update, :destroy]
+
         # Tamper-evident history (#356): with `audit_anchor_every_write` on,
         # extend the signed anchor chain after every versioned write, closing
         # the between-publish window. Off by default and skipped for publishes

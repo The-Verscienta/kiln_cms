@@ -852,6 +852,9 @@ defmodule KilnCMS.CMS do
       define :list_content_links, action: :read
       define :create_content_link, action: :create
       define :destroy_content_link, action: :destroy
+      # "What links here" and a record's own `:reference` edges (#1594).
+      define :list_backlinks, action: :backlinks, args: [:target_id]
+      define :list_reference_links, action: :references_from, args: [:source_id]
     end
 
     # Admin-UI-defined custom fields: the runtime field registry that backs the
