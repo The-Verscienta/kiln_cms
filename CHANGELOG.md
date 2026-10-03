@@ -66,6 +66,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **On Fly.io, Railway and DigitalOcean, rate limits can be per visitor:
+  `CLIENT_IP_HEADER` reads the platform proxy's own client-address header.**
+  ([#1548](https://github.com/The-Verscienta/kiln_cms/issues/1548) · [long form](docs/changelog/unreleased.md#on-fly-io-railway-and-digitalocean-rate-limits-can-be-per-visitor))
+
 - **`:reference` custom fields are also `ContentLink` edges: *Linked from* in
   the editor, broken-reference warnings, and `incoming_links` on the API.**
   ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594) · [long form](docs/changelog/unreleased.md#reference-fields-are-also-link-edges))
@@ -94,6 +98,10 @@ Every summary line below that was shortened links to its own entry there.
 - **A custom field flagged `searchable` is indexed with the record's text, so
   search finds a record by a Chinese name or a Latin binomial.**
   ([#1585](https://github.com/The-Verscienta/kiln_cms/issues/1585) · [long form](docs/changelog/unreleased.md#a-custom-field-flagged-searchable-is-indexed))
+
+- **CI no longer fails at random with "type `_oban_job_state` can not be
+  handled": the suite loads every database type before its first test.**
+  ([#1796](https://github.com/The-Verscienta/kiln_cms/issues/1796) · [long form](docs/changelog/unreleased.md#ci-no-longer-fails-at-random-with-type-oban-job-state-can-not-be))
 
 - **Concluding an experiment now refuses a winner that is not one of its own
   variants.**

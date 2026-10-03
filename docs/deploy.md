@@ -81,7 +81,9 @@ Two more that a real deployment almost always wants:
   the app logs a warning once. Leave it unset **only** when the app is
   internet-facing directly. Details and the private-range caveat are under
   *server & networking* in
-  [`environment-variables.md`](environment-variables.md).
+  [`environment-variables.md`](environment-variables.md). On Fly.io, Railway
+  or DigitalOcean App Platform, set **`CLIENT_IP_HEADER`** instead; see
+  [`deploy-platforms.md`](deploy-platforms.md#client-addresses-and-rate-limiting).
 
 Generate the two secrets once, store them in your secret manager, and never
 regenerate `SECRET_KEY_BASE` on an existing deployment.

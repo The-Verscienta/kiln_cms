@@ -93,6 +93,7 @@ Deploy on Railway button for it can go in the README.
    | `SECRET_KEY_BASE` | `${{secret(64, "abcdef0123456789")}}` |
    | `TOKEN_SIGNING_SECRET` | `${{secret(64, "abcdef0123456789")}}` |
    | `KILN_MEDIA_ROOT` | `/app/media` |
+   | `CLIENT_IP_HEADER` | `x-real-ip` (per-visitor rate limits; see [below](#client-addresses-and-rate-limiting)) |
 
    Railway sets `PORT`, and Kiln listens on it.
 3. **Volume.** Attach a volume to the app service, mounted at `/app/media`.
@@ -212,21 +213,57 @@ the things the verification drill will confirm.
 ## Client addresses and rate limiting
 
 Kiln's per-IP rate limits (sign-in brute-force protection included) need the
-real client address. Behind a proxy, Kiln takes it from `X-Forwarded-For`, but
-only when the proxy's address is listed in `TRUSTED_PROXIES`.
+real client address. Behind a proxy on your own server, Kiln takes it from
+`X-Forwarded-For`, but only when the proxy's address is listed in
+`TRUSTED_PROXIES`. None of these four platforms documents the address range
+its proxy connects from, so the templates leave `TRUSTED_PROXIES` unset:
+guessing a range risks trusting addresses that aren't the proxy. DigitalOcean
+also puts its own ingress address in `X-Forwarded-For`, so even a correct
+`TRUSTED_PROXIES` wouldn't help there.
 
-None of these four platforms documents the address range its proxy connects
-from, so the templates leave `TRUSTED_PROXIES` unset. Guessing a range risks
-trusting addresses that aren't the proxy. As a result, every request appears
-to come from the platform's proxy, and each rate limit becomes one shared
-bucket for all visitors. Kiln logs a warning about this on the first proxied
-request. DigitalOcean also puts its own ingress address in `X-Forwarded-For`,
-so even a correct `TRUSTED_PROXIES` wouldn't help there.
+Three of the platforms instead write the client's address into a header of
+their own, and `CLIENT_IP_HEADER` tells Kiln to read it (#1548):
 
-Fly (`Fly-Client-IP`) and DigitalOcean (`do-connecting-ip`) send the client's
-address in a header of their own. Reading it is tracked in
-[#1548](https://github.com/The-Verscienta/kiln_cms/issues/1548). Until then,
-these deployments get per-deployment, not per-visitor, rate limiting.
+| Platform | `CLIENT_IP_HEADER` | Honoured only while these are set | Template |
+|----------|--------------------|-----------------------------------|----------|
+| Fly | `fly-client-ip` | `FLY_APP_NAME` and `FLY_MACHINE_ID` (Fly sets both in every Machine) | set in `fly.toml` |
+| Railway | `x-real-ip` | `RAILWAY_SERVICE_ID` and `RAILWAY_ENVIRONMENT_ID` (Railway sets both) | in the recipe above |
+| DigitalOcean | `do-connecting-ip` | `APP_ID`, holding an app id (the spec binds it to `${APP_ID}`) | set in `.do/app.yaml` |
+| Render | not available | | |
+
+**Why the second column.** A header is something any client can send. Trusting
+one is safe only when every request reaches the app through the platform's
+proxy, which sets or overwrites it. So Kiln honours `CLIENT_IP_HEADER` only when
+the platform's own variables are present too. Copied into a deployment
+anywhere else, it is ignored, and Kiln logs one error saying why. On
+DigitalOcean the check is weaker: App Platform injects no variable of its own,
+so the marker is the `${APP_ID}` binding, which only App Platform resolves.
+Don't set `APP_ID` by hand.
+
+How the header is used:
+
+- **It wins over `TRUSTED_PROXIES`** when both are set.
+- **A request without the header**, or with anything other than one address
+  in it, falls back to the normal rules. That covers health probes, and a
+  request from another app on the platform's private network, which doesn't
+  pass through the proxy. That private path is the one residual risk: Kiln
+  can't tell a header the proxy wrote from one a neighbouring app wrote
+  itself, so another app on the same private network (on Fly, any app in your
+  organization) could pick its own rate-limit bucket. The public internet
+  can't, because it only reaches Kiln through the proxy.
+- **Live connections see only `x-` headers.** That is a Phoenix limit: a
+  WebSocket handshake hands the app `X-…` headers and nothing else. Railway's
+  `X-Real-IP` gets through, so on Railway the sign-in form's brute-force limit
+  is per visitor too. `Fly-Client-IP` and `do-connecting-ip` don't, so on Fly
+  and DigitalOcean the sign-in form (which submits over the live connection)
+  still shares one bucket per deployment. Every HTTP request is per visitor,
+  including `/api/auth/sign_in` and the other forms.
+
+**Render** documents neither a proxy range nor a header of its own, so a
+Render deployment keeps one shared bucket per deployment, and Kiln logs a
+warning about it on the first proxied request. Render sits behind Cloudflare,
+which sends `True-Client-IP`, but Render doesn't document or promise that
+header, so Kiln doesn't offer it.
 
 ## Upgrading
 

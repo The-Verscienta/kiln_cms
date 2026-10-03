@@ -49,7 +49,8 @@ services:
         value: "4000"
       # PHX_HOST is not set: Kiln falls back to RENDER_EXTERNAL_HOSTNAME
       # (your-service.onrender.com). Add a custom domain? Set PHX_HOST to it.
-      # TRUSTED_PROXIES is not set: Render documents no proxy address range.
+      # TRUSTED_PROXIES and CLIENT_IP_HEADER are not set: Render documents
+      # neither a proxy address range nor a client-address header of its own.
       # See docs/deploy-platforms.md#client-addresses-and-rate-limiting.
 
 databases:
