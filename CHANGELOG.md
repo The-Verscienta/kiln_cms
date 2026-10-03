@@ -60,6 +60,12 @@ Every summary line below that was shortened links to its own entry there.
   installs it, refolds non-ASCII search rows and rebuilds the title indexes.**
   ([#1628](https://github.com/The-Verscienta/kiln_cms/issues/1628) · [long form](docs/changelog/unreleased.md#search-now-needs-postgresqls-unaccent-extension))
 
+### Added
+
+- **Field-level localization: a field can be shared across a document's
+  locale variants, or inherited along the site's fallback chain when empty.**
+  ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) · [long form](docs/changelog/unreleased.md#field-level-localization))
+
 ### Changed
 
 - **Search ranks faster under load: the query is parsed once per statement,

@@ -91,6 +91,25 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     assert KilnCMS.CMS.NameFields.for_resource(KilnCMS.CMS.Page, nil) == ["latin_name"]
   end
 
+  test "an admin shares a field across locales (#1327); the default is per locale", %{conn: conn} do
+    admin = authed_user(:admin)
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+    assert has_element?(lv, "#new-field-form select[name='field_definition[localization]']")
+
+    for {name, localization} <- [{"list_price", "shared"}, {"blurb", nil}] do
+      params =
+        %{scopes: ["page"], name: name, label: name, field_type: "string"}
+        |> then(&if localization, do: Map.put(&1, :localization, localization), else: &1)
+
+      lv |> form("#new-field-form", field_definition: params) |> render_submit()
+    end
+
+    by_name = :page |> CMS.field_definitions_for!(authorize?: false) |> Map.new(&{&1.name, &1})
+    assert by_name["list_price"].localization == :shared
+    assert by_name["blurb"].localization == :localized
+  end
+
   test "non-admins are redirected away", %{conn: conn} do
     editor = authed_user(:editor)
     assert {:error, {:redirect, %{to: "/"}}} = conn |> log_in(editor) |> live(~p"/editor/fields")

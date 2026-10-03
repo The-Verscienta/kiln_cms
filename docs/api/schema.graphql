@@ -454,6 +454,7 @@ type Entry {
   effectiveSeoTitle: String
   effectiveSeoDescription: String
   relatedLinks: [JsonString!]
+  inheritedFields: JsonString
   blockIds: [JsonString!]
   highlight(locale: String!, query: String!): String
 }
@@ -1548,6 +1549,7 @@ type Page {
   effectiveSeoTitle: String
   effectiveSeoDescription: String
   relatedLinks: [JsonString!]
+  inheritedFields: JsonString
   blockIds: [JsonString!]
   highlight(locale: String!, query: String!): String
 }
@@ -2225,6 +2227,7 @@ type Post {
   effectiveSeoTitle: String
   effectiveSeoDescription: String
   relatedLinks: [JsonString!]
+  inheritedFields: JsonString
   blockIds: [JsonString!]
   highlight(locale: String!, query: String!): String
 }

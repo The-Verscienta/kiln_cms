@@ -75,6 +75,33 @@ defmodule Kiln.Block.Info do
   defp translatable_kind(%{type: :string}), do: :text
   defp translatable_kind(_field), do: nil
 
+  @doc """
+  The block's **localization modes** (#1327): every declared field, as
+  `{name, :localized | :shared | :fallback}`, in declaration order.
+
+  A field that does not pass `localized:` is `:localized` — each locale
+  variant of a document holds its own value, which is what every field did
+  before the option existed. `:shared` and `:fallback` are opt-in:
+
+    * `:shared` — one value for the document. The default-locale variant owns
+      it, and publishing that variant copies it into each sibling's block with
+      the same `_id` (`KilnCMS.I18n.SharedFields`).
+    * `:fallback` — a variant may leave it empty, and delivery fills the empty
+      value from the first variant along the site's fallback chain that has one
+      (`KilnCMS.I18n.FieldFallback`).
+
+  This is a different question from `translatable/1`. That one asks whether a
+  translation vendor should see the text; this one asks whether the value
+  differs between locales. A locale-specific hero image is localized but not
+  prose, and a product name kept in English everywhere is prose but shared.
+  """
+  @spec localization(Ash.Resource.t() | map()) :: [{atom(), :localized | :shared | :fallback}]
+  def localization(resource_or_dsl) do
+    resource_or_dsl
+    |> fields()
+    |> Enum.map(&{&1.name, &1.localized || :localized})
+  end
+
   @doc "The block's declared schema migrations (Phase H upcasting)."
   @spec migrations(Ash.Resource.t() | map()) :: [Kiln.Block.Migration.t()]
   def migrations(resource_or_dsl) do

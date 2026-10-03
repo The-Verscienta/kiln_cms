@@ -36,6 +36,42 @@ carries the reasoning.
   the stored vectors stay folded until each row is next saved).
   ([#1628](https://github.com/The-Verscienta/kiln_cms/issues/1628))
 
+## Added
+
+<a id="field-level-localization"></a>
+
+- **Field-level localization: a field can be shared across a document's
+  locale variants, or inherited along the site's fallback chain when empty.**
+  Content stays one record per locale. What is new is a per-field mode, as
+  the v0.12 design check (`docs/field-level-localization.md`, Design A)
+  proposed: `:localized` (the default, and what every field did before),
+  `:shared` (one value for the document, owned by the default-locale variant
+  and copied into every translation when that variant publishes) and
+  `:fallback` (an empty value is filled from the first variant along the
+  site's chain that has one).
+
+  Custom fields opt in on the Fields screen; block fields with a new
+  `localized:` option on `Kiln.Block`'s `field`; an overlay type's record
+  attributes with a new `localization:` option on `use KilnCMS.CMS.Content`;
+  and the core types' record attributes with
+  `config :kiln_cms, :i18n, field_localization:`. Nothing changes until one of
+  them does.
+
+  The copy is a versioned write on each translation (the internal
+  `:sync_shared_fields` action), held until *Publish changes* on the source's
+  working copy, and written into a translation's own pending working copy too.
+  Inherited values are filled in the fired artifacts, on the public page and
+  in the search text, never written back to the row; the `:json` artifact
+  names them under `inherited_fields`, and JSON:API and GraphQL serve them
+  through a new `inherited_fields` / `inheritedFields` field only when asked
+  for. The editor shows a shared field read-only on a translation and an empty
+  fallback field's inherited value as its placeholder. Translation coverage
+  ignores the copy, XLIFF leaves shared fields out, the schema export
+  annotates the modes, and saving the fallback chain re-fires the translations
+  that can inherit. Every existing response keeps its shape for a type that
+  opts nothing in.
+  ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327))
+
 ## Changed
 
 <a id="search-ranks-faster-under-load"></a>

@@ -861,6 +861,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             />
             <.compute_field form={@form} />
             <.input field={@form[:help_text]} label={gettext("Help text")} />
+            <.localization_input field={@form[:localization]} />
             <.options_field form={@form} id="new-field-options" />
             <.default_field form={@form} />
             <label class="flex items-center gap-2 self-end text-sm">
@@ -1050,6 +1051,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                   />
                   <.compute_field form={@edit.form} />
                   <.input field={@edit.form[:help_text]} label={gettext("Help text")} />
+                  <.localization_input field={@edit.form[:localization]} />
                   <.options_field form={@edit.form} id={"edit-field-options-#{@edit.id}"} />
                   <.default_field form={@edit.form} />
                   <label class="flex items-center gap-2 self-end text-sm">
@@ -1130,6 +1132,30 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         </section>
       </div>
     </Layouts.console>
+    """
+  end
+
+  # Field-level localization (#1327): whether this field's value differs
+  # between the locale variants of a document.
+  attr :field, Phoenix.HTML.FormField, required: true
+
+  defp localization_input(assigns) do
+    ~H"""
+    <.input
+      field={@field}
+      type="select"
+      label={gettext("Across locales")}
+      options={[
+        {gettext("Translated per locale"), "localized"},
+        {gettext("Shared: one value, set in the default locale"), "shared"},
+        {gettext("Inherited when a translation leaves it empty"), "fallback"}
+      ]}
+      hint={
+        gettext(
+          "Shared values are copied to every translation when the default-locale version publishes."
+        )
+      }
+    />
     """
   end
 end

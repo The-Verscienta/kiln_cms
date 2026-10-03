@@ -170,15 +170,15 @@
     },
     {
       "allow_nil?": false,
-      "default": "false",
+      "default": "\"localized\"",
       "generated?": false,
       "precision": null,
       "primary_key?": false,
       "references": null,
       "scale": null,
       "size": null,
-      "source": "searchable",
-      "type": "boolean"
+      "source": "localization",
+      "type": "text"
     },
     {
       "allow_nil?": true,
@@ -268,7 +268,7 @@
   "custom_indexes": [],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "E8261A02A2186AC50089CFE52809F93E08D7172EE727F3C38B0CC4B7FAF0C202",
+  "hash": "D23D23AB85D2461CC9D46D5EB983300E73632F6394A23956132D03BFC04530A7",
   "identities": [
     {
       "all_tenants?": false,
