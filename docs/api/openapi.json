@@ -1093,6 +1093,17 @@
                   }
                 ]
               },
+              "inherited_fields": {
+                "anyOf": [
+                  {
+                    "nullable": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "inserted_at": {
                 "description": "Field included by default."
               },
@@ -5728,6 +5739,17 @@
                   }
                 ]
               },
+              "inherited_fields": {
+                "anyOf": [
+                  {
+                    "nullable": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "inserted_at": {
                 "description": "Field included by default."
               },
@@ -7958,6 +7980,17 @@
                   {
                     "nullable": true,
                     "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "inherited_fields": {
+                "anyOf": [
+                  {
+                    "nullable": true,
+                    "type": "object"
                   },
                   {
                     "type": "null"

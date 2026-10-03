@@ -42,10 +42,102 @@ served; the API side is documented in [api.md → Locale fallback](api.md#locale
 
 A variant a reader may not open (audience-gated, passphrase-locked) is skipped
 along the chain like a missing one. The chain is resolved per *locale*, not
-per document, so the per-field localization tracked in
-[#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) will resolve
-each localized field along the same chain — see the
-[field-level localization design check](field-level-localization.md).
+per document, so field-level localization (below) resolves each `:fallback`
+field along the same chain.
+
+## Field-level localization — shared and inherited fields
+
+Every variant is a whole document, which is right for pages that differ
+between languages and wasteful for the fields that do not: one product
+photo, one price, one category, copied by hand into every translation until
+the copies drift. Since 1.1 (#1327) a field can say how it relates to the
+other locales:
+
+| Mode | What it means |
+|---|---|
+| `:localized` (the default) | Each variant holds its own value, as every field always has. |
+| `:shared` | One value for the document. The default-locale variant owns it; when that variant publishes, the value is copied into every other variant. On a translation the field is read-only in the editor. |
+| `:fallback` | A variant may leave it empty. Readers then get the value from the first variant along the site's fallback chain that has one. The editor shows that value as the field's placeholder. |
+
+Nothing is shared or inherited until a site opts a field in, so a site that
+does not see no change. Where each kind of field opts in:
+
+- **Custom fields** — *Across locales* on the Fields screen (`/editor/fields`),
+  stored as `FieldDefinition.localization`.
+- **Block fields** — a block module declares it on the field, independently of
+  `translatable:` (which says whether a translator sees the text):
+
+  ```elixir
+  block :product_card do
+    field :name, :string
+    field :image_url, :string, translatable: false, localized: :shared
+    field :caption, :string, localized: :fallback
+  end
+  ```
+
+- **Record attributes** of an overlay content type — the `localization:`
+  option:
+
+  ```elixir
+  use KilnCMS.CMS.Content,
+    type: :product,
+    excerpt?: true,
+    localization: [shared: [:featured_image_id, :category_id], fallback: [:excerpt]]
+  ```
+
+  `shared:` may name `excerpt`, `seo_title`, `seo_description`,
+  `seo_keywords`, `seo_image`, `category_id` and `featured_image_id`;
+  `fallback:` the text fields and `seo_image`. The title, slug, locale and
+  canonical URL are always per locale.
+- **Record attributes of the core types** — a site cannot edit `page` or
+  `post`'s `use` line, so the operator config takes the same list per type:
+
+  ```elixir
+  config :kiln_cms, :i18n,
+    field_localization: [page: [shared: [:seo_image], fallback: [:seo_description]]]
+  ```
+
+### What happens, and when
+
+- **Shared values are copied when the default-locale variant publishes** —
+  *Publish*, a scheduled publish, *Publish changes*, or a live edit through the
+  API. Its pending working copy is not shared: the copy is held until
+  *Publish changes*, like everything else in it
+  ([working copy](working-copy.md)). A translation that publishes later takes
+  the source's current values then. A source that is not published shares
+  nothing.
+- The copy is an ordinary versioned write on each translation
+  (`:sync_shared_fields`), so its history shows it, `/api/sync` reports it,
+  a published translation is re-fired and sends its `updated` webhook. Block
+  fields are matched by the block id a translation shares with its source;
+  a block the translation deleted is skipped.
+- A translation with a **pending working copy** gets the value in the copy
+  too, so its next *Publish changes* does not put the old value back, and the
+  lost-update guard does not count the copy as a conflict.
+- **Inherited values are filled where a variant is turned into something a
+  reader sees**: the fired artifacts (whose `:json` body names what was filled
+  under `inherited_fields`), the public page, and the search text. The row
+  itself keeps what the translator saved. JSON:API and GraphQL serve the
+  inherited values through the `inherited_fields` / `inheritedFields` field,
+  only when a client asks for it. Only a published, unlocked variant that is
+  at least as public as the one being filled is inherited from.
+- A publish re-fires the published translations that might inherit from it,
+  and saving the chain at `/editor/locales` re-fires every published
+  translation of a type that declares a `:fallback` field.
+- **Coverage** ignores the copy: a shared value landing on a translation is
+  not someone translating it, so an outdated translation stays *Outdated*.
+- **XLIFF** leaves shared fields out of the file, both ways.
+
+### Limits
+
+- Blocks nested inside a `columns` block are not walked; only top-level block
+  fields are shared or inherited.
+- Tags and curated related content are not shareable.
+- An API write can still change a shared field on a translation; the
+  source's next publish overwrites it.
+
+The design — and why one record per locale stays — is in
+[field-level localization](field-level-localization.md).
 
 ## Coverage & staleness
 

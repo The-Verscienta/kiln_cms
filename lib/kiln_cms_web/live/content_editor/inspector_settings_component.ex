@@ -29,6 +29,8 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
   import KilnCMSWeb.ContentEditor.InspectorComponents
   import KilnCMSWeb.ContentEditor.Shared
 
+  alias KilnCMSWeb.ContentEditor.Localization
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -246,14 +248,29 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
       </.inspector_section>
 
       <.inspector_section :if={@field_definitions != []} title={gettext("Custom fields")}>
-        <.custom_field_input
+        <%!-- A shared field on a translation (#1327) is disabled, not just
+              read-only: a disabled control is not submitted, and a custom
+              field absent from the params keeps its stored value — the one
+              the source variant's publish copied in. --%>
+        <fieldset
           :for={definition <- @field_definitions}
-          definition={definition}
-          name={"#{@form.name}[custom_fields][#{definition.name}]"}
-          value={custom_field_value(@form, definition.name)}
-          errors={custom_field_errors(@form, definition.name)}
-          options={custom_field_options(definition, @media, @reference_options)}
-        />
+          disabled={Localization.locked?(@localization, {:custom, definition.name})}
+          class="contents"
+        >
+          <.custom_field_input
+            definition={definition}
+            name={"#{@form.name}[custom_fields][#{definition.name}]"}
+            value={custom_field_value(@form, definition.name)}
+            errors={custom_field_errors(@form, definition.name)}
+            options={custom_field_options(definition, @media, @reference_options)}
+          />
+          <Localization.localization_note
+            localization={@localization}
+            field={{:custom, definition.name}}
+            kind={@kind}
+            inherited={Localization.inherited(@localization, {:custom, definition.name})}
+          />
+        </fieldset>
       </.inspector_section>
 
       <%!-- Accessibility (#495) sits in its own section rather than
@@ -376,8 +393,18 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
                 "Overrides the title in search results and browser tabs. Falls back to the title."
               )
             }
-            readonly={field_locked?(@locked_fields, "seo_title")}
+            readonly={
+              field_locked?(@locked_fields, "seo_title") or
+                Localization.locked?(@localization, {:attribute, :seo_title})
+            }
+            {localized_placeholder(@localization, :seo_title)}
             {field_attrs("seo_title")}
+          />
+          <Localization.localization_note
+            localization={@localization}
+            field={{:attribute, :seo_title}}
+            kind={@kind}
+            inherited={Localization.inherited(@localization, {:attribute, :seo_title})}
           />
           <.field_cursors field="seo_title" cursors={@cursors} />
         </div>
@@ -394,8 +421,18 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
                 "The snippet shown under the title in search results (aim for ~155 characters)."
               )
             }
-            readonly={field_locked?(@locked_fields, "seo_description")}
+            readonly={
+              field_locked?(@locked_fields, "seo_description") or
+                Localization.locked?(@localization, {:attribute, :seo_description})
+            }
+            {localized_placeholder(@localization, :seo_description)}
             {field_attrs("seo_description")}
+          />
+          <Localization.localization_note
+            localization={@localization}
+            field={{:attribute, :seo_description}}
+            kind={@kind}
+            inherited={Localization.inherited(@localization, {:attribute, :seo_description})}
           />
           <.field_cursors field="seo_description" cursors={@cursors} />
         </div>
@@ -406,8 +443,18 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
           <.input
             field={@form[:seo_keywords]}
             label={gettext("SEO keywords")}
-            readonly={field_locked?(@locked_fields, "seo_keywords")}
+            readonly={
+              field_locked?(@locked_fields, "seo_keywords") or
+                Localization.locked?(@localization, {:attribute, :seo_keywords})
+            }
+            {localized_placeholder(@localization, :seo_keywords)}
             {field_attrs("seo_keywords")}
+          />
+          <Localization.localization_note
+            localization={@localization}
+            field={{:attribute, :seo_keywords}}
+            kind={@kind}
+            inherited={Localization.inherited(@localization, {:attribute, :seo_keywords})}
           />
           <p class="mt-1 text-xs text-base-content/60">
             {gettext("Comma-separated; the first keyphrase drives the auto-derived slug.")}
@@ -422,9 +469,18 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
             field={@form[:seo_image]}
             label={gettext("Social image")}
             hint={gettext("Image shown when this page is shared on social media.")}
-            placeholder="/uploads/cover.jpg"
-            readonly={field_locked?(@locked_fields, "seo_image")}
+            readonly={
+              field_locked?(@locked_fields, "seo_image") or
+                Localization.locked?(@localization, {:attribute, :seo_image})
+            }
+            {localized_placeholder(@localization, :seo_image)}
             {field_attrs("seo_image")}
+          />
+          <Localization.localization_note
+            localization={@localization}
+            field={{:attribute, :seo_image}}
+            kind={@kind}
+            inherited={Localization.inherited(@localization, {:attribute, :seo_image})}
           />
           <%!-- The URL box stays for off-site absolute URLs; these
                   shortcuts cover the common cases (#476). --%>
@@ -775,4 +831,14 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
   # vacates the same path, and "since" is what the editor is asking.
   defp redirect_since(%{inserted_at: %DateTime{} = at}), do: Calendar.strftime(at, "%Y-%m-%d")
   defp redirect_since(_redirect), do: "—"
+
+  # An empty `:fallback` field shows what it will inherit (#1327); the social
+  # image keeps its example path when there is nothing to inherit.
+  defp localized_placeholder(localization, field) do
+    case {Localization.placeholder(localization, {:attribute, field}), field} do
+      {nil, :seo_image} -> [placeholder: "/uploads/cover.jpg"]
+      {nil, _field} -> []
+      {text, _field} -> [placeholder: text]
+    end
+  end
 end

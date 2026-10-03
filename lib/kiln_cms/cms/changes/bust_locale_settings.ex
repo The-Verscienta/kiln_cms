@@ -23,6 +23,10 @@ defmodule KilnCMS.CMS.Changes.BustLocaleSettings do
 
   defp bust(_changeset, {:ok, record} = result) do
     KilnCMS.Cache.bust_locale_fallbacks(record.org_id)
+    # A fired artifact carries the values a `:fallback` field inherited along
+    # the chain it was fired under (#1327); the caches above do not hold
+    # those, so the translations that can inherit are re-fired.
+    _ = KilnCMS.I18n.RefireInheritingWorker.enqueue(record.org_id)
     result
   end
 
