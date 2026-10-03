@@ -19,10 +19,19 @@ defmodule KilnCMS.CMS.Changes.SetSearchText do
 
   A stored row is rewritten on its next save, or on its next fire for a
   published document (`mix kiln.refire_all` sweeps every one).
+
+  ## Searchable custom fields (#1585)
+
+  The values of the custom fields flagged `searchable` follow the body
+  (`KilnCMS.CMS.SearchableFields`), so a record is found by a structured
+  identity field its prose never repeats. A value equal to one already
+  written is left out, as above.
   """
   use Ash.Resource.Change
 
   alias KilnCMS.CMS.BlockText
+  alias KilnCMS.CMS.Changes.ApplyCustomFields
+  alias KilnCMS.CMS.SearchableFields
 
   @text_fields [:title, :seo_title, :seo_description, :seo_keywords, :excerpt]
 
@@ -39,7 +48,33 @@ defmodule KilnCMS.CMS.Changes.SetSearchText do
 
     block_texts = BlockText.block_texts(Ash.Changeset.get_attribute(changeset, :blocks))
 
-    Ash.Changeset.force_change_attribute(changeset, :search_text, join(field_text, block_texts))
+    Ash.Changeset.force_change_attribute(
+      changeset,
+      :search_text,
+      join(field_text, block_texts, custom_texts(changeset))
+    )
+  end
+
+  # The definitions `ApplyCustomFields` already read for this write, when it
+  # ran; otherwise read here — in the caller's process, inside the write's
+  # transaction, never through a cache (whose fallback would run in another
+  # process and need a second connection).
+  defp custom_texts(changeset) do
+    case Ash.Changeset.get_attribute(changeset, :custom_fields) do
+      fields when is_map(fields) and map_size(fields) > 0 ->
+        definitions =
+          ApplyCustomFields.stashed_definitions(changeset) ||
+            ApplyCustomFields.definitions(
+              changeset.resource,
+              Ash.Changeset.get_attribute(changeset, :type_definition_id),
+              changeset.to_tenant
+            )
+
+        SearchableFields.texts(fields, definitions)
+
+      _none ->
+        []
+    end
   end
 
   @doc """
@@ -62,13 +97,13 @@ defmodule KilnCMS.CMS.Changes.SetSearchText do
       |> Enum.filter(&Ash.Resource.Info.attribute(record.__struct__, &1))
       |> Enum.map(&Map.get(record, &1))
 
-    join(field_text, blocks_text)
+    join(field_text, blocks_text, SearchableFields.record_texts(record))
   end
 
-  defp join(field_text, blocks_text) when is_binary(blocks_text),
-    do: join(field_text, [blocks_text])
+  defp join(field_text, blocks_text, custom) when is_binary(blocks_text),
+    do: join(field_text, [blocks_text], custom)
 
-  defp join(field_text, block_texts) do
+  defp join(field_text, block_texts, custom) do
     fields = field_text |> Enum.reject(&blank?/1) |> Enum.uniq_by(&normalize/1)
     seen = MapSet.new(fields, &normalize/1)
 
@@ -81,7 +116,14 @@ defmodule KilnCMS.CMS.Changes.SetSearchText do
           []
       end
 
-    Enum.join(fields ++ body, " ")
+    seen = Enum.reduce(body, seen, &MapSet.put(&2, normalize(&1)))
+
+    custom =
+      custom
+      |> Enum.uniq_by(&normalize/1)
+      |> Enum.reject(&MapSet.member?(seen, normalize(&1)))
+
+    Enum.join(fields ++ body ++ custom, " ")
   end
 
   defp blank?(value), do: value in [nil, ""]

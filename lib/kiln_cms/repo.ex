@@ -8,7 +8,9 @@ defmodule KilnCMS.Repo do
     # `vector` (pgvector) backs semantic-search embeddings — see
     # docs/semantic-search-plan.md. Requires the pgvector/pgvector Postgres image.
     # `pg_trgm` backs typo-tolerant autocomplete (trigram similarity on titles).
-    ["ash-functions", "citext", "vector", "pg_trgm"]
+    # `unaccent` + `KilnCMS.Search.AccentFolding` fold diacritics out of every
+    # full-text leg, so "Zusanli" finds "Zúsānlǐ" (#1628).
+    ["ash-functions", "citext", "vector", "pg_trgm", "unaccent", KilnCMS.Search.AccentFolding]
   end
 
   # Don't open unnecessary transactions

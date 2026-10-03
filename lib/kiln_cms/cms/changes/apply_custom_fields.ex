@@ -184,6 +184,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
     changeset
     |> Ash.Changeset.force_change_attribute(:custom_fields, cleaned)
+    |> stash(defs)
     |> note_dropped(dropped)
     |> then(fn cs -> Enum.reduce(errors, cs, &Ash.Changeset.add_error(&2, &1)) end)
   end
@@ -247,6 +248,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # diff, no phantom "changed" attribute for anything downstream to react to.
   defp refresh_computed(changeset) do
     defs = definitions_for(changeset)
+    changeset = stash(changeset, defs)
 
     case Enum.filter(defs, &(&1.field_type == :computed)) do
       [] -> changeset
@@ -328,14 +330,30 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # would drop every stored value on the record, skip every `required`, and
   # refuse every key the caller sent. A refusal raises instead.
   defp definitions_for(%{resource: resource} = changeset) do
+    definitions(
+      resource,
+      Ash.Changeset.get_attribute(changeset, :type_definition_id),
+      changeset.to_tenant
+    )
+  end
+
+  @doc """
+  The field definitions in scope for a record of `resource` on `tenant` — by
+  its type atom, or on the generic entry tier by `type_definition_id` (`nil`
+  there means no custom fields yet). The same system-actor, fail-closed read
+  this change makes; public for `KilnCMS.CMS.SearchableFields`, which reads
+  the same schema for a loaded record.
+  """
+  @spec definitions(module(), Ash.UUID.t() | nil, term()) :: [KilnCMS.CMS.FieldDefinition.t()]
+  def definitions(resource, type_definition_id, tenant) do
     opts = [
       actor: KilnCMS.CMS.Bookkeeping.system(),
       authorize_with: :error,
-      tenant: changeset.to_tenant
+      tenant: tenant
     ]
 
     if function_exported?(resource, :__kiln_dynamic_entry__, 0) do
-      case Ash.Changeset.get_attribute(changeset, :type_definition_id) do
+      case type_definition_id do
         nil -> []
         id -> KilnCMS.CMS.field_definitions_for_definition!(id, opts)
       end
@@ -343,6 +361,17 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
       KilnCMS.CMS.field_definitions_for!(resource.__kiln_content_type__(), opts)
     end
   end
+
+  @doc """
+  The definitions this change read for `changeset`, if it ran — stashed in
+  the changeset's context so `Changes.SetSearchText`, declared after it on
+  every write that indexes, does not read them a second time.
+  """
+  @spec stashed_definitions(Ash.Changeset.t()) :: [KilnCMS.CMS.FieldDefinition.t()] | nil
+  def stashed_definitions(changeset), do: changeset.context[:kiln_field_definitions]
+
+  defp stash(changeset, defs),
+    do: Ash.Changeset.set_context(changeset, %{kiln_field_definitions: defs})
 
   # Resolve one definition's value and fold it into the {cleaned, errors} acc.
   # Three-way per key: a field the caller *supplied* is coerced/cleared; a field

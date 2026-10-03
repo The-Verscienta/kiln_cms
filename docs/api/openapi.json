@@ -3718,6 +3718,10 @@
                 "description": "Field included by default.",
                 "type": "boolean"
               },
+              "searchable": {
+                "description": "Field included by default.",
+                "type": "boolean"
+              },
               "target_type": {
                 "anyOf": [
                   {
@@ -3751,7 +3755,8 @@
               "required",
               "options",
               "position",
-              "names_record"
+              "names_record",
+              "searchable"
             ],
             "type": "object"
           },
@@ -3855,6 +3860,9 @@
           },
           "required": {
             "$ref": "#/components/schemas/field_definition-filter-required"
+          },
+          "searchable": {
+            "$ref": "#/components/schemas/field_definition-filter-searchable"
           },
           "target_type": {
             "$ref": "#/components/schemas/field_definition-filter-target_type"
@@ -4343,6 +4351,45 @@
         "type": "object"
       },
       "field_definition-filter-required": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "type": "boolean"
+          },
+          "greater_than": {
+            "type": "boolean"
+          },
+          "greater_than_or_equal": {
+            "type": "boolean"
+          },
+          "in": {
+            "items": {
+              "type": "boolean"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "boolean"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "boolean"
+          },
+          "less_than": {
+            "type": "boolean"
+          },
+          "less_than_or_equal": {
+            "type": "boolean"
+          },
+          "not_eq": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "field_definition-filter-searchable": {
         "additionalProperties": false,
         "properties": {
           "eq": {

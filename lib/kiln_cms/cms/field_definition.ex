@@ -145,6 +145,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :default,
       :compute,
       :names_record,
+      :searchable,
       :localization
     ]
 
@@ -333,6 +334,17 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # matched as text, so a flag on a number or a media snapshot names
     # nothing.
     attribute :names_record, :boolean, allow_nil?: false, default: false, public?: true
+
+    # Whether this field's value is indexed as body text (#1585): appended to
+    # the record's `search_text` (`KilnCMS.CMS.SearchableFields`), so the
+    # keyword legs find a record by a structured identity field — a Chinese
+    # name, a Latin binomial — that its prose never repeats. Off by default:
+    # most fields are numbers, enums and snapshots that would only add noise.
+    # Independent of `names_record`, which makes the value a *name* (the
+    # alias leg's phrase match) rather than body words. Flipping it, or
+    # deleting a flagged field, re-fires the type's published documents
+    # (`Changes.BustTypeRegistry`).
+    attribute :searchable, :boolean, allow_nil?: false, default: false, public?: true
 
     # Field-level localization (#1327): whether this field's value differs
     # between the locale variants of a document. `:localized` (the default) is

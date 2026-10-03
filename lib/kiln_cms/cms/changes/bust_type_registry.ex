@@ -52,10 +52,16 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
 
         result
 
-      # FieldDefinition — check if the field name changed (affects [field:<name>] tokens)
+      # FieldDefinition — re-fire when the field name changed (affects
+      # [field:<name>] tokens), and when what search indexes of it changed
+      # (#1585): the `searchable` flag flipped, or a flagged field was renamed
+      # or deleted. A re-fire recomputes each published document's
+      # `search_text` (`Firing.Engine`), which is what the public search
+      # reads; a draft catches up on its next save.
       Map.has_key?(record, :name) and
           (Map.has_key?(record, :content_type) or Map.has_key?(record, :type_definition_id)) ->
-        if Ash.Changeset.changing_attribute?(changeset, :name) do
+        if Ash.Changeset.changing_attribute?(changeset, :name) or
+             reindex_search?(changeset, record) do
           # Determine which type this field belongs to and sweep it
           type =
             cond do
@@ -99,6 +105,11 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
   end
 
   defp enqueue_seo_refire(_changeset, other, _context), do: other
+
+  defp reindex_search?(changeset, record) do
+    Ash.Changeset.changing_attribute?(changeset, :searchable) or
+      (changeset.action_type == :destroy and Map.get(record, :searchable) == true)
+  end
 
   # The feed *documents* (#719). `has_published_feed` is the other half of
   # `KilnCMS.Feeds.syndicated?/2`: turning it off stops `/recipes/feed.xml`

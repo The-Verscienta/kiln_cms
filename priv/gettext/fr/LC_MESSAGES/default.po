@@ -12524,6 +12524,11 @@ msgstr "Rechercher dans le contenu publié"
 msgid "Search published content…"
 msgstr "Rechercher dans le contenu publié…"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Searchable (search indexes this value as text)"
+msgstr "Recherchable (la recherche indexe cette valeur comme du texte)"
+
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
 msgid "Searches are logged anonymously — no user ID or IP — to improve content discovery, and purged after %{days} days."
