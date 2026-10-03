@@ -88,9 +88,18 @@ services:
         scope: RUN_TIME
         type: SECRET
         value: CHANGE_ME
-      # TRUSTED_PROXIES is not set: App Platform puts its own ingress address
-      # in X-Forwarded-For, so it would not recover the client's. See
+      # ---- per-visitor rate limits ----
+      # App Platform puts the client address in do-connecting-ip (its own
+      # ingress address is what lands in X-Forwarded-For, so TRUSTED_PROXIES
+      # stays unset). Kiln honours the header only while APP_ID holds an app
+      # id, and only App Platform resolves the ${APP_ID} binding below. See
       # docs/deploy-platforms.md#client-addresses-and-rate-limiting.
+      - key: CLIENT_IP_HEADER
+        scope: RUN_TIME
+        value: do-connecting-ip
+      - key: APP_ID
+        scope: RUN_TIME
+        value: ${APP_ID}
 
 databases:
   - name: db

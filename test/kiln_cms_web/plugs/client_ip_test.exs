@@ -10,7 +10,8 @@ defmodule KilnCMSWeb.Plugs.ClientIpTest do
   that (trusting `X-Forwarded-For` unconditionally is strictly worse), so it says
   so instead.
 
-  `async: false`: both `:trusted_proxies` and the warning latch are global.
+  `async: false`: `:trusted_proxies`, `:client_ip_header` and the warning
+  latches are global.
   """
   use ExUnit.Case, async: false
 
@@ -20,12 +21,23 @@ defmodule KilnCMSWeb.Plugs.ClientIpTest do
 
   alias KilnCMSWeb.Plugs.ClientIp
 
+  # What the test config says, restored after each test rather than a captured
+  # value (memory of #1614: a captured `nil` faithfully re-applies a leak).
+  @configured_header Application.compile_env(:kiln_cms, :client_ip_header)
+
   setup do
     previous = Application.get_env(:kiln_cms, :trusted_proxies)
     ClientIp.reset_forwarding_warning()
+    ClientIp.reset_refused_header_warning()
 
     on_exit(fn ->
       ClientIp.reset_forwarding_warning()
+      ClientIp.reset_refused_header_warning()
+
+      case @configured_header do
+        nil -> Application.delete_env(:kiln_cms, :client_ip_header)
+        configured -> Application.put_env(:kiln_cms, :client_ip_header, configured)
+      end
 
       case previous do
         nil -> Application.delete_env(:kiln_cms, :trusted_proxies)
@@ -276,6 +288,174 @@ defmodule KilnCMSWeb.Plugs.ClientIpTest do
         assert ClientIp.resolve(@x_headers, @proxy) == plug_answer,
                "socket and plug disagreed with trusted_proxies=#{inspect(proxies)}"
       end
+    end
+  end
+
+  # #1548. A platform header is a request header trusted with no peer check, so
+  # the cases that matter most are the ones where it must NOT be believed.
+  describe "CLIENT_IP_HEADER (a platform's own client-address header)" do
+    @fly %{"FLY_APP_NAME" => "kiln", "FLY_MACHINE_ID" => "148e123a"}
+    @railway %{"RAILWAY_SERVICE_ID" => "svc", "RAILWAY_ENVIRONMENT_ID" => "env"}
+    @do_app %{"APP_ID" => "8a3f9c2e-1b4d-4e5f-9a6b-7c8d9e0f1a2b"}
+
+    defp with_header(header, value) do
+      :get
+      |> conn("/")
+      |> Map.put(:remote_ip, {10, 0, 0, 1})
+      |> put_req_header(header, value)
+    end
+
+    defp configure(env) do
+      Application.put_env(:kiln_cms, :client_ip_header, ClientIp.header_setting(env))
+    end
+
+    test "unset (the default): the header is ignored and the peer stands" do
+      Application.put_env(:kiln_cms, :trusted_proxies, [])
+      assert ClientIp.header_setting(%{}) == nil
+      assert ClientIp.header_setting(Map.put(@fly, "CLIENT_IP_HEADER", "  ")) == nil
+
+      configure(@fly)
+
+      # `X-Real-IP` is also a forwarding header, so it trips the #564 warning.
+      capture_log(fn ->
+        for header <- ["fly-client-ip", "x-real-ip", "do-connecting-ip"] do
+          conn = ClientIp.call(with_header(header, "203.0.113.9"), [])
+          assert conn.remote_ip == {10, 0, 0, 1}, "#{header} believed without CLIENT_IP_HEADER"
+        end
+      end)
+    end
+
+    test "on the platform it names, the header is the client address" do
+      for {header, markers} <- [
+            {"fly-client-ip", @fly},
+            {"x-real-ip", @railway},
+            {"do-connecting-ip", @do_app}
+          ] do
+        # Case-insensitive, as HTTP header names are; Plug lowercases them.
+        configure(Map.put(markers, "CLIENT_IP_HEADER", String.upcase(header)))
+
+        assert ClientIp.header_setting(Map.put(markers, "CLIENT_IP_HEADER", header)) ==
+                 {:header, header}
+
+        assert ClientIp.call(with_header(header, "203.0.113.9"), []).remote_ip ==
+                 {203, 0, 113, 9}
+
+        assert ClientIp.call(with_header(header, " 2001:db8::7 "), []).remote_ip ==
+                 {8193, 3512, 0, 0, 0, 0, 0, 7}
+      end
+    end
+
+    test "it takes precedence over TRUSTED_PROXIES, and only that one header is believed" do
+      trust(["10.0.0.0/8"])
+      configure(Map.put(@fly, "CLIENT_IP_HEADER", "fly-client-ip"))
+
+      conn =
+        "198.51.100.4"
+        |> forwarded()
+        |> put_req_header("fly-client-ip", "203.0.113.9")
+        |> put_req_header("x-real-ip", "192.0.2.1")
+        |> ClientIp.call([])
+
+      assert conn.remote_ip == {203, 0, 113, 9}
+    end
+
+    test "a request without the header falls through to the proxy path" do
+      configure(Map.put(@fly, "CLIENT_IP_HEADER", "fly-client-ip"))
+
+      trust(["10.0.0.0/8"])
+      assert ClientIp.call(forwarded("198.51.100.4"), []).remote_ip == {198, 51, 100, 4}
+
+      Application.put_env(:kiln_cms, :trusted_proxies, [])
+      {conn, _log} = with_log(fn -> ClientIp.call(forwarded("198.51.100.4"), []) end)
+      assert conn.remote_ip == {10, 0, 0, 1}
+    end
+
+    test "anything but exactly one address is not the proxy's and is ignored" do
+      Application.put_env(:kiln_cms, :trusted_proxies, [])
+      configure(Map.put(@railway, "CLIENT_IP_HEADER", "x-real-ip"))
+
+      capture_log(fn ->
+        for value <- [
+              "203.0.113.9, 198.51.100.4",
+              "unknown",
+              "",
+              "203.0.113.9:443",
+              "[2001:db8::7]"
+            ] do
+          assert ClientIp.call(with_header("x-real-ip", value), []).remote_ip == {10, 0, 0, 1},
+                 "believed #{inspect(value)}"
+        end
+      end)
+    end
+
+    # The spoofing case: the variable copied onto a host where clients reach the
+    # app directly. Any client could then send the header and pick its bucket.
+    test "without the platform's markers it is refused, logged once, and ignored" do
+      Application.put_env(:kiln_cms, :trusted_proxies, [])
+
+      for {header, markers} <- [
+            {"fly-client-ip", @fly},
+            {"x-real-ip", @railway},
+            {"do-connecting-ip", @do_app}
+          ],
+          missing <- Map.keys(markers) do
+        env = markers |> Map.delete(missing) |> Map.put("CLIENT_IP_HEADER", header)
+        assert {:refused, ^header, reason} = ClientIp.header_setting(env)
+        assert reason =~ missing
+      end
+
+      # Another platform's markers are not this one's.
+      assert {:refused, "fly-client-ip", _} =
+               ClientIp.header_setting(Map.put(@railway, "CLIENT_IP_HEADER", "fly-client-ip"))
+
+      # A placeholder is not an App Platform app id.
+      assert {:refused, "do-connecting-ip", _} =
+               ClientIp.header_setting(%{
+                 "CLIENT_IP_HEADER" => "do-connecting-ip",
+                 "APP_ID" => "${APP_ID}"
+               })
+
+      configure(%{"CLIENT_IP_HEADER" => "fly-client-ip"})
+      ClientIp.reset_refused_header_warning()
+
+      {conn, log} =
+        with_log(fn -> ClientIp.call(with_header("fly-client-ip", "203.0.113.9"), []) end)
+
+      assert conn.remote_ip == {10, 0, 0, 1}
+      assert log =~ "CLIENT_IP_HEADER=fly-client-ip"
+      assert log =~ "FLY_APP_NAME and FLY_MACHINE_ID are not set"
+      refute log =~ "203.0.113.9"
+
+      assert capture_log(fn ->
+               ClientIp.call(with_header("fly-client-ip", "203.0.113.9"), [])
+             end) == ""
+    end
+
+    test "a header no platform is known to set is refused" do
+      for header <- ["x-forwarded-for", "true-client-ip", "cf-connecting-ip", "forwarded"] do
+        env = Map.merge(@fly, Map.merge(@railway, @do_app))
+
+        assert {:refused, ^header, reason} =
+                 ClientIp.header_setting(Map.put(env, "CLIENT_IP_HEADER", header))
+
+        assert reason =~ "Supported: do-connecting-ip, fly-client-ip, x-real-ip"
+      end
+    end
+
+    test "the socket path agrees with the plug" do
+      configure(Map.put(@railway, "CLIENT_IP_HEADER", "x-real-ip"))
+      x_headers = [{"x-real-ip", "203.0.113.9"}, {"x-forwarded-for", "192.0.2.1"}]
+
+      assert ClientIp.resolve(x_headers, {10, 0, 0, 1}) == {203, 0, 113, 9}
+
+      assert ClientIp.call(with_header("x-real-ip", "203.0.113.9"), []).remote_ip ==
+               {203, 0, 113, 9}
+
+      # Unconfigured, the socket ignores it exactly as the plug does.
+      Application.delete_env(:kiln_cms, :client_ip_header)
+      Application.put_env(:kiln_cms, :trusted_proxies, [])
+      {answer, _log} = with_log(fn -> ClientIp.resolve(x_headers, {10, 0, 0, 1}) end)
+      assert answer == {10, 0, 0, 1}
     end
   end
 end

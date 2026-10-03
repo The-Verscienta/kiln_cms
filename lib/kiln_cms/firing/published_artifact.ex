@@ -49,6 +49,20 @@ defmodule KilnCMS.Firing.PublishedArtifact do
              )
     end
 
+    # `get_surface` for many documents of one type at once: the sync API reads
+    # a page's uncached artifacts in one query rather than one per document
+    # (#1713). Same index, same policies.
+    read :for_documents do
+      argument :document_type, :atom, allow_nil?: false
+      argument :document_ids, {:array, :uuid}, allow_nil?: false
+      argument :surface, :atom, allow_nil?: false
+
+      filter expr(
+               document_type == ^arg(:document_type) and document_id in ^arg(:document_ids) and
+                 surface == ^arg(:surface)
+             )
+    end
+
     create :upsert do
       upsert? true
       upsert_identity :doc_surface

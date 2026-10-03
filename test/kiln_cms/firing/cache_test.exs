@@ -39,7 +39,40 @@ defmodule KilnCMS.Firing.CacheTest do
     for surface <- [:web, :json, :json_ld], do: Cache.put(org, :page, "id-3", surface, %{})
     Cache.evict(org, :page, "id-3")
 
-    for surface <- [:web, :json, :json_ld],
-        do: assert(:miss = Cache.get(org, :page, "id-3", surface))
+    for surface <- [:web, :json, :json_ld] do
+      assert :miss = Cache.get(org, :page, "id-3", surface)
+      assert :miss = Cache.get_json(org, :page, "id-3", surface)
+    end
+  end
+
+  describe "get_json/4 (#1713)" do
+    test "is the encoding of the body beside it", %{org: org} do
+      body = %{"title" => "Café \"quoted\"", "blocks" => [%{"n" => 1}], "at" => nil}
+      Cache.put(org, :post, "id-4", :json, body)
+
+      assert {:ok, json} = Cache.get_json(org, :post, "id-4", :json)
+      assert json == Jason.encode!(body)
+    end
+
+    test "follows the body when a re-fire replaces it", %{org: org} do
+      Cache.put(org, :post, "id-5", :json, %{"title" => "Old"})
+      Cache.put(org, :post, "id-5", :json, %{"title" => "New"})
+
+      assert {:ok, ~s({"title":"New"})} = Cache.get_json(org, :post, "id-5", :json)
+    end
+
+    test "misses, rather than serving an older encoding, for a body JSON cannot hold",
+         %{org: org} do
+      Cache.put(org, :post, "id-6", :json, %{"title" => "Old"})
+      Cache.put(org, :post, "id-6", :json, %{"pair" => {1, 2}})
+
+      assert :miss = Cache.get_json(org, :post, "id-6", :json)
+      assert {:ok, %{"pair" => {1, 2}}} = Cache.get(org, :post, "id-6", :json)
+    end
+
+    test "is per site", %{org: org} do
+      Cache.put(org, :post, "id-7", :json, %{"title" => "Mine"})
+      assert :miss = Cache.get_json(Ecto.UUID.generate(), :post, "id-7", :json)
+    end
   end
 end

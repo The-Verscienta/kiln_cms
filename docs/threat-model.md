@@ -1085,6 +1085,14 @@ because other files cite them by number.
    `X-Client-IP` or `X-Real-IP`) while no proxies are trusted. The
    trap itself remains — honouring the header without a trusted-proxy list would
    be worse, since it is spoofable — so this is detection, not a fix.
+   **On Fly.io, Railway and DigitalOcean App Platform (#1548)**, whose proxies
+   publish no address range, `CLIENT_IP_HEADER` reads the proxy's own
+   client-address header instead. It is honoured only while that platform's
+   runtime variables are present, so a copy elsewhere is refused and logged.
+   Two gaps remain: another app on the platform's private network reaches Kiln
+   without the proxy and can send the header itself, and sockets see only `x-`
+   headers, so the `/sign-in` form on Fly and DigitalOcean stays per
+   deployment (see `docs/deploy-platforms.md`).
 
    Two things about `:auth` specifically, both worse for addresses many people
    share (an office NAT, or any deployment in the trap above). **One successful
@@ -1104,7 +1112,7 @@ because other files cite them by number.
 
    **1.0 verdict (decided, #1535): still accepted at 1.0 (correct the
    arithmetic).** Detection is in `KilnCMSWeb.Plugs.ClientIp`
-   (`lib/kiln_cms_web/plugs/client_ip.ex:164-170`, a once-per-node warning that
+   (`lib/kiln_cms_web/plugs/client_ip.ex:226-232`, a once-per-node warning that
    names the fix). Honouring forwarding headers without a trusted list would be
    the worse bug. The arithmetic had drifted: #747 doubled `:auth` to 40/min
    (`lib/kiln_cms_web/rate_limit.ex:28`), so a successful browser sign-in

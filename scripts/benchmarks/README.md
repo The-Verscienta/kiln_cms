@@ -49,9 +49,9 @@ All anonymous, all against `Host: localhost` (the canonical `PHX_HOST`):
   stay warm; this measures Kiln's caches, not the disk.
 - **Warm**: 200 requests over 50 keys, then the measured run over the same 50.
 
-Only `content_by_slug` (and host and type-registry lookups on every route)
-reads through an in-BEAM cache, so for the other surfaces cold and warm differ
-little by design.
+Only `content_by_slug` and `sync_initial` (and host and type-registry lookups
+on every route) read through an in-BEAM cache, the fired-artifact cache, so
+for the other surfaces cold and warm differ little by design.
 
 ### What is measured
 

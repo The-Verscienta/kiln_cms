@@ -54,6 +54,13 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Changed
+
+- **The sync API's first page stays under 15 ms p95 from 10
+  concurrent clients, where it took 31–57 ms.** Same response, byte for
+  byte.
+  ([#1713](https://github.com/The-Verscienta/kiln_cms/issues/1713) · [long form](docs/changelog/unreleased.md#the-sync-apis-first-page-stays-under-15-ms-p95-from-10-concurrent))
+
 ### Upgrade notes
 
 - **The upgrade writes a link edge for every stored `:reference` custom field
@@ -67,6 +74,10 @@ Every summary line below that was shortened links to its own entry there.
   filter as a named view.**
   ([#1854](https://github.com/The-Verscienta/kiln_cms/issues/1854) · [long form](docs/changelog/unreleased.md#the-content-list-filters-and-saves-views))
 
+- **On Fly.io, Railway and DigitalOcean, rate limits can be per visitor:
+  `CLIENT_IP_HEADER` reads the platform proxy's own client-address header.**
+  ([#1548](https://github.com/The-Verscienta/kiln_cms/issues/1548) · [long form](docs/changelog/unreleased.md#on-fly-io-railway-and-digitalocean-rate-limits-can-be-per-visitor))
+
 - **`:reference` custom fields are also `ContentLink` edges: *Linked from* in
   the editor, broken-reference warnings, and `incoming_links` on the API.**
   ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594) · [long form](docs/changelog/unreleased.md#reference-fields-are-also-link-edges))
@@ -76,6 +87,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) · [long form](docs/changelog/unreleased.md#field-level-localization))
 
 ### Fixed
+
+- **CI no longer fails at random with "type `_oban_job_state` can not be
+  handled": the suite loads every database type before its first test.**
+  ([#1796](https://github.com/The-Verscienta/kiln_cms/issues/1796) · [long form](docs/changelog/unreleased.md#ci-no-longer-fails-at-random-with-type-oban-job-state-can-not-be))
 
 - **Concluding an experiment now refuses a winner that is not one of its own
   variants.**
