@@ -123,9 +123,18 @@ defmodule KilnCMSWeb.SessionCookieTest do
       # truthy, because a *different* default would be the kind of change
       # that reads as harmless in a diff and silently signs every existing
       # visitor out.
+      #
+      # An overlay that sets its own salts in `config/project.exs` (the 1.0
+      # upgrade notes ask every deployment to) compiles those instead, so the
+      # defaults are pinned only where the keys are absent; under an override
+      # the assertion is against the configured value.
       opts = SessionCookie.options(false)
-      assert opts[:signing_salt] == "Dsoh9oKb"
-      assert opts[:encryption_salt] == "8fso5iqxDfI"
+
+      assert opts[:signing_salt] ==
+               Application.get_env(:kiln_cms, :session_signing_salt, "Dsoh9oKb")
+
+      assert opts[:encryption_salt] ==
+               Application.get_env(:kiln_cms, :session_encryption_salt, "8fso5iqxDfI")
     end
 
     test "are compile-time config, so an overlay's config/project.exs is what sets them" do

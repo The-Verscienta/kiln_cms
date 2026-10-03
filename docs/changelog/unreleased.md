@@ -381,6 +381,24 @@ carries the reasoning.
   and refuse a perfectly good winner.
   ([#1851](https://github.com/The-Verscienta/kiln_cms/pull/1851))
 
+<a id="an-overlays-composed-suite-no-longer-fails-the-session-salt-and-system-actor"></a>
+
+- **An overlay's composed suite no longer fails the session-salt and
+  system-actor scope tests on a correct configuration.**
+  Two tests new in 1.0 held only for this repository. The session-salt test
+  pinned `Dsoh9oKb` / `8fso5iqxDfI` exactly, so an overlay that sets its own
+  `:session_signing_salt` / `:session_encryption_salt` in
+  `config/project.exs`, as the 1.0 upgrade notes ask, failed it; it now pins
+  the defaults only where the keys are unset and otherwise asserts the
+  configured value. The system-actor scope test (#1747) read the matrix's
+  `(content)` row as `CMS.Page`, `CMS.Post` and `CMS.Entry` only, so every
+  content type an overlay builds on `KilnCMS.CMS.Content` was reported as
+  admitting `:search`, `:cms_bookkeeping` and `:firing` "which its row does
+  not name". The row now covers every resource built on the macro, and the
+  per-resource subsystem check in `PolicyCoverageTest` holds those types to
+  it as well. Test-only; nothing changes at runtime
+  ([#1866](https://github.com/The-Verscienta/kiln_cms/pull/1866)).
+
 ## Security
 
 <a id="content-links-readable-only-when-both-ends-are"></a>

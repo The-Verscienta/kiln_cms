@@ -127,11 +127,7 @@ defmodule KilnCMS.PolicyCoverageTest do
   # `CMS.Page` does: a type that layers a grant of its own on top of the base is
   # still an undocumented admission and still fails.
   defp inherits_documented_content_grant?(resource, section) do
-    content? =
-      function_exported?(resource, :__kiln_content_type__, 0) or
-        function_exported?(resource, :__kiln_dynamic_entry__, 0)
-
-    content? and String.contains?(section, "(content)") and
+    KilnCMS.SystemActorGrants.content_type?(resource) and String.contains?(section, "(content)") and
       system_actor_policy_count(resource) <= system_actor_policy_count(KilnCMS.CMS.Page)
   end
 
