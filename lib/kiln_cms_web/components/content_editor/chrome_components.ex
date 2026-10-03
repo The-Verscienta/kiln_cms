@@ -35,6 +35,8 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
   # When the record was last written by anyone: the stamp the save line shows
   # between saves. `nil` only for a record whose `updated_at` is unknown.
   attr :saved_at, :any, default: nil
+  # How many records link here (#1594): an unpublish asks first when any do.
+  attr :backlink_count, :integer, default: 0
 
   def editor_action_bar(assigns) do
     # Resolved once per render rather than per interpolation: `words_per_minute/0`
@@ -184,6 +186,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
             tier={@tier}
             pending?={@pending?}
             editors_can_publish={@editors_can_publish}
+            backlink_count={@backlink_count}
           />
           <%!-- `data-flush-body`: every rich-text block settles its debounced
                 body push on this button's mousedown, before the click's
@@ -358,6 +361,10 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
     doc:
       "the site lets editors publish (`KilnCMS.CMS.EditorialSettings`) — the policy decides; this only offers the button"
 
+  attr :backlink_count, :integer,
+    default: 0,
+    doc: "records whose links point here (#1594); unpublishing asks first when any do"
+
   def workflow_buttons(assigns) do
     assigns =
       assign(
@@ -417,6 +424,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
       data-flush-body
       phx-value-action="unpublish"
       phx-disable-with={gettext("Working…")}
+      data-confirm={unpublish_confirm(@backlink_count)}
       class="btn btn-sm btn-default"
     >
       {gettext("Unpublish")}
@@ -468,6 +476,7 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
             type="button"
             phx-click="workflow"
             phx-value-action="unpublish"
+            data-confirm={unpublish_confirm(@backlink_count)}
             class="w-full rounded px-3 py-1.5 text-left text-sm hover:bg-base-200"
           >
             {gettext("Unpublish")}
@@ -487,5 +496,20 @@ defmodule KilnCMSWeb.ContentEditor.ChromeComponents do
       {gettext("Unarchive")}
     </button>
     """
+  end
+
+  # Unpublishing a record other records link to breaks those links for
+  # readers (#1594) — their edges stop being readable, and a front end that
+  # follows a reference gets a 404. Say so before it happens; no prompt when
+  # nothing links here.
+  defp unpublish_confirm(0), do: nil
+
+  defp unpublish_confirm(count) do
+    ngettext(
+      "%{count} other record links here. Readers will no longer be able to follow that link. Unpublish?",
+      "%{count} other records link here. Readers will no longer be able to follow those links. Unpublish?",
+      count,
+      count: count
+    )
   end
 end

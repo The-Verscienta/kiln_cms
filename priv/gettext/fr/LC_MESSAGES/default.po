@@ -271,6 +271,13 @@ msgid_plural "%{count} open tasks anchored to a block"
 msgstr[0] "%{count} tâche ouverte rattachée à un bloc"
 msgstr[1] "%{count} tâches ouvertes rattachées à un bloc"
 
+#: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} other record links here. Readers will no longer be able to follow that link. Unpublish?"
+msgid_plural "%{count} other records link here. Readers will no longer be able to follow those links. Unpublish?"
+msgstr[0] "%{count} autre élément renvoie ici. Les lecteurs ne pourront plus suivre ce lien. Dépublier ?"
+msgstr[1] "%{count} autres éléments renvoient ici. Les lecteurs ne pourront plus suivre ces liens. Dépublier ?"
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} page"
@@ -469,6 +476,11 @@ msgstr "%{email} (%{role}) — vous"
 #, elixir-autogen, elixir-format
 msgid "%{failed} failed in 24h · %{disabled} auto-disabled"
 msgstr "%{failed} en échec en 24 h · %{disabled} désactivés automatiquement"
+
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} points at a record that was deleted or moved to the trash."
+msgstr "%{field} pointe vers un élément supprimé ou placé dans la corbeille."
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
@@ -2751,6 +2763,11 @@ msgstr "Diffuser « %{event} » sur le canal interne %{topic}."
 #, elixir-autogen, elixir-format
 msgid "Broken links"
 msgstr "Liens rompus"
+
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Broken references"
+msgstr "Références rompues"
 
 #: lib/kiln_cms_web/controllers/error_html/404.html.heex
 #: lib/kiln_cms_web/controllers/error_html/500.html.heex
@@ -7875,6 +7892,13 @@ msgid "Link text “%{example}” doesn't say where it goes — screen readers c
 msgid_plural "%{count} links have text like “%{example}” that doesn't say where they go — screen readers can list links out of context."
 msgstr[0] "Le texte du lien « %{example} » n'indique pas où il mène — les lecteurs d'écran peuvent lister les liens hors contexte."
 msgstr[1] "%{count} liens ont un texte comme « %{example} » qui n'indique pas où ils mènent — les lecteurs d'écran peuvent lister les liens hors contexte."
+
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Linked from %{count} record"
+msgid_plural "Linked from %{count} records"
+msgstr[0] "Lié depuis %{count} élément"
+msgstr[1] "Lié depuis %{count} éléments"
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/link_report_live.ex
@@ -17040,6 +17064,7 @@ msgstr "un éditeur"
 msgid "an unknown time"
 msgstr "une durée inconnue"
 
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "and %{count} more"
@@ -17065,6 +17090,11 @@ msgstr "est archivé"
 msgid "arrow keys move it"
 msgstr "les touches fléchées le déplacent"
 
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "as %{kind}"
+msgstr "en tant que %{kind}"
+
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
 msgid "as a task"
@@ -17074,6 +17104,11 @@ msgstr "sous forme de tâche"
 #, elixir-autogen, elixir-format
 msgid "as a task for %{person}"
 msgstr "sous forme de tâche pour %{person}"
+
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "as related content"
+msgstr "comme contenu associé"
 
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
@@ -17693,6 +17728,7 @@ msgid "not configured"
 msgstr "non configuré"
 
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "not published"
 msgstr "non publié"
@@ -18144,6 +18180,11 @@ msgstr "type non pris en charge"
 #, elixir-autogen, elixir-format
 msgid "upload failed"
 msgstr "échec du téléversement"
+
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "via %{field}"
+msgstr "via %{field}"
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format

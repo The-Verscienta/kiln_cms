@@ -39,7 +39,10 @@ defmodule KilnCMS.SystemActorScopeTest do
   alias KilnCMS.SystemActorGrants, as: Grants
 
   # Reads whose policy is `access_type :runtime`: decided against a row below.
-  @data_probed %{Firing.PublishedArtifact => [:read, :for_document, :get_surface]}
+  @data_probed %{
+    Firing.PublishedArtifact => [:read, :for_document, :get_surface],
+    KilnCMS.CMS.ContentLink => [:read, :backlinks, :references_from]
+  }
 
   defp expected(resource, action),
     do: Map.get(Grants.matrix_grants(), {resource, action}, MapSet.new())
@@ -181,6 +184,65 @@ defmodule KilnCMS.SystemActorScopeTest do
 
         assert admitted? == MapSet.member?(expected(Firing.PublishedArtifact, action), subsystem),
                "PublishedArtifact #{inspect(action)} as #{inspect(subsystem)}: " <>
+                 "admitted? #{admitted?}, but the matrix row says the opposite"
+      end
+    end
+  end
+
+  describe "CMS.ContentLink reads, against a row" do
+    setup do
+      org_id = KilnCMS.Accounts.default_org_id()
+
+      # A draft at both ends: no branch for people admits the edge (an
+      # anonymous reader may read neither end), so only the system clause can.
+      draft = fn ->
+        Ash.Seed.seed!(KilnCMS.CMS.Page, %{
+          title: "Link probe",
+          slug: "link-probe-#{System.unique_integer([:positive])}",
+          locale: "en",
+          state: :draft
+        })
+      end
+
+      source = draft.()
+      target = draft.()
+
+      link =
+        Ash.Seed.seed!(KilnCMS.CMS.ContentLink, %{
+          org_id: org_id,
+          source_id: source.id,
+          target_id: target.id,
+          kind: :reference,
+          field: "probe"
+        })
+
+      %{org_id: org_id, source: source, target: target, link: link}
+    end
+
+    test "each read admits the subsystems its row names, and refuses every other", ctx do
+      reads = %{
+        read: &KilnCMS.CMS.list_content_links(Keyword.put(&1, :query, filter: [id: ctx.link.id])),
+        backlinks: &KilnCMS.CMS.list_backlinks(ctx.target.id, &1),
+        references_from: &KilnCMS.CMS.list_reference_links(ctx.source.id, &1)
+      }
+
+      assert Map.keys(reads) |> Enum.sort() ==
+               Enum.sort(@data_probed[KilnCMS.CMS.ContentLink])
+
+      for {action, read} <- reads, subsystem <- Grants.all_subsystems() do
+        admitted? =
+          case read.(
+                 actor: SystemActor.new(subsystem),
+                 tenant: ctx.org_id,
+                 authorize_with: :error
+               ) do
+            {:ok, [%{id: id}]} -> id == ctx.link.id
+            {:ok, []} -> false
+            {:error, %Ash.Error.Forbidden{}} -> false
+          end
+
+        assert admitted? == MapSet.member?(expected(KilnCMS.CMS.ContentLink, action), subsystem),
+               "ContentLink #{inspect(action)} as #{inspect(subsystem)}: " <>
                  "admitted? #{admitted?}, but the matrix row says the opposite"
       end
     end

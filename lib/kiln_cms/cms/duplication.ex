@@ -221,10 +221,14 @@ defmodule KilnCMS.CMS.Duplication do
   # `content_links` is the raw `ContentLink` row set (`kind`, `position`,
   # `label`, `metadata`); `incoming_links` deliberately stay with the source —
   # other records linked to *it*, not to a draft copy of it.
+  #
+  # `kind: :reference` edges are skipped (#1594): they mirror the custom
+  # fields, which the copy carries, so its own create has already written
+  # them — cloning would collide with those rows.
   defp clone_links(%{content_links: links}, copy, opts) when is_list(links) do
     scope = Keyword.take(opts, [:actor, :tenant])
 
-    for link <- links do
+    for link <- links, link.kind != :reference do
       CMS.create_content_link!(
         %{
           source_id: copy.id,
