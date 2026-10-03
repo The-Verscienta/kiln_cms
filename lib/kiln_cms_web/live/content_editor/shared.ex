@@ -366,6 +366,12 @@ defmodule KilnCMSWeb.ContentEditor.Shared do
 
   def dsl_label(name), do: name |> to_string() |> Phoenix.Naming.humanize()
 
+  @doc """
+  A block TYPE's display name: the block's own `label/0` when it defines one
+  (`Kiln.Block.Renderer` — plugin blocks), else the humanized type name.
+  """
+  def block_label(type), do: KilnCMS.Blocks.editor_meta(type, :label) || dsl_label(type)
+
   attr :field, :string, required: true
   attr :cursors, :map, required: true
 

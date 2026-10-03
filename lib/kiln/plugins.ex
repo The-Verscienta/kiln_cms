@@ -10,6 +10,11 @@ defmodule Kiln.Plugins do
 
   @plugins Application.compile_env(:kiln_cms, :plugins, [])
 
+  # Recompile when a configured plugin's contributions change, not only when
+  # the list does — see `Kiln.Plugins.CompileEdges`.
+  require Kiln.Plugins.CompileEdges
+  Kiln.Plugins.CompileEdges.call_configured()
+
   @doc "The installed plugin modules, in registration order."
   @spec all() :: [module()]
   def all, do: @plugins

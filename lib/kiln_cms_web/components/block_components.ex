@@ -247,6 +247,9 @@ defmodule KilnCMSWeb.BlockComponents do
               </span>
             </span>
           </a>
+        <% @type == "plugin" -> %>
+          <%!-- The plugin block's own `:web` render, already safe (see `view/1`). --%>
+          {@block.content}
         <% true -> %>
           <p>{@block.content}</p>
       <% end %>
@@ -705,7 +708,28 @@ defmodule KilnCMSWeb.BlockComponents do
 
   defp view(%Blocks.Custom{} = b), do: %{type: "custom", content: b.content}
 
-  defp view(_block), do: %{type: "custom", content: nil}
+  # A plugin-contributed block (D18) has no clause above, and this module cannot
+  # grow one per plugin. Its own `:web` serializer is the render: the same HTML
+  # the firing engine already publishes for it (`Kiln.Firing.Engine`), so live
+  # delivery and every preview agree with the fired artifact instead of drawing
+  # an empty `<p>`. Plugin field values are stored raw (`TypedBlocks` sanitizes
+  # core types only), which is why `Kiln.Block.Renderer` makes escaping the
+  # plugin's job — the same trust this HTML already has when fired.
+  # Reviewed XSS.Raw: `html` is the plugin's own escaping `:web` render, the
+  # exact fragment `Kiln.Firing.Engine` publishes unmodified as the `web`
+  # surface; marking it safe here grants it no trust it doesn't already have.
+  # sobelow_skip ["XSS.Raw"]
+  defp view(block) do
+    if plugin_block?(block) do
+      html = block |> Blocks.render(:web) |> List.wrap() |> IO.iodata_to_binary()
+      %{type: "plugin", content: Phoenix.HTML.raw(html)}
+    else
+      %{type: "custom", content: nil}
+    end
+  end
+
+  defp plugin_block?(%module{}), do: module in Kiln.Plugins.blocks()
+  defp plugin_block?(_block), do: false
 
   # The items each renderable surface actually shows, filtered the same way the
   # block modules' own `:web` serializers filter. Two renderers over one block

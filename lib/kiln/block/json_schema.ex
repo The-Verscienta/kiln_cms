@@ -343,12 +343,29 @@ defmodule Kiln.Block.JsonSchema do
   # scans for and reports affected rows, read-only, so an operator can decide
   # what to do with each one.
   defp field_schema(%Field{} = field) do
-    field.type
-    |> type_schema(!field.required)
+    field
+    |> base_field_schema()
     |> put_unless_nil("description", field.description)
     |> put_default(field.default)
     |> put_localization(field.localized)
   end
+
+  # An `{:array, :map}` field that names its `item_keys:` says what its items
+  # hold: an object of those string keys and nothing else. Keys are not marked
+  # required — the field stores what the editor posted, and a render that
+  # normalizes items to always carry every key tightens this through
+  # `json_schema/0` (see `object_array/1`).
+  defp base_field_schema(%Field{type: {:array, :map}, item_keys: [_ | _] = keys} = field) do
+    item = %{
+      "type" => "object",
+      "properties" => Map.new(keys, &{to_string(&1), %{"type" => "string"}}),
+      "additionalProperties" => false
+    }
+
+    nullable(%{"type" => "array", "items" => item}, !field.required)
+  end
+
+  defp base_field_schema(%Field{} = field), do: type_schema(field.type, !field.required)
 
   # Field-level localization (#1327): a field that is not per-locale says so.
   # Absent for `:localized` — the default, and every field before the option
