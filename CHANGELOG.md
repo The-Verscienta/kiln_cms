@@ -116,6 +116,10 @@ Every summary line below that was shortened links to its own entry there.
   system-actor scope tests on a correct configuration.**
   ([#1866](https://github.com/The-Verscienta/kiln_cms/pull/1866) · [long form](docs/changelog/unreleased.md#an-overlays-composed-suite-no-longer-fails-the-session-salt-and-system-actor))
 
+- **A plugin's console panels no longer need a copy of the core's surface test
+  in an overlay's composed suite.**
+  ([#1864](https://github.com/The-Verscienta/kiln_cms/issues/1864) · [long form](docs/changelog/unreleased.md#a-plugins-console-panels-no-longer-need-a-copy-of-the-cores-surface-test))
+
 ### Security
 
 - **A content link is readable only by someone who may read both of its ends;

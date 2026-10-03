@@ -7,6 +7,14 @@ defmodule KilnCMSWeb.SurfaceTest do
   (`KilnCMSWeb.Surface`'s moduledoc), make `Surface.of/1` say so if it does not
   already, and add the path to the list below. Do not widen a rule to make the
   test pass — the whole point is that "console" is a decision, not a default.
+
+  `@console` lists the core's own routes. A plugin's `admin_routes/0` and
+  `editor_routes/0` are mounted inside the admin- and editor-gated live
+  sessions, so they are console by the router's own facts, and the expected
+  list takes them from the plugin registry rather than naming them here (#1864).
+  A downstream overlay that registers a plugin panel then passes this test
+  unchanged, while a plugin route that stopped classifying as console, or a
+  core route added without a decision, still fails it.
   """
   use ExUnit.Case, async: true
 
@@ -20,7 +28,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor/compliance /editor/configure /editor/content/:type/:id /editor/content/:type/new
     /editor/experiments
     /editor/experiments/:id
-    /editor/federation /editor/feeds /editor/fields /editor/fixture /editor/forms
+    /editor/federation /editor/feeds /editor/fields /editor/forms
     /editor/forms/:id /editor/forms/:id/entries/export.csv /editor/forms/settings
     /editor/funnels /editor/funnels/:id /editor/governance /editor/governance/:type/:id
     /editor/governance/:type/:id/export.csv /editor/governance/:type/:id/export.json
@@ -54,8 +62,16 @@ defmodule KilnCMSWeb.SurfaceTest do
     /sign-out /up
   )
 
-  test "the console list is exactly these routes" do
-    assert console_paths() == Enum.sort(@console)
+  test "the console list is exactly these routes, plus every plugin panel" do
+    assert console_paths() == Enum.sort(@console ++ plugin_console_paths())
+  end
+
+  # Guards the guard above: the registry is where the fixture plugin's panel
+  # now comes from, so a `plugin_console_paths/0` that stopped reading it would
+  # drop `/editor/fixture` from both sides and pass.
+  test "plugin panels come from the registry" do
+    assert "/editor/fixture" in plugin_console_paths()
+    assert "/editor/fixture" not in @console
   end
 
   test "the shared list is exactly these routes" do
@@ -105,6 +121,11 @@ defmodule KilnCMSWeb.SurfaceTest do
 
     # An unmatched or unknown shape is delivery.
     assert Surface.of(%{route: "/some/tenant/page"}) == :delivery
+  end
+
+  defp plugin_console_paths do
+    for {path, _live_view, _action} <- Kiln.Plugins.admin_routes() ++ Kiln.Plugins.editor_routes(),
+        do: "/" <> String.trim_leading(path, "/")
   end
 
   defp console_paths, do: for({:console, p} <- Surface.all(), do: p) |> Enum.sort()
