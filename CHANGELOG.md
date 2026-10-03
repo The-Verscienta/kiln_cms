@@ -61,7 +61,17 @@ Every summary line below that was shortened links to its own entry there.
   byte.
   ([#1713](https://github.com/The-Verscienta/kiln_cms/issues/1713) · [long form](docs/changelog/unreleased.md#the-sync-apis-first-page-stays-under-15-ms-p95-from-10-concurrent))
 
+### Upgrade notes
+
+- **The upgrade writes a link edge for every stored `:reference` custom field
+  value; after restoring a pre-1.1 backup, run `mix kiln.links.backfill`.**
+  ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594) · [long form](docs/changelog/unreleased.md#reference-edges-backfill))
+
 ### Added
+
+- **`:reference` custom fields are also `ContentLink` edges: *Linked from* in
+  the editor, broken-reference warnings, and `incoming_links` on the API.**
+  ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594) · [long form](docs/changelog/unreleased.md#reference-fields-are-also-link-edges))
 
 - **Field-level localization: a field can be shared across a document's
   locale variants, or inherited along the site's fallback chain when empty.**
@@ -72,6 +82,12 @@ Every summary line below that was shortened links to its own entry there.
 - **Concluding an experiment now refuses a winner that is not one of its own
   variants.**
   ([#1851](https://github.com/The-Verscienta/kiln_cms/issues/1851) · [long form](docs/changelog/unreleased.md#concluding-an-experiment-now-refuses-a-winner-that-is-not-one-of-its-own))
+
+### Security
+
+- **A content link is readable only by someone who may read both of its ends;
+  `incoming_links` no longer names the drafts that link to a published page.**
+  ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594) · [long form](docs/changelog/unreleased.md#content-links-readable-only-when-both-ends-are))
 
 ## [1.0.0] - 2026-10-02
 

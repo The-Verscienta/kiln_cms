@@ -86,6 +86,7 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     case target(definition) do
       {:ok, table, filter, params} ->
         execute(op, table, filter, params)
+        execute_links(op, table, filter, params)
 
       :error ->
         Logger.warning(
@@ -124,6 +125,34 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
      WHERE custom_fields ? $1#{filter.(2)}
     """
     |> query([from, to | params], "moved #{inspect(from)} to #{inspect(to)} on")
+  end
+
+  # The field's reference edges (#1594) follow its values: a purge deletes
+  # them, a rename moves them to the new key. Scoped by the same table, org
+  # and type as the value statement, through the edge's source. Edges of any
+  # other field type match nothing (`kind = 'reference'`).
+  # sobelow_skip ["SQL.Query"]
+  defp execute_links({:purge, name}, table, filter, params) do
+    """
+    DELETE FROM content_links
+     WHERE kind = 'reference' AND field = $1
+       AND source_id IN (SELECT id FROM #{table} WHERE TRUE#{filter.(1)})
+    """
+    |> query([name | params], "deleted the #{inspect(name)} reference links of")
+  end
+
+  # sobelow_skip ["SQL.Query"]
+  defp execute_links({:rename, from, to}, table, filter, params) do
+    """
+    UPDATE content_links
+       SET field = $2
+     WHERE kind = 'reference' AND field = $1
+       AND source_id IN (SELECT id FROM #{table} WHERE TRUE#{filter.(2)})
+    """
+    |> query(
+      [from, to | params],
+      "moved the #{inspect(from)} reference links to #{inspect(to)} on"
+    )
   end
 
   # sobelow_skip ["SQL.Query"]
