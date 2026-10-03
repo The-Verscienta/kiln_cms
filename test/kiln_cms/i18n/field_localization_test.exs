@@ -8,8 +8,17 @@ defmodule KilnCMS.I18n.FieldLocalizationTest do
 
   The test config runs `en` (the default), `fr` and `es`, with no site chain:
   `fr → en`, `es → en`.
+
+  `async: false`, as `KilnCMSWeb.FieldLocalizationDeliveryTest` is: the chain
+  is read through the default org's cached `locale_fallbacks` key, which every
+  other default-org delivery test shares. Cachex coalesces concurrent misses on
+  one key, so an async run can be handed another test's lookup, run in that
+  test's sandbox. A failed lookup is not cached and answers every coalesced
+  caller `nil`, which `KilnCMS.OrgSettings.resolve/2` turns into the degraded
+  chain `[locale]`: nothing to inherit from, and a fallback field reads back
+  `nil` (seen once on CI as `"caption" => nil`).
   """
-  use KilnCMS.DataCase, async: true
+  use KilnCMS.DataCase, async: false
 
   import Ecto.Query, only: [from: 2]
 
@@ -23,6 +32,12 @@ defmodule KilnCMS.I18n.FieldLocalizationTest do
   alias KilnCMS.I18n.FieldLocalization
   alias KilnCMS.I18n.SharedFields
   alias KilnCMS.I18n.SharedFieldsWorker
+
+  # The chain is cached per org and one test here saves the default org's;
+  # leave no cached chain behind for whatever runs next.
+  setup do
+    on_exit(fn -> KilnCMS.Cache.bust_locale_fallbacks(KilnCMS.Accounts.default_org_id()) end)
+  end
 
   defp admin do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{

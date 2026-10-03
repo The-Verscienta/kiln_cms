@@ -69,6 +69,11 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **The content list filters by author, category, tag, language, update date
+  and review health, sorts by update, publish date or title, and saves a
+  filter as a named view.**
+  ([#1854](https://github.com/The-Verscienta/kiln_cms/issues/1854) · [long form](docs/changelog/unreleased.md#the-content-list-filters-and-saves-views))
+
 - **On Fly.io, Railway and DigitalOcean, rate limits can be per visitor:
   `CLIENT_IP_HEADER` reads the platform proxy's own client-address header.**
   ([#1548](https://github.com/The-Verscienta/kiln_cms/issues/1548) · [long form](docs/changelog/unreleased.md#on-fly-io-railway-and-digitalocean-rate-limits-can-be-per-visitor))

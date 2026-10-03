@@ -967,6 +967,24 @@ the filter reduces to `user_id == NULL`, and no row satisfies it.
 Org-scoped (`multitenancy strategy :attribute, attribute :org_id`) — a user who
 edits two sites sees each site's notifications in that site's console only.
 
+## Saved views — `CMS.SavedView` (#1593)
+
+| Action | admin | editor (owner) | editor (not owner) | viewer | anonymous |
+|--------|:-----:|:--------------:|:------------------:|:------:|:---------:|
+| read (`read`, `visible`) — private view | ✅ | ✅ | 🔎 nothing | 🔎 nothing | 🔎 nothing |
+| read — shared view | ✅ | ✅ | ✅ | 🔎 nothing | 🔎 nothing |
+| `create` (private) | ✅ | ✅ | — | ❌ | ❌ |
+| `create` / `update` with `shared: true` | ✅ | ❌ | ❌ | ❌ | ❌ |
+| `update`, `destroy` — private view | ✅ | ✅ | ❌ | ❌ | ❌ |
+| `update`, `destroy` — shared view | ✅ | ❌ | ❌ | ❌ | ❌ |
+
+A saved view is a named filter on the content list, so it is an editor's
+resource: `forbid_unless OrgEditor` heads every policy. An editor manages their
+own private views; sharing a view with the whole site, and editing or deleting
+a shared one, is an admin's (`OrgAdmin` bypass), so the team's view cannot be
+renamed out from under it by one member. Org-scoped like every console row: a
+view saved on one site is never listed on another.
+
 ## Webhook deliveries — `WebhookDelivery`
 
 | Action | admin | editor | viewer | anonymous |

@@ -85,6 +85,17 @@ facet list — that drift is exactly what `KilnCMS.CMS.Taxonomy` was written to
 stop, and it had already happened once there (`TagGroup` shipped without a
 `:search` action and was unfindable in `/search` with nothing failing).
 
+**Status (1.1).** The facets, the sort choice and saved views shipped
+([#1593](https://github.com/The-Verscienta/kiln_cms/issues/1593)): author,
+category, tag, locale, an update-date range, review health and "scheduled",
+all in the URL; private views plus admin-shared ones (`KilnCMS.CMS.SavedView`).
+The list reads each type's primary `:read` with the facets as filters rather
+than a `:browse` sibling of `:search`, so the obstacle above did not arise —
+but it does mean the console's facets (`KilnCMSWeb.EditorLive.Filters`) are a
+second list beside `:search`'s `facet_args`, a superset of it. A facet added to
+one should be considered for the other. Still open: a group-by axis, and
+per-type columns from `FieldDefinition`.
+
 ## 4. Workstream B — references become edges ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594))
 
 > **Proposed decision D20. A content reference is an edge, not a snapshot.**

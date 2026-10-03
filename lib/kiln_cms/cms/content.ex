@@ -2183,6 +2183,36 @@ defmodule KilnCMS.CMS.Content do
           index [:last_reviewed_at],
             name: unquote("#{table}_last_reviewed_at_index"),
             where: "review_after_days IS NOT NULL AND state = 'published'"
+
+          # The console's content list (#1593) reads one site's rows in one of
+          # three orders, 50 at a time, continuing from a keyset. Without an
+          # index on the order, every page sorts the whole site (a top-N heap
+          # sort over every row: ~7 ms at 30,000 posts, linear after that);
+          # with one, a page reads 51 index entries and stops. Codegen prepends
+          # `org_id`, which is the equality the tenant filter supplies, so each
+          # index is `(org_id, <sort key>, id)` — the trailing `id` is the
+          # keyset's tiebreaker, so a page boundary inside a run of equal keys
+          # is a seek too. The list's other filters (status, author, …) ride
+          # whichever index the order picks; the author, category and
+          # scheduled facets have their own indexes from
+          # `add_hot_path_indexes`.
+          #
+          # `updated_at DESC, id DESC` is a backward scan of the first. The
+          # published order puts never-published rows last, which no plain
+          # btree serves (a backward scan puts NULLs first), so that one
+          # declares its own direction. Built CONCURRENTLY: a large content
+          # table keeps taking writes while each one builds.
+          index [:updated_at, :id],
+            name: unquote("#{table}_console_updated_index"),
+            concurrently: true
+
+          index [:title, :id],
+            name: unquote("#{table}_console_title_index"),
+            concurrently: true
+
+          index ["published_at DESC NULLS LAST", "id DESC"],
+            name: unquote("#{table}_console_published_index"),
+            concurrently: true
         end
       end
 
