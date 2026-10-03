@@ -15,6 +15,11 @@ defmodule KilnCMS.Firing do
       define :list_artifacts, action: :read
       define :artifacts_for, action: :for_document, args: [:document_type, :document_id]
       define :get_artifact, action: :get_surface, args: [:document_type, :document_id, :surface]
+
+      define :artifacts_for_documents,
+        action: :for_documents,
+        args: [:document_type, :document_ids, :surface]
+
       define :upsert_artifact, action: :upsert
     end
 

@@ -135,6 +135,35 @@ defmodule KilnCMS.Firing.FirePathAuthorizationTest do
       assert {:ok, []} =
                Firing.artifacts_for(:page, gated.id, actor: nil, tenant: org_id())
     end
+
+    # #1713: the sync API's batched read. Same policies as `get_surface`.
+    test "the batched read gives a consumer only the artifacts of documents it may read" do
+      public = page()
+      gated = page(%{audience: hd(CMS.Audiences.gated())})
+      public_row = artifact(public)
+      gated_row = artifact(gated)
+      ids = [public.id, gated.id]
+
+      assert {:ok, rows} =
+               Firing.artifacts_for_documents(:page, ids, :web,
+                 actor: SystemActor.new(:delivery),
+                 tenant: org_id()
+               )
+
+      assert Enum.sort(Enum.map(rows, & &1.id)) == Enum.sort([public_row.id, gated_row.id])
+
+      assert {:ok, [%{id: id}]} =
+               Firing.artifacts_for_documents(:page, ids, :web, actor: nil, tenant: org_id())
+
+      assert id == public_row.id
+
+      # Narrowed to the surface asked for.
+      assert {:ok, []} =
+               Firing.artifacts_for_documents(:page, ids, :json,
+                 actor: SystemActor.new(:delivery),
+                 tenant: org_id()
+               )
+    end
   end
 
   describe "TypeDefinition / FieldDefinition — the schema the engine reads" do
