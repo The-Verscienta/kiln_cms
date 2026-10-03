@@ -56,16 +56,30 @@ defmodule KilnCMS.SystemActorGrants do
   end
 
   # The "(content)" row names the core's content types, but its grants come
-  # from `KilnCMS.CMS.Content`, which every content type an overlay registers
-  # in `:content_domains` uses too, so the row covers those types as well.
-  # Without this, a correct overlay's own content types admit subsystems "no
-  # row names".
+  # from `KilnCMS.CMS.Content`, which every content type an overlay builds on
+  # it carries too, so the row covers those types as well. Without this, a
+  # correct overlay's own content types admit subsystems "no row names". The
+  # types are taken from the granting resources rather than `:content_domains`,
+  # so one compiled into any configured domain is covered.
   defp row_resources(cell) do
     named = Enum.map(ticked(cell), &Module.concat(KilnCMS, &1))
 
     if String.contains?(cell, "(content)"),
-      do: Enum.uniq(named ++ Enum.map(KilnCMS.CMS.ContentTypes.all(), & &1.resource)),
+      do: Enum.uniq(named ++ Enum.filter(granting_resources(), &content_type?/1)),
       else: named
+  end
+
+  @doc """
+  Whether `resource` is built on `KilnCMS.CMS.Content`: a compiled content
+  type (`__kiln_content_type__/0`) or the dynamic `Entry` resource
+  (`__kiln_dynamic_entry__/0`). Such a resource carries the base's
+  system-actor grants, which the matrix's "(content)" row documents.
+  """
+  @spec content_type?(module()) :: boolean()
+  def content_type?(resource) do
+    Code.ensure_loaded?(resource) and
+      (function_exported?(resource, :__kiln_content_type__, 0) or
+         function_exported?(resource, :__kiln_dynamic_entry__, 0))
   end
 
   defp parse_grants(cell) do

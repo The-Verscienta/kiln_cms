@@ -112,6 +112,10 @@ Every summary line below that was shortened links to its own entry there.
   variants.**
   ([#1851](https://github.com/The-Verscienta/kiln_cms/issues/1851) · [long form](docs/changelog/unreleased.md#concluding-an-experiment-now-refuses-a-winner-that-is-not-one-of-its-own))
 
+- **An overlay's composed suite no longer fails the session-salt and
+  system-actor scope tests on a correct configuration.**
+  ([#1866](https://github.com/The-Verscienta/kiln_cms/pull/1866) · [long form](docs/changelog/unreleased.md#an-overlays-composed-suite-no-longer-fails-the-session-salt-and-system-actor))
+
 ### Security
 
 - **A content link is readable only by someone who may read both of its ends;
