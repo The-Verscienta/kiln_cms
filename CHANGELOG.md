@@ -54,13 +54,6 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
-### Changed
-
-- **The sync API's first page stays under 15 ms p95 from 10
-  concurrent clients, where it took 31–57 ms.** Same response, byte for
-  byte.
-  ([#1713](https://github.com/The-Verscienta/kiln_cms/issues/1713) · [long form](docs/changelog/unreleased.md#the-sync-apis-first-page-stays-under-15-ms-p95-from-10-concurrent))
-
 ### Upgrade notes
 
 - **Search now needs PostgreSQL's `unaccent` extension; the upgrade migration
@@ -82,6 +75,11 @@ Every summary line below that was shortened links to its own entry there.
   ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) · [long form](docs/changelog/unreleased.md#field-level-localization))
 
 ### Changed
+
+- **The sync API's first page stays under 15 ms p95 from 10
+  concurrent clients, where it took 31–57 ms.** Same response, byte for
+  byte.
+  ([#1713](https://github.com/The-Verscienta/kiln_cms/issues/1713) · [long form](docs/changelog/unreleased.md#the-sync-apis-first-page-stays-under-15-ms-p95-from-10-concurrent))
 
 - **Search ranks faster under load: the query is parsed once per statement,
   not once per matching row, and `/api/search` skips an empty entries section.**
