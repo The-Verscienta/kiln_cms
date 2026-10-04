@@ -19,6 +19,7 @@ on:
       - "CONTRIBUTING.md"
       - "mix.exs"
       - "scripts/publish_docs.exs"
+      - "scripts/publish/common.exs"
       - ".github/workflows/publish-docs.yml"
   # A full re-sync, e.g. after restoring the site's database.
   workflow_dispatch:

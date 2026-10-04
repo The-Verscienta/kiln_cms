@@ -49,8 +49,9 @@ UI" workflow, scoped to fields.
 - **References are edges too**: a `:reference` value is stored as a snapshot
   (`%{"id", "type", "slug", "title"}`) *and* as a `ContentLink` edge
   (`kind: :reference`, `field` the field's name) written with the live value
-  (#1594, decision D20 in
-  [content-organization-plan.md](content-organization-plan.md)). The edge is
+  (#1594; D20 in [content-organization-plan.md](content-organization-plan.md),
+  adopted additively — the snapshot stays the value, the edge is added beside
+  it, rather than the edge becoming the source of truth as D20 proposed). The edge is
   what answers "what links here" — the editor lists it under *Linked from*,
   and the API serves it through `incoming_links`. A published record's
   working copy holds draft references without edges until they are published.

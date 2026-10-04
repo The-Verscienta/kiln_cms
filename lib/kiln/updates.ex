@@ -7,12 +7,33 @@ defmodule Kiln.Updates do
   built off a pinned submodule (see `projects/README.md`), so it cannot update
   itself — it can only tell an admin that it's behind and print the command.
 
-  ## Why the API and not git
+  ## Why a feed and not git
 
   `mix kiln.update` reads tags from the checkout it runs in. A running
-  container has no checkout, so this module asks the GitHub releases API
-  instead. The two therefore agree only once a tag has an accompanying
-  *release* — which is the point of the release checklist in `docs/releasing.md`.
+  container has no checkout, so this module asks over HTTP instead, in two
+  legs (#1877):
+
+    1. **The release feed on kilncms.dev**, tried first. kilncms.dev is itself
+       a Kiln instance, and each final release is published there as an entry
+       of the `release` content type (#1870), so the feed is just the generic
+       public read API every Kiln serves —
+       `GET /api/json/entries/published?filter[type_name]=release`. It is not
+       subject to GitHub's 60-requests-per-hour unauthenticated budget, and it
+       carries each release's highlights, which the update page lists.
+    2. **The GitHub releases API**, on *any* failure of the first leg —
+       unreachable, a non-200, a body that isn't the expected JSON:API shape,
+       or no entry with a parseable final version (which is also what the feed
+       answers until the site has published its first release). An outage of
+       kilncms.dev therefore only changes where the answer comes from.
+
+  The feed is paged at 100 entries and `links.next` is followed for at most
+  five pages, and only while it stays on the feed's own origin. The highest
+  semver among the entries wins, compared here rather than trusting any server
+  sort, since a patch to an older line can be published after a newer major.
+
+  Either leg sees a version only once its tag has an accompanying GitHub
+  *release* (the feed is published from it) — which is the point of the
+  release checklist in `docs/releasing.md`.
 
   ## Which upstream
 
@@ -24,7 +45,24 @@ defmodule Kiln.Updates do
   reports "Up to date" indefinitely, so the fork's own security releases never
   surface.
 
+  The feed obeys the same rule. It describes *upstream* releases, so it is
+  consulted by default only while this deployment compares itself against
+  upstream: `KILN_UPDATE_REPO` unset (or set to the canonical repo) and
+  `KILN_UPDATE_RELEASES_URL` unset. A fork that set `KILN_UPDATE_REPO`, or a
+  GitHub Enterprise / air-gapped install that set `KILN_UPDATE_RELEASES_URL`,
+  goes straight to its own GitHub endpoint — otherwise kilncms.dev would answer
+  first and every fork would be told about upstream again, which is the exact
+  failure the repo setting exists to prevent, and a mirror chosen to keep
+  traffic internal would start reaching the internet. Such a deployment opts
+  back in by setting `KILN_UPDATE_FEED_URL` explicitly (its own site's feed,
+  typically). `KILN_UPDATE_FEED_URL=false` turns the feed leg off everywhere,
+  leaving GitHub only.
+
   ## Pre-releases
+
+  The feed publishes final releases only (#1870), but the publishing script
+  can be told to publish a candidate, so the feed leg ignores any entry whose
+  version has a pre-release part rather than offering it.
 
   `releases/latest` is GitHub's newest release that is neither a draft nor
   marked as a pre-release, so a release candidate published with
@@ -34,16 +72,21 @@ defmodule Kiln.Updates do
 
   ## Network behaviour
 
-  One unauthenticated GET to the releases API, made only when an admin opens
-  the update page. It is a public read of the configured repo's releases: the
-  request carries a bare `KilnCMS` user-agent and no version, no instance
-  identifier and no content, so nothing about this deployment is disclosed.
-  Operators who still want no outbound traffic at all set
-  `KILN_UPDATE_CHECK=false`, and `check/1` then reports `:disabled` without
-  touching the network.
+  Made only when an admin opens the update page: one unauthenticated GET to the
+  feed (more only if it pages), and a GET to the GitHub releases API only if
+  the feed failed. Both are public reads. Each request carries a bare
+  `KilnCMS` user-agent and nothing else that could identify the instance: no
+  version, no host name, no instance identifier, no cookie or credential, and
+  no query parameters beyond the feed's fixed type filter, field list and page
+  size. kilncms.dev keeps no client IP for the feed route (#1877). Operators
+  who want no outbound traffic at all set `KILN_UPDATE_CHECK=false`, and
+  `check/1` then reports `:disabled` without touching the network.
 
   Every outcome is cached in `:persistent_term` — 24h for a comparison, 15
-  minutes for a failure — and forced checks are floored at one per minute.
+  minutes for a failure — and forced checks are floored at one per minute. The
+  two legs share that cache and that floor: a check is one cached answer
+  however many legs it took, and the 15-minute error entry is written only
+  when *both* failed.
   Caching failures matters as much as caching successes: unauthenticated
   api.github.com allows 60 requests/hour/IP, and if a 403 went uncached the
   instance would keep requesting on every page load and never recover from
@@ -84,6 +127,23 @@ defmodule Kiln.Updates do
   @github_api "https://api.github.com"
   @github_web "https://github.com"
 
+  # The release feed (#1877): kilncms.dev's generic published-entries read,
+  # filtered to the `release` type that #1870 publishes into.
+  @default_feed_url "https://kilncms.dev/api/json/entries/published"
+  @feed_type "release"
+
+  # `100` is the `:published` action's `max_page_size`; asking for more is
+  # clamped server-side anyway. Five pages is 500 releases — years of headroom
+  # — and a hard bound on how many requests one check can make, whatever the
+  # `next` links say.
+  @feed_page_size 100
+  @feed_max_pages 5
+
+  # The page lists these under "Update available"; a feed entry is someone
+  # else's data, so it does not get to make the page arbitrarily long.
+  @max_highlights 8
+  @max_highlight_length 300
+
   # `owner/name`, GitHub's own shape. Deliberately strict: anything else is a
   # typo, and interpolating a typo would resolve somewhere else under
   # api.github.com rather than fail.
@@ -116,11 +176,17 @@ defmodule Kiln.Updates do
              | :prerelease
              | term()}
 
+  @typedoc """
+  The newest upstream release. `highlights` is the release's headline changes,
+  one per line, as the feed publishes them; it is `[]` when the answer came
+  from the GitHub leg, which has no such field.
+  """
   @type release :: %{
           version: Version.t(),
           tag: String.t(),
           url: String.t(),
-          published_at: DateTime.t() | nil
+          published_at: DateTime.t() | nil,
+          highlights: [String.t()]
         }
 
   @doc """
@@ -226,6 +292,59 @@ defmodule Kiln.Updates do
   end
 
   @doc """
+  The release feed tried before GitHub, or `:disabled`.
+
+    * `KILN_UPDATE_FEED_URL=false` (any off-spelling) — `:disabled`, so the
+      check is GitHub-only;
+    * `KILN_UPDATE_FEED_URL=<url>` — that URL, whatever `repo/0` says. It is
+      the published-entries endpoint of a Kiln site
+      (`https://site.example/api/json/entries/published`); this module adds the
+      query;
+    * unset — `#{@default_feed_url}`, but **only** while this deployment
+      compares itself against upstream. A configured `KILN_UPDATE_REPO` other
+      than `#{@default_repo}`, or any `KILN_UPDATE_RELEASES_URL`, makes it
+      `:disabled`: the default feed describes upstream's releases, and
+      answering a fork from it is the wrong-repo comparison `repo/0` exists to
+      prevent.
+
+  A configured value that isn't an absolute http(s) URL is
+  `{:error, :invalid_feed_url}`. Unlike `releases_url/0` that does not fail
+  the check — the GitHub leg is still the right answer for the configured repo
+  — but it is logged, since the operator asked for a feed and isn't getting it.
+  """
+  @spec feed_url() :: {:ok, String.t()} | :disabled | {:error, :invalid_feed_url}
+  def feed_url do
+    cond do
+      Application.get_env(:kiln_cms, __MODULE__, []) |> Keyword.get(:feed_url) == false ->
+        :disabled
+
+      url = config_string(:feed_url) ->
+        validate_http_url(url, :invalid_feed_url)
+
+      upstream?() ->
+        {:ok, @default_feed_url}
+
+      true ->
+        :disabled
+    end
+  end
+
+  defp upstream? do
+    config_string(:releases_url) == nil and config_string(:repo) in [nil, @default_repo]
+  end
+
+  defp validate_http_url(url, error) do
+    case URI.new(url) do
+      {:ok, %URI{scheme: scheme, host: host}}
+      when scheme in ~w(http https) and is_binary(host) and host != "" ->
+        {:ok, url}
+
+      _ ->
+        {:error, error}
+    end
+  end
+
+  @doc """
   Where an operator runs `mix kiln.update` from, if this deployment was told.
 
   `nil` unless `KILN_PIN_PATH` is set, and the admin page then gives a
@@ -313,13 +432,177 @@ defmodule Kiln.Updates do
 
   # The repo is resolved even when `:releases_url` overrides the endpoint: it
   # still supplies the `html_url` fallback below, and a repo that is set but
-  # malformed should fail closed rather than be silently unused.
+  # malformed should fail closed rather than be silently unused. That happens
+  # before either leg, so a misconfigured install makes no request at all —
+  # not even to the feed, whose answer would be about some other repo.
+  #
+  # The feed's failure reason is deliberately dropped: the GitHub leg is the
+  # answer then, and its error (if any) is the one cached and shown.
   defp fetch_latest do
     with {:ok, repo} <- repo(),
          {:ok, endpoint} <- releases_url(repo) do
-      handle_response(request(endpoint), repo)
+      case fetch_feed(repo) do
+        {:ok, release} -> {:ok, release}
+        :skip -> fetch_github(endpoint, repo)
+      end
     end
   end
+
+  defp fetch_github(endpoint, repo),
+    do: handle_response(request(endpoint, "application/vnd.github+json"), repo)
+
+  # `:skip` whenever GitHub should answer instead — the leg is off, or it
+  # failed in any way. Failures are logged at debug only: kilncms.dev being
+  # down is not something an operator can act on, and the fallback covers it.
+  defp fetch_feed(repo) do
+    case feed_url() do
+      {:ok, url} ->
+        case fetch_feed_pages(feed_params(url), feed_origin(url), @feed_max_pages, []) do
+          {:ok, entries} ->
+            newest_feed_release(entries, repo)
+
+          {:error, reason} ->
+            Logger.debug("Kiln release feed failed, falling back to GitHub: #{inspect(reason)}")
+            :skip
+        end
+
+      :disabled ->
+        :skip
+
+      {:error, :invalid_feed_url} ->
+        Logger.warning(
+          "KILN_UPDATE_FEED_URL is not an absolute http(s) URL; the update check is using GitHub only."
+        )
+
+        :skip
+    end
+  end
+
+  # Exactly what the response needs and nothing more (#1877): the type filter,
+  # the one attribute read below, and the page size. No version, host or
+  # instance id — the feed's operator learns only that *a* Kiln asked.
+  defp feed_params(url) do
+    [
+      url: url,
+      params: [
+        {"filter[type_name]", @feed_type},
+        {"fields[entry]", "custom_fields"},
+        {"page[limit]", @feed_page_size}
+      ]
+    ]
+  end
+
+  defp feed_origin(url) do
+    uri = URI.parse(url)
+    {uri.scheme, uri.host, uri.port}
+  end
+
+  # `links.next` is a full URL carrying the query (and the keyset cursor), so
+  # it is requested as-is — but only on the feed's own origin. A `next` that
+  # points elsewhere would send this instance's request, with its IP, to a
+  # host the operator never configured, so it ends the walk instead.
+  defp fetch_feed_pages(_target, _origin, 0, acc), do: {:ok, acc}
+
+  defp fetch_feed_pages(target, origin, pages_left, acc) do
+    case request(target, "application/vnd.api+json") do
+      {:ok, %Req.Response{status: 200, body: %{"data" => data} = body}} when is_list(data) ->
+        acc = acc ++ data
+
+        case next_link(body, origin) do
+          nil -> {:ok, acc}
+          next -> fetch_feed_pages([url: next], origin, pages_left - 1, acc)
+        end
+
+      {:ok, %Req.Response{status: 200}} ->
+        {:error, :unparseable_feed}
+
+      {:ok, %Req.Response{status: status}} ->
+        {:error, {:http_status, status}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp next_link(%{"links" => %{"next" => next}}, origin) when is_binary(next) do
+    if feed_origin(next) == origin, do: next
+  end
+
+  defp next_link(_body, _origin), do: nil
+
+  # The highest final version wins. An entry that isn't a release this module
+  # can stand behind — no version, an unparseable one, a pre-release — is
+  # skipped rather than failing the whole feed; a feed with none left is a
+  # failure, so GitHub answers. That is also the feed's state until the site
+  # publishes its first release: an empty `data`.
+  defp newest_feed_release(entries, repo) do
+    case Enum.flat_map(entries, &feed_release(&1, repo)) do
+      [] ->
+        Logger.debug("Kiln release feed had no usable release, falling back to GitHub")
+        :skip
+
+      releases ->
+        {:ok, Enum.max_by(releases, & &1.version, Version)}
+    end
+  end
+
+  defp feed_release(
+         %{"attributes" => %{"custom_fields" => %{"version" => raw} = fields}},
+         repo
+       )
+       when is_binary(raw) do
+    case Version.parse(raw |> String.trim() |> String.trim_leading("v")) do
+      {:ok, %Version{pre: []} = version} ->
+        tag = "v#{version}"
+
+        [
+          %{
+            version: version,
+            tag: tag,
+            url: feed_release_url(fields["release_url"], tag, repo),
+            published_at: parse_date(fields["released_on"]),
+            highlights: parse_highlights(fields["highlights"])
+          }
+        ]
+
+      _prerelease_or_unparseable ->
+        []
+    end
+  end
+
+  defp feed_release(_entry, _repo), do: []
+
+  # The link is rendered as an `href` on the admin page, so only an http(s)
+  # URL from the feed is used as-is; anything else (absent, `javascript:`)
+  # becomes the configured repo's tag page.
+  defp feed_release_url(url, tag, repo) when is_binary(url) do
+    case validate_http_url(String.trim(url), :invalid) do
+      {:ok, url} -> url
+      {:error, :invalid} -> "#{@github_web}/#{repo}/releases/tag/#{tag}"
+    end
+  end
+
+  defp feed_release_url(_url, tag, repo), do: "#{@github_web}/#{repo}/releases/tag/#{tag}"
+
+  defp parse_date(raw) when is_binary(raw) do
+    case Date.from_iso8601(raw) do
+      {:ok, date} -> DateTime.new!(date, ~T[00:00:00], "Etc/UTC")
+      _ -> nil
+    end
+  end
+
+  defp parse_date(_raw), do: nil
+
+  defp parse_highlights(raw) when is_binary(raw) do
+    raw
+    |> String.split("\n")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.take(@max_highlights)
+    |> Enum.map(&String.slice(&1, 0, @max_highlight_length))
+  end
+
+  defp parse_highlights(_raw), do: []
 
   defp handle_response({:ok, %Req.Response{status: 200, body: body}}, repo),
     do: parse_release(body, repo)
@@ -348,7 +631,8 @@ defmodule Kiln.Updates do
            version: version,
            tag: tag,
            url: body["html_url"] || "#{@github_web}/#{repo}/releases",
-           published_at: parse_timestamp(body["published_at"])
+           published_at: parse_timestamp(body["published_at"]),
+           highlights: []
          }}
 
       :error ->
@@ -367,17 +651,22 @@ defmodule Kiln.Updates do
     end
   end
 
-  defp request(url) do
+  # One request shape for both legs, so neither can drift into sending more:
+  # an accept header and the bare `KilnCMS` user-agent — no version, no host,
+  # no instance id. `target` is a URL or Req options carrying one.
+  defp request(target, accept) when is_binary(target), do: request([url: target], accept)
+
+  defp request(target, accept) do
     [
-      url: url,
       headers: [
-        {"accept", "application/vnd.github+json"},
+        {"accept", accept},
         {"user-agent", "KilnCMS"}
       ],
       # An admin is waiting on the page render; fail fast rather than retry.
       receive_timeout: 10_000,
       retry: false
     ]
+    |> Keyword.merge(target)
     |> Keyword.merge(req_options())
     |> Req.request()
   end

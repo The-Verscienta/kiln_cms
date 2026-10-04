@@ -87,11 +87,19 @@ Every summary line below that was shortened links to its own entry there.
   field hints, a row editor for `item_keys:` list fields, and live rendering.**
   ([#1865](https://github.com/The-Verscienta/kiln_cms/pull/1865) · [long form](docs/changelog/unreleased.md#plugin-blocks-get-editor-seams))
 
+- **Each published GitHub release now becomes a page on kilncms.dev at
+  `/releases/<version>`, listed at `/releases`.**
+  ([#1870](https://github.com/The-Verscienta/kiln_cms/issues/1870) · [long form](docs/changelog/unreleased.md#each-published-github-release-now-becomes-a-page-on-kilncmsdev-at))
+
 - **Each site can publish a `/.well-known/security.txt` (RFC 9116), set by an
   admin at Configure → Organization → Security contact.**
   ([#1873](https://github.com/The-Verscienta/kiln_cms/issues/1873) · [long form](docs/changelog/unreleased.md#each-site-can-publish-a-well-knownsecuritytxt-rfc-9116-set-by-an-admin-at))
 
 ### Changed
+
+- **The update check asks kilncms.dev's release feed first and lists the
+  release's highlights; GitHub is the fallback, and forks skip the feed.**
+  ([#1877](https://github.com/The-Verscienta/kiln_cms/issues/1877) · [long form](docs/changelog/unreleased.md#the-update-check-asks-kilncms-devs-release-feed-first))
 
 - **The sync API's first page stays under 15 ms p95 from 10
   concurrent clients, where it took 31–57 ms.** Same response, byte for
@@ -101,6 +109,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Search ranks faster under load: the query is parsed once per statement,
   not once per matching row, and `/api/search` skips an empty entries section.**
   ([#1725](https://github.com/The-Verscienta/kiln_cms/issues/1725) · [long form](docs/changelog/unreleased.md#search-ranks-faster-under-load))
+
+- **Every release candidate is canaried on kilncms.dev before the final, and
+  the headless API guides carry examples that run against it anonymously.**
+  ([#1869](https://github.com/The-Verscienta/kiln_cms/issues/1869) · [#1872](https://github.com/The-Verscienta/kiln_cms/issues/1872) · [long form](docs/changelog/unreleased.md#release-candidates-are-canaried-on-kilncms-dev))
 
 ### Fixed
 

@@ -663,12 +663,33 @@ database credentials do not own. See
 ### upstream update check
 
 The admin system page (`/editor/system`) reports whether a newer Kiln release
-exists. The check is a single unauthenticated GET to the GitHub releases API,
-made only when an admin opens the page. The request carries a bare `KilnCMS`
-user-agent — no version, no instance identifier, no content — so it discloses
-nothing about this deployment beyond its IP address. Results are cached for 24
-hours (15 minutes for a failure) and manual re-checks are floored at one per
-minute. See [`docs/releasing.md`](releasing.md).
+exists. The check is made only when an admin opens the page, and asks in two
+legs (#1877): first the **release feed on kilncms.dev** — the public
+published-entries API every Kiln serves, filtered to its `release` entries —
+and, only if that fails in any way, the **GitHub releases API**. An outage of
+kilncms.dev therefore only changes where the answer comes from. Results are
+cached for 24 hours (15 minutes when both legs failed) and manual re-checks
+are floored at one per minute. See [`docs/releasing.md`](releasing.md) and
+[`Kiln.Updates`](../lib/kiln/updates.ex).
+
+**What is sent.** Each request is an unauthenticated GET with a bare `KilnCMS`
+user-agent: no version, no host name, no instance identifier, no cookie or
+credential. The feed request's only query parameters are its fixed type
+filter, field list and page size
+(`?filter[type_name]=release&fields[entry]=custom_fields&page[limit]=100`);
+the GitHub request has none. Nothing about this deployment is disclosed
+beyond the IP address the request comes from.
+
+**kilncms.dev keeps no client IPs for the feed route.** The application does
+not log the client address for that route, and keeps it off any error report
+(`KilnCMSWeb.SentryScrubber`); the reverse proxy in front of kilncms.dev is
+configured not to log it either. GitHub's own logging of the fallback request
+is GitHub's.
+
+**To opt out**, set `KILN_UPDATE_CHECK=false`: no request is made to either
+service, and the page reports the running version and the update command
+without the comparison. To keep the check but skip kilncms.dev, set
+`KILN_UPDATE_FEED_URL=false` (GitHub only).
 
 **This is the only outbound integration that is on by default.** Unlike
 Meilisearch, S3, Unsplash and mail, it needs no credential to work, so there is
@@ -681,6 +702,13 @@ else's code — and the failure is silent in the direction that matters: a fork
 ahead of upstream compares as newer, so the page reports "Up to date"
 indefinitely and the fork's own security releases never surface.
 
+Setting `KILN_UPDATE_REPO` (to anything but the canonical repo) or
+`KILN_UPDATE_RELEASES_URL` also stops the kilncms.dev feed from being asked,
+since it describes upstream's releases: a fork or an internal mirror goes
+straight to its own endpoint. A fork that publishes its own `release` entries
+on its own Kiln site opts back in by setting `KILN_UPDATE_FEED_URL` to that
+site's feed.
+
 `GIT_SHA` and `BUILD_DATE` are Docker **build args**, not runtime variables —
 the Dockerfile records them as `KILN_GIT_SHA` / `KILN_BUILD_DATE` so a running
 instance can name the commit it was built from. Without `GIT_SHA` it takes the
@@ -690,10 +718,11 @@ reports the version alone.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `KILN_UPDATE_CHECK` | enabled | Set to an off-spelling for an instance that must make no outbound requests. | [`config/runtime/updates.exs:42`](../config/runtime/updates.exs#L42) |
-| `KILN_UPDATE_REPO` | `The-Verscienta/kiln_cms` | The `owner/name` this build compares itself against. **Forks must set this.** Left at the default, a fork is told about upstream's releases — and a fork *ahead* of upstream compares as newer, so the page reports "Up to date" forever and the fork's own security releases never surface. A value that isn't `owner/name` is rejected, not ignored. | [`config/runtime/updates.exs:72`](../config/runtime/updates.exs#L72), [`Kiln.Updates`](../lib/kiln/updates.ex) |
-| `KILN_UPDATE_RELEASES_URL` | derived from `KILN_UPDATE_REPO` | Full releases-API endpoint, for GitHub Enterprise or an internal mirror that can't reach `api.github.com`. Overrides the endpoint only — set `KILN_UPDATE_REPO` alongside it so the release link has a fallback. | [`config/runtime/updates.exs:78`](../config/runtime/updates.exs#L78), [`Kiln.Updates`](../lib/kiln/updates.ex) |
-| `KILN_PIN_PATH` | unset | Path to this project's pinned Kiln checkout (`kiln/upstream`, `upstream`, …). Display only: the update page prefixes its `mix kiln.update` command with a matching `cd`. Unset by default because the pin's path is a downstream choice — see [`projects/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md). | [`config/runtime/updates.exs:55`](../config/runtime/updates.exs#L55), [`Kiln.Updates`](../lib/kiln/updates.ex) |
+| `KILN_UPDATE_CHECK` | enabled | Set to an off-spelling for an instance that must make no outbound requests: neither the kilncms.dev feed nor GitHub is asked. | [`config/runtime/updates.exs:43`](../config/runtime/updates.exs#L43) |
+| `KILN_UPDATE_REPO` | `The-Verscienta/kiln_cms` | The `owner/name` this build compares itself against. **Forks must set this.** Left at the default, a fork is told about upstream's releases — and a fork *ahead* of upstream compares as newer, so the page reports "Up to date" forever and the fork's own security releases never surface. A value that isn't `owner/name` is rejected, not ignored. | [`config/runtime/updates.exs:73`](../config/runtime/updates.exs#L73), [`Kiln.Updates`](../lib/kiln/updates.ex) |
+| `KILN_UPDATE_RELEASES_URL` | derived from `KILN_UPDATE_REPO` | Full releases-API endpoint, for GitHub Enterprise or an internal mirror that can't reach `api.github.com`. Overrides the endpoint only — set `KILN_UPDATE_REPO` alongside it so the release link has a fallback. | [`config/runtime/updates.exs:79`](../config/runtime/updates.exs#L79), [`Kiln.Updates`](../lib/kiln/updates.ex) |
+| `KILN_UPDATE_FEED_URL` | `https://kilncms.dev/api/json/entries/published`, only while `KILN_UPDATE_REPO` and `KILN_UPDATE_RELEASES_URL` are unset | The release feed tried before GitHub: a Kiln site's published-entries endpoint, read for its `release` entries (`custom_fields.version` etc.); Kiln adds the query. Sends only the bare `KilnCMS` user-agent and a fixed query — no version or instance identifier — and kilncms.dev keeps no client IPs for it. Any failure falls back to GitHub. An off-spelling (`false`, `off`, …) makes the check GitHub-only; blank means unset. A value that isn't an absolute http(s) URL is logged and the check uses GitHub. A fork sets this to its own site to use a feed at all — see above. | [`config/runtime/updates.exs:92`](../config/runtime/updates.exs#L92), [`Kiln.Updates`](../lib/kiln/updates.ex) |
+| `KILN_PIN_PATH` | unset | Path to this project's pinned Kiln checkout (`kiln/upstream`, `upstream`, …). Display only: the update page prefixes its `mix kiln.update` command with a matching `cd`. Unset by default because the pin's path is a downstream choice — see [`projects/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md). | [`config/runtime/updates.exs:56`](../config/runtime/updates.exs#L56), [`Kiln.Updates`](../lib/kiln/updates.ex) |
 | `KILN_GIT_SHA` | unset | Commit the image was built from. Set via `--build-arg GIT_SHA`, else `--build-arg SOURCE_COMMIT` (what Coolify passes). | [`Kiln.Version`](../lib/kiln/version.ex) |
 | `KILN_BUILD_DATE` | unset | ISO-8601 UTC build timestamp. Set via `--build-arg BUILD_DATE`. | [`Kiln.Version`](../lib/kiln/version.ex) |
 

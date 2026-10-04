@@ -216,6 +216,26 @@ carries the reasoning.
   rather than needing `mix compile --force`. Blocks that define none of this render as
   before. ([#1865](https://github.com/The-Verscienta/kiln_cms/pull/1865))
 
+<a id="each-published-github-release-now-becomes-a-page-on-kilncmsdev-at"></a>
+
+- **Each published GitHub release now becomes a page on kilncms.dev at
+  `/releases/<version>`, listed at `/releases`.** A new workflow,
+  `publish-releases.yml`, runs `scripts/publish_releases.exs` when a release
+  is published. The script writes one entry of a `release` content type per
+  release. Its body is the release's long-form notes from
+  `docs/changelog/vX.Y.Z.md`. Its custom fields are `version`, `released_on`
+  (an ISO date), `release_url` and `highlights`, which holds the bold leads of
+  the CHANGELOG.md summary's Upgrade notes, Breaking and Added lines. It then
+  rebuilds the index page. Release candidates are skipped unless asked for
+  with `--prerelease`. `--all` backfills every release. The workflow reuses
+  the docs publisher's `KILN_DOCS_URL` and `KILN_DOCS_API_KEY`, and is skipped
+  where they are unset. The site's admin creates the `release` type once, and
+  the script names any field it is missing. The Markdown renderer and API
+  client that `publish_docs.exs` had to itself now live in
+  `scripts/publish/common.exs`, which both scripts load; the docs it
+  publishes are byte-for-byte unchanged. Nothing changes in the application
+  ([#1870](https://github.com/The-Verscienta/kiln_cms/issues/1870)).
+
 <a id="each-site-can-publish-a-well-knownsecuritytxt-rfc-9116-set-by-an-admin-at"></a>
 
 - **Each site can publish a `/.well-known/security.txt` (RFC 9116), set by an
@@ -241,6 +261,36 @@ carries the reasoning.
   ([#1873](https://github.com/The-Verscienta/kiln_cms/issues/1873))
 
 ## Changed
+
+<a id="the-update-check-asks-kilncms-devs-release-feed-first"></a>
+
+- **The update check asks kilncms.dev's release feed first and lists the
+  release's highlights; GitHub is the fallback, and forks skip the feed.**
+  `Kiln.Updates` now reads the `release` entries kilncms.dev publishes for
+  each final release (#1870), through the published-entries JSON:API every
+  Kiln serves (`/api/json/entries/published?filter[type_name]=release`),
+  picks the highest final semver among them, and shows its highlights on
+  `/editor/system`. Any failure of that leg — unreachable, a non-200, an
+  unexpected shape, no usable entry (the feed's state until the site has
+  published a release) — falls through to the GitHub releases API as before,
+  so until then the check behaves exactly as it did. The two legs share the
+  24-hour cache and the one-per-minute floor; the 15-minute error entry is
+  written only when both failed. The feed is paged at 100 and followed for at
+  most five pages, and only on its own origin.
+
+  The request is as anonymous as the GitHub one: a bare `KilnCMS`
+  user-agent, no version or instance identifier, and only the fixed query
+  the response needs. On the serving side, a read of that route no longer
+  attaches the client address or forwarding headers to a Sentry error
+  report; Kiln's own request logging never carried it.
+
+  `KILN_UPDATE_FEED_URL` points the leg at another Kiln site, or turns it off
+  with an off-spelling (`false`). The default feed describes upstream, so a
+  deployment that set `KILN_UPDATE_REPO` (to a fork) or
+  `KILN_UPDATE_RELEASES_URL` (a mirror) does not ask it unless it sets
+  `KILN_UPDATE_FEED_URL` too. `KILN_UPDATE_CHECK=false` still turns the whole
+  check off.
+  ([#1877](https://github.com/The-Verscienta/kiln_cms/issues/1877))
 
 <a id="the-sync-apis-first-page-stays-under-15-ms-p95-from-10-concurrent"></a>
 
@@ -304,6 +354,30 @@ carries the reasoning.
   Measured before and after with the same harness: see
   [`docs/benchmarks.md`](../benchmarks.md#headless-api-p95-under-50-ms).
   ([#1725](https://github.com/The-Verscienta/kiln_cms/issues/1725))
+
+<a id="release-candidates-are-canaried-on-kilncms-dev"></a>
+
+- **Every release candidate is canaried on kilncms.dev before the final, and
+  the headless API guides carry examples that run against it anonymously.**
+  kilncms.dev is the one Kiln instance the project runs with real editors
+  and real traffic, and the 1.0 candidates were exercised only by beta
+  testers. [`docs/releasing.md`](../releasing.md#cutting-a-release-candidate)
+  gains a fifth candidate step: check the migrations over the whole range
+  with `mix kiln.migrations.check --base`, deploy the candidate's image to
+  kilncms.dev, and let it soak for about 48 hours. A failed or hand-finished
+  migration, a new error class, or a p95 regression on the headless API or
+  editor save blocks the final. Rolling back is redeploying the previous
+  image, which the range check makes safe. `demo.kilncms.dev` takes only
+  final releases.
+
+  The headless consumer guide, the JSON:API and GraphQL references and the
+  JS client's README each gain a "Try it live" section with JSON:API,
+  artifact, search, resolve, sync and GraphQL reads against kilncms.dev's
+  own published guides. Every URL was checked anonymously before it was
+  written down. kilncms.dev does not publish its OpenAPI document or answer
+  GraphQL introspection, and the sections say so rather than link them.
+  ([#1869](https://github.com/The-Verscienta/kiln_cms/issues/1869),
+  [#1872](https://github.com/The-Verscienta/kiln_cms/issues/1872))
 
 ## Fixed
 
@@ -479,3 +553,4 @@ carries the reasoning.
   `related_<type>s` is unaffected — the related records were, and are,
   filtered by their own policy.
   ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594))
+
