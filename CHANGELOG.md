@@ -93,6 +93,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **The update check asks kilncms.dev's release feed first and lists the
+  release's highlights; GitHub is the fallback, and forks skip the feed.**
+  ([#1877](https://github.com/The-Verscienta/kiln_cms/issues/1877) · [long form](docs/changelog/unreleased.md#the-update-check-asks-kilncms-devs-release-feed-first))
+
 - **The sync API's first page stays under 15 ms p95 from 10
   concurrent clients, where it took 31–57 ms.** Same response, byte for
   byte.

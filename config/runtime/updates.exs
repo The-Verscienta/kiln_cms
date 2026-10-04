@@ -19,8 +19,9 @@ end
 
 # ## Upstream update check
 #
-# The admin update page asks GitHub whether a newer Kiln release exists. The
-# request carries a bare `KilnCMS` user-agent with no version and no instance
+# The admin update page asks whether a newer Kiln release exists — the release
+# feed on kilncms.dev first, then GitHub if that fails (#1877). Each request
+# carries a bare `KilnCMS` user-agent with no version and no instance
 # identifier, so it discloses nothing about this deployment beyond its IP. It
 # is made only when an admin opens the page, and results are cached (24h for a
 # comparison, 15 minutes for a failure), so an outage cannot turn page loads
@@ -79,4 +80,24 @@ releases_url = "KILN_UPDATE_RELEASES_URL" |> System.get_env("") |> String.trim()
 
 if releases_url != "" do
   config :kiln_cms, Kiln.Updates, releases_url: releases_url
+end
+
+# The release feed tried before GitHub (#1877): a Kiln site's published-entries
+# endpoint, kilncms.dev's by default. Unset, the default applies only while the
+# two settings above are unset — a fork or a mirror is not answered from
+# upstream's feed — so a fork that publishes its own `release` entries sets
+# this to its own site. An off-spelling (`false`, `off`, …) turns the feed leg
+# off and leaves GitHub only; blank is unset, as for every key here. See
+# `Kiln.Updates.feed_url/0`.
+feed_url = "KILN_UPDATE_FEED_URL" |> System.get_env("") |> String.trim()
+
+cond do
+  feed_url == "" ->
+    :ok
+
+  String.downcase(feed_url) in Env.false_values() ->
+    config :kiln_cms, Kiln.Updates, feed_url: false
+
+  true ->
+    config :kiln_cms, Kiln.Updates, feed_url: feed_url
 end

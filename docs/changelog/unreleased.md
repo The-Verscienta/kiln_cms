@@ -238,6 +238,36 @@ carries the reasoning.
 
 ## Changed
 
+<a id="the-update-check-asks-kilncms-devs-release-feed-first"></a>
+
+- **The update check asks kilncms.dev's release feed first and lists the
+  release's highlights; GitHub is the fallback, and forks skip the feed.**
+  `Kiln.Updates` now reads the `release` entries kilncms.dev publishes for
+  each final release (#1870), through the published-entries JSON:API every
+  Kiln serves (`/api/json/entries/published?filter[type_name]=release`),
+  picks the highest final semver among them, and shows its highlights on
+  `/editor/system`. Any failure of that leg — unreachable, a non-200, an
+  unexpected shape, no usable entry (the feed's state until the site has
+  published a release) — falls through to the GitHub releases API as before,
+  so until then the check behaves exactly as it did. The two legs share the
+  24-hour cache and the one-per-minute floor; the 15-minute error entry is
+  written only when both failed. The feed is paged at 100 and followed for at
+  most five pages, and only on its own origin.
+
+  The request is as anonymous as the GitHub one: a bare `KilnCMS`
+  user-agent, no version or instance identifier, and only the fixed query
+  the response needs. On the serving side, a read of that route no longer
+  attaches the client address or forwarding headers to a Sentry error
+  report; Kiln's own request logging never carried it.
+
+  `KILN_UPDATE_FEED_URL` points the leg at another Kiln site, or turns it off
+  with an off-spelling (`false`). The default feed describes upstream, so a
+  deployment that set `KILN_UPDATE_REPO` (to a fork) or
+  `KILN_UPDATE_RELEASES_URL` (a mirror) does not ask it unless it sets
+  `KILN_UPDATE_FEED_URL` too. `KILN_UPDATE_CHECK=false` still turns the whole
+  check off.
+  ([#1877](https://github.com/The-Verscienta/kiln_cms/issues/1877))
+
 <a id="the-sync-apis-first-page-stays-under-15-ms-p95-from-10-concurrent"></a>
 
 - **The sync API's first page stays under 15 ms p95 from 10

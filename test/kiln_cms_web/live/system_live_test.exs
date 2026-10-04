@@ -143,6 +143,41 @@ defmodule KilnCMSWeb.SystemLiveTest do
       assert html =~ "Update available"
       assert html =~ newer_tag()
       assert html =~ "mix kiln.update"
+      # A GitHub answer carries no highlights, so the section is left out.
+      refute html =~ "What&#39;s new in this release"
+    end
+
+    # #1877: the kilncms.dev feed answers first and carries each release's
+    # highlights, which the page lists — escaped, since they are feed data.
+    test "lists the feed's highlights for the newer release", %{conn: conn} do
+      "v" <> version = newer_tag()
+
+      Req.Test.stub(Updates, fn conn ->
+        assert conn.host == "kilncms.dev"
+
+        Req.Test.json(conn, %{
+          "data" => [
+            %{
+              "attributes" => %{
+                "custom_fields" => %{
+                  "version" => version,
+                  "released_on" => "2026-10-02",
+                  "highlights" => "Faster publishing\n<b>Bold</b> claims"
+                }
+              }
+            }
+          ],
+          "links" => %{"next" => nil}
+        })
+      end)
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/system")
+      html = render_async(lv, 2_000)
+
+      assert html =~ "What&#39;s new in this release"
+      assert html =~ "Faster publishing"
+      assert html =~ "&lt;b&gt;Bold&lt;/b&gt; claims"
+      assert html =~ "released 2026-10-02"
     end
 
     # The pin is a submodule *or* a fetched ref, at a path the project chose,

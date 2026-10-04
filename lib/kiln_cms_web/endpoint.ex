@@ -205,7 +205,13 @@ defmodule KilnCMSWeb.Endpoint do
   # body: a `pending_token` plus a `code` is a complete sign-in for a 2FA
   # account, so a single 500 on `/api/auth/sign_in/verify` would ship one to
   # anyone with Sentry read access.
-  plug Sentry.PlugContext, body_scrubber: &KilnCMSWeb.SentryScrubber.scrub_params/1
+  #
+  # The address reader and header scrubber keep the client IP off any event
+  # raised by a read of the update feed's route (#1877) — see the module.
+  plug Sentry.PlugContext,
+    body_scrubber: &KilnCMSWeb.SentryScrubber.scrub_params/1,
+    header_scrubber: &KilnCMSWeb.SentryScrubber.scrub_headers/1,
+    remote_address_reader: &KilnCMSWeb.SentryScrubber.remote_address/1
 
   # CORS for the headless API surfaces (`/api/*`, `/gql`). Ahead of the router so
   # it can answer preflight `OPTIONS` requests, which never match a `get`/`post`

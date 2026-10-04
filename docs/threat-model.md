@@ -703,7 +703,9 @@ a credential, so the operator's trust assumptions do not carry over:
   an anonymous visitor's question. It is the site's choice and the page says so.
 
 ### Other outbound calls
-`Kiln.Updates` (GitHub releases, admin-triggered),
+`Kiln.Updates` (the kilncms.dev release feed, then GitHub releases;
+admin-triggered, and the feed's `links.next` is followed only on its own
+origin),
 Meilisearch (the operator's instance — a site's own is below), S3/MinIO, the
 mailer, and the LLM providers behind `/api/ask` and
 SEO drafting all make outbound requests to *operator-configured or fixed*
