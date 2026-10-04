@@ -306,7 +306,11 @@ defmodule KilnCMSWeb.VersionDiffComponents do
     author_id: "Author",
     category_id: "Category",
     featured_image_id: "Featured image",
-    custom_fields: "Custom fields"
+    custom_fields: "Custom fields",
+    # Where the document sits (#1597). Reported, because a move belongs in
+    # history; not restorable — see `KilnCMS.CMS.VersionFields`.
+    parent_id: "Parent",
+    position: "Order among siblings"
   }
 
   @field_order KilnCMS.CMS.VersionFields.field_order()

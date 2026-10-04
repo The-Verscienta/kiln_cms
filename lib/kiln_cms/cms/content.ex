@@ -2095,6 +2095,14 @@ defmodule KilnCMS.CMS.Content do
         # `search_vector` column (locale-weighted tsvector) — created in the
         # `add_locale_weighted_search` migration alongside the trigger, since the
         # column isn't an Ash-managed attribute.
+        # Purging a parent must NEVER delete its children (#1597). They become
+        # roots instead — the call `KilnCMS.CMS.Tag` makes for its group, with a
+        # great deal more at stake here: a cascade would take a subtree of
+        # published documents with it. Trash is archival and touches no FK.
+        references do
+          reference :parent, on_delete: :nilify
+        end
+
         custom_indexes do
           # Delivery lookup for multi-segment path aliases (#485) — hit on the
           # URL-miss fallback, so it must seek. Partial: most rows have none.
@@ -2102,6 +2110,18 @@ defmodule KilnCMS.CMS.Content do
             name: unquote("#{table}_path_alias_index"),
             where: "path_alias IS NOT NULL",
             all_tenants?: true
+
+          # Postgres does not index FK columns for you, and the derived index
+          # under multitenancy would be `(org_id, parent_id)` — which the
+          # `ON DELETE SET NULL` cascade's `parent_id`-only scan cannot seek,
+          # and neither can a `children` load. `all_tenants?` keeps a plain
+          # `(parent_id)` index for both (mirrors `tags_tag_group_lookup_index`).
+          # Built CONCURRENTLY like the console indexes below: a large content
+          # table keeps taking writes while it builds.
+          index [:parent_id],
+            name: unquote("#{table}_parent_lookup_index"),
+            all_tenants?: true,
+            concurrently: true
 
           # HNSW index for approximate nearest-neighbour search over embeddings,
           # using cosine distance (`<=>`). The `embedding vector_cosine_ops`
@@ -2519,6 +2539,28 @@ defmodule KilnCMS.CMS.Content do
         # `KilnCMS.CMS.WorkingCopy.held_param_keys/1`). Operational settings —
         # audience, the passphrase, schedule, lifecycle — are not accepted
         # here and still save through `:update`.
+        # Where the document sits (#1597, D21 — `KilnCMS.CMS.ContentTree`).
+        #
+        # Its own action rather than two more attributes on `default_accept`,
+        # for three reasons. A move is a distinct editorial act, and the tree
+        # UI's drag-and-drop wants one call rather than a general update. It
+        # keeps `parent_id`/`position` off the public API surface, which the
+        # first slice of the tree deliberately does not change — `accept` feeds
+        # the GraphQL/JSON:API *input* types, so putting them there would make
+        # the tree writable headlessly before it is readable, and the read side
+        # is waiting on a `Checks.LinkEndsReadable`-style gate so a published
+        # page's children cannot enumerate its drafts (#1594's lesson). And it
+        # is where the bound on a subtree move belongs when D21's fan-out
+        # measurement lands: re-deriving every descendant's alias is a property
+        # of moving, not of saving.
+        #
+        # `Validations.ContentPlacement` guards the placement itself; it is
+        # declared globally and fires here because this changes `parent_id`.
+        update :move do
+          require_atomic? false
+          accept [:parent_id, :position]
+        end
+
         update :save_working_copy do
           require_atomic? false
           accept [:working_title, :working_blocks]
@@ -3270,6 +3312,13 @@ defmodule KilnCMS.CMS.Content do
       end
 
       validations do
+        # Where a document may sit: under a parent of its own type in its own
+        # org, within `ContentTree.max_depth/0` counting the subtree it carries,
+        # never inside its own subtree. Only on writes that actually change
+        # `parent_id` — an unconditional depth check freezes a too-deep row,
+        # because outdenting it is itself a write.
+        validate {KilnCMS.CMS.Validations.ContentPlacement, []}, on: [:create, :update]
+
         # A content slug is a URL component by definition (#1062). Same charset
         # as taxonomy (#1044): lowercase letters, digits, and single hyphens
         # between them. `DeriveSlug` already produces conforming values for the
@@ -3626,6 +3675,17 @@ defmodule KilnCMS.CMS.Content do
         # Internal: never on the public APIs (delivery must serve the
         # published text only), but versioned by PaperTrail so a discarded
         # working copy survives as history.
+        # Sibling order within a parent (or among the roots, for `parent_id`
+        # nil). Ties break on `title` wherever this is read, so an unordered set
+        # still lists predictably. See `KilnCMS.CMS.ContentTree`.
+        attribute :position, :integer do
+          allow_nil? false
+          default 0
+          # Public once the tree is a deliberate API surface — see `parent` in
+          # `relationships` for why that is not this slice.
+          public? false
+        end
+
         attribute :working_title, :string do
           public? false
           constraints max_length: KilnCMS.Limits.line()
@@ -3795,6 +3855,29 @@ defmodule KilnCMS.CMS.Content do
         belongs_to :category, KilnCMS.CMS.Category do
           allow_nil? true
           public? true
+        end
+
+        # Where this document sits in the content tree (#1597, D21). Same type
+        # only, so this is a real FK rather than a bare UUID — see
+        # `KilnCMS.CMS.ContentTree` for why, and for why it is not the term
+        # hierarchy and not the menu.
+        # NOT on the public API surface yet, deliberately. A published page's
+        # `children` would otherwise enumerate its DRAFT children to an
+        # anonymous reader — the leak `Checks.LinkEndsReadable` had to close for
+        # `incoming_links` (#1594). Exposing the tree headlessly is worth doing,
+        # but it needs that gate (and a decision about pagination) rather than
+        # falling out of a `public? true` on the first slice.
+        belongs_to :parent, unquote(resource) do
+          allow_nil? true
+          public? false
+        end
+
+        # The inverse. Ordered the way the tree is read everywhere: the
+        # editor-chosen `position` first, `title` as the tiebreaker.
+        has_many :children, unquote(resource) do
+          destination_attribute :parent_id
+          sort position: :asc, title: :asc
+          public? false
         end
 
         # Many-to-one: the lead/hero image.
