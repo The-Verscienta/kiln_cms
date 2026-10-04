@@ -5,8 +5,9 @@ views) and **B** (#1594, references as edges) landed in 1.1. **C** (#1595) is on
 the **v2.0.0** milestone — collapsing `Category` and `Tag` removes two covered
 resources, which the 1.0 contract only allows in a major, so §9's timing
 question was answered by deferring rather than by rushing it. **E** (#1597) is
-decided (**D21** in §7 — content gets a tree) and on **v1.1.0**. **D** (#1596)
-is open and unscheduled, and §8 explains why that is now awkward.
+decided (**D21** in §7 — content gets a tree) and **D** (#1596) is scheduled
+ahead of C, both on **v1.1.0**; §8 says why that inverts the plan's own
+sequencing on purpose.
 
 This is the design record for issues
 [#1593](https://github.com/The-Verscienta/kiln_cms/issues/1593)–[#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597),
@@ -249,8 +250,17 @@ Two constraints that are not optional:
   `docs/automation.md` already documents a bulk move exhausting the embedding
   reserve.
 
-This wants Workstream C landed first, so the suggestions have a vocabulary
-worth aiming at.
+**Scheduled for v1.1.0, ahead of C.** This originally wanted Workstream C
+landed first, so the suggestions would have a vocabulary worth aiming at. C is
+now a v2.0.0 item, and waiting for it would park the one differentiator in this
+plan behind the one breaking change in it — so D is built against today's
+`Category`/`Tag` and migrated with C when C happens.
+
+The rework that buys is accepted rather than overlooked: the taxonomy-health
+view and the bulk auto-tagging surface both target a vocabulary C will replace.
+Keep the term-facing parts thin for that reason — prefer one narrow helper over
+scattering `Tag`/`Category` reads across the new surfaces, so the 2.0 migration
+has a single seam instead of many.
 
 ## 7. Workstream E — the structure decision ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597))
 
@@ -323,18 +333,23 @@ deliberately between a recursive CTE and a materialized path, and measuring it.
 | 1 | **A** — faceted saved views (#1593) | Biggest felt change, no schema risk, reuses facets that already exist | **shipped 1.1** |
 | 2 | **B** — references as edges (#1594) | Small refactor against a table already built; unlocks backlinks and the graph | **shipped 1.1** |
 | 3 | **C** — one term vocabulary (#1595) | Schema + deprecation; wants the 1.0 window (below) | **deferred to v2.0.0** |
-| 4 | **D** — derived organization (#1596) | Best built once C gives it a vocabulary to aim at | open, unscheduled |
+| 4 | **D** — derived organization (#1596) | Originally: once C gives it a vocabulary to aim at. **Reversed** — see below | **v1.1.0** |
 | 5 | **E** — the structure decision (#1597) | Decide explicitly; document either way | **decided (D21), v1.1.0** |
 
 The order held for the two that shipped, and in the direction the table
 predicted: A was the visible change and carried no schema risk, B was small
 because the table was already there.
 
-**D now has a sequencing problem.** It was placed after C so the suggestions
-would have a vocabulary worth aiming at. C is a major-release item, and waiting
-for v2.0.0 would park the one differentiator in this plan behind the one
-breaking change in it. Worth deciding whether D can be built against today's
-`Category`/`Tag` and migrated with C, rather than waiting.
+**D's sequencing problem is resolved: it goes before C, not after.** D was
+placed after C so its suggestions would have a vocabulary worth aiming at. Once
+C became a v2.0.0 item that ordering would have parked the plan's one
+differentiator behind its one breaking change, so D is on **v1.1.0**, built
+against today's `Category`/`Tag`, and migrated with C later. The second pass
+costs less than a release of delay (see §6).
+
+That leaves the original table's order intact only for A and B. The live order
+is: A and B shipped, **D and E in 1.1**, **C in 2.0** — which inverts the one
+dependency this plan originally asserted, deliberately.
 
 ## 9. Timing — C and E were schedule-sensitive
 
@@ -361,7 +376,8 @@ shipped machinery and stays additive. Worth noting as the cheaper lesson —
 checking what delivery already does would have answered this before it was
 filed as an open question.
 
-A, B and D are additive and can go at any time.
+A, B and D are additive and can go at any time — which is what lets D precede C
+rather than follow it.
 
 ## 10. Honest caveats
 
