@@ -27,6 +27,41 @@ generator that emits per-site TypeScript types from `GET /api/schema` (dynamic
 content types and custom fields included). `examples/astro-blog` consumes it
 end to end.
 
+## Try it live
+
+The project's own site, [kilncms.dev](https://kilncms.dev), is a Kiln
+instance, and its published content answers anonymous reads. The guides under
+`/docs` are entries of a dynamic `doc` type, so you can try each surface below
+with nothing installed:
+
+```bash
+# Filterable lists / metadata (JSON:API)
+curl -g 'https://kilncms.dev/api/json/entries/published?filter[type_name]=doc&fields[entry]=slug,title&page[limit]=5' \
+  -H 'accept: application/vnd.api+json'
+
+# The rendered body of one document (the fired artifact)
+curl 'https://kilncms.dev/api/content/doc/getting-started?surface=json'
+
+# Hybrid search
+curl 'https://kilncms.dev/api/search?q=migrations'
+
+# What lives at this URL?
+curl 'https://kilncms.dev/api/resolve?path=/docs/getting-started'
+
+# Mirroring: the first page of a sync
+curl 'https://kilncms.dev/api/sync?initial=true&limit=5'
+
+# A typed query (GraphQL)
+curl https://kilncms.dev/gql -H 'content-type: application/json' \
+  -d '{"query":"{ publishedEntries(limit: 3, offset: 0) { count results { title slug } } }"}'
+```
+
+It is a documentation site, so it has no categories, tags or menus, and few
+posts: those reads answer `200` with an empty list. It is read-only for you,
+and the [rate limits](api.md#rate-limits) are a stock install's. The examples
+in the rest of this guide use `localhost:4000` or `cms.example.com`, meaning a
+site of your own.
+
 ## Decision tree
 
 | You want… | Use | Returns |

@@ -48,6 +48,13 @@ people to pass the flag reflexively.
    CANDIDATE_REF=origin/main scripts/upgrade_rehearsal/rehearse.sh v0.11.0
    ```
 
+   If the release had candidates, the last one must also have passed its
+   canary on kilncms.dev (step 5 of
+   [Cutting a release candidate](#cutting-a-release-candidate)). If `main`
+   has moved since that candidate in anything but the changelog, the
+   version and the deploy templates, the change was never canaried: cut
+   another candidate, or say in the release commit why it needs none.
+
 2. **Write the changelog entry.** Move `## [Unreleased]` items into a new
    `## [X.Y.Z]` section, and rename `docs/changelog/unreleased.md` to
    `docs/changelog/vX.Y.Z.md` — it already holds the long form of everything
@@ -228,6 +235,65 @@ skips pre-releases, and each one has an explicit way in.
    (`{:error, :prerelease}`) rather than telling anyone to install it, but the
    page can no longer report on the final release either — fix it with
    `gh release edit vX.Y.Z-rc.N --prerelease`.
+
+5. **Canary it on kilncms.dev** (#1869). kilncms.dev is the one Kiln
+   instance the project runs with real editors and real traffic, so it is
+   where a candidate first meets a live database. Beta testers exercise the
+   features. The canary catches what only an upgrade shows: an
+   expand/contract mistake, a new boot warning, the cache under real load.
+
+   First check the migrations over the whole range, from the release
+   kilncms.dev runs now:
+
+   ```bash
+   mix kiln.migrations.check --base vA.B.C   # the release kilncms.dev runs
+   ```
+
+   CI judged each pull request's migrations on their own. This judges them
+   together, and it must pass, because it is what makes the rollback below
+   safe. Then take a backup (`scripts/backup.sh`), point the kilncms.dev app
+   at `ghcr.io/the-verscienta/kiln_cms:X.Y.Z-rc.N` (or, where the platform
+   builds from source, at the `vX.Y.Z-rc.N` tag), and redeploy. Migrations
+   run on boot.
+
+   Let it soak for about **48 hours**, including a working day of editing
+   and a docs publish (`publish-docs.yml` writes every guide through the
+   API). Then compare it with the previous release over the same hours of
+   the week:
+
+   - the boot log: `bin/migrate` finished, and no boot warning is new
+     (they go to stderr only, so read the container log);
+   - Sentry, when `SENTRY_DSN` is set, and the log's `[error]` lines;
+   - headless API and editor save p95, from the panels in
+     [`observability.md`](observability.md) (which need
+     `KILN_METRICS_ENABLED`);
+   - Oban failures.
+
+   **What blocks the final:**
+
+   - a migration that fails on boot, or has to be finished by hand;
+   - a new error class: an exception, Sentry issue or `[error]` line the
+     previous release did not produce, however rare;
+   - a p95 regression on the headless API or editor save against the
+     previous release, and any p95 over its target in
+     [`performance.md`](performance.md#slo-targets).
+
+   Fix it on `main`, cut `-rc.N+1`, and canary that one from the start. A
+   blocker found on hour 47 restarts the 48.
+
+   **Rolling back** is pointing the app at the previous release's image
+   and redeploying. Do not run the down migrations. The range passed
+   `mix kiln.migrations.check`, so the previous release runs against the
+   migrated schema, as the old nodes of a rolling deploy do (see
+   [Migrations: expand, migrate, contract](#migrations-expand-migrate-contract)).
+   Two things do not go back with the image: rows a migration rewrote (the
+   candidate's Upgrade notes name them), and Oban jobs queued for a worker
+   only the candidate has, which fail on the previous release until their
+   attempts run out.
+
+   `demo.kilncms.dev` does not take candidates. It resets to a golden
+   snapshot ([`demo-mode.md`](demo-mode.md)) that would need recapturing for
+   each one, so it moves to the final release once that is published.
 
 **How a downstream opts in.** A plain `mix kiln.update` never targets a
 candidate. To try one:

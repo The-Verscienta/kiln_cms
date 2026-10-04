@@ -281,6 +281,30 @@ carries the reasoning.
   [`docs/benchmarks.md`](../benchmarks.md#headless-api-p95-under-50-ms).
   ([#1725](https://github.com/The-Verscienta/kiln_cms/issues/1725))
 
+<a id="release-candidates-are-canaried-on-kilncms-dev"></a>
+
+- **Every release candidate is canaried on kilncms.dev before the final, and
+  the headless API guides carry examples that run against it anonymously.**
+  kilncms.dev is the one Kiln instance the project runs with real editors
+  and real traffic, and the 1.0 candidates were exercised only by beta
+  testers. [`docs/releasing.md`](../releasing.md#cutting-a-release-candidate)
+  gains a fifth candidate step: check the migrations over the whole range
+  with `mix kiln.migrations.check --base`, deploy the candidate's image to
+  kilncms.dev, and let it soak for about 48 hours. A failed or hand-finished
+  migration, a new error class, or a p95 regression on the headless API or
+  editor save blocks the final. Rolling back is redeploying the previous
+  image, which the range check makes safe. `demo.kilncms.dev` takes only
+  final releases.
+
+  The headless consumer guide, the JSON:API and GraphQL references and the
+  JS client's README each gain a "Try it live" section with JSON:API,
+  artifact, search, resolve, sync and GraphQL reads against kilncms.dev's
+  own published guides. Every URL was checked anonymously before it was
+  written down. kilncms.dev does not publish its OpenAPI document or answer
+  GraphQL introspection, and the sections say so rather than link them.
+  ([#1869](https://github.com/The-Verscienta/kiln_cms/issues/1869),
+  [#1872](https://github.com/The-Verscienta/kiln_cms/issues/1872))
+
 ## Fixed
 
 <a id="search-folds-diacritics"></a>
