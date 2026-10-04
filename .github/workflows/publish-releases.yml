@@ -1,0 +1,93 @@
+# Publishes each GitHub release's notes to the Kiln site that dogfoods them
+# (kilncms.dev) — a /releases/<slug> entry plus the /releases index page — when
+# the release is published (#1870). See scripts/publish_releases.exs for what
+# is published and how, and for the one-time setup (the `release` type and its
+# fields).
+#
+# Same site and same admin key as the docs, so it reuses their configuration:
+#   vars.KILN_DOCS_URL         e.g. https://kilncms.dev — unset skips the job,
+#                              so forks and unconfigured clones stay green
+#   secrets.KILN_DOCS_API_KEY  :read_write key on an admin account
+#
+# A release created with a workflow's GITHUB_TOKEN triggers no workflow, so
+# this one runs for releases a maintainer publishes (docs/releasing.md).
+# Pre-releases are skipped. A manual run publishes one version (a candidate
+# only with `prerelease` ticked), or every release when `version` is empty —
+# the backfill, or a re-sync after restoring the site's database.
+name: Publish release notes
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, e.g. v1.0.0. Empty publishes every release."
+        required: false
+        default: ""
+      prerelease:
+        description: "Publish it even if it is a pre-release (rc)"
+        type: boolean
+        default: false
+
+# One run at a time, in order: two overlapping runs could each create the
+# same new entry, or rebuild the index from different sets.
+concurrency:
+  group: publish-releases
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish release notes to ${{ vars.KILN_DOCS_URL }}
+    if: >-
+      vars.KILN_DOCS_URL != '' &&
+      (github.event_name != 'release' || !github.event.release.prerelease)
+    runs-on: ubuntu-latest
+
+    steps:
+      # The default branch, not the release's tag: the index lists every
+      # release, and a patch tagged off an older line has a tree without the
+      # newer ones. Every release's notes land on main (a patch line's by its
+      # merge-back; until then, re-run this by hand once it has merged).
+      # Full history so a release CHANGELOG.md has no dated heading for can be
+      # dated by its tag.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: Set up Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      # Mix.install's build of earmark_parser/req/jason, keyed on the scripts
+      # that pin them.
+      - name: Cache Mix.install
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/mix/installs
+          key: ${{ runner.os }}-publish-releases-${{ hashFiles('.tool-versions') }}-${{ hashFiles('scripts/publish_releases.exs') }}
+
+      - name: Publish
+        env:
+          KILN_URL: ${{ vars.KILN_DOCS_URL }}
+          KILN_RELEASES_API_KEY: ${{ secrets.KILN_DOCS_API_KEY }}
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.event.release.tag_name }}
+          VERSION: ${{ inputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          if [ "$EVENT" = "release" ]; then
+            elixir scripts/publish_releases.exs --version "$TAG"
+          elif [ -z "$VERSION" ]; then
+            elixir scripts/publish_releases.exs --all
+          elif [ "$PRERELEASE" = "true" ]; then
+            elixir scripts/publish_releases.exs --version "$VERSION" --prerelease
+          else
+            elixir scripts/publish_releases.exs --version "$VERSION"
+          fi

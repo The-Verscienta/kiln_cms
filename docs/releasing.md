@@ -174,6 +174,15 @@ people to pass the flag reflexively.
 
    Paste the changelog section in as the release body.
 
+   Publishing it also runs `.github/workflows/publish-releases.yml`, which
+   posts the release's notes (`docs/changelog/vX.Y.Z.md`) to kilncms.dev at
+   `/releases/<version>` and relists `/releases` (#1870). Publish the release
+   yourself, with `gh` or the web UI: a release created by a workflow's
+   `GITHUB_TOKEN` starts no other workflow, so this one would not run. The
+   job reads `main`, so the tag must be on it. A pre-release is skipped.
+   If it fails, fix the cause and re-run it from the Actions tab with the
+   version as input.
+
 8. **Verify** from a project checkout:
 
    ```bash
@@ -326,6 +335,10 @@ for the previous minor, use a branch:
    read itself as ahead, and report "up to date" while a `1.1.x` patch
    existed. If that happens, run `gh release edit v1.1.1 --latest` on the
    highest release.
+
+   Its notes reach kilncms.dev only once they are on `main`: after step 7,
+   run "Publish release notes" from the Actions tab with `v1.0.3` as the
+   version.
 
 7. **Merge the branch back into `main` with a merge commit.** Open
    `release/v1.0.3 → main` and merge it with **Create a merge commit**, never
