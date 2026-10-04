@@ -217,7 +217,7 @@ backlog. Newer evaluator-facing gaps were filed as individual issues in August
 | Public site has no theme system | [#1318](https://github.com/The-Verscienta/kiln_cms/issues/1318) |
 | Field-level localization (document-per-locale only today) | [#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) |
 | Co-editing is dev-only but docs read as shipped | [#1324](https://github.com/The-Verscienta/kiln_cms/issues/1324) — **resolved by labelling**, not by shipping; graduating it is Theme F of [content-editor-modernization.md](content-editor-modernization.md) |
-| Content organization is the 2005 model: one category, flat tags, no hierarchy, a flat list | [#1593](https://github.com/The-Verscienta/kiln_cms/issues/1593)–[#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) — assessed in [content-organization-plan.md](content-organization-plan.md) |
+| Content organization is the 2005 model: one category, flat tags, no hierarchy, a flat list | [#1593](https://github.com/The-Verscienta/kiln_cms/issues/1593)–[#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) — assessed in [content-organization-plan.md](content-organization-plan.md). **Partly closed in 1.1**: the faceted list with saved views (#1593) and references as `ContentLink` edges (#1594). The taxonomy collapse (#1595) is on **v2.0.0**; content intelligence (#1596) and the content-structure decision (#1597) are open. |
 
 Before adding a row here, check whether it belongs on an issue instead. A
 checklist in a doc drifts silently; an issue does not.
