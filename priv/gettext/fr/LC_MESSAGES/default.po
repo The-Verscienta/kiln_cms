@@ -16584,6 +16584,11 @@ msgstr "Ce que signifient les couleurs"
 msgid "What they had typed stays in their editor, unsaved, until they save it."
 msgstr "Ce qu'ils avaient tapé reste dans leur éditeur, non enregistré, jusqu'à ce qu'ils l'enregistrent."
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "What's new in this release:"
+msgstr "Nouveautés de cette version :"
+
 #: lib/kiln_cms_web/controllers/content_controller.ex
 #, elixir-autogen, elixir-format
 msgid "What's on, soonest first."

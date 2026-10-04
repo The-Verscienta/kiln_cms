@@ -507,6 +507,7 @@ defmodule KilnCMSWeb.SystemLive do
     assigns =
       assigns
       |> assign(:release, release)
+      |> assign(:highlights, Map.get(release, :highlights, []))
       |> assign(:update_command, update_command())
 
     ~H"""
@@ -520,6 +521,15 @@ defmodule KilnCMSWeb.SystemLive do
           {gettext("released")} {Calendar.strftime(@release.published_at, "%Y-%m-%d")}
         </span>
       </p>
+
+      <%!-- Only the kilncms.dev feed carries highlights (#1877); a GitHub answer
+            has none, and the section is then left out rather than empty. --%>
+      <div :if={@highlights != []}>
+        <p class="text-sm text-base-content/70">{gettext("What's new in this release:")}</p>
+        <ul class="mt-1 list-disc space-y-0.5 pl-5 text-sm">
+          <li :for={highlight <- @highlights}>{highlight}</li>
+        </ul>
+      </div>
 
       <div>
         <p class="text-sm text-base-content/70">

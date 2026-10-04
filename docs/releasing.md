@@ -170,7 +170,10 @@ people to pass the flag reflexively.
    kiln.update` reads git tags, but the admin update page (`Kiln.Updates`)
    reads the *releases* API, because a running container has no checkout. A
    tag with no release leaves every deployed instance reporting "up to date"
-   while a newer version exists.
+   while a newer version exists. (The page asks kilncms.dev's release feed
+   first and the releases API only as a fallback (#1877), but the feed is
+   itself published from the GitHub release, so the release is still the
+   step that makes a version visible.)
 
    Paste the changelog section in as the release body.
 

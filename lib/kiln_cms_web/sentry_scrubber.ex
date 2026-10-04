@@ -28,7 +28,32 @@ defmodule KilnCMSWeb.SentryScrubber do
   `status_code` — masking those would quietly gut the reports this exists to
   keep useful. The trade is deliberate and is why the two lists are separate
   rather than one regex.
+
+  ## The update feed carries no client address (#1877)
+
+  Every Kiln instance's update check reads kilncms.dev's
+  `GET /api/json/entries/published` — the generic published-entries route,
+  which any Kiln serves. kilncms.dev has promised not to keep client IPs for
+  it, and this is the one place the app itself would: `Sentry.PlugContext`
+  attaches the client address (`REMOTE_ADDR`, read from `x-forwarded-for`) and
+  every request header to any error event raised while handling a request. So
+  for a read of that route, `remote_address/1` reports none and
+  `scrub_headers/1` drops the client-address headers as well. Every other
+  route keeps Sentry's defaults; widening this would be a policy change about
+  error reports in general, not part of the feed's promise.
   """
+
+  # `Sentry.PlugContext` runs ahead of the router, so this is matched on the
+  # path; the locale prefix is already stripped by then.
+  @update_feed_path ["api", "json", "entries", "published"]
+
+  # Every header a proxy or platform uses to pass the client address on —
+  # `RemoteIp`'s defaults (as `KilnCMSWeb.Plugs.ClientIp` honours them) plus
+  # the CDN and platform ones it knows.
+  @client_address_headers ~w(
+    forwarded x-forwarded-for x-client-ip x-real-ip x-cluster-client-ip
+    cf-connecting-ip true-client-ip fly-client-ip do-connecting-ip
+  )
 
   @mask "*********"
 
@@ -68,4 +93,36 @@ defmodule KilnCMSWeb.SentryScrubber do
     downcased in @sensitive_exact or
       Enum.any?(@sensitive_substrings, &String.contains?(downcased, &1))
   end
+
+  @doc """
+  `Sentry.PlugContext`'s `:remote_address_reader`: Sentry's own reader,
+  except that a read of the update-feed route reports no address — see the
+  moduledoc.
+  """
+  @spec remote_address(Plug.Conn.t()) :: String.t()
+  def remote_address(%Plug.Conn{} = conn) do
+    if update_feed_read?(conn),
+      do: "",
+      else: Sentry.PlugContext.default_remote_address_reader(conn)
+  end
+
+  @doc """
+  `Sentry.PlugContext`'s `:header_scrubber`: Sentry's default (which drops
+  `authorization`, `authentication` and `cookie`), plus the client-address
+  headers on a read of the update-feed route.
+  """
+  @spec scrub_headers(Plug.Conn.t()) :: map()
+  def scrub_headers(%Plug.Conn{} = conn) do
+    headers = Sentry.PlugContext.default_header_scrubber(conn)
+
+    if update_feed_read?(conn),
+      do: Map.drop(headers, @client_address_headers),
+      else: headers
+  end
+
+  defp update_feed_read?(%Plug.Conn{method: method, path_info: path})
+       when method in ["GET", "HEAD"],
+       do: path == @update_feed_path
+
+  defp update_feed_read?(_conn), do: false
 end
