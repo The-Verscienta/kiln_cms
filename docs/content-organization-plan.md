@@ -1,8 +1,17 @@
 # Content organization — assessment & phased plan
 
-**Status:** **proposed** — nothing here is built. This is the design record for
-issues [#1593](https://github.com/The-Verscienta/kiln_cms/issues/1593)–[#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597),
-written from a read of the current model rather than from a wish list.
+**Status:** **partly shipped.** Workstreams **A** (#1593, faceted list + saved
+views) and **B** (#1594, references as edges) landed in 1.1. **C** (#1595) is on
+the **v2.0.0** milestone — collapsing `Category` and `Tag` removes two covered
+resources, which the 1.0 contract only allows in a major, so §9's timing
+question was answered by deferring rather than by rushing it. **D** (#1596) and
+**E** (#1597) are open and unscheduled.
+
+This is the design record for issues
+[#1593](https://github.com/The-Verscienta/kiln_cms/issues/1593)–[#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597),
+written from a read of the model as it stood on 2026-09-25. Each workstream
+below carries its own status; read the resources for current behaviour and this
+for *why*.
 
 **Goal:** move Kiln's *organization* layer — how content relates, how it is
 classified, and how an editor finds it again — from the model it inherited
@@ -17,9 +26,11 @@ running.
 
 ---
 
-## 1. What the shape is today
+## 1. What the shape was on 2026-09-25
 
-Verified by code inspection, 2026-09-25.
+Verified by code inspection on that date. **Rows that A or B has since changed
+are marked — the rest still hold.** Kept as written rather than rewritten,
+because §2's diagnosis and the workstreams argue from it.
 
 | Concern | Today | Where |
 |---|---|---|
@@ -28,9 +39,9 @@ Verified by code inspection, 2026-09-25.
 | Vocabularies | `TagGroup` — one optional bucket per tag, with an empty-means-all `content_types` scope | `tag_group.ex` |
 | Content hierarchy | **None.** No `parent_id`, no `position` on any content type | `content.ex` |
 | The only tree | `MenuItem` (`parent_id` + `position`, cycle-safe walk) | `menu_item.ex`, `menus.ex:196` |
-| Relating content — mechanism A | `ContentLink`: a real typed edge table (`kind`, `label`, `metadata`), indexed both directions, **no API routes**, managed only via `manage_relationship` | `content_link.ex` |
-| Relating content — mechanism B | `:reference` custom field: a denormalized `%{"id","type","slug","title"}` snapshot in the `custom_fields` jsonb, single-valued | `apply_custom_fields.ex:504` |
-| Editor browse | Status + type filter, `ilike(title) or ilike(slug)`, `sort: [updated_at: :desc]`, 50/page | `editor_live.ex:189-194` |
+| Relating content — mechanism A | `ContentLink`: a real typed edge table (`kind`, `label`, `metadata`), indexed both directions, **no API routes**, managed only via `manage_relationship` — *B: still routeless (it travels as an `included` member), but reference edges are now reconciled by a change, and reads are gated by `Checks.LinkEndsReadable` rather than `always()`* | `content_link.ex` |
+| Relating content — mechanism B | `:reference` custom field: a denormalized `%{"id","type","slug","title"}` snapshot in the `custom_fields` jsonb, single-valued — **changed by B**: the snapshot is unchanged, but every live value now *also* carries a `content_links` row (`kind: :reference`, plus `field`/`source_type`/`target_type`), so backlinks and integrity exist | `apply_custom_fields.ex`, `changes/sync_reference_links.ex` |
+| Editor browse | Status + type filter, `ilike(title) or ilike(slug)`, `sort: [updated_at: :desc]`, 50/page — **changed by A**: now also author, category, tag, locale, an update-date range, review health and "scheduled", a sort choice, and saved views | `editor_live/filters.ex`, `cms/saved_view.ex` |
 | API browse | `category_id`, `author_id`, `state`, `tag_ids`, `custom_filter` facets over hybrid keyword + semantic search with RRF fusion | `content.ex:1216-1234` |
 | Content intelligence | `related_documents`, `near_duplicates`, `suggest_tags`, `content_gaps` — all computed, all org-scoped | `search/related.ex` |
 | Where that intelligence surfaces | One document's editor; the analytics page; the public related endpoint | `content_editor_live.ex:4334`, `analytics_live.ex:109`, `related_controller.ex` |
@@ -41,26 +52,32 @@ neighbourhoods for every block of every document, ranks the existing vocabulary
 against a draft, and detects near-duplicates — and then uses all of it to
 decorate a single editor screen. Nothing organizes the library.
 
-## 2. Why it reads as old-school
+## 2. Why it read as old-school
 
-Three things, in order of how loudly they say it:
+Three things, in order of how loudly they said it. **Two are now closed** — kept
+because they are the argument the workstreams were built from:
 
 1. **The Category/Tag split is an inherited distinction, not a modelled one.**
    Two term types that differ only in arity is a WordPress artifact. Drupal
    (vocabularies + hierarchical terms), Craft (category groups) and
    Sanity/Contentful (taxonomy as referenced documents) all converged on one
    term type with a vocabulary above it and a parent beside it.
-2. **The console is behind its own API.** An API consumer can facet on author,
-   term, state and arbitrary custom fields; an editor gets a status dropdown
-   and a substring match on the title. A buyer evaluating Kiln sees the console.
-3. **The graph exists but is unreachable.** `ContentLink` is the right table,
-   already built and indexed in both directions, and the field type an admin
-   actually reaches for writes jsonb snapshots instead.
+2. ~~**The console is behind its own API.**~~ **Closed by A (#1593).** An API
+   consumer could facet on author, term, state and arbitrary custom fields
+   while an editor got a status dropdown and a substring match on the title.
+   The console now facets too — and on more than `:search` does, which is its
+   own small hazard (see §3).
+3. ~~**The graph exists but is unreachable.**~~ **Closed by B (#1594).**
+   `ContentLink` was the right table, already built and indexed in both
+   directions, while the field type an admin actually reaches wrote jsonb
+   snapshots instead. Reference values now write edges as well, and the editor
+   lists "Linked from".
 
-Notably, none of this is on any existing backlog.
-`docs/competitive-gaps-todo.md` and `docs/differentiator-opportunities.md` are
-both closed out; content organization was never the subject of a plan. It is a
-genuine blank spot rather than a deferred one.
+Notably, none of this was on any existing backlog when this was written.
+`docs/competitive-gaps-todo.md` and `docs/differentiator-opportunities.md` were
+both closed out; content organization had never been the subject of a plan. It
+was a genuine blank spot rather than a deferred one — which is the reason this
+document exists.
 
 ---
 
@@ -98,12 +115,40 @@ per-type columns from `FieldDefinition`.
 
 ## 4. Workstream B — references become edges ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594))
 
-> **Proposed decision D20. A content reference is an edge, not a snapshot.**
-> The `:reference` field type stores a `ContentLink` row. A cached label may be
-> kept for display, but the edge is the source of truth. Multi-valued
-> references are multiple rows, ordered by a position on the link.
+> **Proposed decision D20 — NOT adopted as stated.** *A content reference is an
+> edge, not a snapshot: the `:reference` field type stores a `ContentLink` row, a
+> cached label may be kept for display, but the edge is the source of truth, and
+> multi-valued references are multiple rows ordered by a position on the link.*
+>
+> What shipped keeps the snapshot as the value and adds the edge beside it, so
+> the edge is **not** the source of truth and references are still
+> single-valued. The capability D20 was after — backlinks, integrity, a visible
+> graph — arrived without the swap it asked for. Recorded as rejected-in-form
+> rather than quietly rewritten, because the difference is what the delete story
+> turns on (below).
 
-What the snapshot costs today, all of it present:
+**Status (1.1).** Shipped ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594)),
+and *additively* rather than as the swap D20 proposed: the jsonb snapshot stays
+exactly as it was, and every live value also carries a `content_links` row
+(`kind: :reference`, with new nullable `field`, `source_type`, `target_type`).
+`Changes.SyncReferenceLinks` reconciles the edges after any write that moved the
+stored value — never for a working copy's held value — a field rename or destroy
+moves or deletes them, and a purge drops a record's outgoing edges. A plain-SQL
+idempotent data migration backfilled existing values, re-runnable with
+`mix kiln.links.backfill`. The editor lists "Linked from" and asks before
+unpublishing a linked record, so the backlink question below is answered.
+
+Two consequences worth knowing. `ContentLink` reads now require **both** ends to
+be readable (`Checks.LinkEndsReadable`) instead of `authorize_if always()` —
+`incoming_links` was naming drafts to anonymous readers. And reference edges are
+deliberately excluded from `related_<type>s` and its managed unrelate, so the
+two kinds of link do not contaminate each other.
+
+Keeping the snapshot means the delete story is still "null the edge and keep the
+label", not "block the purge" — the stored value can outlive its target, and
+only the edge disappears. That is a narrower guarantee than D20 described.
+
+What the snapshot cost, which is the case the above was built from:
 
 - **No reverse lookup** — "what links here" needs a jsonb scan across every
   content table.
@@ -253,24 +298,45 @@ an omission as an oversight.
 
 ## 8. Sequencing
 
-| Order | Workstream | Why here |
-|---|---|---|
-| 1 | **A** — faceted saved views (#1593) | Biggest felt change, no schema risk, reuses facets that already exist |
-| 2 | **B** — references as edges (#1594) | Small refactor against a table already built; unlocks backlinks and the graph |
-| 3 | **C** — one term vocabulary (#1595) | Schema + deprecation; wants the 1.0 window (below) |
-| 4 | **D** — derived organization (#1596) | Best built once C gives it a vocabulary to aim at |
-| 5 | **E** — the structure decision (#1597) | Decide explicitly; document either way |
+| Order | Workstream | Why here | State |
+|---|---|---|---|
+| 1 | **A** — faceted saved views (#1593) | Biggest felt change, no schema risk, reuses facets that already exist | **shipped 1.1** |
+| 2 | **B** — references as edges (#1594) | Small refactor against a table already built; unlocks backlinks and the graph | **shipped 1.1** |
+| 3 | **C** — one term vocabulary (#1595) | Schema + deprecation; wants the 1.0 window (below) | **deferred to v2.0.0** |
+| 4 | **D** — derived organization (#1596) | Best built once C gives it a vocabulary to aim at | open, unscheduled |
+| 5 | **E** — the structure decision (#1597) | Decide explicitly; document either way | open, unscheduled |
 
-## 9. Timing — C and E are schedule-sensitive
+The order held for the two that shipped, and in the direction the table
+predicted: A was the visible change and carried no schema risk, B was small
+because the table was already there.
 
-Workstreams C and E change the content contract.
-[#1542](https://github.com/The-Verscienta/kiln_cms/issues/1542) (label every
-surface), [#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538)
-(first deprecations) and
-[#1545](https://github.com/The-Verscienta/kiln_cms/issues/1545) (1.0 contract
-doc) are actively freezing it. Either they land **before** the freeze with
-their deprecations declared in #1538, or they wait for 2.0. They must not get
-caught mid-freeze.
+**D now has a sequencing problem.** It was placed after C so the suggestions
+would have a vocabulary worth aiming at. C is a major-release item, and waiting
+for v2.0.0 would park the one differentiator in this plan behind the one
+breaking change in it. Worth deciding whether D can be built against today's
+`Category`/`Tag` and migrated with C, rather than waiting.
+
+## 9. Timing — C and E were schedule-sensitive
+
+**Resolved, the second way.** Workstreams C and E change the content contract,
+and [#1542](https://github.com/The-Verscienta/kiln_cms/issues/1542) (label every
+surface), [#1538](https://github.com/The-Verscienta/kiln_cms/issues/1538) (first
+deprecations) and
+[#1545](https://github.com/The-Verscienta/kiln_cms/issues/1545) (the 1.0
+contract doc) were freezing it while this was written. The call was: land before
+the freeze with deprecations declared, or wait for 2.0 — but not get caught
+mid-freeze.
+
+1.0 shipped on 2026-10-02 and **C waited**: #1595 is on the **v2.0.0**
+milestone, because replacing `Category` and `Tag` with one vocabulary removes
+two covered resources, which the 1.0 overlay contract permits only in a major,
+with a deprecation path through 1.x first. That deprecation path is the next
+thing C needs, and it belongs in a 1.x release rather than in the 2.0 work.
+
+**E is unresolved and now costs more.** It is a decision, not a build, and 1.0
+froze the surface it would change: giving content a `parent_id` is additive, but
+making a path part of the URL is not. Deciding it is still cheap; deferring it
+keeps it that way only until someone wants Option A.
 
 A, B and D are additive and can go at any time.
 
@@ -281,9 +347,10 @@ A, B and D are additive and can go at any time.
   is invisible until an operator turns it on. That is a deployment story to
   solve alongside it, not a reason to skip it — but it should not be sold as a
   default-install capability.
-- **"Saved views" is a UX pattern, not an architecture.** It will look modern
-  and it is genuinely useful, but it does not by itself fix anything in §1.
-  Shipping only Workstream A would be treating the symptom.
+- **"Saved views" is a UX pattern, not an architecture.** It looks modern and
+  is genuinely useful, but it did not by itself fix anything in §1 — and with A
+  and B both shipped, the §1 rows it left untouched are still the honest list:
+  no term hierarchy, no content hierarchy, one mutually-exclusive category.
 - **A term hierarchy is not free at read time.** Ancestor rollup means either a
   recursive CTE or a materialized path; pick one deliberately and measure it,
   in the spirit of `docs/performance.md` rather than after a complaint.
