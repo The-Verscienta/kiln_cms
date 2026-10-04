@@ -87,6 +87,10 @@ Every summary line below that was shortened links to its own entry there.
   field hints, a row editor for `item_keys:` list fields, and live rendering.**
   ([#1865](https://github.com/The-Verscienta/kiln_cms/pull/1865) · [long form](docs/changelog/unreleased.md#plugin-blocks-get-editor-seams))
 
+- **Each published GitHub release now becomes a page on kilncms.dev at
+  `/releases/<version>`, listed at `/releases`.**
+  ([#1870](https://github.com/The-Verscienta/kiln_cms/issues/1870) · [long form](docs/changelog/unreleased.md#each-published-github-release-now-becomes-a-page-on-kilncmsdev-at))
+
 ### Changed
 
 - **The sync API's first page stays under 15 ms p95 from 10

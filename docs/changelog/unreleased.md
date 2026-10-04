@@ -216,6 +216,26 @@ carries the reasoning.
   rather than needing `mix compile --force`. Blocks that define none of this render as
   before. ([#1865](https://github.com/The-Verscienta/kiln_cms/pull/1865))
 
+<a id="each-published-github-release-now-becomes-a-page-on-kilncmsdev-at"></a>
+
+- **Each published GitHub release now becomes a page on kilncms.dev at
+  `/releases/<version>`, listed at `/releases`.** A new workflow,
+  `publish-releases.yml`, runs `scripts/publish_releases.exs` when a release
+  is published. The script writes one entry of a `release` content type per
+  release. Its body is the release's long-form notes from
+  `docs/changelog/vX.Y.Z.md`. Its custom fields are `version`, `released_on`
+  (an ISO date), `release_url` and `highlights`, which holds the bold leads of
+  the CHANGELOG.md summary's Upgrade notes, Breaking and Added lines. It then
+  rebuilds the index page. Release candidates are skipped unless asked for
+  with `--prerelease`. `--all` backfills every release. The workflow reuses
+  the docs publisher's `KILN_DOCS_URL` and `KILN_DOCS_API_KEY`, and is skipped
+  where they are unset. The site's admin creates the `release` type once, and
+  the script names any field it is missing. The Markdown renderer and API
+  client that `publish_docs.exs` had to itself now live in
+  `scripts/publish/common.exs`, which both scripts load; the docs it
+  publishes are byte-for-byte unchanged. Nothing changes in the application
+  ([#1870](https://github.com/The-Verscienta/kiln_cms/issues/1870)).
+
 ## Changed
 
 <a id="the-sync-apis-first-page-stays-under-15-ms-p95-from-10-concurrent"></a>
@@ -455,3 +475,4 @@ carries the reasoning.
   `related_<type>s` is unaffected — the related records were, and are,
   filtered by their own policy.
   ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594))
+
