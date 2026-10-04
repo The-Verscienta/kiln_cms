@@ -4,8 +4,9 @@
 views) and **B** (#1594, references as edges) landed in 1.1. **C** (#1595) is on
 the **v2.0.0** milestone — collapsing `Category` and `Tag` removes two covered
 resources, which the 1.0 contract only allows in a major, so §9's timing
-question was answered by deferring rather than by rushing it. **D** (#1596) and
-**E** (#1597) are open and unscheduled.
+question was answered by deferring rather than by rushing it. **E** (#1597) is
+decided (**D21** in §7 — content gets a tree) and on **v1.1.0**. **D** (#1596)
+is open and unscheduled, and §8 explains why that is now awkward.
 
 This is the design record for issues
 [#1593](https://github.com/The-Verscienta/kiln_cms/issues/1593)–[#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597),
@@ -40,7 +41,7 @@ because §2's diagnosis and the workstreams argue from it.
 | Content hierarchy | **None.** No `parent_id`, no `position` on any content type | `content.ex` |
 | The only tree | `MenuItem` (`parent_id` + `position`, cycle-safe walk) | `menu_item.ex`, `menus.ex:196` |
 | Relating content — mechanism A | `ContentLink`: a real typed edge table (`kind`, `label`, `metadata`), indexed both directions, **no API routes**, managed only via `manage_relationship` — *B: still routeless (it travels as an `included` member), but reference edges are now reconciled by a change, and reads are gated by `Checks.LinkEndsReadable` rather than `always()`* | `content_link.ex` |
-| Relating content — mechanism B | `:reference` custom field: a denormalized `%{"id","type","slug","title"}` snapshot in the `custom_fields` jsonb, single-valued — **changed by B**: the snapshot is unchanged, but every live value now *also* carries a `content_links` row (`kind: :reference`, plus `field`/`source_type`/`target_type`), so backlinks and integrity exist | `apply_custom_fields.ex`, `changes/sync_reference_links.ex` |
+| Relating content — mechanism B | `:reference` custom field: a denormalized `%{"id","type","slug","title"}` snapshot in the `custom_fields` jsonb, single-valued — **changed by B**: the snapshot is unchanged, but every live value now *also* carries a `content_links` row (`kind: :reference`, plus `field`/`source_type`/`target_type`), so backlinks exist (integrity only as far as the delete story in §4 goes) | `apply_custom_fields.ex`, `changes/sync_reference_links.ex` |
 | Editor browse | Status + type filter, `ilike(title) or ilike(slug)`, `sort: [updated_at: :desc]`, 50/page — **changed by A**: now also author, category, tag, locale, an update-date range, review health and "scheduled", a sort choice, and saved views | `editor_live/filters.ex`, `cms/saved_view.ex` |
 | API browse | `category_id`, `author_id`, `state`, `tag_ids`, `custom_filter` facets over hybrid keyword + semantic search with RRF fusion | `content.ex:1216-1234` |
 | Content intelligence | `related_documents`, `near_duplicates`, `suggest_tags`, `content_gaps` — all computed, all org-scoped | `search/related.ex` |
@@ -115,40 +116,21 @@ per-type columns from `FieldDefinition`.
 
 ## 4. Workstream B — references become edges ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594))
 
-> **Proposed decision D20 — NOT adopted as stated.** *A content reference is an
-> edge, not a snapshot: the `:reference` field type stores a `ContentLink` row, a
-> cached label may be kept for display, but the edge is the source of truth, and
-> multi-valued references are multiple rows ordered by a position on the link.*
+> **Proposed decision D20 — adopted in capability, not in form.** *A content
+> reference is an edge, not a snapshot: the `:reference` field type stores a
+> `ContentLink` row, a cached label may be kept for display, but the edge is the
+> source of truth.*
 >
-> What shipped keeps the snapshot as the value and adds the edge beside it, so
-> the edge is **not** the source of truth and references are still
-> single-valued. The capability D20 was after — backlinks, integrity, a visible
-> graph — arrived without the swap it asked for. Recorded as rejected-in-form
-> rather than quietly rewritten, because the difference is what the delete story
-> turns on (below).
+> 1.1 added the edge **beside** the snapshot instead of replacing it, because
+> 1.0's overlay contract had since made `custom_fields` and its documented
+> shapes a covered surface. So the snapshot remains the value and the edge is
+> not the source of truth — the capability D20 wanted (backlinks, integrity, a
+> visible graph) arrived without the swap it asked for. Left recorded in its
+> original form rather than rewritten to match, so the constraint that changed
+> the shape stays visible. See *Built in 1.1* below for what actually landed,
+> including a delete story narrower than "the edge is authoritative" implies.
 
-**Status (1.1).** Shipped ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594)),
-and *additively* rather than as the swap D20 proposed: the jsonb snapshot stays
-exactly as it was, and every live value also carries a `content_links` row
-(`kind: :reference`, with new nullable `field`, `source_type`, `target_type`).
-`Changes.SyncReferenceLinks` reconciles the edges after any write that moved the
-stored value — never for a working copy's held value — a field rename or destroy
-moves or deletes them, and a purge drops a record's outgoing edges. A plain-SQL
-idempotent data migration backfilled existing values, re-runnable with
-`mix kiln.links.backfill`. The editor lists "Linked from" and asks before
-unpublishing a linked record, so the backlink question below is answered.
-
-Two consequences worth knowing. `ContentLink` reads now require **both** ends to
-be readable (`Checks.LinkEndsReadable`) instead of `authorize_if always()` —
-`incoming_links` was naming drafts to anonymous readers. And reference edges are
-deliberately excluded from `related_<type>s` and its managed unrelate, so the
-two kinds of link do not contaminate each other.
-
-Keeping the snapshot means the delete story is still "null the edge and keep the
-label", not "block the purge" — the stored value can outlive its target, and
-only the edge disappears. That is a narrower guarantee than D20 described.
-
-What the snapshot cost, which is the case the above was built from:
+What the snapshot cost, which is the case the edge was added to answer:
 
 - **No reverse lookup** — "what links here" needs a jsonb scan across every
   content table.
@@ -291,8 +273,46 @@ good at the job — bulk operations, orphan detection, a structure-shaped view
 over the flat list. The media library has already made a consistent call in
 this direction, and the difference is that *that* one is documented.
 
-Either is defensible. The current state is an omission, and an evaluator reads
-an omission as an oversight.
+> **Decision D21. Content gets a tree; the URL shape it already has carries it.**
+> `parent_id` + `position` on content, cycle-safe. A path derives from the
+> ancestor chain through the **existing** `path_alias` mechanism (#485) plus one
+> new `alias_pattern` token — not through new URL resolution. **Default
+> resolution does not change**: a record with no parent, or no ancestor-derived
+> alias, resolves exactly as it does today. The content tree stays a distinct
+> axis from C's term hierarchy. Milestone **v1.1.0**.
+
+**Option B was disqualified by the code, not by taste.** B asks us to write down
+"URL is a slug, structure is a menu" — and that is already false. `path_alias`
+ships and is served: any record can live at a multi-segment path, auto-filled
+from `alias_pattern`, validated by `Validations.PathAliasValid`, separately
+indexed, and `Changes.RecordSlugRedirect` already fires when it is **added,
+changed or removed**, not only on a slug rename. Committing to B would record a
+rule the delivery layer contradicts, which is the drift this document exists to
+stop. The media-library precedent does not transfer: that call is documented
+*and* the code agrees with it.
+
+**A is additive, which is what makes it a 1.1 item** rather than a 2.0 one. This
+corrects §9's earlier reading, which assumed a tree needs new URL resolution:
+
+| Piece | Status |
+|---|---|
+| `parent_id` + `position` | new nullable attributes — additive |
+| Resolving a nested path | **already shipped** (`path_alias`) |
+| Deriving it from the ancestor chain | one new `alias_pattern` token — additive |
+| 301s on a move | **already shipped**; `Redirect` targets the record, not a frozen path, so repeated moves never chain |
+| Cycle safety | copy `Menus.rooted?/3` |
+
+**Out of scope for 1.1, deliberately:** menus derived from the tree (ship the
+tree plus orphan detection first, or we trade one duplication for a migration in
+the same release), and any change to default URL resolution — that would be a
+2.0 conversation and D21 does not authorise it.
+
+**The cost to measure rather than assume:** a subtree move re-derives every
+descendant's alias and writes a redirect per descendant. A deep section is N
+alias writes plus N redirect rows, and in one transaction that is the next
+`Repo.transaction`-timeout story. It needs a bound, and past some size a
+background job. §10's note applies too — ancestor rollup means choosing
+deliberately between a recursive CTE and a materialized path, and measuring it.
 
 ---
 
@@ -304,7 +324,7 @@ an omission as an oversight.
 | 2 | **B** — references as edges (#1594) | Small refactor against a table already built; unlocks backlinks and the graph | **shipped 1.1** |
 | 3 | **C** — one term vocabulary (#1595) | Schema + deprecation; wants the 1.0 window (below) | **deferred to v2.0.0** |
 | 4 | **D** — derived organization (#1596) | Best built once C gives it a vocabulary to aim at | open, unscheduled |
-| 5 | **E** — the structure decision (#1597) | Decide explicitly; document either way | open, unscheduled |
+| 5 | **E** — the structure decision (#1597) | Decide explicitly; document either way | **decided (D21), v1.1.0** |
 
 The order held for the two that shipped, and in the direction the table
 predicted: A was the visible change and carried no schema risk, B was small
@@ -333,10 +353,13 @@ two covered resources, which the 1.0 overlay contract permits only in a major,
 with a deprecation path through 1.x first. That deprecation path is the next
 thing C needs, and it belongs in a 1.x release rather than in the 2.0 work.
 
-**E is unresolved and now costs more.** It is a decision, not a build, and 1.0
-froze the surface it would change: giving content a `parent_id` is additive, but
-making a path part of the URL is not. Deciding it is still cheap; deferring it
-keeps it that way only until someone wants Option A.
+**E is resolved** — as D21 in §7, Option A, milestone v1.1.0. The worry recorded
+here was that 1.0 had frozen the surface E would change, because a path in the
+URL is not additive. That premise was wrong: `path_alias` already resolves
+multi-segment paths and already records its own redirects, so the tree rides
+shipped machinery and stays additive. Worth noting as the cheaper lesson —
+checking what delivery already does would have answered this before it was
+filed as an open question.
 
 A, B and D are additive and can go at any time.
 
