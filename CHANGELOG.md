@@ -106,6 +106,10 @@ Every summary line below that was shortened links to its own entry there.
   not once per matching row, and `/api/search` skips an empty entries section.**
   ([#1725](https://github.com/The-Verscienta/kiln_cms/issues/1725) · [long form](docs/changelog/unreleased.md#search-ranks-faster-under-load))
 
+- **Every release candidate is canaried on kilncms.dev before the final, and
+  the headless API guides carry examples that run against it anonymously.**
+  ([#1869](https://github.com/The-Verscienta/kiln_cms/issues/1869) · [#1872](https://github.com/The-Verscienta/kiln_cms/issues/1872) · [long form](docs/changelog/unreleased.md#release-candidates-are-canaried-on-kilncms-dev))
+
 ### Fixed
 
 - **Search folds diacritics: `Zusanli` finds `Zúsānlǐ`, `creme brulee` finds

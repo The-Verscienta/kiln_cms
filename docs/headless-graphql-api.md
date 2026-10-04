@@ -440,7 +440,8 @@ served in development only. `__typename` always works.
 
 Open `/gql/playground` on a local development server and try these. A
 production deployment does not serve the playground; send the same queries as a
-`POST` to `/gql` instead.
+`POST` to `/gql` instead. To try queries with nothing installed, see
+[Try it live](#try-it-live).
 
 ### Fetch a published post by slug
 
@@ -579,6 +580,37 @@ curl -s http://localhost:4000/gql \
     "variables": { "slug": "hello-world", "locale": "en" }
   }'
 ```
+
+### Try it live
+
+[kilncms.dev](https://kilncms.dev) runs Kiln, so its published content
+answers the same anonymous queries. Its guides are entries of a dynamic `doc`
+type, and its docs index is a page:
+
+```bash
+# The newest guides
+curl -s https://kilncms.dev/gql -H 'content-type: application/json' \
+  -d '{"query":"{ publishedEntries(limit: 5, offset: 0) { count hasNextPage results { title slug publishedAt } } }"}'
+
+# One page by slug
+curl -s https://kilncms.dev/gql -H 'content-type: application/json' \
+  -d '{
+    "query": "query($slug:String!,$locale:String!){ pageBySlug(slug:$slug,locale:$locale){ id title publishedAt } }",
+    "variables": { "slug": "documentation", "locale": "en" }
+  }'
+
+# Published-only search
+curl -s https://kilncms.dev/gql -H 'content-type: application/json' \
+  -d '{"query":"query($q:String!){ searchPublishedEntries(query:$q){ title slug } }","variables":{"q":"migrations"}}'
+```
+
+It runs a production build, so introspection is off there
+(`GraphQL introspection is disabled`) and
+`/api/graphql/schema.graphql` answers `404` without an API key. Generate
+types from the committed
+[`docs/api/schema.graphql`](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/api/schema.graphql)
+instead. The site has no categories or tags, so the taxonomy examples above
+return empty lists there.
 
 ### Bearer tokens and drafts
 
