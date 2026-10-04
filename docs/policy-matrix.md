@@ -640,15 +640,17 @@ Submission contents are visitor-provided data, frequently PII — admin eyes onl
 The public submit path validates and then writes as the **system**
 (`Forms.system/0`, admitted to `create` alone — see "The system actor").
 
-## Redirects & branding — `Redirect`, `SiteBranding`
+## Redirects & branding — `Redirect`, `SiteBranding`, `SiteSecurityTxt`
 
 | Resource | read | writes |
 |---|---|---|
 | `Redirect` (`read`) | ✅ everyone incl. anonymous | `create`: admin only · `destroy`: admin, **or** whoever may write the target record · both also the slug-change hook's system actor (see "The system actor") |
 | `SiteBranding` (`read`) | ✅ everyone incl. anonymous | admin only (`save`, `update`, `destroy`) |
+| `SiteSecurityTxt` (`read`) | ✅ everyone incl. anonymous | admin only (`save`, `update`, `destroy`) |
 
-Both are public information by design — delivery serves the same redirect map to
-anyone who hits an old URL, and branding tokens render on every public page.
+All three are public information by design — delivery serves the same redirect map to
+anyone who hits an old URL, branding tokens render on every public page, and a
+site's `security.txt` row is the file `/.well-known/security.txt` serves (#1873).
 Both reads are tenant-scoped, so a request sees only its own site's rows. The
 slug-change hook that writes redirects runs as the **system**.
 

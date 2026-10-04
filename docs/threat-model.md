@@ -50,7 +50,7 @@ the router so preflights are answered before route matching).
 | Surface | Route(s) | Auth | Rate bucket |
 |---|---|---|---|
 | Public HTML delivery | `/`, `/:slug`, `/:type/:slug`, `/blog`, `/blog/:slug`, `/search`, `/*path` | none | `:delivery` |
-| Probes & SEO | `/up`, `/ready`, `/sitemap.xml`, `/robots.txt`, `/llms.txt`, `/manifest.webmanifest`, `/offline.html` | none | `:probe` |
+| Probes & SEO | `/up`, `/ready`, `/sitemap.xml`, `/robots.txt`, `/.well-known/security.txt` (+ `/security.txt` redirect), `/llms.txt`, `/manifest.webmanifest`, `/offline.html` | none | `:probe` |
 | First-run bootstrap | `/setup` | none — the `:bootstrap_admin` policy (`Checks.NoAdminExists`) + advisory lock in `KilnCMS.Accounts.Bootstrap` are the gate | none |
 | GraphQL | `/gql` (GET + POST), `/ws/gql` | optional JWT / API key | `:gql` (per operation, on both transports), `:gql_join` (socket connects) |
 | JSON:API | `/api/json/**` (GET/POST/PATCH/DELETE) | optional JWT / API key | `:api` |

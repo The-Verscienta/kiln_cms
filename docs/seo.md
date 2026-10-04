@@ -319,3 +319,38 @@ reaching the provider.
 
 **Spend.** Every generation emits `[:kiln_cms, :seo, :draft, :stop]` telemetry
 carrying token usage, model, provider and outcome — see `docs/observability.md`.
+
+## `security.txt`
+
+Next to `robots.txt` and `sitemap.xml`, each site can serve
+**`/.well-known/security.txt`** ([RFC 9116](https://www.rfc-editor.org/rfc/rfc9116)):
+where a security researcher reports a vulnerability in that site.
+
+```
+Editor → Configure → Organization → Security contact (/editor/security-txt)
+```
+
+An admin sets one or more **contacts** (`mailto:`, `https://` or `tel:`,
+preferred first) and an **expiry date**, both required by the RFC, plus
+optionally a disclosure **policy** URL, **preferred languages**, an
+**encryption** key (`https://` URL or `openpgp4fpr:` fingerprint) and an
+**acknowledgments** page. `Canonical` is not a setting: it is the site's own
+URL, derived from the request's host, so each tenant's file names its own host
+and a site that moves to a custom domain follows at once.
+
+- **Per site, no deployment default.** A contact is a promise that someone
+  reads it, so the operator cannot make one on every tenant's behalf. A site
+  with no contact answers **404**, which RFC 9116 reads as "no security.txt".
+- **Expiry.** The page warns when the date has passed, is within 30 days, or
+  is more than the RFC's recommended year away. A past date cannot be saved,
+  but a saved one lapses; an expired file is still served (a stale contact
+  beats none), and researchers are told to treat it as stale, so renew it.
+- **One line per value.** The file is `Field: value` lines, so a line break in
+  a value would forge a field. Values are held to one line of printable ASCII
+  when saved and again when rendered.
+- `/security.txt` redirects (301) to the `.well-known` path. The response is
+  `text/plain; charset=utf-8`, rate-limited like `robots.txt` (`:probe`), and
+  cached per site for five minutes server-side, busted on save.
+
+Only admins can edit it (`KilnCMS.CMS.SiteSecurityTxt`); the file, and the row
+behind it, are public.

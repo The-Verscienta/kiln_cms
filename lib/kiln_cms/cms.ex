@@ -802,6 +802,15 @@ defmodule KilnCMS.CMS do
       define :reset_site_locale_settings, action: :destroy
     end
 
+    # Per-org `/.well-known/security.txt` (RFC 9116, #1873). Served through
+    # `KilnCMS.SecurityTxt` (cached); this interface is for the settings page
+    # and the resolver's own lookup.
+    resource KilnCMS.CMS.SiteSecurityTxt do
+      define :list_site_security_txt, action: :read
+      define :save_site_security_txt, action: :save
+      define :reset_site_security_txt, action: :destroy
+    end
+
     # Taxonomy: categories (one-to-many to content) and tags (many-to-many).
     resource KilnCMS.CMS.Category do
       define :list_categories, action: :read

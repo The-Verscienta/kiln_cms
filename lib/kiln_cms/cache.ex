@@ -602,6 +602,25 @@ defmodule KilnCMS.Cache do
   end
 
   @doc """
+  Cache key for a site's resolved `security.txt` settings (#1873,
+  `KilnCMS.SecurityTxt.resolve/1`). Per-org.
+  """
+  @spec security_txt_key(Ash.UUID.t()) :: String.t()
+  def security_txt_key(org_id), do: "security_txt:#{org_id}"
+
+  @doc """
+  Drop a site's cached `security.txt` settings on every node, after a
+  `SiteSecurityTxt` write (`Changes.BustSecurityTxt`). Cluster-wide like
+  `bust_branding/1`: a changed security contact should not keep being served
+  by the nodes that did not take the write.
+  """
+  @spec bust_security_txt(Ash.UUID.t()) :: :ok
+  def bust_security_txt(org_id) do
+    if enabled?(), do: ClusterBust.broadcast([security_txt_key(org_id)])
+    :ok
+  end
+
+  @doc """
   Cache key for a generated feed (#486).
 
   `type` is the content-type name for a per-type feed (`/blog/feed.xml`) or
