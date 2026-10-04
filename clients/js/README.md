@@ -65,6 +65,33 @@ becomes its `attributes` plus `id`/`type`, with relationships reduced to
 `{type, id}` ref lists and side-loaded resources in an `included` lookup —
 join them with `resolve(item, "tags", included)`.
 
+### Try it live
+
+[kilncms.dev](https://kilncms.dev) runs Kiln, and its guides are published
+entries of a dynamic `doc` type, so you can point the client at it with no
+key:
+
+```ts
+const kiln = createClient({ baseUrl: "https://kilncms.dev" });
+
+const { items, total } = await kiln.list("entries", {
+  filter: { type_name: "doc" },
+  fields: { entry: ["slug", "title"] },
+  limit: 5,
+});
+const doc = await kiln.artifact("doc", "getting-started");
+const hits = await kiln.search("migrations");
+const { publishedEntries } = await kiln.graphql(
+  `{ publishedEntries(limit: 3, offset: 0) { count results { title slug } } }`,
+);
+```
+
+`npx kiln-types --url https://kilncms.dev --type doc` generates its types.
+Unset `KILN_API_KEY` first if your shell has one: the CLI sends it, and
+kilncms.dev answers a key it did not issue with `401`. The site is read-only
+for you and has few posts, so the `"post"` examples elsewhere in
+this README need a site of your own.
+
 ## Generated types: `kiln-types`
 
 The baseline types (`ArtifactDocument`, the `Block` union) describe every Kiln

@@ -41,7 +41,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
   # developer with `OEMBED_ENABLED=enabled` exported would otherwise get a red
   # suite with an assertion message naming DATABASE_SSL.
   #
-  # KILN_UPDATE_REPO/RELEASES_URL/PIN_PATH are listed although no case sets
+  # KILN_UPDATE_REPO/RELEASES_URL/FEED_URL/PIN_PATH are listed although no case sets
   # them: they write into the *same* `Kiln.Updates` keyword the update-check
   # cases assert on, and `Config` deep-merges — so a fork maintainer, whom
   # docs/environment-variables.md instructs to set KILN_UPDATE_REPO, would
@@ -51,7 +51,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             VISUAL_EDITING_ENABLED KILN_UPDATE_CHECK KILN_ANALYTICS_REFERRERS
             KILN_ANALYTICS_LOW_COUNT_THRESHOLD
             KILN_AUDIT_ANCHORS_ENABLED KILN_AUDIT_ANCHOR_EVERY_WRITE
-            KILN_UPDATE_REPO KILN_UPDATE_RELEASES_URL KILN_PIN_PATH
+            KILN_UPDATE_REPO KILN_UPDATE_RELEASES_URL KILN_UPDATE_FEED_URL KILN_PIN_PATH
             MAIL_MODE SMTP_HOST SMTP_TLS SMTP_TLS_VERIFY S3_BUCKET
             KILN_PROVENANCE_ENABLED TENANT_STRICT_HOST API_DOCS_ENABLED
             GRAPHQL_INTROSPECTION_ENABLED
@@ -369,6 +369,34 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
     test "an unrecognized value leaves the setting alone" do
       updates = update_check("nope")
       assert updates == nil or not Keyword.has_key?(updates, :enabled)
+    end
+  end
+
+  # #1877. Blank must read as unset (the default feed, gated on upstream), and
+  # only an off-spelling — not an empty compose value — turns the leg off.
+  describe "KILN_UPDATE_FEED_URL" do
+    defp feed_url(value) do
+      %{"KILN_UPDATE_FEED_URL" => value}
+      |> eval()
+      |> get_in([:kiln_cms, Kiln.Updates])
+      |> Kernel.||([])
+      |> Keyword.fetch(:feed_url)
+    end
+
+    test "unset or blank writes nothing, so the default applies" do
+      assert feed_url(nil) == :error
+      assert feed_url("  ") == :error
+    end
+
+    test "an off-spelling writes false, turning the feed leg off" do
+      for value <- ["false", "OFF", "0", "no"] do
+        assert feed_url(value) == {:ok, false}
+      end
+    end
+
+    test "a URL is written trimmed" do
+      assert feed_url(" https://site.example/api/json/entries/published\n") ==
+               {:ok, "https://site.example/api/json/entries/published"}
     end
   end
 

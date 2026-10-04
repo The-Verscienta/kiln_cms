@@ -13,6 +13,31 @@ see [Writing](#writing-330). This document covers the read query params
 > and prod). See [api.md](api.md) for the full API documentation index
 > (authentication, GraphQL, webhooks, preview tokens, rate limits).
 
+**Try it now.** [kilncms.dev](https://kilncms.dev) runs Kiln, and its guides
+are published entries of a dynamic `doc` type, so these reads answer
+anonymously. `-g` stops curl from reading the brackets as a URL range:
+
+```bash
+A='accept: application/vnd.api+json'
+
+# The delivery feed, with a sparse fieldset and a page size
+curl -g -H "$A" 'https://kilncms.dev/api/json/entries/published?filter[type_name]=doc&fields[entry]=slug,title&page[limit]=5'
+
+# Filter by exact slug
+curl -g -H "$A" 'https://kilncms.dev/api/json/entries?filter[type_name]=doc&filter[slug]=getting-started&fields[entry]=slug,title,published_at'
+
+# One page by slug (locale fallback applies)
+curl -g -H "$A" 'https://kilncms.dev/api/json/pages/by-slug/documentation?locale=en&fields[page]=slug,title'
+
+# Published-only full-text search and typeahead
+curl -g -H "$A" 'https://kilncms.dev/api/json/entries/search/published?query=migrations&fields[entry]=slug,title'
+curl -g -H "$A" 'https://kilncms.dev/api/json/entries/autocomplete/published?prefix=dep&fields[entry]=slug,title'
+```
+
+The site has no categories or tags, so those routes answer an empty list,
+and it does not publish its OpenAPI document. The rest of this page uses
+`localhost:4000`, meaning a site of your own.
+
 ## Content negotiation
 
 Every request must use the JSON:API media type:

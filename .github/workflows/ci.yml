@@ -677,6 +677,13 @@ jobs:
       - name: Check the docs publisher can still read mix.exs
         run: elixir scripts/publish_docs.exs --all --dry-run --out "$RUNNER_TEMP/docs-html"
 
+      # The same for the release-notes publisher (#1870), which runs only when
+      # a release is published — the worst moment to find it broken. It reads
+      # docs/changelog/ and CHANGELOG.md's dated headings; its parsing is unit
+      # tested in test/scripts/publish_releases_test.exs.
+      - name: Check the release-notes publisher can still read the changelog
+        run: elixir scripts/publish_releases.exs --all --dry-run --out "$RUNNER_TEMP/release-notes-html"
+
   client:
     name: Elixir client (kiln_client)
     runs-on: ubuntu-latest
