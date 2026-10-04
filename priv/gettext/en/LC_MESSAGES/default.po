@@ -10053,6 +10053,11 @@ msgstr ""
 msgid "Or until (UTC)"
 msgstr ""
 
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#, elixir-autogen, elixir-format
+msgid "Order among siblings"
+msgstr ""
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "Ordered content steps, and where readers drop out."
@@ -10224,6 +10229,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Paragraph text"
+msgstr ""
+
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#, elixir-autogen, elixir-format
+msgid "Parent"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
