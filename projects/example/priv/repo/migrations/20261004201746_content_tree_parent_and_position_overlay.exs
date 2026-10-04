@@ -1,4 +1,4 @@
-defmodule KilnCMS.Repo.Migrations.ContentTreeParentAndPosition do
+defmodule KilnCMS.Repo.Migrations.ContentTreeParentAndPositionOverlay do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 
