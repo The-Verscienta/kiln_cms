@@ -43,11 +43,9 @@ defmodule KilnCMSWeb.VisualEditingController do
   alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.Params
 
-  @token_header "x-kiln-preview-token"
-
   @doc "The request header `show/2` reads a preview token from."
   @spec token_header() :: String.t()
-  def token_header, do: @token_header
+  defdelegate token_header, to: KilnCMSWeb.Plugs.PreviewGrant
 
   def show(conn, %{"type" => type, "slug" => slug} = params) do
     org_id = KilnCMSWeb.Tenant.current_org_id(conn)
@@ -94,12 +92,8 @@ defmodule KilnCMSWeb.VisualEditingController do
   end
 
   # The header first: a query string is what access logs and `Referer`s keep.
-  defp preview_token(conn, params) do
-    case get_req_header(conn, @token_header) do
-      [token | _] when token != "" -> token
-      _ -> Params.string(params, "preview_token", nil)
-    end
-  end
+  # Same reading as the headless reads' grant plug.
+  defp preview_token(conn, _params), do: KilnCMSWeb.Plugs.PreviewGrant.presented_token(conn)
 
   # The token names the record by id; the route still has to agree with it on
   # everything else it says. The type and the site are the token's own claims

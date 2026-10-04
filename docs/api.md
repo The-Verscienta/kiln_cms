@@ -105,7 +105,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Sitemap** | `GET /sitemap.xml` | Enumerate published content for crawling/SSG. | — |
 | **Feeds** | `GET /feed.xml`, `GET /feed.json` | Atom 1.0 / JSON Feed 1.1 of newly published content. | [§ Feeds](#feeds) |
 | **Outbound webhooks** | (you host the receiver) | Timestamped HMAC-signed push on the content lifecycle. | [webhooks.md](webhooks.md) |
-| **Signed preview** | `GET /preview/:token` | One unpublished document via a short-lived token. | [§ Preview tokens](#preview-tokens) |
+| **Signed preview** | `GET /preview/:token` | One unpublished document via a short-lived token — also accepted by JSON:API and `/api/content` for a front end's draft mode. | [§ Preview tokens](#preview-tokens) |
 | **Image transforms** | `GET /media/:id/t/:ops` | Resize, crop to the focal point, convert (AVIF/WebP) and re-encode an image on request; unsigned URLs are held to a size allowlist, signed ones are not. | [§ Image transforms](#image-transforms) |
 
 ## Authentication
@@ -1091,6 +1091,30 @@ the annotated read (`x-kiln-preview-token` on `GET /api/visual-editing/:type/:sl
 and the live socket (`/ws/bridge?preview_token=`). See
 [visual-editing-bridge.md](visual-editing-bridge.md#preview-tokens-and-long-edit-sessions)
 for re-minting through a long edit session.
+
+### Rendering a draft in your own templates
+
+A front end that renders pages itself can render the draft the token names
+**through the same reads it makes for a published page**. Send the token as
+`x-kiln-preview-token` (or `?preview_token=` when a header is impossible — the
+header wins, and a query string ends up in access logs and `Referer`s):
+
+| Read | Under a token |
+|------|---------------|
+| `GET /api/json/<plural>?filter[slug]=…` (the plain index, **not** `/published`) | The draft joins the result — exactly that one extra row. |
+| `GET /api/json/<plural>/<id>` | The draft, by id. |
+| `include=content_links,incoming_links,tags`, `fields[...]=` | Work as usual. The draft's edges to published documents are included, and so are published documents' edges to it; an edge to another draft stays hidden. |
+| `GET /api/content/:type/:slug?surface=json\|web\|json_ld\|llm` | The draft's **working copy**, rendered live (a published document's pending edits included), unannotated. `Cache-Control: private, no-store`, no ETag, not counted as a view. |
+
+Everything else ignores the token: `/published`, by-slug delivery, search and
+semantic reads never surface the draft, a write is never authorized by one, and
+GraphQL and `/mcp` do not read it. A presented token that does not verify,
+belongs to another site, or names another document is answered
+`404 invalid_preview` — never the published page — so a front end whose token
+lapsed can show "this preview link has expired" instead of the live version.
+Requests that present a token are charged to the `:preview_api` rate bucket
+(120/min per address) on top of `:api`; a server-side front end is one address,
+see [`CLIENT_IP_HEADER`](deploy-platforms.md#client-addresses-and-rate-limiting) if you sit behind a proxy.
 
 Who may mint: anyone who sees this document's **drafts** as an editor — an
 admin, or an editor whose read scope covers the type (`readable_types`, see

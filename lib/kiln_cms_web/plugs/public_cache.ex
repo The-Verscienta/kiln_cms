@@ -20,6 +20,9 @@ defmodule KilnCMSWeb.Plugs.PublicCache do
       These three surfaces never honour one (their read policies exclude
       locked rows for every non-editor), but a caller presenting a grant is
       asking for a per-caller answer and gets a per-caller header;
+    * a preview token — `x-kiln-preview-token` or `?preview_token=`. On
+      JSON:API it admits one draft to the read (`KilnCMSWeb.Plugs.PreviewGrant`),
+      so the body is a function of the token, never of the URL alone;
     * a `Cookie`. Nothing on these surfaces reads one today —
       `KilnCMSWeb.Plugs.SetLocale` puts the session's locale in the assigns,
       but the APIs take their locale from `?locale=`/arguments only — so this
@@ -51,7 +54,7 @@ defmodule KilnCMSWeb.Plugs.PublicCache do
   ## Vary
 
   Every response — anonymous or not, cached or not — gets
-  `Vary: Accept, Authorization, Origin`, **merged** into any `Vary` already
+  `Vary: Accept, Authorization, Origin, X-Kiln-Preview-Token`, **merged** into any `Vary` already
   present. The anonymous response is the one a cache stores, and it is served
   to later requests that *do* carry a token unless the cache is told the token
   changes the answer. `Accept` because JSON:API negotiates its media type on
@@ -92,9 +95,9 @@ defmodule KilnCMSWeb.Plugs.PublicCache do
   # that changed it made a decision this plug must not second-guess.
   @plug_default "max-age=0, private, must-revalidate"
 
-  @vary ~w(accept authorization origin)
+  @vary ~w(accept authorization origin x-kiln-preview-token)
 
-  @credential_headers ~w(authorization x-api-key x-kiln-unlock cookie)
+  @credential_headers ~w(authorization x-api-key x-kiln-unlock x-kiln-preview-token cookie)
 
   @impl true
   def init(opts), do: %{graphql: Keyword.get(opts, :graphql, false)}
@@ -117,8 +120,12 @@ defmodule KilnCMSWeb.Plugs.PublicCache do
   def anonymous?(conn) do
     conn = fetch_query_params(conn)
 
+    # `KilnCMSWeb.Plugs.PreviewGrant` takes `?preview_token=` out of the query
+    # once read, so the grant it leaves is the trace that one was presented.
     Enum.all?(@credential_headers, &(get_req_header(conn, &1) == [])) and
-      not Map.has_key?(conn.query_params, "unlock")
+      not Map.has_key?(conn.query_params, "unlock") and
+      not Map.has_key?(conn.query_params, "preview_token") and
+      not Map.has_key?(conn.assigns, :kiln_preview_grant)
   end
 
   @doc """

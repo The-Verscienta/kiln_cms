@@ -3347,10 +3347,15 @@ defmodule KilnCMS.CMS.Content do
         # (the default). A restricted editor reading an out-of-scope type falls
         # through to the published/audience filters below, i.e. reads it like
         # any signed-in consumer.
+        # A verified preview token (`KilnCMS.CMS.PreviewGrant`) admits the one
+        # record it names, in any state, to the primary `:read` — what lets a
+        # headless front end render a shared draft through JSON:API. The check
+        # is a no-op without a grant in the Ash context.
         policy action_type(:read) do
           authorize_if KilnCMS.CMS.Checks.ReadableContentType
           authorize_if expr(^ref(:state) == :published and ^ref(:audience) == :public)
           authorize_if KilnCMS.CMS.Checks.InAudience
+          authorize_if KilnCMS.CMS.Checks.PreviewGrant
         end
 
         # Passphrase-locked content (#496) is invisible to every authorized
@@ -3373,9 +3378,14 @@ defmodule KilnCMS.CMS.Content do
         # through the bypass above); a *restricted* editor reading an
         # out-of-scope type reads it as a consumer does, which here means they
         # need the passphrase too.
+        #
+        # A preview grant clears the lock too, for its one record: an editor who
+        # may preview a locked draft sees it without the passphrase, and so does
+        # the token they mint for it.
         policy action_type(:read) do
           authorize_if KilnCMS.CMS.Checks.ReadableContentType
           authorize_if expr(is_nil(^ref(:access_password_hash)))
+          authorize_if KilnCMS.CMS.Checks.PreviewGrant
         end
 
         # Authoring and workflow transitions are reserved for editors (and admins

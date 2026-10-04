@@ -165,6 +165,23 @@ defmodule KilnCMSWeb.Plugs.PublicCacheTest do
       assert header(conn, "cache-control") == ["private, no-store"]
     end
 
+    test "a preview token, as a header or a query param, is not anonymous" do
+      admin = user(:admin)
+      post = published_post(admin)
+      token = KilnCMS.CMS.PreviewToken.sign(post)
+      path = "/api/json/posts?filter[slug]=#{post.slug}"
+
+      conn = jsonapi(put_req_header(build_conn(), "x-kiln-preview-token", token), path)
+      assert header(conn, "cache-control") == ["private, no-store"]
+      assert header(conn, "etag") == []
+
+      # The grant plug consumes `?preview_token=` before this plug looks, so the
+      # grant it leaves is what marks the request credentialed.
+      conn = jsonapi(path <> "&preview_token=#{token}")
+      assert header(conn, "cache-control") == ["private, no-store"]
+      assert header(conn, "etag") == []
+    end
+
     test "a presented If-None-Match never 304s a credentialed request" do
       post = published_post(user(:admin))
       path = "/api/json/posts?filter[slug]=#{post.slug}"
@@ -314,7 +331,7 @@ defmodule KilnCMSWeb.Plugs.PublicCacheTest do
       assert [single] = header(conn, "vary")
 
       assert single |> String.split(", ") |> Enum.sort() ==
-               ~w(accept authorization origin x-thing)
+               ~w(accept authorization origin x-kiln-preview-token x-thing)
 
       assert length(String.split(single, "origin")) == 2
     end

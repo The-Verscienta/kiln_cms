@@ -140,6 +140,13 @@ defmodule KilnCMSWeb.Router do
   # 1.6.6 has no parser clause for (#763) — a separate pipeline because the
   # guard is meaningless for our own hand-written `/api` handlers, which
   # already go through `KilnCMSWeb.Params` (#751).
+  # A preview token on a headless read → a one-record read grant (Ash context +
+  # `conn.assigns.kiln_preview_grant`). Only on the JSON:API forward and the
+  # artifact read; GraphQL and `/mcp` never see a grant.
+  pipeline :preview_grant do
+    plug KilnCMSWeb.Plugs.PreviewGrant
+  end
+
   pipeline :ash_json_api do
     plug KilnCMSWeb.Plugs.AshJsonApiParams
     # `If-Match` on a single-record write → the action's version check (412).
@@ -683,8 +690,11 @@ defmodule KilnCMSWeb.Router do
   # Headless JSON:API. The OpenAPI spec the router itself serves at
   # `/api/json/open_api` follows the same `:api_docs` flag as the explorer
   # above (#567); the content routes are unaffected.
+  #
+  # `:preview_grant` lets a preview token admit the one draft it names to the
+  # plain reads here (and their includes) — see `KilnCMSWeb.Plugs.PreviewGrant`.
   scope "/api/json" do
-    pipe_through [:api, :ash_json_api, :public_cache]
+    pipe_through [:api, :preview_grant, :ash_json_api, :public_cache]
 
     forward "/", KilnCMSWeb.AshJsonApiRouter
   end
@@ -768,14 +778,22 @@ defmodule KilnCMSWeb.Router do
 
   # Headless delivery of fired artifacts (Kiln v2 — D9). The v2 content API serves
   # immutable per-surface artifacts, not the raw editable block tree.
+  #
+  # `show` sits in its own scope with `:preview_grant`: a preview token turns it
+  # into a live render of that one draft's working copy (a front end's draft
+  # mode). Nothing else under `/api` takes a token this way.
+  scope "/api", KilnCMSWeb do
+    pipe_through [:api, :preview_grant]
+
+    get "/content/:type/:slug", ArtifactController, :show
+  end
+
   scope "/api", KilnCMSWeb do
     pipe_through :api
 
     # Collection view as of a date (#338 phase 2): which documents were
     # published at that instant, reconstructed from version history.
     get "/content/:type", ArtifactController, :index_point_in_time
-
-    get "/content/:type/:slug", ArtifactController, :show
 
     # Embedding-driven related content (#339 phase 2): published documents
     # semantically closest to this one.

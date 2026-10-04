@@ -320,7 +320,9 @@ editor sees one only when they may read **both** its source and its target
 (`Checks.LinkEndsReadable`, which re-reads the ends under the reader's own
 authorization, the way `Checks.DocumentReadable` does for artifacts). It used
 to be world-readable, which let a published page's `incoming_links` name the
-drafts linking to it. The join read Ash runs behind a `related_*`
+drafts linking to it. A preview token on a headless read (#1887) makes its
+one draft a readable end as well, so a front end rendering that draft gets its
+edges to published documents, never edges to other drafts. The join read Ash runs behind a `related_*`
 many-to-many is admitted as such (`Checks.ThroughRelatedJoin`): it never
 returns a row, and the related records are filtered by their own policy.
 

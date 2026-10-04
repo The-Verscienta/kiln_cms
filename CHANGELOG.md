@@ -66,6 +66,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A preview token now works on JSON:API and `/api/content`, so a headless
+  front end can render a shared draft in its own templates.**
+  ([#1887](https://github.com/The-Verscienta/kiln_cms/issues/1887) · [long form](docs/changelog/unreleased.md#preview-tokens-for-headless-draft-mode))
+
 - **The content list filters by author, category, tag, language, update date
   and review health, sorts by update, publish date or title, and saves a
   filter as a named view.**
@@ -137,6 +141,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#1864](https://github.com/The-Verscienta/kiln_cms/issues/1864) · [long form](docs/changelog/unreleased.md#a-plugins-console-panels-no-longer-need-a-copy-of-the-cores-surface-test))
 
 ### Security
+
+- **A preview token is a cache credential (`Vary`, never `public`), and
+  `?preview_token=` / `?unlock=` are filtered from request logs.**
+  ([#1887](https://github.com/The-Verscienta/kiln_cms/issues/1887) · [long form](docs/changelog/unreleased.md#preview-tokens-are-credentials))
 
 - **A content link is readable only by someone who may read both of its ends;
   `incoming_links` no longer names the drafts that link to a published page.**

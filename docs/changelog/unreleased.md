@@ -57,6 +57,37 @@ carries the reasoning.
 
 ## Added
 
+<a id="preview-tokens-for-headless-draft-mode"></a>
+
+- **A preview token now works on JSON:API and `/api/content`, so a headless
+  front end can render a shared draft in its own templates.**
+  Present the token as `x-kiln-preview-token` (or `?preview_token=` for a
+  client that cannot set headers; the header wins) on the reads a front end
+  already makes for a published page, and the one draft it names joins them:
+
+  - `GET /api/json/<plural>?filter[slug]=…` (the plain index, not
+    `/published`) and `GET /api/json/<plural>/<id>`, with
+    `include=content_links,incoming_links,tags` and sparse fieldsets. The
+    draft's edges to published documents are included, and so are published
+    documents' edges to it; an edge to any *other* draft stays hidden (#1594).
+  - `GET /api/content/:type/:slug?surface=json|web|json_ld|llm` renders the
+    draft's **working copy** live (a published document's unpublished edits
+    included), unannotated, `private, no-store`, not counted as a view and
+    with no experiment arm.
+
+  The token becomes a `KilnCMS.CMS.PreviewGrant` in the request's Ash context
+  (`KilnCMSWeb.Plugs.PreviewGrant`) and a new policy check,
+  `KilnCMS.CMS.Checks.PreviewGrant`, admits `id == grant.id` to the primary
+  `:read` in both content read policies — nothing is read with
+  `authorize?: false`. It never reaches the published-only, by-slug, search or
+  semantic reads, writes, GraphQL or `/mcp`. A presented token that does not
+  verify, belongs to another site, or names another document is
+  `404 invalid_preview` — never a silent fallback to the published page.
+  Requests that present one are also charged to a new `:preview_api` rate
+  bucket (120/min). The visual-editing bridge reads its token through the same
+  helper and is otherwise unchanged.
+  ([#1887](https://github.com/The-Verscienta/kiln_cms/issues/1887))
+
 <a id="the-content-list-filters-and-saves-views"></a>
 
 - **The content list filters by author, category, tag, language, update date
@@ -507,6 +538,20 @@ carries the reasoning.
   ([#1864](https://github.com/The-Verscienta/kiln_cms/issues/1864)).
 
 ## Security
+
+<a id="preview-tokens-are-credentials"></a>
+
+- **A preview token is a cache credential (`Vary`, never `public`), and
+  `?preview_token=` / `?unlock=` are filtered from request logs.**
+  `KilnCMSWeb.Plugs.PublicCache` now treats `x-kiln-preview-token`,
+  `?preview_token=` and a verified grant as credentials (the response is
+  `private, no-store`, with no ETag) and adds `X-Kiln-Preview-Token` to
+  `Vary`, so a shared cache never hands the anonymous answer to a token
+  request or a draft to anyone else. `config :phoenix, :filter_parameters`
+  was unset (Phoenix's default filters only `password`), so a token or unlock
+  grant in a query string was written to the request log; both are filtered
+  now. Prefer the header: a query string also travels in `Referer`.
+  ([#1887](https://github.com/The-Verscienta/kiln_cms/issues/1887))
 
 <a id="content-links-readable-only-when-both-ends-are"></a>
 

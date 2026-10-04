@@ -187,8 +187,16 @@ must not hold your API key. Mint on the server, redeem in the page:
 3. The page reads `GET /preview/:token` — no credential — until it expires 15
    minutes later; mint again on the next render.
 
-See [api.md → Preview tokens](api.md#preview-tokens) for the response shape and
-who may mint.
+To render the draft in **your own templates** rather than from that thin
+payload, send the token as `x-kiln-preview-token` on the reads your page
+already makes: the plain JSON:API index or get (not `/published`) with its
+`include`s, and `GET /api/content/:type/:slug?surface=…` for the body, which
+renders the working copy live. Your server needs no editor key for this —
+only the token. A `404 invalid_preview` means the link lapsed: say so rather
+than falling back to the published page.
+
+See [api.md → Preview tokens](api.md#preview-tokens) for the response shape,
+the exact reads a token unlocks, and who may mint.
 
 ## Images: sizes, crops and formats on request
 
@@ -240,8 +248,16 @@ must not hold your API key. Mint on the server, redeem in the page:
 3. The page reads `GET /preview/:token` — no credential — until it expires 15
    minutes later; mint again on the next render.
 
-See [api.md → Preview tokens](api.md#preview-tokens) for the response shape and
-who may mint.
+To render the draft in **your own templates** rather than from that thin
+payload, send the token as `x-kiln-preview-token` on the reads your page
+already makes: the plain JSON:API index or get (not `/published`) with its
+`include`s, and `GET /api/content/:type/:slug?surface=…` for the body, which
+renders the working copy live. Your server needs no editor key for this —
+only the token. A `404 invalid_preview` means the link lapsed: say so rather
+than falling back to the published page.
+
+See [api.md → Preview tokens](api.md#preview-tokens) for the response shape,
+the exact reads a token unlocks, and who may mint.
 
 ## Author / PII
 

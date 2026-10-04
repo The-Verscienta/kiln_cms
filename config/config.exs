@@ -877,6 +877,11 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# Parameters Phoenix's request log prints as [FILTERED]. Phoenix's default is
+# `["password"]`; a preview token (`?preview_token=`) and an unlock grant
+# (`?unlock=`) are bearer secrets in a query string, so they are filtered too.
+config :phoenix, :filter_parameters, ["password", "preview_token", "unlock"]
+
 # Error tracking (Sentry). The DSN is only set in config/runtime.exs from the
 # SENTRY_DSN env var, so with no DSN every capture is a no-op — dev, test, and
 # precommit never reach out to Sentry. Transport uses the default Finch client

@@ -66,6 +66,10 @@ defmodule KilnCMSWeb.RateLimit do
     media_render: {120, :timer.minutes(1)},
     # Signed preview links — tight, to slow token enumeration / draft scraping.
     preview: {30, :timer.minutes(1)},
+    # Headless reads that present a preview token (`KilnCMSWeb.Plugs.PreviewGrant`),
+    # charged on top of `:api`. Looser than `:preview`: one draft page in a front
+    # end is several calls (record, includes, body), all from its server's address.
+    preview_api: {120, :timer.minutes(1)},
     # Passphrase attempts against locked content (#496). Tighter than `:form`
     # and separate from `:auth`, because this is the one bucket standing between
     # a shared secret and a brute force: the passphrase is chosen by an editor

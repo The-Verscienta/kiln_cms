@@ -24,11 +24,25 @@ defmodule KilnCMSWeb.ArtifactController do
   is on the response as `x-kiln-locale` and `Content-Language`, and in the ETag.
   A locale the site does not run is `400 unsupported_locale` — see
   `KilnCMSWeb.DeliveryLocale`.
+
+  ## Draft preview
+
+  With a preview token (`x-kiln-preview-token`, verified into
+  `conn.assigns.kiln_preview_grant` by `KilnCMSWeb.Plugs.PreviewGrant`) the
+  route renders **that one draft live** instead: its working copy (a published
+  document's unpublished edits included), fired in memory for the requested
+  surface, unannotated. That is what a front end's draft mode renders in its own
+  templates. The response is `private, no-store` with no ETag; it is not counted
+  as a view, carries no experiment arm and enqueues nothing. A token for another
+  document, type, slug or locale is `404 invalid_preview`; `?as_of=` does not
+  combine with one (`400`).
   """
   use KilnCMSWeb, :controller
 
   alias KilnCMS.CMS.ContentPassword
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.PreviewGrant
+  alias KilnCMS.CMS.WorkingCopy
   alias KilnCMS.Experiments
   alias KilnCMS.Firing.Delivery
   alias KilnCMS.Firing.Engine
@@ -45,6 +59,18 @@ defmodule KilnCMSWeb.ArtifactController do
   # evicts the firing cache), so they're cacheable; the ETag lets a CDN/static
   # build revalidate cheaply after the window (#188).
   @max_age_seconds 300
+
+  def show(%{assigns: %{kiln_preview_grant: %PreviewGrant{}}} = conn, %{"as_of" => _}) do
+    ApiError.send(
+      conn,
+      :bad_request,
+      "invalid_parameter",
+      "as_of cannot be combined with a preview token."
+    )
+  end
+
+  def show(%{assigns: %{kiln_preview_grant: %PreviewGrant{} = grant}} = conn, params),
+    do: show_preview(conn, grant, params)
 
   def show(conn, %{"as_of" => _} = params), do: show_point_in_time(conn, params)
 
@@ -121,6 +147,42 @@ defmodule KilnCMSWeb.ArtifactController do
       # still 404s.
       _ ->
         locked_or_not_found(conn, org_id, type, slug, locale, mode)
+    end
+  end
+
+  # A shared draft, rendered live for a front end's draft mode (moduledoc). The
+  # read runs under the caller's own actor with the grant in its context, so
+  # the content read policy (`Checks.PreviewGrant`) is what admits the record —
+  # no `authorize?: false`. Everything published delivery does around the body
+  # (view counting, experiments, provenance, ETags, backfill) is skipped: this
+  # is a draft, and the response is per-token.
+  defp show_preview(conn, grant, %{"type" => type, "slug" => slug} = params) do
+    org_id = current_org_id(conn)
+    actor = Ash.PlugHelpers.get_actor(conn)
+    read_opts = [actor: actor, tenant: org_id, context: PreviewGrant.context(grant)]
+    locale = Params.string(params, "locale", nil)
+
+    with %{} = ct <- ContentTypes.get(type, org_id),
+         true <- grant.type == to_string(ct.type),
+         surface_name = params["surface"] || "json",
+         surface when not is_nil(surface) <- Map.get(@surfaces, surface_name),
+         {:ok, record} <-
+           ContentTypes.get_record(
+             ct,
+             grant.id,
+             read_opts ++ [load: [:featured_image] ++ KilnCMS.Seo.Patterns.loads()]
+           ),
+         true <- record.slug == slug,
+         true <- is_nil(locale) or record.locale == locale,
+         view = WorkingCopy.load_view(record, read_opts),
+         {:ok, %{^surface => body}} <- Engine.fire(view, mode: :preview) do
+      conn
+      |> put_resp_header("cache-control", "private, no-store")
+      |> DeliveryLocale.put_served(record.locale)
+      |> respond(surface_name, body)
+    else
+      _ ->
+        ApiError.send(conn, :not_found, "invalid_preview", "Invalid or expired preview token.")
     end
   end
 

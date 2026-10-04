@@ -53,7 +53,7 @@ the router so preflights are answered before route matching).
 | Probes & SEO | `/up`, `/ready`, `/sitemap.xml`, `/robots.txt`, `/llms.txt`, `/manifest.webmanifest`, `/offline.html` | none | `:probe` |
 | First-run bootstrap | `/setup` | none — the `:bootstrap_admin` policy (`Checks.NoAdminExists`) + advisory lock in `KilnCMS.Accounts.Bootstrap` are the gate | none |
 | GraphQL | `/gql` (GET + POST), `/ws/gql` | optional JWT / API key | `:gql` (per operation, on both transports), `:gql_join` (socket connects) |
-| JSON:API | `/api/json/**` (GET/POST/PATCH/DELETE) | optional JWT / API key | `:api` |
+| JSON:API | `/api/json/**` (GET/POST/PATCH/DELETE) | optional JWT / API key; on a GET, optionally a preview token (one draft, #1887) | `:api` (+ `:preview_api` with a token) |
 | Headless REST | `/api/content/**`, `/api/resolve`, `/api/locales`, `/api/search`, `/api/ask`, `/api/provenance/**`, `/api/visual-editing/:type/:slug`, `/api/sync`, `/api/schema`, `/api/menus/**`, `/api/content/:type/:id/revisions/**` | optional JWT / API key | `:api` |
 | OpenAPI & explorer | `/api/json/open_api`, `/api/json/swaggerui` | none — and **not served in prod** unless `API_DOCS_ENABLED` (#567); the document (never the explorer) also answers any valid API key | `:docs` |
 | GraphQL SDL | `GET /api/graphql/schema.graphql` | none where introspection is on; **API key required** in prod unless `GRAPHQL_INTROSPECTION_ENABLED` | `:docs` |
@@ -604,6 +604,19 @@ build if a resource is ever registered without that authorizer.
   access to that record in whatever state it is in. Tokens are the sharing
   mechanism for unpublished work; treat a leaked preview URL as a content leak.
   See residual risk 6.
+- **Token on headless reads** (#1887) — `x-kiln-preview-token` /
+  `?preview_token=` on `GET /api/json/**` and `GET /api/content/:type/:slug`
+  is verified once by `KilnCMSWeb.Plugs.PreviewGrant` (pinned to the serving
+  org, charged to `:preview_api`) and becomes a `KilnCMS.CMS.PreviewGrant` in
+  the Ash context. Unlike `/preview/:token`, nothing here reads with
+  `authorize?: false`: `Checks.PreviewGrant` in the content read policies admits
+  `id == grant.id` to the primary `:read` only (never `/published`, search or
+  semantic reads, writes, GraphQL or `/mcp`), and `Checks.LinkEndsReadable`
+  counts that one draft as a readable link end. The grant is matched as a
+  struct, which no request input can produce. Responses are `private,
+  no-store`, `Vary: X-Kiln-Preview-Token`, and the query-param form is filtered
+  from request logs. Same exposure as `/preview/:token`: one document, 15
+  minutes.
 
 ### Media (`/uploads/*`)
 - **Unauthenticated access** — local blobs are served by `Plug.Static` with no
