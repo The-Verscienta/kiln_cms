@@ -22,6 +22,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
 
   import KilnCMSWeb.ContentEditor.Shared
 
+  alias KilnCMSWeb.ContentEditor.BlockParams
   alias KilnCMSWeb.ContentEditor.Localization
 
   attr :block_types, :list, required: true
@@ -222,6 +223,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
             field={@bf[field.name]}
             type="textarea"
             label={dsl_label(field.name)}
+            hint={field.description}
             readonly={
               field_locked?(@locked_fields, @bf[field.name].name) or
                 Localization.locked?(@localization, {:block, @module, field.name})
@@ -239,6 +241,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
           field={@bf[field.name]}
           type={dsl_input_type(field.type)}
           label={dsl_label(field.name)}
+          hint={field.description}
           readonly={Localization.locked?(@localization, {:block, @module, field.name})}
           placeholder={
             Localization.placeholder(@localization, {:block, @module, field.name, @block_id})
@@ -356,6 +359,83 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
         <.icon name="hero-plus" class="size-4" />{@add_label}
       </button>
     </div>
+    """
+  end
+
+  # ── Declared row editor (`item_keys:`) ──────────────────────────────────────
+
+  # The generic form of `item_rows_editor/1`, for any block whose
+  # `{:array, :map}` field declares `item_keys:` (`Kiln.Block.Info.item_keys/1`)
+  # — which is how a plugin block's table-like field gets an editor without a
+  # core edit. One row per item, one text input per key in declared order,
+  # bound into `…[field][i][key]` exactly as the core rows are, so
+  # `normalize_item_rows/1` and the `item_row_add`/`item_row_remove` events
+  # serve both (`BlockParams.row_field?/2` gates the events per block type).
+  # Renders nothing for a block with no declared row fields.
+  attr :bf, :any, required: true
+
+  def declared_rows_editor(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :specs,
+        for {field, keys} <- BlockParams.declared_row_fields(block_type_string(assigns.bf)) do
+          form_field = assigns.bf[String.to_existing_atom(field)]
+
+          %{
+            field: field,
+            keys: keys,
+            name: form_field.name,
+            items: item_row_maps(form_field.value)
+          }
+        end
+      )
+
+    ~H"""
+    <fieldset :for={spec <- @specs} class="mt-2 space-y-2" data-row-field={spec.field}>
+      <legend class="text-xs font-semibold text-base-content/70">{dsl_label(spec.field)}</legend>
+      <input type="hidden" name={"#{spec.name}[_sentinel]"} value="" />
+
+      <div
+        :for={{item, i} <- Enum.with_index(spec.items)}
+        class="flex items-start gap-2 rounded border border-base-content/10 p-2"
+      >
+        <div class="grid grow gap-2 sm:grid-cols-2">
+          <label :for={key <- spec.keys} class="block space-y-1">
+            <span class="text-xs font-medium text-base-content/70">{dsl_label(key)}</span>
+            <input
+              type="text"
+              name={"#{spec.name}[#{i}][#{key}]"}
+              value={item[key]}
+              aria-label={dsl_label(key)}
+              phx-debounce="300"
+              class="field-input w-full text-sm"
+            />
+          </label>
+        </div>
+        <button
+          type="button"
+          phx-click="item_row_remove"
+          phx-value-index={@bf.index}
+          phx-value-field={spec.field}
+          phx-value-item={i}
+          aria-label={gettext("Remove row")}
+          class="btn btn-ghost btn-sm mt-1 p-0.5 hover:text-error"
+        >
+          <.icon name="hero-x-mark" class="size-4" />
+        </button>
+      </div>
+
+      <button
+        type="button"
+        phx-click="item_row_add"
+        phx-value-index={@bf.index}
+        phx-value-field={spec.field}
+        class="btn btn-sm btn-default"
+      >
+        <.icon name="hero-plus" class="size-4" />{gettext("Add row")}
+      </button>
+    </fieldset>
     """
   end
 
@@ -814,7 +894,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
                   class="flex cursor-grab active:cursor-grabbing items-center gap-1 text-xs text-base-content/60"
                 >
                   <.icon name="hero-bars-3" class="size-4" />
-                  {dsl_label(child["_type"])}
+                  {block_label(child["_type"])}
                 </span>
                 <div class="flex items-center gap-1">
                   <%!-- Back onto the canvas, right after this columns block —
@@ -858,7 +938,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
               phx-value-type={type}
               class="btn btn-sm btn-default px-2 py-1 text-xs"
             >
-              + {dsl_label(type)}
+              + {block_label(type)}
             </button>
           </div>
         </div>

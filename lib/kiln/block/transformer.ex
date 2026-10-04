@@ -16,6 +16,7 @@ defmodule Kiln.Block.Transformer do
     case Transformer.get_entities(dsl_state, [:kiln_block]) do
       [%Kiln.Block.Definition{name: name, version: version, fields: fields}] ->
         with :ok <- validate_translatable(fields),
+             :ok <- validate_item_keys(fields),
              do: {:ok, build(dsl_state, name, version, fields)}
 
       [] ->
@@ -60,6 +61,26 @@ defmodule Kiln.Block.Transformer do
 
         _ok ->
           {:cont, :ok}
+      end
+    end)
+  end
+
+  # `item_keys:` names the keys of an `{:array, :map}` field's items; anywhere
+  # else it would be silently ignored by the editor and the schema export.
+  defp validate_item_keys(fields) do
+    Enum.reduce_while(fields, :ok, fn field, :ok ->
+      case {field.item_keys, field.type} do
+        {nil, _type} ->
+          {:cont, :ok}
+
+        {[_ | _], {:array, :map}} ->
+          {:cont, :ok}
+
+        {keys, type} ->
+          {:halt,
+           {:error,
+            "Kiln.Block: field #{inspect(field.name)} declares item_keys #{inspect(keys)}, " <>
+              "which only a non-empty list on an {:array, :map} field can (got #{inspect(type)})."}}
       end
     end)
   end
