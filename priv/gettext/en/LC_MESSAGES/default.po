@@ -4134,6 +4134,11 @@ msgid "Couldn't import that photo from Unsplash."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't move that document."
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Couldn't move that task."
 msgstr ""
@@ -7391,6 +7396,11 @@ msgstr ""
 msgid "In-app backups are turned off (BACKUP_ENABLED)."
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "In:"
+msgstr ""
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/form_live.ex
 #: lib/kiln_cms_web/live/funnel_live.ex
@@ -8626,6 +8636,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Moved “%{title}” to %{date}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Moved."
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Moving a document saves straight away, without waiting for Save."
 msgstr ""
 
 #: lib/kiln_cms_web/live/site_mail_live.ex
@@ -10282,6 +10302,7 @@ msgstr ""
 msgid "Paragraph text"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format
 msgid "Parent"
@@ -18646,6 +18667,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "— No default —"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "— No parent (top level) —"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex

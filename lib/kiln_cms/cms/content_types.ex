@@ -678,6 +678,17 @@ defmodule KilnCMS.CMS.ContentTypes do
   def update(type, record, attrs, opts \\ []),
     do: call(type, "update_#{atom(type, opts)}", [record, attrs, opts], opts)
 
+  @doc """
+  Move a document in the content tree (#1597): its parent, its sibling order,
+  or both.
+
+  Its own dispatcher because it is its own action — `parent_id`/`position` are
+  not in `default_accept`, so `update/4` cannot write them. See
+  `KilnCMS.CMS.ContentTree`.
+  """
+  def move(type, record, attrs, opts \\ []),
+    do: call(type, "move_#{atom(type, opts)}", [record, attrs, opts], opts)
+
   def list_versions!(type, opts \\ []),
     do: call(type, "list_#{atom(type, opts)}_versions!", [opts], opts)
 

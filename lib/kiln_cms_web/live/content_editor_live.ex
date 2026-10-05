@@ -34,6 +34,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentLinks
+  alias KilnCMS.CMS.ContentTree
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.Mentions
   alias KilnCMS.CMS.PreviewToken
@@ -876,6 +877,27 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> load_fragment_options()
     |> load_redirects()
     |> load_links()
+    |> load_tree()
+  end
+
+  # Where this document sits, and where it could sit (#1597, D21). Refreshed
+  # with the record, so a move is reflected without a reload — and so the
+  # options never go stale against a tree another editor has changed under us.
+  #
+  # Both reads go through `ContentTree`, which offers only placements the
+  # `:move` write would accept. A new draft has no id and nothing to move, so
+  # it is skipped entirely rather than reading the whole type for a picker the
+  # inspector will not render.
+  defp load_tree(%{assigns: %{record: %{id: nil}}} = socket),
+    do: socket |> assign(:parent_options, []) |> assign(:parent_path, [])
+
+  defp load_tree(socket) do
+    %{record: record, kind: kind, actor: actor, current_org: org} = socket.assigns
+    opts = [actor: actor, tenant: org]
+
+    socket
+    |> assign(:parent_options, ContentTree.candidate_parents(kind, record, opts))
+    |> assign(:parent_path, ContentTree.ancestors(kind, record, opts))
   end
 
   attr :keys, :list, required: true
@@ -2579,6 +2601,40 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("release_draft_change", _params, socket), do: {:noreply, socket}
 
+  # Move the document (#1597, D21). Its own action, so this writes immediately
+  # rather than staging a form change — the inspector says so next to the
+  # control. `""` means "make it a root".
+  #
+  # The options were built from `ContentTree.candidate_parents/3`, which applies
+  # the same rule as the write, so a refusal here is a tree that changed under
+  # the editor (or a hand-sent value) rather than a UI that offered the
+  # impossible. Either way the reason is worth showing: "would nest too deep"
+  # and "one of this document's own children" are both actionable.
+  # Guarded (#764): a hand-sent `parent_id` of any other shape must not reach
+  # the body, where it would be handed to the action. `KilnCMSWeb.MalformedEvent`
+  # makes the unmatched event a no-op. `""` is a binary and means "make it a
+  # root", so the guard admits it.
+  def handle_event("move_parent", %{"parent_id" => parent_id}, socket)
+      when is_binary(parent_id) do
+    record = socket.assigns.record
+
+    attrs = %{parent_id: if(parent_id == "", do: nil, else: parent_id)}
+
+    case ContentTypes.move(socket.assigns.kind, record, attrs,
+           actor: socket.assigns.actor,
+           tenant: socket.assigns.current_org
+         ) do
+      {:ok, moved} ->
+        {:noreply,
+         socket
+         |> assign_record(moved)
+         |> put_flash(:info, gettext("Moved."))}
+
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, move_error(error))}
+    end
+  end
+
   def handle_event("release_add", _params, socket) do
     draft = socket.assigns.release_draft
     release_id = draft["release_id"] || default_release_id(socket)
@@ -3652,6 +3708,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # browse grid too if the picker stays open (gallery multi-select).
   defp media_row(item) do
     %{id: item.id, url: item.url, alt: item.alt, caption: item.caption, filename: item.filename}
+  end
+
+  # A refused move is worth its reason: "would nest deeper than 5 levels" and
+  # "can't be one of this document's own children" are both things the editor
+  # can act on, and both mean the tree moved under them since the options were
+  # built (the picker offers only what the write accepts).
+  defp move_error(error) do
+    error
+    |> Ash.Error.to_error_class()
+    |> Map.get(:errors, [])
+    |> Enum.map_join(" ", &"#{Map.get(&1, :message, "")}.")
+    |> String.trim()
+    |> case do
+      "" -> gettext("Couldn't move that document.")
+      message -> message
+    end
   end
 
   # A restore can fail for a reason the editor can act on — a category deleted or
@@ -6756,6 +6828,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
               releases={@releases}
               release_draft={@release_draft}
               categories={@categories}
+              parent_options={@parent_options}
+              parent_path={@parent_path}
               can_create_tag?={@can_create_tag?}
               can_create_category?={@can_create_category?}
               category_draft={@category_draft}

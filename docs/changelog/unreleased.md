@@ -82,6 +82,15 @@ carries the reasoning.
   [content-organization-plan.md](../content-organization-plan.md); the tree is
   a different axis from a document's category or tags, which say what it is
   *about* rather than where it sits.
+  The content editor's **Organization & relationships** panel sets the parent,
+  showing where the document sits now and offering only placements the write
+  would accept — `KilnCMS.CMS.ContentTree.candidate_parents/3` does the same
+  arithmetic as the validation, so the picker cannot propose a move that gets
+  refused. Choosing writes immediately rather than waiting for Save, because a
+  move is its own action, and the panel says so. A refusal shows its reason
+  ("would nest deeper than 5 levels", "can't be one of this document's own
+  children") rather than a generic failure — those only happen when the tree
+  moved under the editor since the options were built.
 
 <a id="the-content-list-filters-and-saves-views"></a>
 
