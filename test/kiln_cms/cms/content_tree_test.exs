@@ -167,6 +167,66 @@ defmodule KilnCMS.CMS.ContentTreeTest do
     end
   end
 
+  describe "candidate_parents/3 offers what a move would accept" do
+    test "every document but the moved one and its subtree, with depths to indent by" do
+      admin = user(:admin)
+      [root, mid, leaf] = chain(admin, 3)
+      elsewhere = page(admin)
+
+      offered = ContentTree.candidate_parents(:page, mid, actor: admin)
+      ids = Enum.map(offered, & &1.id)
+
+      # Not itself, not its own child.
+      refute mid.id in ids
+      refute leaf.id in ids
+      # Its parent is a legal target (a no-op move), as is an unrelated root.
+      assert root.id in ids
+      assert elsewhere.id in ids
+
+      assert Enum.find(offered, &(&1.id == root.id)).depth == 1
+    end
+
+    test "a document whose subtree would not fit under a candidate is not offered it" do
+      admin = user(:admin)
+      max = ContentTree.max_depth()
+
+      deepest = List.last(chain(admin, max))
+      subtree_root = page(admin)
+      _subtree_leaf = page(admin, %{parent_id: subtree_root.id})
+
+      offered = ContentTree.candidate_parents(:page, subtree_root, actor: admin)
+
+      # The same arithmetic the validation does: the full-depth leaf has no
+      # headroom for a two-level subtree, so the picker must not propose it.
+      refute deepest.id in Enum.map(offered, & &1.id)
+
+      assert {:error, _} = CMS.move_page(subtree_root, %{parent_id: deepest.id}, actor: admin)
+    end
+
+    test "with nothing being moved, every document within the cap is a candidate" do
+      admin = user(:admin)
+      a = page(admin)
+      b = page(admin)
+
+      ids = :page |> ContentTree.candidate_parents(nil, actor: admin) |> Enum.map(& &1.id)
+
+      assert a.id in ids
+      assert b.id in ids
+    end
+  end
+
+  describe "ancestors/3" do
+    test "returns the chain root first, and nothing for a root" do
+      admin = user(:admin)
+      [root, mid, leaf] = chain(admin, 3)
+
+      assert ContentTree.ancestors(:page, leaf, actor: admin) |> Enum.map(& &1.id) ==
+               [root.id, mid.id]
+
+      assert ContentTree.ancestors(:page, root, actor: admin) == []
+    end
+  end
+
   describe "deleting a parent" do
     test "a purge leaves its children as roots rather than deleting them" do
       admin = user(:admin)

@@ -120,7 +120,8 @@ carries the reasoning.
   refused. Choosing writes immediately rather than waiting for Save, because a
   move is its own action, and the panel says so. A refusal shows its reason
   ("would nest deeper than 5 levels", "can't be one of this document's own
-  children") rather than a generic failure.
+  children") rather than a generic failure — those only happen when the tree
+  moved under the editor since the options were built.
 
 <a id="the-content-list-filters-and-saves-views"></a>
 

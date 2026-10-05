@@ -172,6 +172,16 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
       </.inspector_section>
 
       <.inspector_section title={gettext("Organization & relationships")}>
+        <%!-- Where the document SITS, which is a different axis from what it is
+                ABOUT (category/tags below). Writes on change — a move is its own
+                action, not a field on this form. See `KilnCMS.CMS.ContentTree`. --%>
+        <.parent_field
+          options={@parent_options}
+          current_id={@record.parent_id}
+          path={@parent_path}
+          persisted?={not is_nil(@record.id)}
+        />
+
         <.category_field
           form={@form}
           categories={@categories}
