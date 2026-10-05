@@ -66,6 +66,11 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Documents can sit under one another: every content type gains a parent and
+  a sibling order, with a `:move` action that refuses cycles, cross-site parents
+  and anything nesting past five levels.**
+  ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) · [long form](docs/changelog/unreleased.md#documents-can-sit-under-one-another-the-content-tree))
+
 - **System → Plugins says what each plugin adds — its blocks, field types,
   pages and content types by name — and flags a plugin with no summary.**
   ([#1888](https://github.com/The-Verscienta/kiln_cms/pull/1888))
@@ -94,6 +99,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Each published GitHub release now becomes a page on kilncms.dev at
   `/releases/<version>`, listed at `/releases`.**
   ([#1870](https://github.com/The-Verscienta/kiln_cms/issues/1870) · [long form](docs/changelog/unreleased.md#each-published-github-release-now-becomes-a-page-on-kilncmsdev-at))
+
+- **Each site can publish a `/.well-known/security.txt` (RFC 9116), set by an
+  admin at Configure → Organization → Security contact.**
+  ([#1873](https://github.com/The-Verscienta/kiln_cms/issues/1873) · [long form](docs/changelog/unreleased.md#each-site-can-publish-a-well-knownsecuritytxt-rfc-9116-set-by-an-admin-at))
 
 ### Changed
 

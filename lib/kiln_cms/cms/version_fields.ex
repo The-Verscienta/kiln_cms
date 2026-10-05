@@ -30,6 +30,14 @@ defmodule KilnCMS.CMS.VersionFields do
       consent gate on `:publish` (#356).
     * `author_id` — attribution. Reverting the text of a document does not make
       a previous author responsible for it again.
+    * `parent_id`, `position` — where the document *sits* (#1597,
+      `KilnCMS.CMS.ContentTree`). A restore is an edit to what a document says,
+      and relocating it is not that: it is a structural change, with a 301 and
+      (once an alias derives from the chain) a path behind it. Restoring text
+      must not silently move a document to where it used to live, especially
+      when its old parent may since have been purged. A move is still worth
+      seeing in history, so the diff reports both; placement is changed only by
+      `:move`.
     * `expiry_action`, `review_after_days`, `last_reviewed_at` — lifecycle
       (docs/content-lifecycles.md). The same argument as workflow, on the other
       axis: these say when
@@ -78,6 +86,7 @@ defmodule KilnCMS.CMS.VersionFields do
   @not_restorable ~w(
     state published_at scheduled_at proposed_publish_at unpublish_at author_id
     expiry_action review_after_days last_reviewed_at
+    parent_id position
   )a
 
   # Editorially significant first; anything else the resource declares (a dynamic
@@ -95,6 +104,7 @@ defmodule KilnCMS.CMS.VersionFields do
     published_at scheduled_at proposed_publish_at unpublish_at expiry_action
     review_after_days last_reviewed_at
     author_id category_id featured_image_id custom_fields
+    parent_id position
   )a
 
   @doc """

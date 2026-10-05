@@ -115,6 +115,29 @@ defmodule KilnCMS.Docs.EnvVarTiersTest do
            """
   end
 
+  test "every variable the document has a row for is in .env.example" do
+    # The Common test above only covers ten names. The rest drifted silently:
+    # 39 documented variables — CDN purge, console host, image-transform key,
+    # six cron overrides — had never reached .env.example, which claims to
+    # mirror the document. A commented-out line counts; a mention in prose
+    # does too, since some variables are explained rather than assigned.
+    documented =
+      for line <- doc_lines(),
+          [_, var] <- [Regex.run(~r/^\|\s*`([A-Z][A-Z0-9_]+)`\s*\|/, line) || []],
+          uniq: true,
+          do: var
+
+    example = File.read!(@env_example)
+    missing = Enum.reject(documented, &Regex.match?(~r/\b#{&1}\b/, example))
+
+    assert missing == [],
+           """
+           #{@doc_path} documents these variables, but #{@env_example} never \
+           mentions them: #{inspect(missing)}. Add each to the matching section \
+           of #{@env_example}, commented out with its default.
+           """
+  end
+
   test "every Common row points at a detail row elsewhere in the document" do
     # Otherwise the short list silently becomes the only documentation for those
     # ten, with no default column and no source anchor.

@@ -209,6 +209,7 @@ defmodule KilnCMS.CMS do
       define :publish_page, action: :publish
       define :publish_scheduled_page, action: :publish_scheduled
       # The working copy of a live document (docs/working-copy.md).
+      define :move_page, action: :move
       define :save_page_working_copy, action: :save_working_copy
       define :publish_page_changes, action: :publish_changes
       define :discard_page_changes, action: :discard_changes
@@ -253,6 +254,7 @@ defmodule KilnCMS.CMS do
       define :publish_post, action: :publish
       define :publish_scheduled_post, action: :publish_scheduled
       # The working copy of a live document (docs/working-copy.md).
+      define :move_post, action: :move
       define :save_post_working_copy, action: :save_working_copy
       define :publish_post_changes, action: :publish_changes
       define :discard_post_changes, action: :discard_changes
@@ -318,6 +320,7 @@ defmodule KilnCMS.CMS do
       define :publish_entry, action: :publish
       define :publish_scheduled_entry, action: :publish_scheduled
       # The working copy of a live document (docs/working-copy.md).
+      define :move_entry, action: :move
       define :save_entry_working_copy, action: :save_working_copy
       define :publish_entry_changes, action: :publish_changes
       define :discard_entry_changes, action: :discard_changes
@@ -800,6 +803,15 @@ defmodule KilnCMS.CMS do
       define :list_site_locale_settings, action: :read
       define :save_site_locale_settings, action: :save
       define :reset_site_locale_settings, action: :destroy
+    end
+
+    # Per-org `/.well-known/security.txt` (RFC 9116, #1873). Served through
+    # `KilnCMS.SecurityTxt` (cached); this interface is for the settings page
+    # and the resolver's own lookup.
+    resource KilnCMS.CMS.SiteSecurityTxt do
+      define :list_site_security_txt, action: :read
+      define :save_site_security_txt, action: :save
+      define :reset_site_security_txt, action: :destroy
     end
 
     # Taxonomy: categories (one-to-many to content) and tags (many-to-many).

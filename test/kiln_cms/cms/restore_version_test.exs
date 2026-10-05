@@ -219,12 +219,15 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
       # same set algebra `VersionFields` uses holds for any value of
       # `@not_restorable` — including one that silently drops `audience` back
       # out of the restore, which is what #691 was filed about.
+      # `parent_id`/`position` are reported but not restorable (#1597): a move
+      # belongs in history, while restoring text must not relocate the document.
       assert VersionDiff.diffable_fields(KilnCMS.CMS.Post) ==
                ~w(title working_title slug path_alias excerpt state audience locale
                   seo_title seo_description seo_keywords seo_image canonical_url
                   published_at scheduled_at proposed_publish_at unpublish_at expiry_action
                   review_after_days last_reviewed_at
-                  author_id category_id featured_image_id custom_fields)a
+                  author_id category_id featured_image_id custom_fields
+                  parent_id position)a
 
       assert VersionFields.restorable_fields(KilnCMS.CMS.Post) ==
                ~w(title working_title slug path_alias excerpt audience locale
