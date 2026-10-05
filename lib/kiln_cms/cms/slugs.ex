@@ -18,6 +18,10 @@ defmodule KilnCMS.CMS.Slugs do
 
   require Ash.Query
 
+  # The ancestor walk's bound, one deeper than a legal tree so a cycle is
+  # detectable rather than infinite. See `changeset_ancestor_slugs/2`.
+  @ancestor_limit KilnCMS.CMS.ContentTree.max_depth()
+
   alias KilnCMS.CMS.ContentTypes
 
   @doc "Full public path for a type descriptor + slug (`/blog/guide-kiln`, `/about`)."
@@ -297,14 +301,20 @@ defmodule KilnCMS.CMS.Slugs do
   (category loaded or absent). The date anchor is the same chain everywhere:
   publish date, else scheduled date, else the record's creation date.
   """
-  @spec record_context(struct()) :: KilnCMS.Slug.Pattern.context()
-  def record_context(record) do
+  @spec record_context(struct(), [String.t()] | nil) :: KilnCMS.Slug.Pattern.context()
+  def record_context(record, ancestor_slugs \\ nil) do
     %{
       title: record.title,
       seo_keywords: Map.get(record, :seo_keywords),
       category_slug: record_category_slug(record),
       slug: record.slug,
       custom_fields: Map.get(record, :custom_fields),
+      # Supplied by the caller rather than walked here (#1597): a bulk alias
+      # regeneration over a subtree can build every chain from ONE read of the
+      # type's `(id, parent_id, slug)` rows, where walking per record would cost
+      # N × depth reads. `nil` when the pattern has no `[ancestors]` token, and
+      # for every caller that is not deriving an alias.
+      ancestor_slugs: ancestor_slugs,
       date: record.published_at || record.scheduled_at || Map.get(record, :inserted_at)
     }
   end
@@ -324,6 +334,7 @@ defmodule KilnCMS.CMS.Slugs do
       title: Ash.Changeset.get_attribute(changeset, :title),
       seo_keywords: changeset_attribute(changeset, :seo_keywords),
       category_slug: changeset_category_slug(changeset, pattern),
+      ancestor_slugs: changeset_ancestor_slugs(changeset, pattern),
       slug: Ash.Changeset.get_attribute(changeset, :slug),
       custom_fields: changeset_custom_fields(changeset, pattern),
       # Stable date anchor: publish date when set, else the scheduled date,
@@ -413,6 +424,50 @@ defmodule KilnCMS.CMS.Slugs do
     else
       _ -> nil
     end
+  end
+
+  # The slugs of this document's ancestors, root first, for `[ancestors]`
+  # (#1597). Gated on the pattern naming the token, like the category lookup —
+  # an ordinary pattern pays no walk.
+  #
+  # Reads the chain from `parent_id` upward, which on a `:move` is the NEW
+  # parent (`get_attribute/2` sees the change) — the point of deriving here at
+  # all. Bounded by `ContentTree.max_depth/0` plus one: a longer chain means a
+  # cycle `Validations.ContentPlacement` exists to refuse, and an alias
+  # derivation is not where that should be discovered, so it stops and returns
+  # what it has rather than spinning.
+  #
+  # Reads as the system, like the other registry-shaped lookups here: an
+  # ancestor may be a draft the writer cannot read, and a derivation that
+  # silently skipped it would produce a DIFFERENT path than the same document
+  # gets once that ancestor is published — a URL that moves on someone else's
+  # workflow. `authorize_with: :error` so a refusal raises rather than reading
+  # as "no ancestors" and flattening the path.
+  defp changeset_ancestor_slugs(changeset, pattern) do
+    if KilnCMS.Slug.Pattern.uses?(pattern, "ancestors") do
+      climb(changeset.resource, changeset_attribute(changeset, :parent_id), changeset.tenant, [])
+    else
+      nil
+    end
+  end
+
+  defp climb(_resource, nil, _tenant, acc), do: acc
+
+  defp climb(resource, id, tenant, acc)
+       when length(acc) <= @ancestor_limit do
+    case ancestor(resource, id, tenant) do
+      nil -> acc
+      row -> climb(resource, row.parent_id, tenant, [row.slug | acc])
+    end
+  end
+
+  defp climb(_resource, _id, _tenant, acc), do: acc
+
+  defp ancestor(resource, id, tenant) do
+    resource
+    |> Ash.Query.filter(id == ^id)
+    |> Ash.Query.select([:id, :parent_id, :slug])
+    |> Ash.read_one!(registry_opts(tenant))
   end
 
   # The custom-field values a `[field:<name>]` token resolves against.
