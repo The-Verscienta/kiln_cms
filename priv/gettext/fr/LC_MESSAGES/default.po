@@ -4135,6 +4135,11 @@ msgstr "Import de cette photo depuis Unsplash impossible."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
+msgid "Couldn't move that document."
+msgstr "Impossible de déplacer ce document."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
 msgid "Couldn't move that task."
 msgstr "Impossible de déplacer cette tâche."
 
@@ -7391,6 +7396,11 @@ msgstr "Dans l’éditeur de contenu"
 msgid "In-app backups are turned off (BACKUP_ENABLED)."
 msgstr "Les sauvegardes depuis l'application sont désactivées (BACKUP_ENABLED)."
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "In:"
+msgstr "Dans :"
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/form_live.ex
 #: lib/kiln_cms_web/live/funnel_live.ex
@@ -8627,6 +8637,16 @@ msgstr "Bloc déplacé à la position %{pos} sur %{count}"
 #, elixir-autogen, elixir-format
 msgid "Moved “%{title}” to %{date}."
 msgstr "« %{title} » déplacé au %{date}."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Moved."
+msgstr "Déplacé."
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Moving a document saves straight away, without waiting for Save."
+msgstr "Déplacer un document enregistre immédiatement, sans attendre Enregistrer."
 
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -10282,6 +10302,7 @@ msgstr "Paragraphe"
 msgid "Paragraph text"
 msgstr "Texte du paragraphe"
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format
 msgid "Parent"
@@ -18647,6 +18668,11 @@ msgstr "—"
 #, elixir-autogen, elixir-format
 msgid "— No default —"
 msgstr "— Aucune valeur par défaut —"
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "— No parent (top level) —"
+msgstr "— Aucun élément parent (niveau principal) —"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format

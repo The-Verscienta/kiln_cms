@@ -66,9 +66,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
-- **Documents can sit under one another: every content type gains a parent and
-  a sibling order, with a `:move` action that refuses cycles, cross-site parents
-  and anything nesting past five levels.**
+- **Documents can sit under one another: set a parent from the content editor,
+  with cycles, cross-site parents and anything nesting past five levels
+  refused.**
   ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) · [long form](docs/changelog/unreleased.md#documents-can-sit-under-one-another-the-content-tree))
 
 - **The content list filters by author, category, tag, language, update date

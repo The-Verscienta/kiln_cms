@@ -277,6 +277,54 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     Enum.any?(sections, fn section -> Enum.any?(section.tags, &(&1.filter == wanted)) end)
   end
 
+  @doc """
+  Where this document sits in the content tree (#1597, D21).
+
+  A plain select with its own `phx-change`, never a field on the editor's form:
+  `parent_id` is not in `default_accept`, because a move is its own action
+  (`:move`). So choosing here **writes immediately** rather than waiting for
+  Save — which is why the hint says so, and why the options are only ever ones
+  the write would accept (`KilnCMS.CMS.ContentTree.candidate_parents/3` does the
+  same arithmetic the validation does).
+
+  Hidden entirely for an unsaved draft: there is no record to move yet.
+  """
+  attr :options, :list, required: true
+  attr :current_id, :string, default: nil
+  # Ancestors, root first — where the document sits now.
+  attr :path, :list, default: []
+  attr :persisted?, :boolean, default: true
+
+  def parent_field(assigns) do
+    ~H"""
+    <div :if={@persisted?} id="parent-field" class="space-y-2">
+      <label for="parent-select" class="field-label">{gettext("Parent")}</label>
+
+      <select
+        id="parent-select"
+        name="parent_id"
+        phx-change="move_parent"
+        class="field-select py-1"
+      >
+        <option value="" selected={is_nil(@current_id)}>
+          {gettext("— No parent (top level) —")}
+        </option>
+        <option :for={option <- @options} value={option.id} selected={@current_id == option.id}>
+          {String.duplicate("— ", option.depth - 1)}{option.title}
+        </option>
+      </select>
+
+      <p :if={@path != []} class="text-xs text-base-content/60">
+        {gettext("In:")} {Enum.map_join(@path, " / ", & &1.title)}
+      </p>
+
+      <p class="text-xs text-base-content/60">
+        {gettext("Moving a document saves straight away, without waiting for Save.")}
+      </p>
+    </div>
+    """
+  end
+
   # The Category select, plus "New category" (#1805): a small inline name field
   # that creates the category and selects it. Plain inputs with their own
   # `phx-change`/`phx-click`, never a nested `<form>` — this renders inside the

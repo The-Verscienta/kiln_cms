@@ -83,4 +83,120 @@ defmodule KilnCMS.CMS.ContentTree do
   """
   @spec max_depth() :: pos_integer()
   def max_depth, do: @max_depth
+
+  @doc """
+  The documents of `type` that `record` may legally be moved under, in tree
+  order, each with the `depth` it sits at so a picker can indent them.
+
+  Excluded: `record` itself, everything in its subtree, and any document deep
+  enough that landing `record`'s own subtree beneath it would pass
+  `max_depth/0`. That is the same arithmetic
+  `KilnCMS.CMS.Validations.ContentPlacement` does — `ancestors + 1 + height` —
+  which is the point: **this offers, the validation decides.** A picker built
+  from this cannot propose a move the write would refuse, and a caller that
+  ignores it is still refused. Keeping the rule in two places is the trade for
+  not making the editor discover it by being rejected, and the duplication is
+  one-directional: this may only ever be *more* restrictive than the write.
+
+  One query. Depth, descendants and subtree height all come from the same
+  `(id, title, parent_id)` rows, walked in memory, because a tree small enough
+  to put in a `<select>` is small enough to sort in the VM.
+
+  `record` may be `nil` (nothing is being moved), in which case every document
+  within the cap is a candidate.
+
+  ## Scale
+
+  This reads **every** document of the type. That is the right shape for the
+  sites the picker is for and the wrong one for a site with thousands of pages,
+  where both the query and a flat `<select>` stop being reasonable. The fix when
+  that lands is a search-as-you-type parent picker over
+  `KilnCMS.CMS.ContentTypes.list!/2`'s existing filters, not a cleverer walk —
+  so this stays deliberately plain rather than half-optimised for a case it
+  does not serve.
+  """
+  @spec candidate_parents(term(), struct() | nil, keyword()) ::
+          [%{id: Ecto.UUID.t(), title: String.t() | nil, depth: pos_integer()}]
+  def candidate_parents(type, record, opts \\ []) do
+    rows = tree_rows(type, opts)
+    moving_id = record && Map.get(record, :id)
+
+    by_parent = Enum.group_by(rows, & &1.parent_id)
+    blocked = if moving_id, do: subtree_ids(by_parent, moving_id), else: MapSet.new()
+    headroom = @max_depth - 1 - height(by_parent, moving_id)
+
+    by_parent
+    |> walk(nil, 1)
+    |> Enum.reject(&(MapSet.member?(blocked, &1.id) or &1.depth > headroom))
+  end
+
+  @doc """
+  `record`'s ancestors, root first — where it sits, for a breadcrumb.
+
+  Bounded by `max_depth/0` plus one: a longer chain means a cycle committed by
+  two concurrent moves, and this returns what it has rather than spinning.
+  """
+  @spec ancestors(term(), struct(), keyword()) :: [%{id: Ecto.UUID.t(), title: String.t() | nil}]
+  def ancestors(type, record, opts \\ []) do
+    by_id = type |> tree_rows(opts) |> Map.new(&{&1.id, &1})
+
+    climb(by_id, Map.get(record, :parent_id), [])
+  end
+
+  defp climb(_by_id, nil, acc), do: acc
+
+  defp climb(by_id, id, acc) when length(acc) <= @max_depth do
+    case Map.get(by_id, id) do
+      nil -> acc
+      row -> climb(by_id, row.parent_id, [%{id: row.id, title: row.title} | acc])
+    end
+  end
+
+  defp climb(_by_id, _id, acc), do: acc
+
+  defp tree_rows(type, opts) do
+    KilnCMS.CMS.ContentTypes.list!(
+      type,
+      Keyword.put(opts, :query,
+        select: [:id, :title, :parent_id, :position],
+        sort: [position: :asc, title: :asc]
+      )
+    )
+  end
+
+  # Depth-first from `parent`, carrying the depth each row sits at.
+  defp walk(by_parent, parent, depth) do
+    by_parent
+    |> Map.get(parent, [])
+    |> Enum.flat_map(fn row ->
+      [%{id: row.id, title: row.title, depth: depth} | walk(by_parent, row.id, depth + 1)]
+    end)
+  end
+
+  # `id` and everything beneath it. Bounded by the row count, so a cycle
+  # committed by concurrent moves cannot spin it.
+  defp subtree_ids(by_parent, id) do
+    collect(by_parent, [id], MapSet.new())
+  end
+
+  defp collect(_by_parent, [], seen), do: seen
+
+  defp collect(by_parent, [id | rest], seen) do
+    if MapSet.member?(seen, id) do
+      collect(by_parent, rest, seen)
+    else
+      children = by_parent |> Map.get(id, []) |> Enum.map(& &1.id)
+      collect(by_parent, rest ++ children, MapSet.put(seen, id))
+    end
+  end
+
+  # Levels below `id`; 0 for a leaf or for nothing being moved.
+  defp height(_by_parent, nil), do: 0
+
+  defp height(by_parent, id) do
+    case Map.get(by_parent, id, []) do
+      [] -> 0
+      children -> 1 + (children |> Enum.map(&height(by_parent, &1.id)) |> Enum.max())
+    end
+  end
 end
