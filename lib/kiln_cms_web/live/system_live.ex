@@ -27,7 +27,11 @@ defmodule KilnCMSWeb.SystemLive do
   config line (D18, `docs/plugin-extensibility.md`), so what is installed is
   fixed for the life of the image: there is nothing to install from a browser,
   and an "install" button would be the same lie an "update" button would be.
-  The panel reports `Kiln.Plugins.manifests/0` and names the commands. It
+  The panel reports `Kiln.Plugins.manifests/0` and names the commands. Each
+  row also spells out what the plugin adds — its blocks, field types, pages
+  and content types, in the labels it already shows editors — because a
+  `summary/0` is optional and a row of counts alone doesn't say what a
+  plugin does. It
   completes the answer this page exists to give — the version stamp says which
   Kiln is running, and this says what was built into it.
   """
@@ -409,6 +413,7 @@ defmodule KilnCMSWeb.SystemLive do
     assigns =
       assigns
       |> assign(:contributions, contributions(assigns.plugin))
+      |> assign(:features, features(assigns.plugin))
       # A plugin's `homepage/0` is compile-time code, as trusted as core — but
       # it is still an href, and this project keeps one policy for those.
       |> assign(:homepage, HTMLSanitizer.safe_href(assigns.plugin.homepage))
@@ -424,6 +429,13 @@ defmodule KilnCMSWeb.SystemLive do
       </div>
 
       <p :if={@plugin.summary} class="mt-1 text-sm text-base-content/70">{@plugin.summary}</p>
+
+      <p :if={is_nil(@plugin.summary)} class="mt-1 text-sm italic text-base-content/50">
+        {gettext(
+          "This plugin doesn't describe itself. Its author can add a one-line %{callback} — the list below says what it adds in the meantime.",
+          callback: "summary/0"
+        )}
+      </p>
 
       <.link
         :if={@homepage}
@@ -441,6 +453,28 @@ defmodule KilnCMSWeb.SystemLive do
           <dd class="font-mono">{count}</dd>
         </div>
       </dl>
+
+      <details :if={@features != []} class="group mt-2">
+        <summary class="cursor-pointer list-none text-xs text-base-content/70 hover:text-base-content">
+          <.icon
+            name="hero-chevron-right"
+            class="size-3 transition-transform group-open:rotate-90"
+          />
+          {gettext("What it adds")}
+        </summary>
+
+        <div class="mt-2 space-y-3 border-l border-base-content/10 pl-3">
+          <section :for={{kind, items} <- @features}>
+            <h3 class="text-xs font-medium text-base-content/60">{kind}</h3>
+            <ul class="mt-1 space-y-1">
+              <li :for={{title, detail} <- items} class="text-sm">
+                <span>{title}</span>
+                <span :if={detail} class="text-base-content/60"> — {detail}</span>
+              </li>
+            </ul>
+          </section>
+        </div>
+      </details>
 
       <p :if={@contributions == []} class="mt-2 text-xs text-base-content/60">
         {gettext("Catalog metadata only — contributes nothing to this instance.")}
@@ -467,6 +501,71 @@ defmodule KilnCMSWeb.SystemLive do
       {gettext("Supervised children"), manifest.children}
     ]
     |> Enum.reject(fn {_label, count} -> count == 0 end)
+  end
+
+  # What each contribution actually *is*, so an operator can tell what a
+  # plugin does without reading its source: the counts above say "Blocks 1",
+  # this says "Stat — a highlighted number with a caption". Every name here is
+  # the one the plugin already shows editors (a block's inserter label, a
+  # field type's picker label, a nav item's text), so the panel invents no copy
+  # of its own. `{kind, [{title, detail | nil}]}`, empty kinds dropped.
+  defp features(manifest) do
+    plugin = manifest.module
+
+    [
+      {gettext("Content types"), Enum.flat_map(manifest.domains, &domain_features/1)},
+      {gettext("Blocks"), Enum.map(manifest.blocks, &block_feature/1)},
+      {gettext("Field types"), Enum.map(manifest.field_types, &{&1.label(), &1.description()})},
+      {gettext("Editor checks"), Enum.map(manifest.advisories, &{module_title(&1), nil})},
+      {gettext("Spam checks"), Enum.map(manifest.spam_checks, &{module_title(&1), nil})},
+      {gettext("Console pages"), console_pages(plugin)},
+      {gettext("Public pages"), Enum.map(plugin.public_routes(), &route_feature/1)},
+      {gettext("Background queues"),
+       Enum.map(manifest.oban_queues, fn {queue, limit} ->
+         {to_string(queue), ngettext("%{count} worker", "%{count} workers", limit)}
+       end)}
+    ]
+    |> Enum.reject(fn {_kind, items} -> items == [] end)
+  end
+
+  defp domain_features(domain) do
+    domain
+    |> Ash.Domain.Info.resources()
+    |> Enum.map(&{module_title(&1), nil})
+  end
+
+  defp block_feature(block) do
+    Code.ensure_loaded(block)
+
+    label =
+      if function_exported?(block, :label, 0),
+        do: block.label(),
+        else: block |> Kiln.Block.Info.name() |> to_string() |> Phoenix.Naming.humanize()
+
+    description = if function_exported?(block, :description, 0), do: block.description()
+
+    {label, description}
+  end
+
+  # A nav item names its page; a route with no nav item (reached by a link the
+  # plugin renders itself) is listed by its path alone.
+  defp console_pages(plugin) do
+    nav = Enum.map(plugin.nav_items(), &{&1.label, &1.path})
+    named = Enum.map(nav, &elem(&1, 1))
+
+    unnamed =
+      (plugin.admin_routes() ++ plugin.editor_routes())
+      |> Enum.map(&route_feature/1)
+      |> Enum.reject(fn {path, _} -> path in named end)
+
+    nav ++ unnamed
+  end
+
+  defp route_feature({path, _live_view, _action}), do: {path, nil}
+
+  # `Example.Catalog.TeamMember` → "Team member".
+  defp module_title(module) do
+    module |> Module.split() |> List.last() |> Macro.underscore() |> Phoenix.Naming.humanize()
   end
 
   # Kept out of the template: the <pre> has to hold its own newlines, which a

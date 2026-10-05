@@ -15,6 +15,15 @@ defmodule Example.Blocks.Stat do
     field :label, :string, required: true
   end
 
+  @impl Kiln.Block.Renderer
+  def label, do: "Stat"
+
+  @impl Kiln.Block.Renderer
+  def icon, do: "hero-chart-bar"
+
+  @impl Kiln.Block.Renderer
+  def description, do: "A big number with a caption, like “10,000+ customers served”"
+
   # Plain-var heads, not `%__MODULE__{}` — the struct is built by an Ash
   # transformer at @before_compile, so it isn't available when these heads
   # compile.

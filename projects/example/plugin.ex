@@ -34,6 +34,12 @@ defmodule Example.Plugin do
   def name, do: "example"
 
   @impl true
+  def summary,
+    do:
+      "Demo content for the fictional Acme company — products, team members, " <>
+        "testimonials and FAQs — plus a Stat block and a Money field type."
+
+  @impl true
   def domains, do: [Example.Catalog]
 
   @impl true
