@@ -632,6 +632,16 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("Content freshness, provenance and the audit record."),
             keywords: ["audit", "provenance", "witness", "freshness", "review cadence"]
           },
+          # Organization, not Delivery: who answers for the site's security is a
+          # statement about the organization, served as a file (#1873).
+          %{
+            key: :security_txt,
+            label: gettext("Security contact"),
+            path: ~p"/editor/security-txt",
+            icon: "hero-shield-exclamation",
+            description: gettext("Where researchers report a vulnerability: security.txt."),
+            keywords: ["security.txt", "vulnerability", "disclosure", "rfc 9116", "contact"]
+          },
           %{
             key: :trash,
             label: gettext("Trash"),

@@ -262,6 +262,30 @@ carries the reasoning.
   publishes are byte-for-byte unchanged. Nothing changes in the application
   ([#1870](https://github.com/The-Verscienta/kiln_cms/issues/1870)).
 
+<a id="each-site-can-publish-a-well-knownsecuritytxt-rfc-9116-set-by-an-admin-at"></a>
+
+- **Each site can publish a `/.well-known/security.txt` (RFC 9116), set by an
+  admin at Configure → Organization → Security contact.**
+  Kiln had no route for it, so a researcher who found a vulnerability in a
+  Kiln-hosted site had nowhere standard to look. The file is per site, like
+  branding: the people who answer for one tenant's security are not the people
+  who answer for another's, so there is no deployment-wide default underneath —
+  a site with no contact answers 404, which RFC 9116 reads as "no
+  security.txt", rather than a file missing its one required field. An admin
+  sets the contacts (`mailto:`, `https://` or `tel:`), `Expires`, and
+  optionally the disclosure policy, preferred languages, encryption key and
+  acknowledgments page; `Canonical` is the site's own host, derived on every
+  request. The page shows the file as served and warns when `Expires` has
+  passed, is within 30 days, or is more than a year out. `/security.txt`
+  redirects to the `.well-known` path.
+
+  The file is `Field: value` lines, so a value carrying a line break would add
+  a field the admin never wrote — a `Contact:` routing reports elsewhere. Every
+  value is held to one line of printable ASCII when saved, and again when the
+  file is rendered, so a row restored around the validation cannot forge one
+  either. See [docs/seo.md](../seo.md).
+  ([#1873](https://github.com/The-Verscienta/kiln_cms/issues/1873))
+
 ## Changed
 
 <a id="the-update-check-asks-kilncms-devs-release-feed-first"></a>

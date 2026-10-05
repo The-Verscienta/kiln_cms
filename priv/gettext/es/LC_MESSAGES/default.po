@@ -1112,6 +1112,11 @@ msgstr "Un enlace a otro contenido, del tipo que elija más abajo. Para un artí
 msgid "A mailto: address or https:// URL the push services can reach you at. Leave blank to use your own address."
 msgstr "Una dirección mailto: o una URL https:// en la que los servicios push puedan contactarle. Déjelo en blanco para usar su propia dirección."
 
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "A mailto:, https:// or tel: address. Required to publish the file."
+msgstr "Una dirección mailto:, https:// o tel:. Obligatoria para publicar el archivo."
+
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "A media library"
@@ -1437,6 +1442,11 @@ msgstr "Cuentas"
 #, elixir-autogen, elixir-format
 msgid "Accounts belong to the whole deployment, so your provider can only sign in addresses in the domains you verify here. It can't sign in anyone who has access to another site, or who administers the deployment: they sign in with a password or an email link instead. A second factor, if the account has one, is still asked for."
 msgstr "Las cuentas pertenecen a toda la instalación, así que tu proveedor solo puede iniciar sesión con direcciones de los dominios que verifiques aquí. No puede iniciar sesión por nadie que tenga acceso a otro sitio o que administre la instalación: esas personas entran con una contraseña o un enlace por correo. Si la cuenta tiene un segundo factor, se sigue pidiendo."
+
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "Acknowledgments URL"
+msgstr "URL de agradecimientos"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -2102,6 +2112,11 @@ msgstr "Un icono de aplicación debe pesar menos de %{max} MB; ese pesa más."
 msgid "An export is capped at %{max} records — %{over} selected rows are not in this file."
 msgstr "Una exportación se limita a %{max} registros — %{over} filas seleccionadas no están en este archivo."
 
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "An https:// URL to a public key, or an openpgp4fpr: fingerprint."
+msgstr "Una URL https:// a una clave pública, o una huella openpgp4fpr:."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "An image or file from the media library. For a hero image, a logo or a PDF."
@@ -2383,6 +2398,11 @@ msgstr "Tipos archivados"
 #, elixir-autogen, elixir-format
 msgid "Artifacts"
 msgstr "Archivos generados"
+
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "As served"
+msgstr "Tal como se sirve"
 
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #, elixir-autogen, elixir-format
@@ -3113,6 +3133,11 @@ msgstr "Comprobación en cola: los resultados aparecen aquí a medida que cada e
 msgid "Check that address"
 msgstr "Revisa esa dirección"
 
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "Check the contacts are still read, then move the date forward and save."
+msgstr "Compruebe que los contactos se siguen leyendo, luego adelante la fecha y guarde."
+
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Check your inbox for a confirmation link. You won't receive anything until you click it."
@@ -3698,6 +3723,11 @@ msgstr "Contacto para los servicios push"
 #, elixir-autogen, elixir-format
 msgid "Contact saved."
 msgstr "Contacto guardado."
+
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "Contacts (one per line, preferred first)"
+msgstr "Contactos (uno por línea, el preferido primero)"
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/analytics_live.ex
@@ -5187,6 +5217,11 @@ msgstr "¿Descartar los cambios? El texto publicado vuelve al editor; lo que esc
 msgid "Discarded the changes — the published text is back."
 msgstr "Cambios descartados: el texto publicado está de vuelta."
 
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "Disclosure policy URL"
+msgstr "URL de la política de divulgación"
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "Disconnect"
@@ -5857,6 +5892,11 @@ msgstr "Activarla crea la identidad de actor permanente de este sitio. El identi
 msgid "Encryption"
 msgstr "Cifrado"
 
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "Encryption key"
+msgstr "Clave de cifrado"
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
@@ -6213,6 +6253,7 @@ msgid "Expired (flagged)"
 msgstr "Caducado (marcado)"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
+#: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format
 msgid "Expires"
 msgstr "Caducidad"
@@ -7506,6 +7547,16 @@ msgstr "Enlaces internos"
 #, elixir-autogen, elixir-format
 msgid "Issuer URL"
 msgstr "URL del emisor"
+
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "It answers 404 until a contact is set below. Add at least one contact and an expiry date to publish it."
+msgstr "Responde 404 hasta que se defina un contacto abajo. Añada al menos un contacto y una fecha de caducidad para publicarlo."
+
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "It is still served, but researchers are told to treat an expired file as stale. Set a new date and save."
+msgstr "Se sigue sirviendo, pero los investigadores deben tratar un archivo caducado como obsoleto. Defina una nueva fecha y guarde."
 
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
@@ -10598,6 +10649,11 @@ msgstr "Con tecnología de %{name}."
 msgid "Powered by KilnCMS."
 msgstr "Desarrollado con KilnCMS."
 
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "Preferred languages"
+msgstr "Idiomas preferidos"
+
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Presentation: %{title}"
@@ -10970,6 +11026,11 @@ msgstr "Pregunta"
 #, elixir-autogen, elixir-format
 msgid "Quote"
 msgstr "Cita"
+
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "RFC 9116 recommends an expiry less than a year ahead, so a forgotten file goes stale."
+msgstr "La RFC 9116 recomienda una caducidad a menos de un año, para que un archivo olvidado quede obsoleto."
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
@@ -11459,6 +11520,11 @@ msgstr "Eliminar fila"
 msgid "Remove schedule"
 msgstr "Quitar programación"
 
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove security.txt"
+msgstr "Eliminar security.txt"
+
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove step %{title}"
@@ -11563,6 +11629,11 @@ msgstr "¿Eliminar el proveedor de este sitio? Su botón de inicio de sesión de
 #, elixir-autogen, elixir-format
 msgid "Remove this site's relay? Its mail will use the deployment's relay again."
 msgstr "¿Quitar el relé de este sitio? Su correo volverá a usar el relé del despliegue."
+
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove this site's security.txt? It will answer 404."
+msgstr "¿Eliminar el security.txt de este sitio? Responderá 404."
 
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -11754,6 +11825,11 @@ msgstr "Obligatorio"
 #, elixir-autogen, elixir-format
 msgid "Required disclaimer"
 msgstr "Aviso legal obligatorio"
+
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "Required with a contact. Researchers treat the file as stale after this date; the RFC recommends less than a year ahead."
+msgstr "Obligatoria con un contacto. Los investigadores tratan el archivo como obsoleto después de esta fecha; la RFC recomienda menos de un año."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -12186,6 +12262,7 @@ msgstr "sáb"
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
+#: lib/kiln_cms_web/live/security_txt_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #: lib/kiln_cms_web/live/site_push_live.ex
@@ -12358,6 +12435,7 @@ msgstr "Al guardar esto, el contenido de este sitio se envía a la URL de abajo.
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/locale_settings_live.ex
+#: lib/kiln_cms_web/live/security_txt_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
@@ -12574,6 +12652,12 @@ msgstr "Separador de sección — sin campos editables."
 #, elixir-autogen, elixir-format
 msgid "Section title"
 msgstr "Título de sección"
+
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "Security contact"
+msgstr "Contacto de seguridad"
 
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
@@ -15146,6 +15230,11 @@ msgstr "Este experimento no puede convertir: %{reason}."
 msgid "This experiment concluded without a winner."
 msgstr "Este experimento concluyó sin ganadora."
 
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "This expiry date is more than a year away."
+msgstr "Esta fecha de caducidad está a más de un año."
+
 #: lib/kiln_cms_web/components/block_components.ex
 #, elixir-autogen, elixir-format
 msgid "This field is required."
@@ -15298,6 +15387,16 @@ msgstr "Esta regla:"
 msgid "This runs code on your public site."
 msgstr "Esto ejecuta código en tu sitio público."
 
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "This security.txt expires within 30 days."
+msgstr "Este security.txt caduca en menos de 30 días."
+
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "This security.txt has expired."
+msgstr "Este security.txt ha caducado."
+
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
 msgid "This segment has no confirmed subscribers. Pick another segment, or add and confirm subscribers first."
@@ -15332,6 +15431,11 @@ msgstr "Este sitio como actor de ActivityPub, y quiénes lo siguen."
 #, elixir-autogen, elixir-format
 msgid "This site as an ActivityPub actor: who follows it, how deliveries are going, and who is refused."
 msgstr "Este sitio como actor de ActivityPub: quién lo sigue, cómo van las entregas y a quién se rechaza."
+
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site does not publish a security.txt."
+msgstr "Este sitio no publica un security.txt."
 
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
@@ -16632,6 +16736,11 @@ msgstr "Cuando se publique algo, haga esto."
 msgid "When this happens"
 msgstr "Cuando esto ocurra"
 
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "Where a security researcher reports a vulnerability in this site, published as /.well-known/security.txt (RFC 9116)."
+msgstr "Dónde un investigador de seguridad informa de una vulnerabilidad en este sitio, publicado como /.well-known/security.txt (RFC 9116)."
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Where backups go"
@@ -16646,6 +16755,11 @@ msgstr "A dónde apuntan las URL movidas, y qué pidieron en vano los visitantes
 #, elixir-autogen, elixir-format
 msgid "Where readers came from"
 msgstr "De dónde vinieron los lectores"
+
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Where researchers report a vulnerability: security.txt."
+msgstr "Dónde los investigadores informan de una vulnerabilidad: security.txt."
 
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
@@ -16949,6 +17063,11 @@ msgstr "No tiene permiso para cambiar la clave push de este sitio."
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's search instance."
 msgstr "No tienes permiso para cambiar la instancia de búsqueda de este sitio."
+
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's security.txt."
+msgstr "No tiene permiso para cambiar el security.txt de este sitio."
 
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
@@ -18199,6 +18318,21 @@ msgstr "tipo de schema.org (datos estructurados)"
 #, elixir-autogen, elixir-format
 msgid "score %{score}"
 msgstr "puntuación %{score}"
+
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "security.txt could not be saved."
+msgstr "No se pudo guardar el security.txt."
+
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "security.txt removed. The site no longer serves one."
+msgstr "security.txt eliminado. El sitio ya no sirve ninguno."
+
+#: lib/kiln_cms_web/live/security_txt_live.ex
+#, elixir-autogen, elixir-format
+msgid "security.txt saved."
+msgstr "security.txt guardado."
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format

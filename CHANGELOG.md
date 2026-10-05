@@ -96,6 +96,10 @@ Every summary line below that was shortened links to its own entry there.
   `/releases/<version>`, listed at `/releases`.**
   ([#1870](https://github.com/The-Verscienta/kiln_cms/issues/1870) · [long form](docs/changelog/unreleased.md#each-published-github-release-now-becomes-a-page-on-kilncmsdev-at))
 
+- **Each site can publish a `/.well-known/security.txt` (RFC 9116), set by an
+  admin at Configure → Organization → Security contact.**
+  ([#1873](https://github.com/The-Verscienta/kiln_cms/issues/1873) · [long form](docs/changelog/unreleased.md#each-site-can-publish-a-well-knownsecuritytxt-rfc-9116-set-by-an-admin-at))
+
 ### Changed
 
 - **The update check asks kilncms.dev's release feed first and lists the

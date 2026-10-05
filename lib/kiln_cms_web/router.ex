@@ -523,6 +523,9 @@ defmodule KilnCMSWeb.Router do
       # White-label branding for the current site (#48) — name, logo, colour.
       # Org-scoped: you brand the site you're on (switch org by host).
       live "/editor/branding", BrandingLive, :index
+      # The site's `/.well-known/security.txt` (RFC 9116, #1873). Org-scoped and
+      # admin-only: a security contact is a statement on the whole site's behalf.
+      live "/editor/security-txt", SecurityTxtLive, :index
       # Per-site custom head/footer HTML for the DELIVERY site (#490). Admin-only
       # by the live session's tier gate AND the resource policy; the snippet is
       # rendered only by the `:delivery` pipeline, never here.
@@ -935,6 +938,12 @@ defmodule KilnCMSWeb.Router do
 
     get "/sitemap.xml", SitemapController, :index
     get "/robots.txt", SitemapController, :robots
+
+    # Where to report a vulnerability in this site (RFC 9116, #1873). Per-org,
+    # from `/editor/security-txt`; 404 until a contact is set. The legacy
+    # top-level path redirects (RFC 9116 §3) rather than serving a second copy.
+    get "/.well-known/security.txt", SecurityTxtController, :show
+    get "/security.txt", SecurityTxtController, :legacy
 
     # LLM content index (llmstxt.org convention) — the GEO analogue of the sitemap.
     get "/llms.txt", LlmsController, :index

@@ -36,7 +36,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor/links /editor/locales /editor/mail /editor/menus /editor/menus/:id /editor/newsletter
     /editor/overview /editor/pages/:id /editor/posts/:id /editor/presentation/:type/:slug
     /editor/preview/:kind/:id /editor/redirects /editor/releases /editor/releases/:id
-    /editor/search /editor/settings /editor/site-ai /editor/site-mail /editor/site-push
+    /editor/search /editor/security-txt /editor/settings /editor/site-ai /editor/site-mail /editor/site-push
     /editor/site-search /editor/site-sso /editor/site/:type/:slug /editor/slugs
     /editor/social
     /editor/site-storage /editor/system /editor/tasks /editor/taxonomy /editor/team
