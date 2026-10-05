@@ -10053,6 +10053,11 @@ msgstr "O escribe un nombre abajo para añadir una."
 msgid "Or until (UTC)"
 msgstr "O hasta el (UTC)"
 
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#, elixir-autogen, elixir-format
+msgid "Order among siblings"
+msgstr "Orden entre elementos del mismo nivel"
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "Ordered content steps, and where readers drop out."
@@ -10225,6 +10230,11 @@ msgstr "Párrafo"
 #, elixir-autogen, elixir-format
 msgid "Paragraph text"
 msgstr "Texto del párrafo"
+
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#, elixir-autogen, elixir-format
+msgid "Parent"
+msgstr "Elemento superior"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format

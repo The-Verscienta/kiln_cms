@@ -209,6 +209,7 @@ defmodule KilnCMS.CMS do
       define :publish_page, action: :publish
       define :publish_scheduled_page, action: :publish_scheduled
       # The working copy of a live document (docs/working-copy.md).
+      define :move_page, action: :move
       define :save_page_working_copy, action: :save_working_copy
       define :publish_page_changes, action: :publish_changes
       define :discard_page_changes, action: :discard_changes
@@ -253,6 +254,7 @@ defmodule KilnCMS.CMS do
       define :publish_post, action: :publish
       define :publish_scheduled_post, action: :publish_scheduled
       # The working copy of a live document (docs/working-copy.md).
+      define :move_post, action: :move
       define :save_post_working_copy, action: :save_working_copy
       define :publish_post_changes, action: :publish_changes
       define :discard_post_changes, action: :discard_changes
@@ -318,6 +320,7 @@ defmodule KilnCMS.CMS do
       define :publish_entry, action: :publish
       define :publish_scheduled_entry, action: :publish_scheduled
       # The working copy of a live document (docs/working-copy.md).
+      define :move_entry, action: :move
       define :save_entry_working_copy, action: :save_working_copy
       define :publish_entry_changes, action: :publish_changes
       define :discard_entry_changes, action: :discard_changes

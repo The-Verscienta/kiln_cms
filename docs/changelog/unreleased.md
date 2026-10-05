@@ -57,6 +57,32 @@ carries the reasoning.
 
 ## Added
 
+<a id="documents-can-sit-under-one-another-the-content-tree"></a>
+
+- **Documents can sit under one another — the content tree.** Every content
+  type gains `parent_id` (a same-type self-reference) and `position` (sibling
+  order), so where a document lives is a property of the document rather than
+  something an editor restates in a navigation menu and then keeps in sync by
+  hand. Placement is its own action (`:move`) rather than two more attributes on
+  an ordinary save: a move is a distinct editorial act, the tree UI's
+  drag-and-drop wants one call, and it is where the bound on re-deriving a
+  subtree's paths belongs. `KilnCMS.CMS.Validations.ContentPlacement` refuses a
+  parent in another site, a document's own subtree, and any move that would push
+  the subtree it carries past `KilnCMS.CMS.ContentTree.max_depth/0` (five
+  levels) — counting the whole subtree, not just the moved record, because
+  checking only the record lets an editor land its leaves too deep and then be
+  unable to move them back. It is checked on moves only; an unconditional depth
+  check would freeze a too-deep row, since outdenting it is itself a write.
+  Purging a parent leaves its children as roots rather than taking a subtree of
+  published documents with it. The tree is **not** on the public API surface
+  yet, deliberately, and nothing about URL resolution changes: a document with
+  no parent resolves exactly as before. Multi-segment paths were already served
+  by `path_alias` (#485), which is what makes the tree additive — deriving an
+  alias from the ancestor chain is the next slice. This is decision **D21** in
+  [content-organization-plan.md](../content-organization-plan.md); the tree is
+  a different axis from a document's category or tags, which say what it is
+  *about* rather than where it sits.
+
 <a id="the-content-list-filters-and-saves-views"></a>
 
 - **The content list filters by author, category, tag, language, update date

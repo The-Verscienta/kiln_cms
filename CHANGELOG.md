@@ -66,6 +66,11 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Documents can sit under one another: every content type gains a parent and
+  a sibling order, with a `:move` action that refuses cycles, cross-site parents
+  and anything nesting past five levels.**
+  ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) · [long form](docs/changelog/unreleased.md#documents-can-sit-under-one-another-the-content-tree))
+
 - **The content list filters by author, category, tag, language, update date
   and review health, sorts by update, publish date or title, and saves a
   filter as a named view.**
