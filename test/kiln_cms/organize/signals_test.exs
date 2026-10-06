@@ -192,7 +192,7 @@ defmodule KilnCMS.Organize.SignalsTest do
     assert %{unused: [], single_use: [], near_duplicates: [], unlinked: []} =
              Health.report(org, admin)
 
-    assert Gaps.signals(org, admin) == %{gaps: [], skipped: nil}
+    assert Gaps.signals(org, admin) == %{gaps: [], skipped: nil, vocabulary_truncated?: false}
     assert spent("user", admin.id, @minute) == 0
   end
 end

@@ -14,7 +14,9 @@ defmodule KilnCMS.Organize.Queue do
       `KilnCMS.Search.suggest_tags_threshold/0` from **every** tag's stored
       name vector. Tagged or not: a document no word in the vocabulary
       describes is a vocabulary gap even if someone attached a tag to it.
-      Tags only — categories have no vector.
+      Tags only — categories have no vector — and the first
+      `bound(:term_limit)` by name (`vocabulary_truncated?` says when there
+      are more).
 
   Zero inference: stored centroids (`Clusters.centroids/2`) against stored tag
   vectors, in memory. Measured at the bounds (100 documents × 500 tags × 384
@@ -33,7 +35,8 @@ defmodule KilnCMS.Organize.Queue do
           far: [%{doc: Candidates.t(), nearest: {Terms.t(), float()} | nil}],
           far_considered: non_neg_integer(),
           far_truncated?: boolean(),
-          vocabulary_indexed?: boolean()
+          vocabulary_indexed?: boolean(),
+          vocabulary_truncated?: boolean()
         }
 
   @empty %{
@@ -42,7 +45,8 @@ defmodule KilnCMS.Organize.Queue do
     far: [],
     far_considered: 0,
     far_truncated?: false,
-    vocabulary_indexed?: false
+    vocabulary_indexed?: false,
+    vocabulary_truncated?: false
   }
 
   @doc "The queue for the actor. Empty when semantic search is off."
@@ -72,7 +76,8 @@ defmodule KilnCMS.Organize.Queue do
       far: far(published, centroids, indexed),
       far_considered: map_size(centroids),
       far_truncated?: far_truncated?,
-      vocabulary_indexed?: indexed != []
+      vocabulary_indexed?: indexed != [],
+      vocabulary_truncated?: length(tags) >= Organize.bound(:term_limit)
     }
   end
 

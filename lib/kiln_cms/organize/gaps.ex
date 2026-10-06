@@ -16,6 +16,17 @@ defmodule KilnCMS.Organize.Gaps do
     * `:unclassified` — the classification could not run (no tag vectors yet,
       or no budget for the query embeddings); the gap itself still shows.
 
+  ## Which threshold
+
+  `suggest_tags_threshold/0` (0.35), calibrated for a tag name against a
+  *document* centroid — not separately calibrated for a query against a tag
+  name, which is short text against short text. By
+  `KilnCMS.TermDuplicateCorpus`, related-but-distinct labels sit at
+  0.09–0.40, so most queries *related* to an existing tag read as
+  `:hub_missing`. That is the intended reading: a nearby term exists, so the
+  first fix is a hub page or tagging for it, not a new term. The vocabulary is
+  `Terms.tags/2`'s first 500 by name (`vocabulary_truncated?`).
+
   ## Cost
 
   The one inference here is the query's own embedding: one per query not
@@ -43,12 +54,18 @@ defmodule KilnCMS.Organize.Gaps do
         }
 
   @typedoc "The signals, and why classification was skipped, if it was."
-  @type t :: %{gaps: [gap()], skipped: nil | :no_vectors | {:rate_limited, non_neg_integer()}}
+  @type t :: %{
+          gaps: [gap()],
+          skipped: nil | :no_vectors | {:rate_limited, non_neg_integer()},
+          vocabulary_truncated?: boolean()
+        }
 
   @doc "Gap signals for the actor. Empty when semantic search is off."
   @spec signals(term(), term()) :: t()
   def signals(org, actor) do
-    if Organize.enabled?(), do: compute(org, actor), else: %{gaps: [], skipped: nil}
+    if Organize.enabled?(),
+      do: compute(org, actor),
+      else: %{gaps: [], skipped: nil, vocabulary_truncated?: false}
   end
 
   defp compute(org, actor) do
@@ -61,11 +78,14 @@ defmodule KilnCMS.Organize.Gaps do
     vectors = Terms.tag_vectors(org, tags)
     indexed = for tag <- tags, v = Map.get(vectors, tag.id), do: {tag, Vectors.normalize(v)}
 
-    cond do
-      gaps == [] -> %{gaps: [], skipped: nil}
-      indexed == [] -> %{gaps: gaps, skipped: :no_vectors}
-      true -> classify(gaps, indexed, org, actor)
-    end
+    result =
+      cond do
+        gaps == [] -> %{gaps: [], skipped: nil}
+        indexed == [] -> %{gaps: gaps, skipped: :no_vectors}
+        true -> classify(gaps, indexed, org, actor)
+      end
+
+    Map.put(result, :vocabulary_truncated?, length(tags) >= Organize.bound(:term_limit))
   end
 
   defp classify(gaps, indexed, org, actor) do

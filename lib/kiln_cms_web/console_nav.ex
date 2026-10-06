@@ -267,6 +267,16 @@ defmodule KilnCMSWeb.ConsoleNav do
       %{key: :content, label: gettext("Content"), path: ~p"/editor", icon: "hero-document-text"},
       %{key: :media, label: gettext("Media"), path: ~p"/media", icon: "hero-photo"},
       %{key: :taxonomy, label: gettext("Taxonomy"), path: ~p"/editor/taxonomy", icon: "hero-tag"},
+      # Derived organization (#1596), beside the taxonomy it reads. Only with
+      # semantic search on: on a default install the whole workstream is
+      # invisible, rather than a page of empty states.
+      KilnCMS.Organize.enabled?() &&
+        %{
+          key: :organize,
+          label: gettext("Organize"),
+          path: ~p"/editor/organize",
+          icon: "hero-sparkles"
+        },
       %{key: :menus, label: gettext("Menus"), path: ~p"/editor/menus", icon: "hero-bars-3"},
       %{
         key: :calendar,

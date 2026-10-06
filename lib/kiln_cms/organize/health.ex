@@ -8,7 +8,9 @@ defmodule KilnCMS.Organize.Health do
       count, and counts are read as the actor).
     * **Near-duplicate tags** — pairs of tags whose stored *name* vectors sit
       within `KilnCMS.Search.near_duplicate_term_threshold/0`: "colour" and
-      "color", "JS" and "JavaScript". Tags only (categories have no vector),
+      "color", "tutorial" and "tutorials" (abbreviations such as "JS" sit
+      among related-but-distinct pairs and are missed by design — see the
+      threshold's measurement). Tags only (categories have no vector),
       stored vectors only (never infers; `missing_vectors` says how many tags
       the check could not see yet). All pairs in memory over at most
       `bound(:term_limit)` (500) tags — measured at that bound, ~330 ms on a
@@ -17,6 +19,10 @@ defmodule KilnCMS.Organize.Health do
       `bound(:inbound_limit)`, 300, newest first) that no `KilnCMS.CMS.ContentLink`
       edge targets: no curated related link, no `:reference` custom field
       (#1594). One edge read for the whole set. A self-link does not count.
+      An edge from a **trashed** source still counts: `ContentLinks` keeps a
+      trashed record's outgoing edges until it is purged (a restore brings
+      them back), so a document linked only from the trash reads as linked —
+      the console caption says so.
       This is the *content-graph* half of orphan detection; whether a menu
       links a document is the structure view's question (#1597, PR #1895's
       `Menus.linked_content_ids/1`), deliberately not redefined here.
