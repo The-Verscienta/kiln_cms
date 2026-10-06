@@ -994,6 +994,13 @@ msgid_plural "%{count} paragraphs run over %{max} words — consider splitting t
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 published document is in no menu."
+msgid_plural "%{count} published documents are in no menu."
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "2FA on"
@@ -9795,6 +9802,11 @@ msgstr ""
 msgid "Not enough data to call a leader: every variant needs at least %{floor} impressions first. Rates on fewer are shown but not compared."
 msgstr ""
 
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not in any menu"
+msgstr ""
+
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Not in feeds"
@@ -11294,12 +11306,12 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
-msgid "Published documents no related link or reference field points to. A link from a trashed page still counts until that page is purged. Menus are checked on each type's structure view."
+msgid "Published documents no tag describes closely, tagged or not — the vocabulary may be missing a word. Tags only: categories have no vector."
 msgstr ""
 
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
-msgid "Published documents no tag describes closely, tagged or not — the vocabulary may be missing a word. Tags only: categories have no vector."
+msgid "Published documents with no way in: no related link, no reference field and no menu points to them. A link from a trashed page still counts until that page is purged."
 msgstr ""
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
@@ -11320,6 +11332,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Published — content I authored went live"
+msgstr ""
+
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Published, but no menu links to it."
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex

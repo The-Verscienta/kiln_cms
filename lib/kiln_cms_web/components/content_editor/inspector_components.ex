@@ -336,20 +336,31 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   # `nil` while the inline field is closed; the typed name while it is open.
   attr :draft, :string, default: nil
   attr :error, :string, default: nil
+  # A category the type shares across locales, on a translation (#1327,
+  # #1860): shown, not editable. A select has no `readonly`, so it is disabled
+  # and a hidden input carries the stored value, which re-sends it unchanged.
+  attr :locked, :boolean, default: false
 
   def category_field(assigns) do
     ~H"""
     <div id="category-field" class="space-y-2">
+      <input
+        :if={@locked}
+        type="hidden"
+        name={@form[:category_id].name}
+        value={@form[:category_id].value}
+      />
       <.input
         field={@form[:category_id]}
         type="select"
         label={gettext("Category")}
         prompt={gettext("— None —")}
         options={Enum.map(@categories, &{&1.name, &1.id})}
+        disabled={@locked}
       />
 
       <button
-        :if={@can_create? and is_nil(@draft)}
+        :if={@can_create? and is_nil(@draft) and not @locked}
         type="button"
         id="category-new"
         phx-click="category_new_open"
@@ -1062,6 +1073,9 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
 
   attr :form, :any, required: true
   attr :media, :list, required: true
+  # A featured image the type shares across locales, on a translation (#1327,
+  # #1860): shown, with no way to pick or remove one here.
+  attr :locked, :boolean, default: false
 
   def featured_image_field(assigns) do
     id = AshPhoenix.Form.value(assigns.form, :featured_image_id)
@@ -1088,6 +1102,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
           {(@selected && @selected.filename) || gettext("None selected")}
         </span>
         <button
+          :if={not @locked}
           type="button"
           phx-click="open_featured_picker"
           class="btn btn-sm btn-default"
@@ -1095,7 +1110,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
           {gettext("Choose from library")}
         </button>
         <button
-          :if={@selected}
+          :if={@selected && not @locked}
           type="button"
           phx-click="clear_featured"
           class="text-sm text-base-content/70 hover:text-error"

@@ -179,8 +179,14 @@ defmodule KilnCMSWeb.FieldLocalizationDeliveryTest do
         document(
           actor,
           %{seo_description: "Handmade leather shoes", seo_image: "https://example.com/en.png"},
-          fn _fr -> %{seo_description: nil, seo_image: "https://example.com/fr.png"} end
+          fn _fr -> %{seo_description: nil} end
         )
+
+      # A French social image of its own, from before the field was shared:
+      # seeded past the action, since a write now refuses it (#1860), so the
+      # copy has a divergent value to overwrite.
+      fr = Ash.Seed.update!(fr, %{seo_image: "https://example.com/fr.png"})
+      assert reload(fr).seo_image == "https://example.com/fr.png"
 
       %{en: en, fr: fr, actor: actor}
     end

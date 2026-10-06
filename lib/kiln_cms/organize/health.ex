@@ -16,16 +16,18 @@ defmodule KilnCMS.Organize.Health do
       `bound(:term_limit)` (500) tags — measured at that bound, ~330 ms on a
       lean build.
     * **Nothing links here** — published documents (at most
-      `bound(:inbound_limit)`, 300, newest first) that no `KilnCMS.CMS.ContentLink`
-      edge targets: no curated related link, no `:reference` custom field
-      (#1594). One edge read for the whole set. A self-link does not count.
+      `bound(:inbound_limit)`, 300, newest first) with **no way in at all**:
+      no `KilnCMS.CMS.ContentLink` edge targets them (no curated related link,
+      no `:reference` custom field, #1594) *and* no menu links them
+      (`KilnCMS.CMS.Menus.linked_content_ids/1`, the structure view's helper,
+      #1597 — reused, not redefined, so a "linked" menu item means the same
+      thing on both pages). The structure view's "not in any menu" badge is
+      the narrower question; this is the union of both kinds of link. One edge
+      read and one menu read for the whole set. A self-link does not count.
       An edge from a **trashed** source still counts: `ContentLinks` keeps a
       trashed record's outgoing edges until it is purged (a restore brings
       them back), so a document linked only from the trash reads as linked —
       the console caption says so.
-      This is the *content-graph* half of orphan detection; whether a menu
-      links a document is the structure view's question (#1597, PR #1895's
-      `Menus.linked_content_ids/1`), deliberately not redefined here.
 
   Empty when semantic search is off — including the parts that need no
   vectors, per the maintainer's "on a default install this whole workstream is
@@ -111,8 +113,9 @@ defmodule KilnCMS.Organize.Health do
   defp pairs([]), do: []
   defp pairs([head | tail]), do: Enum.map(tail, &{head, &1}) ++ pairs(tail)
 
-  # One read: every edge pointing at any of these documents, as the actor
-  # (`ContentLink`'s read policy: editors see every edge of their site).
+  # One edge read — every edge pointing at any of these documents, as the
+  # actor (`ContentLink`'s read policy: editors see every edge of their site)
+  # — and one menu read, the structure view's own.
   defp unlinked(_org, _actor, []), do: []
 
   defp unlinked(org, actor, published) do
@@ -127,6 +130,8 @@ defmodule KilnCMS.Organize.Health do
       |> Enum.reject(&(&1.source_id == &1.target_id))
       |> MapSet.new(& &1.target_id)
 
-    Enum.reject(published, &MapSet.member?(linked, &1.id))
+    in_menus = org |> KilnCMS.Accounts.org_id() |> KilnCMS.CMS.Menus.linked_content_ids()
+
+    Enum.reject(published, &(MapSet.member?(linked, &1.id) or MapSet.member?(in_menus, &1.id)))
   end
 end

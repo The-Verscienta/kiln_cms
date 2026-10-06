@@ -68,7 +68,9 @@ carries the reasoning.
   row (a published document's tags go to its working copy); an
   **under-organized** queue of untagged documents and ones far from every tag;
   **taxonomy health** — unused, single-use and near-duplicate terms, and
-  published documents no link points to; and zero-result **searches** read as a
+  published documents with no way in (no related link, reference field or
+  menu — the menu half is the structure view's own check, reused); and
+  zero-result **searches** read as a
   missing term or a missing hub page.
   With semantic search off (the default) none of it shows: no nav item, and a
   bookmarked visit gets one line. Built against today's tags and categories
@@ -88,6 +90,27 @@ carries the reasoning.
   variants and no related-but-distinct pair, and misses abbreviations by
   design.
   ([#1596](https://github.com/The-Verscienta/kiln_cms/issues/1596))
+
+<a id="the-structure-view-flags-published-documents-no-menu-links-to"></a>
+
+- **The structure view flags published documents no menu links to.** A document
+  in no menu is one a visitor can only reach by knowing its URL, which for a
+  section an editor has just arranged is usually an oversight rather than a
+  choice. `/editor/structure/:type` badges them and counts them at the top.
+  A menu item only counts if it would actually **render**: a `:content` item
+  with a target (a `:url` item typed out by hand is invisible here, because
+  nothing records that it is the same document), visible itself *and* all the
+  way up its chain (an item inside a section an editor switched off is not a
+  way in), and rooted within its menu (an item whose parent chain does not reach
+  a root never renders, so it links nothing). Linked from any one menu or locale
+  counts as linked.
+  Only **published** documents are flagged. A draft nothing points at is the
+  normal state of a draft, and badging those would fire on nearly everything and
+  make the signal worthless.
+  The wording is "not in any menu" rather than "unreachable" on purpose: a
+  document can be reachable by routes this cannot see — a link in another
+  document's body, or a theme that renders a section's children on its own — and
+  the badge should not claim more than it knows.
 
 <a id="a-structure-view-for-arranging-a-content-tree"></a>
 
@@ -322,7 +345,22 @@ carries the reasoning.
   annotates the modes, and saving the fallback chain re-fires the translations
   that can inherit. Every existing response keeps its shape for a type that
   opts nothing in.
-  ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327))
+
+  The write path holds the line the editor draws. On a translation, a value
+  for a shared field that the next copy would overwrite — one that differs
+  from both the translation's current value and the source's — is refused
+  with a validation error naming the field and the locale that owns it: on a
+  JSON:API `PATCH` or `POST` (a `400` pointing at the field), a GraphQL
+  mutation, `:autosave` and the working copy. Media and reference custom
+  fields compare by id. Re-sending the stored value passes, as does setting
+  the source's, so a translation that kept its own value from before the
+  field became shared stays editable; *Translate*, duplication and the
+  content import copy stored rows and are not judged. The editor locks the
+  category, the featured image and shared checkboxes on a translation too.
+  Refused rather than dropped with a warning because both land in this
+  release: no released client depends on the write being accepted.
+  ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327),
+  [#1860](https://github.com/The-Verscienta/kiln_cms/issues/1860))
 
 <a id="plugin-blocks-get-editor-seams"></a>
 

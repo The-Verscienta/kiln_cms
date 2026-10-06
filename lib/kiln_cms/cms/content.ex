@@ -2341,6 +2341,11 @@ defmodule KilnCMS.CMS.Content do
           validate KilnCMS.CMS.Validations.PathAliasValid
           validate KilnCMS.CMS.Validations.SeoUrls
           validate KilnCMS.CMS.Validations.ScheduleOrder
+          # A new translation may not carry a shared value its source does not
+          # (#1860) — the next shared-field copy would overwrite it. AFTER the
+          # changes above (the derived slug, the cast body, the coerced custom
+          # fields). Copies of stored rows opt out; see the validation.
+          validate KilnCMS.I18n.Validations.SharedFieldsReadOnly
           # Any open editorial calendar re-queries its window. NOT on
           # `:autosave`: a broadcast per debounce would wake every open grid
           # in the org every few seconds while one person types.
@@ -2408,6 +2413,12 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.I18n.Changes.EnqueueSharedFields
 
           unquote_splicing(merge_validations.())
+
+          # On a translation, a `:shared` field belongs to the source variant:
+          # a value the next shared-field copy would overwrite is refused here
+          # rather than accepted and lost (#1860). AFTER the changes above, so
+          # it sees the cast body and the coerced custom fields.
+          validate KilnCMS.I18n.Validations.SharedFieldsReadOnly
 
           validate KilnCMS.CMS.Validations.SlugAvailable
           validate KilnCMS.CMS.Validations.PathAliasValid
@@ -2512,6 +2523,8 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.ApplyAccessPassword
 
           change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
+          # A translation's shared fields — see `:update` (#1860).
+          validate KilnCMS.I18n.Validations.SharedFieldsReadOnly
           validate KilnCMS.CMS.Validations.SlugAvailable
           validate KilnCMS.CMS.Validations.PathAliasValid
           validate KilnCMS.CMS.Validations.SeoUrls
@@ -2577,6 +2590,9 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.StageWorkingFields
           change KilnCMS.CMS.Changes.StampWorkingCopy
           change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
+          # A translation's shared fields in the held body (#1860). The held
+          # settings in `fields` already met this check in `:update`'s probe.
+          validate {KilnCMS.I18n.Validations.SharedFieldsReadOnly, blocks: :working_blocks}
         end
 
         # "Publish changes": the working copy becomes the published text. Same

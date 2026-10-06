@@ -267,9 +267,10 @@ has a single seam instead of many.
 moduledoc and `docs/automation.md`. Two calls left for the maintainer: the
 non-semantic health checks (unused terms, content nothing links to) are
 gated with the rest, per "this whole workstream is invisible" on a default
-install, though they would work without vectors; and "nothing links here"
-counts content-link edges only — menu reachability is the structure view's
-(#1597), and the two are not yet combined.
+install, though they would work without vectors. "Nothing links here" is
+the union of both kinds of link — content-link edges and menus, through the
+structure view's own `Menus.linked_content_ids/1` (#1597) — so it never
+contradicts the structure view's narrower "not in any menu" badge.
 
 ## 7. Workstream E — the structure decision ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597))
 

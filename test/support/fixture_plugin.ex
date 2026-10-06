@@ -137,7 +137,8 @@ defmodule KilnCMS.FixturePlugin.ProductCardBlock do
   field-level localization (#1327): the image and price are one value for the
   whole document (`localized: :shared`), the caption falls back along the
   site's locale chain when a variant leaves it empty (`localized: :fallback`),
-  and the name stays per locale, as every field always was.
+  and the name stays per locale, as every field always was. `in_stock` is a
+  shared boolean.
   """
   use Kiln.Block
 
@@ -146,6 +147,9 @@ defmodule KilnCMS.FixturePlugin.ProductCardBlock do
     field :image_url, :string, translatable: false, localized: :shared
     field :price, :integer, localized: :shared
     field :caption, :string, localized: :fallback
+    # A shared boolean: the editor's checkbox ignores `readonly`, so it is
+    # the case that has to be disabled on a translation instead (#1860).
+    field :in_stock, :boolean, localized: :shared
   end
 
   @impl Kiln.Block.Renderer

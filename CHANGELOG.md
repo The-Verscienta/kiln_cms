@@ -77,6 +77,9 @@ Every summary line below that was shortened links to its own entry there.
   queue, taxonomy health and search gaps — only with semantic search on.**
   ([#1596](https://github.com/The-Verscienta/kiln_cms/issues/1596) · [long form](docs/changelog/unreleased.md#derived-organization-at-editororganize))
 
+- **The structure view flags published documents that no menu links to.**
+  ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) · [long form](docs/changelog/unreleased.md#the-structure-view-flags-published-documents-no-menu-links-to))
+
 - **A structure view for arranging a content tree: drag to reorder, indent to
   nest, reachable from the content list for one type at a time.**
   ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) · [long form](docs/changelog/unreleased.md#a-structure-view-for-arranging-a-content-tree))
@@ -110,7 +113,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Field-level localization: a field can be shared across a document's
   locale variants, or inherited along the site's fallback chain when empty.**
-  ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) · [long form](docs/changelog/unreleased.md#field-level-localization))
+  ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) · [#1860](https://github.com/The-Verscienta/kiln_cms/issues/1860) · [long form](docs/changelog/unreleased.md#field-level-localization))
 
 - **Plugin blocks get editor seams: their own label, icon and description,
   field hints, a row editor for `item_keys:` list fields, and live rendering.**

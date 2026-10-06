@@ -994,6 +994,13 @@ msgid_plural "%{count} paragraphs run over %{max} words — consider splitting t
 msgstr[0] "1 paragraphe dépasse %{max} mots — envisagez de le découper."
 msgstr[1] "%{count} paragraphes dépassent %{max} mots — envisagez de les découper."
 
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 published document is in no menu."
+msgid_plural "%{count} published documents are in no menu."
+msgstr[0] "1 document publié n'est dans aucun menu."
+msgstr[1] "%{count} documents publiés ne sont dans aucun menu."
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "2FA on"
@@ -9795,6 +9802,11 @@ msgstr "Non configurée"
 msgid "Not enough data to call a leader: every variant needs at least %{floor} impressions first. Rates on fewer are shown but not compared."
 msgstr "Pas assez de données pour désigner une variante en tête : chaque variante doit d'abord atteindre %{floor} impressions. Les taux en deçà sont affichés mais pas comparés."
 
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not in any menu"
+msgstr "Dans aucun menu"
+
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Not in feeds"
@@ -11294,13 +11306,13 @@ msgstr "Le contenu publié repasse à l'état de brouillon à ce moment-là."
 
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
-msgid "Published documents no related link or reference field points to. A link from a trashed page still counts until that page is purged. Menus are checked on each type's structure view."
-msgstr "Documents publiés vers lesquels ne pointe aucun lien associé ni champ de référence. Un lien depuis une page à la corbeille compte tant que cette page n'est pas purgée. Les menus sont vérifiés dans la vue de structure de chaque type."
+msgid "Published documents no tag describes closely, tagged or not — the vocabulary may be missing a word. Tags only: categories have no vector."
+msgstr "Documents publiés qu'aucune étiquette ne décrit de près, étiquetés ou non — il manque peut-être un mot au vocabulaire. Étiquettes uniquement : les catégories n'ont pas de vecteur."
 
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
-msgid "Published documents no tag describes closely, tagged or not — the vocabulary may be missing a word. Tags only: categories have no vector."
-msgstr "Documents publiés qu'aucune étiquette ne décrit de près, étiquetés ou non — il manque peut-être un mot au vocabulaire. Étiquettes uniquement : les catégories n'ont pas de vecteur."
+msgid "Published documents with no way in: no related link, no reference field and no menu points to them. A link from a trashed page still counts until that page is purged."
+msgstr "Documents publiés sans aucune entrée : aucun lien associé, champ de référence ni menu n'y pointe. Un lien depuis une page à la corbeille compte tant que cette page n'est pas purgée."
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
@@ -11321,6 +11333,11 @@ msgstr "Vos modifications ont été publiées."
 #, elixir-autogen, elixir-format
 msgid "Published — content I authored went live"
 msgstr "Publié — un contenu dont je suis l'auteur a été mis en ligne"
+
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Published, but no menu links to it."
+msgstr "Publié, mais aucun menu n'y renvoie."
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex

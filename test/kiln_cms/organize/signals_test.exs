@@ -97,6 +97,26 @@ defmodule KilnCMS.Organize.SignalsTest do
       a = post!(org, admin, "alpha passage", tag_ids: [colour.id, sourdough.id])
       b = post!(org, admin, "beta passage", tag_ids: [sourdough.id])
       lonely = post!(org, admin, "gamma passage")
+      # Linked only from a menu: it has a way in, so it is not listed.
+      in_menu = post!(org, admin, "beta menu passage")
+
+      menu =
+        CMS.create_menu!(%{key: "m#{uniq()}", locale: "en", name: "Main"},
+          actor: admin,
+          tenant: org
+        )
+
+      CMS.create_menu_item!(
+        %{
+          menu_id: menu.id,
+          label: "L",
+          link_type: :content,
+          target_type: "post",
+          target_id: in_menu.id
+        },
+        actor: admin,
+        tenant: org
+      )
 
       # `b` links to `a` (a curated related link); a self-link on `lonely`
       # must not count as a way in.
@@ -128,7 +148,8 @@ defmodule KilnCMS.Organize.SignalsTest do
       assert d <= 0.08
 
       assert ids(report.unlinked) == MapSet.new([b.id, lonely.id])
-      assert report.unlinked_considered == 3
+      refute in_menu.id in Enum.map(report.unlinked, & &1.id)
+      assert report.unlinked_considered == 4
       assert report.missing_vectors == 0
     end
   end

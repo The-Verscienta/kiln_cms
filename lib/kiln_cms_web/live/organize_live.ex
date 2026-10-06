@@ -773,7 +773,7 @@ defmodule KilnCMSWeb.OrganizeLive do
         <h2 class="text-sm font-medium">{gettext("Nothing links here")}</h2>
         <p class="text-xs text-base-content/55">
           {gettext(
-            "Published documents no related link or reference field points to. A link from a trashed page still counts until that page is purged. Menus are checked on each type's structure view."
+            "Published documents with no way in: no related link, no reference field and no menu points to them. A link from a trashed page still counts until that page is purged."
           )}
         </p>
         <p :if={@data.unlinked == []} class="text-sm text-base-content/60">

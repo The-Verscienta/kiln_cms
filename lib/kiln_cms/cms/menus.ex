@@ -172,6 +172,76 @@ defmodule KilnCMS.CMS.Menus do
   end
 
   @doc """
+  Every document id this site's menus actually link to (#1597, D21).
+
+  The question behind "is this published document reachable?" — a document in
+  no menu is one a visitor can only find by knowing its URL, which for a
+  section an editor just built is usually a mistake rather than a choice.
+
+  ## What counts as a link
+
+  A menu item makes its target reachable only if it would **render**:
+
+    * `link_type: :content` with a `target_id` — a `:url` item pointing at the
+      same page by hand is invisible to this, because nothing records that it
+      is the same page;
+    * `visible` itself, and `visible` all the way up its chain — an item inside
+      a section an editor switched off is not a way in;
+    * **rooted** within its menu — an item whose `parent_id` chain does not
+      terminate at a root never renders at all (`detached/1`), so it links
+      nothing. A cycle is treated the same way, and terminates the walk.
+
+  Across every menu and locale in the org: linked from one is linked.
+
+  ## What it does not know
+
+  Whether the *target* is published. That is the caller's question — this
+  answers "do the menus point here", and a draft that nothing points at is not
+  yet a problem. Nor does it know about links from content bodies, or a theme
+  that renders a section's children on its own; a document can be reachable by
+  routes this cannot see, which is why the editor-facing wording is "not in any
+  menu" rather than "unreachable".
+  """
+  @spec linked_content_ids(Ash.UUID.t()) :: MapSet.t(Ash.UUID.t())
+  def linked_content_ids(org_id) do
+    MenuItem
+    |> Ash.Query.sort(position: :asc, label: :asc)
+    |> read_items(org_id)
+    # Grouped per menu because rootedness is a property within one menu's
+    # items, and the whole set is read unfiltered: filtering first would break
+    # the chains the walk needs, making a visible child of a visible parent
+    # look detached because some unrelated sibling was dropped.
+    |> Enum.group_by(& &1.menu_id)
+    |> Enum.flat_map(fn {_menu_id, items} -> renderable_targets(items) end)
+    |> MapSet.new()
+  end
+
+  defp renderable_targets(items) do
+    by_id = Map.new(items, &{&1.id, &1})
+
+    for %{link_type: :content, target_id: target_id} = item <- items,
+        not is_nil(target_id),
+        renderable?(item, by_id, []),
+        do: target_id
+  end
+
+  # Visible, with a visible chain, terminating at a root. `seen` terminates a
+  # cycle, and is a plain list for the reason `rooted?/3` documents below.
+  defp renderable?(%{visible: false}, _by_id, _seen), do: false
+  defp renderable?(%{parent_id: nil}, _by_id, _seen), do: true
+
+  defp renderable?(%{id: id, parent_id: parent_id}, by_id, seen) do
+    if id in seen do
+      false
+    else
+      case Map.get(by_id, parent_id) do
+        nil -> false
+        parent -> renderable?(parent, by_id, [id | seen])
+      end
+    end
+  end
+
+  @doc """
   `detached/2` over rows the caller already has.
 
   The builder reads this menu's items to render the tree anyway, and reading

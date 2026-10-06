@@ -37,6 +37,7 @@ defmodule KilnCMSWeb.StructureLive do
 
   alias KilnCMS.CMS.ContentTree
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.Menus
 
   @list_fields [:id, :title, :slug, :state, :parent_id, :position, :path_alias]
 
@@ -192,10 +193,27 @@ defmodule KilnCMSWeb.StructureLive do
         query: [select: @list_fields, sort: [position: :asc, title: :asc]]
       )
 
+    # One read for the whole page, not one per node: which documents the site's
+    # menus actually link to (#1597). Refreshed with the tree, so a move does
+    # not leave a stale badge behind.
+    linked = Menus.linked_content_ids(socket.assigns.current_org)
+
+    orphans =
+      records
+      |> Enum.filter(&orphan?(&1, linked))
+      |> MapSet.new(& &1.id)
+
     socket
     |> assign(:records, records)
     |> assign(:by_parent, Enum.group_by(records, & &1.parent_id))
+    |> assign(:orphans, orphans)
   end
+
+  # Only a PUBLISHED document can be orphaned. A draft nothing links to is the
+  # normal state of a draft, and badging it would make the signal worthless by
+  # firing on almost everything.
+  defp orphan?(%{state: :published, id: id}, linked), do: not MapSet.member?(linked, id)
+  defp orphan?(_record, _linked), do: false
 
   @impl true
   def render(assigns) do
@@ -220,6 +238,15 @@ defmodule KilnCMSWeb.StructureLive do
           </.link>
         </header>
 
+        <p :if={MapSet.size(@orphans) > 0} class="text-sm text-base-content/70" role="status">
+          <.icon name="hero-exclamation-triangle" class="size-4 text-warning" />
+          {ngettext(
+            "1 published document is in no menu.",
+            "%{count} published documents are in no menu.",
+            MapSet.size(@orphans)
+          )}
+        </p>
+
         <p :if={@records == []} class="text-sm text-base-content/60" role="status">
           {gettext("Nothing to arrange yet.")}
         </p>
@@ -232,6 +259,7 @@ defmodule KilnCMSWeb.StructureLive do
           depth={1}
           max_depth={@max_depth}
           ct={@ct}
+          orphans={@orphans}
         />
       </div>
     </Layouts.console>
@@ -248,6 +276,7 @@ defmodule KilnCMSWeb.StructureLive do
   attr :depth, :integer, required: true
   attr :max_depth, :integer, required: true
   attr :ct, :map, required: true
+  attr :orphans, :any, required: true
 
   defp level(assigns) do
     ~H"""
@@ -268,7 +297,18 @@ defmodule KilnCMSWeb.StructureLive do
           </span>
 
           <div class="min-w-0 flex-1">
-            <p class="truncate font-medium">{node.title}</p>
+            <p class="truncate font-medium">
+              {node.title}
+              <.badge
+                :if={MapSet.member?(@orphans, node.id)}
+                variant="warning"
+                class="ml-2 align-middle"
+              >
+                <span title={gettext("Published, but no menu links to it.")}>
+                  {gettext("Not in any menu")}
+                </span>
+              </.badge>
+            </p>
             <p class="truncate font-mono text-xs text-base-content/60">
               {node.path_alias || "/#{node.slug}"}
             </p>
@@ -312,6 +352,7 @@ defmodule KilnCMSWeb.StructureLive do
           depth={@depth + 1}
           max_depth={@max_depth}
           ct={@ct}
+          orphans={@orphans}
         />
       </li>
     </ul>

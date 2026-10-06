@@ -108,13 +108,15 @@ defmodule KilnCMS.I18n.FieldLocalizationTest do
                name: :localized,
                image_url: :shared,
                price: :shared,
-               caption: :fallback
+               caption: :fallback,
+               in_stock: :shared
              ]
 
       assert FieldLocalization.block_fields(ProductCardBlock) == %{
                image_url: :shared,
                price: :shared,
-               caption: :fallback
+               caption: :fallback,
+               in_stock: :shared
              }
 
       # `translatable:` keeps its own, separate meaning (#502).
@@ -219,11 +221,19 @@ defmodule KilnCMS.I18n.FieldLocalizationTest do
 
       fr_card = card_of(fr)
 
-      CMS.update_page!(
-        reload(fr),
-        %{blocks: [card(%{"_id" => fr_card.id, "name" => "Chaussure", "image_url" => "fr.png"})]},
-        actor: actor
-      )
+      fr =
+        CMS.update_page!(
+          reload(fr),
+          %{blocks: [card(%{"_id" => fr_card.id, "name" => "Chaussure"})]},
+          actor: actor
+        )
+
+      # A translation holding its own value for the shared field — one written
+      # before the field became shared, since a write now refuses it (#1860).
+      # Seeded past the action so the copy has something to overwrite.
+      [%Ash.Union{value: held} = union] = fr.blocks
+      Ash.Seed.update!(fr, %{blocks: [%{union | value: %{held | image_url: "fr.png"}}]})
+      assert card_of(fr).image_url == "fr.png"
 
       en_card = card_of(en)
 
