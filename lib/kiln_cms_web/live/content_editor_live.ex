@@ -427,6 +427,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # `nil` = never run; `[]` = ran and found nothing.
     |> assign(:intel_duplicates, nil)
     |> assign(:intel_tags, nil)
+    # The tag ranking is partial while the org has tags with no vector yet:
+    # `Related.suggest_tags_partial/2` indexes them one window's room at a
+    # time. `unindexed` is how many are still out of the ranking (the panel
+    # says so); `failed` the ids the embedder answered nothing for, passed
+    # back as `:exclude` so the next run moves on instead of re-trying them.
+    |> assign(:intel_tags_unindexed, 0)
+    |> assign(:intel_tags_failed, [])
     |> assign(:intel_loading?, false)
     # Media picker (image blocks) + relationship pickers (taxonomy, siblings).
     # `picking` is nil (closed), a block index (fill that image block), or
@@ -706,12 +713,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
     if version == socket.assigns.editor_version do
       {duplicates, duplicates_reason} = intel_outcome(intel.duplicates)
       {tags, tags_reason} = intel_outcome(intel.tags)
+      index = tag_index(intel.tags)
 
       socket =
         socket
         |> assign(:intel_loading?, false)
         |> assign(:intel_duplicates, duplicates)
         |> assign(:intel_tags, tags)
+        |> assign(:intel_tags_unindexed, index.unindexed)
+        |> update(:intel_tags_failed, &Enum.uniq(&1 ++ index.failed))
 
       # Same reasoning as the `{:exit, reason}` clause below: `[]` alone reads
       # as the panel's ordinary "nothing similar found" empty state, which is a
@@ -750,6 +760,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
      |> assign(:intel_loading?, false)
      |> assign(:intel_duplicates, [])
      |> assign(:intel_tags, [])
+     |> assign(:intel_tags_unindexed, 0)
      |> put_flash(:error, gettext("Couldn't analyze this content. Please try again."))}
   end
 
@@ -3778,6 +3789,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # is about to be replaced.
     |> assign(:intel_duplicates, nil)
     |> assign(:intel_tags, nil)
+    |> assign(:intel_tags_unindexed, 0)
     # The Markdown view's text and placeholders were written from the blocks
     # being replaced; leave it rather than let its next keystroke undo the
     # restore.
@@ -4893,6 +4905,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # #1076) — this is only the per-caller half, same as `actor.id` for the
     # SEO panel's `KilnCMS.Seo.draft/2` call above.
     actor_id = actor && actor.id
+    failed = socket.assigns.intel_tags_failed
 
     socket
     |> assign(:intel_loading?, true)
@@ -4900,7 +4913,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
       {version,
        %{
          duplicates: Related.near_duplicates(record, actor: actor, user_id: actor_id),
-         tags: Related.suggest_tags(record, actor: actor, user_id: actor_id)
+         # The partial variant, not `suggest_tags/2`: an org with more
+         # never-indexed tags than the room left in this editor's embedding
+         # window would otherwise be refused on every open — and each refusal
+         # still counted against the window the near-duplicate and link
+         # suggestions draw on. This indexes what fits and ranks over that.
+         tags:
+           Related.suggest_tags_partial(record,
+             actor: actor,
+             user_id: actor_id,
+             exclude: failed
+           )
        }}
     end)
   end
@@ -4912,7 +4935,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # and carries enough detail for `intel_error_message/1` to say *why*, the
   # same as `seo_error_message/1` does for the SEO panel's own budget errors.
   defp intel_outcome({:error, reason}), do: {[], reason}
+  defp intel_outcome({:ok, %{suggestions: suggestions}}), do: {suggestions, nil}
   defp intel_outcome(list) when is_list(list), do: {list, nil}
+
+  # The index half of `Related.suggest_tags_partial/2`'s answer; a refusal
+  # indexed nothing and learned nothing about the taxonomy.
+  defp tag_index({:ok, %{unindexed: unindexed, failed: failed}}),
+    do: %{unindexed: unindexed, failed: failed}
+
+  defp tag_index(_refused), do: %{unindexed: 0, failed: []}
 
   # Tick a suggested tag in the form's `tag_ids`, then drop it from the panel.
   #
@@ -6899,6 +6930,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               seo_links_loading?={@seo_links_loading?}
               intel_duplicates={@intel_duplicates}
               intel_tags={@intel_tags}
+              intel_tags_unindexed={@intel_tags_unindexed}
               intel_loading?={@intel_loading?}
             />
 

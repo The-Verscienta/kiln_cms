@@ -148,6 +148,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **The editor's tag suggestions no longer fail on an org with more unindexed
+  tags than the editor's embedding window, or use up that window on refusals.**
+  ([#1596](https://github.com/The-Verscienta/kiln_cms/issues/1596) · [long form](docs/changelog/unreleased.md#tag-suggestions-on-a-large-unindexed-taxonomy))
+
 - **Search folds diacritics: `Zusanli` finds `Zúsānlǐ`, `creme brulee` finds
   `Crème brûlée`, in every full-text leg.**
   ([#1628](https://github.com/The-Verscienta/kiln_cms/issues/1628) · [long form](docs/changelog/unreleased.md#search-folds-diacritics))

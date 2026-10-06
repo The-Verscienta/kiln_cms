@@ -544,6 +544,31 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="tag-suggestions-on-a-large-unindexed-taxonomy"></a>
+
+- **The editor's tag suggestions no longer fail on an org with more unindexed
+  tags than the editor's embedding window, or use up that window on refusals.**
+  `Related.suggest_tags/2` embedded every tag name that had no stored vector
+  and charged them all to the `search_embedding` budget as one charge. Hammer's
+  fixed window counts a charge before it checks it against the limit, so a
+  refused charge still counts. With more than 60 unindexed tags (the per-user
+  window), or fewer but more than the room the editor had left, the "Similar
+  content" panel always got a rate-limit error. Each time it opened, it also
+  added the full count to the editor's bucket, which blocked their
+  near-duplicate and link suggestions for the rest of the minute.
+
+  `suggest_tags/2`, used by automation and `/editor/organize`, now checks the
+  count against `KilnCMS.Search.embedding_remaining/3` before it charges. When
+  the count doesn't fit, it returns the refusal without charging or embedding
+  anything. When it fits, it charges once, as before. The editor panel uses a
+  new `Related.suggest_tags_partial/2` instead. It indexes as many names as the
+  room left allows, in one charge, and ranks over the tags that have a current
+  vector. A renamed tag is left out until its new name is indexed, rather than
+  ranked by its old name. Each run indexes the next batch, and a run with no
+  room left charges nothing and still ranks the indexed tags. Under Suggested
+  tags, the panel says how many tags are not indexed yet.
+  ([#1596](https://github.com/The-Verscienta/kiln_cms/issues/1596))
+
 <a id="search-folds-diacritics"></a>
 
 - **Search folds diacritics: `Zusanli` finds `Zúsānlǐ`, `creme brulee` finds

@@ -274,4 +274,39 @@ defmodule KilnCMSWeb.ContentEditorIntelligenceTest do
     # ("nothing similar found"), and this is the absence of one.
     refute html =~ "possible duplicate"
   end
+
+  test "a taxonomy larger than the editor's window ranks what fits and says the rest is pending",
+       %{conn: conn} do
+    actor = authed_user(:admin)
+    uniq = System.unique_integer([:positive])
+
+    for i <- 1..65,
+        do: CMS.create_tag!(%{name: "pending #{uniq} #{i}", slug: slug()}, actor: actor)
+
+    page = indexed_page(actor, "tag budget passage #{uniq}", title: "Anchor #{uniq}")
+
+    # The editor's own 60-a-minute window; the org bucket is the shared
+    # default org's, so it is opened wide rather than left to whatever the
+    # rest of the run already spent against it.
+    original = Application.get_env(:kiln_cms, KilnCMS.Search, [])
+
+    Application.put_env(
+      :kiln_cms,
+      KilnCMS.Search,
+      Keyword.merge(original,
+        embedding_per_user_limit: {60, :timer.minutes(1)},
+        embedding_per_org_limit: {1_000_000, :timer.hours(1)}
+      )
+    )
+
+    on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Search, original) end)
+
+    html = conn |> open(actor, page) |> analyze()
+
+    # Before the partial path: 65 uncached names in one charge, refused (and
+    # counted) every time — a rate-limit flash and no suggestions, ever.
+    refute html =~ "rate limit"
+    assert html =~ "Suggested tags"
+    assert html =~ "Ranked over indexed tags only; 5 tags not indexed yet"
+  end
 end

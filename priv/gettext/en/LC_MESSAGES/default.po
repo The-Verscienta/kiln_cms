@@ -11410,6 +11410,13 @@ msgstr ""
 msgid "RFC 9116 recommends an expiry less than a year ahead, so a forgotten file goes stale."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Ranked over indexed tags only; %{count} tag not indexed yet — it fills in on a later run."
+msgid_plural "Ranked over indexed tags only; %{count} tags not indexed yet — they fill in a batch at a time."
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "Rate"

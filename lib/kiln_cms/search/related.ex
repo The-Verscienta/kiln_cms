@@ -192,13 +192,70 @@ defmodule KilnCMS.Search.Related do
   {:rate_limited, ms}}` or `{:error, :unattended_disabled}` instead of a list
   — including partway through the taxonomy, in which case nothing already
   scored is returned either. That is deliberate: a truncated ranking (the
-  first N tags alphabetically, say) is a worse answer than none, because
-  nothing about it tells the caller it stopped early.
+  first N tags alphabetically, say) is a worse answer than none *from a
+  function whose answer is a bare list*, because nothing about it tells the
+  caller it stopped early. `suggest_tags_partial/2` is the variant that can
+  say so.
+
+  ## Never a charge the budget would refuse
+
+  The uncached tag names are one charge, and a Hammer fixed window refuses a
+  charge larger than the room left in it **and still counts it** (it
+  increments before it compares). So before charging, the uncached count is
+  compared with `KilnCMS.Search.embedding_remaining/3`; when it does not fit,
+  this answers the refusal straight away — nothing embedded, nothing charged —
+  instead of spending the caller's window on being told no. Before that check
+  existed, an org with more never-indexed tags than the per-user window
+  (`embedding_per_user_limit/0`, 60) could never be ranked at all, and every
+  attempt burned the caller's whole window.
   """
   @spec suggest_tags(struct(), keyword()) ::
           [%{tag: struct(), distance: float()}]
           | {:error, {:rate_limited, non_neg_integer()} | :unattended_disabled}
   def suggest_tags(record, opts \\ []) do
+    case rank_tags(record, opts, false) do
+      {:ok, %{suggestions: suggestions}} -> suggestions
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  `suggest_tags/2` for a caller that can show a **partial** ranking and say it
+  is one — the editor's per-document panel.
+
+  Where `suggest_tags/2` refuses when the never-indexed tag names do not fit
+  the room left in the caller's embedding window, this indexes a chunk sized
+  to that room (`KilnCMS.Search.embedding_remaining/3`, the same sizing as
+  `ensure_tag_vectors/3`'s `:max`) and ranks over the tags that are indexed.
+  Each call indexes another chunk, so repeated calls fill the index over
+  successive windows; a call with no room left charges nothing and still
+  ranks what is there. When everything fits, it is exactly `suggest_tags/2`:
+  one charge for the whole uncached set.
+
+  Options are `suggest_tags/2`'s, plus `:exclude` — tag ids an earlier call
+  reported as `failed` (the embedder answered nothing for them), left out of
+  the chunk so the next one moves on instead of re-trying the same names.
+
+  Returns `{:ok, %{suggestions:, unindexed:, failed:}}`: `suggestions` as
+  `suggest_tags/2` returns them, ranked over the indexed tags only;
+  `unindexed`, how many candidate tags are still without a vector (neither in
+  this chunk nor excluded) — a non-zero count means the ranking is partial;
+  and `failed`, this call's embedder misses, to pass back as `:exclude`. Or
+  `{:error, reason}` when the document's own centroid is budget-blocked.
+  Semantic search off answers `{:ok, %{suggestions: [], unindexed: 0,
+  failed: []}}` without touching the budget or the index.
+  """
+  @spec suggest_tags_partial(struct(), keyword()) ::
+          {:ok,
+           %{
+             suggestions: [%{tag: struct(), distance: float()}],
+             unindexed: non_neg_integer(),
+             failed: [Ash.UUID.t()]
+           }}
+          | {:error, {:rate_limited, non_neg_integer()} | :unattended_disabled}
+  def suggest_tags_partial(record, opts \\ []), do: rank_tags(record, opts, true)
+
+  defp rank_tags(record, opts, partial?) do
     actor = opts[:actor]
     threshold = Keyword.get(opts, :threshold, Search.suggest_tags_threshold())
     budget_ctx = budget_context(record, opts)
@@ -232,15 +289,26 @@ defmodule KilnCMS.Search.Related do
         )
         |> Enum.reject(&MapSet.member?(applied, &1.id))
 
-      # Make sure every candidate has a stored, current vector — the only
+      # Make sure the candidates have a stored, current vector — the only
       # inference this function does, and only the first time a tag (or a
       # renamed tag) is seen; then the ceiling and the ranking are one query.
-      with :ok <- ensure_tag_embeddings(candidates, record.org_id, budget_ctx) do
-        nearest_tags(candidates, centroid, threshold, Keyword.get(opts, :limit, 5), record.org_id)
+      # A tag still without one is left out of the ranking rather than ranked
+      # by a stale (pre-rename) row.
+      with {:ok, %{unranked: unranked} = index} <-
+             ensure_tag_embeddings(candidates, record.org_id, budget_ctx, partial?, opts) do
+        ranked = Enum.reject(candidates, &MapSet.member?(unranked, &1.id))
+        limit = Keyword.get(opts, :limit, 5)
+
+        {:ok,
+         %{
+           suggestions: nearest_tags(ranked, centroid, threshold, limit, record.org_id),
+           unindexed: index.unindexed,
+           failed: index.failed
+         }}
       end
     else
       {:error, reason} -> {:error, reason}
-      _ -> []
+      _ -> {:ok, %{suggestions: [], unindexed: 0, failed: []}}
     end
   end
 
@@ -322,7 +390,6 @@ defmodule KilnCMS.Search.Related do
     exclude = opts |> Keyword.get(:exclude, []) |> MapSet.new()
     missing = tags |> stale_tags(org_id) |> Enum.reject(&MapSet.member?(exclude, &1.id))
     {chunk, rest} = Enum.split(missing, Keyword.get(opts, :max, length(missing)))
-    uncached = Enum.count(chunk, &(not VectorCache.cached?(&1.name)))
 
     budget_ctx = %{
       org_id: org_id,
@@ -330,10 +397,17 @@ defmodule KilnCMS.Search.Related do
       unattended?: Keyword.get(opts, :unattended?, false)
     }
 
-    with {:ok, failed} <-
-           embedding_charge(budget_ctx, uncached, fn -> store_tag_chunk(chunk, org_id) end) do
+    with {:ok, failed} <- index_tag_chunk(chunk, org_id, budget_ctx) do
       {:ok, %{indexed: length(chunk) - length(failed), failed: failed, remaining: length(rest)}}
     end
+  end
+
+  # One charge for the chunk's uncached names (cached ones are free), then
+  # embed and store each. `{:ok, failed_ids}` or the budget's refusal, with
+  # nothing embedded.
+  defp index_tag_chunk(chunk, org_id, budget_ctx) do
+    uncached = Enum.count(chunk, &(not VectorCache.cached?(&1.name)))
+    embedding_charge(budget_ctx, uncached, fn -> store_tag_chunk(chunk, org_id) end)
   end
 
   defp store_tag_chunk(chunk, org_id) do
@@ -573,20 +647,90 @@ defmodule KilnCMS.Search.Related do
   # list instead of to actual inference volume — the exact failure
   # `VectorCache` exists to avoid. Checked once for the whole missing set — one
   # budget round trip charging the real uncached count, not one round trip per
-  # tag — and a refused charge stops the fill before any of it runs, leaving
-  # every candidate exactly as cached as it was; see `suggest_tags/2`'s doc for
-  # why a partial ranking is worse than none. Rows already written by an
-  # earlier call stay: they are correct, and this call is cheaper for them.
-  defp ensure_tag_embeddings([], _org_id, _budget_ctx), do: :ok
+  # tag. Rows already written by an earlier call stay: they are correct, and
+  # this call is cheaper for them.
+  #
+  # The uncached count is compared with the room left in the window FIRST
+  # (`Search.embedding_remaining/3`). A Hammer fixed window refuses a charge
+  # larger than its room *and still counts it*, so charging regardless would
+  # spend the caller's whole window on a refusal — every time, on an org with
+  # more never-indexed tags than the window holds. When it doesn't fit:
+  #
+  #   * `suggest_tags/2` (`partial?: false`) answers the refusal without
+  #     charging, leaving every candidate exactly as cached as it was — see its
+  #     doc for why a bare list must never be a partial ranking;
+  #   * `suggest_tags_partial/2` indexes the cached names (free) plus as many
+  #     uncached ones as the room allows, and reports the rest as unindexed —
+  #     the next window's call takes the next chunk.
+  #
+  # Returns `{:ok, %{unranked:, unindexed:, failed:}}` — `unranked` the ids to
+  # leave out of the ranking (no current vector) — or the budget's refusal.
+  defp ensure_tag_embeddings(candidates, org_id, budget_ctx, partial?, opts) do
+    exclude = opts |> Keyword.get(:exclude, []) |> MapSet.new(&to_string/1)
 
-  defp ensure_tag_embeddings(candidates, org_id, budget_ctx) do
-    missing = stale_tags(candidates, org_id)
-    uncached = Enum.count(missing, &(not VectorCache.cached?(&1.name)))
+    {excluded, missing} =
+      candidates
+      |> stale_tags(org_id)
+      |> Enum.split_with(&MapSet.member?(exclude, to_string(&1.id)))
 
-    embedding_charge(budget_ctx, uncached, fn ->
-      Enum.each(missing, &embed_and_store_tag(&1, org_id))
-      :ok
-    end)
+    {cached, uncached} = Enum.split_with(missing, &VectorCache.cached?(&1.name))
+
+    case tag_room(uncached, budget_ctx) do
+      :all ->
+        index_tags(missing, [], excluded, org_id, budget_ctx)
+
+      room when partial? ->
+        index_tags(
+          cached ++ Enum.take(uncached, room),
+          Enum.drop(uncached, room),
+          excluded,
+          org_id,
+          budget_ctx
+        )
+
+      _short ->
+        {:error, known_refusal(budget_ctx)}
+    end
+  end
+
+  defp index_tags(chunk, rest, excluded, org_id, budget_ctx) do
+    with {:ok, failed} <- index_tag_chunk(chunk, org_id, budget_ctx) do
+      unranked = MapSet.new(Enum.map(excluded ++ rest, & &1.id) ++ failed)
+      {:ok, %{unranked: unranked, unindexed: length(rest), failed: failed}}
+    end
+  end
+
+  # `:all` when the whole uncached set fits the room left (a fully cached set
+  # never reads the budget at all), else the room, in units.
+  defp tag_room([], _budget_ctx), do: :all
+
+  defp tag_room(uncached, %{org_id: org_id, user_id: user_id, unattended?: unattended?}) do
+    case Search.embedding_remaining(org_id, user_id, unattended?) do
+      :infinity -> :all
+      room when room >= length(uncached) -> :all
+      room -> room
+    end
+  end
+
+  # What `KilnCMS.LLM.Budget.check/4` would have answered, without making the
+  # charge: the standing "unattended share is 0" setting is reported as such
+  # (not as a retryable overload), anything else as a rate limit over the
+  # per-user window — the same retry hint `KilnCMS.Organize.Terms` gives.
+  defp known_refusal(%{org_id: org_id, unattended?: true}) when not is_nil(org_id) do
+    ceiling =
+      Budget.unattended_ceiling(
+        Search.embedding_per_org_limit(),
+        Search.embedding_unattended_share()
+      )
+
+    if ceiling == 0, do: :unattended_disabled, else: rate_limited()
+  end
+
+  defp known_refusal(_budget_ctx), do: rate_limited()
+
+  defp rate_limited do
+    {_count, window_ms} = Search.embedding_per_user_limit()
+    {:rate_limited, window_ms}
   end
 
   # The tags among `tags` with no stored vector, or one computed for a previous
