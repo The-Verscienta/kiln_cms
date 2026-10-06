@@ -151,6 +151,21 @@ Two consequences worth knowing:
   scoped to `in_review` is exactly the case that computes rather than reads —
   a bulk move to that state now stops spending embeddings once the reserve is
   hit, instead of running unbounded.
+
+  **Bulk tag review shares this reserve** (`/editor/organize`, #1596). An
+  editor's review run is attended, but it is the multiplied caller this
+  reserve exists for, so it charges as an *unattended* caller under the
+  editor's own id: it stops once the org has spent `embedding_unattended_share`
+  of its window, and can never take the half an editor's per-document panel
+  relies on. Two consequences: with `embedding_unattended_share: 0.0`, bulk
+  review of anything that needs computing is off too (the page says so, and
+  published documents with stored vectors still review, since they cost
+  nothing); and once rules have used the background share, a review run stops
+  with a message naming automation, while the per-document panel keeps
+  working. Each run spends at most one per-user window (`embedding_per_user_limit`,
+  60 by default) and sizes every document to the room left before charging, so
+  the reserve check (`spent >= ceiling`, not `spent + units`) is never
+  overshot by more than one document's cost — in practice not at all.
 - **`suggest_metadata` needs `"allow_egress": true`** when the configured model
   provider is off-site (`KilnCMS.Seo.egress?/0`). The editor panel is one
   person deciding to spend one request; a rule is every matching document,

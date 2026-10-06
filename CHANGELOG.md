@@ -73,6 +73,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **`/editor/organize`: semantic clusters, bulk tag review, an under-organized
+  queue, taxonomy health and search gaps — only with semantic search on.**
+  ([#1596](https://github.com/The-Verscienta/kiln_cms/issues/1596) · [long form](docs/changelog/unreleased.md#derived-organization-at-editororganize))
+
 - **The structure view flags published documents that no menu links to.**
   ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) · [long form](docs/changelog/unreleased.md#the-structure-view-flags-published-documents-no-menu-links-to))
 

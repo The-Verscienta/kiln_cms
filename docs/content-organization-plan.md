@@ -262,6 +262,16 @@ Keep the term-facing parts thin for that reason — prefer one narrow helper ove
 scattering `Tag`/`Category` reads across the new surfaces, so the 2.0 migration
 has a single seam instead of many.
 
+**Shipped in 1.1** as `/editor/organize` (`KilnCMS.Organize`). The seam is
+`KilnCMS.Organize.Terms`; the bound is in `KilnCMS.Organize.Tagging`'s
+moduledoc and `docs/automation.md`. Two calls left for the maintainer: the
+non-semantic health checks (unused terms, content nothing links to) are
+gated with the rest, per "this whole workstream is invisible" on a default
+install, though they would work without vectors. "Nothing links here" is
+the union of both kinds of link — content-link edges and menus, through the
+structure view's own `Menus.linked_content_ids/1` (#1597) — so it never
+contradicts the structure view's narrower "not in any menu" badge.
+
 ## 7. Workstream E — the structure decision ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597))
 
 A decision, not a feature. Content is flat; site structure lives in a

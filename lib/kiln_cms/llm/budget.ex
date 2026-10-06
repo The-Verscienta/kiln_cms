@@ -114,6 +114,54 @@ defmodule KilnCMS.LLM.Budget do
   end
 
   @doc """
+  How many units a `check/4` with these `limits` could still spend right now
+  without being refused: the smallest room left across the buckets that call
+  would hit — the user's, the org's, and (for `unattended?: true`) the org's
+  room below the unattended ceiling. `:infinity` when no bucket applies (both
+  ids `nil`). `:units` in `limits` is ignored.
+
+  For a caller about to spend a known batch (#1596's bulk surfaces). A charge
+  the bucket refuses is **still counted** — Hammer's fixed window increments
+  before it compares — so a batch that overshoots the window does not merely
+  fail, it spends the caller's allowance on failing. Sizing the batch to this
+  number first is how a bulk caller never makes that charge. Read and charge
+  are not atomic; a concurrent caller can still take the room in between, the
+  same overshoot `check/4` documents for unattended calls.
+  """
+  @spec remaining(String.t(), term(), term(), keyword()) :: non_neg_integer() | :infinity
+  def remaining(feature, org_id, user_id, limits) do
+    per_org = Keyword.fetch!(limits, :per_org)
+
+    reserve =
+      if Keyword.get(limits, :unattended?, false) and not is_nil(org_id) do
+        room(
+          unattended_ceiling(per_org, Keyword.fetch!(limits, :unattended_share)),
+          spent(feature, "org", org_id, elem(per_org, 1))
+        )
+      else
+        :infinity
+      end
+
+    [
+      bucket_room(feature, "user", user_id, Keyword.fetch!(limits, :per_user)),
+      bucket_room(feature, "org", org_id, per_org),
+      reserve
+    ]
+    |> Enum.reduce(:infinity, &tighter/2)
+  end
+
+  defp tighter(:infinity, acc), do: acc
+  defp tighter(n, :infinity), do: n
+  defp tighter(n, acc), do: min(n, acc)
+
+  defp bucket_room(_feature, _kind, nil, _limit), do: :infinity
+
+  defp bucket_room(feature, kind, id, {count, window_ms}),
+    do: room(count, spent(feature, kind, id, window_ms))
+
+  defp room(limit, spent), do: max(limit - spent, 0)
+
+  @doc """
   The org spend at which unattended callers stop, for a `{count, window}`.
 
   Everything above it is the interactive reserve. Public so a test — and an

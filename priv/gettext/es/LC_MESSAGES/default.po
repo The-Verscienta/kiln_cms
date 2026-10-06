@@ -130,11 +130,19 @@ msgstr[0] "Queda %{count} día"
 msgstr[1] "Quedan %{count} días"
 
 #: lib/kiln_cms_web/live/governance_live.ex
+#: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} document"
 msgid_plural "%{count} documents"
 msgstr[0] "%{count} documento"
 msgstr[1] "%{count} documentos"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} document selected (at most %{max} per run)."
+msgid_plural "%{count} documents selected (at most %{max} per run)."
+msgstr[0] "%{count} documento seleccionado (como máximo %{max} por ejecución)."
+msgstr[1] "%{count} documentos seleccionados (como máximo %{max} por ejecución)."
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -207,6 +215,13 @@ msgid "%{count} indexing job is waiting to retry: the instance didn't answer, or
 msgid_plural "%{count} indexing jobs are waiting to retry: the instance didn't answer, or refused them."
 msgstr[0] "%{count} trabajo de indexación espera un reintento: la instancia no respondió o lo rechazó."
 msgstr[1] "%{count} trabajos de indexación esperan un reintento: la instancia no respondió o los rechazó."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} isn't indexed yet, so it isn't grouped."
+msgid_plural "%{count} aren't indexed yet, so they aren't grouped."
+msgstr[0] "%{count} aún no está indexado, así que no se agrupa."
+msgstr[1] "%{count} aún no están indexados, así que no se agrupan."
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -354,6 +369,13 @@ msgstr[1] "%{count} experimentos en curso no están produciendo resultados utili
 msgid "%{count} scheduled this week"
 msgstr "%{count} programados esta semana"
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} search"
+msgid_plural "%{count} searches"
+msgstr[0] "%{count} búsqueda"
+msgstr[1] "%{count} búsquedas"
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
@@ -396,6 +418,27 @@ msgid "%{count} tag"
 msgid_plural "%{count} tags"
 msgstr[0] "%{count} etiqueta"
 msgstr[1] "%{count} etiquetas"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} tag isn't indexed yet and isn't compared."
+msgid_plural "%{count} tags aren't indexed yet and aren't compared."
+msgstr[0] "%{count} etiqueta aún no está indexada y no se compara."
+msgstr[1] "%{count} etiquetas aún no están indexadas y no se comparan."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} tag name couldn't be indexed and is left out."
+msgid_plural "%{count} tag names couldn't be indexed and are left out."
+msgstr[0] "%{count} nombre de etiqueta no se pudo indexar y queda fuera."
+msgstr[1] "%{count} nombres de etiqueta no se pudieron indexar y quedan fuera."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} tag name isn't indexed yet — index it before proposing."
+msgid_plural "%{count} tag names aren't indexed yet — index them before proposing."
+msgstr[0] "%{count} nombre de etiqueta aún no está indexado — indéxelo antes de proponer."
+msgstr[1] "%{count} nombres de etiqueta aún no están indexados — indéxelos antes de proponer."
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -619,6 +662,11 @@ msgid "%{paths} points at content that isn't published yet."
 msgid_plural "%{count} links point at content that isn't published yet: %{paths}"
 msgstr[0] "%{paths} apunta a contenido que aún no está publicado."
 msgstr[1] "%{count} enlaces apuntan a contenido que aún no está publicado: %{paths}"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{pct}% match"
+msgstr "%{pct}% de coincidencia"
 
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
@@ -854,6 +902,7 @@ msgstr "(sin definir)"
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/link_report_live.ex
+#: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "(untitled)"
 msgstr "(sin título)"
@@ -1854,6 +1903,11 @@ msgstr "Añadido solo a %{types}: el siguiente tipo de contenido lo rechazó."
 msgid "Added to the release."
 msgstr "Añadido al lanzamiento."
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Added to the working copy — publish changes to make it live"
+msgstr "Añadido a la copia de trabajo — publique los cambios para que sea visible"
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Address removed — it can receive mail again."
@@ -1999,6 +2053,7 @@ msgstr "Desde siempre"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "All types"
 msgstr "Todos los tipos"
@@ -2255,6 +2310,11 @@ msgstr "Cualquier idioma"
 msgid "Any role"
 msgstr "Cualquier rol"
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Any state"
+msgstr "Cualquier estado"
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Any status"
@@ -2311,10 +2371,16 @@ msgstr "Icono de la app"
 msgid "App password or access token"
 msgstr "Contraseña de aplicación o token de acceso"
 
+#: lib/kiln_cms_web/live/organize_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Applied"
 msgstr "Aplicado"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Apply"
+msgstr "Aplicar"
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -2906,6 +2972,11 @@ msgstr "Construido con"
 msgid "Built-in"
 msgstr "Integrado"
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Bulk review is switched off: background embedding is disabled on this site. The per-document panel in the editor still works."
+msgstr "La revisión en bloque está desactivada: el cálculo de embeddings en segundo plano está deshabilitado en este sitio. El panel por documento del editor sigue funcionando."
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Bundle a campaign's publishes and unpublishes and ship them as one coordinated change. A release goes live all at once, or not at all."
@@ -3166,6 +3237,11 @@ msgstr "Revisa tu bandeja de entrada para encontrar el enlace de confirmación. 
 #, elixir-autogen, elixir-format
 msgid "Checkbox"
 msgstr "Casilla de verificación"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Checked the %{count} most recently updated published documents."
+msgstr "Se revisaron los %{count} documentos publicados actualizados más recientemente."
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -3490,6 +3566,28 @@ msgstr "Cerrar"
 msgid "Closed"
 msgstr "Cerrados"
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Clustering %{count} published document."
+msgid_plural "Clustering %{count} published documents."
+msgstr[0] "Agrupando %{count} documento publicado."
+msgstr[1] "Agrupando %{count} documentos publicados."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Clustering the %{count} most recently updated published documents."
+msgstr "Agrupando los %{count} documentos publicados actualizados más recientemente."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Clusters"
+msgstr "Grupos"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Clusters form from published, indexed documents."
+msgstr "Los grupos se forman a partir de documentos publicados e indexados."
+
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/code_injection_live.ex
@@ -3573,6 +3671,11 @@ msgstr "Comparar seleccionadas"
 #, elixir-autogen, elixir-format
 msgid "Compare versions"
 msgstr "Comparar versiones"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Compared against the first %{count} tags by name."
+msgstr "Comparado con las primeras %{count} etiquetas por nombre."
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
@@ -3826,6 +3929,11 @@ msgstr "Modelo de contenido"
 msgid "Content no longer exists"
 msgstr "El contenido ya no existe"
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Content tagged %{tag}"
+msgstr "Contenido etiquetado %{tag}"
+
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #: lib/kiln_cms_web/live/experiments_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
@@ -3887,6 +3995,13 @@ msgstr "Contenido"
 #, elixir-autogen, elixir-format
 msgid "Continue"
 msgstr "Continuar"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Continue (%{count} left)"
+msgid_plural "Continue (%{count} left)"
+msgstr[0] "Continuar (queda %{count})"
+msgstr[1] "Continuar (quedan %{count})"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -3997,6 +4112,11 @@ msgstr "No se pudo añadir esa etiqueta."
 #, elixir-autogen, elixir-format
 msgid "Couldn't analyze this content. Please try again."
 msgstr "No se pudo analizar este contenido. Vuelve a intentarlo."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't apply those tags — the document may have changed. Reload and try again."
+msgstr "No se pudieron aplicar esas etiquetas — puede que el documento haya cambiado. Recargue e inténtelo de nuevo."
 
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -5395,6 +5515,7 @@ msgstr "Documento descargable, p. ej. un PDF"
 #: lib/kiln_cms_web/live/editor_live/filters.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
 #: lib/kiln_cms_web/live/experiments_live.ex
+#: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "Draft"
 msgstr "Borrador"
@@ -6147,6 +6268,16 @@ msgstr "El testigo ha recibido todos los puntos de control."
 msgid "Every delivery attempt is recorded; failures retry with backoff, and %{count} exhausted deliveries in a row disable an endpoint. History is kept for %{days} days."
 msgstr "Se registra cada intento de entrega; los fallos se reintentan con espera progresiva y %{count} entregas agotadas seguidas desactivan un endpoint. El historial se conserva %{days} días."
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every document carries at least one tag."
+msgstr "Todos los documentos tienen al menos una etiqueta."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every published document has at least one link in."
+msgstr "Todos los documentos publicados reciben al menos un enlace."
+
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "Every published page, post and entry that anyone can read without signing in is copied to that Meilisearch instance: its title, excerpt and full text. It is kept up to date as you publish, edit and unpublish. Members-only and passphrase-protected content is never sent. Whoever runs that instance can read everything in it."
@@ -6172,6 +6303,11 @@ msgstr "En cualquier caso, todas las pantallas siguen en la búsqueda (⌘K); es
 #, elixir-autogen, elixir-format
 msgid "Every settings screen, and what each one is for."
 msgstr "Cada pantalla de configuración, y para qué sirve."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every term is in use."
+msgstr "Todos los términos están en uso."
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
@@ -6380,6 +6516,11 @@ msgstr "Alternativa para %{locale}"
 #, elixir-autogen, elixir-format
 msgid "Fallbacks only matter once there is a second language to fall back from. The operator adds locales in configuration."
 msgstr "Las alternativas solo importan cuando hay un segundo idioma. El operador añade idiomas en la configuración."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Far from every tag"
+msgstr "Lejos de todas las etiquetas"
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -6847,6 +6988,11 @@ msgstr "Embudo eliminado."
 #, elixir-autogen, elixir-format
 msgid "Funnels"
 msgstr "Embudos"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Gaps"
+msgstr "Lagunas"
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/media_live.ex
@@ -7415,6 +7561,7 @@ msgstr "En los feeds"
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
+#: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "In review"
 msgstr "En revisión"
@@ -7474,6 +7621,11 @@ msgstr "Aumentar sangría"
 msgid "Index"
 msgstr "Índice"
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Index tag names"
+msgstr "Indexar nombres de etiquetas"
+
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "Index this site into this instance"
@@ -7484,12 +7636,44 @@ msgstr "Indexar este sitio en esta instancia"
 msgid "Index this site's content into your own Meilisearch."
 msgstr "Indexa el contenido de este sitio en tu propio Meilisearch."
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Index your tag names on the Tag review tab to classify these."
+msgstr "Indexe los nombres de sus etiquetas en la pestaña Revisión de etiquetas para clasificarlas."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Index your tag names on the Tag review tab to see these."
+msgstr "Indexe los nombres de sus etiquetas en la pestaña Revisión de etiquetas para verlos."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Indexed %{count} tag name."
+msgid_plural "Indexed %{count} tag names."
+msgstr[0] "Se indexó %{count} nombre de etiqueta."
+msgstr[1] "Se indexaron %{count} nombres de etiqueta."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Indexed %{n} tag names; %{left} still to go. Continue in a minute."
+msgstr "Se indexaron %{n} nombres de etiqueta; faltan %{left}. Continúe en un minuto."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Indexing tag names stopped unexpectedly. Try again."
+msgstr "La indexación de nombres de etiquetas se detuvo inesperadamente. Inténtelo de nuevo."
+
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "Indexing: %{count} job left."
 msgid_plural "Indexing: %{count} jobs left."
 msgstr[0] "Indexando: queda %{count} trabajo."
 msgstr[1] "Indexando: quedan %{count} trabajos."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Indexing…"
+msgstr "Indexando…"
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
@@ -8307,6 +8491,7 @@ msgstr "Gestionar campos"
 msgid "Manage membership"
 msgstr "Gestionar la suscripción"
 
+#: lib/kiln_cms_web/live/organize_live.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Manage taxonomy"
@@ -8513,6 +8698,21 @@ msgstr "Genere una clave arriba para conceder acceso headless o MCP."
 #, elixir-autogen, elixir-format
 msgid "Missing alt text"
 msgstr "Falta el texto alternativo"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Missing hub page"
+msgstr "Falta una página central"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Missing term"
+msgstr "Falta un término"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Missing term?"
+msgstr "¿Falta un término?"
 
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
@@ -9173,6 +9373,11 @@ msgstr "Aún no hay documentos: sube un PDF en la"
 msgid "No enabled %{network} account — nothing would be posted. It would read:"
 msgstr "No hay ninguna cuenta de %{network} activada: no se publicaría nada. Diría:"
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "No existing tag fits closely."
+msgstr "Ninguna etiqueta existente encaja de cerca."
+
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
 msgid "No experiments yet."
@@ -9238,6 +9443,11 @@ msgstr "Todavía no hay imágenes."
 #, elixir-autogen, elixir-format
 msgid "No items yet"
 msgstr "Aún no hay elementos"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "No longer available — it may have been deleted."
+msgstr "Ya no está disponible — puede que se haya eliminado."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -9446,10 +9656,25 @@ msgstr "No hay direcciones bloqueadas."
 msgid "No sweep has finished yet — the first one runs tonight."
 msgstr "Aún no ha terminado ningún rastreo: el primero se ejecuta esta noche."
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "No tag covers this group"
+msgstr "Ninguna etiqueta cubre este grupo"
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "No tag groups yet."
 msgstr "Aún no hay grupos de etiquetas."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "No tag names are close enough to look like duplicates."
+msgstr "Ningún nombre de etiqueta está lo bastante cerca como para parecer un duplicado."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "No tags"
+msgstr "Sin etiquetas"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
@@ -9465,6 +9690,11 @@ msgstr "Aún no hay etiquetas en este grupo."
 #, elixir-autogen, elixir-format
 msgid "No tags match that filter."
 msgstr "Ninguna etiqueta coincide con ese filtro."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "No tags or category"
+msgstr "Sin etiquetas ni categoría"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/media_live.ex
@@ -9482,6 +9712,11 @@ msgstr "Aún no hay etiquetas. Escribe un nombre abajo para añadir una."
 #, elixir-autogen, elixir-format
 msgid "No taxonomy terms yet"
 msgstr "Aún no hay términos de taxonomía"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "No term is used only once."
+msgstr "Ningún término se usa una sola vez."
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -9521,6 +9756,11 @@ msgstr "Aún no hay visualizaciones registradas."
 msgid "No webhooks yet"
 msgstr "Aún no hay webhooks"
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "No zero-result searches recorded"
+msgstr "No hay búsquedas sin resultados registradas"
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nobody follows this site yet."
@@ -9546,6 +9786,11 @@ msgstr "Ninguno seleccionado"
 #, elixir-autogen, elixir-format
 msgid "Not available"
 msgstr "No disponible"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not classified right now — the embedding budget has no room. Reload later."
+msgstr "Sin clasificar por ahora — el presupuesto de embeddings no tiene margen. Recargue más tarde."
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -9694,6 +9939,11 @@ msgstr "Todavía no hay nada publicado. Cuatro pasos ponen tu página de inicio 
 msgid "Nothing is scanned and no panel appears until you switch it on, and what you switch on applies to this site only."
 msgstr "No se analiza nada ni aparece ningún panel hasta que lo active, y lo que active se aplica solo a este sitio."
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing links here"
+msgstr "Nada enlaza aquí"
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing matches the current filter."
@@ -9718,6 +9968,11 @@ msgstr "No se encontró nada similar."
 #, elixir-autogen, elixir-format
 msgid "Nothing to arrange yet."
 msgstr "Todavía no hay nada que ordenar."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing to group yet"
+msgstr "Aún no hay nada que agrupar"
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -10091,6 +10346,11 @@ msgstr "Las tareas abiertas de un contenido se marcan como completadas al public
 msgid "Open tasks stay open when their content publishes. Individual tasks can opt in."
 msgstr "Las tareas abiertas siguen abiertas al publicarse su contenido. Cada tarea puede optar por lo contrario."
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Open taxonomy"
+msgstr "Abrir taxonomía"
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Open the editor's Compliance panel"
@@ -10192,6 +10452,17 @@ msgstr "Organización"
 #, elixir-autogen, elixir-format
 msgid "Organization & relationships"
 msgstr "Organización y relaciones"
+
+#: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Organize"
+msgstr "Organizar"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Organize views"
+msgstr "Vistas de organización"
 
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
@@ -10860,6 +11131,11 @@ msgstr "Perfil actualizado."
 msgid "Promote winner into document"
 msgstr "Promover la ganadora al documento"
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Propose tags"
+msgstr "Proponer etiquetas"
+
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
 msgid "Propose tags for an editor to accept."
@@ -10900,6 +11176,11 @@ msgstr "Fecha de publicación propuesta; la confirma un administrador"
 #, elixir-autogen, elixir-format
 msgid "Proposed:"
 msgstr "Propuesta:"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Proposing…"
+msgstr "Proponiendo…"
 
 #: lib/kiln_cms_web/controllers/content_html/lock.html.heex
 #, elixir-autogen, elixir-format
@@ -10996,6 +11277,7 @@ msgstr "¿Publicar este lanzamiento ahora? Todos los elementos se publican junto
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
+#: lib/kiln_cms_web/live/organize_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #: lib/kiln_cms_web/notification_text.ex
 #, elixir-autogen, elixir-format
@@ -11007,6 +11289,11 @@ msgstr "Publicado"
 msgid "Published at"
 msgstr "Publicado el"
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Published but not indexed yet, so there is nothing to compare."
+msgstr "Publicado pero aún no indexado, así que no hay nada que comparar."
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Published content and fired artifacts are cached in memory and invalidated automatically when you edit. Flush them by hand when something changed that Kiln cannot see — a config change, a template deploy, or an external source feeding a custom block."
@@ -11016,6 +11303,16 @@ msgstr "El contenido publicado y los artefactos generados se guardan en memoria 
 #, elixir-autogen, elixir-format
 msgid "Published content is taken back to draft at this time."
 msgstr "El contenido publicado vuelve a borrador en ese momento."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Published documents no tag describes closely, tagged or not — the vocabulary may be missing a word. Tags only: categories have no vector."
+msgstr "Documentos publicados que ninguna etiqueta describe de cerca, etiquetados o no — puede que al vocabulario le falte una palabra. Solo etiquetas: las categorías no tienen vector."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Published documents with no way in: no related link, no reference field and no menu points to them. A link from a trashed page still counts until that page is purged."
+msgstr "Documentos publicados sin vía de acceso: ningún enlace relacionado, campo de referencia ni menú apunta a ellos. Un enlace desde una página en la papelera sigue contando hasta que esa página se elimina definitivamente."
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
@@ -11182,6 +11479,11 @@ msgstr "Tipos legibles (editorial)"
 #, elixir-autogen, elixir-format
 msgid "Reading ease is %{score}/100 — shorter words and sentences would help."
 msgstr "La legibilidad es de %{score}/100 — ayudarían palabras y frases más cortas."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reading the library…"
+msgstr "Leyendo la biblioteca…"
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
@@ -11870,6 +12172,11 @@ msgstr "Sustituir la frase de contraseña"
 msgid "Replaces the key pair. Every device subscribed with the current key is removed, and has to turn notifications on again."
 msgstr "Sustituye el par de claves. Se elimina cada dispositivo suscrito con la clave actual, que tendrá que volver a activar las notificaciones."
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reporting on the first %{count} terms by name."
+msgstr "Informe sobre los primeros %{count} términos por nombre."
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reprocess every image in the library? Originals are untouched — this rebuilds the responsive and modern-format variants in the background."
@@ -12065,6 +12372,11 @@ msgstr "Revisión solicitada — se envió a revisión contenido que puedo aprob
 #, elixir-autogen, elixir-format
 msgid "Review requests, comments, mentions and task assignments land here."
 msgstr "Aquí llegan las solicitudes de revisión, los comentarios, las menciones y las asignaciones de tareas."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Review tags"
+msgstr "Revisar etiquetas"
 
 #: lib/kiln_cms_web/controllers/manifest_controller.ex
 #, elixir-autogen, elixir-format
@@ -12708,6 +13020,11 @@ msgstr "Buscable (la búsqueda indexa este valor como texto)"
 msgid "Searches are logged anonymously — no user ID or IP — to improve content discovery, and purged after %{days} days."
 msgstr "Las búsquedas se registran de forma anónima — sin ID de usuario ni IP — para mejorar el descubrimiento de contenido, y se purgan después de %{days} días."
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Searches that found nothing, read as organization: a term that exists but has no page behind it, or a term the site doesn't have."
+msgstr "Búsquedas que no encontraron nada, leídas como organización: un término que existe pero no tiene página detrás, o un término que el sitio no tiene."
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -13167,6 +13484,11 @@ msgstr "Mostrando solo los bloques que necesitan atención."
 #, elixir-autogen, elixir-format
 msgid "Showing the %{count} most recent — narrow with the filter."
 msgstr "Mostrando los %{count} más recientes: acote con el filtro."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Showing the %{count} most recently updated."
+msgstr "Se muestran los %{count} actualizados más recientemente."
 
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
@@ -13721,6 +14043,7 @@ msgstr "Iniciando…"
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/federation_live.ex
+#: lib/kiln_cms_web/live/organize_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -14074,6 +14397,11 @@ msgstr "Grupo de etiquetas añadido."
 msgid "Tag groups"
 msgstr "Grupos de etiquetas"
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Tag review"
+msgstr "Revisión de etiquetas"
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Tag to apply"
@@ -14108,6 +14436,11 @@ msgstr "Se etiquetaron %{ok}; %{failed} no se pudieron actualizar."
 #, elixir-autogen, elixir-format
 msgid "Tags"
 msgstr "Etiquetas"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Tags that may be the same"
+msgstr "Etiquetas que pueden ser la misma"
 
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
@@ -14193,6 +14526,11 @@ msgstr "Las tareas van al autor del contenido. Esta persona las recibe cuando el
 #, elixir-autogen, elixir-format
 msgid "Taxonomy"
 msgstr "Taxonomía"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Taxonomy health"
+msgstr "Salud de la taxonomía"
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/team_live.ex
@@ -14532,6 +14870,11 @@ msgstr "Ese enlace de inicio de sesión ha caducado. Empieza de nuevo."
 msgid "That tier no longer exists."
 msgstr "Ese nivel ya no existe."
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "That view couldn't be loaded. Try again in a moment."
+msgstr "No se pudo cargar esa vista. Inténtelo de nuevo en un momento."
+
 #: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
 #, elixir-autogen, elixir-format
 msgid "That's more Markdown than one document can hold (the limit is %{size} MB)."
@@ -14778,6 +15121,11 @@ msgstr "No se pudo guardar el dominio."
 msgid "The editing console, as your team uses it every day."
 msgstr "La consola de edición, tal como su equipo la usa cada día."
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "The embedding budget refused that request."
+msgstr "El presupuesto de embeddings rechazó esa solicitud."
+
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "The entry limit is deployment-wide and not configurable per site: it bounds the work a feed request costs the server, rather than expressing a publishing choice."
@@ -14966,6 +15314,11 @@ msgstr "La URL preferida, si este contenido es accesible en más de una direcci�
 msgid "The preflight check failed unexpectedly."
 msgstr "La comprobación previa falló inesperadamente."
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "The proposal run stopped unexpectedly. Try again."
+msgstr "La ejecución de propuestas se detuvo inesperadamente. Inténtelo de nuevo."
+
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "The provider's OpenID Connect issuer, exactly as its discovery document states it. Must be https://."
@@ -15041,6 +15394,11 @@ msgstr "No se pudo cambiar la barra lateral."
 #, elixir-autogen, elixir-format
 msgid "The site tier governs this member's capability on THIS site (platform admins always retain access); custom roles and scopes refine it."
 msgstr "El nivel del sitio determina la capacidad de este miembro en ESTE sitio (los administradores de la plataforma siempre conservan el acceso); los roles personalizados y los alcances lo refinan."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "The site's background embedding allowance is used up for now — it is shared with automation rules. The per-document panel in the editor still works. Continue later."
+msgstr "La asignación de embeddings en segundo plano del sitio está agotada por ahora — se comparte con las reglas de automatización. El panel por documento del editor sigue funcionando. Continúe más tarde."
 
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
@@ -15174,6 +15532,11 @@ msgstr "No se puede llegar a estos elementos desde el primer nivel, así que no 
 #, elixir-autogen, elixir-format
 msgid "These two versions are identical."
 msgstr "Estas dos versiones son idénticas."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "These views appear once semantic search is switched on for this site."
+msgstr "Estas vistas aparecen cuando se activa la búsqueda semántica en este sitio."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -15475,6 +15838,11 @@ msgstr "Esta regla nunca se ejecutaría: solo las tareas se asignan o vencen, y 
 msgid "This rule would:"
 msgstr "Esta regla:"
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "This run reached its embedding allowance. Continue to propose the rest — each run spends at most %{cap} embeddings."
+msgstr "Esta ejecución alcanzó su asignación de embeddings. Continúe para proponer el resto — cada ejecución gasta como máximo %{cap} embeddings."
+
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
 msgid "This runs code on your public site."
@@ -15698,6 +16066,11 @@ msgstr "jue"
 msgid "Tick a row to export."
 msgstr "Marca una fila para exportar."
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Tick at least one tag to apply."
+msgstr "Marque al menos una etiqueta para aplicar."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Tick every type that should carry this field. Each gets its own copy under the same machine name, which you can then change on its own."
@@ -15773,6 +16146,11 @@ msgstr "Tokens: %{tokens}, [field:<name>]. Compone el último segmento de la URL
 #, elixir-autogen, elixir-format
 msgid "Tokens: %{tokens}, [field:<name>]. Used only where an entry leaves its own SEO title blank — nothing is written to the entry, so editing this re-titles those entries immediately."
 msgstr "Comodines: %{tokens}, [field:<name>]. Solo se usa cuando una entrada deja en blanco su propio título SEO; no se escribe nada en la entrada, así que al editar esto se retitulan esas entradas de inmediato."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Too large to propose in bulk (%{count} embeddings). Open it in the editor for its own suggestions."
+msgstr "Demasiado grande para proponer en bloque (%{count} embeddings). Ábralo en el editor para ver sus propias sugerencias."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -15856,6 +16234,11 @@ msgstr "Papelera (%{count})"
 #, elixir-autogen, elixir-format
 msgid "Trash is empty."
 msgstr "La papelera está vacía."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Trashed items don't count. Counts cover the content you can see."
+msgstr "Los elementos en la papelera no cuentan. Los recuentos cubren el contenido que usted puede ver."
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
@@ -15975,6 +16358,7 @@ msgstr "La autenticación de doble factor está activada."
 #: lib/kiln_cms_web/live/calendar_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
+#: lib/kiln_cms_web/live/organize_live.ex
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -16091,6 +16475,11 @@ msgstr "Sin cambios"
 msgid "Unconfirmed"
 msgstr "Sin confirmar"
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Under-organized"
+msgstr "Poco organizado"
+
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "Undo"
@@ -16191,15 +16580,26 @@ msgstr "Falló la búsqueda en Unsplash: inténtalo de nuevo."
 msgid "Unsubscribe"
 msgstr "Darse de baja"
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Untagged only"
+msgstr "Solo sin etiquetas"
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Untitled"
 msgstr "Sin título"
 
 #: lib/kiln_cms_web/live/media_live.ex
+#: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "Unused"
 msgstr "Sin usar"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Unused and single-use terms"
+msgstr "Términos sin uso y de un solo uso"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -16456,6 +16856,11 @@ msgstr "Se usa en botones, enlaces y elementos destacados, en el sitio público 
 #, elixir-autogen, elixir-format
 msgid "Used for link previews when a page has no image of its own."
 msgstr "Se usa en las vistas previas de enlaces cuando una página no tiene imagen propia."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Used once"
+msgstr "Usado una vez"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -17410,6 +17815,11 @@ msgstr "Sus embudos"
 msgid "Your inbox is empty"
 msgstr "Tu bandeja de entrada está vacía"
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your library grouped by what it is about, not only by how it was filed — and where the vocabulary has not caught up."
+msgstr "Su biblioteca agrupada por su tema, no solo por cómo se archivó — y dónde el vocabulario no ha llegado."
+
 #: lib/kiln_cms_web/live/token_preview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Your name"
@@ -17564,6 +17974,7 @@ msgstr "un tiempo desconocido"
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/media_live.ex
+#: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "and %{count} more"
 msgstr "y %{count} más"
@@ -17677,6 +18088,11 @@ msgstr "vaciar la caché"
 #, elixir-autogen, elixir-format
 msgid "close"
 msgstr "cerrar"
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "closest: %{tag} (%{pct}%)"
+msgstr "más cercana: %{tag} (%{pct}%)"
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format

@@ -456,6 +456,10 @@ defmodule KilnCMSWeb.Router do
       # The content tree for one type (#1597, D21). Per-type because a parent
       # is a record of the same type, so the tree cannot span types.
       live "/editor/structure/:type", StructureLive, :index
+      # Derived organization (#1596): clusters, bulk tag review, the
+      # under-organized queue, taxonomy health and gaps. Invisible (nav) and
+      # empty when semantic search is off.
+      live "/editor/organize", OrganizeLive, :index
       live "/editor/content/:type/new", ContentEditorLive, :new
       live "/editor/content/:type/:id", ContentEditorLive, :content
       live "/editor/preview/:kind/:id", PreviewLive, :show

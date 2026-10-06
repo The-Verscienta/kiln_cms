@@ -13,6 +13,8 @@ defmodule KilnCMS.SearchIndex do
       define :upsert_block_embedding, action: :upsert
       define :block_embeddings_for, action: :for_document, args: [:document_type, :document_id]
       define :nearest_block_embeddings, action: :nearest_to_vector
+      # Per-document centroids averaged in SQL (#1596, `KilnCMS.Organize`).
+      define :document_centroids, action: :document_centroids, args: [:document_ids]
 
       define :get_block_embedding,
         action: :read,
