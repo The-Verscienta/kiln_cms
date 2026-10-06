@@ -425,6 +425,40 @@ carries the reasoning.
 
 ## Changed
 
+<a id="searchable-custom-fields-are-indexed-as-text"></a>
+
+- **Searchable custom fields are indexed as text: HTML stripped, entities
+  decoded, and a project extractor can decode JSON, pick keys and set order.**
+  A rich-text custom field stores markup, and `search_text` took it verbatim:
+  the full-text vector dropped the tags, but the `highlight`/`passage`
+  snippets and the document embedding read `<p>`, `<em>` and `&amp;`. Every
+  string a flagged field contributes now goes through
+  `KilnCMS.PlainText.from_html/1` — two regexes, so malformed markup never
+  raises inside a save. A site whose structured values are JSON stored as
+  text (common after a migration) can configure
+  `config :kiln_cms, KilnCMS.CMS.SearchableFields, extractor: MyApp.SearchText`,
+  a `KilnCMS.CMS.SearchableFields.Extractor` that returns a field's texts (or
+  `:default`) and may order the fields, since an embedding reads only the
+  first few hundred tokens. An extractor that raises, throws or exits is
+  logged once per field and that field falls back to the default; an
+  `order/1` that drops or repeats a field is corrected. Inline tags (`em`,
+  `sub`, …) no longer split words, and the typographic, Latin-1 and Greek
+  named entities decode. Existing rows pick this up on their next save or
+  fire. Documented in `docs/search-roadmap.md`. ([#1585](https://github.com/The-Verscienta/kiln_cms/issues/1585))
+
+<a id="re-indexing-no-longer-moves-updated-at"></a>
+
+- **Re-indexing search text and storing an embedding no longer move a
+  document's `updated_at`.** `:reindex_search_text` (written on every fire)
+  and `:set_embedding` (the embedding worker) wrote only derived columns, but
+  Ash stamps `updated_at` on every update, so flipping a field's `searchable`
+  flag restamped every published document of the type as edited "now" — in
+  the "last updated" a reader sees, JSON-LD `dateModified`, feeds and
+  newest-first sorts — contrary to `KilnCMS.Firing.Sweep`'s promise of no
+  `updated_at` churn. Both actions now carry `Changes.KeepUpdatedAt`, an
+  atomic `updated_at = updated_at`. Editorial writes are unchanged.
+  ([#1585](https://github.com/The-Verscienta/kiln_cms/issues/1585))
+
 <a id="the-update-check-asks-kilncms-devs-release-feed-first"></a>
 
 - **The update check asks kilncms.dev's release feed first and lists the

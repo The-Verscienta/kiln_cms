@@ -122,6 +122,14 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Searchable custom fields are indexed as text: HTML stripped, entities
+  decoded, and a project extractor can decode JSON, pick keys and set order.**
+  ([#1585](https://github.com/The-Verscienta/kiln_cms/issues/1585) · [long form](docs/changelog/unreleased.md#searchable-custom-fields-are-indexed-as-text))
+
+- **Re-indexing search text and storing an embedding no longer move a
+  document's `updated_at`.**
+  ([#1585](https://github.com/The-Verscienta/kiln_cms/issues/1585) · [long form](docs/changelog/unreleased.md#re-indexing-no-longer-moves-updated-at))
+
 - **The update check asks kilncms.dev's release feed first and lists the
   release's highlights; GitHub is the fallback, and forks skip the feed.**
   ([#1877](https://github.com/The-Verscienta/kiln_cms/issues/1877) · [long form](docs/changelog/unreleased.md#the-update-check-asks-kilncms-devs-release-feed-first))

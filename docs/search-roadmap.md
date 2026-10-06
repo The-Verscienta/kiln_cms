@@ -205,6 +205,32 @@ field, re-fires the type's published documents so the index catches up; a
 draft catches up on its next save. `names_record` is separate: it makes the
 value a *name* (the alias leg's phrase match), not body text.
 
+Every string is read as text, not markup: HTML tags are stripped and
+entities decoded (`KilnCMS.PlainText.from_html/1`), so the snippet and the
+embedding never see `<p>` or `&amp;`. A re-index (the flag flipped, a
+`mix kiln.refire_all`) and an embedding write leave the document's
+`updated_at` alone (`Changes.KeepUpdatedAt`): recomputing derived text is
+not an edit.
+
+A site can read its own fields with an **extractor**:
+
+```elixir
+config :kiln_cms, KilnCMS.CMS.SearchableFields, extractor: MyApp.SearchText
+```
+
+`MyApp.SearchText` implements `KilnCMS.CMS.SearchableFields.Extractor`:
+`texts(definition, value)` returns a field's texts, or `:default` for the
+generic reading above (`SearchableFields.default_texts/1` is public, for a
+value the extractor decoded itself); the optional `order(definitions)`
+orders the flagged fields — which matters, because the embedding model reads
+only the first few hundred tokens of `search_text`. Use it when structured
+values are stored as JSON text (common after a migration from another CMS),
+to keep only some keys of a structured value, or to put identity fields
+first. It runs inside every indexing write and every fire: a raise, throw or
+exit falls back to the default for that field and is logged once per field;
+an `order/1` result that drops, invents or repeats a definition is
+corrected, so no field's text is lost or doubled.
+
 ## 8. Reranking  ·  Effort M–L · Risk M · *shipped (Bumblebee cross-encoder adapter, applied in hybrid/global when enabled)*
 
 **Goal.** Reorder the top-k hybrid results with a stronger relevance model.

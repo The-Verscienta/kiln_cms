@@ -125,55 +125,12 @@ defmodule KilnCMS.Assist.Suggestion do
     String.replace(text, ~r/^[ \t]*(?:```|~~~)[^\n]*$/mu, "")
   end
 
-  # Only things that are actually tags — a name or a closing slash after the
-  # `<`, or a comment. A blanket `<[^>]*>` also eats ordinary prose: "use x < y
-  # and a > b" came out as "use x b", silently deleting a clause from a
-  # suggestion whose selling point is that it keeps every fact.
-  #
-  # Replaced with a space, not removed: "one<br>two" must not become "onetwo".
-  defp strip_tags(text) do
-    String.replace(text, ~r|<!--.*?-->|us, " ")
-    |> String.replace(~r|</?[A-Za-z][^>]*>|u, " ")
-  end
-
-  @entities %{
-    "amp" => "&",
-    "lt" => "<",
-    "gt" => ">",
-    "quot" => "\"",
-    "apos" => "'",
-    "nbsp" => " "
-  }
-
-  # Decoded, not blanked. Models routinely escape `&` and apostrophes, and
-  # substituting a space split the word around them — "AT&amp;T and R&amp;D"
-  # became "AT T and R D". Decoding runs *after* `strip_tags/1` on purpose:
-  # `&lt;script&gt;` then survives as the literal text "<script>", which is
-  # exactly what this module wants an author to see and refuse.
-  defp decode_entities(text) do
-    String.replace(text, ~r/&(#[0-9]+|#[xX][0-9A-Fa-f]+|[A-Za-z]+);/u, fn entity ->
-      entity |> String.slice(1..-2//1) |> entity_char() || entity
-    end)
-  end
-
-  defp entity_char("#x" <> hex), do: codepoint(hex, 16)
-  defp entity_char("#X" <> hex), do: codepoint(hex, 16)
-  defp entity_char("#" <> digits), do: codepoint(digits, 10)
-  defp entity_char(name), do: Map.get(@entities, String.downcase(name))
-
-  defp codepoint(digits, base) do
-    case Integer.parse(digits, base) do
-      # Valid scalar values only. A surrogate or an out-of-range number would
-      # raise in `List.to_string/1`, and the decoded character still has to
-      # survive `strip_control/1` below, so nothing dangerous is smuggled in
-      # by writing it as an entity.
-      {number, ""} when number in 0x20..0xD7FF or number in 0xE000..0x10FFFF ->
-        <<number::utf8>>
-
-      _ ->
-        nil
-    end
-  end
+  # Tag stripping and entity decoding live in `KilnCMS.PlainText` (shared
+  # with the search index); decoding still runs after stripping, so
+  # `&lt;script&gt;` survives as the literal text an author should see and
+  # refuse.
+  defp strip_tags(text), do: KilnCMS.PlainText.strip_tags(text)
+  defp decode_entities(text), do: KilnCMS.PlainText.decode_entities(text)
 
   # Control (Cc) and format (Cf) characters. NUL is here: Postgres rejects 0x00
   # in a text column by *raising*, killing the LiveView and the author's
