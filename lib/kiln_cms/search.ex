@@ -353,6 +353,36 @@ defmodule KilnCMS.Search do
   def near_duplicate_threshold, do: cfg(:near_duplicate_threshold, 0.1)
 
   @doc """
+  Cosine-distance ceiling on two **tag names** being near-duplicates — the
+  taxonomy-health check in `KilnCMS.Organize.Health` (#1596): "colour" and
+  "color", "tutorial" and "tutorials".
+
+  A third axis, measured on its own: a label against a label, which behaves
+  like neither `suggest_tags_threshold/0` (a label against a document) nor
+  `near_duplicate_threshold/0` (a document against a document). Measured
+  2026-10-06 against the default `BAAI/bge-small-en-v1.5` over
+  `KilnCMS.TermDuplicateCorpus` — 20 pairs a person would merge, 15 related but
+  distinct pairs, 10 unrelated:
+
+  | | cosine distance |
+  |---|---|
+  | the same term (spelling, plural, case, hyphenation, abbreviation) | 0.0000 – 0.2679 |
+  | related but distinct terms ("tea" / "coffee", "frontend" / "backend") | 0.0893 – 0.3951 |
+  | unrelated terms | 0.3917 – 0.5200 |
+
+  The first two bands **overlap**, as the tag-suggestion ones do, so this is a
+  choice of error. `0.08` keeps 11 of the 20 duplicates — every spelling,
+  plural, case and hyphenation variant — and admits **none** of the 15 related
+  pairs. What it misses are the abbreviations ("JS", "ML", "UX" at 0.13-0.27),
+  which sit among the related-but-distinct pairs and cannot be told apart from
+  them by distance alone. A health report that calls "recipes" and "cooking"
+  the same tag (0.0893) is one an editor stops reading; one that misses "JS"
+  is merely incomplete.
+  """
+  @spec near_duplicate_term_threshold() :: float()
+  def near_duplicate_term_threshold, do: cfg(:near_duplicate_term_threshold, 0.08)
+
+  @doc """
   Rate-limit budget for computing an embedding on demand — see
   `KilnCMS.LLM.Budget` and `KilnCMS.Search.Related`'s `centroid/2` fallback,
   which costs one model inference **per block** for a document that has no
