@@ -828,6 +828,22 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
           </div>
         </div>
 
+        <%!-- The ranking only covers tags with a vector; the rest are
+                indexed a budget window's room at a time
+                (`Related.suggest_tags_partial/2`), so say the list is
+                partial rather than let it read as the whole taxonomy. --%>
+        <p
+          :if={@intel_tags != nil and @intel_tags_unindexed > 0}
+          id="intel-tags-unindexed"
+          class="text-xs text-base-content/60"
+        >
+          {ngettext(
+            "Ranked over indexed tags only; %{count} tag not indexed yet — it fills in on a later run.",
+            "Ranked over indexed tags only; %{count} tags not indexed yet — they fill in a batch at a time.",
+            @intel_tags_unindexed
+          )}
+        </p>
+
         <button
           type="button"
           phx-click="content_intel_refresh"
