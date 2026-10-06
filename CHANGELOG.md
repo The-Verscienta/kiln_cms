@@ -76,6 +76,10 @@ Every summary line below that was shortened links to its own entry there.
   refused.**
   ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) · [long form](docs/changelog/unreleased.md#documents-can-sit-under-one-another-the-content-tree))
 
+- **System → Plugins says what each plugin adds — its blocks, field types,
+  pages and content types by name — and flags a plugin with no summary.**
+  ([#1888](https://github.com/The-Verscienta/kiln_cms/pull/1888))
+
 - **The content list filters by author, category, tag, language, update date
   and review health, sorts by update, publish date or title, and saves a
   filter as a named view.**
