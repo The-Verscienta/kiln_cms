@@ -57,6 +57,38 @@ carries the reasoning.
 
 ## Added
 
+<a id="derived-organization-at-editororganize"></a>
+
+- **Derived organization at `/editor/organize`.** The library seen through its
+  embeddings rather than its folders (§6 of
+  `docs/content-organization-plan.md`), in five tabs: **clusters** of published
+  documents by subject, each named by its nearest tag or flagged when no tag
+  covers it; **tag review**, which proposes *existing* tags across a filtered
+  selection of up to 20 documents and applies only what an editor ticks per
+  row (a published document's tags go to its working copy); an
+  **under-organized** queue of untagged documents and ones far from every tag;
+  **taxonomy health** — unused, single-use and near-duplicate terms, and
+  published documents no link points to; and zero-result **searches** read as a
+  missing term or a missing hub page.
+  With semantic search off (the default) none of it shows: no nav item, and a
+  bookmarked visit gets one line. Built against today's tags and categories
+  through one module (`KilnCMS.Organize.Terms`), so the 2.0 vocabulary (#1595)
+  has one seam to migrate.
+  Every bulk path is bounded, and the bounds are shown wherever they cut a set
+  short. Only tag review can reach model inference: each document's cost is
+  counted before the call, a run spends at most one per-user embedding window
+  (60 by default), runs as an **unattended** caller so it can never reach the
+  half of the embedding budget editors' own panels rely on, and stops *before*
+  a charge the budget would refuse. A published library costs nothing — its
+  vectors are stored — once tag names are indexed, which the page does in
+  window-sized chunks. See `docs/automation.md` for how this shares the
+  embedding reserve with automation rules.
+  The near-duplicate tag ceiling (`near_duplicate_term_threshold`, `0.08`) is
+  measured against the default model: it flags spelling, plural and case
+  variants and no related-but-distinct pair, and misses abbreviations by
+  design.
+  ([#1596](https://github.com/The-Verscienta/kiln_cms/issues/1596))
+
 <a id="a-structure-view-for-arranging-a-content-tree"></a>
 
 - **A structure view for arranging a content tree.** `/editor/structure/:type`

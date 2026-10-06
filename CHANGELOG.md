@@ -73,6 +73,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **`/editor/organize`: semantic clusters, bulk tag review, an under-organized
+  queue, taxonomy health and search gaps — only with semantic search on.**
+  ([#1596](https://github.com/The-Verscienta/kiln_cms/issues/1596) · [long form](docs/changelog/unreleased.md#derived-organization-at-editororganize))
+
 - **A structure view for arranging a content tree: drag to reorder, indent to
   nest, reachable from the content list for one type at a time.**
   ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) · [long form](docs/changelog/unreleased.md#a-structure-view-for-arranging-a-content-tree))
