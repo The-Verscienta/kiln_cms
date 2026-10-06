@@ -945,6 +945,13 @@ msgid_plural "%{count} paragraphs run over %{max} words — consider splitting t
 msgstr[0] "1 párrafo supera las %{max} palabras — considere dividirlo."
 msgstr[1] "%{count} párrafos superan las %{max} palabras — considere dividirlos."
 
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 published document is in no menu."
+msgid_plural "%{count} published documents are in no menu."
+msgstr[0] "1 documento publicado no está en ningún menú."
+msgstr[1] "%{count} documentos publicados no están en ningún menú."
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "2FA on"
@@ -9550,6 +9557,11 @@ msgstr "Sin configurar"
 msgid "Not enough data to call a leader: every variant needs at least %{floor} impressions first. Rates on fewer are shown but not compared."
 msgstr "No hay datos suficientes para declarar una líder: cada variante necesita al menos %{floor} impresiones. Las tasas con menos se muestran pero no se comparan."
 
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not in any menu"
+msgstr "En ningún menú"
+
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Not in feeds"
@@ -11024,6 +11036,11 @@ msgstr "Tus cambios se han publicado."
 #, elixir-autogen, elixir-format
 msgid "Published — content I authored went live"
 msgstr "Publicado — contenido de mi autoría se puso en línea"
+
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Published, but no menu links to it."
+msgstr "Publicado, pero ningún menú enlaza con él."
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex

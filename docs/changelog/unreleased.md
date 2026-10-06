@@ -57,6 +57,27 @@ carries the reasoning.
 
 ## Added
 
+<a id="the-structure-view-flags-published-documents-no-menu-links-to"></a>
+
+- **The structure view flags published documents no menu links to.** A document
+  in no menu is one a visitor can only reach by knowing its URL, which for a
+  section an editor has just arranged is usually an oversight rather than a
+  choice. `/editor/structure/:type` badges them and counts them at the top.
+  A menu item only counts if it would actually **render**: a `:content` item
+  with a target (a `:url` item typed out by hand is invisible here, because
+  nothing records that it is the same document), visible itself *and* all the
+  way up its chain (an item inside a section an editor switched off is not a
+  way in), and rooted within its menu (an item whose parent chain does not reach
+  a root never renders, so it links nothing). Linked from any one menu or locale
+  counts as linked.
+  Only **published** documents are flagged. A draft nothing points at is the
+  normal state of a draft, and badging those would fire on nearly everything and
+  make the signal worthless.
+  The wording is "not in any menu" rather than "unreachable" on purpose: a
+  document can be reachable by routes this cannot see — a link in another
+  document's body, or a theme that renders a section's children on its own — and
+  the badge should not claim more than it knows.
+
 <a id="a-structure-view-for-arranging-a-content-tree"></a>
 
 - **A structure view for arranging a content tree.** `/editor/structure/:type`
