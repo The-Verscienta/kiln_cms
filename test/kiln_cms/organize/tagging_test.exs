@@ -128,6 +128,57 @@ defmodule KilnCMS.Organize.TaggingTest do
     assert spent("org", org.id, @hour) == base
   end
 
+  test "a budget stop holds back costed documents only, never the free ones behind it",
+       %{org: org, admin: admin, editor: editor, base: base} do
+    budget(60, 600, 0.0)
+    costly = draft(org, admin, 2)
+    pub1 = post!(org, admin, "published passage #{uniq()}")
+    pub2 = post!(org, admin, "published passage #{uniq()}")
+
+    run = Tagging.propose(org, editor, selection(org, editor, [costly, pub1, pub2]))
+
+    assert Enum.map(run.rows, &{&1.id, &1.status}) == [{pub1.id, :proposed}, {pub2.id, :proposed}]
+    assert run.stopped == :unattended_disabled
+    assert Enum.map(run.pending, & &1.id) == [costly.id]
+    assert spent("org", org.id, @hour) == base
+  end
+
+  test "a published document with no stored vectors says so, rather than 'no tag fits'",
+       %{org: org, admin: admin, editor: editor} do
+    unindexed =
+      CMS.create_post!(%{title: "late #{uniq()}", slug: "late-#{uniq()}"},
+        actor: admin,
+        tenant: org
+      )
+      |> CMS.publish_post!(%{}, actor: admin, tenant: org)
+
+    assert [%{status: :unindexed, cost: 0}] =
+             Tagging.propose(org, editor, selection(org, editor, [unindexed])).rows
+  end
+
+  test "the tag index and the cost estimate cover the WHOLE vocabulary, not the health bound",
+       %{org: org, admin: admin, editor: editor} do
+    Application.put_env(:kiln_cms, KilnCMS.Organize, term_limit: 3)
+    on_exit(fn -> Application.delete_env(:kiln_cms, KilnCMS.Organize) end)
+
+    # Setup indexed 3; two more, past the bound.
+    extra = for _ <- 1..2, do: tag!(org, admin, "zzz past the bound #{uniq()}")
+    assert Terms.missing_tag_vectors(org, editor) == 2
+
+    # The estimate sees them: a stored-vector document reaching the ranking
+    # costs exactly the two uncached names.
+    live = post!(org, admin, "published passage #{uniq()}")
+
+    assert [%{cost: 2, status: :proposed}] =
+             Tagging.propose(org, editor, selection(org, editor, [live])).rows
+
+    assert spent("user", editor.id, @minute) == 2
+    assert Terms.missing_tag_vectors(org, editor) == 0
+    assert length(Terms.all_tags(org, editor)) == 5
+    assert length(Terms.tags(org, editor)) == 3
+    assert length(extra) == 2
+  end
+
   test "automation already spent the background share: stopped, not charged",
        %{org: org, admin: admin, editor: editor} do
     # Org window 10, share 0.5: unattended callers stop at 5. Setup spent 3;

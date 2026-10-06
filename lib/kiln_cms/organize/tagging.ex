@@ -39,8 +39,10 @@ defmodule KilnCMS.Organize.Tagging do
        but a bulk run is the multiplied caller the reserve (#943) exists for:
        held to `embedding_unattended_share` of the org window, it can never
        eat the half another editor's per-document panel relies on. The first
-       `{:error, _}` stops the run (never "try the next one anyway": each
-       refused charge still counts).
+       stop — the cap, no room, or an `{:error, _}` from the call — ends all
+       *charging* for the run (never "try the next one anyway": each refused
+       charge still counts). Documents that cost nothing are still proposed
+       after it; costed ones are returned as `pending` for *Continue*.
 
   Worst case per click: `run_cap/0` units (60 of the default 600/hour org
   window). Because the reserve check is `spent >= ceiling` rather than
@@ -69,7 +71,7 @@ defmodule KilnCMS.Organize.Tagging do
           type: String.t(),
           title: String.t() | nil,
           state: atom(),
-          status: :proposed | :nothing | :too_large | :unavailable,
+          status: :proposed | :nothing | :too_large | :unindexed | :unavailable,
           suggestions: [%{term: Terms.t(), distance: float()}],
           cost: non_neg_integer()
         }
@@ -170,36 +172,52 @@ defmodule KilnCMS.Organize.Tagging do
       nil ->
         step(rest, ctx, add_row(acc, row(doc, :unavailable, [], 0)))
 
+      %{state: :published} = record when not is_map_key(ctx.stored, record.id) ->
+        # Published but not indexed yet (semantic search switched on without
+        # a re-fire): `suggest_tags/2` would answer `[]`, which is not "no tag
+        # fits" — say what it is.
+        step(rest, ctx, add_row(acc, row(doc, :unindexed, [], 0)))
+
       record ->
         decide(record, doc, cost(record, ctx.stored, ctx.tag_cost), rest, ctx, acc)
     end
   end
 
   # A document that costs nothing (stored vectors, a fully cached tag index)
-  # never touches the budget, so it runs whatever the budget says — a
-  # published library is reviewable even with unattended embedding off.
+  # never touches the budget, so it runs whatever the budget says — including
+  # after a budget stop: a published library is reviewable even with
+  # unattended embedding off, and a stop on one draft does not hold back the
+  # free documents queued behind it.
   defp decide(record, doc, 0, rest, ctx, acc), do: call(record, doc, 0, rest, ctx, acc)
 
   defp decide(record, doc, cost, rest, ctx, acc) do
     cond do
       # A standing setting, not an overload: say so rather than "try later".
       unattended_off?() ->
-        finish(%{acc | stopped: :unattended_disabled, pending: [doc | rest]})
+        step(rest, ctx, hold(acc, doc, :unattended_disabled))
 
       cost > max_doc_cost() ->
         step(rest, ctx, add_row(acc, row(doc, :too_large, [], cost)))
 
+      # Once stopped, no costed document is tried again in this run.
+      acc.stopped != nil ->
+        step(rest, ctx, hold(acc, doc, acc.stopped))
+
       acc.spent + cost > run_cap() ->
-        finish(%{acc | stopped: :run_cap, pending: [doc | rest]})
+        step(rest, ctx, hold(acc, doc, :run_cap))
 
       not room?(cost, ctx) ->
         {_count, window_ms} = Search.embedding_per_user_limit()
-        finish(%{acc | stopped: {:rate_limited, window_ms}, pending: [doc | rest]})
+        step(rest, ctx, hold(acc, doc, {:rate_limited, window_ms}))
 
       true ->
         call(record, doc, cost, rest, ctx, acc)
     end
   end
+
+  # Queue `doc` for a later run; the first reason is the one reported.
+  defp hold(acc, doc, reason),
+    do: %{acc | stopped: acc.stopped || reason, pending: [doc | acc.pending]}
 
   defp unattended_off? do
     KilnCMS.LLM.Budget.unattended_ceiling(
@@ -214,8 +232,11 @@ defmodule KilnCMS.Organize.Tagging do
            user_id: ctx.user_id,
            unattended?: true
          ) do
+      # Refused anyway (another caller took the room in between): stop
+      # charging — each refused charge still counts — but keep going for the
+      # free documents behind it.
       {:error, reason} ->
-        finish(%{acc | stopped: stop_reason(reason), pending: [doc | rest]})
+        step(rest, ctx, hold(acc, doc, stop_reason(reason)))
 
       [] ->
         step(
@@ -252,7 +273,7 @@ defmodule KilnCMS.Organize.Tagging do
 
   defp add_row(acc, row), do: %{acc | rows: [row | acc.rows]}
 
-  defp finish(acc), do: %{acc | rows: Enum.reverse(acc.rows)}
+  defp finish(acc), do: %{acc | rows: Enum.reverse(acc.rows), pending: Enum.reverse(acc.pending)}
 
   defp load(doc, ctx) do
     case ContentTypes.get_record(doc.type, doc.id,
@@ -295,7 +316,7 @@ defmodule KilnCMS.Organize.Tagging do
 
   defp tag_cost(org_id, org, actor) do
     org_id
-    |> Related.missing_tag_vectors(Terms.tags(org, actor))
+    |> Related.missing_tag_vectors(Terms.all_tags(org, actor))
     |> Enum.count(&(not VectorCache.cached?(&1.name)))
   end
 

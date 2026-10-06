@@ -65,6 +65,21 @@ defmodule KilnCMS.Organize.Terms do
     |> Enum.map(&to_term(&1, :tag))
   end
 
+  @doc """
+  **Every** tag the actor may read, `id` and `name` only — the same set
+  `KilnCMS.Search.Related.suggest_tags/2` reads as its candidates, unbounded
+  like it. The tag-vector index and its cost estimate must cover exactly what
+  `suggest_tags/2` will try to embed: a tag left out here is one it embeds in
+  a single charge of its own, which past the window is refused (and still
+  counted) on every call. `term_limit` bounds the health and distance passes,
+  never this.
+  """
+  @spec all_tags(term(), term()) :: [t()]
+  def all_tags(org, actor) do
+    CMS.list_tags!(actor: actor, tenant: org, query: [select: [:id, :name, :slug]])
+    |> Enum.map(&to_term(&1, :tag))
+  end
+
   @doc "The actor's categories, by name — same bound as `tags/2`."
   @spec categories(term(), term()) :: [t()]
   def categories(org, actor) do
@@ -252,7 +267,7 @@ defmodule KilnCMS.Organize.Terms do
 
       org
       |> KilnCMS.Accounts.org_id()
-      |> Related.missing_tag_vectors(tags(org, actor))
+      |> Related.missing_tag_vectors(all_tags(org, actor))
       |> Enum.count(&(not MapSet.member?(excluded, &1.id)))
     else
       0
@@ -295,7 +310,7 @@ defmodule KilnCMS.Organize.Terms do
       room ->
         opts = [user_id: user_id, exclude: exclude]
         opts = if room == :infinity, do: opts, else: Keyword.put(opts, :max, room)
-        Related.ensure_tag_vectors(org_id, tags(org, actor), opts)
+        Related.ensure_tag_vectors(org_id, all_tags(org, actor), opts)
     end
   end
 
