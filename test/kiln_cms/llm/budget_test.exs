@@ -191,4 +191,34 @@ defmodule KilnCMS.LLM.BudgetTest do
       assert {:error, {:rate_limited, _}} = Budget.check(feature, org, rule, tight)
     end
   end
+
+  describe "remaining/4 (#1596)" do
+    test "is the tightest bucket the call would hit" do
+      {f, o, u} = {feature(), org(), user()}
+      lim = limits(per_user: {3, @window}, per_org: {10, @window})
+
+      assert Budget.remaining(f, o, u, lim) == 3
+      :ok = Budget.check(f, o, u, Keyword.put(lim, :units, 2))
+      assert Budget.remaining(f, o, u, lim) == 1
+      # The org bucket took the 2 as well: with no user to throttle, its room.
+      assert Budget.remaining(f, o, nil, lim) == 8
+    end
+
+    test "an unattended caller's room stops at the reserve ceiling" do
+      {f, o, u} = {feature(), org(), user()}
+      # per_org 4, share 0.5 -> ceiling 2.
+      assert Budget.remaining(f, o, u, unattended()) == 2
+      :ok = Budget.check(f, o, user(), limits(units: 1))
+      assert Budget.remaining(f, o, u, unattended()) == 1
+      assert Budget.remaining(f, o, u, limits()) == 3
+    end
+
+    test "never negative, and :infinity with no bucket to read" do
+      {f, o, u} = {feature(), org(), user()}
+      lim = limits(per_user: {1, @window})
+      _denied = Budget.check(f, o, u, Keyword.put(lim, :units, 5))
+      assert Budget.remaining(f, o, u, lim) == 0
+      assert Budget.remaining(f, nil, nil, lim) == :infinity
+    end
+  end
 end

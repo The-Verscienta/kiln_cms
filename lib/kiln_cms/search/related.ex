@@ -289,30 +289,38 @@ defmodule KilnCMS.Search.Related do
 
   The chunk is the point. `suggest_tags/2` charges its whole uncached set in
   one `KilnCMS.LLM.Budget` charge, and a Hammer bucket refuses — and still
-  counts — any single charge larger than its window, so an org with more
-  never-embedded tags than `embedding_per_user_limit/0` allows could never
-  suggest anything, and every attempt would spend the caller's window for
-  nothing. Filling the index ahead of time in window-sized chunks is how a
-  bulk surface (`KilnCMS.Organize`) makes progress instead: each call charges
-  one chunk, and reports what is left.
+  counts — any single charge larger than the room left in its window, so an
+  org with more never-embedded tags than `embedding_per_user_limit/0` allows
+  could never suggest anything, and every attempt would spend the caller's
+  window for nothing. Filling the index ahead of time in chunks sized to the
+  room left (`KilnCMS.Search.embedding_remaining/3`) is how a bulk surface
+  (`KilnCMS.Organize`) makes progress instead.
 
-  Options: `:max` (default: all of them), `:user_id`, `:unattended?` — the
-  same budget context as `suggest_tags/2`. Returns `{:ok, %{indexed:,
-  remaining:}}`, or the budget's `{:error, reason}` with nothing embedded.
-  Semantic search off answers `{:ok, %{indexed: 0, remaining: 0}}` without
-  touching the budget or the index.
+  Options: `:max` (default: all of them); `:exclude`, tag ids to leave out
+  of the chunk (ones an earlier call reported as `failed`); `:user_id`,
+  `:unattended?` — the same budget context as `suggest_tags/2`.
+
+  Returns `{:ok, %{indexed:, failed:, remaining:}}`: how many were stored,
+  the ids of those the embedder answered nothing for (they stay missing —
+  pass them back as `:exclude` so the next chunk moves on rather than
+  re-trying the same names forever), and how many missing tags are left
+  outside this chunk and `:exclude`. Or the budget's `{:error, reason}` with
+  nothing embedded. Semantic search off answers `{:ok, %{indexed: 0, failed:
+  [], remaining: 0}}` without touching the budget or the index.
   """
   @spec ensure_tag_vectors(Ash.UUID.t(), [map()], keyword()) ::
-          {:ok, %{indexed: non_neg_integer(), remaining: non_neg_integer()}}
+          {:ok,
+           %{indexed: non_neg_integer(), failed: [Ash.UUID.t()], remaining: non_neg_integer()}}
           | {:error, {:rate_limited, non_neg_integer()} | :unattended_disabled}
   def ensure_tag_vectors(org_id, tags, opts \\ []) do
     if Search.semantic?(),
       do: fill_tag_vectors(org_id, tags, opts),
-      else: {:ok, %{indexed: 0, remaining: 0}}
+      else: {:ok, %{indexed: 0, failed: [], remaining: 0}}
   end
 
   defp fill_tag_vectors(org_id, tags, opts) do
-    missing = stale_tags(tags, org_id)
+    exclude = opts |> Keyword.get(:exclude, []) |> MapSet.new()
+    missing = tags |> stale_tags(org_id) |> Enum.reject(&MapSet.member?(exclude, &1.id))
     {chunk, rest} = Enum.split(missing, Keyword.get(opts, :max, length(missing)))
     uncached = Enum.count(chunk, &(not VectorCache.cached?(&1.name)))
 
@@ -322,14 +330,15 @@ defmodule KilnCMS.Search.Related do
       unattended?: Keyword.get(opts, :unattended?, false)
     }
 
-    with :ok <- embedding_charge(budget_ctx, uncached, fn -> store_tag_chunk(chunk, org_id) end) do
-      {:ok, %{indexed: length(chunk), remaining: length(rest)}}
+    with {:ok, failed} <-
+           embedding_charge(budget_ctx, uncached, fn -> store_tag_chunk(chunk, org_id) end) do
+      {:ok, %{indexed: length(chunk) - length(failed), failed: failed, remaining: length(rest)}}
     end
   end
 
   defp store_tag_chunk(chunk, org_id) do
-    Enum.each(chunk, &embed_and_store_tag(&1, org_id))
-    :ok
+    failed = for tag <- chunk, embed_and_store_tag(tag, org_id) == :skipped, do: tag.id
+    {:ok, failed}
   end
 
   # ── internals ─────────────────────────────────────────────────────────────
@@ -607,8 +616,12 @@ defmodule KilnCMS.Search.Related do
   # rank) rather than failing every other tag's suggestion.
   defp embed_and_store_tag(tag, org_id) do
     case tag_vector(tag.name) do
-      vector when is_list(vector) -> store_tag_embedding(tag, vector, org_id)
-      _ -> :ok
+      vector when is_list(vector) ->
+        store_tag_embedding(tag, vector, org_id)
+        :stored
+
+      _ ->
+        :skipped
     end
   end
 

@@ -29,6 +29,16 @@ defmodule KilnCMS.Organize.Terms do
   taxonomy page. Counts are read **as the actor**: an aggregate authorizes its
   destination, so a granular-RBAC editor's counts leave out the types they were
   not given, exactly like the taxonomy page's own counts.
+
+  ## Bounds
+
+  `tags/2`, `categories/2` and `usage/2` read at most
+  `KilnCMS.Organize.bound(:term_limit)` (500) terms each, by name — a larger
+  vocabulary is reported on its first 500, and the console says so. Types the
+  private aggregates do not cover (compiled types from `mix kiln.gen.content`)
+  cost one count per *suspect* term (usage 0 or 1) per such type, so at most
+  `2 × 500 × extra types` queries on a fresh vocabulary, and none on a stock
+  install.
   """
   import Ash.Expr, only: [expr: 1]
 
@@ -198,31 +208,63 @@ defmodule KilnCMS.Organize.Terms do
     |> Map.new(&{&1.tag_id, &1.embedding})
   end
 
-  @doc "How many of the actor's tags have no current stored vector."
-  @spec missing_tag_vectors(term(), term()) :: non_neg_integer()
-  def missing_tag_vectors(org, actor) do
-    org
-    |> KilnCMS.Accounts.org_id()
-    |> Related.missing_tag_vectors(tags(org, actor))
-    |> length()
+  @doc """
+  How many of the actor's tags have no current stored vector, leaving out
+  `exclude` (ids an earlier `index_tag_vectors/3` reported as failed). `0`
+  when semantic search is off, without a database read.
+  """
+  @spec missing_tag_vectors(term(), term(), [Ash.UUID.t()]) :: non_neg_integer()
+  def missing_tag_vectors(org, actor, exclude \\ []) do
+    if KilnCMS.Organize.enabled?() do
+      excluded = MapSet.new(exclude)
+
+      org
+      |> KilnCMS.Accounts.org_id()
+      |> Related.missing_tag_vectors(tags(org, actor))
+      |> Enum.count(&(not MapSet.member?(excluded, &1.id)))
+    else
+      0
+    end
   end
 
   @doc """
-  Fills the tag-vector index one budget window at a time — at most the
-  per-user embedding window's count per call (see
-  `KilnCMS.Search.Related.ensure_tag_vectors/3` for why a bigger single charge
-  could never pass). Interactive: an editor clicked for it.
-  """
-  @spec index_tag_vectors(term(), term()) ::
-          {:ok, %{indexed: non_neg_integer(), remaining: non_neg_integer()}}
-          | {:error, term()}
-  def index_tag_vectors(org, actor) do
-    {chunk, _window} = KilnCMS.Search.embedding_per_user_limit()
+  Fills the tag-vector index one chunk at a time, the chunk sized to the room
+  **left** in the editor's embedding window
+  (`KilnCMS.Search.embedding_remaining/3`), never to the window's full size:
+  a charge larger than the room left is refused *and still counted* (Hammer
+  increments before it compares), which would leave the editor's own
+  per-document panel blocked for the rest of the window. With no room left it
+  answers `{:error, {:rate_limited, window_ms}}` without charging anything.
 
-    Related.ensure_tag_vectors(KilnCMS.Accounts.org_id(org), tags(org, actor),
-      max: chunk,
-      user_id: actor && actor.id
-    )
+  Interactive: an editor clicked for it. `exclude` is the `failed` ids earlier
+  calls reported (see `KilnCMS.Search.Related.ensure_tag_vectors/3`), so a
+  name the embedder cannot answer for stops being retried. Semantic search off
+  answers `{:ok, %{indexed: 0, failed: [], remaining: 0}}` before any read.
+  """
+  @spec index_tag_vectors(term(), term(), [Ash.UUID.t()]) ::
+          {:ok,
+           %{indexed: non_neg_integer(), failed: [Ash.UUID.t()], remaining: non_neg_integer()}}
+          | {:error, term()}
+  def index_tag_vectors(org, actor, exclude \\ []) do
+    if KilnCMS.Organize.enabled?(),
+      do: index_chunk(org, actor, exclude),
+      else: {:ok, %{indexed: 0, failed: [], remaining: 0}}
+  end
+
+  defp index_chunk(org, actor, exclude) do
+    org_id = KilnCMS.Accounts.org_id(org)
+    user_id = actor && actor.id
+
+    case KilnCMS.Search.embedding_remaining(org_id, user_id, false) do
+      0 ->
+        {_count, window_ms} = KilnCMS.Search.embedding_per_user_limit()
+        {:error, {:rate_limited, window_ms}}
+
+      room ->
+        opts = [user_id: user_id, exclude: exclude]
+        opts = if room == :infinity, do: opts, else: Keyword.put(opts, :max, room)
+        Related.ensure_tag_vectors(org_id, tags(org, actor), opts)
+    end
   end
 
   @doc """

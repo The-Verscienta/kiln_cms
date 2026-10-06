@@ -409,6 +409,23 @@ defmodule KilnCMS.Search do
   end
 
   @doc """
+  The embedding units a `"search_embedding"` charge could still spend now for
+  this org and caller without being refused — `KilnCMS.LLM.Budget.remaining/4`
+  over `embedding_budget_limits/2`. A bulk caller sizes its next batch to this
+  rather than discovering the window with a refused (and still counted)
+  charge (#1596).
+  """
+  @spec embedding_remaining(term(), term(), boolean()) :: non_neg_integer() | :infinity
+  def embedding_remaining(org_id, user_id, unattended?) do
+    KilnCMS.LLM.Budget.remaining(
+      "search_embedding",
+      org_id,
+      user_id,
+      embedding_budget_limits(unattended?)
+    )
+  end
+
+  @doc """
   Nx `defn_options` for the local Bumblebee servings. Uses the EXLA compiler when
   the `:exla` dependency is compiled in (dev/test); otherwise returns `[]` so the
   servings fall back to Nx's default backend instead of crashing on a missing

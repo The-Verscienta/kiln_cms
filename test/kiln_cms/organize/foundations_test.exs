@@ -130,6 +130,69 @@ defmodule KilnCMS.Organize.FoundationsTest do
       assert Related.missing_tag_vectors(org.id, [Map.take(tag, [:id, :name])]) == []
       assert spent("user", user, :timer.minutes(1)) == 0
     end
+
+    test "Terms.index_tag_vectors sizes the chunk to the room LEFT in the window",
+         %{org: org, admin: admin} do
+      # The editor already spent 2 of 3 this minute (the per-document panel,
+      # say). A full-window chunk of 3 would be refused AND counted — leaving
+      # the counter at 5 and the panel blocked. Sized to the room left, it
+      # indexes 1 and the counter lands exactly on the limit.
+      put_search_env(
+        embedding_per_user_limit: {3, :timer.minutes(1)},
+        embedding_per_org_limit: {100, :timer.hours(1)}
+      )
+
+      editor = user!(:admin)
+      for _ <- 1..3, do: tag!(org, admin, "room tag #{uniq()}")
+
+      :ok =
+        KilnCMS.LLM.Budget.check(
+          "search_embedding",
+          nil,
+          editor.id,
+          KilnCMS.Search.embedding_budget_limits(false, 2)
+        )
+
+      assert spent("user", editor.id, :timer.minutes(1)) == 2
+
+      assert {:ok, %{indexed: 1, remaining: 2}} = Terms.index_tag_vectors(org, editor)
+      assert spent("user", editor.id, :timer.minutes(1)) == 3
+
+      # No room left: refused without charging anything further.
+      assert {:error, {:rate_limited, _}} = Terms.index_tag_vectors(org, editor)
+      assert spent("user", editor.id, :timer.minutes(1)) == 3
+      assert Terms.missing_tag_vectors(org, editor) == 2
+    end
+
+    test "a name the embedder cannot answer for is reported, and the next chunk moves on",
+         %{org: org, admin: admin} do
+      put_search_env(embedder: KilnCMS.Organize.FoundationsTest.PickyEmbedder)
+      bad = tag!(org, admin, "aaa unembeddable #{uniq()}")
+      good = tag!(org, admin, "bbb fine #{uniq()}")
+      tags = Enum.map([bad, good], &Map.take(&1, [:id, :name]))
+
+      assert {:ok, %{indexed: 0, failed: [failed_id], remaining: 1}} =
+               Related.ensure_tag_vectors(org.id, tags, max: 1)
+
+      assert failed_id == bad.id
+
+      # Without `:exclude`, the same unembeddable name would head every chunk.
+      assert {:ok, %{indexed: 1, failed: [], remaining: 0}} =
+               Related.ensure_tag_vectors(org.id, tags, max: 1, exclude: [failed_id])
+
+      assert Enum.map(Related.missing_tag_vectors(org.id, tags), & &1.id) == [bad.id]
+    end
+  end
+
+  defmodule PickyEmbedder do
+    @moduledoc false
+    @behaviour KilnCMS.Search.Embedder
+    @impl true
+    def embed(text) do
+      if String.contains?(text, "unembeddable"),
+        do: {:error, :no_vector},
+        else: KilnCMS.StubEmbedder.embed(text)
+    end
   end
 
   describe "Terms.usage/2" do
