@@ -8,7 +8,7 @@ Code.require_file(Path.expand("config/ml_flag.exs", __DIR__))
 defmodule KilnCMS.MixProject do
   use Mix.Project
 
-  @version "1.1.0-rc.1"
+  @version "1.1.0-rc.2"
   @source_url "https://github.com/The-Verscienta/kiln_cms"
 
   def project do
