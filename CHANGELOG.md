@@ -66,6 +66,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A structure view for arranging a content tree: drag to reorder, indent to
+  nest, reachable from the content list for one type at a time.**
+  ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) · [long form](docs/changelog/unreleased.md#a-structure-view-for-arranging-a-content-tree))
+
 - **A document's URL can follow the content tree: an `[ancestors]` alias token,
   and moving a section re-derives the paths beneath it without overwriting
   hand-written ones.**

@@ -57,6 +57,33 @@ carries the reasoning.
 
 ## Added
 
+<a id="a-structure-view-for-arranging-a-content-tree"></a>
+
+- **A structure view for arranging a content tree.** `/editor/structure/:type`
+  draws one content type's tree: drag to reorder within a level, indent to nest
+  under the sibling above, outdent to move up one. Reachable from the content
+  list whenever a single type is selected — a parent is a record of the same
+  type, so a tree cannot span types and "all" has no structure to show.
+  Depth is changed with buttons rather than by dragging across levels, the same
+  call the menu builder makes and for the same reasons: dropping *into* a
+  sibling is a small target, ambiguous at the boundary between "after this" and
+  "inside this", and unreachable from a keyboard. That matters more here, since
+  with an `[ancestors]` alias pattern this tree decides URLs. Indent means
+  "become the child of the sibling directly above", which is the only placement
+  predictable from the visual order and what Drupal and WordPress both do; the
+  first sibling has nothing above it, so its button is disabled.
+  Every change writes through `:move`, so the placement rules are the action's
+  rather than the page's — a hand-sent move that would nest too deep is refused
+  with its reason, not merely greyed out. A drop reorders the level it landed
+  in and ignores ids from any other level, because the payload is
+  client-supplied and a `position` written against the wrong parent would
+  reorder a level nobody dragged.
+  There is deliberately no filtering and no paging. A filtered tree is not a
+  tree: hiding a parent would either orphan its children on screen or silently
+  promote them, and both lie about the structure being edited. The whole type is
+  loaded, which is bounded in depth but not in breadth — the same honest limit
+  the parent picker carries, with the same answer if a site outgrows it.
+
 <a id="a-documents-url-can-follow-the-content-tree"></a>
 
 - **A document's URL can follow the content tree.** A type's alias pattern gains

@@ -2615,6 +2615,11 @@ msgstr ""
 msgid "Back to the homepage"
 msgstr ""
 
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Back to the list"
+msgstr ""
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Back up now"
@@ -4134,6 +4139,7 @@ msgid "Couldn't import that photo from Unsplash."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/structure_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't move that document."
 msgstr ""
@@ -4250,6 +4256,7 @@ msgid "Couldn't save the new order of fields."
 msgstr ""
 
 #: lib/kiln_cms_web/live/menu_live.ex
+#: lib/kiln_cms_web/live/structure_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't save the new order."
 msgstr ""
@@ -5560,6 +5567,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
+#: lib/kiln_cms_web/live/structure_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
 #: lib/kiln_cms_web/live/type_definition_live.ex
@@ -7431,6 +7439,7 @@ msgid "Incorrect email or password"
 msgstr ""
 
 #: lib/kiln_cms_web/live/menu_live.ex
+#: lib/kiln_cms_web/live/structure_live.ex
 #, elixir-autogen, elixir-format
 msgid "Indent"
 msgstr ""
@@ -9396,6 +9405,11 @@ msgstr ""
 msgid "No such content to edit."
 msgstr ""
 
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "No such content type."
+msgstr ""
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -9668,6 +9682,11 @@ msgstr "Nothing scheduled in this window"
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing similar found."
+msgstr ""
+
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing to arrange yet."
 msgstr ""
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
@@ -10196,6 +10215,7 @@ msgid "Outdated"
 msgstr ""
 
 #: lib/kiln_cms_web/live/menu_live.ex
+#: lib/kiln_cms_web/live/structure_live.ex
 #, elixir-autogen, elixir-format
 msgid "Outdent"
 msgstr ""
@@ -13777,9 +13797,16 @@ msgstr ""
 msgid "Stored encrypted and never shown again. Clearing the username removes it."
 msgstr ""
 
+#: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/live/structure_live.ex
 #, elixir-autogen, elixir-format
 msgid "Structure"
+msgstr ""
+
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Structure: %{type}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/branding_live.ex
@@ -16765,6 +16792,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Where backups go"
+msgstr ""
+
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Where each %{type} sits. Drag to reorder; indent to nest."
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex

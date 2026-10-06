@@ -2615,6 +2615,11 @@ msgstr "Volver a iniciar sesión"
 msgid "Back to the homepage"
 msgstr "Volver a la página de inicio"
 
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Back to the list"
+msgstr "Volver a la lista"
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Back up now"
@@ -4134,6 +4139,7 @@ msgid "Couldn't import that photo from Unsplash."
 msgstr "No se pudo importar esa foto de Unsplash."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
+#: lib/kiln_cms_web/live/structure_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't move that document."
 msgstr "No se pudo mover ese documento."
@@ -4250,6 +4256,7 @@ msgid "Couldn't save the new order of fields."
 msgstr "No se pudo guardar el nuevo orden de los campos."
 
 #: lib/kiln_cms_web/live/menu_live.ex
+#: lib/kiln_cms_web/live/structure_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't save the new order."
 msgstr "No se pudo guardar el nuevo orden."
@@ -5560,6 +5567,7 @@ msgstr "Cada nivel concede una audiencia. Configure el precio en el panel de su 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
+#: lib/kiln_cms_web/live/structure_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
 #: lib/kiln_cms_web/live/type_definition_live.ex
@@ -7431,6 +7439,7 @@ msgid "Incorrect email or password"
 msgstr "Correo electrónico o contraseña incorrectos"
 
 #: lib/kiln_cms_web/live/menu_live.ex
+#: lib/kiln_cms_web/live/structure_live.ex
 #, elixir-autogen, elixir-format
 msgid "Indent"
 msgstr "Aumentar sangría"
@@ -9396,6 +9405,11 @@ msgstr "Aún no hay envíos"
 msgid "No such content to edit."
 msgstr "No existe ese contenido para editar."
 
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "No such content type."
+msgstr "No existe ese tipo de contenido."
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -9669,6 +9683,11 @@ msgstr "No hay nada programado en este periodo"
 #, elixir-autogen, elixir-format
 msgid "Nothing similar found."
 msgstr "No se encontró nada similar."
+
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing to arrange yet."
+msgstr "Todavía no hay nada que ordenar."
 
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
@@ -10196,6 +10215,7 @@ msgid "Outdated"
 msgstr "Desactualizado"
 
 #: lib/kiln_cms_web/live/menu_live.ex
+#: lib/kiln_cms_web/live/structure_live.ex
 #, elixir-autogen, elixir-format
 msgid "Outdent"
 msgstr "Reducir sangría"
@@ -13777,10 +13797,17 @@ msgstr "Se guarda cifrada y no se vuelve a mostrar. Cambiar el proveedor o el en
 msgid "Stored encrypted and never shown again. Clearing the username removes it."
 msgstr "Se guarda cifrada y no se vuelve a mostrar. Si vacías el usuario, se elimina."
 
+#: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/live/structure_live.ex
 #, elixir-autogen, elixir-format
 msgid "Structure"
 msgstr "Estructura"
+
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Structure: %{type}"
+msgstr "Estructura: %{type}"
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
@@ -16766,6 +16793,11 @@ msgstr "Dónde un investigador de seguridad informa de una vulnerabilidad en est
 #, elixir-autogen, elixir-format
 msgid "Where backups go"
 msgstr "Dónde se guardan las copias"
+
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Where each %{type} sits. Drag to reorder; indent to nest."
+msgstr "Dónde se sitúa cada %{type}. Arrastra para reordenar; sangra para anidar."
 
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
