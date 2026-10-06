@@ -462,6 +462,21 @@ defmodule KilnCMS.AssistTest do
       refute text =~ "<b>"
     end
 
+    test "an inline tag never splits a word; a block tag still separates" do
+      # `KilnCMS.PlainText.strip_tags/1`: inline (phrasing) elements are
+      # removed without a space, so emphasis inside a word or a formula with
+      # subscripts reads as written.
+      assert {:ok, suggestion} =
+               Suggestion.normalize(
+                 "Un<em>break</em>able C<sub>2</sub>H<sub>6</sub>.<br>Next.",
+                 :rewrite
+               )
+
+      text = Suggestion.text(suggestion)
+      assert text =~ "Unbreakable C2H6."
+      refute text =~ "C2H6.Next"
+    end
+
     test "an escaped tag survives as visible text rather than being swallowed" do
       # The author must SEE what a compromised model tried to emit; that is the
       # control this module leans on. It is never raw HTML on the wire.

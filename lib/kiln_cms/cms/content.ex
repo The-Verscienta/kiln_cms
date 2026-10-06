@@ -3089,6 +3089,9 @@ defmodule KilnCMS.CMS.Content do
           change set_attribute(:embedding, arg(:embedding))
           change set_attribute(:embedded_at, &DateTime.utc_now/0), where: present(:embedding)
           change set_attribute(:embedded_at, nil), where: absent(:embedding)
+          # A vector is derived from the content, not a change to it: the
+          # document's `updated_at` stays put (#1585 follow-up).
+          change KilnCMS.CMS.Changes.KeepUpdatedAt
         end
 
         # Internal: wire `published_version_id` after publish without a new
@@ -3215,6 +3218,10 @@ defmodule KilnCMS.CMS.Content do
           require_atomic? false
           argument :search_text, :string, allow_nil?: false
           change set_attribute(:search_text, arg(:search_text))
+          # Re-indexing is not editing: a sweep that recomputes every published
+          # document's text (a `searchable` flag flipped) must not restamp
+          # them all as updated now (`Changes.KeepUpdatedAt`).
+          change KilnCMS.CMS.Changes.KeepUpdatedAt
         end
 
         # Internal: field-level localization's copy of a document's `:shared`
