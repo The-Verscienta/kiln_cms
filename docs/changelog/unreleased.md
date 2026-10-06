@@ -57,6 +57,37 @@ carries the reasoning.
 
 ## Added
 
+<a id="a-documents-url-can-follow-the-content-tree"></a>
+
+- **A document's URL can follow the content tree.** A type's alias pattern gains
+  an `[ancestors]` token, so `"/[ancestors]/[slug]"` puts a document at
+  `/docs/guides/routing` and a root document at `/routing` — the empty chain
+  drops its segment rather than leaving a stray separator. Nothing about URL
+  *resolution* changes: multi-segment paths were already served by `path_alias`
+  (#485), which is what makes this additive.
+  Moving a section re-derives the paths of everything beneath it, not just the
+  document that moved, because each descendant's path contains its own ancestor
+  chain. That runs as a job after the commit
+  (`KilnCMS.CMS.Workers.RegenerateSubtreeAliases`): the fan-out is unbounded in
+  principle, every rewrite goes through the type's `:update` so a 301 is
+  recorded and artifacts re-fire, and reading the subtree inside the move's
+  transaction is a hazard. Until it lands a descendant keeps the path it had,
+  which still resolves; afterwards the old path 301s to the record, whose
+  current URL is resolved per request, so repeated moves never chain.
+  The regeneration is `KilnCMS.CMS.SlugRegeneration` extended to aliases rather
+  than a second bulk path, so it inherits the streaming, the author-pinned skip
+  and the write-through-`:update` guarantees that one already had. A
+  hand-written alias is never overwritten: the pinned verdict is made against
+  what the pattern would have produced **before** the move, because after one
+  every derived alias in the subtree differs from the current derivation and
+  would otherwise look hand-written. That inference is a workaround for Kiln
+  deciding derivedness by re-deriving; recording it instead is
+  [#1890](https://github.com/The-Verscienta/kiln_cms/issues/1890).
+  An `[ancestors]` token in a *slug* pattern is refused — a slug is one segment
+  — and the chain is spliced into the pattern before segmentation, with every
+  ancestor slug slugified first, so no stored value can contribute path
+  structure or inject a token.
+
 <a id="documents-can-sit-under-one-another-the-content-tree"></a>
 
 - **Documents can sit under one another — the content tree.** Every content

@@ -2559,6 +2559,13 @@ defmodule KilnCMS.CMS.Content do
         update :move do
           require_atomic? false
           accept [:parent_id, :position]
+
+          # A move changes the correct `[ancestors]`-derived path of this
+          # document AND everything beneath it, so the subtree's aliases are
+          # re-derived after the commit. See
+          # `KilnCMS.CMS.Workers.RegenerateSubtreeAliases` for why that is a
+          # job rather than part of the write.
+          change KilnCMS.CMS.Changes.EnqueueAliasRegeneration
         end
 
         update :save_working_copy do

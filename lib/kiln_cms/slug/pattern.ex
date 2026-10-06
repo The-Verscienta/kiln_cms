@@ -46,6 +46,7 @@ defmodule KilnCMS.Slug.Pattern do
           optional(:category_slug) => String.t() | nil,
           optional(:date) => Date.t() | DateTime.t() | nil,
           optional(:slug) => String.t() | nil,
+          optional(:ancestor_slugs) => [String.t()] | nil,
           optional(:custom_fields) => map() | nil
         }
 
@@ -114,6 +115,7 @@ defmodule KilnCMS.Slug.Pattern do
   def expand_path(pattern, context, extra \\ []) do
     segments =
       pattern
+      |> substitute_ancestors(context)
       |> String.split("/", trim: true)
       |> Enum.map(&expand(&1, context, extra))
       |> Enum.reject(&(&1 == ""))
@@ -126,8 +128,9 @@ defmodule KilnCMS.Slug.Pattern do
 
   @doc """
   Validate a pattern's tokens; `nil` (no pattern) is always ok. `usage:
-  :alias` additionally permits the `[slug]` token, which is circular in a
-  slug pattern.
+  :alias` additionally permits `[slug]`, which is circular in a slug pattern,
+  and `[ancestors]` (#1597), which is a multi-segment path and so cannot be a
+  slug.
   """
   @spec validate(String.t() | nil, keyword()) :: :ok | {:error, String.t()}
   def validate(pattern, opts \\ [])
@@ -143,7 +146,7 @@ defmodule KilnCMS.Slug.Pattern do
         {:error,
          "unknown token(s) #{Enum.map_join(unknown, ", ", &"[#{&1}]")} — supported: " <>
            Enum.map_join(@tokens, ", ", &"[#{&1}]") <>
-           ", [field:<name>]" <> if(usage == :alias, do: ", [slug]", else: "")}
+           ", [field:<name>]" <> if(usage == :alias, do: ", [slug], [ancestors]", else: "")}
 
       :ok ->
         if String.trim(pattern) == "",
@@ -201,7 +204,22 @@ defmodule KilnCMS.Slug.Pattern do
       %{match: "mm", resolve: fn _token, ctx -> ctx |> date() |> then(& &1.month) |> pad(2) end},
       %{match: "dd", resolve: fn _token, ctx -> ctx |> date() |> then(& &1.day) |> pad(2) end},
       %{match: @field_token, resolve: &field_value/2},
-      %{match: "slug", resolve: fn _token, ctx -> Slug.slugify(to_string(ctx[:slug] || "")) end}
+      %{match: "slug", resolve: fn _token, ctx -> Slug.slugify(to_string(ctx[:slug] || "")) end},
+      # The ancestor chain (#1597) resolves to nothing HERE, on purpose.
+      #
+      # `expand/3` collapses `/` into `-` so no token's value can contribute
+      # path structure — that is a safety property, not an accident: a
+      # `[field:…]` holding `"a/b"` or `"../.."` must stay one segment. An
+      # ancestor chain genuinely IS several segments, so it is substituted into
+      # the PATTERN by `expand_path/3` before segmentation, where the
+      # multi-segment-ness comes from operator-controlled text and each
+      # ancestor slug still passes through this per-segment slugify.
+      #
+      # The definition exists so `[ancestors]` is a KNOWN token (validation
+      # reads this list), and resolves empty so a stray one — in a slug
+      # pattern, or anywhere `expand_path/3` did not pre-substitute — expands
+      # to nothing rather than leaking the literal token.
+      %{match: "ancestors", resolve: fn _token, _ctx -> "" end}
     ] ++ extra
   end
 
@@ -218,13 +236,45 @@ defmodule KilnCMS.Slug.Pattern do
   defp allowed_definitions(usage, extra) do
     case usage do
       :alias -> definitions(extra)
-      _slug -> Enum.reject(definitions(extra), &matches_slug?/1)
+      _slug -> Enum.reject(definitions(extra), &alias_only?/1)
     end
   end
 
-  defp matches_slug?(%{match: match}) when is_binary(match), do: match == "slug"
-  defp matches_slug?(%{match: %Regex{} = regex}), do: Regex.match?(regex, "slug")
-  defp matches_slug?(_definition), do: false
+  # `[ancestors]` becomes real path segments in the pattern before it is split,
+  # so the chain contributes several segments while every value still goes
+  # through `expand/3`'s per-segment slugify. Each slug is slugified here too,
+  # before it is spliced into pattern text — stored slugs cannot contain `[`,
+  # and this makes that a property of the code rather than of the data.
+  #
+  # An empty chain substitutes to `""`, so the segment drops out and a root
+  # document keeps its flat path.
+  defp substitute_ancestors(pattern, context) do
+    if String.contains?(pattern, "[ancestors]") do
+      chain =
+        context
+        |> Map.get(:ancestor_slugs)
+        |> List.wrap()
+        |> Enum.map(&Slug.slugify(to_string(&1)))
+        |> Enum.reject(&(&1 == ""))
+        |> Enum.join("/")
+
+      String.replace(pattern, "[ancestors]", chain)
+    else
+      pattern
+    end
+  end
+
+  # Alias-only tokens, filtered out of the slug vocabulary. `[slug]` is circular
+  # in a slug pattern; `[ancestors]` is a multi-segment path, and a slug is one
+  # segment — a slug containing `/` is not a slug.
+  @alias_only ~w(slug ancestors)
+
+  defp alias_only?(%{match: match}) when is_binary(match), do: match in @alias_only
+
+  defp alias_only?(%{match: %Regex{} = regex}),
+    do: Enum.any?(@alias_only, &Regex.match?(regex, &1))
+
+  defp alias_only?(_definition), do: false
 
   defp focus_keyphrase(_token, ctx) do
     case Slug.focus_keyphrase(ctx[:seo_keywords]) do
