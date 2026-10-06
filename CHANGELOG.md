@@ -122,6 +122,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **The content list opens on a count per stage, rows show author, type and last
+  update with one next step up front, and bulk actions appear on selection.**
+  ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM))
+
 - **Searchable custom fields are indexed as text: HTML stripped, entities
   decoded, and a project extractor can decode JSON, pick keys and set order.**
   ([#1585](https://github.com/The-Verscienta/kiln_cms/issues/1585) · [long form](docs/changelog/unreleased.md#searchable-custom-fields-are-indexed-as-text))

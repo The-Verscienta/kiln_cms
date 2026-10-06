@@ -100,11 +100,16 @@ defmodule KilnCMSWeb.EditorsCanPublishLiveTest do
       page!(editor)
       bulk_publish = ~s(button[phx-click="bulk"][phx-value-action="publish"])
 
+      # The bulk bar only appears once something is selected.
+      select_all = "input[phx-click='toggle_select_all']"
+
       {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor")
+      lv |> element(select_all) |> render_click()
       refute has_element?(lv, bulk_publish)
 
       allow_editors!(true)
       {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor")
+      lv |> element(select_all) |> render_click()
       assert has_element?(lv, bulk_publish)
     end
 

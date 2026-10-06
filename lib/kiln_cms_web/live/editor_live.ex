@@ -109,6 +109,8 @@ defmodule KilnCMSWeb.EditorLive do
     :proposed_publish_at,
     :unpublish_at,
     :working_copy_at,
+    # The row's byline, named from the `@authors` roster already loaded.
+    :author_id,
     # The "Last published" sort's key — selected so keyset paging can read it.
     :published_at
   ]
@@ -131,6 +133,42 @@ defmodule KilnCMSWeb.EditorLive do
     |> assign(:compliance_settings, compliance_settings(socket, items))
     |> assign_translated()
   end
+
+  # The overview strip's counts: how much of the site's content sits in each
+  # stage, whatever the list below is filtered to. One count per type per
+  # stage, so it is NOT run on every filter change — only on the first
+  # navigation and after a write from this page (`refresh/1`). Another tab's
+  # write shows up on the next visit, as the facet choices do.
+  @overview [
+    {"draft", %{"status" => "draft"}},
+    {"in_review", %{"status" => "in_review"}},
+    {"scheduled", %{"scheduled" => "1"}},
+    {"published", %{"status" => "published"}}
+  ]
+
+  defp load_overview(socket) do
+    %{actor: actor, current_org: org, content_types: types} = socket.assigns
+
+    overview =
+      Map.new(@overview, fn {key, params} ->
+        query = params |> Filters.parse(filter_ctx(socket)) |> Filters.query_filters(actor.id)
+
+        count =
+          types
+          |> Enum.map(&ContentTypes.count!(&1, actor: actor, tenant: org, query: query))
+          |> Enum.sum()
+
+        {key, count}
+      end)
+
+    assign(socket, :overview, overview)
+  end
+
+  defp ensure_overview(%{assigns: %{overview: %{}}} = socket), do: socket
+  defp ensure_overview(socket), do: load_overview(socket)
+
+  # After a write from this page: the list and the overview both moved.
+  defp refresh(socket), do: socket |> load_items() |> load_overview()
 
   # Resolved once per load, not per row — `Settings.for_org/1` is cached, but a
   # cache read per row on a 50-row page is still 50 reads for one answer. Only
@@ -556,7 +594,7 @@ defmodule KilnCMSWeb.EditorLive do
 
     {:noreply,
      socket
-     |> load_items()
+     |> refresh()
      |> assign(:selected, MapSet.new())
      |> assign(:confirming_bulk, nil)
      |> put_flash(:info, bulk_flash(verb, ok, skipped))}
@@ -592,7 +630,7 @@ defmodule KilnCMSWeb.EditorLive do
            ContentTypes.update(kind, record, %{scheduled_at: at}, actor: actor, tenant: org) do
       {:noreply,
        socket
-       |> load_items()
+       |> refresh()
        |> put_flash(
          :info,
          gettext("Scheduled to publish on %{date} UTC.",
@@ -733,7 +771,8 @@ defmodule KilnCMSWeb.EditorLive do
      |> assign(:renaming_view, nil)
      |> assign(:confirming_view_delete, nil)
      |> load_releases()
-     |> load_items()}
+     |> load_items()
+     |> ensure_overview()}
   end
 
   defp filter_ctx(socket) do
@@ -794,7 +833,7 @@ defmodule KilnCMSWeb.EditorLive do
     case do_transition(kind, verb, record, actor, org) do
       {:ok, record} ->
         socket
-        |> load_items()
+        |> refresh()
         |> put_flash(:info, KilnCMSWeb.WorkflowMessages.success(verb, record.state))
 
       {:error, error} ->
@@ -943,6 +982,8 @@ defmodule KilnCMSWeb.EditorLive do
       |> assign(:selected_count, MapSet.size(assigns.selected))
       |> assign(:compiled_types, Enum.filter(assigns.content_types, &(&1.source == :compiled)))
       |> assign(:dynamic_types, Enum.filter(assigns.content_types, &(&1.source == :dynamic)))
+      |> assign(:type_labels, Map.new(assigns.content_types, &{type_value(&1), &1.label}))
+      |> assign(:author_names, Map.new(assigns.authors, fn {label, id} -> {id, label} end))
       |> assign(
         :all_selected?,
         MapSet.size(visible_keys) > 0 and MapSet.subset?(visible_keys, assigns.selected)
@@ -996,13 +1037,43 @@ defmodule KilnCMSWeb.EditorLive do
         </details>
       </:actions>
 
-      <div class="space-y-5">
+      <div class="space-y-6">
         <div>
-          <h1 class="text-xl font-semibold tracking-tight">{gettext("Content")}</h1>
-          <p class="text-sm text-base-content/60">
+          <h1 class="text-2xl font-semibold tracking-tight">{gettext("Content")}</h1>
+          <p class="mt-1 text-sm text-base-content/60">
             {gettext("Pages, posts and custom types across your site.")}
           </p>
         </div>
+
+        <%!-- Where the site's content stands, whatever the list is filtered
+              to: each count is a link to the list it counts. --%>
+        <nav
+          :if={Enum.any?(@overview, fn {_key, count} -> count > 0 end)}
+          id="content-overview"
+          aria-label={gettext("Content by stage")}
+        >
+          <ul class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <li :for={stat <- @stats}>
+              <.link
+                patch={stat.path}
+                id={"overview-#{stat.key}"}
+                aria-current={stat.current? && "page"}
+                class="stat"
+              >
+                <span class={[
+                  "flex size-10 shrink-0 items-center justify-center rounded-full",
+                  stat.tone
+                ]}>
+                  <.icon name={stat.icon} class="size-5" />
+                </span>
+                <span class="min-w-0">
+                  <span class="stat-value block">{stat.count}</span>
+                  <span class="stat-label block truncate">{stat.label}</span>
+                </span>
+              </.link>
+            </li>
+          </ul>
+        </nav>
 
         <%!-- Views (#1593): built-in filters with a name, then the actor's own
               saved views and the site's shared ones. Each is a link to its
@@ -1020,7 +1091,7 @@ defmodule KilnCMSWeb.EditorLive do
                 patch={view.path}
                 id={"view-#{view.id}"}
                 aria-current={view.id == @active_view_id && "page"}
-                class="inline-flex items-center gap-1.5 rounded-full border border-base-content/15 px-3 py-1 text-sm text-base-content/80 transition-colors hover:border-base-content/30 hover:bg-base-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary aria-[current=page]:border-primary aria-[current=page]:bg-primary aria-[current=page]:text-primary-content"
+                class="pill"
               >
                 {view.name}
               </.link>
@@ -1030,7 +1101,7 @@ defmodule KilnCMSWeb.EditorLive do
                 patch={params_path(view_params(view, @filter_ctx))}
                 id={"view-#{view.id}"}
                 aria-current={view.id == @active_view_id && "page"}
-                class="inline-flex items-center gap-1.5 rounded-full border border-base-content/15 px-3 py-1 text-sm text-base-content/80 transition-colors hover:border-base-content/30 hover:bg-base-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary aria-[current=page]:border-primary aria-[current=page]:bg-primary aria-[current=page]:text-primary-content"
+                class="pill"
               >
                 <.icon
                   :if={view.shared}
@@ -1074,7 +1145,7 @@ defmodule KilnCMSWeb.EditorLive do
               />
             </div>
             <label :if={@tier == :admin} class="flex items-center gap-2 pb-2">
-              <input type="checkbox" name="shared" value="true" class="size-4 accent-primary" />
+              <input type="checkbox" name="shared" value="true" class="field-checkbox size-4" />
               {gettext("Share with every editor on this site")}
             </label>
             <div class="ml-auto flex gap-2">
@@ -1149,7 +1220,7 @@ defmodule KilnCMSWeb.EditorLive do
             id="delete-view-confirm"
             role="alertdialog"
             aria-labelledby="delete-view-prompt"
-            class="flex flex-wrap items-center gap-3 rounded border border-error/40 bg-error/10 px-3 py-2 text-sm"
+            class="flex flex-wrap items-center gap-3 rounded-lg border border-error/40 bg-error/10 px-3 py-2 text-sm"
           >
             <span id="delete-view-prompt">
               {gettext("Delete the view “%{name}”? The content in it is not touched.",
@@ -1162,7 +1233,7 @@ defmodule KilnCMSWeb.EditorLive do
                 phx-click="confirm_delete_view"
                 phx-value-id={@confirming_view_delete.id}
                 phx-mounted={JS.focus()}
-                class="btn btn-sm border-transparent bg-error text-error-content hover:opacity-90"
+                class="btn btn-sm btn-danger-fill"
               >
                 {gettext("Delete view")}
               </button>
@@ -1187,8 +1258,17 @@ defmodule KilnCMSWeb.EditorLive do
               {gettext("Structure")}
             </.link>
 
-            <form id="content-search" phx-change="search" phx-submit="search" class="min-w-48 flex-1">
+            <form
+              id="content-search"
+              phx-change="search"
+              phx-submit="search"
+              class="relative min-w-48 max-w-xs flex-1"
+            >
               <label for="content-search-input" class="sr-only">{gettext("Search by title")}</label>
+              <.icon
+                name="hero-magnifying-glass"
+                class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-base-content/45"
+              />
               <input
                 id="content-search-input"
                 type="search"
@@ -1198,7 +1278,7 @@ defmodule KilnCMSWeb.EditorLive do
                 aria-label={gettext("Search by title")}
                 phx-debounce="200"
                 autocomplete="off"
-                class="field-input max-w-xs"
+                class="field-input pl-9"
               />
             </form>
             <form
@@ -1387,7 +1467,7 @@ defmodule KilnCMSWeb.EditorLive do
                     name="scheduled"
                     value="1"
                     checked={@filters["scheduled"] == "1"}
-                    class="size-4 accent-primary"
+                    class="field-checkbox size-4"
                   />
                   {gettext("Only scheduled to publish")}
                 </label>
@@ -1397,143 +1477,29 @@ defmodule KilnCMSWeb.EditorLive do
 
           <%!-- One chip per active facet, each its own remove button. --%>
           <div
-            :if={@chips != [] or @filtering?}
+            :if={@chips != []}
             class="flex flex-wrap items-center gap-2"
           >
-            <ul :if={@chips != []} id="content-filter-chips" class="flex flex-wrap gap-2">
+            <ul id="content-filter-chips" class="flex flex-wrap gap-2">
               <li :for={{key, label} <- @chips}>
                 <button
                   type="button"
                   phx-click="remove_filter"
                   phx-value-key={key}
                   aria-label={gettext("Remove filter: %{filter}", filter: label)}
-                  class="inline-flex items-center gap-1 rounded-full bg-primary/12 px-2.5 py-0.5 text-xs font-medium text-primary-ink transition-colors hover:bg-primary/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                  class="chip"
                 >
                   {label}
                   <.icon name="hero-x-mark" class="size-3.5" />
                 </button>
               </li>
             </ul>
-            <span class="text-sm text-base-content/60" role="status" id="content-count">
-              {ngettext("%{count} item", "%{count} items", @total)}
-            </span>
             <button
-              :if={@filtering?}
               type="button"
               phx-click="clear_filters"
               class="btn btn-sm btn-ghost text-base-content/70"
             >
               {gettext("Clear filters")}
-            </button>
-          </div>
-        </div>
-
-        <div
-          :if={@items != []}
-          class="flex flex-wrap items-center gap-3 rounded-lg border border-base-content/10 bg-base-200/40 px-3 py-2"
-        >
-          <label class="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={@all_selected?}
-              phx-click="toggle_select_all"
-              class="size-4 rounded border-base-content/30 accent-primary"
-            />
-            {gettext("Select all")}
-          </label>
-          <span class="text-sm text-base-content/60">
-            {if @selected_count > 0,
-              do: gettext("%{count} selected", count: @selected_count),
-              else: gettext("None selected")}
-          </span>
-          <div class="ml-auto flex flex-wrap justify-end gap-2">
-            <button
-              :for={{verb, label} <- bulk_actions(@tier, @editors_can_publish)}
-              type="button"
-              phx-click="bulk"
-              phx-value-action={verb}
-              disabled={@selected_count == 0}
-              class="btn btn-sm btn-default"
-            >
-              {label}
-            </button>
-            <%!-- Content releases (#500). Only offered once a release exists to
-                  add to — the button would otherwise be a dead end, and the
-                  release list is one click away in the sidebar. --%>
-            <button
-              :if={@releases != []}
-              type="button"
-              phx-click="open_release_panel"
-              disabled={@selected_count == 0}
-              class="btn btn-sm btn-default"
-            >
-              {gettext("Add to release")}
-            </button>
-            <button
-              :if={@tier == :admin}
-              type="button"
-              phx-click="bulk"
-              phx-value-action="delete"
-              disabled={@selected_count == 0}
-              class="btn btn-sm btn-danger"
-            >
-              {gettext("Delete")}
-            </button>
-          </div>
-        </div>
-
-        <form
-          :if={@adding_to_release?}
-          id="add-to-release"
-          phx-submit="add_to_release"
-          class="flex flex-wrap items-end gap-3 rounded border border-primary/40 bg-primary/5 px-3 py-2 text-sm"
-        >
-          <div>
-            <label for="add-to-release-target" class="field-label">{gettext("Release")}</label>
-            <select id="add-to-release-target" name="release_id" class="field-select w-auto">
-              <option :for={release <- @releases} value={release.id}>{release.name}</option>
-            </select>
-          </div>
-          <div>
-            <label for="add-to-release-action" class="field-label">{gettext("On go-live")}</label>
-            <select id="add-to-release-action" name="release_action" class="field-select w-auto">
-              <option value="publish">{gettext("Publish")}</option>
-              <option value="unpublish">{gettext("Unpublish")}</option>
-            </select>
-          </div>
-          <div class="ml-auto flex gap-2">
-            <button type="submit" class="btn btn-sm btn-primary">
-              {gettext("Add %{count} item(s)", count: @selected_count)}
-            </button>
-            <button type="button" phx-click="cancel_release_panel" class="btn btn-sm btn-default">
-              {gettext("Cancel")}
-            </button>
-          </div>
-        </form>
-
-        <div
-          :if={@confirming_bulk}
-          class={[
-            "flex flex-wrap items-center gap-3 rounded border px-3 py-2 text-sm",
-            (@confirming_bulk == "delete" && "border-error/40 bg-error/10") ||
-              "border-warning/40 bg-warning/10"
-          ]}
-        >
-          <span>{bulk_confirm_prompt(@confirming_bulk, @selected_count)}</span>
-          <div class="ml-auto flex flex-wrap justify-end gap-2">
-            <button
-              type="button"
-              phx-click="confirm_bulk"
-              class={[
-                "btn btn-sm border-transparent hover:opacity-90",
-                (@confirming_bulk == "delete" && "bg-error text-error-content") ||
-                  "bg-warning text-warning-content"
-              ]}
-            >
-              {bulk_verb_label(@confirming_bulk)}
-            </button>
-            <button type="button" phx-click="cancel_bulk" class="btn btn-sm btn-default">
-              {gettext("Cancel")}
             </button>
           </div>
         </div>
@@ -1545,224 +1511,423 @@ defmodule KilnCMSWeb.EditorLive do
         >
           {gettext("Create your first page or post to get started.")}
         </.empty_state>
-        <p :if={@items == [] and @filtering?} class="text-sm text-base-content/60" role="status">
-          {gettext("Nothing matches the current filter.")}
-          <button
-            type="button"
-            phx-click="clear_filters"
-            class="btn btn-sm btn-ghost ml-2 text-base-content/70"
-          >
-            {gettext("Clear filters")}
-          </button>
-        </p>
-
-        <ul
-          :if={@items != []}
-          class="card divide-y divide-base-content/10 overflow-hidden"
+        <.empty_state
+          :if={@items == [] and @filtering?}
+          id="content-no-match"
+          icon="hero-funnel"
+          title={gettext("Nothing matches the current filter.")}
+          compact
+          role="status"
         >
-          <li
-            :for={{kind, record} <- @items}
-            id={"#{kind}-#{record.id}"}
-            class="flex flex-wrap items-center gap-x-3 gap-y-2 p-3 transition-colors hover:bg-base-200/40"
+          {gettext("Try a wider filter, or clear it to see everything.")}
+          <:action>
+            <button type="button" phx-click="clear_filters" class="btn btn-sm btn-default">
+              {gettext("Clear filters")}
+            </button>
+          </:action>
+        </.empty_state>
+
+        <div :if={@items != []} id="content-list" class="card overflow-hidden">
+          <%!-- The list's head: select-all and the count, and — only once
+                something is ticked — what can be done to the selection. --%>
+          <div class={[
+            "flex min-h-12 flex-wrap items-center gap-x-4 gap-y-2 border-b px-3 py-2 transition-colors",
+            if(@selected_count > 0,
+              do: "border-primary/25 bg-primary/8",
+              else: "border-base-content/10 bg-base-200/40"
+            )
+          ]}>
+            <label class="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={@all_selected?}
+                phx-click="toggle_select_all"
+                class="field-checkbox size-4"
+              />
+              {gettext("Select all")}
+            </label>
+            <span
+              :if={@selected_count > 0}
+              id="content-selected-count"
+              class="text-sm font-medium text-primary-ink"
+            >
+              {gettext("%{count} selected", count: @selected_count)}
+            </span>
+            <span class="text-sm text-base-content/60" role="status" id="content-count">
+              {ngettext("%{count} item", "%{count} items", @total)}
+            </span>
+            <div :if={@selected_count > 0} id="bulk-actions" class="ml-auto flex flex-wrap gap-2">
+              <button
+                :for={{verb, label} <- bulk_actions(@tier, @editors_can_publish)}
+                type="button"
+                phx-click="bulk"
+                phx-value-action={verb}
+                class="btn btn-sm btn-default"
+              >
+                {label}
+              </button>
+              <%!-- Content releases (#500). Only offered once a release exists to
+                    add to — the button would otherwise be a dead end, and the
+                    release list is one click away in the sidebar. --%>
+              <button
+                :if={@releases != []}
+                type="button"
+                phx-click="open_release_panel"
+                class="btn btn-sm btn-default"
+              >
+                {gettext("Add to release")}
+              </button>
+              <button
+                :if={@tier == :admin}
+                type="button"
+                phx-click="bulk"
+                phx-value-action="delete"
+                class="btn btn-sm btn-danger"
+              >
+                {gettext("Delete")}
+              </button>
+            </div>
+          </div>
+
+          <form
+            :if={@adding_to_release?}
+            id="add-to-release"
+            phx-submit="add_to_release"
+            class="flex flex-wrap items-end gap-3 border-b border-primary/25 bg-primary/5 px-3 py-2 text-sm"
           >
-            <input
-              type="checkbox"
-              checked={MapSet.member?(@selected, "#{kind}:#{record.id}")}
-              phx-click="toggle_select"
-              phx-value-key={"#{kind}:#{record.id}"}
-              aria-label={gettext("Select %{title}", title: record.title)}
-              class="size-4 shrink-0 rounded border border-base-content/30 accent-primary"
-            />
-            <.content_trigram
-              :if={@status_marks == :trigrams}
-              published={record.state == :published}
-              translated={translated?(@translated, kind, record.slug)}
-              scheduled={scheduled?(record)}
-              class="text-base-content/50"
-            />
-            <span class="shrink-0 text-xs uppercase text-base-content/70">{kind}</span>
-            <div class="min-w-0 flex-1">
-              <.link navigate={edit_path(kind, record.id)} class="font-medium hover:underline">
-                {record.title}
-              </.link>
-              <p class="truncate text-xs text-base-content/70">/{record.slug}</p>
+            <div>
+              <label for="add-to-release-target" class="field-label">{gettext("Release")}</label>
+              <select id="add-to-release-target" name="release_id" class="field-select w-auto">
+                <option :for={release <- @releases} value={release.id}>{release.name}</option>
+              </select>
             </div>
-            <.state_badge state={record.state} />
-            <.content_status_marks
-              :if={@status_marks == :words}
-              translated={translated?(@translated, kind, record.slug)}
-            />
-            <%!-- A live record whose working copy has run ahead of its
-                  published text (docs/working-copy.md). --%>
-            <span
-              :if={record.state == :published and record.working_copy_at}
-              class="text-xs italic text-base-content/60"
-              title={gettext("The working copy has run ahead of the published text.")}
-            >
-              {gettext("edited since publishing")}
-            </span>
-            <%!-- The approving admin sees the publish gate but never the
-                  claim panel — it lives in the editor, and the approver acts
-                  from this list (#856). A click-through to the editor rather
-                  than a flat badge: seeing "poor" here and still having to
-                  open the editor to find out WHAT matched is the same dead
-                  end the flash refusal already is. `nil` (no badge) when
-                  compliance is off for this org or the document's locale
-                  isn't one the shipped pack can judge — see
-                  `compliance_grade/2`. Computed once into `compliance` rather
-                  than called twice (`:if` and the badge attr), since it scans
-                  the document's text on every call. --%>
-            <% compliance = compliance_grade(record, @compliance_settings) %>
-            <.link
-              :if={compliance}
-              navigate={edit_path(kind, record.id)}
-              title={gettext("Open the editor's Compliance panel")}
-            >
-              <.compliance_grade_badge report={compliance} />
-            </.link>
-            <span
-              :if={record.scheduled_at && record.state in [:draft, :in_review]}
-              class="flex items-center gap-1 text-xs text-base-content/60"
-              title={gettext("Scheduled to publish")}
-            >
-              <.icon name="hero-clock" class="size-3.5" />
-              <span>{gettext("Publishes")}</span>
-              <time
-                id={"scheduled-#{kind}-#{record.id}"}
-                phx-hook="LocalTime"
-                datetime={DateTime.to_iso8601(record.scheduled_at)}
-              >{Calendar.strftime(record.scheduled_at, "%Y-%m-%d %H:%M")} UTC</time>
-            </span>
-            <%!-- A date someone without publish rights proposed (#1812). Drawn
-                  apart from the real schedule above — dashed, and saying who
-                  decides — so a reviewer cannot mistake it for one. --%>
-            <span
-              :if={record.proposed_publish_at && record.state in [:draft, :in_review]}
-              id={"proposed-#{kind}-#{record.id}"}
-              class="flex items-center gap-1 rounded border border-dashed border-base-content/40 px-1.5 text-xs text-base-content/70"
-              title={gettext("Proposed publish date — an admin confirms it")}
-            >
-              <.icon name="hero-calendar-days" class="size-3.5" />
-              <span>{gettext("Proposed")}</span>
-              <time
-                id={"proposed-time-#{kind}-#{record.id}"}
-                phx-hook="LocalTime"
-                datetime={DateTime.to_iso8601(record.proposed_publish_at)}
-              >{Calendar.strftime(record.proposed_publish_at, "%Y-%m-%d %H:%M")} UTC</time>
-            </span>
-            <span
-              :if={record.unpublish_at && record.state == :published}
-              class="flex items-center gap-1 text-xs text-base-content/60"
-              title={gettext("Scheduled to unpublish")}
-            >
-              <.icon name="hero-clock" class="size-3.5" />
-              <span>{gettext("Unpublishes")}</span>
-              <time
-                id={"unpublish-#{kind}-#{record.id}"}
-                phx-hook="LocalTime"
-                datetime={DateTime.to_iso8601(record.unpublish_at)}
-              >{Calendar.strftime(record.unpublish_at, "%Y-%m-%d %H:%M")} UTC</time>
-            </span>
-            <div class="flex w-full items-center justify-end gap-2 sm:w-auto">
-              <button
-                :if={record.state == :draft and @tier == :editor}
-                type="button"
-                phx-click="submit"
-                phx-value-kind={kind}
-                phx-value-id={record.id}
-                class="btn btn-sm btn-default"
-              >
-                {gettext("Submit for review")}
-              </button>
-              <span
-                :if={record.state == :in_review and @tier == :editor}
-                class="text-xs text-base-content/70"
-              >
-                {gettext("Awaiting admin approval")}
-              </span>
-              <button
-                :if={
-                  not is_nil(record.proposed_publish_at) and record.state in [:draft, :in_review] and
-                    (@tier == :admin or (@tier == :editor and @editors_can_publish))
-                }
-                type="button"
-                phx-click="confirm_proposed_date"
-                phx-value-kind={kind}
-                phx-value-id={record.id}
-                class="btn btn-sm btn-default"
-              >
-                {gettext("Confirm date")}
-              </button>
-              <button
-                :if={
-                  record.state in [:draft, :in_review] and
-                    (@tier == :admin or (@tier == :editor and @editors_can_publish))
-                }
-                type="button"
-                phx-click="publish"
-                phx-value-kind={kind}
-                phx-value-id={record.id}
-                class="btn btn-sm btn-default"
-              >
-                {if record.state == :in_review and @tier == :admin,
-                  do: gettext("Approve"),
-                  else: gettext("Publish")}
-              </button>
-              <button
-                :if={record.state == :in_review and @tier == :admin}
-                type="button"
-                phx-click="return"
-                phx-value-kind={kind}
-                phx-value-id={record.id}
-                class="btn btn-sm btn-default"
-              >
-                {gettext("Return")}
-              </button>
-              <button
-                :if={record.state == :published}
-                type="button"
-                phx-click="unpublish"
-                phx-value-kind={kind}
-                phx-value-id={record.id}
-                class="btn btn-sm btn-default"
-              >
-                {gettext("Unpublish")}
-              </button>
-              <button
-                :if={record.state == :archived}
-                type="button"
-                phx-click="unarchive"
-                phx-value-kind={kind}
-                phx-value-id={record.id}
-                class="btn btn-sm btn-default"
-              >
-                {gettext("Unarchive")}
-              </button>
-              <button
-                type="button"
-                phx-click="duplicate"
-                phx-value-kind={kind}
-                phx-value-id={record.id}
-                title={gettext("Copy into a new draft")}
-                class="btn btn-sm btn-default"
-              >
-                {gettext("Duplicate")}
-              </button>
-              <.link
-                navigate={edit_path(kind, record.id) <> "?assign=1"}
-                class="btn btn-sm btn-default"
-              >
-                {gettext("Assign")}
-              </.link>
-              <.link
-                navigate={edit_path(kind, record.id)}
-                class="btn btn-sm btn-default"
-              >
-                {gettext("Edit")}
-              </.link>
+            <div>
+              <label for="add-to-release-action" class="field-label">{gettext("On go-live")}</label>
+              <select id="add-to-release-action" name="release_action" class="field-select w-auto">
+                <option value="publish">{gettext("Publish")}</option>
+                <option value="unpublish">{gettext("Unpublish")}</option>
+              </select>
             </div>
-          </li>
-        </ul>
+            <div class="ml-auto flex gap-2">
+              <button type="submit" class="btn btn-sm btn-primary">
+                {gettext("Add %{count} item(s)", count: @selected_count)}
+              </button>
+              <button type="button" phx-click="cancel_release_panel" class="btn btn-sm btn-default">
+                {gettext("Cancel")}
+              </button>
+            </div>
+          </form>
+
+          <div
+            :if={@confirming_bulk}
+            id="bulk-confirm"
+            role="alertdialog"
+            aria-labelledby="bulk-confirm-prompt"
+            class={[
+              "flex flex-wrap items-center gap-3 border-b px-3 py-2 text-sm",
+              (@confirming_bulk == "delete" && "border-error/30 bg-error/10") ||
+                "border-warning/30 bg-warning/10"
+            ]}
+          >
+            <span id="bulk-confirm-prompt">
+              {bulk_confirm_prompt(@confirming_bulk, @selected_count)}
+            </span>
+            <div class="ml-auto flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                phx-click="confirm_bulk"
+                phx-mounted={JS.focus()}
+                class={[
+                  "btn btn-sm",
+                  (@confirming_bulk == "delete" && "btn-danger-fill") || "btn-warning-fill"
+                ]}
+              >
+                {bulk_verb_label(@confirming_bulk)}
+              </button>
+              <button type="button" phx-click="cancel_bulk" class="btn btn-sm btn-default">
+                {gettext("Cancel")}
+              </button>
+            </div>
+          </div>
+
+          <ul class="divide-y divide-base-content/10">
+            <li
+              :for={{kind, record} <- @items}
+              id={"#{kind}-#{record.id}"}
+              class={[
+                "group/row flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-3 transition-colors sm:flex-nowrap",
+                if(MapSet.member?(@selected, "#{kind}:#{record.id}"),
+                  do: "bg-primary/5",
+                  else: "hover:bg-base-200/40"
+                )
+              ]}
+            >
+              <input
+                type="checkbox"
+                checked={MapSet.member?(@selected, "#{kind}:#{record.id}")}
+                phx-click="toggle_select"
+                phx-value-key={"#{kind}:#{record.id}"}
+                aria-label={gettext("Select %{title}", title: record.title)}
+                class="field-checkbox size-4 shrink-0"
+              />
+              <.content_trigram
+                :if={@status_marks == :trigrams}
+                published={record.state == :published}
+                translated={translated?(@translated, kind, record.slug)}
+                scheduled={scheduled?(record)}
+                class="text-base-content/50"
+              />
+              <div class="min-w-0 flex-1">
+                <div class="flex min-w-0 items-center gap-2">
+                  <.link
+                    navigate={edit_path(kind, record.id)}
+                    class="truncate font-medium hover:text-primary-ink hover:underline"
+                  >
+                    {record.title}
+                  </.link>
+                  <.badge variant="neutral" class="shrink-0">
+                    {Map.get(@type_labels, to_string(kind), kind)}
+                  </.badge>
+                </div>
+                <div class="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/60">
+                  <span class="max-w-full truncate font-mono text-[0.7rem]">/{record.slug}</span>
+                  <span
+                    :if={@author_names[record.author_id]}
+                    class="flex items-center gap-1"
+                  >
+                    <.icon name="hero-user" class="size-3.5" />
+                    {@author_names[record.author_id]}
+                  </span>
+                  <time
+                    :if={record.updated_at}
+                    datetime={DateTime.to_iso8601(record.updated_at)}
+                    title={Calendar.strftime(record.updated_at, "%Y-%m-%d %H:%M UTC")}
+                  >
+                    {gettext("Updated %{time} ago", time: ago(record.updated_at))}
+                  </time>
+                  <%!-- A live record whose working copy has run ahead of its
+                        published text (docs/working-copy.md). --%>
+                  <span
+                    :if={record.state == :published and record.working_copy_at}
+                    class="italic"
+                    title={gettext("The working copy has run ahead of the published text.")}
+                  >
+                    {gettext("edited since publishing")}
+                  </span>
+                  <span
+                    :if={record.scheduled_at && record.state in [:draft, :in_review]}
+                    class="flex items-center gap-1 font-medium text-primary-ink"
+                    title={gettext("Scheduled to publish")}
+                  >
+                    <.icon name="hero-clock" class="size-3.5" />
+                    <span>{gettext("Publishes")}</span>
+                    <time
+                      id={"scheduled-#{kind}-#{record.id}"}
+                      phx-hook="LocalTime"
+                      datetime={DateTime.to_iso8601(record.scheduled_at)}
+                    >{Calendar.strftime(record.scheduled_at, "%Y-%m-%d %H:%M")} UTC</time>
+                  </span>
+                  <%!-- A date someone without publish rights proposed (#1812). Drawn
+                        apart from the real schedule above — dashed, and saying who
+                        decides — so a reviewer cannot mistake it for one. --%>
+                  <span
+                    :if={record.proposed_publish_at && record.state in [:draft, :in_review]}
+                    id={"proposed-#{kind}-#{record.id}"}
+                    class="flex items-center gap-1 rounded border border-dashed border-base-content/40 px-1.5 text-base-content/70"
+                    title={gettext("Proposed publish date — an admin confirms it")}
+                  >
+                    <.icon name="hero-calendar-days" class="size-3.5" />
+                    <span>{gettext("Proposed")}</span>
+                    <time
+                      id={"proposed-time-#{kind}-#{record.id}"}
+                      phx-hook="LocalTime"
+                      datetime={DateTime.to_iso8601(record.proposed_publish_at)}
+                    >{Calendar.strftime(record.proposed_publish_at, "%Y-%m-%d %H:%M")} UTC</time>
+                  </span>
+                  <span
+                    :if={record.unpublish_at && record.state == :published}
+                    class="flex items-center gap-1"
+                    title={gettext("Scheduled to unpublish")}
+                  >
+                    <.icon name="hero-clock" class="size-3.5" />
+                    <span>{gettext("Unpublishes")}</span>
+                    <time
+                      id={"unpublish-#{kind}-#{record.id}"}
+                      phx-hook="LocalTime"
+                      datetime={DateTime.to_iso8601(record.unpublish_at)}
+                    >{Calendar.strftime(record.unpublish_at, "%Y-%m-%d %H:%M")} UTC</time>
+                  </span>
+                </div>
+              </div>
+
+              <div class="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
+                <.content_status_marks
+                  :if={@status_marks == :words}
+                  translated={translated?(@translated, kind, record.slug)}
+                />
+                <%!-- The approving admin sees the publish gate but never the
+                      claim panel — it lives in the editor, and the approver acts
+                      from this list (#856). A click-through to the editor rather
+                      than a flat badge: seeing "poor" here and still having to
+                      open the editor to find out WHAT matched is the same dead
+                      end the flash refusal already is. `nil` (no badge) when
+                      compliance is off for this org or the document's locale
+                      isn't one the shipped pack can judge — see
+                      `compliance_grade/2`. Computed once into `compliance` rather
+                      than called twice (`:if` and the badge attr), since it scans
+                      the document's text on every call. --%>
+                <% compliance = compliance_grade(record, @compliance_settings) %>
+                <.link
+                  :if={compliance}
+                  navigate={edit_path(kind, record.id)}
+                  title={gettext("Open the editor's Compliance panel")}
+                >
+                  <.compliance_grade_badge report={compliance} />
+                </.link>
+                <.state_badge state={record.state} />
+
+                <%!-- One visible next step per row — the verb that moves the
+                      record along its workflow — and everything else behind
+                      the "⋯" menu. The title is the way into the editor. --%>
+                <% can_publish? = @tier == :admin or (@tier == :editor and @editors_can_publish) %>
+                <button
+                  :if={record.state in [:draft, :in_review] and can_publish?}
+                  type="button"
+                  phx-click="publish"
+                  phx-value-kind={kind}
+                  phx-value-id={record.id}
+                  class="btn btn-sm btn-default"
+                >
+                  {if record.state == :in_review and @tier == :admin,
+                    do: gettext("Approve"),
+                    else: gettext("Publish")}
+                </button>
+                <button
+                  :if={record.state == :draft and @tier == :editor and not can_publish?}
+                  type="button"
+                  phx-click="submit"
+                  phx-value-kind={kind}
+                  phx-value-id={record.id}
+                  class="btn btn-sm btn-default"
+                >
+                  {gettext("Submit for review")}
+                </button>
+                <span
+                  :if={record.state == :in_review and @tier == :editor and not can_publish?}
+                  class="text-xs text-base-content/70"
+                >
+                  {gettext("Awaiting admin approval")}
+                </span>
+                <button
+                  :if={record.state == :archived}
+                  type="button"
+                  phx-click="unarchive"
+                  phx-value-kind={kind}
+                  phx-value-id={record.id}
+                  class="btn btn-sm btn-default"
+                >
+                  {gettext("Unarchive")}
+                </button>
+
+                <button
+                  type="button"
+                  id={"row-menu-button-#{kind}-#{record.id}"}
+                  popovertarget={"row-menu-#{kind}-#{record.id}"}
+                  aria-label={gettext("More actions for %{title}", title: record.title)}
+                  title={gettext("More actions")}
+                  class="btn btn-sm btn-ghost px-1.5 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 group-has-[:popover-open]/row:opacity-100 pointer-coarse:opacity-100"
+                >
+                  <.icon name="hero-ellipsis-horizontal" class="size-5" />
+                </button>
+                <div
+                  id={"row-menu-#{kind}-#{record.id}"}
+                  popover
+                  class="row-menu"
+                >
+                  <button
+                    :if={record.state == :draft and @tier == :editor and can_publish?}
+                    type="button"
+                    popovertarget={"row-menu-#{kind}-#{record.id}"}
+                    popovertargetaction="hide"
+                    phx-click="submit"
+                    phx-value-kind={kind}
+                    phx-value-id={record.id}
+                    class="row-menu-item"
+                  >
+                    <.icon name="hero-paper-airplane" class="size-4 text-base-content/60" />
+                    {gettext("Submit for review")}
+                  </button>
+                  <button
+                    :if={
+                      not is_nil(record.proposed_publish_at) and record.state in [:draft, :in_review] and
+                        can_publish?
+                    }
+                    type="button"
+                    popovertarget={"row-menu-#{kind}-#{record.id}"}
+                    popovertargetaction="hide"
+                    phx-click="confirm_proposed_date"
+                    phx-value-kind={kind}
+                    phx-value-id={record.id}
+                    class="row-menu-item"
+                  >
+                    <.icon name="hero-calendar-days" class="size-4 text-base-content/60" />
+                    {gettext("Confirm date")}
+                  </button>
+                  <button
+                    :if={record.state == :in_review and @tier == :admin}
+                    type="button"
+                    popovertarget={"row-menu-#{kind}-#{record.id}"}
+                    popovertargetaction="hide"
+                    phx-click="return"
+                    phx-value-kind={kind}
+                    phx-value-id={record.id}
+                    class="row-menu-item"
+                  >
+                    <.icon name="hero-arrow-uturn-left" class="size-4 text-base-content/60" />
+                    {gettext("Return")}
+                  </button>
+                  <button
+                    :if={record.state == :published}
+                    type="button"
+                    popovertarget={"row-menu-#{kind}-#{record.id}"}
+                    popovertargetaction="hide"
+                    phx-click="unpublish"
+                    phx-value-kind={kind}
+                    phx-value-id={record.id}
+                    class="row-menu-item"
+                  >
+                    <.icon name="hero-eye-slash" class="size-4 text-base-content/60" />
+                    {gettext("Unpublish")}
+                  </button>
+                  <button
+                    type="button"
+                    popovertarget={"row-menu-#{kind}-#{record.id}"}
+                    popovertargetaction="hide"
+                    phx-click="duplicate"
+                    phx-value-kind={kind}
+                    phx-value-id={record.id}
+                    title={gettext("Copy into a new draft")}
+                    class="row-menu-item"
+                  >
+                    <.icon name="hero-document-duplicate" class="size-4 text-base-content/60" />
+                    {gettext("Duplicate")}
+                  </button>
+                  <.link
+                    navigate={edit_path(kind, record.id) <> "?assign=1"}
+                    class="row-menu-item"
+                  >
+                    <.icon name="hero-user-plus" class="size-4 text-base-content/60" />
+                    {gettext("Assign")}
+                  </.link>
+                  <.link navigate={edit_path(kind, record.id)} class="row-menu-item">
+                    <.icon name="hero-pencil-square" class="size-4 text-base-content/60" />
+                    {gettext("Edit")}
+                  </.link>
+                </div>
+              </div>
+            </li>
+          </ul>
+        </div>
 
         <div :if={@more?} class="flex justify-center">
           <button
@@ -1801,12 +1966,44 @@ defmodule KilnCMSWeb.EditorLive do
     |> assign(:default_views, defaults)
     |> assign(:active_saved_view, active_saved)
     |> assign(:active_view_id, (active_default || active_saved || %{id: nil}).id)
+    |> assign(:stats, stats(assigns.overview, ctx, current))
     |> assign(:chips, chips(assigns))
     |> assign(
       :panel_count,
       assigns.filters |> Map.take(@panel_keys) |> Filters.to_params() |> map_size()
     )
   end
+
+  # The overview strip's cards, in workflow order. Each links to the list it
+  # counts and is current when that is exactly the filter on screen.
+  defp stats(overview, ctx, current) do
+    for {key, params} <- @overview do
+      path_params = params |> Filters.parse(ctx) |> Filters.to_params()
+      {label, icon, tone} = stat_look(key)
+
+      %{
+        key: key,
+        label: label,
+        icon: icon,
+        tone: tone,
+        count: Map.get(overview, key, 0),
+        path: params_path(path_params),
+        current?: path_params == current
+      }
+    end
+  end
+
+  # Tones match `state_badge/1`'s, so a card and the badges it counts agree.
+  defp stat_look("draft"), do: {gettext("Drafts"), "hero-pencil", "bg-info/12 text-info-ink"}
+
+  defp stat_look("in_review"),
+    do: {gettext("In review"), "hero-eye", "bg-warning/20 text-warning-ink"}
+
+  defp stat_look("scheduled"),
+    do: {gettext("Scheduled"), "hero-clock", "bg-primary/12 text-primary-ink"}
+
+  defp stat_look("published"),
+    do: {gettext("Published"), "hero-check-circle", "bg-success/15 text-success-ink"}
 
   # `{key, label}` for every active facet but the sort, in a stable order.
   defp chips(assigns) do

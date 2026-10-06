@@ -259,14 +259,13 @@ defmodule KilnCMSWeb.EditorLiveTest do
     test "the bulk Publish button is admin-only", %{conn: conn} do
       draft_page()
 
-      {:ok, _lv, editor_html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
-
+      # The bulk bar only appears once something is selected.
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      editor_html = lv |> element("input[phx-click='toggle_select_all']") |> render_click()
       refute editor_html =~ ~s(phx-value-action="publish")
 
-      {:ok, _lv, admin_html} =
-        build_conn() |> log_in(authed_user(:admin)) |> live(~p"/editor")
-
+      {:ok, lv, _html} = build_conn() |> log_in(authed_user(:admin)) |> live(~p"/editor")
+      admin_html = lv |> element("input[phx-click='toggle_select_all']") |> render_click()
       assert admin_html =~ ~s(phx-value-action="publish")
     end
 
@@ -337,14 +336,13 @@ defmodule KilnCMSWeb.EditorLiveTest do
     test "the bulk Delete button is admin-only", %{conn: conn} do
       draft_page()
 
-      {:ok, _lv, editor_html} =
-        conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
-
+      # The bulk bar only appears once something is selected.
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      editor_html = lv |> element("input[phx-click='toggle_select_all']") |> render_click()
       refute editor_html =~ ~s(phx-value-action="delete")
 
-      {:ok, _lv, admin_html} =
-        build_conn() |> log_in(authed_user(:admin)) |> live(~p"/editor")
-
+      {:ok, lv, _html} = build_conn() |> log_in(authed_user(:admin)) |> live(~p"/editor")
+      admin_html = lv |> element("input[phx-click='toggle_select_all']") |> render_click()
       assert admin_html =~ ~s(phx-value-action="delete")
     end
 

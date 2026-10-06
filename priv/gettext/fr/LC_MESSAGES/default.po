@@ -3873,6 +3873,11 @@ msgstr "Contenu"
 msgid "Content blocks"
 msgstr "Blocs de contenu"
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Content by stage"
+msgstr "Contenu par étape"
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Content can carry any number of tags."
@@ -5553,6 +5558,7 @@ msgid "Draft, review and publish, with scheduled publishing and content releases
 msgstr "Brouillon, relecture et publication, avec publication programmée et lots de contenu qui publient plusieurs modifications à la fois."
 
 #: lib/kiln_cms_web/controllers/manifest_controller.ex
+#: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Drafts"
 msgstr "Brouillons"
@@ -8746,9 +8752,15 @@ msgid "Month"
 msgstr "Mois"
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "More actions"
 msgstr "Autres actions"
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "More actions for %{title}"
+msgstr "Autres actions pour %{title}"
 
 #: lib/kiln_cms_web/controllers/content_html/search.html.heex
 #, elixir-autogen, elixir-format
@@ -9777,7 +9789,6 @@ msgid "None"
 msgstr "Aucun"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
-#: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "None selected"
 msgstr "Aucun sélectionné"
@@ -12862,6 +12873,7 @@ msgstr "Planifier"
 msgid "Schedule a publish, set an embargo end, or give content a review cadence."
 msgstr "Programmez une publication, fixez une fin d'embargo ou donnez au contenu une cadence de révision."
 
+#: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -16267,6 +16279,11 @@ msgstr "Trigrammes"
 msgid "Trigram glyphs: three lines per item — published at the bottom, translated in the middle, scheduled on top; solid means yes. Hover one for its reading."
 msgstr "Trigrammes : trois lignes par élément — publié en bas, traduit au milieu, planifié en haut ; une ligne pleine signifie oui. Survolez-en un pour sa lecture."
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Try a wider filter, or clear it to see everything."
+msgstr "Élargissez le filtre, ou effacez-le pour tout afficher."
+
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/controllers/offline_controller.ex
 #, elixir-autogen, elixir-format
@@ -16637,6 +16654,11 @@ msgstr "Les vérifications de mise à jour sont désactivées (KILN_UPDATE_CHECK
 #, elixir-autogen, elixir-format
 msgid "Updated"
 msgstr "Mis à jour"
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Updated %{time} ago"
+msgstr "Mis à jour il y a %{time}"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
