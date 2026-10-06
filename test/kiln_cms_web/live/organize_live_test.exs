@@ -12,6 +12,53 @@ defmodule KilnCMSWeb.OrganizeLiveTest do
 
   @password "password123456"
 
+  # A second embedder module, so a second run's embeds key differently in
+  # `KilnCMS.Search.VectorCache` (the key includes the embedder) and cannot
+  # join the first run's in-flight Cachex fetch — they reach an embedder, and
+  # report it.
+  defmodule ReportingEmbedder do
+    @moduledoc false
+    @behaviour KilnCMS.Search.Embedder
+    @impl true
+    def embed(text) do
+      case Application.get_env(:kiln_cms, :organize_latch) do
+        {_state, test_pid} -> send(test_pid, {:embed_started, self()})
+        _ -> :ok
+      end
+
+      KilnCMS.StubEmbedder.embed(text)
+    end
+  end
+
+  defmodule LatchEmbedder do
+    @moduledoc false
+    # Reports every embed to the test pid in `:organize_latch`; the FIRST one
+    # then blocks until the test sends `:go`, holding a run in flight.
+    @behaviour KilnCMS.Search.Embedder
+    @impl true
+    def embed(text) do
+      case Application.get_env(:kiln_cms, :organize_latch) do
+        {:armed, test_pid} ->
+          Application.put_env(:kiln_cms, :organize_latch, {:open, test_pid})
+          send(test_pid, {:embed_started, self()})
+
+          receive do
+            :go -> :ok
+          after
+            5_000 -> :ok
+          end
+
+        {:open, test_pid} ->
+          send(test_pid, {:embed_started, self()})
+
+        _ ->
+          :ok
+      end
+
+      KilnCMS.StubEmbedder.embed(text)
+    end
+  end
+
   defp authed_user(role) do
     email = "organize-lv-#{uniq()}@example.com"
 
@@ -43,7 +90,7 @@ defmodule KilnCMSWeb.OrganizeLiveTest do
 
   defp open(conn, user, tab \\ "clusters") do
     {:ok, view, _html} = conn |> log_in(user) |> live(~p"/editor/organize?#{%{tab: tab}}")
-    render_async(view)
+    render_async(view, 2_000)
     view
   end
 
@@ -71,7 +118,7 @@ defmodule KilnCMSWeb.OrganizeLiveTest do
 
       {:ok, view, html} = conn |> log_in(admin) |> live(~p"/editor/organize")
       assert html =~ ~s(href="/editor/organize")
-      assert render_async(view) =~ "Cluster One"
+      assert render_async(view, 2_000) =~ "Cluster One"
       assert has_element?(view, "#organize-clusters article")
     end
 
@@ -92,12 +139,12 @@ defmodule KilnCMSWeb.OrganizeLiveTest do
       assert has_element?(view, "#index-tags")
       refute has_element?(view, "#propose")
       view |> element("#index-tags") |> render_click()
-      render_async(view)
-      render_async(view)
+      render_async(view, 2_000)
+      render_async(view, 2_000)
       assert has_element?(view, "#propose")
 
       view |> element("#propose") |> render_click()
-      assert render_async(view) =~ "Review me"
+      assert render_async(view, 2_000) =~ "Review me"
       assert has_element?(view, "#apply-#{draft.id}")
 
       # A forged id rides along with the real one; only the proposed one lands.
@@ -120,30 +167,38 @@ defmodule KilnCMSWeb.OrganizeLiveTest do
       assert has_element?(open(conn, admin, "gaps"), "#organize-gaps")
     end
 
-    # Guards `proposing?`. Honest about its reach: a replayed run would find
-    # the first run's blocks already in VectorCache and cost nothing, so the
-    # spend alone cannot tell a guarded handler from an unguarded one — what
-    # the guard protects is a charged run's rows from being discarded. This
-    # pins the observable contract: one row, one run's spend.
-    test "a double Propose yields one run's rows and one run's spend",
-         %{conn: conn} do
+    # Guards `proposing?`: a run is held in flight inside the embedder, and a
+    # second Propose must not start another one (which would cancel the first
+    # after it may already have charged, discarding its rows).
+    test "a second Propose while a run is in flight is refused", %{conn: conn} do
       editor = authed_user(:admin)
-      tag!(org(), editor, "double tag #{uniq()}")
-      draft = post!(org(), editor, ["double a #{uniq()}", "double b #{uniq()}"], publish?: false)
+      tag!(org(), editor, "latch tag #{uniq()}")
+      draft = post!(org(), editor, ["latch a #{uniq()}", "latch b #{uniq()}"], publish?: false)
 
       view = open(conn, editor, "tagging")
       view |> element("#index-tags") |> render_click()
-      render_async(view)
-      render_async(view)
-      spent_before = spent("user", editor.id, :timer.minutes(1))
+      # The index chunk, then the tab reload it triggers.
+      render_async(view, 2_000)
+      render_async(view, 2_000)
+      assert has_element?(view, "#propose")
+
+      put_search_env(embedder: LatchEmbedder)
+      Application.put_env(:kiln_cms, :organize_latch, {:armed, self()})
+      on_exit(fn -> Application.delete_env(:kiln_cms, :organize_latch) end)
 
       render_click(view, "propose", %{})
+      assert_receive {:embed_started, blocked}, 2_000
+
+      # Whatever a second run would embed now reaches a fresh embedder.
+      put_search_env(embedder: ReportingEmbedder)
       render_click(view, "propose", %{})
-      html = render_async(view)
+      refute_receive {:embed_started, _}, 300
+
+      Application.delete_env(:kiln_cms, :organize_latch)
+      send(blocked, :go)
+
+      html = render_async(view, 2_000)
       assert length(Regex.scan(~r/id="row-#{draft.id}"/, html)) == 1
-
-      # The draft's two uncached blocks, once — not twice.
-      assert spent("user", editor.id, :timer.minutes(1)) - spent_before == 2
     end
 
     test "malformed payloads are ignored, not crashed", %{conn: conn} do
@@ -156,7 +211,7 @@ defmodule KilnCMSWeb.OrganizeLiveTest do
       render_change(view, "filter", %{"filter" => %{"state" => "deleted", "type" => ["x"]}})
       render_click(view, "continue", %{})
       render_click(view, "propose", %{"x" => 1})
-      render_async(view)
+      render_async(view, 2_000)
 
       assert Process.alive?(view.pid)
       assert has_element?(view, "#organize-tagging")
