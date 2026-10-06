@@ -64,6 +64,13 @@ Every summary line below that was shortened links to its own entry there.
   value; after restoring a pre-1.1 backup, run `mix kiln.links.backfill`.**
   ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594) · [long form](docs/changelog/unreleased.md#reference-edges-backfill))
 
+### Security
+
+- **`ash` 3.34.4 closes an atom-table exhaustion advisory (EEF-CVE-2026-94201,
+  HIGH); no untrusted filter path onto the affected attribute was found in
+  Kiln.**
+  ([long form](docs/changelog/unreleased.md#ash-3344-closes-an-atom-table-exhaustion-advisory))
+
 ### Added
 
 - **A document's URL can follow the content tree: an `[ancestors]` alias token,
