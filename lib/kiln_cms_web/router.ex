@@ -453,6 +453,9 @@ defmodule KilnCMSWeb.Router do
       # An unsaved new document: nothing is written until the writer's first
       # title or Save, then the same LiveView patches to the `:id` route. Must
       # precede it, or "new" would be read as an id.
+      # The content tree for one type (#1597, D21). Per-type because a parent
+      # is a record of the same type, so the tree cannot span types.
+      live "/editor/structure/:type", StructureLive, :index
       live "/editor/content/:type/new", ContentEditorLive, :new
       live "/editor/content/:type/:id", ContentEditorLive, :content
       live "/editor/preview/:kind/:id", PreviewLive, :show

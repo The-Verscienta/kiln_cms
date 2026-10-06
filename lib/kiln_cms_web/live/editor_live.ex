@@ -1175,6 +1175,18 @@ defmodule KilnCMSWeb.EditorLive do
 
         <div :if={@items != [] or @filtering?} class="space-y-3">
           <div class="flex flex-wrap items-center gap-3">
+            <%!-- The content tree for this type (#1597, D21). Only with ONE type
+                    selected: a parent is a record of the same type, so a tree
+                    cannot span types and "all" has no structure to show. --%>
+            <.link
+              :if={@filters["type"] not in [nil, "", "all"]}
+              navigate={~p"/editor/structure/#{@filters["type"]}"}
+              class="btn btn-default"
+            >
+              <.icon name="hero-bars-3-bottom-left" class="size-4" />
+              {gettext("Structure")}
+            </.link>
+
             <form id="content-search" phx-change="search" phx-submit="search" class="min-w-48 flex-1">
               <label for="content-search-input" class="sr-only">{gettext("Search by title")}</label>
               <input
