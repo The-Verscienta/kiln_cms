@@ -35,11 +35,11 @@ defmodule KilnCMS.Search.DocumentCentroids do
   def for_documents(tenant, document_ids) when is_list(document_ids) do
     case org_id(tenant) do
       nil -> []
-      org_id -> query(org_id, document_ids)
+      org_id -> averaged(org_id, document_ids)
     end
   end
 
-  defp query(org_id, document_ids) do
+  defp averaged(org_id, document_ids) do
     {:ok, org_id} = Ecto.UUID.dump(org_id)
     ids = Enum.map(document_ids, &(&1 |> Ecto.UUID.dump() |> elem(1)))
 
