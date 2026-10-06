@@ -114,6 +114,17 @@ defmodule KilnCMSWeb.SharedFieldWritesTest do
     |> Ash.Resource.get_metadata(:plaintext_api_key)
   end
 
+  defp post_json(attrs, key) do
+    conn =
+      build_conn()
+      |> put_req_header("accept", @accept)
+      |> put_req_header("content-type", @accept)
+      |> put_req_header("authorization", "Bearer #{key}")
+      |> post("/api/json/pages", Jason.encode!(%{data: %{type: "page", attributes: attrs}}))
+
+    {conn.status, Jason.decode!(conn.resp_body)}
+  end
+
   defp patch_json(page, attrs, key) do
     conn =
       build_conn()
@@ -151,7 +162,11 @@ defmodule KilnCMSWeb.SharedFieldWritesTest do
       assert reload(ctx.fr).seo_image == "https://example.com/en.png"
 
       # Clearing it is a change too.
-      assert refused?(CMS.update_page(reload(ctx.fr), %{seo_image: nil}, actor: ctx.actor), "en")
+      assert {:error, %Ash.Error.Invalid{errors: [cleared]}} =
+               CMS.update_page(reload(ctx.fr), %{seo_image: nil}, actor: ctx.actor)
+
+      assert %Ash.Error.Changes.InvalidAttribute{field: :seo_image} = cleared
+      assert reload(ctx.fr).seo_image == "https://example.com/en.png"
     end
 
     test "a shared custom field is refused; a localized one, and leaving it out, pass", ctx do
@@ -404,6 +419,172 @@ defmodule KilnCMSWeb.SharedFieldWritesTest do
       # The source's value is not.
       fr = CMS.update_page!(fr, %{custom_fields: %{"note" => "Hello"}}, actor: ctx.actor)
       assert fr.custom_fields["note"] == "Hello"
+    end
+  end
+
+  describe "media and reference fields compare by id" do
+    test "re-sending a reference whose target was renamed passes", ctx do
+      target = CMS.create_page!(%{title: "Target", slug: slug(), locale: "en"}, actor: ctx.actor)
+
+      CMS.create_field_definition!(
+        %{
+          content_type: :page,
+          name: "related",
+          label: "Related",
+          field_type: :reference,
+          target_type: "page",
+          localization: :shared
+        },
+        actor: ctx.actor
+      )
+
+      {en, fr} =
+        document(ctx.actor, %{custom_fields: %{"related" => target.id, "note" => "Hello"}})
+
+      assert fr.custom_fields["related"]["title"] == "Target"
+
+      # The target's title is part of the stored snapshot, and every write
+      # re-reads it.
+      CMS.update_page!(target, %{title: "Renamed"}, actor: ctx.actor)
+
+      fr =
+        CMS.update_page!(fr, %{custom_fields: %{"related" => target.id, "note" => "Bonjour"}},
+          actor: ctx.actor
+        )
+
+      assert fr.custom_fields["related"]["id"] == target.id
+      assert fr.custom_fields["related"]["title"] == "Renamed"
+      assert en.custom_fields["related"]["title"] == "Target"
+
+      # Another id is still refused.
+      other = CMS.create_page!(%{title: "Other", slug: slug(), locale: "en"}, actor: ctx.actor)
+
+      assert refused?(
+               CMS.update_page(fr, %{custom_fields: %{"related" => other.id}}, actor: ctx.actor),
+               ~s("related")
+             )
+    end
+  end
+
+  describe "the source is the resulting document's, never the record's own row" do
+    test "a lone default-locale page moved to another locale is not judged against itself",
+         ctx do
+      en =
+        CMS.create_page!(
+          %{title: "Alone", slug: slug(), locale: "en", seo_image: "https://example.com/a.png"},
+          actor: ctx.actor
+        )
+
+      es =
+        CMS.update_page!(en, %{locale: "es", seo_image: "https://example.com/b.png"},
+          actor: ctx.actor
+        )
+
+      assert es.locale == "es"
+      assert es.seo_image == "https://example.com/b.png"
+    end
+
+    test "a translation renamed out of its document is judged by where it lands", ctx do
+      # Out to a slug with no source: nothing to differ from.
+      moved =
+        CMS.update_page!(
+          reload(ctx.fr),
+          %{slug: slug(), seo_image: "https://example.com/own.png"},
+          actor: ctx.actor
+        )
+
+      assert moved.seo_image == "https://example.com/own.png"
+
+      # Into another document: judged by THAT document's source.
+      {other_en, _other_fr} =
+        document(ctx.actor, %{seo_image: "https://example.com/other.png"})
+
+      lone = CMS.create_page!(%{title: "Lone", slug: slug(), locale: "es"}, actor: ctx.actor)
+
+      result =
+        CMS.update_page(lone, %{slug: other_en.slug, seo_image: "https://example.com/mine.png"},
+          actor: ctx.actor
+        )
+
+      assert {:error, %Ash.Error.Invalid{errors: [%{field: :seo_image}]}} = result
+
+      landed =
+        CMS.update_page!(
+          lone,
+          %{slug: other_en.slug, seo_image: "https://example.com/other.png"},
+          actor: ctx.actor
+        )
+
+      assert landed.slug == other_en.slug
+    end
+  end
+
+  describe "a new translation" do
+    test "a JSON:API POST is refused a shared value its source does not hold", ctx do
+      key = key(ctx.actor)
+      fr_card_id = card_of(ctx.en).id
+
+      assert {400, %{"errors" => [error]}} =
+               post_json(
+                 %{
+                   title: "Produit",
+                   slug: ctx.en.slug,
+                   locale: "es",
+                   seo_image: "https://example.com/es.png"
+                 },
+                 key
+               )
+
+      assert error["source"]["pointer"] == "/data/attributes/seo_image"
+      assert error["detail"] =~ "en version"
+
+      assert {400, %{"errors" => [block_error]}} =
+               post_json(
+                 %{
+                   title: "Produit",
+                   slug: ctx.en.slug,
+                   locale: "es",
+                   block_tree: [card(%{"_id" => fr_card_id, "price" => 99})]
+                 },
+                 key
+               )
+
+      assert block_error["detail"] =~ "product_card.price"
+
+      # The source's value, or none at all, is fine.
+      assert {201, _} =
+               post_json(
+                 %{
+                   title: "Produit",
+                   slug: ctx.en.slug,
+                   locale: "es",
+                   seo_image: "https://example.com/en.png",
+                   custom_fields: %{"price" => "10", "note" => "Hola"}
+                 },
+                 key
+               )
+    end
+
+    test "a copy of a stored row opts out; an ordinary create of the same row does not", ctx do
+      # The setup's French variant came through *Translate* (`ContentCopy`),
+      # which carries the opt-out; here, an exported translation from before
+      # the field became shared, landing next to its source.
+      attrs = %{
+        title: "Importado",
+        slug: ctx.en.slug,
+        locale: "es",
+        seo_image: "https://example.com/legacy.png"
+      }
+
+      assert refused?(CMS.create_page(attrs, actor: ctx.actor), "seo_image")
+
+      imported =
+        CMS.create_page!(attrs,
+          actor: ctx.actor,
+          context: %{custom_fields: :drop, shared_fields_check: :skip}
+        )
+
+      assert imported.seo_image == "https://example.com/legacy.png"
     end
   end
 

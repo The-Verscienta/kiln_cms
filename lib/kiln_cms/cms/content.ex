@@ -2341,6 +2341,11 @@ defmodule KilnCMS.CMS.Content do
           validate KilnCMS.CMS.Validations.PathAliasValid
           validate KilnCMS.CMS.Validations.SeoUrls
           validate KilnCMS.CMS.Validations.ScheduleOrder
+          # A new translation may not carry a shared value its source does not
+          # (#1860) — the next shared-field copy would overwrite it. AFTER the
+          # changes above (the derived slug, the cast body, the coerced custom
+          # fields). Copies of stored rows opt out; see the validation.
+          validate KilnCMS.I18n.Validations.SharedFieldsReadOnly
           # Any open editorial calendar re-queries its window. NOT on
           # `:autosave`: a broadcast per debounce would wake every open grid
           # in the org every few seconds while one person types.

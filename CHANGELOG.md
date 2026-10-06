@@ -106,7 +106,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Field-level localization: a field can be shared across a document's
   locale variants, or inherited along the site's fallback chain when empty.**
-  ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) · [long form](docs/changelog/unreleased.md#field-level-localization))
+  ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) · [#1860](https://github.com/The-Verscienta/kiln_cms/issues/1860) · [long form](docs/changelog/unreleased.md#field-level-localization))
 
 - **Plugin blocks get editor seams: their own label, icon and description,
   field hints, a row editor for `item_keys:` list fields, and live rendering.**
@@ -138,10 +138,6 @@ Every summary line below that was shortened links to its own entry there.
 - **Every release candidate is canaried on kilncms.dev before the final, and
   the headless API guides carry examples that run against it anonymously.**
   ([#1869](https://github.com/The-Verscienta/kiln_cms/issues/1869) · [#1872](https://github.com/The-Verscienta/kiln_cms/issues/1872) · [long form](docs/changelog/unreleased.md#release-candidates-are-canaried-on-kilncms-dev))
-
-- **On a translation, an API write that changes a `:shared` field is refused
-  with a validation error naming the field and the locale that owns it.**
-  ([#1860](https://github.com/The-Verscienta/kiln_cms/issues/1860) · [long form](docs/changelog/unreleased.md#an-api-write-to-a-shared-field-on-a-translation-is-refused))
 
 ### Fixed
 

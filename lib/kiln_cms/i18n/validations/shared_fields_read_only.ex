@@ -49,28 +49,48 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
 
   ## Where it runs
 
-  On the actions that take content input on an existing row: `:update` (the
+  On the actions that take content input on an existing row — `:update` (the
   JSON:API `PATCH`, the GraphQL `update*` mutations, and every code path
   through the `update_*` interfaces), `:autosave`, and `:save_working_copy`
   (option `blocks: :working_blocks`, for the held body; the held settings are
   judged by `:update` itself through `Changes.StageWorkingFields`' probe, so
-  they meet this check there). The internal `:sync_shared_fields` action does
+  they meet this check there) — and on `:create`. The internal `:sync_shared_fields` action does
   not carry it — it is the write that is *meant* to change these fields — and
   a source variant's writes never meet it.
 
-  Not on `:create`: a create has no current value to compare with, and the
-  paths that create a variant in bulk (a content import, a restore) carry
-  whatever the exported pair held, which for a pair that predates the field
-  becoming shared differs legitimately. See `docs/localization-workflows.md`,
-  "Limits".
+  And on `:create`, where there is no current value: a new translation (a
+  JSON:API `POST`, a GraphQL `create*`) is refused a shared value that differs
+  from its source's. A shared value the payload leaves out is not judged.
+
+  Machinery that copies stored rows wholesale opts out with
+  `context: %{shared_fields_check: :skip}` — `ContentCopy.create_opts/1`
+  (*Translate*, which copies the source's own values, and duplication) and the
+  content import, whose payload is an exported pair that may predate the field
+  becoming shared. No HTTP surface can set a changeset context.
+
+  ## The source
+
+  The default-locale row of the document this write leaves the record in: the
+  *resulting* slug (and, on the entry tier, type definition), never the record
+  itself. So a variant renamed into another document is judged against that
+  document's source, and a lone page moved out of the default locale is not
+  judged against its own row. A failed read is an error, not a pass.
+
+  ## Values compared by identity
+
+  A `:media` or `:reference` custom field stores a snapshot (`id` plus the
+  target's url, alt, slug or title, refreshed by `ApplyCustomFields` on every
+  write). Those compare by `"id"` alone: a renamed target or a re-described
+  image is the same value, and the sync copies the same id.
   """
   use Ash.Resource.Validation
+
+  require Ash.Query
 
   alias Ash.Error.Changes.InvalidAttribute
   alias KilnCMS.CMS.Changes.ApplyCustomFields
   alias KilnCMS.CMS.WorkingCopy
   alias KilnCMS.I18n.FieldLocalization
-  alias KilnCMS.I18n.SharedFields
 
   @impl true
   def init(opts) do
@@ -85,19 +105,24 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
     do: {:not_atomic, "compares against the source variant, which is another row"}
 
   @impl true
-  def validate(%{action_type: :update} = changeset, opts, _context) do
-    locale = Ash.Changeset.get_attribute(changeset, :locale)
-
-    if locale == FieldLocalization.source_locale() do
-      :ok
-    else
-      changeset
-      |> candidates(opts[:blocks])
-      |> refuse(%{changeset.data | locale: locale})
+  def validate(%{action_type: type, context: context} = changeset, opts, _context)
+      when type in [:create, :update] do
+    cond do
+      Map.get(context, :shared_fields_check) == :skip -> :ok
+      source_locale?(changeset) -> :ok
+      true -> changeset |> candidates(opts[:blocks]) |> refuse(changeset)
     end
   end
 
   def validate(_changeset, _opts, _context), do: :ok
+
+  defp source_locale?(changeset),
+    do: Ash.Changeset.get_attribute(changeset, :locale) == FieldLocalization.source_locale()
+
+  # The current value of `name` before this write: the row's on an update,
+  # none on a create.
+  defp current(%{action_type: :create}, _name), do: :none
+  defp current(changeset, name), do: {:value, Map.get(changeset.data, name)}
 
   # ── What this write changes ────────────────────────────────────────────────
   # Cheap and read-free, so a write that touches no shared field (every write
@@ -112,7 +137,7 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
     for name <- FieldLocalization.attributes(changeset.resource).shared,
         Ash.Changeset.changing_attribute?(changeset, name),
         value <- [Ash.Changeset.get_attribute(changeset, name)],
-        value != Map.get(changeset.data, name),
+        current(changeset, name) != {:value, value},
         do: {:attribute, name, value}
   end
 
@@ -120,13 +145,18 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
     with true <- Ash.Changeset.changing_attribute?(changeset, :custom_fields),
          supplied when is_list(supplied) <- ApplyCustomFields.supplied_keys(changeset) do
       written = Ash.Changeset.get_attribute(changeset, :custom_fields) || %{}
-      current = changeset.data.custom_fields || %{}
 
-      for key <- shared_custom_fields(changeset),
+      current =
+        case current(changeset, :custom_fields) do
+          {:value, map} -> map || %{}
+          :none -> :none
+        end
+
+      for {key, type} <- shared_custom_fields(changeset),
           key in supplied,
-          value <- [Map.fetch(written, key)],
-          value != Map.fetch(current, key),
-          do: {:custom_field, key, value}
+          value <- [comparable(type, Map.fetch(written, key))],
+          current == :none or value != comparable(type, Map.fetch(current, key)),
+          do: {:custom_field, key, type, value}
     else
       _not_written -> []
     end
@@ -145,8 +175,13 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
 
     for %{name: name, localization: :shared, field_type: type} <- definitions,
         type != :computed,
-        do: name
+        do: {name, type}
   end
+
+  # A media or reference snapshot is the same value while its id is: the
+  # rest is a display label `ApplyCustomFields` re-reads on every write.
+  defp comparable(type, {:ok, %{"id" => id}}) when type in [:media, :reference], do: {:ok, id}
+  defp comparable(_type, fetched), do: fetched
 
   defp block_candidates(changeset, attr) do
     if Ash.Changeset.changing_attribute?(changeset, attr) do
@@ -166,6 +201,8 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
 
   # The body the held copy is edited from: the copy while one is pending, the
   # live body before the first save opens one.
+  defp current_blocks(%{action_type: :create}, _attr), do: []
+
   defp current_blocks(changeset, :working_blocks) do
     if WorkingCopy.pending?(changeset.data),
       do: changeset.data.working_blocks || [],
@@ -183,28 +220,74 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
 
   # ── Against the source ─────────────────────────────────────────────────────
 
-  defp refuse([], _record), do: :ok
+  defp refuse([], _changeset), do: :ok
 
-  defp refuse(candidates, record) do
-    case SharedFields.source(record) do
-      nil ->
+  defp refuse(candidates, changeset) do
+    case source(changeset) do
+      {:ok, nil} ->
         :ok
 
-      source ->
+      {:ok, source} ->
         source_blocks = by_id(source.blocks || [])
 
         case Enum.reject(candidates, &matches_source?(&1, source, source_blocks)) do
           [] -> :ok
           refused -> {:error, Enum.map(refused, &error(&1, source.locale))}
         end
+
+      {:error, error} ->
+        {:error, error}
     end
   end
+
+  # The default-locale row of the document this write leaves the record in —
+  # see "The source" above. `SharedFields.source/1` is not used: it reads by
+  # the record's stored slug and would find the record's own row.
+  defp source(changeset) do
+    slug = Ash.Changeset.get_attribute(changeset, :slug)
+
+    if is_binary(slug) do
+      changeset.resource
+      |> Ash.Query.filter(slug == ^slug and locale == ^FieldLocalization.source_locale())
+      |> exclude_self(changeset)
+      |> scope_to_type(Ash.Changeset.get_attribute(changeset, :type_definition_id))
+      |> Ash.Query.limit(1)
+      # authorize?: false — one row of this document, read only to compare
+      # the shared values the write carries with the ones the source owns;
+      # nothing read here reaches the caller but the source's locale.
+      |> Ash.read(tenant: tenant(changeset), authorize?: false)
+      |> case do
+        {:ok, rows} -> {:ok, List.first(rows)}
+        {:error, error} -> {:error, error}
+      end
+    else
+      {:ok, nil}
+    end
+  end
+
+  defp exclude_self(query, %{action_type: :update, data: %{id: id}}) when not is_nil(id),
+    do: Ash.Query.filter(query, id != ^id)
+
+  defp exclude_self(query, _changeset), do: query
+
+  defp scope_to_type(query, id) when is_binary(id),
+    do: Ash.Query.filter(query, type_definition_id == ^id)
+
+  defp scope_to_type(query, _none), do: query
+
+  defp tenant(%{action_type: :update, data: %{org_id: org_id}}) when not is_nil(org_id),
+    do: org_id
+
+  defp tenant(changeset),
+    do:
+      changeset.to_tenant || Ash.Changeset.get_attribute(changeset, :org_id) ||
+        KilnCMS.Accounts.default_org_id()
 
   defp matches_source?({:attribute, name, value}, source, _blocks),
     do: value == Map.get(source, name)
 
-  defp matches_source?({:custom_field, key, value}, source, _blocks),
-    do: value == Map.fetch(source.custom_fields || %{}, key)
+  defp matches_source?({:custom_field, key, type, value}, source, _blocks),
+    do: value == comparable(type, Map.fetch(source.custom_fields || %{}, key))
 
   # The sync copies a block field only from the source block with the same id
   # and type; with no such block, nothing will overwrite this value.
@@ -221,7 +304,7 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
     InvalidAttribute.exception(field: name, message: "#{name} #{owned_by(locale)}", value: value)
   end
 
-  defp error({:custom_field, key, _value}, locale) do
+  defp error({:custom_field, key, _type, _value}, locale) do
     InvalidAttribute.exception(
       field: :custom_fields,
       message: "\"#{key}\" #{owned_by(locale)}",

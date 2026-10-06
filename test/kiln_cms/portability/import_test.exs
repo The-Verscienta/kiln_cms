@@ -388,6 +388,41 @@ defmodule KilnCMS.Portability.ImportTest do
       assert posts(actor) |> Enum.map(& &1.locale) |> Enum.sort() == ["en", "fr"]
     end
 
+    # An exported translation may hold its own value for a field that has
+    # since become shared (#1327). The import keeps the pair rather than
+    # refusing the translation (#1860); the next shared-field copy settles it.
+    test "a translation's own value for a shared field survives the import", %{actor: actor} do
+      CMS.create_field_definition!(
+        %{content_type: :post, name: "price", label: "Price", localization: :shared},
+        actor: actor
+      )
+
+      envelope = %{
+        "records" => [
+          %{
+            "type" => "post",
+            "title" => "Hello",
+            "slug" => "priced",
+            "locale" => "en",
+            "custom_fields" => %{"price" => "10"}
+          },
+          %{
+            "type" => "post",
+            "title" => "Bonjour",
+            "slug" => "priced",
+            "locale" => "fr",
+            "custom_fields" => %{"price" => "12"}
+          }
+        ]
+      }
+
+      {:ok, report} = Import.run_envelope(envelope, actor: actor, skip_media: true)
+
+      assert report.failed == []
+      fr = posts(actor) |> Enum.find(&(&1.slug == "priced" and &1.locale == "fr"))
+      assert fr.custom_fields["price"] == "12"
+    end
+
     test "an explicit --locale still overrides the envelope", %{actor: actor} do
       envelope = %{
         "records" => [%{"type" => "post", "title" => "T", "slug" => "t", "locale" => "fr"}]

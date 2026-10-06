@@ -134,11 +134,12 @@ the locale it comes from. The Translations panel and `/editor/translations`
 report staleness only for `:localized` and `:fallback` fields.
 
 The write path holds the same line (#1860,
-`KilnCMS.I18n.Validations.SharedFieldsReadOnly`): on a translation, `:update`,
-`:autosave` and the working copy refuse a value for a shared field that the
-next copy would overwrite — one that differs from both the translation's
-current value and the source's — with a validation error naming the field and
-the source locale. So a JSON:API or GraphQL client hears about it when it
+`KilnCMS.I18n.Validations.SharedFieldsReadOnly`): on a translation, `:create`,
+`:update`, `:autosave` and the working copy refuse a value for a shared field
+that the next copy would overwrite — one that differs from the source's and,
+on an existing row, from the translation's current value — with a validation
+error naming the field and the source locale. Copies of stored rows
+(*Translate*, duplication, the content import) opt out. So a JSON:API or GraphQL client hears about it when it
 writes, rather than losing the value at the source's next publish.
 
 ### How delivery chooses a locale

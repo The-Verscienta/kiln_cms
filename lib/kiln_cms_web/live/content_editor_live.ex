@@ -2021,16 +2021,26 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   # Open the (searchable) media browser to choose the featured image (#154),
   # replacing the load-everything <select>.
-  def handle_event("open_featured_picker", _params, socket),
-    do: {:noreply, assign(socket, :picking, :featured)}
+  # Neither opens on a translation whose type shares the featured image
+  # (#1860): the hidden controls are not a boundary, and the save would be
+  # refused.
+  def handle_event("open_featured_picker", _params, socket) do
+    if shared_locked?(socket, :featured_image_id),
+      do: {:noreply, socket},
+      else: {:noreply, assign(socket, :picking, :featured)}
+  end
 
   def handle_event("clear_featured", _params, socket) do
-    params = AshPhoenix.Form.params(socket.assigns.form) |> Map.put("featured_image_id", nil)
+    if shared_locked?(socket, :featured_image_id) do
+      {:noreply, socket}
+    else
+      params = AshPhoenix.Form.params(socket.assigns.form) |> Map.put("featured_image_id", nil)
 
-    {:noreply,
-     socket
-     |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
-     |> mark_dirty(:settings)}
+      {:noreply,
+       socket
+       |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+       |> mark_dirty(:settings)}
+    end
   end
 
   # Open the media browser to choose the social (og:image) card image (#476),
@@ -2901,7 +2911,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # inside the editor form, so — like `comment_draft` — it carries its own
   # `phx-change` and the Add button reads the synced assign.
   def handle_event("category_new_open", _params, socket) do
-    if socket.assigns.can_create_category? do
+    if socket.assigns.can_create_category? and not shared_locked?(socket, :category_id) do
       {:noreply, socket |> assign(:category_draft, "") |> assign(:category_error, nil)}
     else
       {:noreply, socket}
@@ -3601,12 +3611,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   defp apply_pick(socket, :seo_image, _media_id, url), do: put_seo_image(socket, url)
 
+  # Not on a translation whose type shares the featured image (#1860).
   defp apply_pick(socket, :featured, media_id, _url) do
-    params = AshPhoenix.Form.params(socket.assigns.form) |> Map.put("featured_image_id", media_id)
+    if shared_locked?(socket, :featured_image_id) do
+      socket
+    else
+      params =
+        AshPhoenix.Form.params(socket.assigns.form) |> Map.put("featured_image_id", media_id)
 
-    socket
-    |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
-    |> mark_dirty(:settings)
+      socket
+      |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+      |> mark_dirty(:settings)
+    end
   end
 
   # A library pick carries the item's alt text, the same as a paste or upload
@@ -5366,18 +5382,34 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # stale DOM or replayed event beats the disabled attribute; it doesn't beat
   # this.
   defp put_seo_image(socket, url) do
-    if field_locked?(locked_fields(socket), "seo_image") do
-      put_flash(
-        socket,
-        :info,
-        gettext("Another editor is editing the social image right now.")
-      )
-    else
-      params = AshPhoenix.Form.params(socket.assigns.form) |> Map.put("seo_image", url)
+    cond do
+      # Shared across locales and this is a translation (#1860): the save
+      # would be refused, so the picker does not stage it.
+      shared_locked?(socket, :seo_image) ->
+        socket
 
-      socket
-      |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
-      |> mark_dirty(:settings)
+      field_locked?(locked_fields(socket), "seo_image") ->
+        put_flash(
+          socket,
+          :info,
+          gettext("Another editor is editing the social image right now.")
+        )
+
+      true ->
+        params = AshPhoenix.Form.params(socket.assigns.form) |> Map.put("seo_image", url)
+
+        socket
+        |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+        |> mark_dirty(:settings)
+    end
+  end
+
+  # A record attribute this type shares across locales, on a translation
+  # (#1327): read-only here, and a write to it is refused (#1860).
+  defp shared_locked?(socket, attribute) do
+    case socket.assigns[:localization] do
+      nil -> false
+      loc -> KilnCMSWeb.ContentEditor.Localization.locked?(loc, {:attribute, attribute})
     end
   end
 
