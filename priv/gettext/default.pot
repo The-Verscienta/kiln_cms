@@ -7651,12 +7651,22 @@ msgstr[1] ""
 msgid "Indexed %{n} tag names; %{left} still to go. Continue in a minute."
 msgstr ""
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Indexing tag names stopped unexpectedly. Try again."
+msgstr ""
+
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "Indexing: %{count} job left."
 msgid_plural "Indexing: %{count} jobs left."
 msgstr[0] ""
 msgstr[1] ""
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "Indexing…"
+msgstr ""
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format

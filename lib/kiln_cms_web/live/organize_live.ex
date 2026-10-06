@@ -55,6 +55,7 @@ defmodule KilnCMSWeb.OrganizeLive do
     |> assign(:rows, %{})
     |> assign(:applied, %{})
     |> assign(:proposing?, false)
+    |> assign(:indexing?, false)
   end
 
   @impl true
@@ -134,6 +135,30 @@ defmodule KilnCMSWeb.OrganizeLive do
      |> put_flash(:error, gettext("The proposal run stopped unexpectedly. Try again."))}
   end
 
+  def handle_async(:index_tags, {:ok, result}, socket) do
+    socket = assign(socket, :indexing?, false)
+
+    socket =
+      case result do
+        {:ok, %{indexed: n, failed: new_failed, remaining: left}} ->
+          socket
+          |> assign(:failed_tags, socket.assigns.failed_tags ++ new_failed)
+          |> put_flash(:info, index_message(n, left))
+
+        {:error, reason} ->
+          put_flash(socket, :error, budget_message(reason))
+      end
+
+    {:noreply, load_tab(socket)}
+  end
+
+  def handle_async(:index_tags, {:exit, _reason}, socket) do
+    {:noreply,
+     socket
+     |> assign(:indexing?, false)
+     |> put_flash(:error, gettext("Indexing tag names stopped unexpectedly. Try again."))}
+  end
+
   @impl true
   def handle_event("filter", %{"filter" => params}, socket) when is_map(params) do
     filter = %{
@@ -146,29 +171,40 @@ defmodule KilnCMSWeb.OrganizeLive do
     {:noreply, socket |> assign(:filter, filter) |> reset_run() |> load_tab()}
   end
 
-  def handle_event("index_tags", _params, socket) do
+  # One chunk of tag-name inferences — seconds, so off the LiveView process.
+  # Refused while a chunk or a run is in flight: two chunks would each size
+  # themselves to the same room before either charged.
+  def handle_event(
+        "index_tags",
+        _params,
+        %{assigns: %{indexing?: false, proposing?: false}} = socket
+      ) do
     %{current_org: org, current_user: actor, failed_tags: failed} = socket.assigns
 
-    socket =
-      case Terms.index_tag_vectors(org, actor, failed) do
-        {:ok, %{indexed: n, failed: new_failed, remaining: left}} ->
-          socket
-          |> assign(:failed_tags, failed ++ new_failed)
-          |> put_flash(:info, index_message(n, left))
-
-        {:error, reason} ->
-          put_flash(socket, :error, budget_message(reason))
-      end
-
-    {:noreply, load_tab(socket)}
+    {:noreply,
+     socket
+     |> assign(:indexing?, true)
+     |> start_async(:index_tags, fn -> Terms.index_tag_vectors(org, actor, failed) end)}
   end
 
-  def handle_event("propose", _params, %{assigns: %{data: %{selection: docs}}} = socket) do
+  # Refused while a run (or an index chunk) is in flight: a second
+  # `start_async(:propose)` would cancel the first after it may already have
+  # charged, losing its rows with the units spent.
+  def handle_event(
+        "propose",
+        _params,
+        %{assigns: %{data: %{selection: docs}, proposing?: false, indexing?: false}} = socket
+      ) do
     {:noreply, socket |> reset_run() |> start_propose(docs)}
   end
 
-  def handle_event("continue", _params, %{assigns: %{run: %{pending: [_ | _] = docs}}} = socket),
-    do: {:noreply, start_propose(socket, docs)}
+  def handle_event(
+        "continue",
+        _params,
+        %{assigns: %{run: %{pending: [_ | _] = docs}, proposing?: false, indexing?: false}} =
+          socket
+      ),
+      do: {:noreply, start_propose(socket, docs)}
 
   # The row comes from assigns by id — never from the client — and the ticked
   # ids are filtered against that row's own proposal in `Tagging.apply/4`.
@@ -328,6 +364,7 @@ defmodule KilnCMSWeb.OrganizeLive do
           rows={@rows}
           applied={@applied}
           proposing?={@proposing?}
+          indexing?={@indexing?}
         />
         <.queue :if={@tab == "queue" and @data} data={@data} />
         <.health :if={@tab == "health" and @data} data={@data} />
@@ -423,6 +460,7 @@ defmodule KilnCMSWeb.OrganizeLive do
   attr :rows, :map, required: true
   attr :applied, :map, required: true
   attr :proposing?, :boolean, required: true
+  attr :indexing?, :boolean, required: true
 
   defp tagging(assigns) do
     ~H"""
@@ -495,8 +533,14 @@ defmodule KilnCMSWeb.OrganizeLive do
             )}
           </span>
         </p>
-        <.button :if={@data.missing_tags > 0} id="index-tags" size="sm" phx-click="index_tags">
-          {gettext("Index tag names")}
+        <.button
+          :if={@data.missing_tags > 0}
+          id="index-tags"
+          size="sm"
+          phx-click="index_tags"
+          disabled={@indexing?}
+        >
+          {if @indexing?, do: gettext("Indexing…"), else: gettext("Index tag names")}
         </.button>
         <.button
           :if={@data.missing_tags == 0}

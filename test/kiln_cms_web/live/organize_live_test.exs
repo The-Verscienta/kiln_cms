@@ -93,6 +93,7 @@ defmodule KilnCMSWeb.OrganizeLiveTest do
       refute has_element?(view, "#propose")
       view |> element("#index-tags") |> render_click()
       render_async(view)
+      render_async(view)
       assert has_element?(view, "#propose")
 
       view |> element("#propose") |> render_click()
@@ -119,6 +120,32 @@ defmodule KilnCMSWeb.OrganizeLiveTest do
       assert has_element?(open(conn, admin, "gaps"), "#organize-gaps")
     end
 
+    # Guards `proposing?`. Honest about its reach: a replayed run would find
+    # the first run's blocks already in VectorCache and cost nothing, so the
+    # spend alone cannot tell a guarded handler from an unguarded one — what
+    # the guard protects is a charged run's rows from being discarded. This
+    # pins the observable contract: one row, one run's spend.
+    test "a double Propose yields one run's rows and one run's spend",
+         %{conn: conn} do
+      editor = authed_user(:admin)
+      tag!(org(), editor, "double tag #{uniq()}")
+      draft = post!(org(), editor, ["double a #{uniq()}", "double b #{uniq()}"], publish?: false)
+
+      view = open(conn, editor, "tagging")
+      view |> element("#index-tags") |> render_click()
+      render_async(view)
+      render_async(view)
+      spent_before = spent("user", editor.id, :timer.minutes(1))
+
+      render_click(view, "propose", %{})
+      render_click(view, "propose", %{})
+      html = render_async(view)
+      assert length(Regex.scan(~r/id="row-#{draft.id}"/, html)) == 1
+
+      # The draft's two uncached blocks, once — not twice.
+      assert spent("user", editor.id, :timer.minutes(1)) - spent_before == 2
+    end
+
     test "malformed payloads are ignored, not crashed", %{conn: conn} do
       admin = authed_user(:admin)
       view = open(conn, admin, "tagging")
@@ -129,6 +156,7 @@ defmodule KilnCMSWeb.OrganizeLiveTest do
       render_change(view, "filter", %{"filter" => %{"state" => "deleted", "type" => ["x"]}})
       render_click(view, "continue", %{})
       render_click(view, "propose", %{"x" => 1})
+      render_async(view)
 
       assert Process.alive?(view.pid)
       assert has_element?(view, "#organize-tagging")
