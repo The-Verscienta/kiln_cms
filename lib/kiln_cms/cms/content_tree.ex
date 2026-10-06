@@ -122,12 +122,12 @@ defmodule KilnCMS.CMS.ContentTree do
     moving_id = record && Map.get(record, :id)
 
     by_parent = Enum.group_by(rows, & &1.parent_id)
-    blocked = if moving_id, do: subtree_ids(by_parent, moving_id), else: MapSet.new()
+    blocked = if moving_id, do: subtree_ids(by_parent, moving_id), else: %{}
     headroom = @max_depth - 1 - height(by_parent, moving_id)
 
     by_parent
     |> walk(nil, 1)
-    |> Enum.reject(&(MapSet.member?(blocked, &1.id) or &1.depth > headroom))
+    |> Enum.reject(&(Map.has_key?(blocked, &1.id) or &1.depth > headroom))
   end
 
   @doc """
@@ -173,20 +173,26 @@ defmodule KilnCMS.CMS.ContentTree do
     end)
   end
 
-  # `id` and everything beneath it. Bounded by the row count, so a cycle
-  # committed by concurrent moves cannot spin it.
+  # `id` and everything beneath it, as a map used as a set (`id => []`).
+  # Bounded by the row count, so a cycle committed by concurrent moves cannot
+  # spin it.
+  #
+  # A plain map rather than a MapSet: OTP 29's dialyzer loses MapSet's opacity
+  # through a recursive accumulator (and through the `MapSet.new/0` union in
+  # `candidate_parents/3`) and reports `call_without_opaque`. The set never
+  # leaves this module, and `:sets` v2 stores this exact shape underneath.
   defp subtree_ids(by_parent, id) do
-    collect(by_parent, [id], MapSet.new())
+    collect(by_parent, [id], %{})
   end
 
   defp collect(_by_parent, [], seen), do: seen
 
   defp collect(by_parent, [id | rest], seen) do
-    if MapSet.member?(seen, id) do
+    if Map.has_key?(seen, id) do
       collect(by_parent, rest, seen)
     else
       children = by_parent |> Map.get(id, []) |> Enum.map(& &1.id)
-      collect(by_parent, rest ++ children, MapSet.put(seen, id))
+      collect(by_parent, rest ++ children, Map.put(seen, id, []))
     end
   end
 
