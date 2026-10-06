@@ -64,13 +64,6 @@ Every summary line below that was shortened links to its own entry there.
   value; after restoring a pre-1.1 backup, run `mix kiln.links.backfill`.**
   ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594) · [long form](docs/changelog/unreleased.md#reference-edges-backfill))
 
-### Security
-
-- **`ash` 3.34.4 closes an atom-table exhaustion advisory (EEF-CVE-2026-94201,
-  HIGH); no untrusted filter path onto the affected attribute was found in
-  Kiln.**
-  ([long form](docs/changelog/unreleased.md#ash-3344-closes-an-atom-table-exhaustion-advisory))
-
 ### Added
 
 - **`/editor/organize`: semantic clusters, bulk tag review, an under-organized
@@ -177,6 +170,11 @@ Every summary line below that was shortened links to its own entry there.
   ([#1864](https://github.com/The-Verscienta/kiln_cms/issues/1864) · [long form](docs/changelog/unreleased.md#a-plugins-console-panels-no-longer-need-a-copy-of-the-cores-surface-test))
 
 ### Security
+
+- **`ash` 3.34.4 closes an atom-table exhaustion advisory (EEF-CVE-2026-94201,
+  HIGH); no untrusted filter path onto the affected attribute was found in
+  Kiln.**
+  ([long form](docs/changelog/unreleased.md#ash-3344-closes-an-atom-table-exhaustion-advisory))
 
 - **A content link is readable only by someone who may read both of its ends;
   `incoming_links` no longer names the drafts that link to a published page.**
