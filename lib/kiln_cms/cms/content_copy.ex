@@ -68,14 +68,21 @@ defmodule KilnCMS.CMS.ContentCopy do
   gets litigated: refusing the key would fail the entire copy over a value the
   source is sitting on, so the copy drops it (with a warning) exactly as an
   ordinary save of the source would.
+
+  `shared_fields_check: :skip` — a translation copies its source's own shared
+  values, except where the role-aware block reset (#890) or a field grant
+  (#1157) leaves one out, and the next shared-field copy fills those in; a
+  duplicate takes a fresh slug, so it has no source to differ from. Neither is
+  a caller choosing a value the copy would overwrite
+  (`KilnCMS.I18n.Validations.SharedFieldsReadOnly`, #1860).
   """
   @spec create_opts(keyword()) :: keyword()
   def create_opts(opts) do
     Keyword.update(
       opts,
       :context,
-      %{custom_fields: :drop},
-      &Map.put(&1, :custom_fields, :drop)
+      %{custom_fields: :drop, shared_fields_check: :skip},
+      &Map.merge(&1, %{custom_fields: :drop, shared_fields_check: :skip})
     )
   end
 

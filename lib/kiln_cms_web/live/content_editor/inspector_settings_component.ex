@@ -188,6 +188,12 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
           can_create?={@can_create_category?}
           draft={@category_draft}
           error={@category_error}
+          locked={Localization.locked?(@localization, {:attribute, :category_id})}
+        />
+        <Localization.localization_note
+          localization={@localization}
+          field={{:attribute, :category_id}}
+          kind={@kind}
         />
 
         <.input
@@ -245,7 +251,16 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
           can_create?={@can_create_tag?}
         />
 
-        <.featured_image_field form={@form} media={@media} />
+        <.featured_image_field
+          form={@form}
+          media={@media}
+          locked={Localization.locked?(@localization, {:attribute, :featured_image_id})}
+        />
+        <Localization.localization_note
+          localization={@localization}
+          field={{:attribute, :featured_image_id}}
+          kind={@kind}
+        />
 
         <.input
           field={@form[@related_field]}

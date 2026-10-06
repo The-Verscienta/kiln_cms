@@ -177,6 +177,11 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
     |> Enum.filter(&Kiln.Block.Policy.can_edit_field?(module, &1.name, role))
   end
 
+  defp locked_checkbox?(localization, module, field),
+    do:
+      dsl_input_type(field.type) == "checkbox" and
+        Localization.locked?(localization, {:block, module, field.name})
+
   defp dsl_input_type(:integer), do: "number"
   defp dsl_input_type(:boolean), do: "checkbox"
   defp dsl_input_type(_type), do: "text"
@@ -237,7 +242,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
         </div>
 
         <.input
-          :if={field.name != @primary}
+          :if={field.name != @primary and not locked_checkbox?(@localization, @module, field)}
           field={@bf[field.name]}
           type={dsl_input_type(field.type)}
           label={dsl_label(field.name)}
@@ -247,6 +252,23 @@ defmodule KilnCMSWeb.ContentEditor.BlockCanvasComponents do
             Localization.placeholder(@localization, {:block, @module, field.name, @block_id})
           }
         />
+        <%!-- A checkbox ignores `readonly`, so a shared boolean on a
+              translation (#1860) is disabled instead. A disabled control is
+              not submitted, so the stored value rides in a hidden input. --%>
+        <div :if={field.name != @primary and locked_checkbox?(@localization, @module, field)}>
+          <input
+            type="hidden"
+            name={@bf[field.name].name}
+            value={to_string(Phoenix.HTML.Form.normalize_value("checkbox", @bf[field.name].value))}
+          />
+          <.input
+            field={@bf[field.name]}
+            type="checkbox"
+            label={dsl_label(field.name)}
+            hint={field.description}
+            disabled
+          />
+        </div>
         <Localization.localization_note
           localization={@localization}
           field={{:block, @module, field.name}}

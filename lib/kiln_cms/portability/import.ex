@@ -1002,8 +1002,14 @@ defmodule KilnCMS.Portability.Import do
   # merely doesn't know; dropping them keeps the document and logs the keys
   # (see `CMS.Changes.ApplyCustomFields`). Define the fields first and re-run to
   # bring their values in.
+  #
+  # `shared_fields_check: :skip`: an exported translation carries the value it
+  # held, which for a pair exported before a field became shared differs from
+  # its source's (#1860). The next shared-field copy settles it, as it does for
+  # such a pair already on this site.
   defp create_via_action(kind, attrs, opts) do
-    {:ok, ContentTypes.create!(kind, attrs, scope(opts) ++ [context: %{custom_fields: :drop}])}
+    context = %{custom_fields: :drop, shared_fields_check: :skip}
+    {:ok, ContentTypes.create!(kind, attrs, scope(opts) ++ [context: context])}
   rescue
     error -> {:error, error}
   end

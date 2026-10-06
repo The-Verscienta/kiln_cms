@@ -109,7 +109,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Field-level localization: a field can be shared across a document's
   locale variants, or inherited along the site's fallback chain when empty.**
-  ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) · [long form](docs/changelog/unreleased.md#field-level-localization))
+  ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) · [#1860](https://github.com/The-Verscienta/kiln_cms/issues/1860) · [long form](docs/changelog/unreleased.md#field-level-localization))
 
 - **Plugin blocks get editor seams: their own label, icon and description,
   field hints, a row editor for `item_keys:` list fields, and live rendering.**

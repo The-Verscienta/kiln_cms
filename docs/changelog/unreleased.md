@@ -311,7 +311,22 @@ carries the reasoning.
   annotates the modes, and saving the fallback chain re-fires the translations
   that can inherit. Every existing response keeps its shape for a type that
   opts nothing in.
-  ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327))
+
+  The write path holds the line the editor draws. On a translation, a value
+  for a shared field that the next copy would overwrite — one that differs
+  from both the translation's current value and the source's — is refused
+  with a validation error naming the field and the locale that owns it: on a
+  JSON:API `PATCH` or `POST` (a `400` pointing at the field), a GraphQL
+  mutation, `:autosave` and the working copy. Media and reference custom
+  fields compare by id. Re-sending the stored value passes, as does setting
+  the source's, so a translation that kept its own value from before the
+  field became shared stays editable; *Translate*, duplication and the
+  content import copy stored rows and are not judged. The editor locks the
+  category, the featured image and shared checkboxes on a translation too.
+  Refused rather than dropped with a warning because both land in this
+  release: no released client depends on the write being accepted.
+  ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327),
+  [#1860](https://github.com/The-Verscienta/kiln_cms/issues/1860))
 
 <a id="plugin-blocks-get-editor-seams"></a>
 
