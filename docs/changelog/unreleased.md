@@ -625,6 +625,25 @@ carries the reasoning.
 
 ## Security
 
+<a id="ash-3344-closes-an-atom-table-exhaustion-advisory"></a>
+
+- **`ash` 3.34.4 closes an atom-table exhaustion advisory.**
+  **EEF-CVE-2026-94201** (HIGH): filtering an `:atom` attribute declared with
+  `unsafe_to_atom?` created an atom per value, so a caller who could reach such
+  a filter could exhaust the BEAM atom table and bring the node down. Fixed
+  upstream in 3.34.3 ("don't create atoms when filtering on an atom").
+  Kiln never sets `unsafe_to_atom?` itself. `ash_paper_trail` does, on the
+  `version_action_name` attribute of every generated `*.Version` resource —
+  which Kiln has, because it stores action names in version history. Those
+  resources carry no JSON:API or GraphQL extension and are reachable only
+  through internal `:read` code interfaces, so no untrusted filter path onto
+  that attribute was found; the bump is the fix regardless, and the audit job
+  is red repo-wide until it lands.
+  `spark` 2.7.6 and `finch` 0.24.0 come along with the resolution. This is a
+  minor `ash` bump, and the previous one shipped a behaviour change that
+  silently broke the working copy, so it was verified against the full suite
+  (11136 passed) rather than a compile.
+
 <a id="content-links-readable-only-when-both-ends-are"></a>
 
 - **A content link is readable only by someone who may read both of its ends;

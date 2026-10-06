@@ -459,6 +459,13 @@ msgid_plural "%{count} words"
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} worker"
+msgid_plural "%{count} workers"
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{covered} of %{total} fully translated"
@@ -3719,6 +3726,11 @@ msgstr ""
 msgid "Consent records"
 msgstr ""
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Console pages"
+msgstr ""
+
 #: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
 msgid "Contact for push services"
@@ -3844,6 +3856,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
+#: lib/kiln_cms_web/live/system_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -5674,6 +5687,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "Editor"
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editor checks"
 msgstr ""
 
 #: lib/kiln_cms_web/live/system_live.ex
@@ -10904,6 +10922,11 @@ msgstr ""
 msgid "Public forms and the submissions they collect."
 msgstr ""
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Public pages"
+msgstr ""
+
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Public read, set on the bucket itself."
@@ -15389,6 +15412,11 @@ msgstr ""
 msgid "This panel has validation errors"
 msgstr ""
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "This plugin doesn't describe itself. Its author can add a one-line %{callback} — the list below says what it adds in the meantime."
+msgstr ""
+
 #: lib/kiln_cms_web/live/release_preview_live.ex
 #: lib/kiln_cms_web/live/token_preview_live.ex
 #, elixir-autogen, elixir-format
@@ -16719,6 +16747,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "What a reader gets when the translation they asked for has not been published — on this site's pages, its API and its menus."
+msgstr ""
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "What it adds"
 msgstr ""
 
 #: lib/kiln_cms_web/live/federation_live.ex

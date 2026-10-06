@@ -434,6 +434,23 @@ defmodule KilnCMSWeb.SystemLiveTest do
              }
     end
 
+    # The counts say how much; this says what — in the words the plugin already
+    # shows editors, so an operator can tell what it does without its source.
+    test "names what each contribution is", %{conn: conn} do
+      {:ok, _lv, html} = live(conn, ~p"/editor/system")
+
+      panel = plugins_panel(html)
+
+      assert panel =~ "What it adds"
+      assert panel =~ "Checklist"
+      assert panel =~ "Tasks with an owner each"
+      assert panel =~ "One to five stars. For a review score."
+      # The nav item names its page; the route it points at isn't listed twice.
+      assert panel =~ "Fixture"
+      assert length(String.split(panel, "/editor/fixture")) == 2
+      assert panel =~ "1 worker"
+    end
+
     test "reports rather than offers to install", %{conn: conn} do
       {:ok, _lv, html} = live(conn, ~p"/editor/system")
 

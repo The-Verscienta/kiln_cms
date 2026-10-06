@@ -64,6 +64,13 @@ Every summary line below that was shortened links to its own entry there.
   value; after restoring a pre-1.1 backup, run `mix kiln.links.backfill`.**
   ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594) · [long form](docs/changelog/unreleased.md#reference-edges-backfill))
 
+### Security
+
+- **`ash` 3.34.4 closes an atom-table exhaustion advisory (EEF-CVE-2026-94201,
+  HIGH); no untrusted filter path onto the affected attribute was found in
+  Kiln.**
+  ([long form](docs/changelog/unreleased.md#ash-3344-closes-an-atom-table-exhaustion-advisory))
+
 ### Added
 
 - **A structure view for arranging a content tree: drag to reorder, indent to
@@ -79,6 +86,10 @@ Every summary line below that was shortened links to its own entry there.
   with cycles, cross-site parents and anything nesting past five levels
   refused.**
   ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) · [long form](docs/changelog/unreleased.md#documents-can-sit-under-one-another-the-content-tree))
+
+- **System → Plugins says what each plugin adds — its blocks, field types,
+  pages and content types by name — and flags a plugin with no summary.**
+  ([#1888](https://github.com/The-Verscienta/kiln_cms/pull/1888))
 
 - **The content list filters by author, category, tag, language, update date
   and review health, sorts by update, publish date or title, and saves a

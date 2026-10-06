@@ -459,6 +459,13 @@ msgid_plural "%{count} words"
 msgstr[0] "%{count} mot"
 msgstr[1] "%{count} mots"
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} worker"
+msgid_plural "%{count} workers"
+msgstr[0] "%{count} processus"
+msgstr[1] "%{count} processus"
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{covered} of %{total} fully translated"
@@ -3719,6 +3726,11 @@ msgstr "Consentement enregistré."
 msgid "Consent records"
 msgstr "Registres de consentement"
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Console pages"
+msgstr "Pages de la console"
+
 #: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
 msgid "Contact for push services"
@@ -3844,6 +3856,7 @@ msgstr "Type de contenu → attributs qu'un membre peut modifier. Vide = aucune 
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
+#: lib/kiln_cms_web/live/system_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -5675,6 +5688,11 @@ msgstr "Édition, relecture et diffusion dans une seule application que vous hé
 #, elixir-autogen, elixir-format
 msgid "Editor"
 msgstr "Éditeur"
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editor checks"
+msgstr "Vérifications de l'éditeur"
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -10904,6 +10922,11 @@ msgstr "URL publique"
 msgid "Public forms and the submissions they collect."
 msgstr "Les formulaires publics et les réponses qu'ils recueillent."
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Public pages"
+msgstr "Pages publiques"
+
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Public read, set on the bucket itself."
@@ -15389,6 +15412,11 @@ msgstr "Cette page nécessite une phrase secrète"
 msgid "This panel has validation errors"
 msgstr "Ce panneau contient des erreurs de validation"
 
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "This plugin doesn't describe itself. Its author can add a one-line %{callback} — the list below says what it adds in the meantime."
+msgstr "Ce plugin ne se décrit pas. Son auteur peut ajouter une ligne %{callback} — en attendant, la liste ci-dessous indique ce qu'il ajoute."
+
 #: lib/kiln_cms_web/live/release_preview_live.ex
 #: lib/kiln_cms_web/live/token_preview_live.ex
 #, elixir-autogen, elixir-format
@@ -16720,6 +16748,11 @@ msgstr "Ce que sert une traduction manquante."
 #, elixir-autogen, elixir-format
 msgid "What a reader gets when the translation they asked for has not been published — on this site's pages, its API and its menus."
 msgstr "Ce que reçoit un lecteur quand la traduction demandée n'est pas publiée — sur les pages de ce site, son API et ses menus."
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "What it adds"
+msgstr "Ce qu'il ajoute"
 
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format

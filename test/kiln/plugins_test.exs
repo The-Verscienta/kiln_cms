@@ -193,6 +193,8 @@ defmodule Kiln.PluginsTest do
       assert mod.name() == Macro.underscore(camel)
       assert mod.blocks() == []
       assert mod.nav_items() == []
+      # A summary is scaffolded, so a fresh plugin never lists as unexplained.
+      assert mod.summary() =~ camel
     end
 
     test "the generated sample field type compiles against the contract" do
