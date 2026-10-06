@@ -161,6 +161,38 @@ defmodule KilnCMS.Organize.Terms do
     end
   end
 
+  @doc "The filter for a document with no tags (whatever its category)."
+  @spec untagged_filter() :: Ash.Expr.t()
+  def untagged_filter, do: expr(not exists(tags, true))
+
+  @doc """
+  Existing tags proposed for `record` — `KilnCMS.Search.Related.suggest_tags/2`
+  as term maps, `[%{term: t(), distance: float()}]`, best first, minus every
+  tag the document already carries **as the editor sees it**
+  (`applied_tag_ids/1`: a pending working copy's held set, not only the live
+  tags `suggest_tags/2` itself excludes). `:limit` (default 5) is applied
+  after that filter, so a document holding several tags in its working copy
+  still gets a full row. Every other option passes through (`:actor`,
+  `:user_id`, `:unattended?`); a budget refusal comes back as `{:error, _}`.
+  """
+  @spec suggest(struct(), keyword()) ::
+          [%{term: t(), distance: float()}] | {:error, term()}
+  def suggest(record, opts) do
+    applied = record |> applied_tag_ids() |> MapSet.new()
+    limit = Keyword.get(opts, :limit, 5)
+
+    case Related.suggest_tags(record, Keyword.put(opts, :limit, limit + MapSet.size(applied))) do
+      {:error, reason} ->
+        {:error, reason}
+
+      suggestions ->
+        suggestions
+        |> Enum.reject(&MapSet.member?(applied, to_string(&1.tag.id)))
+        |> Enum.take(limit)
+        |> Enum.map(&%{term: to_term(&1.tag, :tag), distance: &1.distance})
+    end
+  end
+
   @doc "The fields `missing/1` reads, for a narrow `select:`."
   @spec term_fields() :: [atom()]
   def term_fields, do: [:category_id]

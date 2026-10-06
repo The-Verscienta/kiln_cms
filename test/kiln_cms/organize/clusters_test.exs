@@ -107,6 +107,17 @@ defmodule KilnCMS.Organize.ClustersTest do
     refute MapSet.member?(members, unindexed.id)
   end
 
+  test "says when the bound cut the library short", %{org: org, admin: admin} do
+    Application.put_env(:kiln_cms, KilnCMS.Organize, cluster_limit: 3)
+    on_exit(fn -> Application.delete_env(:kiln_cms, KilnCMS.Organize) end)
+
+    topic_posts(org, admin, "alpha", 3)
+    assert %{considered: 3, truncated?: false} = Clusters.browse(org, admin)
+
+    topic_posts(org, admin, "beta", 1)
+    assert %{considered: 3, truncated?: true} = Clusters.browse(org, admin)
+  end
+
   test "deterministic: the same library clusters the same way twice", %{org: org, admin: admin} do
     topic_posts(org, admin, "alpha", 4)
     topic_posts(org, admin, "beta", 4)
@@ -126,7 +137,12 @@ defmodule KilnCMS.Organize.ClustersTest do
     topic_posts(org, admin, "alpha", 2)
     put_search_env(semantic: false, embedder: RaisingEmbedder)
 
-    assert Clusters.browse(org, admin) == %{clusters: [], unindexed: 0}
+    assert Clusters.browse(org, admin) == %{
+             clusters: [],
+             unindexed: 0,
+             considered: 0,
+             truncated?: false
+           }
   end
 
   describe "Vectors.kmeans/2" do

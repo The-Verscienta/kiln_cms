@@ -71,6 +71,18 @@ defmodule KilnCMS.Organize.Candidates do
     |> Enum.take(limit)
   end
 
+  @doc """
+  `list/3`, plus whether the bound cut anything off: `%{rows:, truncated?:}`.
+  Reads one row past `:limit` to know. A surface that shows a bounded set
+  says so when `truncated?` — a bound is only stated if the editor can see it.
+  """
+  @spec bounded(term(), term(), keyword()) :: %{rows: [t()], truncated?: boolean()}
+  def bounded(org, actor, opts) do
+    limit = Keyword.fetch!(opts, :limit)
+    rows = list(org, actor, Keyword.put(opts, :limit, limit + 1))
+    %{rows: Enum.take(rows, limit), truncated?: length(rows) > limit}
+  end
+
   @doc "The editor URL path for a candidate row."
   @spec editor_path(t()) :: String.t()
   def editor_path(%{type: type, id: id}), do: "/editor/content/#{type}/#{id}"

@@ -53,17 +53,24 @@ defmodule KilnCMS.Organize.Clusters do
         }
 
   @typedoc "The browse result."
-  @type result :: %{clusters: [cluster()], unindexed: non_neg_integer()}
+  @type result :: %{
+          clusters: [cluster()],
+          unindexed: non_neg_integer(),
+          considered: non_neg_integer(),
+          truncated?: boolean()
+        }
 
   @doc "Clusters of the actor's published documents. Empty when semantic search is off."
   @spec browse(term(), term()) :: result()
   def browse(org, actor) do
-    if Organize.enabled?(), do: compute(org, actor), else: %{clusters: [], unindexed: 0}
+    if Organize.enabled?(),
+      do: compute(org, actor),
+      else: %{clusters: [], unindexed: 0, considered: 0, truncated?: false}
   end
 
   defp compute(org, actor) do
-    candidates =
-      Candidates.list(org, actor, limit: Organize.bound(:cluster_limit), state: :published)
+    %{rows: candidates, truncated?: truncated?} =
+      Candidates.bounded(org, actor, limit: Organize.bound(:cluster_limit), state: :published)
 
     by_id = Map.new(candidates, &{&1.id, &1})
     centroids = centroids(org, Map.keys(by_id))
@@ -77,7 +84,12 @@ defmodule KilnCMS.Organize.Clusters do
         %{members: Enum.map(ids, &Map.fetch!(by_id, &1)), label: labeller.(center)}
       end)
 
-    %{clusters: clusters, unindexed: map_size(by_id) - length(points)}
+    %{
+      clusters: clusters,
+      unindexed: map_size(by_id) - length(points),
+      considered: map_size(by_id),
+      truncated?: truncated?
+    }
   end
 
   @doc false
