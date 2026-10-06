@@ -2,15 +2,16 @@
 
 Getting content **in** from another system, and **out** of this one (#487).
 
-Three mix tasks:
+Four mix tasks:
 
 | Task | Direction |
 |---|---|
 | `mix kiln.import.wordpress <file.xml>` | WordPress WXR export → Kiln |
+| `mix kiln.import.ghost <file.json> --site-url URL` | Ghost JSON export → Kiln |
 | `mix kiln.export.content` | Kiln → portable JSON envelope |
 | `mix kiln.import.content <file.json>` | portable JSON envelope → Kiln |
 
-All three take `--actor EMAIL` and `--org SLUG`, and both importers take
+All four take `--actor EMAIL` and `--org SLUG`, and every importer takes
 `--dry-run`.
 
 ## Always dry-run first
@@ -40,6 +41,10 @@ rather than something you find later in the editor. These were previously only
 written to the server log.
 
 ## Migrating from WordPress
+
+A step-by-step walkthrough is in
+[Migrating from WordPress](compare/migrating-from-wordpress.md); this section
+is the reference.
 
 ```bash
 # 1. In WordPress: Tools → Export → All content. You get a .xml (WXR) file.
@@ -137,6 +142,42 @@ matters before the content is live.
 The create always runs under `--actor`, so an import can never mint content a
 mapped author was not allowed to create; only the attribution moves afterwards,
 through a narrow action that fires no webhooks.
+
+## Migrating from Ghost
+
+```bash
+mix kiln.import.ghost ghost-export.json --site-url https://blog.example.com --dry-run
+```
+
+`KilnCMS.Portability.Ghost` reads Ghost's JSON export (Settings → Advanced →
+Import/Export) into the same source-neutral shape the WordPress parser
+produces, so everything above applies: the dry run, the re-run rules, media
+sideloading, redirects, author mapping and the report. The Ghost-specific
+decisions:
+
+- **`--site-url` is required** when the export contains `__GHOST_URL__`, the
+  placeholder Ghost 4+ writes in place of its own address, or root-relative
+  `/content/images/…` paths (older Ghost). Without it every image
+  would be unfetchable, so the task refuses to start rather than import broken
+  images.
+- **The rendered `html` column is the body**, not Ghost's `lexical` or
+  `mobiledoc` editor source. A very old post stored with no rendered HTML is
+  listed as unreadable, not imported empty.
+- **Members-only, paid and tier-restricted posts stay gated.** Members-only
+  posts import into the `member` audience (or the first gated audience
+  configured); paid and tier posts into `:paid` when configured, otherwise the
+  same audience with a printed note. With no gated audience they import as
+  drafts. Dropping visibility would publish them to the open web.
+- **`scheduled` and email-only posts import as drafts.** The task prints each
+  one, because the report cannot show a decision the parser made.
+- **Internal `#tags` are skipped.** Public tags become tags; no category is set.
+- **Redirects come from `/{slug}/`**, Ghost's default permalink. A custom
+  `routes.yaml` structure needs its redirects added by hand.
+- **The file is read whole,** and files over 128 MB are refused up front.
+
+Members, comments, tiers, offers and code injection are not imported; see
+[Migrating from Ghost](compare/migrating-from-ghost.md) for what to do about
+each.
 
 ## The portable JSON envelope
 
@@ -317,8 +358,9 @@ resolution the pin never sees), and the body is capped.
 ## Extending to another source
 
 `KilnCMS.Portability.Import` takes a source-neutral shape.
-`KilnCMS.Portability.WXR` produces it from WordPress; a Ghost or Drupal
-importer only has to produce the same shape to get the dry run, the conflict
+`KilnCMS.Portability.WXR` produces it from WordPress and
+`KilnCMS.Portability.Ghost` from Ghost; a Drupal importer only has to produce
+the same shape to get the dry run, the conflict
 policy, the media sideloading, the redirects and the report for free.
 
 `KilnCMS.Blocks.Html` is the shared HTML → blocks adapter, and is deliberately

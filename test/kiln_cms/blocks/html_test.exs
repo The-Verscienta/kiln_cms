@@ -297,6 +297,40 @@ defmodule KilnCMS.Blocks.HtmlTest do
       assert Enum.map(images, & &1["value"]["caption"]) == ["A", "B"]
     end
 
+    # Ghost's gallery card nests its images in rows of divs, not figures, so
+    # the figure-of-figures check missed it and kept only the first (#1876).
+    test "a Ghost gallery card keeps every image" do
+      html = """
+      <figure class="kg-card kg-gallery-card"><div class="kg-gallery-container">
+        <div class="kg-gallery-row">
+          <div class="kg-gallery-image"><img src="https://x/a.jpg" alt="A"></div>
+          <div class="kg-gallery-image"><img src="https://x/b.jpg"></div>
+        </div>
+      </div></figure>
+      """
+
+      images = blocks(html) |> Enum.filter(&(&1["type"] == "image"))
+
+      assert Enum.map(images, & &1["value"]["url"]) == ["https://x/a.jpg", "https://x/b.jpg"]
+      assert Enum.map(images, & &1["value"]["alt"]) == ["A", nil]
+    end
+
+    test "an emoji image in a caption does not split the figure" do
+      html =
+        ~s(<figure><img src="https://x/a.jpg"><figcaption>Nice <img class="emoji" src="https://x/e.png"></figcaption></figure>)
+
+      assert [%{"value" => %{"url" => "https://x/a.jpg"}}] =
+               blocks(html) |> Enum.filter(&(&1["type"] == "image"))
+    end
+
+    test "a figure with one image is still one captioned image" do
+      html =
+        ~s(<figure><div><img src="https://x/a.jpg"></div><figcaption>Cap</figcaption></figure>)
+
+      assert [%{"type" => "image", "value" => %{"caption" => "Cap"}}] =
+               blocks(html) |> Enum.filter(&(&1["type"] == "image"))
+    end
+
     # Restoring token 0 reintroduced token 1's literal text, and token 1's
     # global replace then hit it too — replacing a code block with a duplicate
     # of another one.
