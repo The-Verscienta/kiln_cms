@@ -3873,6 +3873,11 @@ msgstr ""
 msgid "Content blocks"
 msgstr ""
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Content by stage"
+msgstr ""
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Content can carry any number of tags."
@@ -5553,6 +5558,7 @@ msgid "Draft, review and publish, with scheduled publishing and content releases
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/manifest_controller.ex
+#: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Drafts"
 msgstr ""
@@ -8746,8 +8752,14 @@ msgid "Month"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "More actions"
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "More actions for %{title}"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/content_html/search.html.heex
@@ -9777,7 +9789,6 @@ msgid "None"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
-#: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "None selected"
 msgstr ""
@@ -12862,6 +12873,7 @@ msgstr ""
 msgid "Schedule a publish, set an embargo end, or give content a review cadence."
 msgstr ""
 
+#: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -16267,6 +16279,11 @@ msgstr ""
 msgid "Trigram glyphs: three lines per item — published at the bottom, translated in the middle, scheduled on top; solid means yes. Hover one for its reading."
 msgstr ""
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Try a wider filter, or clear it to see everything."
+msgstr ""
+
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/controllers/offline_controller.ex
 #, elixir-autogen, elixir-format
@@ -16636,6 +16653,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Updated"
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Updated %{time} ago"
 msgstr ""
 
 #: lib/kiln_cms_web/live/editor_live.ex

@@ -81,6 +81,9 @@ written as a function component or a raw `class="…"` in a template.
   component (`variant=`, `size=`), which emits exactly these classes. For a
   compact inline control keep `.btn .btn-default` and shrink it with utilities
   (`px-2 py-0.5 text-xs`) — utilities outrank the kit.
+  `.btn-danger-fill` / `.btn-warning-fill` are the solid second step of a
+  two-step confirm (the "Delete view" that actually deletes), never a first
+  click.
 - **Link-styled buttons** — `.btn-link` for an in-flow text action
   ("Dismiss", "Undo", "Change") that must stay a `<button>` because it fires an
   event rather than navigating. It supplies the reset, keyboard focus ring and
@@ -91,6 +94,19 @@ written as a function component or a raw `class="…"` in a template.
   reads as body text). The call site keeps its own colour.
 - **Surfaces** — `.card` (the one raised container: base-100, hairline border,
   `--radius-lg`) + `.card-pad` for standard interior padding.
+- **Stat cards** — `.stat` (a card-shaped link whose number is the headline)
+  with `.stat-value` and `.stat-label`; `aria-current="page"` rings the one
+  whose filter is on screen. The tinted icon disc's tone is the call site's,
+  matched to the badge it counts. Used by the content list's overview strip.
+- **Pills & chips** — `.pill` is a named filter you can switch to (the
+  content list's views; `aria-current="page"` fills the active one). `.chip`
+  is an active filter you can remove: a small tinted `<button>` carrying its
+  own x and an `aria-label` that says "Remove filter: …".
+- **Row menu** — `.row-menu` + `.row-menu-item`: a row's secondary actions
+  behind a "⋯" `btn-ghost` button. A native `popover` opened with
+  `popovertarget` (Escape and click-outside close it, no JS), anchored under
+  the button where CSS anchor positioning exists. An item that fires a
+  `phx-click` also carries `popovertargetaction="hide"` so the menu closes.
 - **Fields** — `.field-input`, `.field-select` (full-width, token border, focus
   ring), and `.field-label` for the label above one. The `<.input>` component is the richer, label+error-aware form control;
   these bare classes are for inline filters/toolbars and for markup Kiln does
@@ -192,6 +208,13 @@ written as a function component or a raw `class="…"` in a template.
   `focus-within`, so Tab reaches it, and on `pointer-coarse`, since a touch
   screen has no hover. Fade with `opacity`, never `hidden`: a `display: none`
   control is out of the Tab order.
+- **Rows show one next step** — a list row gets one visible action (the verb
+  that moves the record along: Publish, Approve, Submit for review,
+  Unarchive) and a hover-revealed row menu for the rest. The title is the link
+  into the editor, so a row needs no separate "Edit" button.
+- **Bulk bars appear with a selection** — a list's bulk actions are drawn in
+  its header only once something is ticked; with nothing selected the header
+  is "Select all" and a count, not a row of disabled buttons.
 - **Media, empty, and permission states** — each has a dedicated treatment
   (`<.empty_state>` for the first two; permission states degrade gracefully
   rather than dead-ending).
@@ -330,6 +353,12 @@ The authoring app frame (`lib/kiln_cms_web/components/layouts.ex`):
    and `current_user` (the account/sign-out pair). `Layouts.app/1` now has one
    caller left, `page_html/developers.html.heex`; retire it when that page gets
    `Layouts.public` or its own treatment.
+5. **Done (1.1):** the **Content dashboard** (`/editor`) re-aligned with the
+   kit it introduced. Its view pills, filter chips and confirm buttons had
+   drifted into one-off utility stacks; they became `.pill`, `.chip` and
+   `.btn-*-fill`. It also gained an overview strip (`.stat`), rows with one
+   visible action and a `.row-menu`, a byline (author, last update, type), and
+   a bulk bar drawn only with a selection.
 
 Keep this document in step with the kit: **new shared pattern → document it here
 before using it widely.**

@@ -3,8 +3,9 @@
 // Content list bulk actions (#1314): select several rows on /editor, then
 // publish, unpublish and delete them through the two-step confirm bar. The
 // LiveView tests cover each verb's handler; this proves the *browser* half —
-// that the checkboxes, the toolbar's disabled state, the confirm bar and the
-// flash all wire together, and that the list re-renders with the new state.
+// that the checkboxes, the bulk bar appearing with a selection, the confirm
+// bar and the flash all wire together, and that the list re-renders with the
+// new state.
 const {
   test,
   expect,
@@ -51,13 +52,12 @@ test.describe("content list bulk actions", () => {
     for (const id of ids) await expect(page.locator(`li[id="page-${id}"]`)).toBeVisible();
     await expect(page.locator(`li[id^="page-"]`).filter({ hasText: prefix })).toHaveCount(2);
 
-    // Nothing selected: every verb is disabled, and "None selected" says so.
+    // Nothing selected: the bulk bar is not drawn at all.
     const publish = page.locator('button[phx-click="bulk"][phx-value-action="publish"]');
     const unpublish = page.locator('button[phx-click="bulk"][phx-value-action="unpublish"]');
     const del = page.locator('button[phx-click="bulk"][phx-value-action="delete"]');
-    await expect(publish).toBeDisabled();
-    await expect(del).toBeDisabled();
-    await expect(page.getByText("None selected")).toBeVisible();
+    const bulkBar = page.locator("#bulk-actions");
+    await expect(bulkBar).toHaveCount(0);
 
     // "Select all" selects the *filtered* rows only — two, not the whole site.
     await page.getByLabel("Select all").check();
@@ -65,7 +65,7 @@ test.describe("content list bulk actions", () => {
     for (const id of ids) {
       await expect(page.locator(`li[id="page-${id}"] input[type="checkbox"]`)).toBeChecked();
     }
-    await expect(publish).toBeEnabled();
+    await expect(publish).toBeVisible();
 
     // Publish: the confirm bar names the consequence, Cancel backs out without
     // touching anything, and only Confirm acts.
@@ -87,9 +87,8 @@ test.describe("content list bulk actions", () => {
         page.locator(`li[id="page-${id}"]`).getByText("Published", { exact: true }),
       ).toBeVisible();
     }
-    // The selection is cleared after a bulk verb runs.
-    await expect(page.getByText("None selected")).toBeVisible();
-    await expect(unpublish).toBeDisabled();
+    // The selection is cleared after a bulk verb runs, and the bar goes with it.
+    await expect(bulkBar).toHaveCount(0);
 
     // Unpublish the same two, selecting them individually this time.
     for (const id of ids) {
@@ -110,8 +109,8 @@ test.describe("content list bulk actions", () => {
     // Wait for the unpublish to have cleared the selection before re-selecting:
     // Playwright's `check()` is a no-op on a box that is already ticked, so
     // acting while the previous tick is still rendered would leave nothing
-    // selected and hang the next click on a permanently disabled button.
-    await expect(page.getByText("None selected")).toBeVisible();
+    // selected and hang the next click on a bulk bar that never comes back.
+    await expect(bulkBar).toHaveCount(0);
     await page.getByLabel("Select all").check();
     await del.click();
     await expect(page.getByText(/2 selected item\(s\)/)).toBeVisible();

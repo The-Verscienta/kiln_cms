@@ -6033,7 +6033,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           type="button"
           phx-click="reload_conflict"
           data-confirm={gettext("Reload and discard your unsaved changes?")}
-          class="btn btn-sm border-transparent bg-warning text-warning-content hover:opacity-90"
+          class="btn btn-sm btn-warning-fill"
         >
           {gettext("Reload latest")}
         </button>

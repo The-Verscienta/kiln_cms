@@ -284,7 +284,7 @@ defmodule KilnCMSWeb.TrashLive do
             <button
               type="button"
               phx-click="confirm_empty"
-              class="btn btn-sm bg-error text-error-content border-transparent hover:opacity-90"
+              class="btn btn-sm btn-danger-fill"
             >
               {gettext("Delete everything")}
             </button>

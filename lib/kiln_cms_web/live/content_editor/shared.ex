@@ -355,7 +355,7 @@ defmodule KilnCMSWeb.ContentEditor.Shared do
           type="button"
           id="takeover-confirm"
           phx-click="confirm_takeover"
-          class="btn btn-sm border-transparent bg-warning text-warning-content hover:opacity-90"
+          class="btn btn-sm btn-warning-fill"
         >
           {gettext("Take over")}
         </button>

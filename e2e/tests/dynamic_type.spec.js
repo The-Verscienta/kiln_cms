@@ -129,10 +129,12 @@ test.describe("dynamic content types", () => {
     await expect(chef).toBeVisible();
     await expect(chef).toHaveValue("Auguste Escoffier");
 
-    // And the list shows the draft under its own kind.
+    // And the list shows the draft under its own kind, named by the type's
+    // label rather than its machine name.
     await page.goto(`/editor?q=${encodeURIComponent(title)}`);
     const listRow = page.locator(`li[id="${name}-${draftId}"]`);
     await expect(listRow).toBeVisible();
-    await expect(listRow).toContainText(name);
+    await expect(listRow).toContainText(label);
+    await expect(listRow).not.toContainText(name);
   });
 });
