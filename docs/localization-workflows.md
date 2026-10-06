@@ -133,8 +133,17 @@ does not see no change. Where each kind of field opts in:
 - Blocks nested inside a `columns` block are not walked; only top-level block
   fields are shared or inherited.
 - Tags and curated related content are not shareable.
-- An API write can still change a shared field on a translation; the
-  source's next publish overwrites it.
+- On a translation, a write that changes a shared field — a JSON:API
+  `PATCH`, a GraphQL mutation, `:autosave`, the working copy — is refused
+  with a validation error naming the field and the source locale (#1860).
+  Only a value the source's next publish would overwrite is refused: one that
+  differs from both the translation's current value and the source's.
+  Re-sending the stored value passes, as does setting the source's, so a
+  translation that kept its own value from before the field became shared
+  stays editable. With no source variant, nothing is refused.
+- A **create** is not checked: a new translation (an API `POST`, an import)
+  may carry its own value for a shared field, and the next shared-value copy
+  replaces it. *Translate* copies the source's values, so it never differs.
 
 The design — and why one record per locale stays — is in
 [field-level localization](field-level-localization.md).

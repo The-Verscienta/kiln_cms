@@ -185,6 +185,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     changeset
     |> Ash.Changeset.force_change_attribute(:custom_fields, cleaned)
     |> stash(defs)
+    |> stash_supplied(supplied)
     |> note_dropped(dropped)
     |> then(fn cs -> Enum.reduce(errors, cs, &Ash.Changeset.add_error(&2, &1)) end)
   end
@@ -372,6 +373,20 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   defp stash(changeset, defs),
     do: Ash.Changeset.set_context(changeset, %{kiln_field_definitions: defs})
+
+  # The keys the caller actually sent, before the merge and the defaults
+  # filled the rest in. `KilnCMS.I18n.Validations.SharedFieldsReadOnly` judges
+  # only these: a default this change filled into a key the payload never
+  # named is not a value the caller wrote (#1860).
+  defp stash_supplied(changeset, supplied),
+    do: Ash.Changeset.set_context(changeset, %{kiln_custom_fields_supplied: Map.keys(supplied)})
+
+  @doc """
+  The `custom_fields` keys the caller supplied on this write, if this change
+  ran — `nil` when it did not.
+  """
+  @spec supplied_keys(Ash.Changeset.t()) :: [String.t()] | nil
+  def supplied_keys(changeset), do: changeset.context[:kiln_custom_fields_supplied]
 
   # Resolve one definition's value and fold it into the {cleaned, errors} acc.
   # Three-way per key: a field the caller *supplied* is coerced/cleared; a field

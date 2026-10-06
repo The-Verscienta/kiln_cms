@@ -139,6 +139,10 @@ Every summary line below that was shortened links to its own entry there.
   the headless API guides carry examples that run against it anonymously.**
   ([#1869](https://github.com/The-Verscienta/kiln_cms/issues/1869) · [#1872](https://github.com/The-Verscienta/kiln_cms/issues/1872) · [long form](docs/changelog/unreleased.md#release-candidates-are-canaried-on-kilncms-dev))
 
+- **On a translation, an API write that changes a `:shared` field is refused
+  with a validation error naming the field and the locale that owns it.**
+  ([#1860](https://github.com/The-Verscienta/kiln_cms/issues/1860) · [long form](docs/changelog/unreleased.md#an-api-write-to-a-shared-field-on-a-translation-is-refused))
+
 ### Fixed
 
 - **Search folds diacritics: `Zusanli` finds `Zúsānlǐ`, `creme brulee` finds

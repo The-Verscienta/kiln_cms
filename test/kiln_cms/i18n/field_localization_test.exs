@@ -221,7 +221,7 @@ defmodule KilnCMS.I18n.FieldLocalizationTest do
 
       CMS.update_page!(
         reload(fr),
-        %{blocks: [card(%{"_id" => fr_card.id, "name" => "Chaussure", "image_url" => "fr.png"})]},
+        %{blocks: [card(%{"_id" => fr_card.id, "name" => "Chaussure"})]},
         actor: actor
       )
 

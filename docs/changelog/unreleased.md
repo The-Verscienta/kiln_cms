@@ -472,6 +472,34 @@ carries the reasoning.
   ([#1869](https://github.com/The-Verscienta/kiln_cms/issues/1869),
   [#1872](https://github.com/The-Verscienta/kiln_cms/issues/1872))
 
+<a id="an-api-write-to-a-shared-field-on-a-translation-is-refused"></a>
+
+- **On a translation, an API write that changes a `:shared` field is refused
+  with a validation error naming the field and the locale that owns it.**
+  The editor shows a shared field read-only on a translation, but a JSON:API
+  `PATCH`, a GraphQL `update*` mutation or any other `:update` could still set
+  it. The write succeeded, and the source's next publish put the source's
+  value back without telling anyone. Such a write is now a validation error
+  (JSON:API `400` with a pointer to the field; a GraphQL mutation error),
+  for shared record attributes, shared custom fields (by key) and
+  `localized: :shared` block fields (by block `_id`, as the copy matches
+  them). `:autosave` and the working copy refuse it too.
+
+  Only a value the next copy would overwrite is refused: one that differs
+  from both the translation's current value and the source's. Re-sending the
+  stored value passes, and so does setting the source's. A translation that
+  holds its own value from before the field became shared stays editable.
+  The copy itself (`:sync_shared_fields`) and the source variant's writes are
+  unaffected, and nothing is refused on a translation with no source
+  variant. Creates are not checked; see the Limits in
+  [`docs/localization-workflows.md`](../localization-workflows.md#limits).
+
+  Refused rather than dropped with a warning: field-level localization ships
+  in this same release, so no released client depends on the write being
+  accepted, and an accepted write that is undone later is the behaviour the
+  API guide's contract is meant to rule out.
+  ([#1860](https://github.com/The-Verscienta/kiln_cms/issues/1860))
+
 ## Fixed
 
 <a id="search-folds-diacritics"></a>

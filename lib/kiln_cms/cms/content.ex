@@ -2409,6 +2409,12 @@ defmodule KilnCMS.CMS.Content do
 
           unquote_splicing(merge_validations.())
 
+          # On a translation, a `:shared` field belongs to the source variant:
+          # a value the next shared-field copy would overwrite is refused here
+          # rather than accepted and lost (#1860). AFTER the changes above, so
+          # it sees the cast body and the coerced custom fields.
+          validate KilnCMS.I18n.Validations.SharedFieldsReadOnly
+
           validate KilnCMS.CMS.Validations.SlugAvailable
           validate KilnCMS.CMS.Validations.PathAliasValid
           validate KilnCMS.CMS.Validations.SeoUrls
@@ -2512,6 +2518,8 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.ApplyAccessPassword
 
           change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
+          # A translation's shared fields — see `:update` (#1860).
+          validate KilnCMS.I18n.Validations.SharedFieldsReadOnly
           validate KilnCMS.CMS.Validations.SlugAvailable
           validate KilnCMS.CMS.Validations.PathAliasValid
           validate KilnCMS.CMS.Validations.SeoUrls
@@ -2577,6 +2585,9 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.StageWorkingFields
           change KilnCMS.CMS.Changes.StampWorkingCopy
           change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
+          # A translation's shared fields in the held body (#1860). The held
+          # settings in `fields` already met this check in `:update`'s probe.
+          validate {KilnCMS.I18n.Validations.SharedFieldsReadOnly, blocks: :working_blocks}
         end
 
         # "Publish changes": the working copy becomes the published text. Same

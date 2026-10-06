@@ -179,7 +179,9 @@ defmodule KilnCMSWeb.FieldLocalizationDeliveryTest do
         document(
           actor,
           %{seo_description: "Handmade leather shoes", seo_image: "https://example.com/en.png"},
-          fn _fr -> %{seo_description: nil, seo_image: "https://example.com/fr.png"} end
+          # The social image is shared, so the translation keeps the one it was
+          # created with: setting its own is refused (#1860).
+          fn _fr -> %{seo_description: nil} end
         )
 
       %{en: en, fr: fr, actor: actor}
