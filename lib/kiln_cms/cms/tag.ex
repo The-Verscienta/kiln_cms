@@ -83,6 +83,15 @@ defmodule KilnCMS.CMS.Tag do
       destination_attribute_on_join_resource :subject_id
       public? true
     end
+
+    # Entries (dynamic types, D17), for taxonomy health's usage counts only
+    # (#1596). Private: not an API relationship, so no surface changes.
+    many_to_many :entries, KilnCMS.CMS.Entry do
+      through KilnCMS.CMS.Tagging
+      source_attribute_on_join_resource :tag_id
+      destination_attribute_on_join_resource :subject_id
+      public? false
+    end
   end
 
   aggregates do
@@ -101,6 +110,25 @@ defmodule KilnCMS.CMS.Tag do
     # automatic `is_nil(archived_at)` has to be restated here.
     count :media_count, :media_items do
       public? true
+      filter expr(is_nil(archived_at))
+    end
+
+    # Live usage for taxonomy health (#1596, `KilnCMS.Organize.Terms`): the
+    # public counts above include trashed content (aggregates skip the
+    # destination's archival filter), which would hide a term whose only
+    # remaining use is in the trash. Private, so the API surface is unchanged.
+    count :live_page_count, :pages do
+      public? false
+      filter expr(is_nil(archived_at))
+    end
+
+    count :live_post_count, :posts do
+      public? false
+      filter expr(is_nil(archived_at))
+    end
+
+    count :live_entry_count, :entries do
+      public? false
       filter expr(is_nil(archived_at))
     end
   end

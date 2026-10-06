@@ -118,6 +118,24 @@ defmodule KilnCMS.Search.BlockEmbedding do
         end
       end
     end
+
+    # One centroid per document, averaged in Postgres (#1596). The library-level
+    # organizing surfaces (`KilnCMS.Organize`) cluster and score hundreds of
+    # documents at once; reading their block vectors into the BEAM to average
+    # them there costs ~50x the memory of reading the averages. See
+    # `KilnCMS.Search.DocumentCentroids` — a raw query, so the tenant clause
+    # there is the only isolation, and a call without a tenant answers `[]`.
+    action :document_centroids, {:array, :map} do
+      argument :document_ids, {:array, :uuid}, allow_nil?: false
+
+      run fn input, context ->
+        {:ok,
+         KilnCMS.Search.DocumentCentroids.for_documents(
+           context.tenant,
+           Ash.ActionInput.get_argument(input, :document_ids)
+         )}
+      end
+    end
   end
 
   policies do
@@ -128,6 +146,13 @@ defmodule KilnCMS.Search.BlockEmbedding do
     # editors and up — and since #1402 the system half says so here rather than
     # reaching around the block with `authorize?: false`.
     policy action_type(:read) do
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :search}
+      authorize_if KilnCMS.CMS.Checks.OrgEditor
+    end
+
+    # The centroid read is a read in all but name: the same rows, averaged.
+    # Same two readers as `action_type(:read)` above.
+    policy action(:document_centroids) do
       authorize_if {KilnCMS.Checks.SystemActor, subsystem: :search}
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end

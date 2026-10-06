@@ -25,6 +25,12 @@ defmodule KilnCMS.CMS.Category do
     has_many :posts, KilnCMS.CMS.Post do
       public? true
     end
+
+    # Entries (dynamic types, D17), for taxonomy health's usage counts only
+    # (#1596). Private: not an API relationship.
+    has_many :entries, KilnCMS.CMS.Entry do
+      public? false
+    end
   end
 
   aggregates do
@@ -35,6 +41,22 @@ defmodule KilnCMS.CMS.Category do
 
     count :post_count, :posts do
       public? true
+    end
+
+    # Live usage for taxonomy health (#1596) — see `KilnCMS.CMS.Tag`'s twins.
+    count :live_page_count, :pages do
+      public? false
+      filter expr(is_nil(archived_at))
+    end
+
+    count :live_post_count, :posts do
+      public? false
+      filter expr(is_nil(archived_at))
+    end
+
+    count :live_entry_count, :entries do
+      public? false
+      filter expr(is_nil(archived_at))
     end
   end
 end

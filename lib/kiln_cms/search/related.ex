@@ -271,6 +271,67 @@ defmodule KilnCMS.Search.Related do
     |> Enum.map(&%{query: &1.query, searches: &1.count, results: &1.result_count})
   end
 
+  @doc """
+  The tags among `tags` (each at least `%{id, name}`) whose name has no
+  current stored vector — what `suggest_tags/2` would have to embed before it
+  could rank them, and what `ensure_tag_vectors/3` fills. `[]` when semantic
+  search is off. Reads only the tag-embedding index; never infers, never
+  charges.
+  """
+  @spec missing_tag_vectors(Ash.UUID.t(), [map()]) :: [map()]
+  def missing_tag_vectors(org_id, tags) do
+    if Search.semantic?(), do: stale_tags(tags, org_id), else: []
+  end
+
+  @doc """
+  Embeds and stores the vectors `suggest_tags/2` would otherwise compute
+  lazily, **at most `:max` tags per call** (#1596).
+
+  The chunk is the point. `suggest_tags/2` charges its whole uncached set in
+  one `KilnCMS.LLM.Budget` charge, and a Hammer bucket refuses — and still
+  counts — any single charge larger than its window, so an org with more
+  never-embedded tags than `embedding_per_user_limit/0` allows could never
+  suggest anything, and every attempt would spend the caller's window for
+  nothing. Filling the index ahead of time in window-sized chunks is how a
+  bulk surface (`KilnCMS.Organize`) makes progress instead: each call charges
+  one chunk, and reports what is left.
+
+  Options: `:max` (default: all of them), `:user_id`, `:unattended?` — the
+  same budget context as `suggest_tags/2`. Returns `{:ok, %{indexed:,
+  remaining:}}`, or the budget's `{:error, reason}` with nothing embedded.
+  Semantic search off answers `{:ok, %{indexed: 0, remaining: 0}}` without
+  touching the budget or the index.
+  """
+  @spec ensure_tag_vectors(Ash.UUID.t(), [map()], keyword()) ::
+          {:ok, %{indexed: non_neg_integer(), remaining: non_neg_integer()}}
+          | {:error, {:rate_limited, non_neg_integer()} | :unattended_disabled}
+  def ensure_tag_vectors(org_id, tags, opts \\ []) do
+    if Search.semantic?(),
+      do: fill_tag_vectors(org_id, tags, opts),
+      else: {:ok, %{indexed: 0, remaining: 0}}
+  end
+
+  defp fill_tag_vectors(org_id, tags, opts) do
+    missing = stale_tags(tags, org_id)
+    {chunk, rest} = Enum.split(missing, Keyword.get(opts, :max, length(missing)))
+    uncached = Enum.count(chunk, &(not VectorCache.cached?(&1.name)))
+
+    budget_ctx = %{
+      org_id: org_id,
+      user_id: opts[:user_id],
+      unattended?: Keyword.get(opts, :unattended?, false)
+    }
+
+    with :ok <- embedding_charge(budget_ctx, uncached, fn -> store_tag_chunk(chunk, org_id) end) do
+      {:ok, %{indexed: length(chunk), remaining: length(rest)}}
+    end
+  end
+
+  defp store_tag_chunk(chunk, org_id) do
+    Enum.each(chunk, &embed_and_store_tag(&1, org_id))
+    :ok
+  end
+
   # ── internals ─────────────────────────────────────────────────────────────
 
   # Nearest foreign block embeddings to this document's centroid, aggregated
@@ -510,21 +571,29 @@ defmodule KilnCMS.Search.Related do
   defp ensure_tag_embeddings([], _org_id, _budget_ctx), do: :ok
 
   defp ensure_tag_embeddings(candidates, org_id, budget_ctx) do
-    stored =
-      KilnCMS.SearchIndex.tag_embeddings_for!(Enum.map(candidates, & &1.id),
-        # Search system actor (#1402), as everywhere else in this module.
-        actor: system_actor(),
-        tenant: org_id
-      )
-      |> Map.new(&{&1.tag_id, &1})
-
-    missing = Enum.reject(candidates, &current_embedding?(&1, stored))
+    missing = stale_tags(candidates, org_id)
     uncached = Enum.count(missing, &(not VectorCache.cached?(&1.name)))
 
     embedding_charge(budget_ctx, uncached, fn ->
       Enum.each(missing, &embed_and_store_tag(&1, org_id))
       :ok
     end)
+  end
+
+  # The tags among `tags` with no stored vector, or one computed for a previous
+  # name (a rename) — the ones whose embedding would reach the model.
+  defp stale_tags([], _org_id), do: []
+
+  defp stale_tags(tags, org_id) do
+    stored =
+      KilnCMS.SearchIndex.tag_embeddings_for!(Enum.map(tags, & &1.id),
+        # Search system actor (#1402), as everywhere else in this module.
+        actor: system_actor(),
+        tenant: org_id
+      )
+      |> Map.new(&{&1.tag_id, &1})
+
+    Enum.reject(tags, &current_embedding?(&1, stored))
   end
 
   defp current_embedding?(tag, stored) do

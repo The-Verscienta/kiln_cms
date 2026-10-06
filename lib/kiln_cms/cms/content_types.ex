@@ -679,6 +679,16 @@ defmodule KilnCMS.CMS.ContentTypes do
     do: call(type, "update_#{atom(type, opts)}", [record, attrs, opts], opts)
 
   @doc """
+  Save held settings into a LIVE record's working copy (docs/working-copy.md)
+  through the type's own `save_<type>_working_copy` interface — the path the
+  editor's Save takes for a published document, so nothing readers see moves
+  until *Publish changes*. `attrs` is the action's input, e.g.
+  `%{fields: %{"add_tag_ids" => ids}}` (#1596's bulk tagging review).
+  """
+  def save_working_copy(type, record, attrs, opts \\ []),
+    do: call(type, "save_#{atom(type, opts)}_working_copy", [record, attrs, opts], opts)
+
+  @doc """
   Move a document in the content tree (#1597): its parent, its sibling order,
   or both.
 
