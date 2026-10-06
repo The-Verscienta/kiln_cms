@@ -183,6 +183,57 @@ defmodule KilnCMSWeb.StructureLiveTest do
     assert reload(sibling).parent_id == deepest.parent_id
   end
 
+  describe "orphan detection (#1597)" do
+    defp menu_linking(actor, record) do
+      menu =
+        CMS.create_menu!(
+          %{key: "sm#{System.unique_integer([:positive])}", locale: "en", name: "Main"},
+          actor: actor
+        )
+
+      CMS.create_menu_item!(
+        %{
+          menu_id: menu.id,
+          label: "L",
+          link_type: :content,
+          target_type: "page",
+          target_id: record.id
+        },
+        actor: actor
+      )
+    end
+
+    test "a published document in no menu is badged and counted", %{conn: conn} do
+      admin = authed_user(:admin)
+      orphan = CMS.publish_page!(page(admin, "Orphan"), %{}, actor: admin)
+
+      {:ok, lv, html} = open(conn, admin)
+
+      assert html =~ "Not in any menu"
+      assert html =~ "1 published document is in no menu."
+      assert has_element?(lv, ~s([data-sort-id="#{orphan.id}"]), "Not in any menu")
+    end
+
+    test "a published document a menu links to is not badged", %{conn: conn} do
+      admin = authed_user(:admin)
+      linked = CMS.publish_page!(page(admin, "Linked"), %{}, actor: admin)
+      menu_linking(admin, linked)
+
+      {:ok, _lv, html} = open(conn, admin)
+
+      refute html =~ "Not in any menu"
+    end
+
+    test "a draft in no menu is not badged — that is a draft's normal state", %{conn: conn} do
+      admin = authed_user(:admin)
+      _draft = page(admin, "Draft")
+
+      {:ok, _lv, html} = open(conn, admin)
+
+      refute html =~ "Not in any menu"
+    end
+  end
+
   test "an unknown type goes back to the list rather than crashing", %{conn: conn} do
     admin = authed_user(:admin)
 
