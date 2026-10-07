@@ -45,6 +45,25 @@ defmodule KilnPublish.Markdown do
   def strip_front_matter(markdown), do: markdown
 
   @doc """
+  The page's search-result description: the text of a
+  `<!-- seo-description: … -->` comment, or nil.
+
+  A comment rather than YAML front matter because ExDoc renders the same files
+  and has no front matter: a `---` block would print in the HexDocs page as a
+  rule and a heading. A comment is invisible in both places, and `render/1`
+  drops it from the published body.
+  """
+  def seo_description(markdown) do
+    case Regex.run(~r/<!--\s*seo-description:\s*(.*?)\s*-->/s, markdown) do
+      [_, text] -> text |> String.replace(~r/\s+/, " ") |> presence()
+      nil -> nil
+    end
+  end
+
+  defp presence(""), do: nil
+  defp presence(text), do: text
+
+  @doc """
   Splits off a leading H1 as `{heading | nil, rest}`. The page template prints
   the title, so the document's own H1 would print twice.
   """

@@ -11,6 +11,15 @@ can do).
 checked against the code; claims about the other products are a summary, not a
 benchmark.
 
+> **The public, sourced versions live in [docs/compare/](compare/how-kiln-compares.md)**
+> (#1876): one "Kiln vs X" page each for WordPress, Ghost, Strapi, Payload and
+> Directus, plus migration guides. Those pages date and link every claim about
+> another product, and have a named review owner. This note stays the internal
+> positioning memo. Where the two disagree on a fact about a competitor, the
+> public page is the checked one. One example: Directus moved from BSL 1.1 to
+> the source-available MSCL-1.0-GPL in v12, in June 2026
+> ([Kiln vs Directus](compare/kiln-vs-directus.md)).
+
 ## The field at a glance
 
 | CMS | Stack | Model | Headless writes | Hosting | Closest to Kiln on… |

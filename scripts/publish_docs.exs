@@ -143,6 +143,11 @@ defmodule PublishDocs do
      ast |> Markdown.map_ast(&rewrite(&1, doc.path, slugs)) |> Markdown.render()}
   end
 
+  # Only a guide that names one sends a description. Sending nil for the rest
+  # would clear one an editor wrote on the site.
+  defp seo_attrs(%{seo_description: nil}), do: %{}
+  defp seo_attrs(%{seo_description: text}), do: %{"seo_description" => text}
+
   defp rewrite({"a", attrs, children, meta}, source, slugs),
     do: {"a", Markdown.update_attr(attrs, "href", &link(&1, source, slugs)), children, meta}
 
@@ -218,8 +223,14 @@ defmodule PublishDocs do
 
     rendered =
       Enum.map(catalogue, fn doc ->
-        {title, html} = render(doc, File.read!(doc.path), slugs)
-        Map.merge(doc, %{title: title, html: html})
+        markdown = File.read!(doc.path)
+        {title, html} = render(doc, markdown, slugs)
+
+        Map.merge(doc, %{
+          title: title,
+          html: html,
+          seo_description: Markdown.seo_description(markdown)
+        })
       end)
 
     to_publish = Enum.filter(rendered, fn doc -> Enum.any?(selected, &(&1.path == doc.path)) end)
@@ -233,6 +244,7 @@ defmodule PublishDocs do
   defp dry_run(to_publish, rendered, out) do
     for doc <- to_publish do
       IO.puts("  /docs/#{doc.slug}  #{doc.title}  (#{byte_size(doc.html)} bytes)")
+      if doc.seo_description, do: IO.puts("      description: #{doc.seo_description}")
       if out, do: write_file(out, doc.slug, doc.title, doc.html)
     end
 
@@ -259,7 +271,13 @@ defmodule PublishDocs do
       Enum.map(to_publish, fn doc ->
         API.report(
           doc.slug,
-          API.upsert(req, entries, doc.slug, body(doc.title, doc.html), create_entry)
+          API.upsert(
+            req,
+            entries,
+            doc.slug,
+            Map.merge(body(doc.title, doc.html), seo_attrs(doc)),
+            create_entry
+          )
         )
       end) ++
         [

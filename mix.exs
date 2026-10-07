@@ -243,6 +243,16 @@ defmodule KilnCMS.MixProject do
       "docs/getting-started.md": [],
       "README.md": [title: "Overview"],
       "CONTRIBUTING.md": [],
+      # Compare & migrate — public "Kiln vs X" pages (#1876). Their facts are
+      # dated and sourced; see docs/compare/how-kiln-compares.md for the rules.
+      "docs/compare/how-kiln-compares.md": [],
+      "docs/compare/kiln-vs-wordpress.md": [],
+      "docs/compare/kiln-vs-ghost.md": [],
+      "docs/compare/kiln-vs-strapi.md": [],
+      "docs/compare/kiln-vs-payload.md": [],
+      "docs/compare/kiln-vs-directus.md": [],
+      "docs/compare/migrating-from-wordpress.md": [],
+      "docs/compare/migrating-from-ghost.md": [],
       # Authoring & editorial
       "docs/editor-shortcuts.md": [],
       "docs/markdown.md": [],
@@ -390,6 +400,16 @@ defmodule KilnCMS.MixProject do
   defp groups_for_extras do
     [
       "Getting started": ["docs/getting-started.md", "README.md", "CONTRIBUTING.md"],
+      "Compare & migrate": [
+        "docs/compare/how-kiln-compares.md",
+        "docs/compare/kiln-vs-wordpress.md",
+        "docs/compare/kiln-vs-ghost.md",
+        "docs/compare/kiln-vs-strapi.md",
+        "docs/compare/kiln-vs-payload.md",
+        "docs/compare/kiln-vs-directus.md",
+        "docs/compare/migrating-from-wordpress.md",
+        "docs/compare/migrating-from-ghost.md"
+      ],
       "Authoring & editorial": [
         "docs/editor-shortcuts.md",
         "docs/markdown.md",

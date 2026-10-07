@@ -438,10 +438,29 @@ defmodule KilnCMS.Blocks.Html do
   # not one image. Recursing rather than picking the first match is the whole
   # difference between importing a ten-image gallery and importing its first
   # image with the others silently gone.
-  defp split_top_level({"figure", _attrs, children} = node) do
-    case Enum.filter(children, &match?({"figure", _, _}, &1)) do
-      [] -> single_figure(node, children)
-      nested -> Enum.flat_map(nested, &split_top_level/1)
+  #
+  # Ghost's gallery card is the other shape: one figure, its images nested in
+  # rows of `div`s (`kg-gallery-row` > `kg-gallery-image` > `img`), read as one
+  # image block per image. Only that wrapper counts — not "a figure with
+  # several images", which would also split an emoji `img` out of a caption.
+  #
+  # Ghost's bookmark card is a figure holding one link to another page, with
+  # its title, description, favicon and thumbnail inside the link. It becomes
+  # a paragraph linking the title to that page; reading it as a figure kept the
+  # favicon as an image and lost the link.
+  defp split_top_level({"figure", attrs, children} = node) do
+    cond do
+      class?(attrs, "kg-bookmark-card") ->
+        bookmark(node)
+
+      (gallery = Floki.find(children, ".kg-gallery-image img")) != [] ->
+        Enum.map(gallery, &{:media, &1, nil})
+
+      (nested = Enum.filter(children, &match?({"figure", _, _}, &1))) != [] ->
+        Enum.flat_map(nested, &split_top_level/1)
+
+      true ->
+        single_figure(node, children)
     end
   end
 
@@ -488,6 +507,25 @@ defmodule KilnCMS.Blocks.Html do
       true ->
         {:prose, node}
     end
+  end
+
+  defp bookmark(node) do
+    with [{"a", attrs, _} = link | _] <- Floki.find(node, "a"),
+         href when is_binary(href) <- attr(attrs, "href") do
+      title =
+        case link |> Floki.find(".kg-bookmark-title") |> Floki.text() |> String.trim() do
+          "" -> href
+          text -> text
+        end
+
+      [{:prose, {"p", [], [{"a", [{"href", href}], [title]}]}}]
+    else
+      _ -> [{:prose, node}]
+    end
+  end
+
+  defp class?(attrs, name) do
+    attrs |> attr("class") |> to_string() |> String.split() |> Enum.member?(name)
   end
 
   defp bare_url_paragraph(text, node) do

@@ -54,6 +54,18 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Added
+
+- **`mix kiln.import.ghost` imports a Ghost JSON export: posts, pages, tags,
+  images, SEO fields and bylines, members-only posts kept gated, and a
+  redirect from every old URL.**
+  ([#1876](https://github.com/The-Verscienta/kiln_cms/issues/1876) · [long form](docs/changelog/unreleased.md#mix-kiln-import-ghost))
+
+- **Public "Kiln vs" pages for WordPress, Ghost, Strapi, Payload and Directus,
+  plus WordPress and Ghost migration guides, every competitor claim dated
+  and sourced.**
+  ([#1876](https://github.com/The-Verscienta/kiln_cms/issues/1876) · [long form](docs/changelog/unreleased.md#kiln-vs-pages-and-migration-guides))
+
 ## [1.1.0] - 2026-10-06
 
 Long form: [docs/changelog/v1.1.0.md](docs/changelog/v1.1.0.md) —
