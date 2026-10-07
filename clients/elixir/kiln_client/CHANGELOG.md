@@ -5,6 +5,24 @@ before 1.0 a minor bump may change behaviour and says so here. Releases are
 tagged `kiln_client-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## Unreleased
+
+### Changed
+
+- **Media writes return `%KilnClient.Error{reason: :unexpected_body}`** when
+  Kiln answers 2xx without a `data` resource. `upload_media/2`,
+  `import_media/2` and `complete_direct_upload/2` used to return a bare
+  `{:error, {:unexpected_body, body}}` tuple, contradicting the documented
+  `{:error, %KilnClient.Error{}}`; the body is now in `:body` and the endpoint
+  in `:path`, matching `begin_direct_upload/3`. Code matching the old tuple
+  needs updating.
+
+### Fixed
+
+- `KilnClient.Error`'s `reason` type, its moduledoc and the README's Errors
+  table now list `:storage_refused` (a direct upload's `PUT` to object storage
+  answered non-2xx) and `:unexpected_body`, which the client already returned.
+
 ## 0.3.0
 
 ### Added

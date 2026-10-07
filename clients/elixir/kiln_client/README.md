@@ -300,6 +300,8 @@ Writes and `graphql/3` return `{:error, %KilnClient.Error{}}`. Branch on
 | `:server` | 5xx (a 503 may carry `:retry_after`) |
 | `:transport` | no response (DNS, refused, TLS, timeout); the exception is in `:exception` |
 | `:graphql` | `/gql` answered with top-level `errors` |
+| `:storage_refused` | a direct upload's `PUT` to object storage answered non-2xx (e.g. a stale presigned URL); the store's raw body is in `:body` |
+| `:unexpected_body` | a 2xx whose body isn't the expected shape (a media write with no `data` resource); the decoded body is in `:body` |
 | `:http` | any other status |
 
 Every error also carries `:status`, `:code` (the first error's) and `:errors`
