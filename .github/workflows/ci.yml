@@ -326,17 +326,62 @@ jobs:
       # `qpdf_metadata_stripping` job below still runs on a trixie-based
       # container whatever the runner image, so the `:qpdf`
       # tests never go fully dark (#907).
-      # A stalled mirror connection has hung this step for hours (three shard
-      # jobs on 2026-10-01 sat in it with no output). apt waits on a dead
-      # socket forever by default, and the job has no timeout of its own, so
-      # the fetch gets a per-connection timeout and retries, and the step a
-      # ceiling — a rerun then costs minutes, not a six-hour wait.
-      - name: Install qpdf (PDF metadata stripping tests)
+      #
+      # Same reasoning, for A/V (#820): without ffmpeg here, the :ffmpeg tests
+      # are excluded everywhere that matters and the strip — a privacy
+      # control — would be pinned by nothing: a change to the argv that
+      # silently stopped removing GPS would merge green. The `:no_ffmpeg` pair
+      # is excluded once ffmpeg is installed, which is the intent; between the
+      # two tags, one always runs.
+      #
+      # Both come from a cache, not the mirror. A stalled mirror connection
+      # hung these installs for hours on 2026-10-01 (three shards sat with no
+      # output), so they got per-connection timeouts, retries and a ten-minute
+      # ceiling. That turned a hang into a red shard, but not into a green
+      # one: on 2026-10-07 the ffmpeg install still used up its ten minutes on
+      # three shards across #1910 and #1912 (runs 37653303446 and 37654925085)
+      # and each went red with no test failing. The mirror never stalled
+      # outright — it trickled: one 9 MB .deb took five minutes, 20 to 50 of
+      # ffmpeg's 87 packages arrived before the ceiling, and apt logged no
+      # error at all, because its timeouts measure inactivity and a trickle
+      # is never inactive. Six shards each pulling 62.8 MB from one mirror on
+      # every push is six chances a run to meet that.
+      #
+      # So the .debs, AND the package indexes apt resolved them against, are
+      # cached, keyed on the runner image (`ImageOS`/`ImageVersion`, which
+      # GitHub sets on every hosted runner) and the package list. On a hit,
+      # `scripts/ci/apt_install_cached.sh` installs with `--no-download` and
+      # never opens a connection. On a miss — the first runs after GitHub rolls
+      # the image, roughly weekly, and the days of the rollout when shards of
+      # ONE run land on two image versions (both runs above did) —
+      # `restore-keys` usually still finds the
+      # previous image's cache, which installs offline just the same; only if
+      # that fails does it go to the mirror, with each fetch attempt under a
+      # hard wall-clock `timeout` so a trickling connection is killed and
+      # retried rather than waited out. The script's header has the detail.
+      # The ten-minute ceiling stays, for the cold path.
+      #
+      # Only shard 1 saves: six shards racing to reserve one key is five
+      # "unable to reserve cache" warnings a week and no extra protection.
+      - name: Compute the apt cache key
+        id: apt-key
+        run: |
+          echo "prefix=apt-v1-${ImageOS:-unknown}-qpdf-ffmpeg-" >> "$GITHUB_OUTPUT"
+          echo "image=${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore cached apt packages (qpdf, ffmpeg)
+        id: apt-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.cache/kiln-apt
+          key: ${{ steps.apt-key.outputs.prefix }}${{ steps.apt-key.outputs.image }}-${{ hashFiles('scripts/ci/apt_install_cached.sh') }}
+          restore-keys: |
+            ${{ steps.apt-key.outputs.prefix }}
+
+      - name: Install qpdf and ffmpeg (PDF and A/V metadata stripping tests)
         timeout-minutes: 10
         run: |
-          APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o DPkg::Lock::Timeout=120"
-          sudo apt-get $APT update -qq
-          sudo apt-get $APT install -y --no-install-recommends qpdf
+          scripts/ci/apt_install_cached.sh "$HOME/.cache/kiln-apt" qpdf ffmpeg
           qpdf --version | head -1
           if qpdf --help=all 2>&1 | grep -q -- '--remove-info'; then
             echo "qpdf supports --remove-info; :qpdf tests will run"
@@ -344,20 +389,15 @@ jobs:
             echo "::warning::qpdf $(qpdf --version | head -1) predates 11.10 —" \
                  ":qpdf tests (#807 PDF metadata stripping) will be EXCLUDED"
           fi
-
-      # Same reasoning as qpdf above, for A/V (#820). Without ffmpeg here, the
-      # :ffmpeg tests are excluded everywhere that matters and the strip — a
-      # privacy control — would be pinned by nothing: a change to the argv that
-      # silently stopped removing GPS would merge green. The `:no_ffmpeg` pair
-      # is excluded once this is installed, which is the intent; between the
-      # two tags, one always runs.
-      - name: Install ffmpeg (A/V metadata stripping tests)
-        timeout-minutes: 10
-        run: |
-          APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o DPkg::Lock::Timeout=120"
-          sudo apt-get $APT install -y --no-install-recommends ffmpeg
           ffmpeg -version | head -1
           ffprobe -version | head -1
+
+      - name: Save the apt package cache
+        if: matrix.partition == 1 && steps.apt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/kiln-apt
+          key: ${{ steps.apt-cache.outputs.cache-primary-key }}
 
       # `coveralls.json` is `mix test --cover` plus the one reporter that does
       # NOT check `minimum_coverage` — a shard's partial number would fail the
