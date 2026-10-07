@@ -45,7 +45,7 @@ jobs:
     if: >-
       vars.KILN_DOCS_URL != '' &&
       (github.event_name != 'release' || !github.event.release.prerelease)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       # The default branch, not the release's tag: the index lists every
