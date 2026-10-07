@@ -10,6 +10,17 @@ dynamic content types (D17, [Dynamic content types](dynamic-content-types-plan.m
 [Forms](forms.md), the [JSON API](json-api.md) and the `publish_docs.exs`
 publisher pattern that already runs against kilncms.dev.
 
+> **Blocked on [#1909](https://github.com/The-Verscienta/kiln_cms/issues/1909):
+> plugins can't be Hex or git dependencies today.** This plan assumes they
+> can (`source: hex | git`, a Hex `package`, Hex checksums and download
+> counts, an install step that adds a dep). In fact a plugin only compiles
+> as a `projects/<name>/` directory inside the core: Mix builds a dependency
+> before `kiln_cms`, so `use Kiln.Plugin` can't resolve. Until #1909 settles
+> how plugins are distributed (vendored git repos, or a published plugin
+> SDK), treat every Hex-specific field and step below as provisional. With
+> vendoring, a listing's coordinates are a git repository and a tag/SHA, and
+> "install" means vendoring into `projects/`.
+
 ## TL;DR
 
 > **The registry distributes metadata and trust — never code.** A listing is a

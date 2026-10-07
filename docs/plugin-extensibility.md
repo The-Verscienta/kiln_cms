@@ -11,8 +11,8 @@ declarative editorial automation (#342).
 
 > **Kiln does not hot-load arbitrary plugin *code* at runtime, by design.**
 > A plugin is compile-time OTP code activated by one config line (D18). The
-> "marketplace" is a catalog of **vetted, git/hex-distributed, compile-time
-> plugins** — installers, not a code-execution sandbox — plus the parts of a
+> "marketplace" is a catalog of **vetted, git-distributed, compile-time
+> plugins** vendored into `projects/` — installers, not a code-execution sandbox — plus the parts of a
 > live instance that are *already* extensible without code: dynamic content
 > types (D17), the `Kiln.FieldType` registry, and declarative automation
 > rules (#342). A genuine runtime-code story (out-of-process plugins, a WASM
@@ -87,11 +87,15 @@ runtime code loading at all.**
 
 ### 2a. Catalog of vetted, distributable plugins
 
-A "marketplace plugin" is an ordinary `Kiln.Plugin` (D18) packaged as a **hex
-package or a git dependency**. Installing one is the flow that already exists:
+A "marketplace plugin" is an ordinary `Kiln.Plugin` (D18) kept in **its own
+git repository** and installed into a site's overlay as a `projects/<name>/`
+directory. Installing one is the flow that already exists:
 
-1. **Add the dependency** — `{:kiln_ratings, "~> 1.0"}` in `mix.exs` (hex) or a
-   `git:`/`path:` dep for a private or in-repo plugin.
+1. **Vendor it** — copy, `git subtree` or `git submodule` the plugin's
+   repository into `projects/<name>/` in your overlay, pinned to a tag. Not a
+   Mix dependency: neither `{:kiln_ratings, "~> 1.0"}` (Hex) nor a
+   `git:`/`path:` dep compiles, because Mix builds a dependency before
+   `kiln_cms` and `use Kiln.Plugin` then can't resolve (#1909).
 2. **Register it** — one line: `config :kiln_cms, :plugins, [Ratings.Plugin]`
    (plus its domains in `:ash_domains`/`:content_domains` if it ships content
    types — Ash's own mix tasks read those keys directly).
@@ -102,8 +106,8 @@ package or a git dependency**. Installing one is the flow that already exists:
    installed plugin with its catalog metadata and contribution surface.
 
 The `mix kiln.gen.plugin <Name>` scaffold already produces a
-distribution-shaped skeleton; a marketplace plugin is that skeleton, filled in,
-published to hex or a git host.
+distribution-shaped skeleton in `projects/<name>/`; a marketplace plugin is
+that directory, filled in and published as its own git repository.
 
 ### 2b. Catalog metadata (the "registry")
 
@@ -115,21 +119,21 @@ central service required for v1. Each plugin optionally declares:
 | Name | `name/0` | Machine name (already required) |
 | Version | `version/0` | Display/version pin (defaults to `nil`) |
 | Summary | `summary/0` | One-line catalog description |
-| Homepage | `homepage/0` | Hexdocs / repo URL — **where screenshots, changelog and docs live** |
+| Homepage | `homepage/0` | Repo / docs URL — **where screenshots, changelog and docs live** |
 
 `Kiln.Plugins.manifests/0` collects these plus each plugin's *contribution
 counts* (domains, blocks, field types, nav items, admin routes, queues,
 children) into plain maps — the data a catalog UI or `mix kiln.plugins.list`
 renders. Screenshots and long-form docs deliberately live in the plugin's own
-hex package / README, **not** in the running node: the node carries a pointer
+repository / README, **not** in the running node: the node carries a pointer
 (`homepage/0`), not a media library.
 
 **The curated index** — "which plugins are vetted" — is a governance artifact,
 not a code feature: a docs table (or, later, a hosted static index) listing
-approved packages with their hex/git coordinates and homepage. Vetting is a
+approved plugins with their git coordinates (repository + tag) and homepage. Vetting is a
 human review that a package is safe to compile in, exactly the bar core code
 clears. This keeps the security property intact: nothing is "installed" until a
-maintainer adds the dep and re-releases.
+maintainer vendors it into `projects/` and re-releases.
 
 **A hosted index** — that governance artifact, built out as a public catalog on
 kilncms.dev with a submission path, a compile-and-`doctor` verification

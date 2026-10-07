@@ -250,8 +250,8 @@ drop the definition) when querying or indexing demands it.
 ## 5. Plugins (D18)
 
 For everything beyond one project's content model, package your extension as
-a **plugin** — compile-time OTP code (a `projects/` directory or a hex dep)
-with one entry module and one config line:
+a **plugin** — compile-time OTP code in a `projects/` directory (not a Hex or
+git dependency, see #1909) with one entry module and one config line:
 
 ```bash
 mix kiln.gen.plugin Ratings --block star_rating --field stars

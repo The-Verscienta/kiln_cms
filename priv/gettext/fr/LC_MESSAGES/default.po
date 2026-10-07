@@ -10900,8 +10900,8 @@ msgstr "Extensions"
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
-msgid "Plugins are compiled into the image this instance runs, so this list changes only with the next build. Installing one means adding the dependency and a config line to your project, then rebuilding and redeploying."
-msgstr "Les extensions sont compilées dans l'image que cette instance exécute ; cette liste ne change donc qu'à la prochaine compilation. En installer une consiste à ajouter la dépendance et une ligne de configuration à votre projet, puis à reconstruire et redéployer."
+msgid "Plugins are compiled into the image this instance runs, so this list changes only with the next build. Installing one means adding its directory under projects/ and a config line to your project, then rebuilding and redeploying."
+msgstr "Les extensions sont compilées dans l'image que cette instance exécute ; cette liste ne change donc qu'à la prochaine compilation. En installer une consiste à ajouter son dossier sous projects/ et une ligne de configuration à votre projet, puis à reconstruire et redéployer."
 
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format

@@ -2,9 +2,9 @@ defmodule Kiln.Plugin do
   @moduledoc """
   The KilnCMS **plugin contract** (decision D18, `docs/plugin-system-plan.md`).
 
-  A plugin is compile-time OTP code — a hex dependency or a `projects/`
-  directory — whose entry module `use`s this and overrides only the callbacks
-  it needs. One config line activates it:
+  A plugin is compile-time OTP code in a `projects/<name>/` directory whose
+  entry module `use`s this and overrides only the callbacks it needs. One
+  config line activates it:
 
       config :kiln_cms, :plugins, [MyPlugin]
 
@@ -49,9 +49,17 @@ defmodule Kiln.Plugin do
   `Kiln.Plugins.manifests/0` and `mix kiln.plugins.list` (see
   `docs/plugin-extensibility.md`). All three are optional and default to
   `nil`: they are the "registry" for the vetted-plugin marketplace, not
-  behavior. Screenshots and long-form docs live in the plugin's own hex
-  package / README — `homepage/0` is the pointer to them, so the running node
-  carries a URL, not a media library.
+  behavior. Screenshots and long-form docs live in the plugin's own
+  repository / README — `homepage/0` is the pointer to them, so the running
+  node carries a URL, not a media library.
+
+  ## Not a Mix dependency
+
+  A plugin can't be a Hex or `git:`/`path:` dependency. Mix compiles a
+  dependency before `kiln_cms` itself, with only the dependency's own deps
+  loaded, so `use Kiln.Plugin` fails with "module Kiln.Plugin is not loaded".
+  Share a plugin as a git repository that a site vendors into `projects/`
+  (#1909).
   """
 
   @type nav_item :: %{label: String.t(), path: String.t(), role: :editor | :admin}
@@ -66,7 +74,7 @@ defmodule Kiln.Plugin do
   @doc "One-line catalog description. Defaults to `nil`."
   @callback summary() :: String.t() | nil
 
-  @doc "Hexdocs/repo URL — where screenshots and docs live. Defaults to `nil`."
+  @doc "Repo/docs URL — where screenshots and docs live. Defaults to `nil`."
   @callback homepage() :: String.t() | nil
 
   @callback domains() :: [module()]
