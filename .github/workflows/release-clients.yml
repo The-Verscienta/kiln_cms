@@ -42,7 +42,7 @@ jobs:
   js-build:
     name: Verify and pack @kiln-cms/client
     if: startsWith(github.ref_name, 'client-js-v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     defaults:
       run:
@@ -110,7 +110,7 @@ jobs:
           tarball="$(npm pack --silent)"
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: npm-tarball
           path: clients/js/${{ steps.pack.outputs.tarball }}
@@ -120,7 +120,7 @@ jobs:
   js-publish:
     name: Publish @kiln-cms/client to npm
     needs: js-build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     # The pause point. Add required reviewers to the `npm` environment
     # (Settings → Environments) and nothing reaches the registry until one of
@@ -138,7 +138,7 @@ jobs:
       attestations: write
 
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: npm-tarball
 
@@ -190,7 +190,7 @@ jobs:
   hex-build:
     name: Verify and build kiln_client
     if: startsWith(github.ref_name, 'kiln_client-v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     defaults:
       run:
@@ -246,7 +246,7 @@ jobs:
           mix hex.build --output "$tarball"
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: hex-tarball
           path: clients/elixir/kiln_client/${{ steps.build.outputs.tarball }}
@@ -256,7 +256,7 @@ jobs:
   hex-publish:
     name: Publish kiln_client to Hex
     needs: hex-build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     # Same pause point as `npm` above: required reviewers on the `hex`
     # environment, and `HEX_API_KEY` as an environment secret there.
@@ -282,7 +282,7 @@ jobs:
           version-file: .tool-versions
           version-type: strict
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: hex-tarball
           path: attested

@@ -80,7 +80,7 @@ jobs:
   # moved there.
   build:
     name: Compile, lint & scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     services:
       postgres:
@@ -219,7 +219,7 @@ jobs:
 
       - name: Upload search eval report
         if: ${{ !cancelled() && hashFiles('search-eval.json') != '' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: search-eval-report
           path: search-eval.json
@@ -255,7 +255,7 @@ jobs:
 
   test:
     name: Test (shard ${{ matrix.partition }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     services:
       postgres:
@@ -315,15 +315,16 @@ jobs:
       # prove an uploaded PDF really loses its /Info and XMP need a real one.
       #
       # The options arrived in qpdf 11.10. Ubuntu 24.04 packages 11.9.0 — one
-      # minor short — and 26.04 packages 12.3.2, so whether these tests run
-      # depends on where `ubuntu-latest` currently points. `test_helper.exs`
+      # minor short — and 26.04 packages 12.3.2. The runners are pinned to
+      # ubuntu-24.04, so these tests are excluded here until the pin moves to
+      # 26.04 (a deliberate PR, not GitHub moving `ubuntu-latest`). `test_helper.exs`
       # excludes the `:qpdf` tag when the installed qpdf can't strip and says
       # so on stderr, so this degrades visibly rather than silently passing.
       # The line below reports it in the job log too, where someone will
       # actually see it. The RELEASE image is Debian trixie (qpdf 12.2.0) and
       # is not affected either way. Whatever this job excludes, the
       # `qpdf_metadata_stripping` job below still runs on a trixie-based
-      # container regardless of where `ubuntu-latest` points, so the `:qpdf`
+      # container whatever the runner image, so the `:qpdf`
       # tests never go fully dark (#907).
       # A stalled mirror connection has hung this step for hours (three shard
       # jobs on 2026-10-01 sat in it with no output). apt waits on a dead
@@ -377,7 +378,7 @@ jobs:
         # there is nothing to upload, the shard is already red, and
         # `coverage` refuses to merge N-1 files.
         if: ${{ !cancelled() && hashFiles('cover/shard-*.coverdata') != '' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: coverdata-${{ matrix.partition }}
           path: cover/shard-${{ matrix.partition }}.coverdata
@@ -392,7 +393,7 @@ jobs:
 
   coverage:
     name: Coverage (full suite)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The union of the shards is the full suite; this job runs no test. It
     # waits for every shard and runs even when one is red — a failing test
     # still executed, and a report on a red suite is what the old single job
@@ -413,7 +414,7 @@ jobs:
         uses: ./.github/actions/setup-mix
 
       - name: Download every shard's coverage data
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           pattern: coverdata-*
           # A sibling of cover/, not cover/ itself: cover/ is what the report
@@ -444,7 +445,7 @@ jobs:
 
       - name: Upload coverage report
         if: ${{ !cancelled() && hashFiles('cover/excoveralls.json') != '' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: cover/
@@ -455,7 +456,7 @@ jobs:
 
   dialyzer:
     name: Dialyzer
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     # No database: dialyzer reads beam files. `mix dialyzer` compiles the
     # project first (plainly — `build` is the warnings-as-errors leg) and then
@@ -488,7 +489,7 @@ jobs:
   # one fails if ANY of the four does.
   ci:
     name: Compile, lint, scan & test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [build, test, coverage, dialyzer]
     # `!cancelled()` is load-bearing. The default (`success()`) SKIPS this job
     # when a dependency failed, and a skipped required check is not a failed
@@ -520,7 +521,7 @@ jobs:
   # for an unrelated change — the way the in-job gettext gate already does.
   deps_audit:
     name: Dependency audit (mix_audit + hex.audit)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v5
@@ -595,7 +596,7 @@ jobs:
   # doubles as part of the API reference. Docs are a dev-profile build.
   docs:
     name: Documentation (mix docs)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     env:
       MIX_ENV: dev
@@ -661,7 +662,7 @@ jobs:
       # output is the reference whatever a developer's machine produced.
       - name: Upload the regenerated API specs
         if: ${{ failure() && hashFiles('docs/api/*') != '' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: api-specs
           path: ${{ runner.temp }}/api-specs
@@ -686,7 +687,7 @@ jobs:
 
   client:
     name: Elixir client (kiln_client)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     defaults:
       run:
@@ -731,7 +732,7 @@ jobs:
 
   client-js:
     name: JS client (@kiln-cms/client)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     defaults:
       run:
@@ -780,7 +781,7 @@ jobs:
 
   e2e:
     name: Browser E2E (Playwright)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     services:
       postgres:
@@ -898,7 +899,7 @@ jobs:
 
       - name: Upload report
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: e2e/playwright-report/
@@ -912,7 +913,7 @@ jobs:
       # finished.
       - name: Upload test results (screenshots, traces)
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-test-results
           path: e2e/test-results/
@@ -925,7 +926,7 @@ jobs:
   # fail-open build above.
   strict_tenancy:
     name: Strict-tenancy smoke
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     services:
       postgres:
@@ -1025,7 +1026,7 @@ jobs:
   # its own. See .github/actions/setup-mix's header.
   ml:
     name: Optional ML stack (semantic search)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     services:
       postgres:
@@ -1150,7 +1151,7 @@ jobs:
   # priv merge), then require codegen to be clean.
   overlay_drift:
     name: Overlay drift (example)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     services:
       postgres:
@@ -1219,7 +1220,7 @@ jobs:
 
   image:
     name: Release image (build only, ${{ matrix.name }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     # Two legs: the core image, and one with a project overlay activated (#988).
     #
@@ -1298,10 +1299,10 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build the release image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: false
@@ -1326,8 +1327,8 @@ jobs:
   # #907: `:qpdf` tests — the ones that prove an uploaded PDF actually loses
   # its `/Info` dictionary and XMP packet (#807) — are excluded from the
   # `test` shards above whenever the runner's qpdf predates 11.10 (see the
-  # "Install qpdf" step's comment there). `ubuntu-latest` currently packages
-  # 11.9.0 — one minor short — so this privacy control has had no CI coverage
+  # "Install qpdf" step's comment there). ubuntu-24.04, which the runners are
+  # pinned to, packages 11.9.0 — one minor short — so this privacy control had no CI coverage
   # at all. Rather than move the WHOLE suite onto a newer/untested runner for
   # one feature, this is a small, separate job that runs only the qpdf tests
   # inside `debian:trixie-slim`, the exact base the release image's runner
@@ -1351,7 +1352,7 @@ jobs:
   # name instead — set below.
   qpdf_metadata_stripping:
     name: PDF metadata stripping (qpdf, Debian trixie)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       image: debian:trixie-slim
 

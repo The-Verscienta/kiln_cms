@@ -42,7 +42,7 @@ concurrency:
 jobs:
   plan:
     name: Pick releases
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       tags: ${{ steps.pick.outputs.tags }}
     steps:
@@ -64,7 +64,7 @@ jobs:
   rehearse:
     name: Upgrade from ${{ matrix.tag }}
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -126,7 +126,7 @@ jobs:
 
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: upgrade-rehearsal-${{ matrix.tag }}
           path: |

@@ -37,7 +37,7 @@ jobs:
   publish:
     name: Publish docs to ${{ vars.KILN_DOCS_URL }}
     if: vars.KILN_DOCS_URL != ''
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v5
