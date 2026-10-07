@@ -16,6 +16,10 @@ defmodule Mix.Tasks.Kiln.Import.Ghost do
   the dry run, the re-run behaviour and the report are the same. Always
   dry-run first.
 
+  A release has no Mix: run `KilnCMS.Release.import_ghost/2` through
+  `bin/kiln_cms rpc` instead, with these flags as keyword options
+  (`docs/content-portability.md`, "From a release").
+
   ## Options
 
       --site-url URL     the Ghost site's address. Required when the export
@@ -48,9 +52,7 @@ defmodule Mix.Tasks.Kiln.Import.Ghost do
 
   use Mix.Task
 
-  alias KilnCMS.Portability.CLI
-  alias KilnCMS.Portability.Ghost
-  alias KilnCMS.Portability.Import
+  alias KilnCMS.Portability.Commands
 
   @requirements ["app.start"]
 
@@ -78,94 +80,9 @@ defmodule Mix.Tasks.Kiln.Import.Ghost do
         [] -> Mix.raise("Usage: mix kiln.import.ghost <export.json> --site-url URL [--dry-run]")
       end
 
-    case Ghost.parse_file(path, site_url: opts[:site_url]) do
-      {:ok, parsed} ->
-        import_parsed(parsed, opts)
-
-      {:error, :site_url_required} ->
-        Mix.raise("""
-        #{path} writes the Ghost site's own URLs as __GHOST_URL__, so its images
-        cannot be fetched without the site's address. Pass it:
-
-            mix kiln.import.ghost #{path} --site-url https://your-ghost-site.example
-        """)
-
-      {:error, :not_a_ghost_export} ->
-        Mix.raise("""
-        #{path} is JSON, but not a Ghost export: there is no db[0].data.posts.
-        Export it from Ghost Admin → Settings → Import/Export → Export content.
-        """)
-
-      {:error, {:too_large, size, max}} ->
-        Mix.raise("""
-        #{path} is #{div(size, 1_048_576)} MB; the importer's ceiling is \
-        #{div(max, 1_048_576)} MB. Run it where it can be read whole, or ask on
-        the issue tracker — no Ghost export this size has been seen yet.
-        """)
-
-      {:error, reason} ->
-        Mix.raise("Could not read #{path}: #{inspect(reason)}")
+    case Commands.import_ghost(path, opts, &Mix.shell().info(&1)) do
+      {:ok, _report} -> :ok
+      {:error, message} -> Mix.raise(message)
     end
-  end
-
-  defp import_parsed(parsed, opts) do
-    Mix.shell().info("""
-    Read #{length(parsed.records)} importable records, \
-    #{length(parsed.attachments)} feature images, #{length(parsed.authors)} authors\
-    #{site_line(parsed.site)}
-    """)
-
-    print_notes(parsed)
-
-    run_opts = CLI.scope!(opts) ++ import_opts(opts)
-
-    {:ok, report} = Import.run(parsed, run_opts)
-    CLI.print_report(report)
-    CLI.maybe_drain_media(opts[:drain_media])
-  end
-
-  # Decisions the parser made that the report cannot show — a scheduled post
-  # landing as a draft — and the posts it could not read at all.
-  defp print_notes(parsed) do
-    notes = for %{note: note} = record <- parsed.records, is_binary(note), do: {record, note}
-
-    if notes != [] do
-      Mix.shell().info("Not as Ghost had it (#{length(notes)}):")
-      for {record, note} <- notes, do: Mix.shell().info("  ~ #{record.title}: #{note}")
-      Mix.shell().info("")
-    end
-
-    if parsed.unreadable != [] do
-      Mix.shell().info("Unreadable, not imported (#{length(parsed.unreadable)}):")
-
-      for %{title: title, reason: reason} <- parsed.unreadable,
-          do: Mix.shell().info("  x #{title}: #{reason}")
-
-      Mix.shell().info("")
-    end
-  end
-
-  defp site_line(%{title: title, url: url, version: version}) do
-    [
-      title && "\nSource site: #{title}",
-      url && " (#{url})",
-      version && "\nGhost version: #{version}"
-    ]
-    |> Enum.reject(&(&1 in [nil, false]))
-    |> Enum.join()
-  end
-
-  defp import_opts(opts) do
-    [
-      dry_run: Keyword.get(opts, :dry_run, false),
-      skip_media: Keyword.get(opts, :skip_media, false),
-      redirects: Keyword.get(opts, :redirects, true),
-      locale: Keyword.get(opts, :locale, "en"),
-      on_conflict: if(opts[:on_conflict] == "error", do: :error, else: :skip),
-      author_map: opts |> Keyword.get_values(:author_map) |> CLI.author_map!()
-    ]
-    |> then(fn list ->
-      if opts[:limit], do: Keyword.put(list, :limit, opts[:limit]), else: list
-    end)
   end
 end

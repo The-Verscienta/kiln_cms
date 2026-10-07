@@ -14,6 +14,49 @@ Four mix tasks:
 All four take `--actor EMAIL` and `--org SLUG`, and every importer takes
 `--dry-run`.
 
+### From a release
+
+An OTP release has no Mix, so the three importers also exist as functions on
+`KilnCMS.Release`. Run them through `bin/kiln_cms rpc`, against the node that is
+serving the site:
+
+```bash
+docker cp wordpress.xml <container>:/tmp/wordpress.xml
+docker exec -it <container> /app/bin/kiln_cms rpc 'KilnCMS.Release.import_wordpress("/tmp/wordpress.xml", dry_run: true)'
+docker exec -it <container> /app/bin/kiln_cms rpc 'KilnCMS.Release.import_ghost("/tmp/ghost.json", site_url: "https://blog.example.com", dry_run: true)'
+docker exec -it <container> /app/bin/kiln_cms rpc 'KilnCMS.Release.import_content("/tmp/content.json", dry_run: true)'
+```
+
+| Task flag | Release option |
+|---|---|
+| `--dry-run` | `dry_run: true` |
+| `--actor EMAIL` / `--org SLUG` | `actor: "EMAIL"` / `org: "SLUG"` |
+| `--limit N` / `--locale L` | `limit: N` / `locale: "L"` |
+| `--skip-media` / `--no-redirects` | `skip_media: true` / `redirects: false` |
+| `--on-conflict error` | `on_conflict: :error` |
+| `--author-map jo=jo@example.com` (repeatable) | `author_map: %{"jo" => "jo@example.com"}` |
+| `--drain-media` | `drain_media: true` |
+| `--site-url URL` (Ghost) / `--type NAME` (CSV) | `site_url: "URL"` / `type: "NAME"` |
+
+The report is the same one the task prints, and it appears in the `rpc`
+terminal. Three differences from the tasks:
+
+- **Use `rpc`, not `eval`.** The import enqueues media jobs, fetches images
+  through SafeFetch and clears the content caches, so it needs the running
+  application. `bin/kiln_cms eval` starts a separate VM with none of that, and
+  the functions refuse there rather than fail halfway through.
+- **The path is read inside the container**, so copy the export in first
+  (`docker cp`, as above). On Coolify, run `docker cp` on the host over SSH, then
+  run the `rpc` command from the host or from the application's terminal in
+  the Coolify dashboard.
+- **An unknown option is refused.** A keyword list has no option parser, so
+  without this check a misspelt `dry_run:` would run a real import.
+
+Each call returns `{:ok, report}` or `{:error, message}`. If the connection drops
+during a long import, run the same command again: what already landed is
+skipped. `KilnCMS.Portability.Commands` holds the code that both the tasks and
+the release run.
+
 ## Always dry-run first
 
 ```bash

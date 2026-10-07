@@ -16,6 +16,10 @@ defmodule Mix.Tasks.Kiln.Import.Wordpress do
   prints exactly what a real run would create, using the same code the real run
   uses.
 
+  A release has no Mix: run `KilnCMS.Release.import_wordpress/2` through
+  `bin/kiln_cms rpc` instead, with these flags as keyword options
+  (`docs/content-portability.md`, "From a release").
+
   ## Options
 
       --dry-run          plan only; no writes, no downloads
@@ -44,8 +48,7 @@ defmodule Mix.Tasks.Kiln.Import.Wordpress do
 
   use Mix.Task
 
-  alias KilnCMS.Portability.Import
-  alias KilnCMS.Portability.WXR
+  alias KilnCMS.Portability.Commands
 
   @requirements ["app.start"]
 
@@ -77,62 +80,9 @@ defmodule Mix.Tasks.Kiln.Import.Wordpress do
         [] -> Mix.raise("Usage: mix kiln.import.wordpress <export.xml> [--dry-run]")
       end
 
-    case WXR.parse_file(path) do
-      {:ok, parsed} ->
-        import_parsed(parsed, opts)
-
-      {:error, {:too_large, size, max}} ->
-        Mix.raise("""
-        #{path} is #{div(size, 1_048_576)} MB; the parser's ceiling is #{div(max, 1_048_576)} MB.
-
-        WXR is expanded to a charlist at roughly 16 bytes per source byte before
-        parsing, so a file this size would exhaust memory with no partial
-        progress. Use WordPress's own split export (Tools -> Export produces one
-        file per post type / date range) and run this task once per file —
-        re-running is safe, because what already landed is skipped.
-        """)
-
-      {:error, reason} ->
-        Mix.raise("Could not read #{path}: #{inspect(reason)}")
+    case Commands.import_wordpress(path, opts, &Mix.shell().info(&1)) do
+      {:ok, _report} -> :ok
+      {:error, message} -> Mix.raise(message)
     end
   end
-
-  defp import_parsed(parsed, opts) do
-    Mix.shell().info("""
-    Read #{length(parsed.records)} importable records, \
-    #{length(parsed.attachments)} attachments, #{length(parsed.authors)} authors\
-    #{site_line(parsed.site)}
-    """)
-
-    run_opts = KilnCMS.Portability.CLI.scope!(opts) ++ import_opts(opts)
-
-    # `run/2` reports per-record failures inside the report rather than failing
-    # the run — one unimportable post must not abandon the other 3,999.
-    {:ok, report} = Import.run(parsed, run_opts)
-    KilnCMS.Portability.CLI.print_report(report)
-    KilnCMS.Portability.CLI.maybe_drain_media(opts[:drain_media])
-  end
-
-  defp site_line(%{title: title, url: url}) when is_binary(title),
-    do: "\nSource site: #{title}#{if url, do: " (#{url})", else: ""}"
-
-  defp site_line(_site), do: ""
-
-  defp import_opts(opts) do
-    [
-      dry_run: Keyword.get(opts, :dry_run, false),
-      skip_media: Keyword.get(opts, :skip_media, false),
-      redirects: Keyword.get(opts, :redirects, true),
-      locale: Keyword.get(opts, :locale, "en"),
-      on_conflict: on_conflict(opts[:on_conflict]),
-      author_map: opts |> Keyword.get_values(:author_map) |> KilnCMS.Portability.CLI.author_map!()
-    ]
-    |> maybe_put(:limit, opts[:limit])
-  end
-
-  defp on_conflict("error"), do: :error
-  defp on_conflict(_other), do: :skip
-
-  defp maybe_put(list, _key, nil), do: list
-  defp maybe_put(list, key, value), do: Keyword.put(list, key, value)
 end

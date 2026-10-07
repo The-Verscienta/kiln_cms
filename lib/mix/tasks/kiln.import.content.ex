@@ -16,6 +16,10 @@ defmodule Mix.Tasks.Kiln.Import.Content do
   Existing `(slug, locale)` matches are **skipped**, which makes re-running safe
   and makes resuming after a partial run cheap.
 
+  A release has no Mix: run `KilnCMS.Release.import_content/2` through
+  `bin/kiln_cms rpc` instead, with these flags as keyword options
+  (`docs/content-portability.md`, "From a release").
+
   ## Options
 
       --dry-run          plan only; no writes, no downloads
@@ -32,9 +36,7 @@ defmodule Mix.Tasks.Kiln.Import.Content do
 
   use Mix.Task
 
-  alias KilnCMS.Portability.CLI
-  alias KilnCMS.Portability.CSV
-  alias KilnCMS.Portability.Import
+  alias KilnCMS.Portability.Commands
 
   @requirements ["app.start"]
 
@@ -65,82 +67,9 @@ defmodule Mix.Tasks.Kiln.Import.Content do
         [] -> Mix.raise("Usage: mix kiln.import.content <export.json> [--dry-run]")
       end
 
-    path |> read_envelope!(opts) |> import_envelope(opts)
-  end
-
-  # CSV is one type per file and carries no type column, so `--type` names it.
-  # sobelow_skip ["Traversal.FileModule"]
-  defp read_envelope!(path, opts) do
-    if String.ends_with?(path, ".csv"), do: read_csv!(path, opts), else: read_json!(path)
-  end
-
-  # sobelow_skip ["Traversal.FileModule"]
-  defp read_csv!(path, opts) do
-    type = opts[:type] || Mix.raise("--type is required for a CSV import")
-
-    with {:ok, text} <- File.read(path),
-         {:ok, records} <- CSV.decode(text, type, CLI.scope!(opts)) do
-      %{"records" => records}
-    else
-      {:error, :empty} ->
-        Mix.raise("#{path} has no rows")
-
-      {:error, {:unknown_columns, columns}} ->
-        Mix.raise("""
-        #{path} has columns this type does not define: #{Enum.join(columns, ", ")}
-
-        Expected: title, slug, locale, state, plus this type's fields. A header
-        typo would otherwise import every row with that field silently empty.
-        """)
-
-      {:error, reason} ->
-        Mix.raise("Could not read #{path}: #{inspect(reason)}")
+    case Commands.import_content(path, opts, &Mix.shell().info(&1)) do
+      {:ok, _report} -> :ok
+      {:error, message} -> Mix.raise(message)
     end
   end
-
-  # The path is an operator's own command-line argument.
-  # sobelow_skip ["Traversal.FileModule"]
-  defp read_json!(path) do
-    with {:ok, json} <- File.read(path),
-         {:ok, envelope} <- Jason.decode(json) do
-      envelope
-    else
-      {:error, %Jason.DecodeError{} = error} ->
-        Mix.raise("#{path} is not valid JSON: #{Exception.message(error)}")
-
-      {:error, reason} ->
-        Mix.raise("Could not read #{path}: #{inspect(reason)}")
-    end
-  end
-
-  defp import_envelope(envelope, opts) do
-    records = envelope |> Map.get("records", []) |> length()
-    Mix.shell().info("Read #{records} records from the envelope\n")
-
-    run_opts =
-      CLI.scope!(opts) ++
-        [
-          dry_run: Keyword.get(opts, :dry_run, false),
-          skip_media: Keyword.get(opts, :skip_media, false),
-          redirects: Keyword.get(opts, :redirects, true),
-          on_conflict: on_conflict(opts[:on_conflict]),
-          progress: fn line -> Mix.shell().info(line) end
-        ] ++
-        maybe(:locale, opts[:locale]) ++ maybe(:limit, opts[:limit])
-
-    case Import.run_envelope(envelope, run_opts) do
-      {:ok, report} ->
-        CLI.print_report(report)
-        CLI.maybe_drain_media(opts[:drain_media])
-
-      {:error, :not_an_export_envelope} ->
-        Mix.raise("That file has no \"records\" array")
-    end
-  end
-
-  defp on_conflict("error"), do: :error
-  defp on_conflict(_other), do: :skip
-
-  defp maybe(_key, nil), do: []
-  defp maybe(key, value), do: [{key, value}]
 end

@@ -23,6 +23,21 @@ carries the reasoning.
   gallery card no longer imports as its first image only.
   ([#1876](https://github.com/The-Verscienta/kiln_cms/issues/1876))
 
+<a id="importers-from-a-release"></a>
+
+- **The importers run from a release: `bin/kiln_cms rpc
+  'KilnCMS.Release.import_wordpress(path, dry_run: true)'`, and likewise
+  `import_ghost/2` and `import_content/2`.** A Docker or Coolify deploy has no
+  Mix, so a migration used to need a source checkout with the production
+  environment loaded. The functions take the tasks' flags as keyword options,
+  refuse an unknown one (so a misspelt `dry_run:` cannot import for real), and
+  print the same report into the `rpc` terminal. They refuse under `eval`,
+  which has no job queue, media fetching or caches. The mix tasks and the
+  release now run the same code, `KilnCMS.Portability.Commands`, and
+  `KilnCMS.Portability.CLI` no longer calls Mix; the tasks' output and errors
+  are unchanged. See
+  [content portability](../content-portability.md#from-a-release).
+
 <a id="kiln-vs-pages-and-migration-guides"></a>
 
 - **Public "Kiln vs" pages for WordPress, Ghost, Strapi, Payload and Directus,

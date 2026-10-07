@@ -60,8 +60,14 @@ defmodule Mix.Tasks.Kiln.Export.Content do
         list -> list
       end
 
+    scope =
+      case CLI.scope(opts, &Mix.shell().info(&1)) do
+        {:ok, scope} -> scope
+        {:error, message} -> Mix.raise(message)
+      end
+
     export_opts =
-      CLI.scope!(opts) ++
+      scope ++
         [states: states(opts)] ++
         maybe(:locale, opts[:locale]) ++
         maybe(:limit, opts[:limit])
