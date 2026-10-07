@@ -19,6 +19,8 @@ defmodule KilnClient.Error do
   | `:http` | Any other non-2xx status. |
   | `:transport` | No response at all (DNS, refused, TLS, timeout); the underlying exception is in `:exception`. |
   | `:graphql` | `/gql` answered with a top-level `errors` array; any partial `data` is in `:data`. |
+  | `:storage_refused` | A direct upload's `PUT` to object storage answered non-2xx (a stale presigned URL, a length mismatch); the store's raw body is in `:body`, the presigned URL in `:path`. |
+  | `:unexpected_body` | Kiln answered 2xx with a body that isn't the expected shape (no `data` resource); the decoded body is in `:body`. |
 
   `:errors` is the JSON:API `errors` array Kiln answers every headless refusal
   with (`[%{"status" => "409", "code" => …, "detail" => …, "source" =>
@@ -43,6 +45,8 @@ defmodule KilnClient.Error do
           | :http
           | :transport
           | :graphql
+          | :storage_refused
+          | :unexpected_body
 
   @type t :: %__MODULE__{
           reason: reason(),

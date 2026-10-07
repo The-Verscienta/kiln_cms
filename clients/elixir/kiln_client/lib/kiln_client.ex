@@ -465,7 +465,7 @@ defmodule KilnClient do
       api_key: opts[:api_key],
       req: opts[:req]
     )
-    |> media_item()
+    |> media_item("/api/media")
   end
 
   @doc """
@@ -491,7 +491,7 @@ defmodule KilnClient do
       api_key: opts[:api_key],
       req: opts[:req]
     )
-    |> media_item()
+    |> media_item("/api/media/import-url")
   end
 
   @doc """
@@ -559,7 +559,7 @@ defmodule KilnClient do
       receive_timeout: @upload_timeout,
       req: opts[:req]
     )
-    |> media_item()
+    |> media_item("/api/media/uploads/complete")
   end
 
   @doc """
@@ -614,8 +614,9 @@ defmodule KilnClient do
   defp put_present(map, key, value), do: Map.put(map, key, value)
 
   # A created/updated media item: the resource flattened like a list item, plus
-  # the upload response's `meta.processing` when it carries one.
-  defp media_item({:ok, %{"data" => %{} = resource}}) do
+  # the upload response's `meta.processing` when it carries one. `path` is the
+  # endpoint, for the error when a 2xx carries no `data` resource.
+  defp media_item({:ok, %{"data" => %{} = resource}}, _path) do
     item = flatten_resource(resource)
 
     case resource do
@@ -624,8 +625,10 @@ defmodule KilnClient do
     end
   end
 
-  defp media_item({:ok, other}), do: {:error, {:unexpected_body, other}}
-  defp media_item({:error, reason}), do: {:error, reason}
+  defp media_item({:ok, other}, path),
+    do: {:error, %Error{reason: :unexpected_body, body: other, method: :post, path: path}}
+
+  defp media_item({:error, _reason} = error, _path), do: error
 
   # --- editorial reads (editor-tier credential) ---
   #

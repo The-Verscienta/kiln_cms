@@ -229,4 +229,72 @@ defmodule KilnClientMediaTest do
     assert_received {:put, "0123456789", ["10"], []}
     assert_received {:complete, %{"token" => "tok", "alt" => "Big"}}
   end
+
+  describe "a 2xx with no data resource" do
+    # Used to be a bare `{:error, {:unexpected_body, body}}` tuple — not the
+    # `%KilnClient.Error{}` the docs promise for every write.
+    test "is an :unexpected_body error carrying the body and the endpoint" do
+      Req.Test.stub(KilnClient, fn conn ->
+        conn |> Plug.Conn.put_status(200) |> Req.Test.json(%{"meta" => %{"note" => "huh"}})
+      end)
+
+      body = %{"meta" => %{"note" => "huh"}}
+
+      assert {:error,
+              %Error{reason: :unexpected_body, body: ^body, method: :post, path: "/api/media"} =
+                error} = KilnClient.upload_media(tmp_file("x"), api_key: @key)
+
+      assert Exception.message(error) =~ "unexpected_body"
+
+      assert {:error,
+              %Error{reason: :unexpected_body, body: ^body, path: "/api/media/import-url"}} =
+               KilnClient.import_media("https://example.com/cat.png", api_key: @key)
+
+      assert {:error,
+              %Error{reason: :unexpected_body, body: ^body, path: "/api/media/uploads/complete"}} =
+               KilnClient.complete_direct_upload("tok", api_key: @key)
+
+      assert {:error, %Error{reason: :unexpected_body, body: ^body, path: "/api/media/uploads"}} =
+               KilnClient.begin_direct_upload("a.mp4", 10, api_key: @key)
+    end
+  end
+
+  test "upload_media_direct/2 returns :storage_refused when the bucket refuses the PUT, and never completes" do
+    url = "https://bucket.test/private/direct-uploads/abc?X-Amz-Signature=s"
+
+    Req.Test.stub(KilnClient, fn conn ->
+      case {conn.method, conn.host, conn.request_path} do
+        {"POST", "kiln.test", "/api/media/uploads"} ->
+          conn
+          |> Plug.Conn.put_status(201)
+          |> Req.Test.json(%{
+            "data" => %{
+              "token" => "tok",
+              "upload_url" => url,
+              "method" => "PUT",
+              "headers" => %{"content-length" => "3"},
+              "expires_at" => "2026-09-19T12:15:00Z",
+              "max_bytes" => 500_000_000
+            }
+          })
+
+        {"PUT", "bucket.test", "/private/direct-uploads/abc"} ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/xml")
+          |> Plug.Conn.send_resp(403, "<Error><Code>SignatureDoesNotMatch</Code></Error>")
+
+        {"POST", "kiln.test", "/api/media/uploads/complete"} ->
+          send(self(), :completed)
+          created(conn)
+      end
+    end)
+
+    assert {:error,
+            %Error{reason: :storage_refused, status: 403, method: :put, path: ^url, body: body} =
+              error} = KilnClient.upload_media_direct(tmp_file("abc"), api_key: @key)
+
+    assert body =~ "SignatureDoesNotMatch"
+    assert Exception.message(error) =~ "403 storage_refused"
+    refute_received :completed
+  end
 end
