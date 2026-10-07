@@ -1,11 +1,19 @@
 # KilnClient
 
+[![Hex.pm](https://img.shields.io/hexpm/v/kiln_client.svg)](https://hex.pm/packages/kiln_client)
+[![HexDocs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/kiln_client)
+
 Official Elixir client for the [KilnCMS](https://github.com/The-Verscienta/kiln_cms)
-APIs: the JSON:API read surface (`/api/json/*`), the JSON:API **write** surface
-(create, update, workflow transitions, soft-delete), per-type keyword /
-semantic search and autocomplete, hybrid search (`/api/search`), fired
-artifacts (`/api/content/:type/:slug`), and a minimal GraphQL helper for
-`/gql`.
+APIs:
+
+- the JSON:API read surface (`/api/json/*`), published-only by default
+- the JSON:API **write** surface: create, update, workflow transitions, soft-delete
+- per-type keyword / semantic search and autocomplete, and hybrid search (`/api/search`)
+- fired artifacts (`/api/content/:type/:slug`) and the `/api/sync` delta feed
+- media uploads (multipart, URL import, direct-to-storage) and metadata edits
+- editorial reads: revision history, restore, content releases
+- image-transform URLs (`KilnClient.Image`) and webhook signature checks (`KilnClient.Webhook`)
+- a minimal GraphQL helper for `/gql`
 
 Extracted from the client Verscienta's production site built and hardened
 against a live Kiln ([kiln_cms#300](https://github.com/The-Verscienta/kiln_cms/issues/300)).
@@ -19,16 +27,13 @@ one production incident at a time.
 def deps do
   [
     {:kiln_client, "~> 0.3"}
-    # or, until it's published to Hex:
-    # {:kiln_client, github: "The-Verscienta/kiln_cms", sparse: "clients/elixir/kiln_client"}
   ]
 end
 ```
 
-> **Publishing is prepared, not yet done.** The package metadata and the
-> release workflow are in place (see [Releasing](#releasing)), but the first
-> publish to Hex is a manual maintainer step. Until it happens, use the
-> `github:` / `sparse:` dependency above.
+Requires Elixir 1.15+. The only runtime dependency is [Req](https://hex.pm/packages/req).
+Before 1.0, a minor version may change behaviour; the [changelog](CHANGELOG.md)
+says when.
 
 ## Configuration
 
@@ -42,6 +47,20 @@ config :kiln_client,
 
 Mint delivery keys on a **`:viewer` account** (see Kiln's `docs/api.md` →
 "API keys") so a leaked credential can't widen visibility anywhere.
+
+Every function that makes a request also takes a per-call `:req` option: `Req` options merged into that
+one request last, after the defaults and `req_options`. Use it to put a time
+limit on a call that must not hang:
+
+```elixir
+KilnClient.semantic_search("posts", q, req: [receive_timeout: 1_500, retry: false])
+```
+
+When the embedding backend is degraded, the semantic routes stall instead of
+failing: one production instance took about 70 s per call and still answered 200.
+If you have a keyword fallback, set a timeout on `semantic_search/3` and
+`search/2` well above their healthy latency, and turn retries off. Retrying a
+timeout only adds load to a backend that is already struggling.
 
 ## Published-only by default
 
@@ -73,6 +92,9 @@ its visibility follows the credential, which is why viewer-minted keys matter.
 
 # First match or {:error, :not_found}
 {:ok, post} = KilnClient.one("posts", %{slug: "hello-world", locale: "en"})
+
+# By id, in the order given; misses are dropped (chunked at the server's 100-row cap)
+{:ok, featured} = KilnClient.by_ids("posts", featured_ids)
 
 # Admin-defined custom fields (filter[…] can't reach into custom_fields)
 {:ok, %{items: cheap}} =
@@ -190,6 +212,12 @@ item["processing"]  # true while a video's metadata strip is pending — its url
 {:ok, item} = KilnClient.upload_media_direct("footage.mp4", alt: "Loading the kiln")
 ```
 
+`upload_media_direct/2` does three steps for you: presign, `PUT`, complete. To run
+the `PUT` yourself (from a browser, say), call the two server legs on their own:
+`begin_direct_upload/3` returns the presigned `"upload_url"`, `"headers"` and
+`"token"`, and `complete_direct_upload/2` takes the token plus the same metadata
+options.
+
 The server byte-sniffs every file and runs it through the media library's own
 pipeline — metadata stripping, size caps, variants. See Kiln's `docs/api.md` →
 "Uploading media".
@@ -213,7 +241,13 @@ never a delivery site's key. Anonymous calls are a 401, a viewer's key a 404.
 # Content releases (read-only) and what each will publish or take down
 {:ok, %{items: releases, included: included}} =
   KilnClient.list_releases(filter: %{state: "scheduled"}, include: ["items"])
+
+{:ok, release} = KilnClient.release(release_id, include: ["items"])
+{:ok, %{items: items}} = KilnClient.list_release_items(filter: %{release_id: release_id})
 ```
+
+`list_revisions/3`, `revision/4` and `restore_revision/4` take the **singular**
+type name and the document's id, not its slug.
 
 ## Writing content
 
@@ -306,10 +340,11 @@ Every error also carries `:status`, `:code` (the first error's) and `:errors`
 (the JSON:API `errors` list). The API key is only ever sent as the
 `Authorization` header — no error carries it.
 
-**Reads are unchanged:** `list/2` and friends still return
-`{:error, {:http_status, status, body}}` (or a transport exception), exactly as
-before. `KilnClient.Error.normalize/1` converts one into the struct when you
-want a single error handler for both.
+**Reads use a different shape:** `list/2` and the other read functions return
+`{:error, {:http_status, status, body}}` (or a transport exception), kept for
+compatibility. `KilnClient.Error.normalize/1` converts one into the struct, so
+a single error handler can cover both.
+
 ## Testing your integration
 
 Every request honors `req_options`, so [`Req.Test`](https://hexdocs.pm/req/Req.Test.html)
@@ -340,13 +375,10 @@ no "publish this tarball" task, but its tarballs are reproducible), and runs
 2. Tag the merge commit `kiln_client-vX.Y.Z` and push the tag.
 3. Approve the run in the `hex` environment.
 
-One-time setup a maintainer must do before the first run can succeed:
-
-- **Hex:** the first publish claims the name `kiln_client` (check it is still
-  free on hex.pm) and makes the account whose key published it the package
-  owner — so generate the key on the maintainers' Hex account, not a personal
-  one: hex.pm → Dashboard → Keys, with the `api:write` permission. Add
-  co-owners afterwards with `mix hex.owner add kiln_client <user>`.
-- **GitHub:** create an environment named **`hex`** (Settings →
-  Environments), add required reviewers, and store the key there as the
-  environment secret **`HEX_API_KEY`**.
+The package is owned on Hex by the maintainers' account (`the-verscienta`);
+add co-owners with `mix hex.owner add kiln_client <user>`. The publish key is
+the `HEX_API_KEY` secret on the repository's **`hex`** environment. That
+environment needs a reviewer's approval for every run and only accepts
+`kiln_client-v*` tags. To rotate the key, generate a new `api:write` key on
+that account (hex.pm → Dashboard → Keys), replace the secret, then revoke the
+old key.
