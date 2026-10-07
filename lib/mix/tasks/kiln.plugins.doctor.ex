@@ -240,9 +240,9 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
   # Mirrors `test/kiln/block/json_schema_test.exs`'s "conformance" describe —
   # build a populated struct, render it to `:json`, validate against the same
   # `$defs` `GET /api/schema` publishes. That test only ever runs core blocks
-  # plus the in-repo test-suite fixture plugin; a hex-dep plugin's blocks are
-  # in `Blocks.modules()` at boot but never sit in a `mix test` run, so this
-  # is the only place the check reaches them.
+  # plus the in-repo test-suite fixture plugin; a downstream overlay's plugin
+  # blocks are in `Blocks.modules()` at boot but never sit in this repo's
+  # `mix test` run, so this is the only place the check reaches them.
   #
   # `$defs` is built from `plugins` (this task's own argument) rather than
   # `Kiln.Plugins.blocks()`: the latter is `Application.compile_env`, baked

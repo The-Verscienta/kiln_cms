@@ -40,14 +40,26 @@ exactly what the project plan called for.
 ## 2. Decision D18 — the plugin contract
 
 > **D18. Plugins are compile-time OTP code registered by one config entry.**
-> A plugin is a module (`use Kiln.Plugin`) shipped as a hex dep or a
-> `projects/` directory, declared in `config :kiln_cms, :plugins, [...]`.
+> A plugin is a module (`use Kiln.Plugin`) shipped as a `projects/`
+> directory, declared in `config :kiln_cms, :plugins, [...]`.
 > It contributes through **explicit callbacks** — blocks, nav items,
 > supervision children, Oban queues, admin routes — while domains keep the
 > existing config registration (`:ash_domains`/`:content_domains`), because
 > Ash's own mix tasks read those keys directly. Everything stays
 > compile-time (D4's stance): no dynamic module loading; the "marketplace"
 > future is installers, not runtime code.
+
+> **Amended (#1909): `projects/` only, not a Hex or git dependency.** D18 as
+> first written also allowed "a hex dep". That cannot compile: Mix builds a
+> dependency before the project that uses it, with only the dependency's own
+> deps loaded, so `use Kiln.Plugin` (a macro) fails with `module Kiln.Plugin is
+> not loaded and could not be found`. A plugin can't fix that by depending
+> on `kiln_cms`: the core isn't on Hex, and in the overlay layout `kiln_cms`
+> *is* the root project, so a git/`path:` dependency on it would be a
+> cycle. A plugin is shared as a git repository that a site vendors or
+> submodules into `projects/<name>/`. A separately published plugin SDK
+> (`Kiln.Plugin`, `Kiln.Block`, `Kiln.FieldType` in their own package) would
+> lift this for plugins that don't define content types; #1909 tracks it.
 
 ```elixir
 defmodule MyApp.Plugin do
@@ -124,11 +136,11 @@ the block union and the router need the list during compilation.
   runtime `KnownFieldType` validation (replacing the `one_of` constraint),
   editor + fields-admin rendering, doctor contract/collision checks, and
   `mix kiln.gen.plugin --field <name>`.
-- **Marketplace/discovery** — the plan marks it "future"; installers +
-  hexdocs are the v1 distribution story. Scoped in
+- **Marketplace/discovery** — the plan marks it "future"; vendoring a
+  plugin's repo into `projects/` is the v1 distribution story (#1909). Scoped in
   `docs/plugin-extensibility.md` (decision #333): **no runtime hot-loading of
   arbitrary code** (the BEAM has no in-process sandbox); the marketplace is
-  vetted, compile-time, git/hex-distributed plugins carrying cheap catalog
+  vetted, compile-time, git-distributed plugins carrying cheap catalog
   metadata (`version`/`summary`/`homepage` on the contract,
   `Kiln.Plugins.manifests/0`, `mix kiln.plugins.list`), plus the already-safe
   data-driven runtime config (D17 dynamic types, `Kiln.FieldType`, #342 rules).
@@ -148,8 +160,8 @@ the block union and the router need the list during compilation.
    path shape).
 2. **Seam closures + fixture plugin.** ✅ **Done.** `BlockUnion` and
    `TypedBlocks` derive from `KilnCMS.Blocks.union_types/0` (core + plugin,
-   compile-time; the runtime `modules/0` scan also merges plugin blocks so
-   hex-dep plugins aren't missed); nav appends role-gated plugin items;
+   compile-time; the runtime `modules/0` scan also merges plugin blocks,
+   written for hex-dep plugins, which can't compile today, see #1909); nav appends role-gated plugin items;
    `application.ex` appends plugin children and merges plugin Oban queues at
    boot; `KilnCMSWeb.PluginRouter.plugin_admin_routes/0` expands plugin
    panels inside the admin live_session (`alias: false` — plugin modules are

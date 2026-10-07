@@ -322,7 +322,7 @@ defmodule KilnCMSWeb.SystemLive do
 
           <p class="mt-2 text-sm text-base-content/70">
             {gettext(
-              "Plugins are compiled into the image this instance runs, so this list changes only with the next build. Installing one means adding the dependency and a config line to your project, then rebuilding and redeploying."
+              "Plugins are compiled into the image this instance runs, so this list changes only with the next build. Installing one means adding its directory under projects/ and a config line to your project, then rebuilding and redeploying."
             )}
           </p>
 

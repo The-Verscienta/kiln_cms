@@ -55,9 +55,9 @@ hard-blocked on this write surface.
       `version/0` / `summary/0` / `homepage/0` catalog metadata on `Kiln.Plugin`,
       `Kiln.Plugins.manifests/0` as a plain-data catalog view, and
       `mix kiln.plugins.list` for local discovery, alongside the existing
-      `mix kiln.gen.plugin` → dep + config line → `mix kiln.plugins.doctor`
-      install flow. "Marketplace" here means a catalog of vetted, git/hex-
-      distributed, **compile-time** plugins — installers, not a code-execution
+      `mix kiln.gen.plugin` → `projects/` dir + config line → `mix kiln.plugins.doctor`
+      install flow. "Marketplace" here means a catalog of vetted, git-
+      distributed, **compile-time** plugins vendored into `projects/` (#1909) — installers, not a code-execution
       sandbox.
 
 **What #333 now tracks** is the genuinely different project the above ruled out:

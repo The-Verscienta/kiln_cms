@@ -118,7 +118,7 @@ if Code.ensure_loaded?(Igniter) do
         def summary, do: "TODO: say what #{camel} adds to a Kiln site."
 
         # def version, do: "0.1.0"
-        # def homepage, do: "https://hexdocs.pm/#{Macro.underscore(camel)}"
+        # def homepage, do: "https://github.com/<you>/#{Macro.underscore(camel)}"
 
         # Ash domains this plugin ships. Also register them in the host's
         # :ash_domains and :content_domains config (mix kiln.plugins.doctor
