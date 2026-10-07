@@ -32,7 +32,7 @@ end
 ```
 
 Requires Elixir 1.15+. The only runtime dependency is [Req](https://hex.pm/packages/req).
-Before 1.0, a minor version may change behaviour; the [changelog](CHANGELOG.md)
+Before 1.0, a minor version may change behaviour; the [changelog](https://github.com/The-Verscienta/kiln_cms/blob/main/clients/elixir/kiln_client/CHANGELOG.md)
 says when.
 
 ## Configuration
