@@ -59,7 +59,7 @@ defmodule KilnCMS.Docs.ComparePagesTest do
       assert markdown =~ "## Sources\n\nAll checked #{checked}.",
              "#{@path}'s source list is not dated #{checked}"
 
-      for row <- glance_rows(markdown) do
+      for row <- table_rows(markdown, "## At a glance") do
         [_label, theirs | _] = row
 
         assert theirs =~ ~r/\]\[[\w-]+\]|\]\(https?:/,
@@ -68,9 +68,23 @@ defmodule KilnCMS.Docs.ComparePagesTest do
     end
   end
 
-  # The "At a glance" table's body rows, as cell lists.
-  defp glance_rows(markdown) do
-    [_, section] = String.split(markdown, "## At a glance", parts: 2)
+  # The hub's grid puts every product side by side, so every cell is a claim.
+  # A dash is the one exception: "not compared here", which claims nothing.
+  test "every cell of the hub's feature grid links its source" do
+    markdown = File.read!(Path.join(@dir, "how-kiln-compares.md"))
+    rows = table_rows(markdown, "## Feature grid")
+
+    assert length(hd(rows)) == 7, "the grid should have a label column plus six products"
+
+    for [label | cells] <- rows, cell <- cells, cell != "—" do
+      assert cell =~ ~r/\]\[[\w-]+\]|\]\(https?:/,
+             "feature grid, #{label}: this cell has no source link: #{cell}"
+    end
+  end
+
+  # The body rows of the table under `heading`, as cell lists.
+  defp table_rows(markdown, heading) do
+    [_, section] = String.split(markdown, heading, parts: 2)
     [table | _] = String.split(section, "\n## ", parts: 2)
 
     rows =
@@ -79,10 +93,10 @@ defmodule KilnCMS.Docs.ComparePagesTest do
       |> Enum.filter(&String.starts_with?(&1, "|"))
       |> Enum.drop(2)
       |> Enum.map(fn line ->
-        line |> String.trim() |> String.trim("|") |> String.split(" | ")
+        line |> String.trim() |> String.trim("|") |> String.split("|") |> Enum.map(&String.trim/1)
       end)
 
-    assert rows != [], "the At a glance table has no rows"
+    assert rows != [], "the table under #{heading} has no rows"
     rows
   end
 end
