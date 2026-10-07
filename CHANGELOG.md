@@ -54,16 +54,6 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
-### Upgrade notes
-
-- **Search now needs PostgreSQL's `unaccent` extension; the upgrade migration
-  installs it, refolds non-ASCII search rows and rebuilds the title indexes.**
-  ([#1628](https://github.com/The-Verscienta/kiln_cms/issues/1628) · [long form](docs/changelog/unreleased.md#search-now-needs-postgresqls-unaccent-extension))
-
-- **The upgrade writes a link edge for every stored `:reference` custom field
-  value; after restoring a pre-1.1 backup, run `mix kiln.links.backfill`.**
-  ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594) · [long form](docs/changelog/unreleased.md#reference-edges-backfill))
-
 ### Added
 
 - **`mix kiln.import.ghost` imports a Ghost JSON export: posts, pages, tags,
@@ -76,131 +66,149 @@ Every summary line below that was shortened links to its own entry there.
   and sourced.**
   ([#1876](https://github.com/The-Verscienta/kiln_cms/issues/1876) · [long form](docs/changelog/unreleased.md#kiln-vs-pages-and-migration-guides))
 
+## [1.1.0] - 2026-10-06
+
+Long form: [docs/changelog/v1.1.0.md](docs/changelog/v1.1.0.md) —
+the 1.1.0 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
+### Upgrade notes
+
+- **Search now needs PostgreSQL's `unaccent` extension; the upgrade migration
+  installs it, refolds non-ASCII search rows and rebuilds the title indexes.**
+  ([#1628](https://github.com/The-Verscienta/kiln_cms/issues/1628) · [long form](docs/changelog/v1.1.0.md#search-now-needs-postgresqls-unaccent-extension))
+
+- **The upgrade writes a link edge for every stored `:reference` custom field
+  value; after restoring a pre-1.1 backup, run `mix kiln.links.backfill`.**
+  ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594) · [long form](docs/changelog/v1.1.0.md#reference-edges-backfill))
+
+### Added
+
 - **`/editor/organize`: semantic clusters, bulk tag review, an under-organized
   queue, taxonomy health and search gaps — only with semantic search on.**
-  ([#1596](https://github.com/The-Verscienta/kiln_cms/issues/1596) · [long form](docs/changelog/unreleased.md#derived-organization-at-editororganize))
+  ([#1596](https://github.com/The-Verscienta/kiln_cms/issues/1596) · [long form](docs/changelog/v1.1.0.md#derived-organization-at-editororganize))
 
 - **The structure view flags published documents that no menu links to.**
-  ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) · [long form](docs/changelog/unreleased.md#the-structure-view-flags-published-documents-no-menu-links-to))
+  ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) · [long form](docs/changelog/v1.1.0.md#the-structure-view-flags-published-documents-no-menu-links-to))
 
 - **A structure view for arranging a content tree: drag to reorder, indent to
   nest, reachable from the content list for one type at a time.**
-  ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) · [long form](docs/changelog/unreleased.md#a-structure-view-for-arranging-a-content-tree))
+  ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) · [long form](docs/changelog/v1.1.0.md#a-structure-view-for-arranging-a-content-tree))
 
 - **A document's URL can follow the content tree: an `[ancestors]` alias token,
   and moving a section re-derives the paths beneath it without overwriting
   hand-written ones.**
-  ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) · [long form](docs/changelog/unreleased.md#a-documents-url-can-follow-the-content-tree))
+  ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) · [long form](docs/changelog/v1.1.0.md#a-documents-url-can-follow-the-content-tree))
 
 - **Documents can sit under one another: set a parent from the content editor,
   with cycles, cross-site parents and anything nesting past five levels
   refused.**
-  ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) · [long form](docs/changelog/unreleased.md#documents-can-sit-under-one-another-the-content-tree))
+  ([#1597](https://github.com/The-Verscienta/kiln_cms/issues/1597) · [long form](docs/changelog/v1.1.0.md#documents-can-sit-under-one-another-the-content-tree))
 
-- **System → Plugins says what each plugin adds — its blocks, field types,
-  pages and content types by name — and flags a plugin with no summary.**
-  ([#1888](https://github.com/The-Verscienta/kiln_cms/pull/1888))
+- **System → Plugins says what each plugin adds — its blocks, field types, pages
+  and content types by name — and flags a plugin with no summary.**
+  ([#1888](https://github.com/The-Verscienta/kiln_cms/issues/1888))
 
 - **The content list filters by author, category, tag, language, update date
   and review health, sorts by update, publish date or title, and saves a
   filter as a named view.**
-  ([#1854](https://github.com/The-Verscienta/kiln_cms/issues/1854) · [long form](docs/changelog/unreleased.md#the-content-list-filters-and-saves-views))
+  ([#1854](https://github.com/The-Verscienta/kiln_cms/issues/1854) · [long form](docs/changelog/v1.1.0.md#the-content-list-filters-and-saves-views))
 
 - **On Fly.io, Railway and DigitalOcean, rate limits can be per visitor:
   `CLIENT_IP_HEADER` reads the platform proxy's own client-address header.**
-  ([#1548](https://github.com/The-Verscienta/kiln_cms/issues/1548) · [long form](docs/changelog/unreleased.md#on-fly-io-railway-and-digitalocean-rate-limits-can-be-per-visitor))
+  ([#1548](https://github.com/The-Verscienta/kiln_cms/issues/1548) · [long form](docs/changelog/v1.1.0.md#on-fly-io-railway-and-digitalocean-rate-limits-can-be-per-visitor))
 
 - **`:reference` custom fields are also `ContentLink` edges: *Linked from* in
   the editor, broken-reference warnings, and `incoming_links` on the API.**
-  ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594) · [long form](docs/changelog/unreleased.md#reference-fields-are-also-link-edges))
+  ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594) · [long form](docs/changelog/v1.1.0.md#reference-fields-are-also-link-edges))
 
 - **Field-level localization: a field can be shared across a document's
   locale variants, or inherited along the site's fallback chain when empty.**
-  ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) · [#1860](https://github.com/The-Verscienta/kiln_cms/issues/1860) · [long form](docs/changelog/unreleased.md#field-level-localization))
+  ([#1327](https://github.com/The-Verscienta/kiln_cms/issues/1327) · [#1860](https://github.com/The-Verscienta/kiln_cms/issues/1860) · [long form](docs/changelog/v1.1.0.md#field-level-localization))
 
 - **Plugin blocks get editor seams: their own label, icon and description,
   field hints, a row editor for `item_keys:` list fields, and live rendering.**
-  ([#1865](https://github.com/The-Verscienta/kiln_cms/pull/1865) · [long form](docs/changelog/unreleased.md#plugin-blocks-get-editor-seams))
+  ([#1865](https://github.com/The-Verscienta/kiln_cms/pull/1865) · [long form](docs/changelog/v1.1.0.md#plugin-blocks-get-editor-seams))
 
 - **Each published GitHub release now becomes a page on kilncms.dev at
   `/releases/<version>`, listed at `/releases`.**
-  ([#1870](https://github.com/The-Verscienta/kiln_cms/issues/1870) · [long form](docs/changelog/unreleased.md#each-published-github-release-now-becomes-a-page-on-kilncmsdev-at))
+  ([#1870](https://github.com/The-Verscienta/kiln_cms/issues/1870) · [long form](docs/changelog/v1.1.0.md#each-published-github-release-now-becomes-a-page-on-kilncmsdev-at))
 
 - **Each site can publish a `/.well-known/security.txt` (RFC 9116), set by an
   admin at Configure → Organization → Security contact.**
-  ([#1873](https://github.com/The-Verscienta/kiln_cms/issues/1873) · [long form](docs/changelog/unreleased.md#each-site-can-publish-a-well-knownsecuritytxt-rfc-9116-set-by-an-admin-at))
+  ([#1873](https://github.com/The-Verscienta/kiln_cms/issues/1873) · [long form](docs/changelog/v1.1.0.md#each-site-can-publish-a-well-knownsecuritytxt-rfc-9116-set-by-an-admin-at))
 
 ### Changed
 
 - **The content list opens on a count per stage, rows show author, type and last
   update with one next step up front, and bulk actions appear on selection.**
-  ([#1904](https://github.com/The-Verscienta/kiln_cms/pull/1904))
+  ([#1904](https://github.com/The-Verscienta/kiln_cms/issues/1904))
 
 - **Searchable custom fields are indexed as text: HTML stripped, entities
   decoded, and a project extractor can decode JSON, pick keys and set order.**
-  ([#1585](https://github.com/The-Verscienta/kiln_cms/issues/1585) · [long form](docs/changelog/unreleased.md#searchable-custom-fields-are-indexed-as-text))
+  ([#1585](https://github.com/The-Verscienta/kiln_cms/issues/1585) · [long form](docs/changelog/v1.1.0.md#searchable-custom-fields-are-indexed-as-text))
 
 - **Re-indexing search text and storing an embedding no longer move a
   document's `updated_at`.**
-  ([#1585](https://github.com/The-Verscienta/kiln_cms/issues/1585) · [long form](docs/changelog/unreleased.md#re-indexing-no-longer-moves-updated-at))
+  ([#1585](https://github.com/The-Verscienta/kiln_cms/issues/1585) · [long form](docs/changelog/v1.1.0.md#re-indexing-no-longer-moves-updated-at))
 
 - **The update check asks kilncms.dev's release feed first and lists the
   release's highlights; GitHub is the fallback, and forks skip the feed.**
-  ([#1877](https://github.com/The-Verscienta/kiln_cms/issues/1877) · [long form](docs/changelog/unreleased.md#the-update-check-asks-kilncms-devs-release-feed-first))
+  ([#1877](https://github.com/The-Verscienta/kiln_cms/issues/1877) · [long form](docs/changelog/v1.1.0.md#the-update-check-asks-kilncms-devs-release-feed-first))
 
 - **The sync API's first page stays under 15 ms p95 from 10
   concurrent clients, where it took 31–57 ms.** Same response, byte for
   byte.
-  ([#1713](https://github.com/The-Verscienta/kiln_cms/issues/1713) · [long form](docs/changelog/unreleased.md#the-sync-apis-first-page-stays-under-15-ms-p95-from-10-concurrent))
+  ([#1713](https://github.com/The-Verscienta/kiln_cms/issues/1713) · [long form](docs/changelog/v1.1.0.md#the-sync-apis-first-page-stays-under-15-ms-p95-from-10-concurrent))
 
 - **Search ranks faster under load: the query is parsed once per statement,
   not once per matching row, and `/api/search` skips an empty entries section.**
-  ([#1725](https://github.com/The-Verscienta/kiln_cms/issues/1725) · [long form](docs/changelog/unreleased.md#search-ranks-faster-under-load))
+  ([#1725](https://github.com/The-Verscienta/kiln_cms/issues/1725) · [long form](docs/changelog/v1.1.0.md#search-ranks-faster-under-load))
 
 - **Every release candidate is canaried on kilncms.dev before the final, and
   the headless API guides carry examples that run against it anonymously.**
-  ([#1869](https://github.com/The-Verscienta/kiln_cms/issues/1869) · [#1872](https://github.com/The-Verscienta/kiln_cms/issues/1872) · [long form](docs/changelog/unreleased.md#release-candidates-are-canaried-on-kilncms-dev))
+  ([#1869](https://github.com/The-Verscienta/kiln_cms/issues/1869) · [#1872](https://github.com/The-Verscienta/kiln_cms/issues/1872) · [long form](docs/changelog/v1.1.0.md#release-candidates-are-canaried-on-kilncms-dev))
 
 ### Fixed
 
 - **The editor's tag suggestions no longer fail on an org with more unindexed
   tags than the editor's embedding window, or use up that window on refusals.**
-  ([#1596](https://github.com/The-Verscienta/kiln_cms/issues/1596) · [long form](docs/changelog/unreleased.md#tag-suggestions-on-a-large-unindexed-taxonomy))
+  ([#1596](https://github.com/The-Verscienta/kiln_cms/issues/1596) · [long form](docs/changelog/v1.1.0.md#tag-suggestions-on-a-large-unindexed-taxonomy))
 
 - **Search folds diacritics: `Zusanli` finds `Zúsānlǐ`, `creme brulee` finds
   `Crème brûlée`, in every full-text leg.**
-  ([#1628](https://github.com/The-Verscienta/kiln_cms/issues/1628) · [long form](docs/changelog/unreleased.md#search-folds-diacritics))
+  ([#1628](https://github.com/The-Verscienta/kiln_cms/issues/1628) · [long form](docs/changelog/v1.1.0.md#search-folds-diacritics))
 
 - **A custom field flagged `searchable` is indexed with the record's text, so
   search finds a record by a Chinese name or a Latin binomial.**
-  ([#1585](https://github.com/The-Verscienta/kiln_cms/issues/1585) · [long form](docs/changelog/unreleased.md#a-custom-field-flagged-searchable-is-indexed))
+  ([#1585](https://github.com/The-Verscienta/kiln_cms/issues/1585) · [long form](docs/changelog/v1.1.0.md#a-custom-field-flagged-searchable-is-indexed))
 
 - **CI no longer fails at random with "type `_oban_job_state` can not be
   handled": the suite loads every database type before its first test.**
-  ([#1796](https://github.com/The-Verscienta/kiln_cms/issues/1796) · [long form](docs/changelog/unreleased.md#ci-no-longer-fails-at-random-with-type-oban-job-state-can-not-be))
+  ([#1796](https://github.com/The-Verscienta/kiln_cms/issues/1796) · [long form](docs/changelog/v1.1.0.md#ci-no-longer-fails-at-random-with-type-oban-job-state-can-not-be))
 
 - **Concluding an experiment now refuses a winner that is not one of its own
   variants.**
-  ([#1851](https://github.com/The-Verscienta/kiln_cms/issues/1851) · [long form](docs/changelog/unreleased.md#concluding-an-experiment-now-refuses-a-winner-that-is-not-one-of-its-own))
+  ([#1851](https://github.com/The-Verscienta/kiln_cms/issues/1851) · [long form](docs/changelog/v1.1.0.md#concluding-an-experiment-now-refuses-a-winner-that-is-not-one-of-its-own))
 
 - **An overlay's composed suite no longer fails the session-salt and
   system-actor scope tests on a correct configuration.**
-  ([#1866](https://github.com/The-Verscienta/kiln_cms/pull/1866) · [long form](docs/changelog/unreleased.md#an-overlays-composed-suite-no-longer-fails-the-session-salt-and-system-actor))
+  ([#1866](https://github.com/The-Verscienta/kiln_cms/pull/1866) · [long form](docs/changelog/v1.1.0.md#an-overlays-composed-suite-no-longer-fails-the-session-salt-and-system-actor))
 
 - **A plugin's console panels no longer need a copy of the core's surface test
   in an overlay's composed suite.**
-  ([#1864](https://github.com/The-Verscienta/kiln_cms/issues/1864) · [long form](docs/changelog/unreleased.md#a-plugins-console-panels-no-longer-need-a-copy-of-the-cores-surface-test))
+  ([#1864](https://github.com/The-Verscienta/kiln_cms/issues/1864) · [long form](docs/changelog/v1.1.0.md#a-plugins-console-panels-no-longer-need-a-copy-of-the-cores-surface-test))
 
 ### Security
 
 - **`ash` 3.34.4 closes an atom-table exhaustion advisory (EEF-CVE-2026-94201,
   HIGH); no untrusted filter path onto the affected attribute was found in
   Kiln.**
-  ([long form](docs/changelog/unreleased.md#ash-3344-closes-an-atom-table-exhaustion-advisory))
+  ([long form](docs/changelog/v1.1.0.md#ash-3344-closes-an-atom-table-exhaustion-advisory))
 
 - **A content link is readable only by someone who may read both of its ends;
   `incoming_links` no longer names the drafts that link to a published page.**
-  ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594) · [long form](docs/changelog/unreleased.md#content-links-readable-only-when-both-ends-are))
+  ([#1594](https://github.com/The-Verscienta/kiln_cms/issues/1594) · [long form](docs/changelog/v1.1.0.md#content-links-readable-only-when-both-ends-are))
 
 ## [1.0.0] - 2026-10-02
 
