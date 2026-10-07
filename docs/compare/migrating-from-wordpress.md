@@ -17,12 +17,22 @@ walkthrough.
 
 - **A running Kiln site**, with an admin account. A fresh install's `/setup`
   wizard creates one ([getting started](../getting-started.md)).
-- **Somewhere to run `mix`** with the same configuration as that site: the same
-  `DATABASE_URL`, secrets and media storage settings. Imported images go to
-  whatever storage that configuration points at. An OTP release has no Mix, so
-  on a container deploy, run the import from a source checkout of the same
-  Kiln version with the production environment loaded
-  ([environment variables](../environment-variables.md)).
+- **A way to run the importer.** The commands below use `mix`, from a
+  checkout with the same configuration as the site (the same `DATABASE_URL`,
+  secrets and media storage settings). On a Docker or Coolify deploy there is
+  no Mix, so run the same import inside the running container instead. Copy the
+  export in, then call the release function through `rpc`:
+
+  ```bash
+  docker cp wordpress.xml <container>:/tmp/wordpress.xml
+  docker exec -it <container> /app/bin/kiln_cms rpc 'KilnCMS.Release.import_wordpress("/tmp/wordpress.xml", dry_run: true)'
+  ```
+
+  Each `--flag` below becomes a keyword option: `--dry-run` is `dry_run: true`,
+  `--limit 20` is `limit: 20`, `--author-map jo=jo@example.com` is
+  `author_map: %{"jo" => "jo@example.com"}`. Use `rpc`, not `eval`: the
+  import needs the running application. The full table is in
+  [content portability](../content-portability.md#from-a-release).
 - **The WordPress site still online.** Images are downloaded from their
   original URLs during the import, so keep the old site up until you have
   checked the result.

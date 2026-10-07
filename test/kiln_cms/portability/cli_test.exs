@@ -7,7 +7,7 @@ defmodule KilnCMS.Portability.CLITest do
   against — content attributed to the printed actor, a dry run believed to be
   one — so the tests pin the printed text, not only the returned value.
   """
-  # async: false — `Mix.shell/1` is a VM-global setting.
+  # async: false — `maybe_drain_media/2` drains the whole media queue.
   use KilnCMS.DataCase, async: false
 
   alias KilnCMS.OrgFixtures
@@ -15,13 +15,6 @@ defmodule KilnCMS.Portability.CLITest do
   alias KilnCMS.Portability.Import
   alias KilnCMS.Portability.WXR
   alias KilnCMS.WXRFixture
-
-  setup do
-    previous = Mix.shell()
-    Mix.shell(Mix.Shell.Process)
-    on_exit(fn -> Mix.shell(previous) end)
-    :ok
-  end
 
   defp user(role, email \\ nil) do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
@@ -32,6 +25,14 @@ defmodule KilnCMS.Portability.CLITest do
     })
   end
 
+  # The output function every CLI call takes; a mix task passes
+  # `&Mix.shell().info(&1)`, a release `&IO.puts/1`. Bound to the test process
+  # here, because a drained job runs the function in this process anyway.
+  defp shell do
+    test = self()
+    fn line -> send(test, {:shell, line}) end
+  end
+
   # Everything the shell was told, in order, as one string.
   defp output do
     collect([]) |> Enum.reverse() |> Enum.join("\n")
@@ -39,18 +40,20 @@ defmodule KilnCMS.Portability.CLITest do
 
   defp collect(acc) do
     receive do
-      {:mix_shell, :info, [line]} -> collect([line | acc])
+      {:shell, line} -> collect([line | acc])
     after
       0 -> acc
     end
   end
 
-  describe "scope!/1" do
+  describe "scope/2" do
     test "--actor and --org resolve to that user and that organization's id" do
       editor = user(:editor)
       org = OrgFixtures.org("cli-scope")
 
-      assert [actor: actor, tenant: tenant] = CLI.scope!(actor: editor.email, org: org.slug)
+      assert {:ok, [actor: actor, tenant: tenant]} =
+               CLI.scope([actor: editor.email, org: org.slug], shell())
+
       assert actor.id == editor.id
       assert tenant == org.id
       assert output() =~ "Acting as #{editor.email} in org #{org.id}"
@@ -60,7 +63,7 @@ defmodule KilnCMS.Portability.CLITest do
       admin = user(:admin)
       _editor = user(:editor)
 
-      assert [actor: actor, tenant: tenant] = CLI.scope!([])
+      assert {:ok, [actor: actor, tenant: tenant]} = CLI.scope([], shell())
       assert actor.role == :admin
       assert tenant == KilnCMS.Accounts.default_org_id()
       # Only one admin exists, so "an admin" is this one — and the line printed
@@ -72,15 +75,16 @@ defmodule KilnCMS.Portability.CLITest do
     test "no admin and no --actor refuses, rather than running as nobody" do
       _editor = user(:editor)
 
-      assert_raise Mix.Error, ~r/No admin user to run as/, fn -> CLI.scope!([]) end
+      assert {:error, message} = CLI.scope([], shell())
+      assert message =~ "No admin user to run as, and no --actor given."
+      refute output() =~ "Acting as"
     end
 
     test "an --actor that matches no user refuses, rather than falling back to an admin" do
       _admin = user(:admin)
 
-      assert_raise Mix.Error, "No user with email nobody@example.com", fn ->
-        CLI.scope!(actor: "nobody@example.com")
-      end
+      assert CLI.scope([actor: "nobody@example.com"], shell()) ==
+               {:error, "No user with email nobody@example.com"}
 
       # Nothing printed: an "Acting as" line before the refusal would name an
       # actor the run never used.
@@ -90,30 +94,35 @@ defmodule KilnCMS.Portability.CLITest do
     test "an --org that matches no organization refuses, rather than using the default" do
       admin = user(:admin)
 
-      assert_raise Mix.Error, "No organization with slug nowhere", fn ->
-        CLI.scope!(actor: admin.email, org: "nowhere")
-      end
+      assert CLI.scope([actor: admin.email, org: "nowhere"], shell()) ==
+               {:error, "No organization with slug nowhere"}
+
+      refute output() =~ "Acting as"
     end
   end
 
-  describe "author_map!/1" do
+  describe "author_map/1" do
     test "trims each side, and keeps an = inside the email part" do
-      assert CLI.author_map!([" jo = jo@x.com ", "odd=a=b@x.com"]) ==
-               %{"jo" => "jo@x.com", "odd" => "a=b@x.com"}
+      assert CLI.author_map([" jo = jo@x.com ", "odd=a=b@x.com"]) ==
+               {:ok, %{"jo" => "jo@x.com", "odd" => "a=b@x.com"}}
     end
 
     test "no flags is an empty map" do
-      assert CLI.author_map!([]) == %{}
+      assert CLI.author_map([]) == {:ok, %{}}
     end
 
     test "an empty email side is refused, naming the value" do
-      assert_raise Mix.Error, ~s(--author-map expects login=email, got: "jo="), fn ->
-        CLI.author_map!(["jo="])
-      end
+      assert CLI.author_map(["jo="]) ==
+               {:error, ~s(--author-map expects login=email, got: "jo=")}
+    end
+
+    test "a release caller's map is checked the same way" do
+      assert CLI.author_map(%{" jo " => "jo@x.com"}) == {:ok, %{"jo" => "jo@x.com"}}
+      assert {:error, "--author-map expects login=email" <> _} = CLI.author_map(%{"jo" => ""})
     end
   end
 
-  describe "print_report/1 — from a real import" do
+  describe "print_report/2 — from a real import" do
     setup do
       actor = user(:admin)
       {:ok, parsed} = WXR.parse(WXRFixture.wxr())
@@ -123,7 +132,7 @@ defmodule KilnCMS.Portability.CLITest do
     test "a dry run says so first and last, in the future tense", %{actor: actor, parsed: parsed} do
       {:ok, report} = Import.run(parsed, actor: actor, dry_run: true)
 
-      assert :ok = CLI.print_report(report)
+      assert :ok = CLI.print_report(report, shell())
       out = output()
 
       assert out =~ ~r/\A── DRY RUN — nothing was written/
@@ -139,7 +148,7 @@ defmodule KilnCMS.Portability.CLITest do
     } do
       {:ok, report} = Import.run(parsed, actor: actor, skip_media: true)
 
-      CLI.print_report(report)
+      CLI.print_report(report, shell())
       out = output()
 
       refute out =~ "DRY RUN"
@@ -153,7 +162,7 @@ defmodule KilnCMS.Portability.CLITest do
       {:ok, _first} = Import.run(parsed, actor: actor, skip_media: true)
       {:ok, second} = Import.run(parsed, actor: actor, skip_media: true)
 
-      CLI.print_report(second)
+      CLI.print_report(second, shell())
 
       assert output() =~ "Records:   0 created, 3 skipped (already present), 0 failed"
     end
@@ -164,7 +173,7 @@ defmodule KilnCMS.Portability.CLITest do
     } do
       {:ok, report} = Import.run(parsed, actor: actor, dry_run: true)
 
-      CLI.print_report(report)
+      CLI.print_report(report, shell())
       out = output()
 
       assert out =~ "Authors (0 mapped, 1 unmapped):"
@@ -179,7 +188,7 @@ defmodule KilnCMS.Portability.CLITest do
       {:ok, report} =
         Import.run(parsed, actor: actor, dry_run: true, author_map: %{"jo" => actor.email})
 
-      CLI.print_report(report)
+      CLI.print_report(report, shell())
       out = output()
 
       assert out =~ "Authors (1 mapped, 0 unmapped):"
@@ -188,7 +197,7 @@ defmodule KilnCMS.Portability.CLITest do
     end
   end
 
-  describe "print_report/1 — the sections a real fixture does not reach" do
+  describe "print_report/2 — the sections a real fixture does not reach" do
     defp report(overrides) do
       Map.merge(
         %{
@@ -208,7 +217,7 @@ defmodule KilnCMS.Portability.CLITest do
     test "failed records are listed with their reason, capped at 20 with the remainder counted" do
       failed = for n <- 1..23, do: %{kind: :post, title: "Post #{n}", reason: "slug taken"}
 
-      CLI.print_report(report(%{failed: failed}))
+      CLI.print_report(report(%{failed: failed}), shell())
       out = output()
 
       # The summary count is the complete number, never the truncated one.
@@ -223,7 +232,7 @@ defmodule KilnCMS.Portability.CLITest do
     test "exactly 20 failures are all listed, with no remainder line" do
       failed = for n <- 1..20, do: %{kind: :page, title: "Page #{n}", reason: "x"}
 
-      CLI.print_report(report(%{failed: failed}))
+      CLI.print_report(report(%{failed: failed}), shell())
       out = output()
 
       assert out =~ ~s("Page 20")
@@ -240,7 +249,7 @@ defmodule KilnCMS.Portability.CLITest do
         %{kind: :page, title: "Two problems", issues: ["dated at the import", "no byline"]}
       ]
 
-      CLI.print_report(report(%{created: incomplete, incomplete: incomplete}))
+      CLI.print_report(report(%{created: incomplete, incomplete: incomplete}), shell())
       out = output()
 
       # The created count still counts them — they exist — but the line says
@@ -253,7 +262,7 @@ defmodule KilnCMS.Portability.CLITest do
     end
 
     test "an import with nothing incomplete says nothing about it" do
-      CLI.print_report(report(%{created: [%{kind: :post, title: "Fine", issues: []}]}))
+      CLI.print_report(report(%{created: [%{kind: :post, title: "Fine", issues: []}]}), shell())
       out = output()
 
       assert out =~ "Records:   1 created, 0 skipped"
@@ -263,7 +272,7 @@ defmodule KilnCMS.Portability.CLITest do
     test "media that could not be fetched is listed by URL" do
       failures = [%{url: "https://old.example.com/a.png", reason: {:http_status, 404}}]
 
-      CLI.print_report(report(%{media: %{imported: 2, failed: failures}}))
+      CLI.print_report(report(%{media: %{imported: 2, failed: failures}}), shell())
       out = output()
 
       assert out =~ "Media:     2 imported, 1 failed"
@@ -274,7 +283,7 @@ defmodule KilnCMS.Portability.CLITest do
     test "an envelope report — no authors, no redirect count — still prints" do
       report = report(%{redirects: %{}}) |> Map.delete(:authors)
 
-      assert :ok = CLI.print_report(report)
+      assert :ok = CLI.print_report(report, shell())
       out = output()
 
       assert out =~ "Redirects: 0 created"
@@ -283,15 +292,15 @@ defmodule KilnCMS.Portability.CLITest do
     end
 
     test "an author list with nobody in it prints no Authors section" do
-      CLI.print_report(report(%{authors: %{found: [], mapped: [], unmapped: []}}))
+      CLI.print_report(report(%{authors: %{found: [], mapped: [], unmapped: []}}), shell())
 
       refute output() =~ "Authors"
     end
   end
 
-  describe "maybe_drain_media/1" do
+  describe "maybe_drain_media/2" do
     test "true runs the media queue before returning, and says what ran" do
-      assert :ok = CLI.maybe_drain_media(true)
+      assert :ok = CLI.maybe_drain_media(true, shell())
       out = output()
 
       assert out =~ "Draining the media queue"
@@ -300,7 +309,7 @@ defmodule KilnCMS.Portability.CLITest do
 
     test "anything else leaves the queue alone and prints nothing" do
       for value <- [nil, false] do
-        assert :ok = CLI.maybe_drain_media(value)
+        assert :ok = CLI.maybe_drain_media(value, shell())
       end
 
       assert output() == ""

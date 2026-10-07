@@ -203,6 +203,88 @@ defmodule KilnCMS.Release do
     result
   end
 
+  @doc """
+  `mix kiln.import.wordpress` for a release (#487): import a WordPress WXR
+  export into the **running** node.
+
+      bin/kiln_cms rpc 'KilnCMS.Release.import_wordpress("/data/wordpress.xml", dry_run: true)'
+      bin/kiln_cms rpc 'KilnCMS.Release.import_wordpress("/data/wordpress.xml", author_map: %{"jo" => "jo@example.com"})'
+
+  Run it through `rpc`, not `eval`. The import enqueues media jobs, fetches
+  images through SafeFetch and busts the content caches, so it needs the
+  fully started application; an `eval` node has none of that, and this
+  returns an error there instead of half-importing. The path is read on the
+  node, so copy the export into the container first.
+
+  Options are the task's flags as a keyword list (`dry_run: true`,
+  `actor: "email"`, `org: "slug"`, `limit: 20`, `skip_media: true`,
+  `redirects: false`, `on_conflict: :error`, `author_map:`, `drain_media:
+  true`, `locale:`); an unknown one is refused, so a misspelt `dry_run:`
+  cannot run for real. The report prints in the `rpc` terminal. Returns
+  `{:ok, report}` or `{:error, message}`; see
+  `KilnCMS.Portability.Commands`.
+  """
+  @spec import_wordpress(Path.t(), keyword()) :: {:ok, map()} | {:error, String.t()}
+  def import_wordpress(path, opts \\ []) do
+    run_import(&KilnCMS.Portability.Commands.import_wordpress/3, path, opts)
+  end
+
+  @doc """
+  `mix kiln.import.ghost` for a release (#1876): import a Ghost JSON export
+  into the **running** node.
+
+      bin/kiln_cms rpc 'KilnCMS.Release.import_ghost("/data/ghost.json", site_url: "https://blog.example.com", dry_run: true)'
+
+  `site_url:` is the task's `--site-url`; the other options, and the reason it
+  must run through `rpc`, are `import_wordpress/2`'s.
+  """
+  @spec import_ghost(Path.t(), keyword()) :: {:ok, map()} | {:error, String.t()}
+  def import_ghost(path, opts \\ []) do
+    run_import(&KilnCMS.Portability.Commands.import_ghost/3, path, opts)
+  end
+
+  @doc """
+  `mix kiln.import.content` for a release (#487): load a portable JSON
+  envelope written by `mix kiln.export.content`, or a CSV file with `type:`,
+  into the **running** node.
+
+      bin/kiln_cms rpc 'KilnCMS.Release.import_content("/data/content.json", dry_run: true)'
+      bin/kiln_cms rpc 'KilnCMS.Release.import_content("/data/listings.csv", type: "listing")'
+
+  Options, and the reason it must run through `rpc`, are
+  `import_wordpress/2`'s, less `author_map:` and plus `type:`.
+  """
+  @spec import_content(Path.t(), keyword()) :: {:ok, map()} | {:error, String.t()}
+  def import_content(path, opts \\ []) do
+    run_import(&KilnCMS.Portability.Commands.import_content/3, path, opts)
+  end
+
+  # No `load_app`/`with_repo` here: unlike the tasks above, an import cannot
+  # run on the bare repo `eval` gives, so it refuses rather than starting a
+  # second copy of the application next to the serving one. `serving?` is an
+  # argument only so the test can take the `eval` branch.
+  @doc false
+  def run_import(command, path, opts, serving? \\ serving?()) do
+    result =
+      if serving? do
+        command.(path, opts, &IO.puts/1)
+      else
+        {:error,
+         """
+         The import needs the running application (its job queue, media fetching
+         and caches), and this node has not started it. Run it against the live
+         node with `bin/kiln_cms rpc '...'`, not `bin/kiln_cms eval`.
+         """}
+      end
+
+    with {:error, message} <- result, do: IO.puts(message)
+    result
+  end
+
+  defp serving? do
+    Enum.any?(Application.started_applications(), &match?({@app, _, _}, &1))
+  end
+
   defp repos do
     Application.fetch_env!(@app, :ecto_repos)
   end

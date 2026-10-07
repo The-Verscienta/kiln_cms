@@ -678,15 +678,15 @@ defmodule KilnCMS.Portability.ImportTest do
     end
   end
 
-  describe "CLI.author_map!/1" do
+  describe "CLI.author_map/1" do
     test "parses repeated login=email pairs" do
-      assert KilnCMS.Portability.CLI.author_map!(["jo=jo@x.com", "sam=sam@x.com"]) ==
-               %{"jo" => "jo@x.com", "sam" => "sam@x.com"}
+      assert KilnCMS.Portability.CLI.author_map(["jo=jo@x.com", "sam=sam@x.com"]) ==
+               {:ok, %{"jo" => "jo@x.com", "sam" => "sam@x.com"}}
     end
 
     test "refuses a pair with no = rather than dropping it silently" do
-      assert_raise Mix.Error, fn -> KilnCMS.Portability.CLI.author_map!(["jo"]) end
-      assert_raise Mix.Error, fn -> KilnCMS.Portability.CLI.author_map!(["=jo@x.com"]) end
+      assert {:error, _} = KilnCMS.Portability.CLI.author_map(["jo"])
+      assert {:error, _} = KilnCMS.Portability.CLI.author_map(["=jo@x.com"])
     end
   end
 

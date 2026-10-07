@@ -17,11 +17,22 @@ so the dry run, the re-run behaviour and the report work the same way. See
 
 - **A running Kiln site**, with an admin account
   ([getting started](../getting-started.md)).
-- **Somewhere to run `mix`** with the same configuration as that site: the same
-  `DATABASE_URL`, secrets and media storage settings. An OTP release has no
-  Mix, so on a container deploy, run the import from a source checkout of the
-  same Kiln version with the production environment loaded
-  ([environment variables](../environment-variables.md)).
+- **A way to run the importer.** The commands below use `mix`, from a
+  checkout with the same configuration as the site (the same `DATABASE_URL`,
+  secrets and media storage settings). On a Docker or Coolify deploy there is
+  no Mix, so run the same import inside the running container instead. Copy the
+  export in, then call the release function through `rpc`:
+
+  ```bash
+  docker cp ghost-export.json <container>:/tmp/ghost-export.json
+  docker exec -it <container> /app/bin/kiln_cms rpc 'KilnCMS.Release.import_ghost("/tmp/ghost-export.json", site_url: "https://blog.example.com", dry_run: true)'
+  ```
+
+  Each `--flag` below becomes a keyword option: `--dry-run` is `dry_run: true`,
+  `--limit 20` is `limit: 20`, `--author-map jo=jo@example.com` is
+  `author_map: %{"jo" => "jo@example.com"}`. Use `rpc`, not `eval`: the
+  import needs the running application. The full table is in
+  [content portability](../content-portability.md#from-a-release).
 - **The Ghost site still online.** The export has image *addresses*, not image
   files, so the importer downloads each one from your Ghost site. Keep it up
   until you have checked the result.

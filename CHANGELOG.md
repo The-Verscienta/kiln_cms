@@ -61,6 +61,11 @@ Every summary line below that was shortened links to its own entry there.
   redirect from every old URL.**
   ([#1876](https://github.com/The-Verscienta/kiln_cms/issues/1876) · [long form](docs/changelog/unreleased.md#mix-kiln-import-ghost))
 
+- **The importers run from a release: `bin/kiln_cms rpc
+  'KilnCMS.Release.import_wordpress(path, dry_run: true)'`, and likewise
+  `import_ghost/2` and `import_content/2`.**
+  ([long form](docs/changelog/unreleased.md#importers-from-a-release))
+
 - **Public "Kiln vs" pages for WordPress, Ghost, Strapi, Payload and Directus,
   plus WordPress and Ghost migration guides, every competitor claim dated
   and sourced.**

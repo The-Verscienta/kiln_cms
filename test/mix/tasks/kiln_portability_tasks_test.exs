@@ -1,7 +1,10 @@
 defmodule Mix.Tasks.Kiln.PortabilityTasksTest do
   @moduledoc """
-  `mix kiln.export.content`, `mix kiln.import.content` and
-  `mix kiln.import.wordpress` (#487) — the argument surface and the refusals.
+  `mix kiln.export.content`, `mix kiln.import.content`,
+  `mix kiln.import.wordpress` (#487) and `mix kiln.import.ghost` (#1876) — the
+  argument surface and the refusals. The release runs the same commands
+  (`KilnCMS.ReleaseImportTest`); these pin that the tasks still print through
+  `Mix.shell/0` and still refuse with `Mix.Error`.
 
   What lands in the database is `Portability.Import`/`Export`'s business and
   tested there. The subject here is what only the tasks decide: which switches
@@ -15,10 +18,12 @@ defmodule Mix.Tasks.Kiln.PortabilityTasksTest do
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.GhostFixture
   alias KilnCMS.OrgFixtures
   alias KilnCMS.WXRFixture
   alias Mix.Tasks.Kiln.Export.Content, as: ExportContent
   alias Mix.Tasks.Kiln.Import.Content, as: ImportContent
+  alias Mix.Tasks.Kiln.Import.Ghost, as: ImportGhost
   alias Mix.Tasks.Kiln.Import.Wordpress, as: ImportWordpress
 
   setup do
@@ -347,6 +352,40 @@ defmodule Mix.Tasks.Kiln.PortabilityTasksTest do
       error = assert_raise Mix.Error, fn -> ImportWordpress.run([path]) end
       assert error.message =~ "the parser's ceiling is 64 MB"
       assert error.message =~ "re-running is safe"
+    end
+  end
+
+  describe "kiln.import.ghost" do
+    test "a dry run reads the file, prints the parser's notes, and writes nothing", ctx do
+      path = write!(ctx, "ghost.json", GhostFixture.json())
+
+      ImportGhost.run([path, "--site-url", "https://blog.example.com", "--dry-run"])
+      out = output()
+
+      assert out =~ ~r/Read \d+ importable records, \d+ feature images, \d+ authors/
+      assert out =~ "Not as Ghost had it"
+      assert out =~ "Acting as #{ctx.actor.email}"
+      assert out =~ "DRY RUN — nothing was written"
+      assert CMS.list_posts!(actor: ctx.actor) == []
+    end
+
+    test "an export that needs --site-url is refused without it", ctx do
+      path = write!(ctx, "ghost.json", GhostFixture.json())
+
+      error = assert_raise Mix.Error, fn -> ImportGhost.run([path]) end
+      assert error.message =~ "mix kiln.import.ghost #{path} --site-url"
+    end
+
+    test "JSON that is not a Ghost export is refused as such", ctx do
+      path = write!(ctx, "other.json", ~s({"posts": []}))
+
+      assert_raise Mix.Error, ~r/is JSON, but not a Ghost export/, fn ->
+        ImportGhost.run([path, "--site-url", "https://blog.example.com"])
+      end
+    end
+
+    test "no path prints the usage" do
+      assert_raise Mix.Error, ~r/Usage: mix kiln.import.ghost/, fn -> ImportGhost.run([]) end
     end
   end
 end
