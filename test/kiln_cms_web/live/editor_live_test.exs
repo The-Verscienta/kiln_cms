@@ -549,7 +549,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
   # Audit U-H2: ApplyCustomFields errors land on :custom_fields and previously
   # rendered nowhere — the editor got a generic flash with nothing highlighted.
   describe "custom field validation errors" do
-    test "an invalid custom-field value renders an inline error and opens the section",
+    test "an invalid custom-field value renders an inline error and flags the panel",
          %{conn: conn} do
       KilnCMS.CMS.create_field_definition!(
         %{content_type: :page, name: "level", label: "Level", field_type: :integer},
@@ -573,11 +573,12 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert invalid =~ "Level (level) must be a whole number"
       assert invalid =~ ~s(id="custom-field-level-errors")
       assert invalid =~ ~s(aria-invalid="true")
-      # The custom-field panel now lives in the Settings inspector tab; when it
-      # holds errors, the tab raises an alert dot so a hidden panel gets noticed
-      # (Theme A). The field itself is always mounted, so the inline error shows
-      # regardless of the active tab.
-      assert invalid =~ "This panel has validation errors"
+      # The panel sits in the main column under the blocks, always visible, so
+      # its own header flags the error — the Settings tab no longer raises a
+      # dot for it.
+      assert has_element?(lv, "#custom-fields #custom-field-level")
+      assert has_element?(lv, "#custom-fields header", "Needs attention")
+      refute invalid =~ "This panel has validation errors"
     end
   end
 

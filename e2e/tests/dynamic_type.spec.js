@@ -110,12 +110,9 @@ test.describe("dynamic content types", () => {
     // /editor/content/<name>/<id> with the custom field rendered.
     const draftId = await newDraftContent(page, name);
     expect(page.url()).toContain(`/editor/content/${name}/`);
-    // Custom fields sit in the inspector rail's Settings panel (with SEO and
-    // Organization), which is CSS-hidden behind the default Preview tab.
-    const settingsTab = page.getByRole("tab", { name: /settings/i });
-    const chef = page.locator(`#custom-field-${fieldName}`);
-    await expect(chef).toBeHidden();
-    await settingsTab.click();
+    // Custom fields sit in the main column under the blocks — visible on
+    // load, with no inspector tab to open first.
+    const chef = page.locator(`#custom-fields #custom-field-${fieldName}`);
     await expect(chef).toBeVisible();
 
     const title = `E2E Recipe Draft ${stamp}`;
@@ -125,7 +122,6 @@ test.describe("dynamic content types", () => {
     // Persisted: a full reload renders the saved value from the record.
     await page.reload();
     await expect(page.locator('input[name$="[title]"]')).toHaveValue(title);
-    await settingsTab.click();
     await expect(chef).toBeVisible();
     await expect(chef).toHaveValue("Auguste Escoffier");
 
