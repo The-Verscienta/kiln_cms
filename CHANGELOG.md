@@ -75,7 +75,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Custom fields sit in the editor's main column, under the blocks, instead
   of behind the inspector's Settings tab.**
-  ([long form](docs/changelog/unreleased.md#custom-fields-under-the-blocks))
+  ([#1916](https://github.com/The-Verscienta/kiln_cms/pull/1916) · [long form](docs/changelog/unreleased.md#custom-fields-under-the-blocks))
 
 ### Fixed
 
