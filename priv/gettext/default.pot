@@ -534,7 +534,7 @@ msgstr ""
 msgid "%{failed} failed in 24h · %{disabled} auto-disabled"
 msgstr ""
 
-#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
 #, elixir-autogen, elixir-format
 msgid "%{field} points at a record that was deleted or moved to the trash."
 msgstr ""
@@ -2920,7 +2920,7 @@ msgstr ""
 msgid "Broken links"
 msgstr ""
 
-#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
 #, elixir-autogen, elixir-format
 msgid "Broken references"
 msgstr ""
@@ -4791,8 +4791,8 @@ msgstr ""
 msgid "Custom content"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
-#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Custom fields"
@@ -8989,6 +8989,7 @@ msgstr ""
 msgid "Needed when the configured model runs off-site. Leave off to keep content on this server — the rule then does nothing with an off-site model."
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format

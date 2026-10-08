@@ -71,6 +71,12 @@ Every summary line below that was shortened links to its own entry there.
   and sourced.**
   ([#1876](https://github.com/The-Verscienta/kiln_cms/issues/1876) · [long form](docs/changelog/unreleased.md#kiln-vs-pages-and-migration-guides))
 
+### Changed
+
+- **Custom fields sit in the editor's main column, under the blocks, instead
+  of behind the inspector's Settings tab.**
+  ([#1916](https://github.com/The-Verscienta/kiln_cms/pull/1916) · [long form](docs/changelog/unreleased.md#custom-fields-under-the-blocks))
+
 ### Fixed
 
 - **The plugin docs no longer promise Hex or git-dependency plugins: a plugin

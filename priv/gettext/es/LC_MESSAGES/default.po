@@ -534,7 +534,7 @@ msgstr "%{email} (%{role}) — tú"
 msgid "%{failed} failed in 24h · %{disabled} auto-disabled"
 msgstr "%{failed} fallidos en 24 h · %{disabled} desactivados automáticamente"
 
-#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
 #, elixir-autogen, elixir-format
 msgid "%{field} points at a record that was deleted or moved to the trash."
 msgstr "%{field} apunta a un registro que se eliminó o se movió a la papelera."
@@ -2920,7 +2920,7 @@ msgstr "Difundir «%{event}» en el canal interno %{topic}."
 msgid "Broken links"
 msgstr "Enlaces rotos"
 
-#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
 #, elixir-autogen, elixir-format
 msgid "Broken references"
 msgstr "Referencias rotas"
@@ -4791,8 +4791,8 @@ msgstr "Carga útil de bloque personalizada"
 msgid "Custom content"
 msgstr "Contenido personalizado"
 
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
-#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Custom fields"
@@ -8989,6 +8989,7 @@ msgstr "¿Necesitas más que un preajuste? El CSS personalizado del sitio públi
 msgid "Needed when the configured model runs off-site. Leave off to keep content on this server — the rule then does nothing with an off-site model."
 msgstr "Necesario cuando el modelo configurado se ejecuta fuera del sitio. Déjalo desactivado para mantener el contenido en este servidor; entonces la regla no hace nada con un modelo externo."
 
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format

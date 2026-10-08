@@ -48,3 +48,17 @@ carries the reasoning.
   owner. The docs publisher now sends a guide's
   `<!-- seo-description: … -->` comment as the entry's `seo_description`.
   ([#1876](https://github.com/The-Verscienta/kiln_cms/issues/1876))
+
+## Changed
+
+<a id="custom-fields-under-the-blocks"></a>
+
+- **Custom fields sit in the editor's main column, under the blocks, instead
+  of behind the inspector's Settings tab.** The inspector opens on Preview, so
+  a type's own fields (a recipe's chef, an event's venue) were invisible until
+  a writer thought to open Settings, where they were mixed in with URL, SEO and
+  scheduling. They are now a *Custom fields* panel below the block canvas, the
+  way WordPress puts meta boxes under the post body. The panel flags its own
+  validation errors, so the Settings tab's alert dot no longer counts them.
+  The panel stays visible in the Markdown view. Inputs, names and the save
+  path are unchanged. See `KilnCMSWeb.ContentEditor.CustomFieldsPanel`.

@@ -56,7 +56,8 @@ UI" workflow, scoped to fields.
   and the API serves it through `incoming_links`. A published record's
   working copy holds draft references without edges until they are published.
   See `KilnCMS.CMS.ContentLinks`.
-- **Edit**: the content editor renders one input per definition automatically.
+- **Edit**: the content editor renders one input per definition automatically,
+  in a *Custom fields* panel under the blocks.
 - **Deliver**: `custom_fields` is public, so headless clients get the values.
 - **Query**: list/search reads accept `custom_filter`/`custom_sort` (JSON:API)
   and `customFilter`/`customSort` (GraphQL) — typed, registry-validated

@@ -1,9 +1,10 @@
 defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
   @moduledoc """
   The inspector rail's Settings panel (#1311): assignment, document notes,
-  releases, organization & relationships, custom fields, accessibility,
-  compliance, SEO & scheduling, internal links and similar content. Markup
-  moved verbatim from `KilnCMSWeb.ContentEditorLive.render/1`.
+  releases, organization & relationships, accessibility, compliance, SEO &
+  scheduling, internal links and similar content. Markup moved verbatim from
+  `KilnCMSWeb.ContentEditorLive.render/1`. Custom fields are not here: they
+  sit under the blocks (`KilnCMSWeb.ContentEditor.CustomFieldsPanel`).
 
   Two standing invariants ride along:
 
@@ -272,33 +273,6 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
         />
 
         <.backlinks backlinks={@backlinks} count={@backlink_count} />
-      </.inspector_section>
-
-      <.inspector_section :if={@field_definitions != []} title={gettext("Custom fields")}>
-        <%!-- A shared field on a translation (#1327) is disabled, not just
-              read-only: a disabled control is not submitted, and a custom
-              field absent from the params keeps its stored value — the one
-              the source variant's publish copied in. --%>
-        <fieldset
-          :for={definition <- @field_definitions}
-          disabled={Localization.locked?(@localization, {:custom, definition.name})}
-          class="contents"
-        >
-          <.custom_field_input
-            definition={definition}
-            name={"#{@form.name}[custom_fields][#{definition.name}]"}
-            value={custom_field_value(@form, definition.name)}
-            errors={custom_field_errors(@form, definition.name)}
-            options={custom_field_options(definition, @media, @reference_options)}
-          />
-          <Localization.localization_note
-            localization={@localization}
-            field={{:custom, definition.name}}
-            kind={@kind}
-            inherited={Localization.inherited(@localization, {:custom, definition.name})}
-          />
-        </fieldset>
-        <.broken_references references={@broken_references} definitions={@field_definitions} />
       </.inspector_section>
 
       <%!-- Accessibility (#495) sits in its own section rather than
@@ -927,43 +901,6 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
 
   defp backlink_via(%{kind: :related}), do: gettext("as related content")
   defp backlink_via(%{kind: kind}), do: gettext("as %{kind}", kind: kind)
-
-  attr :references, :list, required: true
-  attr :definitions, :list, required: true
-
-  # A reference whose target was moved to the trash or deleted (#1594). The
-  # stored snapshot still names it, so the field looks filled in; this is the
-  # only place that says the link leads nowhere. Clearing or re-pointing the
-  # field and saving removes the edge.
-  defp broken_references(assigns) do
-    ~H"""
-    <div
-      :if={@references != []}
-      id="broken-references"
-      role="status"
-      class="rounded border border-warning/40 bg-warning/10 p-2 text-xs text-warning-ink"
-    >
-      <p class="flex items-center gap-1 font-medium">
-        <.icon name="hero-exclamation-triangle" class="size-3.5" />
-        {gettext("Broken references")}
-      </p>
-      <ul class="mt-1 list-disc space-y-0.5 pl-5">
-        <li :for={ref <- @references} id={"broken-reference-#{ref.field}"}>
-          {gettext("%{field} points at a record that was deleted or moved to the trash.",
-            field: field_label(@definitions, ref.field)
-          )}
-        </li>
-      </ul>
-    </div>
-    """
-  end
-
-  defp field_label(definitions, name) do
-    case Enum.find(definitions, &(&1.name == name)) do
-      %{label: label} when is_binary(label) and label != "" -> label
-      _other -> name
-    end
-  end
 
   # An empty `:fallback` field shows what it will inherit (#1327); the social
   # image keeps its example path when there is nothing to inherit.

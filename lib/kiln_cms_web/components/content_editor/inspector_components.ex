@@ -2,7 +2,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   @moduledoc """
   Function components for the content editor's right inspector rail (Theme A):
   the tab strip and section cards, the Settings panel's building blocks
-  (assignment/tasks, releases, document notes, tag picker, custom fields,
+  (assignment/tasks, releases, document notes, tag picker, custom field inputs,
   featured image, social card) and the History/Preview panel pieces (#1311).
 
   Moved verbatim from `KilnCMSWeb.ContentEditorLive`. Events stay untargeted,

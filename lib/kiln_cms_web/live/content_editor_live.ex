@@ -5636,9 +5636,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:tag_sections_seen, MapSet.union(seen, MapSet.new(sections, & &1.key)))
   end
 
-  defp any_custom_field_errors?(form, definitions),
-    do: Enum.any?(definitions, &(custom_field_errors(form, &1.name) != []))
-
   # A three-valued select: "" is `nil` ("use the site default"), and it is a
   # value in its own right rather than a missing one (#818). Anything else
   # unrecognised also reads as `nil`, so a hand-pushed payload lands on the
@@ -6838,6 +6835,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
                 <.block_inserter block_types={@block_types} global_key={true} />
               </div>
             </div>
+
+            <%!-- Custom fields under the body, where a writer finds them —
+                  not behind the inspector's Settings tab. Outside the
+                  Markdown-hidden canvas, so they stay visible in either view. --%>
+            <KilnCMSWeb.ContentEditor.CustomFieldsPanel.custom_fields_panel
+              form={@form}
+              field_definitions={@field_definitions}
+              localization={@localization}
+              kind={@kind}
+              media={@media}
+              reference_options={@reference_options}
+              broken_references={@broken_references}
+            />
           </div>
 
           <%!-- Right inspector rail (Theme A): Settings / Preview / History.
@@ -6848,10 +6858,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
           <div class="space-y-3 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:self-start lg:overflow-y-auto lg:pr-0.5">
             <.inspector_tabs
               tab={@inspector_tab}
-              settings_alert={
-                any_custom_field_errors?(@form, @field_definitions) or
-                  url_error_field(@form) != nil
-              }
+              settings_alert={url_error_field(@form) != nil}
             />
 
             <%!-- ── Preview ─────────────────────────────────────────────── --%>
@@ -6877,7 +6884,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
               redirects={@redirects}
               backlinks={@backlinks}
               backlink_count={@backlink_count}
-              broken_references={@broken_references}
               current_org={@current_org}
               may_schedule?={@tier == :admin or (@tier == :editor and @editors_can_publish)}
               tasks={@tasks}
@@ -6907,8 +6913,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
               related_field={@related_field}
               related_current={@related_current}
               siblings={@siblings}
-              field_definitions={@field_definitions}
-              reference_options={@reference_options}
               localization={@localization}
               a11y_report={@a11y_report}
               compliance_report={@compliance_report}
