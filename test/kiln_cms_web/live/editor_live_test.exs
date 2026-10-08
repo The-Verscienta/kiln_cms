@@ -4153,6 +4153,43 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert block.data["source_url"] == "https://s.example"
     end
 
+    test "a newsletter sign-up block persists its fields via the DSL editor (#1870)",
+         %{conn: conn} do
+      page = draft_page(%{blocks: []})
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      lv
+      |> element("#block-inserter button[data-inserter-item][phx-value-type='newsletter_signup']")
+      |> render_click()
+
+      lv
+      |> form("#page-editor")
+      |> render_change(%{
+        "form" => %{
+          "blocks" => %{
+            "0" => %{
+              "heading" => "Get the release notes",
+              "intro" => "One email per release.",
+              "button_label" => "Sign me up",
+              "collect_name" => "true"
+            }
+          }
+        }
+      })
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [%Ash.Union{type: :newsletter_signup, value: block}] =
+               CMS.get_page!(page.id, authorize?: false).blocks
+
+      assert block.heading == "Get the release notes"
+      assert block.intro == "One email per release."
+      assert block.button_label == "Sign me up"
+      assert block.collect_name == true
+    end
+
     test "how_to steps persist and render in the preview", %{conn: conn} do
       page = draft_page(%{blocks: []})
 

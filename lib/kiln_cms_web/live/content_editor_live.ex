@@ -73,7 +73,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Preferred display order for the block palette; any block type registered
   # beyond these is appended automatically (the palette is registry-driven, so
   # adding a `Kiln.Block` module needs no editor change).
-  @type_order ~w(rich_text heading quote image gallery file embed divider columns accordion faq how_to claim custom)
+  @type_order ~w(rich_text heading quote image gallery file embed divider columns accordion faq how_to claim newsletter_signup custom)
 
   # Stands in for the working draft on the version-compare picker (#467). A
   # version id is a UUID, so this can never collide with one.
@@ -5802,6 +5802,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp block_icon("how_to"), do: "hero-list-bullet"
   defp block_icon("claim"), do: "hero-check-badge"
   defp block_icon("form"), do: "hero-clipboard-document-list"
+  defp block_icon("newsletter_signup"), do: "hero-envelope"
   defp block_icon("fragment"), do: "hero-square-2-stack"
   defp block_icon("custom"), do: "hero-puzzle-piece"
   defp block_icon(type), do: KilnCMS.Blocks.editor_meta(type, :icon) || "hero-squares-2x2"
@@ -5851,6 +5852,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def block_description("form"),
     do: gettext("A form built under Forms, e.g. a contact or sign-up form")
+
+  # Says where sign-ups go, because `form` above also says "sign-up": this one
+  # adds people to the newsletter list, that one fills the forms inbox.
+  def block_description("newsletter_signup"),
+    do: gettext("Email sign-up that adds people to your newsletter list, with double opt-in")
 
   # Says what editing it does, because that is the surprise: the block is a
   # pointer, and a change to the fragment reaches every page that embeds it.

@@ -5904,6 +5904,8 @@ msgstr "Dans les deux cas, un administrateur de la plateforme pourra le modifier
 msgid "Either way, you can change it later on the Team page."
 msgstr "Dans les deux cas, vous pourrez le modifier plus tard sur la page Équipe."
 
+#: lib/kiln_cms/blocks/newsletter_signup.ex
+#: lib/kiln_cms_web/components/block_components.ex
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
@@ -5942,6 +5944,11 @@ msgstr "Notifications par e-mail"
 #, elixir-autogen, elixir-format
 msgid "Email or name"
 msgstr "E-mail ou nom"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Email sign-up that adds people to your newsletter list, with double opt-in"
+msgstr "Inscription par e-mail qui ajoute des personnes à votre liste de newsletter, avec double confirmation"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -8197,6 +8204,7 @@ msgstr "Laissez vide pour hériter selon la chaîne de langues de repli du site.
 msgid "Leave it open"
 msgstr "La laisser ouverte"
 
+#: lib/kiln_cms/blocks/newsletter_signup.ex
 #: lib/kiln_cms_web/components/block_components.ex
 #, elixir-autogen, elixir-format
 msgid "Leave this field empty"
@@ -8909,6 +8917,8 @@ msgstr "Mes brouillons"
 msgid "My tasks"
 msgstr "Mes tâches"
 
+#: lib/kiln_cms/blocks/newsletter_signup.ex
+#: lib/kiln_cms_web/components/block_components.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/api_key_live.ex
 #: lib/kiln_cms_web/live/automation_live.ex
@@ -14246,6 +14256,7 @@ msgstr "Soumettre pour révision"
 msgid "Submitting…"
 msgstr "Soumission…"
 
+#: lib/kiln_cms/blocks/newsletter_signup.ex
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
 msgid "Subscribe"

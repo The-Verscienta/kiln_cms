@@ -30,6 +30,9 @@ defmodule KilnCMS.Blocks do
     embed: KilnCMS.Blocks.Embed,
     divider: KilnCMS.Blocks.Divider,
     form: KilnCMS.Blocks.Form,
+    # A sign-up box posting to `/newsletter/subscribe` (#1870) — not a `form`,
+    # whose submissions go to the forms inbox rather than the subscriber list.
+    newsletter_signup: KilnCMS.Blocks.NewsletterSignup,
     columns: KilnCMS.Blocks.Columns,
     gallery: KilnCMS.Blocks.Gallery,
     # The semantically neutral sibling of `faq` (#482): same `<details>` markup,

@@ -119,6 +119,26 @@ than a session. Sign-up needs no authorization because it can only ever produce
 a `:pending` row, which receives nothing until the address owner clicks the link
 mailed to them.
 
+### A sign-up on a page
+
+Insert a **Newsletter sign-up** block in the editor and the page carries an
+email sign-up form. It takes an optional heading and intro line, the button
+label (default "Subscribe"), and a switch to ask for a name as well. It posts
+to `/newsletter/subscribe` with the honeypot below, so everything in the next
+section applies: double opt-in, and the same page for every outcome. A
+subscriber joins the site that served the page.
+
+Use this block, not a *Form* block, for a sign-up. A form built under Forms
+stores its submissions in the forms inbox, and they never reach the
+subscriber list.
+
+Headless frontends get the block on the `json` surface as
+`{"_type": "newsletter_signup", "heading", "intro", "button_label",
+"collect_name", "action", "honeypot_field"}`. `action` is relative, so post to
+it on your Kiln host. The fired `web` HTML is the finished form with a
+relative `action`. Served from another origin, it needs the action pointed at
+Kiln.
+
 ### Signing up
 
 Post `email` (and optionally `name`) to `/newsletter/subscribe`. Include the
