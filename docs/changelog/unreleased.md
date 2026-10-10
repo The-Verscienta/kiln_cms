@@ -92,6 +92,16 @@ carries the reasoning.
 
 ## Security
 
+<a id="decimal-3-2-0-round-allocation"></a>
+
+- **decimal 3.2.0 for EEF-CVE-2026-97853: `Decimal.round/3` no longer
+  allocates without bound on a caller-chosen `places`.** The advisory
+  (MEDIUM) is a denial of service when the `places` argument comes from
+  outside. Kiln does not call `Decimal.round/3` itself; `decimal` is in the
+  tree through Ecto, Jason and the JSON-schema libraries, and the bump keeps
+  the Dependency audit job green. The lock moves from 3.1.1 to 3.2.0, the
+  newest release the tree's constraints allow; the fix landed in 3.1.2.
+
 <a id="ash-3-34-6-aggregate-policies"></a>
 
 - **Ash 3.34.6: an MCP read tool's `count`/`exists`/`aggregate` result no
