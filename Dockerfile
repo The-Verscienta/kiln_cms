@@ -14,11 +14,13 @@
 # `mix compile` below, which is both the slowest way to find out and late enough
 # to look like a compile error rather than a version mismatch.
 #
-# OTP tracks CI's major (27) rather than the newest available: the release image
-# should run the toolchain the test suite and dialyzer actually ran against.
-ARG ELIXIR_VERSION=1.19.5
-ARG OTP_VERSION=27.3.4.15
-ARG DEBIAN_VERSION=bookworm-20260713-slim
+# The release image runs exactly the toolchain the test suite and dialyzer ran
+# against in CI — never "the newest available". `DEBIAN_VERSION` is only the
+# builder's base: it has to be a date `hexpm/elixir` publishes for this exact
+# Elixir/OTP pair (check Docker Hub), which is why it moves with them.
+ARG ELIXIR_VERSION=1.20.4
+ARG OTP_VERSION=29.1.1
+ARG DEBIAN_VERSION=bookworm-20261005-slim
 
 # The runner tracks a NEWER Debian than the builder, deliberately (#807).
 #

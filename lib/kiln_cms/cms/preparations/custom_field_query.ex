@@ -324,8 +324,8 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
   defp cast_value(raw, :dynamic, name) when is_binary(raw) do
     # `Kiln.FieldType.parse_float/1` — `Float.parse/1` raises on an overflow
-    # literal under the pinned Elixir 1.19, and this value comes straight off a
-    # query string.
+    # literal under Elixir 1.19 (total only from 1.20), and this value comes
+    # straight off a query string.
     case {Integer.parse(raw), Kiln.FieldType.parse_float(raw)} do
       {{integer, ""}, _} -> {:ok, integer}
       {_, {float, ""}} -> {:ok, float}

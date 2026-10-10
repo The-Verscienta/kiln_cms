@@ -32,7 +32,7 @@ defmodule KilnCMS.Search.ML do
 
   ## Branch in a module body, never inside a function
 
-  `available?/0` is a compile-time constant, and Elixir 1.19's type checker
+  `available?/0` is a compile-time constant, and Elixir's type checker
   knows it: an `if KilnCMS.Search.ML.available?()` inside a function body is a
   `clause cannot match ... already matched type: dynamic(false)` warning, which
   `--warnings-as-errors` turns into a failed build. That is the checker being

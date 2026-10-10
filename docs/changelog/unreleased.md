@@ -66,6 +66,21 @@ carries the reasoning.
 
 ## Changed
 
+<a id="toolchain-elixir-1-20-otp-29"></a>
+
+- **The toolchain moves to Elixir 1.20.4 / OTP 29.1.1 in CI and the release
+  image; building from source now needs Elixir 1.20 or newer.** It was
+  1.19.5 / OTP 27.3.4.15, held as a floor while development ran ahead on
+  1.20 / OTP 29. The gap had two costs: OTP 29's stricter dialyzer opacity
+  checks never ran in CI (#599), and 1.20's `mix format` breaks some lines
+  differently from 1.19's, so downstream overlay PRs failed "Check
+  formatting" on code that was clean locally. `.tool-versions`, the
+  Dockerfile's builder image (`hexpm/elixir:1.20.4-erlang-29.1.1`, Debian
+  `bookworm-20261005-slim`) and mix.exs's `elixir: "~> 1.20"` move together.
+  A Docker deploy needs nothing: the release carries its own runtime. A
+  downstream project that builds Kiln from source should move its own
+  `.tool-versions` to the same pair.
+
 <a id="custom-fields-under-the-blocks"></a>
 
 - **Custom fields sit in the editor's main column, under the blocks, instead

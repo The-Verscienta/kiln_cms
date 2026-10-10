@@ -27,9 +27,9 @@ defmodule Mix.Tasks.Kiln.Toolchain.Check do
 
   ## What it deliberately does not check
 
-  The Elixir/OTP actually running. Local development runs ahead of the pin
-  (1.20.x / OTP 29) on purpose, and failing there would make the gate something
-  to route around. This compares *declarations* to each other, not to the host.
+  The Elixir/OTP actually running. A developer a patch release ahead of the
+  pin is normal, and failing there would make the gate something to route
+  around. This compares *declarations* to each other, not to the host.
 
       mix kiln.toolchain.check
   """
@@ -109,7 +109,7 @@ defmodule Mix.Tasks.Kiln.Toolchain.Check do
     end
   end
 
-  # `.tool-versions` spells Elixir as `1.19.5-otp-27`; the bare version is what
+  # `.tool-versions` spells Elixir as `1.20.4-otp-29`; the bare version is what
   # mix.exs and the Dockerfile tag use.
   defp base_version(version), do: version |> String.split("-") |> hd()
 

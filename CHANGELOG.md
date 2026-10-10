@@ -77,6 +77,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **The toolchain moves to Elixir 1.20.4 / OTP 29.1.1 in CI and the release
+  image; building from source now needs Elixir 1.20 or newer.**
+  ([long form](docs/changelog/unreleased.md#toolchain-elixir-1-20-otp-29))
+
 - **Custom fields sit in the editor's main column, under the blocks, instead
   of behind the inspector's Settings tab.**
   ([#1916](https://github.com/The-Verscienta/kiln_cms/pull/1916) · [long form](docs/changelog/unreleased.md#custom-fields-under-the-blocks))
