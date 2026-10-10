@@ -194,7 +194,7 @@ fused scores (RRF, around 0.01–0.05), while the others carry 0–1 reranker
 scores. The flat sort then mixes the two scales and ranks every reranked
 source above every fused one. Reranking the merged candidates once, instead
 of per section, removes this
-([#U3_ISSUE](https://github.com/The-Verscienta/kiln_cms/issues/U3_ISSUE)).
+([#1937](https://github.com/The-Verscienta/kiln_cms/issues/1937)).
 
 Two caveats before setting it, both from the report that asked for this
 (a production deployment's search-ranking report, 2026-09-04), quoted as

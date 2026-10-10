@@ -47,6 +47,10 @@ defmodule KilnCMS.Search.RerankerServing do
   Whether this node is reranking: `:off` (no scope reranks, or the reranker is
   not the Bumblebee adapter), `:running`, or `{:unavailable, reason}` when
   reranking is switched on but the model could not be loaded at boot.
+
+  `:running` means the loaded serving was handed to the supervisor at boot,
+  not that the serving process is alive now. A serving that later fails shows
+  up as the adapter's throttled "reranker failed" warning.
   """
   @spec status() :: :off | :running | {:unavailable, String.t()}
   def status, do: :persistent_term.get(@status_key, :off)
