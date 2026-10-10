@@ -135,6 +135,18 @@ defmodule Mix.Tasks.Kiln.Toolchain.CheckRunTest do
       assert output() =~ "Dockerfile pins OTP_VERSION=25.0"
     end
 
+    test "a .tool-versions setup-node would misread is a mismatch", ctx do
+      dir =
+        fixture(
+          ctx.tmp_dir,
+          "# header\n#\n" <> tool_versions(ctx.elixir, ctx.erlang),
+          dockerfile(base(ctx.elixir), base(ctx.erlang))
+        )
+
+      assert_raise Mix.Error, ~r/1 toolchain mismatch/, fn -> run(dir) end
+      assert output() =~ ~s(CI's setup-node would read Node "#" from .tool-versions)
+    end
+
     test "a stale Node pin is named too", ctx do
       dir =
         fixture(

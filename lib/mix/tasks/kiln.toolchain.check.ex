@@ -14,8 +14,12 @@ defmodule Mix.Tasks.Kiln.Toolchain.Check do
       the assets. Docker cannot read `.tool-versions` at build time, so these
       are restated and must be checked rather than derived.
     * **CI** reads `.tool-versions` directly through `setup-beam`'s
-      `version-file:` and `setup-node`'s `node-version-file:`, so there is
-      nothing to check there — that is the point.
+      `version-file:` and `setup-node`'s `node-version-file:`, so there are no
+      versions to compare there — that is the point. What *is* checked is that
+      setup-node reads the right line: it does not parse the file as asdf
+      does, but takes the first line that is a single word (or
+      `nodejs <version>`), so a bare `#` comment line above `nodejs` made CI
+      ask for Node version "#".
 
   ## Why this is a separate gate, not a test
 
@@ -42,6 +46,11 @@ defmodule Mix.Tasks.Kiln.Toolchain.Check do
   @tool_versions ".tool-versions"
   @dockerfile "Dockerfile"
 
+  # setup-node's own `node-version-file:` parse for a non-JSON file
+  # (`getNodeVersionFromFile` in actions/setup-node `src/util.ts`). When
+  # nothing matches it falls back to the whole file, trimmed.
+  @setup_node_pattern ~r/^(?:node(js)?\s+)?v?(?<version>[^\s]+)$/m
+
   @impl Mix.Task
   def run(_args) do
     {elixir, erlang, nodejs} = read_tool_versions()
@@ -52,7 +61,8 @@ defmodule Mix.Tasks.Kiln.Toolchain.Check do
           check_mix_requirement(elixir),
           check_dockerfile_arg("ELIXIR_VERSION", elixir),
           check_dockerfile_arg("OTP_VERSION", erlang),
-          check_dockerfile_arg("NODE_VERSION", nodejs)
+          check_dockerfile_arg("NODE_VERSION", nodejs),
+          check_setup_node(nodejs)
         ],
         &is_nil/1
       )
@@ -140,6 +150,27 @@ defmodule Mix.Tasks.Kiln.Toolchain.Check do
       true ->
         "mix.exs requires elixir #{requirement}, which #{version} " <>
           "(#{@tool_versions}) does not satisfy."
+    end
+  end
+
+  defp check_setup_node(nodejs) do
+    resolved = setup_node_version(File.read!(@tool_versions))
+
+    if resolved == nodejs do
+      nil
+    else
+      "CI's setup-node would read Node #{inspect(resolved)} from #{@tool_versions}, " <>
+        "not #{nodejs}: it takes the first line that is a single word or " <>
+        "`nodejs <version>`. Separate comments with blank lines, not a bare `#`."
+    end
+  end
+
+  @doc false
+  # Exposed for tests, which pin it to setup-node's behaviour on known inputs.
+  def setup_node_version(contents) do
+    case Regex.run(@setup_node_pattern, contents, capture: ["version"]) do
+      [version] -> version
+      nil -> String.trim(contents)
     end
   end
 

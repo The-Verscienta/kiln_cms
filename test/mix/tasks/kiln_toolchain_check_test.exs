@@ -60,6 +60,21 @@ defmodule Mix.Tasks.Kiln.Toolchain.CheckTest do
     end
   end
 
+  describe "setup_node_version/1 (setup-node's parse)" do
+    test "a bare `#` line above nodejs wins, as it did in CI" do
+      assert Check.setup_node_version("# Node:\n#\nelixir 1.20.4-otp-29\nnodejs 22.23.3\n") == "#"
+    end
+
+    test "comment lines with spaces, blank lines and other tools are skipped" do
+      contents = "# a comment\n\nelixir 1.20.4-otp-29\nerlang 29.1.1\nnodejs 22.23.3\n"
+      assert Check.setup_node_version(contents) == "22.23.3"
+    end
+
+    test "a leading v is dropped, as setup-node drops it" do
+      assert Check.setup_node_version("nodejs v22.23.3\n") == "22.23.3"
+    end
+  end
+
   describe "the repo's own declarations" do
     test "the pinned Elixir satisfies mix.exs's requirement" do
       {elixir, _erlang} = Check.parse_tool_versions(File.read!(".tool-versions"))
@@ -83,6 +98,13 @@ defmodule Mix.Tasks.Kiln.Toolchain.CheckTest do
 
       assert elixir_arg == elixir |> String.split("-") |> hd()
       assert otp_arg == erlang
+    end
+
+    # CI's setup-node reads this file with its own one-line pattern, not as
+    # asdf does. A bare `#` comment line once made it ask for Node "#".
+    test "setup-node reads the nodejs line from this repo's .tool-versions" do
+      contents = File.read!(".tool-versions")
+      assert Check.setup_node_version(contents) == Check.parse_node_version(contents)
     end
 
     test "the Dockerfile's NODE_VERSION mirrors .tool-versions" do
