@@ -25,7 +25,7 @@ contributor. It points at the right guide rather than restating it.
 
 ## 1. Run it locally
 
-Prerequisites: Elixir 1.19.3+ / OTP 27+, Docker (for Postgres), Node.js. The
+Prerequisites: Elixir 1.20+ / OTP 29+, Docker (for Postgres), Node.js 22. The
 full list, for running, building and developing, is in
 [system-requirements.md](system-requirements.md).
 

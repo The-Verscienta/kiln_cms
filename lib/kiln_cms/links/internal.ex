@@ -98,7 +98,7 @@ defmodule KilnCMS.Links.Internal do
           | :external
 
   @typedoc "Who is asking: the editor whose document holds the links, or `nil`."
-  @type actor :: Ash.Resource.record() | nil
+  @type actor :: Ash.Resource.Record.t() | nil
 
   @doc """
   Resolve every path in `paths` as `%{path => resolution}`.

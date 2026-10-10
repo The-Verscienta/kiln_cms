@@ -57,7 +57,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
-          node-version: "22"
+          node-version-file: .tool-versions
           cache: npm
           cache-dependency-path: |
             clients/js/package-lock.json
@@ -152,7 +152,7 @@ jobs:
         # token from NODE_AUTH_TOKEN, so the token never lands in a file.
         uses: actions/setup-node@v5
         with:
-          node-version: "22"
+          node-version-file: .tool-versions
           registry-url: https://registry.npmjs.org
 
       - name: Publish
