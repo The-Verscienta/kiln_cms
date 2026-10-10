@@ -19,7 +19,9 @@ carries the reasoning.
   `postgresql-client-17`) and the optional one it does not (ffmpeg), the
   optional services behind compose profiles, and the developer toolchain
   pinned by `.tool-versions`. Linked from the getting-started prerequisites
-  and registered under Operations & deployment.
+  and registered under Operations & deployment. Three deployment presets
+  under `deploy/presets/` (`minimal`, `publishing`, `everything`) turn the
+  runtime features on or off as a set, each a layer on `.env.prod`.
 
 <a id="mix-kiln-import-ghost"></a>
 

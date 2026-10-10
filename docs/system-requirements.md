@@ -55,6 +55,30 @@ larger; the plan does not yet size it, so budget RAM for the model separately.
 A default build runs keyword search and reports `KilnCMS.Search.ML.available?/0`
 as false.
 
+## Presets
+
+Three environment files under
+[`deploy/presets/`](https://github.com/The-Verscienta/kiln_cms/tree/main/deploy/presets)
+turn the runtime features on or off as a set. Each layers on `.env.prod`,
+which keeps the required variables and the secrets; a preset holds neither.
+
+| Preset | Image | What is on | Needs from the host |
+|---|---|---|---|
+| `minimal.env` | `kiln_cms:1.x` | Console, delivery, backups, media on a volume. Nothing calls out and no mail leaves | 512 MB, Postgres, a volume at `/app/media` |
+| `publishing.env` | `kiln_cms:1.x` | Mail over SMTP, oEmbed cards, provenance signing, CDN purge hooks, error tracking | 1 GB, Postgres, an SMTP relay, outbound 443; optionally S3 and a CDN |
+| `everything.env` | `kiln_cms:1.x-ml` | `publishing` plus Meilisearch, federation, experiments, the metrics listener, the LLM assistants and reranking | 2 GB, Postgres, SMTP, S3, Meilisearch, an LLM provider key |
+
+The only thing an image decides is whether the ML stack is compiled in
+(`KILN_ML`); every other optional subsystem is in every image and the preset
+switches it. The `-ml` tag is [#1932](https://github.com/The-Verscienta/kiln_cms/issues/1932);
+until it ships, `everything.env` runs on the lean image with reranking and
+semantic search off.
+
+```bash
+docker compose -f docker-compose.prod.yml \
+  --env-file .env.prod --env-file deploy/presets/publishing.env up -d
+```
+
 ## Building the release image
 
 A `docker build` on a laptop, a CI job, or a PaaS that builds from the

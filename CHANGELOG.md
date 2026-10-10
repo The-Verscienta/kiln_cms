@@ -58,7 +58,8 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`docs/system-requirements.md` lists what a machine needs to run the
   release image, build it, and develop on Kiln: CPU, RAM, disk, Postgres 17
-  with `vector`, the native libraries, and the optional services.**
+  with `vector`, the native libraries, and the optional services, plus three
+  deployment presets under `deploy/presets/`.**
   ([long form](docs/changelog/unreleased.md#system-requirements))
 
 - **`mix kiln.import.ghost` imports a Ghost JSON export: posts, pages, tags,
