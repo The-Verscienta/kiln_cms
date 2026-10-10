@@ -211,6 +211,8 @@ defmodule KilnCMSWeb.BlockComponents do
         <% @type == "form" -> %>
           <%!-- nil form (inactive/unknown slug) renders nothing on-site. --%>
           <.public_form :if={@block[:form]} form={@block[:form]} variant={@variant} />
+        <% @type == "newsletter_signup" -> %>
+          <.newsletter_signup block={@block} />
         <% @type == "embed" -> %>
           <%!-- Two shapes, and only the allowlisted hosts get an iframe. --%>
           <div :if={embed = HTMLSanitizer.safe_embed_url(@block.content)} class="aspect-video">
@@ -376,6 +378,62 @@ defmodule KilnCMSWeb.BlockComponents do
       <button type="submit" class="btn btn-primary">
         {@form.submit_label || gettext("Submit")}
       </button>
+    </form>
+    """
+  end
+
+  # The on-site twin of `KilnCMS.Blocks.NewsletterSignup`'s `:web` render
+  # (#1870): same action, same inputs, same honeypot, in the site's kit
+  # classes. No CSRF token — `/newsletter/subscribe` is on `:public_form`.
+  attr :block, :map, required: true
+
+  defp newsletter_signup(assigns) do
+    assigns = assign(assigns, :id_prefix, "kiln-newsletter-" <> (assigns.block[:id] || "signup"))
+
+    ~H"""
+    <form
+      method="post"
+      action={KilnCMS.Blocks.NewsletterSignup.action()}
+      class="kiln-newsletter-signup space-y-3 rounded-lg border border-base-300 p-4"
+    >
+      <h2 :if={present?(@block.content)} class="text-xl font-bold">{@block.content}</h2>
+      <p :if={present?(@block[:intro])} class="text-sm text-base-content/70">{@block[:intro]}</p>
+
+      <div style="position:absolute;left:-9999px" aria-hidden="true">
+        <label>
+          {gettext("Leave this field empty")}
+          <input type="text" name={KilnCMS.Forms.honeypot_field()} tabindex="-1" autocomplete="off" />
+        </label>
+      </div>
+
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+        <div :if={@block[:collect_name]} class="sm:flex-1">
+          <label for={@id_prefix <> "-name"} class="field-label mb-1 block text-sm font-medium">
+            {gettext("Name")}
+          </label>
+          <input
+            id={@id_prefix <> "-name"}
+            type="text"
+            name="name"
+            autocomplete="name"
+            class="field-input w-full"
+          />
+        </div>
+        <div class="sm:flex-1">
+          <label for={@id_prefix <> "-email"} class="field-label mb-1 block text-sm font-medium">
+            {gettext("Email")}
+          </label>
+          <input
+            id={@id_prefix <> "-email"}
+            type="email"
+            name="email"
+            required
+            autocomplete="email"
+            class="field-input w-full"
+          />
+        </div>
+        <button type="submit" class="btn btn-primary">{@block[:button_label]}</button>
+      </div>
     </form>
     """
   end
@@ -641,6 +699,16 @@ defmodule KilnCMSWeb.BlockComponents do
 
   defp view(%Blocks.Form{} = b),
     do: %{type: "form", content: b.form_slug, form_slug: b.form_slug}
+
+  defp view(%Blocks.NewsletterSignup{} = b) do
+    %{
+      type: "newsletter_signup",
+      content: b.heading,
+      intro: b.intro,
+      button_label: Blocks.NewsletterSignup.button_label(b),
+      collect_name: b.collect_name == true
+    }
+  end
 
   # Repeating-item blocks (#482): item keys are atoms, to match what
   # `render_block/1` reads; `:srcset`/`:focal` are delivery's to add.

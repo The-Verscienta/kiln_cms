@@ -5904,6 +5904,8 @@ msgstr ""
 msgid "Either way, you can change it later on the Team page."
 msgstr ""
 
+#: lib/kiln_cms/blocks/newsletter_signup.ex
+#: lib/kiln_cms_web/components/block_components.ex
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
@@ -5941,6 +5943,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Email or name"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Email sign-up that adds people to your newsletter list, with double opt-in"
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -8197,6 +8204,7 @@ msgstr ""
 msgid "Leave it open"
 msgstr ""
 
+#: lib/kiln_cms/blocks/newsletter_signup.ex
 #: lib/kiln_cms_web/components/block_components.ex
 #, elixir-autogen, elixir-format
 msgid "Leave this field empty"
@@ -8909,6 +8917,8 @@ msgstr ""
 msgid "My tasks"
 msgstr ""
 
+#: lib/kiln_cms/blocks/newsletter_signup.ex
+#: lib/kiln_cms_web/components/block_components.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/api_key_live.ex
 #: lib/kiln_cms_web/live/automation_live.ex
@@ -14246,6 +14256,7 @@ msgstr ""
 msgid "Submitting…"
 msgstr ""
 
+#: lib/kiln_cms/blocks/newsletter_signup.ex
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
 msgid "Subscribe"

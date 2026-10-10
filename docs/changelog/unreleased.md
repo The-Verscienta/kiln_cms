@@ -49,6 +49,21 @@ carries the reasoning.
   `<!-- seo-description: … -->` comment as the entry's `seo_description`.
   ([#1876](https://github.com/The-Verscienta/kiln_cms/issues/1876))
 
+<a id="newsletter-signup-block"></a>
+
+- **A *Newsletter sign-up* block puts an email sign-up on any page; it adds
+  people to the newsletter list with double opt-in.** Until now the only way
+  onto a page was a theme edit: the rich-text sanitizer strips a raw `<form>`,
+  and the *Form* block's submissions go to the forms inbox, not the subscriber
+  list. The block has an optional heading and intro, a button label (default
+  "Subscribe") and a switch to also ask for a name. It posts to the existing
+  `POST /newsletter/subscribe`, so sign-up behaves exactly as before: the
+  shared honeypot, one "check your inbox" page for every outcome, and nothing
+  sent until the reader confirms. The fired `:web` artifact is the real form,
+  and the `:json` surface carries `action` and `honeypot_field` for a headless
+  frontend. See [the newsletter guide](../newsletter.md#a-sign-up-on-a-page).
+  ([#1870](https://github.com/The-Verscienta/kiln_cms/issues/1870))
+
 ## Changed
 
 <a id="custom-fields-under-the-blocks"></a>

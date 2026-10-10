@@ -71,6 +71,10 @@ Every summary line below that was shortened links to its own entry there.
   and sourced.**
   ([#1876](https://github.com/The-Verscienta/kiln_cms/issues/1876) · [long form](docs/changelog/unreleased.md#kiln-vs-pages-and-migration-guides))
 
+- **A *Newsletter sign-up* block puts an email sign-up on any page; it adds
+  people to the newsletter list with double opt-in.**
+  ([#1870](https://github.com/The-Verscienta/kiln_cms/issues/1870) · [long form](docs/changelog/unreleased.md#newsletter-signup-block))
+
 ### Changed
 
 - **Custom fields sit in the editor's main column, under the blocks, instead

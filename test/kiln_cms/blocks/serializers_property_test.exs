@@ -8,7 +8,7 @@ defmodule KilnCMS.Blocks.SerializersPropertyTest do
 
   alias KilnCMS.Blocks
   alias KilnCMS.Blocks.{Accordion, Audio, Claim, Columns, Custom, Divider, Embed, Faq}
-  alias KilnCMS.Blocks.{Form, Fragment}
+  alias KilnCMS.Blocks.{Form, Fragment, NewsletterSignup}
   alias KilnCMS.Blocks.{Gallery, Heading, HowTo, Image, Quote, RichText, Video}
   # Not aliased bare as `File` — that would shadow the stdlib module.
   alias KilnCMS.Blocks.File, as: FileBlock
@@ -64,6 +64,12 @@ defmodule KilnCMS.Blocks.SerializersPropertyTest do
         fn panels -> %Accordion{panels: panels} end
       ),
       StreamData.map(text(), fn s -> %Form{form_slug: s} end),
+      StreamData.map(
+        StreamData.tuple({text(), text(), text(), StreamData.boolean()}),
+        fn {h, i, b, n} ->
+          %NewsletterSignup{heading: h, intro: i, button_label: b, collect_name: n}
+        end
+      ),
       # A fragment renders nothing on every surface — it is *inlined* by
       # `KilnCMS.CMS.Fragments` before any serializer sees it (#479). The
       # generator exists so the totality property still covers "what happens if
