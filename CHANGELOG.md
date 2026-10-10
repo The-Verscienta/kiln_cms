@@ -94,6 +94,10 @@ Every summary line below that was shortened links to its own entry there.
   and the release image; building from source now needs Elixir 1.20+.**
   ([#1934](https://github.com/The-Verscienta/kiln_cms/issues/1934) · [long form](docs/changelog/v1.2.0.md#toolchain-elixir-1-20-otp-29))
 
+- **`docs/path-forward.md` sets Kiln's direction from 1.1 (live delivery plus
+  provable, governed publishing) and the 2.0, 3.0 and 4.0 milestones.**
+  ([long form](docs/changelog/v1.2.0.md#path-forward))
+
 - **Custom fields sit in the editor's main column, under the blocks, instead
   of behind the inspector's Settings tab.**
   ([#1916](https://github.com/The-Verscienta/kiln_cms/pull/1916) · [long form](docs/changelog/v1.2.0.md#custom-fields-under-the-blocks))

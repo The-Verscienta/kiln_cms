@@ -5,7 +5,8 @@ LiveView · Tailwind · Elixir**, with the **Ash Framework** at its core. Client
 interactivity is handled by LiveView + colocated JS hooks — no Surface, no Alpine.js.
 
 See [`KilnCMS_Project_Plan.md`](KilnCMS_Project_Plan.md) for the full vision, architecture, and
-the resolved architectural decisions (D1–D8).
+the resolved architectural decisions (D1–D8), and [`docs/path-forward.md`](docs/path-forward.md)
+for where Kiln is going from 1.1: live content delivery plus provable, governed publishing.
 
 ## Status & maturity
 
