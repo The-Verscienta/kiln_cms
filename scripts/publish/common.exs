@@ -426,6 +426,20 @@ defmodule KilnPublish.API do
     )
   end
 
+  @doc """
+  The site's delivery JSON Schema (`GET /api/schema`, #430): `{:ok, body}`,
+  whose `"$defs"` holds one `block_<type>` key per block type the site has.
+  Plain JSON, not JSON:API, and outside `/api/json`, hence the absolute URL
+  (which `base_url` leaves alone) and the replaced `accept`.
+  """
+  def schema(req) do
+    url = String.replace_suffix(req.options.base_url, "/json", "") <> "/schema"
+
+    req
+    |> Req.Request.put_header("accept", "application/json")
+    |> request(:get, url, [])
+  end
+
   @doc "Prints one upsert's outcome; returns `:error` for a failure."
   def report(slug, {:ok, outcome, _record}), do: IO.puts("  #{outcome}  #{slug}")
 

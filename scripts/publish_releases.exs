@@ -53,7 +53,9 @@
 #     highlights   — text
 #
 # The script checks the type and every field before writing anything, and
-# fails naming what is missing. Create no page with slug `releases`: the
+# fails naming what is missing. The index ends with a newsletter sign-up
+# block when the site's /api/schema has one; it is written here because each
+# run replaces the index's blocks, so don't add one to that page by hand. Create no page with slug `releases`: the
 # index is the page `release-notes`, whose `path_alias` is `/releases`.
 #
 # ## Pre-releases
