@@ -22,6 +22,15 @@ ARG ELIXIR_VERSION=1.20.4
 ARG OTP_VERSION=29.1.1
 ARG DEBIAN_VERSION=bookworm-20261005-slim
 
+# Node builds the assets (`npm ci`, then esbuild/tailwind). It also restates
+# `.tool-versions` (`nodejs`), which CI's setup-node reads, and the toolchain
+# check holds the two together. It used to be Debian's `apt install nodejs`,
+# which on bookworm is Node 18, past end of life and four majors behind what
+# CI built the same assets with. The `node` stage below is only a source of
+# the binary: its codename has to match the builder's (bookworm), since the
+# binary is linked against that glibc and libstdc++.
+ARG NODE_VERSION=22.23.3
+
 # The runner tracks a NEWER Debian than the builder, deliberately (#807).
 #
 # PDF metadata stripping shells out to `qpdf --remove-info --remove-metadata`,
@@ -35,19 +44,28 @@ ARG DEBIAN_VERSION=bookworm-20261005-slim
 # the reverse would not. The one thing ERTS needs from the runner is
 # `libtinfo.so.6` (verified with `ldd` on the builder's `beam.smp`), which
 # trixie's `libncurses6` provides.
-ARG RUNNER_DEBIAN_VERSION=trixie-20260713-slim
+ARG RUNNER_DEBIAN_VERSION=trixie-20261005-slim
 
 ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="debian:${RUNNER_DEBIAN_VERSION}"
 
+FROM node:${NODE_VERSION}-bookworm-slim AS node
+
 # ---- Build stage ----
 FROM ${BUILDER_IMAGE} AS builder
 
-# build-essential/git for native deps, libvips for image processing, and
-# nodejs/npm to install the JS deps (TipTap) that esbuild bundles into app.js.
+# build-essential/git for native deps, libvips for image processing.
 RUN apt-get update -y \
-  && apt-get install -y build-essential git libvips-dev nodejs npm \
+  && apt-get install -y build-essential git libvips-dev \
   && apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+# Node and npm, to install the JS deps (TipTap) that esbuild bundles into
+# app.js. npm ships inside node_modules; its bin is a symlink in the node
+# image, which COPY would flatten, so it is relinked here.
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+  && node --version && npm --version
 
 WORKDIR /app
 

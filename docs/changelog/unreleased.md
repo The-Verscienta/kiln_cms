@@ -68,8 +68,8 @@ carries the reasoning.
 
 <a id="toolchain-elixir-1-20-otp-29"></a>
 
-- **The toolchain moves to Elixir 1.20.4 / OTP 29.1.1 in CI and the release
-  image; building from source now needs Elixir 1.20 or newer.** It was
+- **The toolchain moves to Elixir 1.20.4 / OTP 29.1.1 and Node 22.23.3 in CI
+  and the release image; building from source now needs Elixir 1.20+.** It was
   1.19.5 / OTP 27.3.4.15, held as a floor while development ran ahead on
   1.20 / OTP 29. The gap had two costs: OTP 29's stricter dialyzer opacity
   checks never ran in CI (#599), and 1.20's `mix format` breaks some lines
@@ -77,9 +77,14 @@ carries the reasoning.
   formatting" on code that was clean locally. `.tool-versions`, the
   Dockerfile's builder image (`hexpm/elixir:1.20.4-erlang-29.1.1`, Debian
   `bookworm-20261005-slim`) and mix.exs's `elixir: "~> 1.20"` move together.
-  A Docker deploy needs nothing: the release carries its own runtime. A
+  `.tool-versions` now pins Node too (`nodejs 22.23.3`), which CI's
+  setup-node reads and `mix kiln.toolchain.check` holds the Dockerfile's new
+  `NODE_VERSION` to. The image used to build assets with Debian bookworm's
+  Node 18, past end of life, while CI used 22. The runner moves to Debian
+  `trixie-20261005-slim` for three months of security updates. A Docker
+  deploy needs nothing: the release carries its own runtime. A
   downstream project that builds Kiln from source should move its own
-  `.tool-versions` to the same pair.
+  `.tool-versions` to the same versions.
 
 <a id="custom-fields-under-the-blocks"></a>
 
@@ -106,6 +111,16 @@ carries the reasoning.
   ([#1870](https://github.com/The-Verscienta/kiln_cms/issues/1870))
 
 ## Security
+
+<a id="decimal-3-1-2"></a>
+
+- **`decimal` 3.1.2 fixes an unbounded allocation in `Decimal.round/3`.**
+  EEF-CVE-2026-97853 (MEDIUM): a large `places` argument makes
+  `Decimal.round/3` allocate without limit, which an attacker who controls
+  that argument can use for a denial of service. Kiln does not call
+  `Decimal.round/3` itself; dependencies (Ecto, Ash, Absinthe) and overlay
+  code might, so the lock moves to the patched release. `mix hex.audit` in
+  CI flagged it the day it was published.
 
 <a id="ash-3-34-6-aggregate-policies"></a>
 

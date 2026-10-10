@@ -10,10 +10,12 @@ defmodule Mix.Tasks.Kiln.Toolchain.Check do
       Dockerfile — which still selected a 1.18.4 builder image. That image
       cannot compile this project at all.
     * **`Dockerfile`'s `ELIXIR_VERSION` / `OTP_VERSION` ARGs**, which pick the
-      builder image. Docker cannot read `.tool-versions` at build time, so these
+      builder image, and its `NODE_VERSION`, which picks the Node that builds
+      the assets. Docker cannot read `.tool-versions` at build time, so these
       are restated and must be checked rather than derived.
     * **CI** reads `.tool-versions` directly through `setup-beam`'s
-      `version-file:`, so there is nothing to check there — that is the point.
+      `version-file:` and `setup-node`'s `node-version-file:`, so there is
+      nothing to check there — that is the point.
 
   ## Why this is a separate gate, not a test
 
@@ -42,14 +44,15 @@ defmodule Mix.Tasks.Kiln.Toolchain.Check do
 
   @impl Mix.Task
   def run(_args) do
-    {elixir, erlang} = read_tool_versions()
+    {elixir, erlang, nodejs} = read_tool_versions()
 
     problems =
       Enum.reject(
         [
           check_mix_requirement(elixir),
           check_dockerfile_arg("ELIXIR_VERSION", elixir),
-          check_dockerfile_arg("OTP_VERSION", erlang)
+          check_dockerfile_arg("OTP_VERSION", erlang),
+          check_dockerfile_arg("NODE_VERSION", nodejs)
         ],
         &is_nil/1
       )
@@ -57,7 +60,7 @@ defmodule Mix.Tasks.Kiln.Toolchain.Check do
     if problems == [] do
       Mix.shell().info(
         "Toolchain: #{@tool_versions}, mix.exs and #{@dockerfile} agree " <>
-          "(elixir #{elixir}, erlang #{erlang})."
+          "(elixir #{elixir}, erlang #{erlang}, nodejs #{nodejs})."
       )
     else
       shell = Mix.shell()
@@ -79,13 +82,20 @@ defmodule Mix.Tasks.Kiln.Toolchain.Check do
   # if the file format drifts, and a wrong parse would make the gate pass on a
   # genuine mismatch.
   def parse_tool_versions(contents) do
-    lines =
-      contents
-      |> String.split("\n", trim: true)
-      |> Enum.map(&String.trim/1)
-      |> Enum.reject(&(&1 == "" or String.starts_with?(&1, "#")))
-
+    lines = declarations(contents)
     {version_for(lines, "elixir"), version_for(lines, "erlang")}
+  end
+
+  @doc false
+  # Separate from `parse_tool_versions/1` so that function keeps its shape:
+  # Node arrived in `.tool-versions` later than the BEAM pair.
+  def parse_node_version(contents), do: contents |> declarations() |> version_for("nodejs")
+
+  defp declarations(contents) do
+    contents
+    |> String.split("\n", trim: true)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == "" or String.starts_with?(&1, "#")))
   end
 
   defp version_for(lines, tool) do
@@ -102,10 +112,13 @@ defmodule Mix.Tasks.Kiln.Toolchain.Check do
       Mix.raise("#{@tool_versions} is missing — it is the source of truth for the toolchain.")
     end
 
-    case @tool_versions |> File.read!() |> parse_tool_versions() do
-      {nil, _} -> Mix.raise("#{@tool_versions} declares no `elixir` version.")
-      {_, nil} -> Mix.raise("#{@tool_versions} declares no `erlang` version.")
-      pair -> pair
+    contents = File.read!(@tool_versions)
+
+    case {parse_tool_versions(contents), parse_node_version(contents)} do
+      {{nil, _}, _} -> Mix.raise("#{@tool_versions} declares no `elixir` version.")
+      {{_, nil}, _} -> Mix.raise("#{@tool_versions} declares no `erlang` version.")
+      {_, nil} -> Mix.raise("#{@tool_versions} declares no `nodejs` version.")
+      {{elixir, erlang}, nodejs} -> {elixir, erlang, nodejs}
     end
   end
 

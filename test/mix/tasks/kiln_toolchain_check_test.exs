@@ -85,6 +85,13 @@ defmodule Mix.Tasks.Kiln.Toolchain.CheckTest do
       assert otp_arg == erlang
     end
 
+    test "the Dockerfile's NODE_VERSION mirrors .tool-versions" do
+      node = Check.parse_node_version(File.read!(".tool-versions"))
+
+      assert node, ".tool-versions declares no nodejs version"
+      assert [_, ^node] = Regex.run(~r/^ARG\s+NODE_VERSION=(\S+)/m, File.read!("Dockerfile"))
+    end
+
     # setup-beam reads .tool-versions directly; restating a version in the
     # workflow is what let CI's toolchain drift from the Dockerfile's.
     test "CI reads the file instead of restating the versions" do
@@ -93,6 +100,8 @@ defmodule Mix.Tasks.Kiln.Toolchain.CheckTest do
       refute ci =~ "env.ELIXIR_VERSION"
       refute ci =~ "env.OTP_VERSION"
       assert ci =~ "version-file: .tool-versions"
+      assert ci =~ "node-version-file: .tool-versions"
+      refute ci =~ ~r/node-version:\s/
       assert ci =~ "mix kiln.toolchain.check"
     end
   end

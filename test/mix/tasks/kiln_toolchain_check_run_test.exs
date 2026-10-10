@@ -28,10 +28,10 @@ defmodule Mix.Tasks.Kiln.Toolchain.CheckRunTest do
     # The pinned Elixir this repo actually declares: the happy path has to use
     # a version that satisfies mix.exs, and hard-coding one would rot at the
     # next toolchain bump.
-    {elixir, erlang} =
-      ".tool-versions" |> File.read!() |> Check.parse_tool_versions()
+    contents = File.read!(".tool-versions")
+    {elixir, erlang} = Check.parse_tool_versions(contents)
 
-    %{elixir: elixir, erlang: erlang}
+    %{elixir: elixir, erlang: erlang, nodejs: Check.parse_node_version(contents)}
   end
 
   defp fixture(dir, tool_versions, dockerfile) do
@@ -40,16 +40,22 @@ defmodule Mix.Tasks.Kiln.Toolchain.CheckRunTest do
     dir
   end
 
-  defp dockerfile(elixir, erlang) do
+  # Node is not a parameter: only the Node cases vary it, and they write their
+  # own lines rather than threading a third argument through every fixture.
+  @node "22.23.3"
+
+  defp dockerfile(elixir, erlang, node \\ @node) do
     """
     # syntax=docker/dockerfile:1
     ARG ELIXIR_VERSION=#{elixir}
     ARG OTP_VERSION=#{erlang}
+    ARG NODE_VERSION=#{node}
     ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian"
     """
   end
 
-  defp tool_versions(elixir, erlang), do: "elixir #{elixir}\nerlang #{erlang}\n"
+  defp tool_versions(elixir, erlang, node \\ @node),
+    do: "elixir #{elixir}\nerlang #{erlang}\nnodejs #{node}\n"
 
   defp base(version), do: version |> String.split("-") |> hd()
 
@@ -81,7 +87,7 @@ defmodule Mix.Tasks.Kiln.Toolchain.CheckRunTest do
 
       assert output() =~
                "Toolchain: .tool-versions, mix.exs and Dockerfile agree " <>
-                 "(elixir #{ctx.elixir}, erlang #{ctx.erlang})."
+                 "(elixir #{ctx.elixir}, erlang #{ctx.erlang}, nodejs #{@node})."
     end
 
     test "the `-otp-` suffix is not part of the image tag", ctx do
@@ -129,6 +135,18 @@ defmodule Mix.Tasks.Kiln.Toolchain.CheckRunTest do
       assert output() =~ "Dockerfile pins OTP_VERSION=25.0"
     end
 
+    test "a stale Node pin is named too", ctx do
+      dir =
+        fixture(
+          ctx.tmp_dir,
+          tool_versions(ctx.elixir, ctx.erlang),
+          dockerfile(base(ctx.elixir), base(ctx.erlang), "18.19.0")
+        )
+
+      assert_raise Mix.Error, ~r/1 toolchain mismatch\(es\)/, fn -> run(dir) end
+      assert output() =~ "Dockerfile pins NODE_VERSION=18.19.0, but .tool-versions says #{@node}."
+    end
+
     test "an Elixir mix.exs cannot accept is reported against mix.exs, not the image", ctx do
       dir =
         fixture(ctx.tmp_dir, tool_versions("1.10.0", ctx.erlang), dockerfile("1.11.0", "25.0"))
@@ -150,7 +168,7 @@ defmodule Mix.Tasks.Kiln.Toolchain.CheckRunTest do
         fixture(
           ctx.tmp_dir,
           tool_versions(ctx.elixir, ctx.erlang),
-          "ARG ELIXIR_VERSION=#{base(ctx.elixir)}\n"
+          "ARG ELIXIR_VERSION=#{base(ctx.elixir)}\nARG NODE_VERSION=#{@node}\n"
         )
 
       assert_raise Mix.Error, ~r/1 toolchain mismatch/, fn -> run(dir) end
@@ -164,6 +182,7 @@ defmodule Mix.Tasks.Kiln.Toolchain.CheckRunTest do
       # ARG ELIXIR_VERSION=#{base(ctx.elixir)}
       ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang"
       ARG OTP_VERSION=#{base(ctx.erlang)}
+      ARG NODE_VERSION=#{@node}
       """
 
       dir = fixture(ctx.tmp_dir, tool_versions(ctx.elixir, ctx.erlang), contents)
@@ -192,6 +211,17 @@ defmodule Mix.Tasks.Kiln.Toolchain.CheckRunTest do
       dir = fixture(ctx.tmp_dir, "elixir #{ctx.elixir}\n", dockerfile("1.18.4", "25.0"))
 
       assert_raise Mix.Error, ~r/declares no `erlang` version/, fn -> run(dir) end
+    end
+
+    test "a .tool-versions with no nodejs line is refused by name", ctx do
+      dir =
+        fixture(
+          ctx.tmp_dir,
+          "elixir #{ctx.elixir}\nerlang #{ctx.erlang}\n",
+          dockerfile(base(ctx.elixir), base(ctx.erlang))
+        )
+
+      assert_raise Mix.Error, ~r/declares no `nodejs` version/, fn -> run(dir) end
     end
 
     test "no Dockerfile is refused", ctx do

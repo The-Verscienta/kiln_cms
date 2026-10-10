@@ -77,8 +77,8 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
-- **The toolchain moves to Elixir 1.20.4 / OTP 29.1.1 in CI and the release
-  image; building from source now needs Elixir 1.20 or newer.**
+- **The toolchain moves to Elixir 1.20.4 / OTP 29.1.1 and Node 22.23.3 in CI
+  and the release image; building from source now needs Elixir 1.20+.**
   ([long form](docs/changelog/unreleased.md#toolchain-elixir-1-20-otp-29))
 
 - **Custom fields sit in the editor's main column, under the blocks, instead
@@ -97,6 +97,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#1909](https://github.com/The-Verscienta/kiln_cms/issues/1909))
 
 ### Security
+
+- **`decimal` 3.1.2 fixes an unbounded allocation in `Decimal.round/3`
+  (EEF-CVE-2026-97853).**
+  ([long form](docs/changelog/unreleased.md#decimal-3-1-2))
 
 - **Ash 3.34.6: an MCP read tool's `count`/`exists`/`aggregate` result no
   longer skips related resources' read policies in its filter.**
