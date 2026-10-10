@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **`docs/system-requirements.md`: what a machine needs to run, build and
+  develop Kiln, plus three deployment presets under `deploy/presets/`.**
+  ([long form](docs/changelog/unreleased.md#system-requirements))
+
 - **`mix kiln.import.ghost` imports a Ghost JSON export: posts, pages, tags,
   images, SEO fields and bylines, members-only posts kept gated, and a
   redirect from every old URL.**

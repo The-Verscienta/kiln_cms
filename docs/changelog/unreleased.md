@@ -7,6 +7,22 @@ carries the reasoning.
 
 ## Added
 
+<a id="system-requirements"></a>
+
+- **`docs/system-requirements.md` lists what a machine needs to run the
+  release image, build it, and develop on Kiln.** One page for the question
+  that was spread across the README, `getting-started.md`, `deploy.md`, the
+  platform guides and the Dockerfile: CPU, RAM and disk for running (512 MB
+  minimum, 1 GB recommended) and for building (2 GB marginal, 4 GB
+  comfortable), Postgres 17 with the `vector` extension as the one required
+  service, the native libraries the runner image carries (libvips, qpdf,
+  `postgresql-client-17`) and the optional one it does not (ffmpeg), the
+  optional services behind compose profiles, and the developer toolchain
+  pinned by `.tool-versions`. Linked from the getting-started prerequisites
+  and registered under Operations & deployment. Three deployment presets
+  under `deploy/presets/` (`minimal`, `publishing`, `everything`) turn the
+  runtime features on or off as a set, each a layer on `.env.prod`.
+
 <a id="mix-kiln-import-ghost"></a>
 
 - **`mix kiln.import.ghost` imports a Ghost JSON export: posts, pages, tags,
