@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **`mix kiln.plugins.doctor` notes a plugin with no `summary/0` (or the
+  generator's `TODO:` placeholder) without failing the run.**
+  ([#1942](https://github.com/The-Verscienta/kiln_cms/pull/1942))
+
 - **`mix kiln.import.ghost` imports a Ghost JSON export: posts, pages, tags,
   images, SEO fields and bylines, members-only posts kept gated, and a
   redirect from every old URL.**
