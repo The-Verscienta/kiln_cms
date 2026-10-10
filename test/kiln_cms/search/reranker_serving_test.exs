@@ -4,12 +4,14 @@ defmodule KilnCMS.Search.RerankerServingTest do
 
   * **Every score 1.0.** A cross-encoder reranker has one output logit, and
     Bumblebee's text classification defaults to softmax — over one logit,
-    always 1.0. `scores_function/1` is what picks sigmoid for that head; the ML
-    leg also pins the arithmetic that made the default wrong.
+    always 1.0. `scores_function/1` picks sigmoid for that head, and
+    `serving_options/1` is what `load/0` hands Bumblebee. The one test that
+    loads the real model is `@tag :calibration`, excluded by default.
   * **A model that will not load.** `load/0` answers `{:error, _}` instead of
-    raising, and the adapter answers `{:error, _}` when no serving is running,
-    so `KilnCMS.Application` can start without a reranker and search keeps its
-    fused order instead of the application crash-looping at boot.
+    raising, `children/1` turns that into no child and a reported error, and
+    the adapter answers `{:error, _}` (warning, throttled) when no serving is
+    running — so the application starts without a reranker and search keeps
+    its fused order instead of crash-looping at boot.
 
   Like `KilnCMS.Search.MLTest`, the file defines a different suite on each leg:
   `KilnCMS.Search.ML.available?/0` is a compile-time constant.
@@ -17,6 +19,8 @@ defmodule KilnCMS.Search.RerankerServingTest do
   # async: false — the ML leg sets BUMBLEBEE_* environment variables and the
   # global KilnCMS.Search config.
   use ExUnit.Case, async: false
+
+  import ExUnit.CaptureLog
 
   alias KilnCMS.Search.ML
   alias KilnCMS.Search.Reranker
@@ -30,6 +34,54 @@ defmodule KilnCMS.Search.RerankerServingTest do
     test "leaves any other head on softmax" do
       assert RerankerServing.scores_function(%{num_labels: 2}) == :softmax
       assert RerankerServing.scores_function(%{}) == :softmax
+    end
+  end
+
+  # `load/0` builds the serving with exactly these options, so this is where
+  # "the computed scores_function reaches Bumblebee" is pinned without a model.
+  describe "serving_options/1" do
+    test "passes scores_function/1's choice for the model's head" do
+      assert RerankerServing.serving_options(%{num_labels: 1})[:scores_function] == :sigmoid
+      assert RerankerServing.serving_options(%{num_labels: 3})[:scores_function] == :softmax
+    end
+
+    test "keeps the compiled shape and the search defn options" do
+      options = RerankerServing.serving_options(%{num_labels: 1})
+      assert options[:compile] == [batch_size: 8, sequence_length: 512]
+      assert options[:defn_options] == KilnCMS.Search.defn_options()
+    end
+  end
+
+  # The boot decision `KilnCMS.Application` delegates to: a loaded model is a
+  # serving child; a model that will not load is no child, a reported error,
+  # and a status an operator can read — never a crashed boot.
+  describe "children/1" do
+    setup do
+      RerankerServing.reset_status()
+      on_exit(&RerankerServing.reset_status/0)
+      :ok
+    end
+
+    test "a loaded model is one serving child under the registered name" do
+      assert [{Nx.Serving, opts}] = RerankerServing.children({:ok, :a_serving})
+      assert opts[:serving] == :a_serving
+      assert opts[:name] == RerankerServing.name()
+      assert RerankerServing.status() == :running
+    end
+
+    test "a model that will not load is no child, reported, and visible in status/0" do
+      log =
+        capture_log(fn ->
+          assert RerankerServing.children({:error, :enoent}) == []
+        end)
+
+      assert log =~ "could not be loaded"
+      assert log =~ KilnCMS.Search.rerank_model()
+      assert RerankerServing.status() == {:unavailable, ":enoent"}
+    end
+
+    test "is :off until a boot decided otherwise" do
+      assert RerankerServing.status() == :off
     end
   end
 
@@ -51,19 +103,6 @@ defmodule KilnCMS.Search.RerankerServingTest do
         end)
 
         :ok
-      end
-
-      # The arithmetic behind the bug, on the logits bge-reranker-base gives
-      # one relevant and one irrelevant pair: softmax across a single label
-      # cannot tell them apart, sigmoid can.
-      test "softmax over one logit is 1.0 whatever the logit; sigmoid is not" do
-        logits = Nx.tensor([[4.67], [-8.14]])
-
-        assert Nx.to_flat_list(Axon.Activations.softmax(logits)) == [1.0, 1.0]
-
-        [relevant, irrelevant] = Nx.to_flat_list(Axon.Activations.sigmoid(logits))
-        assert relevant > 0.99
-        assert irrelevant < 0.001
       end
 
       test "load/0 answers {:error, _} for a model it cannot load, rather than raising" do
@@ -91,12 +130,48 @@ defmodule KilnCMS.Search.RerankerServingTest do
         assert {:error, _reason} = RerankerServing.load()
       end
 
+      # The real model, from the local Bumblebee cache (downloads on first
+      # run). Excluded by default like every calibration test: it needs the
+      # weights. Pins the whole path — load/0 → serving → adapter — returning
+      # a relevance, not 1.0 for every pair.
+      @tag :calibration
+      test "the default model scores a relevant pair high and an irrelevant one low" do
+        assert {:ok, serving} = RerankerServing.load()
+        start_supervised!({Nx.Serving, serving: serving, name: RerankerServing.name()})
+
+        assert {:ok, [relevant, irrelevant]} =
+                 Reranker.Bumblebee.scores("intensely bitter and cold", [
+                   "Huang Lian: clears heat and dries dampness; intensely bitter and cold",
+                   "Zusanli, an acupuncture point below the knee"
+                 ])
+
+        assert relevant > 0.5
+        assert irrelevant < 0.1
+      end
+
       test "the adapter answers {:error, _} when no reranker serving is running" do
         # Reranking is off in test, so `KilnCMS.Application` started no serving:
         # the state a deployment is left in after a failed load. An exit from
         # `Nx.Serving.batched_run/2`, which a bare `rescue` would not catch.
+        Reranker.Bumblebee.reset_log_throttle()
         refute Process.whereis(RerankerServing.name())
-        assert {:error, {:exit, _reason}} = Reranker.Bumblebee.scores("query", ["a", "b"])
+
+        capture_log(fn ->
+          assert {:error, {:exit, _reason}} = Reranker.Bumblebee.scores("query", ["a", "b"])
+        end)
+      end
+
+      test "a failing reranker warns at most once a minute, without the query" do
+        Reranker.Bumblebee.reset_log_throttle()
+
+        log =
+          capture_log(fn ->
+            for _ <- 1..3, do: Reranker.Bumblebee.scores("secret question", ["secret doc"])
+          end)
+
+        assert log =~ "reranker failed (:noproc)"
+        assert length(String.split(log, "reranker failed")) == 2
+        refute log =~ "secret"
       end
     end
   else

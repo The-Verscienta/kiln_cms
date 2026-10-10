@@ -15,6 +15,8 @@ defmodule KilnCMS.Search.Reranker.Bumblebee do
   @behaviour KilnCMS.Search.Reranker
 
   if KilnCMS.Search.ML.available?() do
+    require Logger
+
     @impl true
     def scores(query, docs) when is_binary(query) and is_list(docs) do
       results =
@@ -24,14 +26,46 @@ defmodule KilnCMS.Search.Reranker.Bumblebee do
 
       {:ok, Enum.map(results, &top_score/1)}
     rescue
-      error -> {:error, error}
+      error -> failed({:error, error}, inspect(error.__struct__))
     catch
       # No serving registered — `KilnCMS.Application` started none because the
       # model would not load (see `KilnCMS.Search.RerankerServing`) — is an
       # exit from `Nx.Serving.batched_run/2`, not an exception. Same answer as
       # any other failure: `{:error, _}`, and the caller keeps its fused order.
-      :exit, reason -> {:error, {:exit, reason}}
+      :exit, reason -> failed({:error, {:exit, reason}}, exit_kind(reason))
     end
+
+    # A reranker that fails on every request would otherwise be silent: the
+    # caller keeps its fused order and says nothing. Warn, at most once a
+    # minute. Only the failure's *kind* is logged — an exit reason carries the
+    # serving's input, which is the visitor's query and the candidates' text.
+    @log_every_ms :timer.minutes(1)
+    @log_key {__MODULE__, :last_failure_log}
+
+    defp failed(error, kind) do
+      now = System.monotonic_time(:millisecond)
+      last = :persistent_term.get(@log_key, nil)
+
+      if is_nil(last) or now - last >= @log_every_ms do
+        :persistent_term.put(@log_key, now)
+
+        Logger.warning(
+          "reranker failed (#{kind}); keeping the fused order " <>
+            "(KilnCMS.Search.RerankerServing.status/0 says whether it ever started)"
+        )
+      end
+
+      error
+    end
+
+    # Atoms only: a crash reason can carry the input it crashed on.
+    defp exit_kind({reason, {Nx.Serving, _fun, _args}}) when is_atom(reason), do: inspect(reason)
+    defp exit_kind(reason) when is_atom(reason), do: inspect(reason)
+    defp exit_kind(_reason), do: "serving exit"
+
+    @doc false
+    # Tests only: start from a known throttle state.
+    def reset_log_throttle, do: :persistent_term.erase(@log_key)
 
     defp top_score(%{predictions: [%{score: score} | _]}), do: score
     defp top_score(_), do: 0.0

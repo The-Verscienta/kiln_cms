@@ -22,20 +22,84 @@ defmodule KilnCMS.Search.RerankerServing do
 
   ## A model that will not load
 
-  `load/0` returns `{:error, reason}` rather than raising, and
-  `KilnCMS.Application` starts no reranker when it does — logging why. A
-  reranker is a refinement: without it every search keeps its fused order
-  (`KilnCMS.Search.Reranker.Bumblebee` answers `{:error, _}`, which `hybrid/3`
-  already treats as "keep the fused order"). Raising here used to take the
-  whole application down at boot, so a deployment that switched reranking on
-  without the model in its cache (an offline image, `BUMBLEBEE_OFFLINE=true`)
-  crash-looped instead of searching without it.
+  `load/0` returns `{:error, reason}` rather than raising, and `children/1`
+  turns that into no serving child plus a `KilnCMS.Config.Report.error/3`
+  (log and Sentry). A reranker is a refinement: without it every search keeps
+  its fused order (`KilnCMS.Search.Reranker.Bumblebee` answers `{:error, _}`,
+  which `hybrid/3` already treats as "keep the fused order"). Raising here
+  used to take the whole application down at boot, so a deployment that
+  switched reranking on without the model in its cache (an offline image,
+  `BUMBLEBEE_OFFLINE=true`) crash-looped instead of searching without it.
+
+  `status/0` answers whether this node is reranking, for an operator after
+  boot:
+
+      bin/kiln_cms rpc 'KilnCMS.Search.RerankerServing.status() |> IO.inspect()'
   """
   @name __MODULE__
+  @status_key {__MODULE__, :status}
 
   @doc "Registered process name of the serving."
   @spec name() :: atom()
   def name, do: @name
+
+  @doc """
+  Whether this node is reranking: `:off` (no scope reranks, or the reranker is
+  not the Bumblebee adapter), `:running`, or `{:unavailable, reason}` when
+  reranking is switched on but the model could not be loaded at boot.
+  """
+  @spec status() :: :off | :running | {:unavailable, String.t()}
+  def status, do: :persistent_term.get(@status_key, :off)
+
+  @doc false
+  # Tests only: forget a status a previous test recorded.
+  def reset_status, do: :persistent_term.erase(@status_key)
+
+  @doc """
+  The options the serving is built with for a model whose spec is `spec`:
+  the compiled shape, the defn options and `scores_function/1`'s choice.
+  """
+  @spec serving_options(map()) :: keyword()
+  def serving_options(spec) do
+    [
+      compile: [batch_size: 8, sequence_length: 512],
+      defn_options: KilnCMS.Search.defn_options(),
+      scores_function: scores_function(spec)
+    ]
+  end
+
+  @doc """
+  The supervision children for a `load/0` result.
+
+  `{:ok, serving}` is the serving, registered under `name/0`. `{:error,
+  reason}` is **no** child: the application starts without a reranker, the
+  failure is reported once through `KilnCMS.Config.Report.error/3`, and
+  `status/0` answers `{:unavailable, reason}` from then on.
+  """
+  @spec children({:ok, term()} | {:error, term()}) :: [
+          Supervisor.child_spec() | {module(), keyword()}
+        ]
+  def children({:ok, serving}) do
+    :persistent_term.put(@status_key, :running)
+    [{Nx.Serving, serving: serving, name: @name, batch_timeout: 50}]
+  end
+
+  def children({:error, reason}) do
+    model = KilnCMS.Search.rerank_model()
+    summary = inspect(reason, limit: 5, printable_limit: 200)
+    :persistent_term.put(@status_key, {:unavailable, summary})
+
+    KilnCMS.Config.Report.error(
+      "reranker_load",
+      "Reranking is switched on (KilnCMS.Search rerank / KilnCMS.Ask rerank / ASK_RERANK) " <>
+        "but the reranker model #{model} could not be loaded, so no reranker started and " <>
+        "search keeps its fused order. Bake the model into the image (or allow the " <>
+        "Hugging Face download) and restart.",
+      %{model: model, reason: summary}
+    )
+
+    []
+  end
 
   @doc """
   The Bumblebee `scores_function` for a reranker whose model spec is `spec`:
@@ -63,10 +127,10 @@ defmodule KilnCMS.Search.RerankerServing do
         warn_unless_single_logit(model, model_info.spec)
 
         {:ok,
-         Bumblebee.Text.text_classification(model_info, tokenizer,
-           compile: [batch_size: 8, sequence_length: 512],
-           defn_options: KilnCMS.Search.defn_options(),
-           scores_function: scores_function(model_info.spec)
+         Bumblebee.Text.text_classification(
+           model_info,
+           tokenizer,
+           serving_options(model_info.spec)
          )}
       end
     rescue

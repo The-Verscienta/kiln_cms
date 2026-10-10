@@ -184,7 +184,17 @@ downloadable. If it is not (an offline image that never baked it, or a
 misspelt `rerank_model`), Kiln starts **without** a reranker rather than
 failing to boot. It reports the problem once through `KilnCMS.Config.Report`
 (the log and Sentry), and every surface keeps its fused order, exactly as when
-reranking is off.
+reranking is off. `KilnCMS.Search.RerankerServing.status/0` says which state a
+node is in (`:off`, `:running` or `{:unavailable, reason}`), and the adapter
+warns at most once a minute while reranking requests fail.
+
+One known rough edge: reranking happens **per section**. If the reranker
+fails for one section's call but not another's, the failed section keeps its
+fused scores (RRF, around 0.01–0.05), while the others carry 0–1 reranker
+scores. The flat sort then mixes the two scales and ranks every reranked
+source above every fused one. Reranking the merged candidates once, instead
+of per section, removes this
+([#U3_ISSUE](https://github.com/The-Verscienta/kiln_cms/issues/U3_ISSUE)).
 
 Two caveats before setting it, both from the report that asked for this
 (a production deployment's search-ranking report, 2026-09-04), quoted as

@@ -106,15 +106,24 @@ carries the reasoning.
   (`scores_function/1`), so a score is a 0–1 relevance with the logit's order.
   A head with more labels keeps softmax and logs a warning at load.
   Separately, the serving used to load the model with `{:ok, _} =` while
-  `KilnCMS.Application` was building its child list. With reranking switched on
-  and the model missing from an offline image's cache, the match failed and
-  the application crash-looped at boot. `RerankerServing.load/0` now returns
-  `{:error, reason}`, the application starts without a reranker and reports
-  it through `KilnCMS.Config.Report.error/3`, and
-  `KilnCMS.Search.Reranker.Bumblebee.scores/2` answers `{:error, _}` (it now
-  also catches the exit from a serving that is not running). Every surface
-  keeps its fused order, as when reranking is off. `build/0` keeps its
-  contract and raises with the reason.
+  `KilnCMS.Application` was building its child list. With reranking switched
+  on and the model missing from an offline image's cache, the match failed
+  and the application crash-looped at boot.
+  - `RerankerServing.load/0` now returns `{:error, reason}` instead of raising.
+  - `RerankerServing.children/1` turns that into no serving child and a
+    `KilnCMS.Config.Report.error/3`, and the application starts without a
+    reranker.
+  - `RerankerServing.status/0` answers `:off`, `:running` or
+    `{:unavailable, reason}` after boot.
+  - `KilnCMS.Search.Reranker.Bumblebee.scores/2` answers `{:error, _}`. It now
+    also catches the exit from a serving that is not running, and it warns at
+    most once a minute, logging the failure's kind and never the query.
+
+  Every surface keeps its fused order, as when reranking is off. `build/0`
+  keeps its contract and raises with the reason. One caveat remains: because
+  reranking is per section, a section whose rerank call fails keeps fused RRF
+  scores while the others carry 0–1 scores, so `/api/ask`'s flat sort mixes
+  the two scales (documented in `docs/rag.md`).
 
 <a id="the-plugin-docs-no-longer-promise-hex-or-git-dependency-plugins-a-plugin"></a>
 
