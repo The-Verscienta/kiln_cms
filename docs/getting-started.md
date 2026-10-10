@@ -25,7 +25,7 @@ contributor. It points at the right guide rather than restating it.
 
 ## 1. Run it locally
 
-Prerequisites: Elixir 1.19.3+ / OTP 27+, Docker (for Postgres), Node.js.
+Prerequisites: Elixir 1.20+ / OTP 29+, Docker (for Postgres), Node.js 22.
 
 `.tool-versions` pins the exact Elixir/OTP that CI and the release image build
 on — `asdf install` (or `mise install`) reproduces it. Developing on something

@@ -128,7 +128,7 @@ defmodule KilnCMS.Billing.Entitlements do
   # and the recompute returns the error, so the membership transition around
   # it rolls back too and Oban retries (#1659). Inside that transition's
   # transaction this joins it; called on its own it is its own transaction.
-  @spec persist(Ash.Resource.record(), [atom()], [atom()], [atom()], %{
+  @spec persist(Ash.Resource.Record.t(), [atom()], [atom()], [atom()], %{
           optional(Ash.UUID.t()) => [atom()]
         }) :: :ok | {:error, term()}
   def persist(user, before, desired, managed, by_org) do

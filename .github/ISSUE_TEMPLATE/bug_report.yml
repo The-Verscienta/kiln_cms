@@ -76,7 +76,7 @@ body:
         in play (Dragonfly, Meilisearch, MinIO/S3) and whether multi-tenancy is on.
       render: text
       placeholder: |
-        Elixir 1.19.3 / OTP 27
+        Elixir 1.20.4 / OTP 29
         macOS 15.6 / Postgres 16 in Docker
         mix phx.server, single tenant, MinIO storage
     validations:

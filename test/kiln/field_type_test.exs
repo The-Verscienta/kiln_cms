@@ -13,8 +13,8 @@ defmodule Kiln.FieldTypeTest do
     test "is total across toolchain versions" do
       # `Float.parse/1` is version-dependent for an overflow literal: it returns
       # `:error` on Elixir 1.20 but *raises* ArgumentError from
-      # `:erlang.list_to_float/1` on 1.19 — the version `.tool-versions` pins and
-      # CI runs. Anything pattern-matching its result must go through this.
+      # `:erlang.list_to_float/1` on 1.19, which `.tool-versions` pinned until
+      # the move to 1.20. Anything pattern-matching its result goes through this.
       assert Kiln.FieldType.parse_float(String.duplicate("9", 400) <> ".0") == :error
       assert Kiln.FieldType.parse_float("not a number") == :error
     end

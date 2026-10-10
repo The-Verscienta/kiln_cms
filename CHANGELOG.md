@@ -77,6 +77,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **The toolchain moves to Elixir 1.20.4 / OTP 29.1.1 and Node 22.23.3 in CI
+  and the release image; building from source now needs Elixir 1.20+.**
+  ([long form](docs/changelog/unreleased.md#toolchain-elixir-1-20-otp-29))
+
 - **`docs/path-forward.md` sets Kiln's direction from 1.1 (live delivery plus
   provable, governed publishing) and the 2.0, 3.0 and 4.0 milestones.**
   ([long form](docs/changelog/unreleased.md#path-forward))

@@ -406,11 +406,11 @@ type Entry {
   lockVersion: Int!
   insertedAt: DateTime!
   updatedAt: DateTime!
+  state: String!
   typeDefinitionId: ID!
   authorId: ID
   categoryId: ID
   featuredImageId: ID
-  state: String!
   category: Category
   featuredImage: MediaItem
   tags(
@@ -670,11 +670,11 @@ input EntryFilterInput {
   lockVersion: EntryFilterLockVersion
   insertedAt: EntryFilterInsertedAt
   updatedAt: EntryFilterUpdatedAt
+  state: EntryFilterState
   typeDefinitionId: EntryFilterTypeDefinitionId
   authorId: EntryFilterAuthorId
   categoryId: EntryFilterCategoryId
   featuredImageId: EntryFilterFeaturedImageId
-  state: EntryFilterState
   category: CategoryFilterInput
   featuredImage: MediaItemFilterInput
   tags: TagFilterInput
@@ -1020,11 +1020,11 @@ enum EntrySortField {
   LOCK_VERSION
   INSERTED_AT
   UPDATED_AT
+  STATE
   TYPE_DEFINITION_ID
   AUTHOR_ID
   CATEGORY_ID
   FEATURED_IMAGE_ID
-  STATE
   TYPE_NAME
   PUBLISHED
   EFFECTIVE_REVIEW_AFTER_DAYS
@@ -1503,10 +1503,10 @@ type Page {
   lockVersion: Int!
   insertedAt: DateTime!
   updatedAt: DateTime!
+  state: String!
   authorId: ID
   categoryId: ID
   featuredImageId: ID
-  state: String!
   category: Category
   featuredImage: MediaItem
   tags(
@@ -1746,10 +1746,10 @@ input PageFilterInput {
   lockVersion: PageFilterLockVersion
   insertedAt: PageFilterInsertedAt
   updatedAt: PageFilterUpdatedAt
+  state: PageFilterState
   authorId: PageFilterAuthorId
   categoryId: PageFilterCategoryId
   featuredImageId: PageFilterFeaturedImageId
-  state: PageFilterState
   category: CategoryFilterInput
   featuredImage: MediaItemFilterInput
   tags: TagFilterInput
@@ -2134,10 +2134,10 @@ enum PageSortField {
   LOCK_VERSION
   INSERTED_AT
   UPDATED_AT
+  STATE
   AUTHOR_ID
   CATEGORY_ID
   FEATURED_IMAGE_ID
-  STATE
   PUBLISHED
   EFFECTIVE_REVIEW_AFTER_DAYS
   DUE_AT
@@ -2181,10 +2181,10 @@ type Post {
   lockVersion: Int!
   insertedAt: DateTime!
   updatedAt: DateTime!
+  state: String!
   authorId: ID
   categoryId: ID
   featuredImageId: ID
-  state: String!
   category: Category
   featuredImage: MediaItem
   tags(
@@ -2443,10 +2443,10 @@ input PostFilterInput {
   lockVersion: PostFilterLockVersion
   insertedAt: PostFilterInsertedAt
   updatedAt: PostFilterUpdatedAt
+  state: PostFilterState
   authorId: PostFilterAuthorId
   categoryId: PostFilterCategoryId
   featuredImageId: PostFilterFeaturedImageId
-  state: PostFilterState
   category: CategoryFilterInput
   featuredImage: MediaItemFilterInput
   tags: TagFilterInput
@@ -2760,10 +2760,10 @@ enum PostSortField {
   LOCK_VERSION
   INSERTED_AT
   UPDATED_AT
+  STATE
   AUTHOR_ID
   CATEGORY_ID
   FEATURED_IMAGE_ID
-  STATE
   PUBLISHED
   EFFECTIVE_REVIEW_AFTER_DAYS
   DUE_AT

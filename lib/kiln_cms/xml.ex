@@ -280,7 +280,7 @@ defmodule KilnCMS.Xml do
   # but not a success typing, so the untyped `put_name/3` here infers the
   # unrolled `{:set, …} | %{_ => []}` union for its return. Feeding that back
   # into the `scan_names/4` accumulator on the next iteration then trips
-  # `call_without_opaque` under OTP 29 (invisible on CI's OTP 27). The
+  # `call_without_opaque` under OTP 29 (invisible to OTP 27's dialyzer). The
   # build-once-at-the-end shape used elsewhere cannot apply: the budget has to
   # be enforced *during* the scan, before a crafted document is fully read.
   # `map_size/1` is O(1) like `MapSet.size/1`, and `:sets` v2 stores exactly
