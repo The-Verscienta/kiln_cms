@@ -17465,7 +17465,7 @@ msgstr "Fichier XLIFF à importer"
 msgid "Yes, subscribe me"
 msgstr "Oui, abonnez-moi"
 
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex
+#: lib/kiln_cms_web/controllers/newsletter_html/message.html.heex
 #, elixir-autogen, elixir-format
 msgid "Yes, unsubscribe"
 msgstr "Oui, me désabonner"

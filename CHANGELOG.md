@@ -81,6 +81,10 @@ Every summary line below that was shortened links to its own entry there.
   of behind the inspector's Settings tab.**
   ([#1916](https://github.com/The-Verscienta/kiln_cms/pull/1916) · [long form](docs/changelog/unreleased.md#custom-fields-under-the-blocks))
 
+- **The newsletter's sign-up and unsubscribe pages render in the site's own
+  layout instead of as bare unstyled pages.**
+  ([long form](docs/changelog/unreleased.md#newsletter-pages-in-site-chrome))
+
 ### Fixed
 
 - **The plugin docs no longer promise Hex or git-dependency plugins: a plugin
