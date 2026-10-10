@@ -1,0 +1,25 @@
+<%!--
+  Every other public newsletter page: the sign-up outcomes ("Almost there",
+  "Check that address", "Something went wrong") and both unsubscribe pages.
+  They used to be hand-built HTML with inline styles, so a reader who signed up
+  from a styled page landed on one that looked like a different site.
+
+  These routes ride `:public_form`: no session, no CSRF. The unsubscribe
+  button's POST needs no token — the per-subscriber token in its URL is the
+  secret, and the RFC 8058 one-click posts to the same route.
+--%>
+<Layouts.public current_org={@current_org} locale={@locale}>
+  <section class="card card-pad mx-auto my-12 w-full max-w-md space-y-4 text-center">
+    <h1 class="text-2xl font-semibold text-balance">{@heading}</h1>
+    <p class="text-base-content/70">{@body}</p>
+    <form
+      :if={@unsubscribe_token}
+      action={~p"/newsletter/unsubscribe/#{@unsubscribe_token}"}
+      method="post"
+    >
+      <button type="submit" class="btn btn-primary w-full">
+        {gettext("Yes, unsubscribe")}
+      </button>
+    </form>
+  </section>
+</Layouts.public>

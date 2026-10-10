@@ -264,61 +264,32 @@ defmodule KilnCMSWeb.NewsletterController do
 
   # The one-button "confirm unsubscribe" page the GET link renders. No CSRF token
   # is needed (the :public_form pipeline is CSRF-free and the per-subscriber token
-  # is the secret). Values are HTML-escaped.
-  # sobelow_skip ["XSS.SendResp"]
+  # is the secret).
   defp confirm_form(conn, subscriber, token) do
-    html = """
-    <!DOCTYPE html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>#{h(gettext("Unsubscribe"))}</title>
-      </head>
-      <body style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:520px;margin:80px auto;padding:0 24px;color:#111;line-height:1.5;">
-        <h1 style="font-size:22px;">#{h(gettext("Unsubscribe"))}</h1>
-        <p style="color:#444;">
-          #{h(gettext("Stop sending newsletters to %{email}?", email: to_string(subscriber.email)))}
-        </p>
-        <form method="post" action="#{~p"/newsletter/unsubscribe/#{token}"}">
-          <button type="submit" style="padding:10px 16px;font-size:15px;border:none;border-radius:8px;background:#c8865a;color:#1c1a17;cursor:pointer;">
-            #{h(gettext("Yes, unsubscribe"))}
-          </button>
-        </form>
-      </body>
-    </html>
-    """
-
-    conn
-    |> put_resp_content_type("text/html")
-    |> send_resp(200, html)
+    page(
+      conn,
+      gettext("Unsubscribe"),
+      gettext("Stop sending newsletters to %{email}?", email: to_string(subscriber.email)),
+      token
+    )
   end
 
-  # A small self-contained confirmation page. Values are HTML-escaped; no scripts,
-  # so the strict browser CSP applies unchanged.
-  # sobelow_skip ["XSS.SendResp"]
-  defp page(conn, heading, body) do
-    html = """
-    <!DOCTYPE html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>#{h(heading)}</title>
-      </head>
-      <body style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:520px;margin:80px auto;padding:0 24px;color:#111;line-height:1.5;">
-        <h1 style="font-size:22px;">#{h(heading)}</h1>
-        <p style="color:#444;">#{h(body)}</p>
-      </body>
-    </html>
-    """
-
+  # Every other public newsletter page, in the site's own chrome — the same
+  # root layout and `Layouts.public` as the confirmation page, which `:browser`
+  # gives it and `:public_form` does not, so it is set here (as
+  # `KilnCMSWeb.FormController` does for a refused submission).
+  defp page(conn, heading, body, unsubscribe_token \\ nil) do
     conn
-    |> put_resp_content_type("text/html")
-    |> send_resp(200, html)
-  end
-
-  defp h(value) do
-    value |> to_string() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
+    |> put_root_layout(html: {KilnCMSWeb.Layouts, :root})
+    |> put_layout(false)
+    |> put_view(html: KilnCMSWeb.NewsletterHTML)
+    |> render(:message,
+      page_title: heading,
+      heading: heading,
+      body: body,
+      unsubscribe_token: unsubscribe_token,
+      current_org: conn.assigns[:current_org],
+      locale: Gettext.get_locale(KilnCMSWeb.Gettext)
+    )
   end
 end

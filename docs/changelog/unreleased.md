@@ -77,3 +77,15 @@ carries the reasoning.
   validation errors, so the Settings tab's alert dot no longer counts them.
   The panel stays visible in the Markdown view. Inputs, names and the save
   path are unchanged. See `KilnCMSWeb.ContentEditor.CustomFieldsPanel`.
+
+<a id="newsletter-pages-in-site-chrome"></a>
+
+- **The newsletter's sign-up and unsubscribe pages render in the site's own
+  layout instead of as bare unstyled pages.** "Almost there", "Check that
+  address", "Something went wrong" and both unsubscribe pages were
+  hand-built HTML with inline styles, so a reader who signed up from a styled
+  page landed somewhere that looked like a different site. They now use
+  `Layouts.public` and the confirmation page's card, like the confirmation
+  page already did. Routes, status codes, wording and the unsubscribe
+  one-click are unchanged.
+  ([#1870](https://github.com/The-Verscienta/kiln_cms/issues/1870))

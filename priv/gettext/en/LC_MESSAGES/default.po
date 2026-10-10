@@ -17465,7 +17465,7 @@ msgstr ""
 msgid "Yes, subscribe me"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/newsletter_controller.ex
+#: lib/kiln_cms_web/controllers/newsletter_html/message.html.heex
 #, elixir-autogen, elixir-format
 msgid "Yes, unsubscribe"
 msgstr ""

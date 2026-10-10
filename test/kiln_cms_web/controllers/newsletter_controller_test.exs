@@ -128,8 +128,12 @@ defmodule KilnCMSWeb.NewsletterControllerTest do
 
     conn = get(conn, ~p"/newsletter/unsubscribe/#{sub.unsubscribe_token}")
     # A one-button POST form — a GET (e.g. a link prefetcher) must not mutate.
-    assert html_response(conn, 200) =~ "unsubscribe"
-    assert html_response(conn, 200) =~ "<form method=\"post\""
+    html = html_response(conn, 200)
+    assert html =~ "unsubscribe"
+
+    assert html =~
+             ~s(action="/newsletter/unsubscribe/#{sub.unsubscribe_token}" method="post")
+
     assert reload(sub).status == :pending
   end
 
@@ -161,7 +165,12 @@ defmodule KilnCMSWeb.NewsletterControllerTest do
 
       conn = post(conn, ~p"/newsletter/subscribe", %{"email" => email, "name" => "Reader"})
 
-      assert html_response(conn, 200) =~ "Check your inbox"
+      html = html_response(conn, 200)
+      assert html =~ "Check your inbox"
+      # In the site's own chrome, not a bare page with inline styles: a reader
+      # who signed up from a styled page should land on the same site.
+      assert html =~ ~s(class="public-shell")
+      assert html =~ ~s(href="/assets/css/app.css")
       subscriber = find(email)
       assert subscriber.status == :pending
       assert subscriber.name == "Reader"
