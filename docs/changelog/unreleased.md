@@ -112,15 +112,15 @@ carries the reasoning.
 
 ## Security
 
-<a id="decimal-3-1-2"></a>
+<a id="decimal-3-2-0-round-allocation"></a>
 
-- **`decimal` 3.1.2 fixes an unbounded allocation in `Decimal.round/3`.**
-  EEF-CVE-2026-97853 (MEDIUM): a large `places` argument makes
-  `Decimal.round/3` allocate without limit, which an attacker who controls
-  that argument can use for a denial of service. Kiln does not call
-  `Decimal.round/3` itself; dependencies (Ecto, Ash, Absinthe) and overlay
-  code might, so the lock moves to the patched release. `mix hex.audit` in
-  CI flagged it the day it was published.
+- **decimal 3.2.0 for EEF-CVE-2026-97853: `Decimal.round/3` no longer
+  allocates without bound on a caller-chosen `places`.** The advisory
+  (MEDIUM) is a denial of service when the `places` argument comes from
+  outside. Kiln does not call `Decimal.round/3` itself; `decimal` is in the
+  tree through Ecto, Jason and the JSON-schema libraries, and the bump keeps
+  the Dependency audit job green. The lock moves from 3.1.1 to 3.2.0, the
+  newest release the tree's constraints allow; the fix landed in 3.1.2.
 
 <a id="ash-3-34-6-aggregate-policies"></a>
 
