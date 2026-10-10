@@ -344,10 +344,11 @@ defmodule Kiln.FieldType do
   `Float.parse/1` itself is **not** total, and *how* it fails is toolchain-
   dependent: on a literal that overflows a double it returns the bare atom
   `:error` on Elixir 1.20 but **raises** `ArgumentError` out of
-  `:erlang.list_to_float/1` on 1.19 (the version `.tool-versions` pins and CI
-  runs). A `cast/2` runs on every content write, including public ones, so
-  there the difference is a validation message on one toolchain and a 500 on
-  the other. Both failures are normalized to `:error` here.
+  `:erlang.list_to_float/1` on 1.19 (what `.tool-versions` pinned until the
+  move to 1.20). A `cast/2` runs on every content write, including public
+  ones, so there the difference is a validation message on one toolchain and a
+  500 on the other. Both failures are normalized to `:error` here, so a field
+  type's behaviour does not depend on which Elixir compiled it.
 
       Kiln.FieldType.parse_float(String.duplicate("9", 400) <> ".0")
       #=> :error
