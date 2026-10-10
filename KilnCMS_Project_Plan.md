@@ -33,7 +33,7 @@
 ### Core stack + Required
 | Layer              | Technology                          | Why / Notes |
 |--------------------|-------------------------------------|-------------|
-| Language           | Elixir 1.19+ / OTP                  | Concurrency, fault-tolerance, DX |
+| Language           | Elixir 1.20+ / OTP                  | Concurrency, fault-tolerance, DX |
 | Web Framework      | Phoenix 1.8+ + LiveView (latest)    | Real-time UIs, channels, PubSub, HEEx components |
 | Styling            | Tailwind CSS (latest) + custom HEEx components / design system | Full control, lightweight, minimal-dependency. No DaisyUI by default. |
 | Templating         | Plain **HEEx** + a hand-written component kit | **No Surface** — HEEx function components cover the need without a second templating layer |

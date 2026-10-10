@@ -1,31 +1,49 @@
 # The toolchain, in one place. `mix kiln.toolchain.check` fails when the
 # Dockerfile's ARGs or mix.exs's `elixir:` requirement disagree with this file,
 # and CI's setup-beam reads it directly (version-file:) rather than restating it.
-#
+
 # Exact versions on purpose. CI used to pin "1.19"/"27", which setup-beam
 # resolves to whatever is newest at the time — so the toolchain CI tested on
 # moved on its own, and could not be matched by the Dockerfile, which needs
 # exact tags. See #600.
-#
-# Floor: Elixir must stay 1.19.3+. config/dev.exs uses the `E` (`:export`) regex
-# modifier on its live-reload patterns, which 1.18 cannot parse (#572).
-#
+
+# Floor: Elixir 1.20 (mix.exs says `~> 1.20`). The hard floor used to be 1.19.3
+# — config/dev.exs uses the `E` (`:export`) regex modifier on its live-reload
+# patterns, which 1.18 cannot parse (#572) — but the practical one is the
+# formatter: 1.20's `mix format` breaks some lines differently from 1.19's, so a
+# tree formatted on 1.20 fails a 1.19 CI's "Check formatting" and vice versa.
+# One version for everyone is the only way that check means anything.
+
 # Changing these is a real change: bump, run `mix kiln.toolchain.check`, mirror
 # into the Dockerfile ARGs, and expect dialyzer to have opinions on an OTP major
 # bump (#599). setup-beam matches these strictly, so a version with no published
-# build for ubuntu-24.04 fails every job — check builds.hex.pm first.
-#
-# OTP 27 is a deliberate floor, not a stale pin (#600). CI and the release image
-# run what this file says; a developer's machine may be further ahead, and today
-# typically is. The cost of that gap is specific and worth stating rather than
-# rediscovering: OTP 29's dialyzer performs stricter opacity checking than 27's,
-# so that class of warning is invisible to CI and is caught only by whoever runs
-# `mix dialyzer` locally — which is exactly how #599 got in and stayed green.
-#
-# It is a floor rather than a match because this file also decides what
-# *production* runs: the release image should run the toolchain the test suite
-# and dialyzer actually ran against, so moving it is a deploy-affecting change
-# and belongs in its own PR, with #599's class cleared first so the bump is not
-# noisy.
-elixir 1.19.5-otp-27
-erlang 27.3.4.15
+# build for ubuntu-24.04 fails every job — check builds.hex.pm first, and Docker
+# Hub for the matching `hexpm/elixir` builder tag.
+
+# CI, the release image and a developer's machine run the same pair. They did
+# not always: until 1.20.4 / OTP 29.1.1 this file held 1.19.5 / OTP 27 as a
+# deliberate floor while development ran ahead on 1.20 / OTP 29 (#600). That gap
+# had two specific costs. OTP 29's dialyzer performs stricter opacity checking
+# than 27's, so that class of warning was invisible to CI and caught only by
+# whoever ran `mix dialyzer` locally — which is how #599 got in and stayed
+# green. And the formatter disagreement above failed downstream overlay PRs on
+# code that was clean on the author's machine.
+
+# Node (`nodejs`) builds the assets — `npm ci`, then esbuild/tailwind — in CI
+# (setup-node reads this file via `node-version-file:`) and in the release
+# image (the Dockerfile's NODE_VERSION, held to this line by the same check).
+# Before it was declared here, CI said "22" and the image installed Debian's
+# Node 18.
+
+# That is also why these comments are separated by blank lines and never by a
+# bare `#`. setup-node does not parse this file the way asdf does: it takes the
+# first line that is a single word, or `nodejs <version>`, so a lone `#` above
+# the `nodejs` line is read as Node version "#". `mix kiln.toolchain.check`
+# applies setup-node's own pattern and fails if it would not land on `nodejs`.
+
+# This file also decides what *production* runs: the release image should run
+# the toolchain the test suite and dialyzer actually ran against, so moving it
+# is a deploy-affecting change that belongs in its own PR and ships as a release.
+elixir 1.20.4-otp-29
+erlang 29.1.1
+nodejs 22.23.3
