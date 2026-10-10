@@ -89,3 +89,16 @@ carries the reasoning.
   page already did. Routes, status codes, wording and the unsubscribe
   one-click are unchanged.
   ([#1870](https://github.com/The-Verscienta/kiln_cms/issues/1870))
+
+## Security
+
+<a id="ash-3-34-6-aggregate-policies"></a>
+
+- **Ash 3.34.6: an MCP read tool's `count`/`exists`/`aggregate` result no
+  longer skips related resources' read policies in its filter.**
+  EEF-CVE-2026-101028 (MEDIUM): `Ash.count`, `Ash.exists` and
+  `Ash.aggregate` applied only the root resource's read policy, so a filter
+  crossing a relationship could test conditions against related rows the
+  caller can't read. Kiln's MCP read tools keep AshAi's default parameters,
+  which let an API-key holder choose those result types and send a filter.
+  `Ash.read` and page counts were not affected.
