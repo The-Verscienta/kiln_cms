@@ -337,4 +337,44 @@ defmodule KilnCMS.Scripts.PublishReleasesTest do
       assert html =~ ~s(<a href="/releases/v1-0-0">KilnCMS 1.0.0</a> — 2026-10-02)
     end
   end
+
+  describe "the index page's newsletter sign-up" do
+    @index [%{version: "1.0.0", slug: "v1-0-0", date: "2026-10-02"}]
+
+    test "follows the list when the site has the block" do
+      assert %{"title" => "Release notes", "block_tree" => [list, signup]} =
+               PublishReleases.index_page(@index, "releases", true)
+
+      assert list["_type"] == "rich_text"
+      assert list["legacy_html"] =~ "/releases/v1-0-0"
+      assert signup["_type"] == "newsletter_signup"
+    end
+
+    test "is left out when it doesn't, so the list still publishes" do
+      assert %{"block_tree" => [%{"_type" => "rich_text"}]} =
+               PublishReleases.index_page(@index, "releases", false)
+    end
+
+    # The publisher can't compile against the app, so nothing else ties the
+    # map it sends to the block's real fields: a renamed field would be
+    # silently dropped by the site.
+    test "is a block the app reads back with its heading and intro" do
+      %{"block_tree" => [_list, signup]} = PublishReleases.index_page(@index, "releases", true)
+
+      assert [%KilnCMS.Blocks.NewsletterSignup{heading: heading, intro: intro}] =
+               KilnCMS.CMS.TypedBlocks.to_typed([signup])
+
+      assert heading == signup["heading"]
+      assert intro == signup["intro"]
+    end
+
+    test "is supported exactly when the site's schema names the block" do
+      assert PublishReleases.signup_supported?(%{
+               "$defs" => %{"block_newsletter_signup" => %{}, "block_heading" => %{}}
+             })
+
+      refute PublishReleases.signup_supported?(%{"$defs" => %{"block_heading" => %{}}})
+      refute PublishReleases.signup_supported?(%{"errors" => []})
+    end
+  end
 end

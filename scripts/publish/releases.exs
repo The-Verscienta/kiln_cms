@@ -362,6 +362,36 @@ defmodule PublishReleases do
       "<ul>#{items}</ul>"
   end
 
+  # The newsletter sign-up under the list (#1870). It has to come from here:
+  # the index is rebuilt on every run, which replaces its whole block tree, so
+  # a block an editor added by hand would be gone at the next release.
+  @signup_block %{
+    "_type" => "newsletter_signup",
+    "heading" => "Get the release notes by email",
+    "intro" => "One email per release, with what changed and what to do before upgrading."
+  }
+
+  @doc """
+  The `/releases` index page's attributes: the list, then the newsletter
+  sign-up when the site has that block (`signup_supported?/1`).
+  """
+  def index_page(releases, segment, signup?) do
+    blocks = API.rich_text_tree(index_html(releases, segment))
+
+    %{
+      "title" => @index_title,
+      "block_tree" => if(signup?, do: blocks ++ [@signup_block], else: blocks)
+    }
+  end
+
+  @doc """
+  Whether a `GET /api/schema` body names the `newsletter_signup` block. A
+  site on a Kiln without it would refuse the whole index write over that
+  one block, so the index goes out without the sign-up instead.
+  """
+  def signup_supported?(%{"$defs" => %{"block_newsletter_signup" => _}}), do: true
+  def signup_supported?(_body), do: false
+
   # ── The site's release type ───────────────────────────────────────────────
 
   @doc """
@@ -448,10 +478,7 @@ defmodule PublishReleases do
 
     # Rebuilt on every run, so a new release is listed the moment it is
     # published.
-    page = %{
-      "title" => @index_title,
-      "block_tree" => API.rich_text_tree(index_html(index, type.path_segment))
-    }
+    page = index_page(index, type.path_segment, signup?(req))
 
     alias_path = "/" <> type.path_segment
     create_page = &%{"slug" => &1, "path_alias" => alias_path}
@@ -460,6 +487,24 @@ defmodule PublishReleases do
       results ++ [API.report(@index_slug, API.upsert(req, pages, @index_slug, page, create_page))]
 
     if Enum.any?(results, &(&1 == :error)), do: System.halt(1), else: IO.puts("done")
+  end
+
+  # A schema the site can't serve costs the sign-up, not the run: the list is
+  # what the index is for.
+  defp signup?(req) do
+    case API.schema(req) do
+      {:ok, body} ->
+        supported? = signup_supported?(body)
+
+        if not supported?,
+          do: IO.puts("  note  the site has no newsletter_signup block; the index has no sign-up")
+
+        supported?
+
+      {:error, message} ->
+        IO.puts(:stderr, "  note  could not read the site's schema (#{message}); no sign-up")
+        false
+    end
   end
 
   # ── CLI ───────────────────────────────────────────────────────────────────
