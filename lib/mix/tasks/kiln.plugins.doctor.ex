@@ -22,7 +22,11 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       for core blocks, which a third-party plugin never executes;
     * a field type whose `cast/2` output doesn't match what its editor widget
       implies declares `c:Kiln.FieldType.json_schema/1` to say so (#937), the
-      same reason `KilnCMS.CMS.FieldTypes.Recurrence` has one.
+      same reason `KilnCMS.CMS.FieldTypes.Recurrence` has one;
+    * a field type's client hook (`c:Kiln.FieldType.input_hook/1`, #1918)
+      was actually bundled: the name it returns is registered in LiveView's
+      colocated-hook manifest. A typo, or a `<script>` in a template that never
+      compiled, otherwise surfaces only as a silent no-op in the browser.
 
   Exits non-zero with every violation listed, so it can gate CI/precommit.
   """
@@ -55,7 +59,8 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         field_type_problems(plugins, field_types_by_plugin) ++
         queue_collisions(plugins) ++
         block_schema_problems(plugins, blocks_by_plugin) ++
-        field_type_schema_problems(plugins, field_types_by_plugin)
+        field_type_schema_problems(plugins, field_types_by_plugin) ++
+        field_type_hook_problems(plugins, field_types_by_plugin)
 
     case problems do
       [] ->
@@ -434,6 +439,96 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
     # `definition`), and calling it again here would just raise past the
     # rescue instead of producing a message.
     e -> raised_problem(plugin, "field type #{inspect(mod)}", "checking cast/2", e)
+  end
+
+  # #1918: every hook a field type names must be in the colocated manifest
+  # LiveView wrote at compile time (`@requirements ["compile"]` above). The
+  # manifest is read as text — it is generated JS, one
+  # `imp_…["<Module>.<Name>"] = …;` line per hook — because LiveView offers
+  # no API listing the hooks it collected.
+  defp field_type_hook_problems(plugins, field_types_by_plugin) do
+    hooked =
+      for plugin <- plugins,
+          mod <- field_types_by_plugin[plugin],
+          field_type_module?(mod),
+          function_exported?(mod, :input_hook, 1),
+          do: {plugin, mod}
+
+    case hooked do
+      [] ->
+        []
+
+      hooked ->
+        manifest = colocated_manifest()
+        Enum.flat_map(hooked, fn {plugin, mod} -> hook_problems(plugin, mod, manifest) end)
+    end
+  end
+
+  defp hook_problems(plugin, mod, manifest) do
+    definition =
+      struct(FieldDefinition,
+        name: "sample_field",
+        field_type: mod.name(),
+        required: false,
+        content_type: probe_content_type()
+      )
+
+    case mod.input_hook(definition) do
+      nil ->
+        []
+
+      %{hook: hook} when is_binary(hook) and hook != "" ->
+        cond do
+          is_nil(manifest) ->
+            [
+              "#{plugin.name()}: field type #{inspect(mod.name())} names hook #{inspect(hook)}, " <>
+                "but no colocated-hook manifest was found at #{colocated_manifest_path()}"
+            ]
+
+          String.contains?(manifest, "[#{inspect(hook)}]") ->
+            []
+
+          true ->
+            [
+              "#{plugin.name()}: field type #{inspect(mod.name())} names hook #{inspect(hook)}, " <>
+                "which is not a bundled colocated hook (declare it as " <>
+                ~s(<script :type={ColocatedHook} name=".Name"> in a template of a module that ) <>
+                "uses Phoenix.Component, " <>
+                "and build the name with Kiln.FieldType.colocated_hook/2)"
+            ]
+        end
+
+      other ->
+        [
+          "#{plugin.name()}: field type #{inspect(mod.name())} input_hook/1 returned " <>
+            "#{inspect(other)}; expected %{hook: name, data: map} or nil"
+        ]
+    end
+  rescue
+    e -> raised_problem(plugin, "field type #{inspect(mod)}", "building its input_hook/1", e)
+  end
+
+  defp colocated_manifest do
+    case File.read(colocated_manifest_path()) do
+      {:ok, text} -> text
+      {:error, _reason} -> nil
+    end
+  end
+
+  # Where `Phoenix.LiveView.ColocatedAssets` writes it: the configured
+  # `:target_directory` (or `<build>/phoenix-colocated`), then the app name.
+  defp colocated_manifest_path do
+    settings =
+      Application.get_env(
+        :phoenix_live_view,
+        :colocated_assets,
+        Application.get_env(:phoenix_live_view, :colocated_js, [])
+      )
+
+    settings
+    |> Keyword.get(:target_directory, Path.join(Mix.Project.build_path(), "phoenix-colocated"))
+    |> Path.join(to_string(Mix.Project.config()[:app]))
+    |> Path.join("index.js")
   end
 
   # Shared "this plugin's own code raised" message, used by every rescue in

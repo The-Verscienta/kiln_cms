@@ -196,6 +196,13 @@ if Code.ensure_loaded?(Igniter) do
         # The editor renders <input type={input_type()} {input_attrs(definition)}>.
         # def input_type, do: "number"
         # def input_attrs(_definition), do: %{min: 1, max: 5}
+
+        # Browser behaviour (a type-ahead, a picker): name a colocated hook
+        # declared in this module (`use Phoenix.Component` for that), and
+        # answer its "kiln:field_event" pushes. See Kiln.FieldType, "Client hooks".
+        # def input_hook(_definition),
+        #   do: %{hook: Kiln.FieldType.colocated_hook(__MODULE__, "Picker"), data: %{}}
+        # def handle_input_event("lookup", %{"q" => q}, _context), do: {:ok, %{results: []}}
       end
       """
     end
