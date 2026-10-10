@@ -71,7 +71,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`docs/system-requirements.md`: what a machine needs to run, build and
   develop Kiln, plus three deployment presets under `deploy/presets/`.**
-  ([long form](docs/changelog/v1.2.0.md#system-requirements))
+  ([#1931](https://github.com/The-Verscienta/kiln_cms/issues/1931) · [long form](docs/changelog/v1.2.0.md#system-requirements))
 
 - **`mix kiln.import.ghost` imports a Ghost JSON export: posts, pages, tags,
   images, SEO fields and bylines, members-only posts kept gated, and a
