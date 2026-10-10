@@ -18,6 +18,8 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   import KilnCMSWeb.ContentEditor.Shared,
     only: [blank_to_nil: 1, selected_tag_ids: 2, user_label: 1, with_counts: 2]
 
+  require Logger
+
   # Whether this record currently carries a passphrase (#496). Derived from the
   # record rather than kept as an assign, so it cannot go stale against a save —
   # the rail only ever needs to know *that* one is set, never what it is.
@@ -538,11 +540,72 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   # Everything else is registry-driven. A composite field type
   # (`Kiln.FieldType` declaring `input_parts/1`, e.g. `:geolocation`) renders a
   # labelled input per part; anything else renders a single `<input>`.
+  #
+  # A type declaring `input_hook/1` (#1918) gets its widget wrapped in the
+  # hook's element, so the hook sees every part of a composite field.
   def custom_field_input(assigns) do
+    case field_type_hook(assigns.definition) do
+      nil ->
+        bare_custom_field_input(assigns)
+
+      %{} = hook ->
+        assigns = assign(assigns, :hook, hook)
+
+        ~H"""
+        <div
+          id={cf_hook_id(@definition)}
+          phx-hook={@hook.hook}
+          data-field={@definition.name}
+          data-config={@hook.config}
+        >
+          {bare_custom_field_input(assigns)}
+        </div>
+        """
+    end
+  end
+
+  defp bare_custom_field_input(assigns) do
     case field_type_parts(assigns.definition) do
       [] -> scalar_custom_field_input(assigns)
       parts -> composite_custom_field_input(assign(assigns, :parts, parts))
     end
+  end
+
+  # `%{hook: name, config: json}` for a field type declaring a client hook, or
+  # nil. Probed like `input_parts/1` (optional on the contract, and the module
+  # may not be loaded yet). A raise or a malformed return renders the field
+  # without its hook rather than taking the editor down: the plain inputs still
+  # edit the value, only the convenience is lost.
+  defp field_type_hook(definition) do
+    with module when not is_nil(module) <- KilnCMS.CMS.FieldTypes.get(definition.field_type),
+         true <- Code.ensure_loaded?(module),
+         true <- function_exported?(module, :input_hook, 1) do
+      case module.input_hook(definition) do
+        %{hook: hook} = spec when is_binary(hook) and hook != "" ->
+          %{hook: hook, config: Jason.encode!(Map.get(spec, :data, %{}))}
+
+        nil ->
+          nil
+
+        other ->
+          Logger.warning(
+            "#{inspect(module)}.input_hook/1 returned #{inspect(other)}; " <>
+              "expected %{hook: name, data: map} or nil"
+          )
+
+          nil
+      end
+    else
+      _no_hook -> nil
+    end
+  rescue
+    exception ->
+      Logger.warning(
+        "input_hook/1 for field #{inspect(definition.name)} raised: " <>
+          Exception.message(exception)
+      )
+
+      nil
   end
 
   # The composite parts a field type declares, or `[]` for core/scalar types.
@@ -712,6 +775,8 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   end
 
   defp cf_id(definition), do: "custom-field-#{definition.name}"
+  # Its own prefix: `custom-field-<name>-<x>` is already the part-id space.
+  defp cf_hook_id(definition), do: "cf-hook-#{definition.name}"
   defp cf_errors_id(definition), do: "custom-field-#{definition.name}-errors"
   defp cf_part_id(definition, part), do: "custom-field-#{definition.name}-#{part.key}"
 

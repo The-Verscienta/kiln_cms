@@ -285,6 +285,72 @@ defmodule KilnCMS.FixturePlugin.FieldTypes.Exploding do
   def tokens(_definition), do: raise("plugin token list blew up")
 end
 
+defmodule KilnCMS.FixturePlugin.FieldTypes.Lookup do
+  @moduledoc """
+  A plugin field type with a client hook and a server callback (test fixture,
+  #1918): `c:Kiln.FieldType.input_hook/1` names a colocated hook declared
+  below, and `c:Kiln.FieldType.handle_input_event/3` answers it. Its events
+  cover every outcome the editor has to relay: a reply, an error, a raise, a
+  malformed return, and a slow call a newer event supersedes.
+  """
+  use Kiln.FieldType
+  # Not just `import Phoenix.Component`: LiveView collects colocated hooks
+  # only from modules that `use` it.
+  use Phoenix.Component
+
+  @impl Kiln.FieldType
+  def cast(value, _definition), do: {:ok, to_string(value)}
+
+  # A field named `explode_hook` raises here, so the editor's rescue (render
+  # the plain input, drop the hook) has a case to prove it on. The doctor's
+  # probe definition is named otherwise and sees the real hook.
+  @impl Kiln.FieldType
+  def input_hook(%{name: "explode_hook"}), do: raise("plugin hook blew up")
+
+  def input_hook(_definition),
+    do: %{hook: Kiln.FieldType.colocated_hook(__MODULE__, "Suggest"), data: %{min_chars: 3}}
+
+  @impl Kiln.FieldType
+  def handle_input_event("suggest", %{"q" => q}, %{definition: definition}),
+    do: {:ok, %{suggestions: ["#{q} Street"], field: definition.name}}
+
+  def handle_input_event("nothing", _params, _context), do: {:error, "no match"}
+  def handle_input_event("boom", _params, _context), do: raise("lookup blew up")
+  def handle_input_event("odd", _params, _context), do: :not_a_reply
+
+  # Tells a test it has started (via a registered name, so the client payload
+  # carries nothing process-shaped), then never returns.
+  def handle_input_event("slow", _params, _context) do
+    if probe = Process.whereis(:lookup_fixture_slow), do: send(probe, {:slow_started, self()})
+    Process.sleep(:infinity)
+  end
+
+  # Never rendered: compiling it is what bundles the hook (see Kiln.FieldType,
+  # "Client hooks").
+  @doc false
+  def __hooks__(assigns) do
+    ~H"""
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".Suggest">
+      export default {
+        mounted() {
+          this.ref = 0
+          this.handleEvent("kiln:field_reply", ({field, ref, reply}) => {
+            if (field !== this.el.dataset.field || ref !== this.ref) return
+            this.el.dataset.suggestions = JSON.stringify(reply?.suggestions || [])
+          })
+          this.el.addEventListener("input", (e) => {
+            this.pushEvent("kiln:field_event", {
+              field: this.el.dataset.field, event: "suggest",
+              params: {q: e.target.value}, ref: ++this.ref
+            })
+          })
+        }
+      }
+    </script>
+    """
+  end
+end
+
 defmodule KilnCMS.FixturePlugin.PanelLive do
   @moduledoc "A plugin admin panel (test fixture) mounted via `admin_routes/0`."
   use KilnCMSWeb, :live_view
@@ -340,7 +406,8 @@ defmodule KilnCMS.FixturePlugin do
     do: [
       KilnCMS.FixturePlugin.FieldTypes.Rating,
       KilnCMS.FixturePlugin.FieldTypes.Tokenless,
-      KilnCMS.FixturePlugin.FieldTypes.Exploding
+      KilnCMS.FixturePlugin.FieldTypes.Exploding,
+      KilnCMS.FixturePlugin.FieldTypes.Lookup
     ]
 
   @impl true

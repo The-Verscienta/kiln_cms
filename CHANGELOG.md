@@ -98,6 +98,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Security
 
+- **decimal 3.2.0 for EEF-CVE-2026-97853: `Decimal.round/3` no longer
+  allocates without bound on a caller-chosen `places`.**
+  ([long form](docs/changelog/unreleased.md#decimal-3-2-0-round-allocation))
+
 - **Ash 3.34.6: an MCP read tool's `count`/`exists`/`aggregate` result no
   longer skips related resources' read policies in its filter.**
   ([long form](docs/changelog/unreleased.md#ash-3-34-6-aggregate-policies))
