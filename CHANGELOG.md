@@ -88,6 +88,12 @@ Every summary line below that was shortened links to its own entry there.
   repository a site vendors there.**
   ([#1909](https://github.com/The-Verscienta/kiln_cms/issues/1909))
 
+### Security
+
+- **Ash 3.34.6: an MCP read tool's `count`/`exists`/`aggregate` result no
+  longer skips related resources' read policies in its filter.**
+  ([long form](docs/changelog/unreleased.md#ash-3-34-6-aggregate-policies))
+
 ## [1.1.0] - 2026-10-06
 
 Long form: [docs/changelog/v1.1.0.md](docs/changelog/v1.1.0.md) —
