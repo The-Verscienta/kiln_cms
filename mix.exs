@@ -305,6 +305,7 @@ defmodule KilnCMS.MixProject do
       # Operations & deployment
       "docs/deploy.md": [],
       "docs/deploy-platforms.md": [title: "One-click deploy platforms"],
+      "docs/system-requirements.md": [title: "Minimum system requirements"],
       "docs/environment-variables.md": [],
       "docs/backups.md": [],
       "docs/observability.md": [],
@@ -466,6 +467,7 @@ defmodule KilnCMS.MixProject do
       "Operations & deployment": [
         "docs/deploy.md",
         "docs/deploy-platforms.md",
+        "docs/system-requirements.md",
         "docs/environment-variables.md",
         "docs/backups.md",
         "docs/observability.md",
