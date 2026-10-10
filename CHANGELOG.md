@@ -54,40 +54,53 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+## [1.2.0] - 2026-10-10
+
+Long form: [docs/changelog/v1.2.0.md](docs/changelog/v1.2.0.md) —
+the 1.2.0 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
+### Upgrade notes
+
+- **Building from source now needs Elixir 1.20.4 / OTP 29.1.1 (and Node
+  22.23.3 for the assets); move your project's `.tool-versions` to match
+  before `mix kiln.update`.**
+  ([long form](docs/changelog/v1.2.0.md#building-from-source-needs-elixir-1-20))
+
 ### Added
 
 - **`mix kiln.import.ghost` imports a Ghost JSON export: posts, pages, tags,
   images, SEO fields and bylines, members-only posts kept gated, and a
   redirect from every old URL.**
-  ([#1876](https://github.com/The-Verscienta/kiln_cms/issues/1876) · [long form](docs/changelog/unreleased.md#mix-kiln-import-ghost))
+  ([#1876](https://github.com/The-Verscienta/kiln_cms/issues/1876) · [long form](docs/changelog/v1.2.0.md#mix-kiln-import-ghost))
 
 - **The importers run from a release: `bin/kiln_cms rpc
   'KilnCMS.Release.import_wordpress(path, dry_run: true)'`, and likewise
   `import_ghost/2` and `import_content/2`.**
-  ([long form](docs/changelog/unreleased.md#importers-from-a-release))
+  ([long form](docs/changelog/v1.2.0.md#importers-from-a-release))
 
 - **Public "Kiln vs" pages for WordPress, Ghost, Strapi, Payload and Directus,
   plus WordPress and Ghost migration guides, every competitor claim dated
   and sourced.**
-  ([#1876](https://github.com/The-Verscienta/kiln_cms/issues/1876) · [long form](docs/changelog/unreleased.md#kiln-vs-pages-and-migration-guides))
+  ([#1876](https://github.com/The-Verscienta/kiln_cms/issues/1876) · [long form](docs/changelog/v1.2.0.md#kiln-vs-pages-and-migration-guides))
 
 - **A *Newsletter sign-up* block puts an email sign-up on any page; it adds
   people to the newsletter list with double opt-in.**
-  ([#1870](https://github.com/The-Verscienta/kiln_cms/issues/1870) · [long form](docs/changelog/unreleased.md#newsletter-signup-block))
+  ([#1870](https://github.com/The-Verscienta/kiln_cms/issues/1870) · [long form](docs/changelog/v1.2.0.md#newsletter-signup-block))
 
 ### Changed
 
 - **The toolchain moves to Elixir 1.20.4 / OTP 29.1.1 and Node 22.23.3 in CI
   and the release image; building from source now needs Elixir 1.20+.**
-  ([long form](docs/changelog/unreleased.md#toolchain-elixir-1-20-otp-29))
+  ([#1934](https://github.com/The-Verscienta/kiln_cms/issues/1934) · [long form](docs/changelog/v1.2.0.md#toolchain-elixir-1-20-otp-29))
 
 - **Custom fields sit in the editor's main column, under the blocks, instead
   of behind the inspector's Settings tab.**
-  ([#1916](https://github.com/The-Verscienta/kiln_cms/pull/1916) · [long form](docs/changelog/unreleased.md#custom-fields-under-the-blocks))
+  ([#1916](https://github.com/The-Verscienta/kiln_cms/pull/1916) · [long form](docs/changelog/v1.2.0.md#custom-fields-under-the-blocks))
 
 - **The newsletter's sign-up and unsubscribe pages render in the site's own
   layout instead of as bare unstyled pages.**
-  ([long form](docs/changelog/unreleased.md#newsletter-pages-in-site-chrome))
+  ([long form](docs/changelog/v1.2.0.md#newsletter-pages-in-site-chrome))
 
 ### Fixed
 
@@ -100,11 +113,11 @@ Every summary line below that was shortened links to its own entry there.
 
 - **decimal 3.2.0 for EEF-CVE-2026-97853: `Decimal.round/3` no longer
   allocates without bound on a caller-chosen `places`.**
-  ([long form](docs/changelog/unreleased.md#decimal-3-2-0-round-allocation))
+  ([#1933](https://github.com/The-Verscienta/kiln_cms/issues/1933) · [long form](docs/changelog/v1.2.0.md#decimal-3-2-0-round-allocation))
 
 - **Ash 3.34.6: an MCP read tool's `count`/`exists`/`aggregate` result no
   longer skips related resources' read policies in its filter.**
-  ([long form](docs/changelog/unreleased.md#ash-3-34-6-aggregate-policies))
+  ([long form](docs/changelog/v1.2.0.md#ash-3-34-6-aggregate-policies))
 
 ## [1.1.0] - 2026-10-06
 
@@ -2432,7 +2445,9 @@ that `mix kiln.update` compares against.
   one that can't be described by a changelog diff.
   ([long form](docs/changelog/v0.1.0.md#if-your-project-pins-a-sha-from-before-this-tag-your-first-update-is-the-only))
 
-[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/The-Verscienta/kiln_cms/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/The-Verscienta/kiln_cms/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.12.1...v1.0.0
 [0.12.1]: https://github.com/The-Verscienta/kiln_cms/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/The-Verscienta/kiln_cms/compare/v0.11.0...v0.12.0

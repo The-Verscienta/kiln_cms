@@ -9,7 +9,7 @@ the resolved architectural decisions (D1–D8).
 
 ## Status & maturity
 
-**Stable (`v1.1.0`), single maintainer, and consumed as a source overlay
+**Stable (`v1.2.0`), single maintainer, and consumed as a source overlay
 rather than a package.** If you are evaluating KilnCMS for a team, read this
 section before the feature list.
 
@@ -42,7 +42,7 @@ docker pull ghcr.io/the-verscienta/kiln_cms:latest   # linux/amd64
 ```
 
 `latest` is for trying it out. For a site you keep, pin the exact version
-(`:1.1.0`), or the floating major (`:1`) if you want patches and
+(`:1.2.0`), or the floating major (`:1`) if you want patches and
 minor releases without editing the tag;
 [which tag to pin](docs/deploy-platforms.md#which-tag-to-pin) has the
 trade-offs.
