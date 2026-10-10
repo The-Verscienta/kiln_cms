@@ -54,6 +54,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Added
+
+- **`mix kiln.plugins.doctor` notes a plugin with no `summary/0` (or the
+  generator's `TODO:` placeholder) without failing the run.**
+  ([#1942](https://github.com/The-Verscienta/kiln_cms/pull/1942))
+
 ## [1.2.0] - 2026-10-10
 
 Long form: [docs/changelog/v1.2.0.md](docs/changelog/v1.2.0.md) —
