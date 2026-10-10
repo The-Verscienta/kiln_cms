@@ -6,9 +6,11 @@ defmodule KilnCMS.Search.Reranker.Bumblebee do
   `KilnCMS.Ask.rerank?/0` for the ask path alone.
 
   **Experimental.** Cross-encoder scoring depends on the exact model's output
-  head; validate the scores against your chosen reranker before relying on the
-  ordering in production. The hybrid integration and fallback are fully tested
-  with a stub; this adapter's model path is not exercised in CI.
+  head: the serving reads a single-logit head as a sigmoid relevance (see
+  `KilnCMS.Search.RerankerServing.scores_function/1`). Validate the scores
+  against your chosen reranker before relying on the ordering in production.
+  The hybrid integration and fallback are fully tested with a stub; this
+  adapter's model path is not exercised in CI.
   """
   @behaviour KilnCMS.Search.Reranker
 
@@ -23,6 +25,12 @@ defmodule KilnCMS.Search.Reranker.Bumblebee do
       {:ok, Enum.map(results, &top_score/1)}
     rescue
       error -> {:error, error}
+    catch
+      # No serving registered — `KilnCMS.Application` started none because the
+      # model would not load (see `KilnCMS.Search.RerankerServing`) — is an
+      # exit from `Nx.Serving.batched_run/2`, not an exception. Same answer as
+      # any other failure: `{:error, _}`, and the caller keeps its fused order.
+      :exit, reason -> {:error, {:exit, reason}}
     end
 
     defp top_score(%{predictions: [%{score: score} | _]}), do: score

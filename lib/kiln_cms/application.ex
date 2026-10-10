@@ -778,15 +778,39 @@ defmodule KilnCMS.Application do
     defp reranker_children do
       if KilnCMS.Ask.rerank?() and
            KilnCMS.Search.reranker() == KilnCMS.Search.Reranker.Bumblebee do
-        [
-          {Nx.Serving,
-           serving: KilnCMS.Search.RerankerServing.build(),
-           name: KilnCMS.Search.RerankerServing.name(),
-           batch_timeout: 50}
-        ]
+        reranker_child(KilnCMS.Search.RerankerServing.load())
       else
         []
       end
+    end
+
+    # A reranker that will not load — not in an offline image's cache, a
+    # misspelt model id — must not take the application down with it: search
+    # without a reranker keeps its fused order, which is what every surface
+    # already does when reranking fails. So: no child, and say why, loudly.
+    defp reranker_child({:ok, serving}) do
+      [
+        {Nx.Serving,
+         serving: serving, name: KilnCMS.Search.RerankerServing.name(), batch_timeout: 50}
+      ]
+    end
+
+    # `Config.Report.error/3`, not a bare Logger call: an operator's explicit
+    # switch that the running system is not honouring is exactly what that
+    # module exists to surface (Sentry included).
+    defp reranker_child({:error, reason}) do
+      model = KilnCMS.Search.rerank_model()
+
+      KilnCMS.Config.Report.error(
+        "reranker_load",
+        "Reranking is switched on (KilnCMS.Search rerank / KilnCMS.Ask rerank / ASK_RERANK) " <>
+          "but the reranker model #{model} could not be loaded, so no reranker started and " <>
+          "search keeps its fused order. Bake the model into the image (or allow the " <>
+          "Hugging Face download) and restart.",
+        %{model: model, reason: inspect(reason, limit: 5, printable_limit: 200)}
+      )
+
+      []
     end
   else
     defp reranker_children, do: []

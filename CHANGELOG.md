@@ -87,6 +87,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **The reranker scores relevance instead of 1.0 for every pair, and a reranker
+  model that cannot be loaded no longer stops Kiln from booting.**
+  ([long form](docs/changelog/unreleased.md#the-reranker-scores-relevance-instead-of-10-for-every-pair-and-a-reranker-model))
+
 - **The plugin docs no longer promise Hex or git-dependency plugins: a plugin
   compiles only as a `projects/<name>/` directory, and is shared as a git
   repository a site vendors there.**

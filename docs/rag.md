@@ -173,7 +173,18 @@ config :kiln_cms, KilnCMS.Ask, rerank: true
 the global switch, which covers this surface with the rest. Either switch
 loads the model at boot; a default install loads nothing. With it on, each
 source's `score` is the reranker's rather than the fused one, so the number
-still agrees with the order it came in.
+still agrees with the order it came in. That score is the cross-encoder's
+relevance as a sigmoid between 0 and 1, so it compares across content types.
+(Before this was fixed, softmax over the model's single logit made every
+score exactly 1.0. Reranking then reordered nothing, and the flat sort fell
+back to registry order.)
+
+The model has to be loadable at boot: in the image's Bumblebee cache, or
+downloadable. If it is not (an offline image that never baked it, or a
+misspelt `rerank_model`), Kiln starts **without** a reranker rather than
+failing to boot. It reports the problem once through `KilnCMS.Config.Report`
+(the log and Sentry), and every surface keeps its fused order, exactly as when
+reranking is off.
 
 Two caveats before setting it, both from the report that asked for this
 (a production deployment's search-ranking report, 2026-09-04), quoted as
