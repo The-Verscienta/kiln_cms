@@ -778,12 +778,9 @@ defmodule KilnCMS.Application do
     defp reranker_children do
       if KilnCMS.Ask.rerank?() and
            KilnCMS.Search.reranker() == KilnCMS.Search.Reranker.Bumblebee do
-        [
-          {Nx.Serving,
-           serving: KilnCMS.Search.RerankerServing.build(),
-           name: KilnCMS.Search.RerankerServing.name(),
-           batch_timeout: 50}
-        ]
+        # A model that will not load is no child and a reported error, never a
+        # crashed boot: search without a reranker keeps its fused order.
+        KilnCMS.Search.RerankerServing.children(KilnCMS.Search.RerankerServing.load())
       else
         []
       end
