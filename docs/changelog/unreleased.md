@@ -86,6 +86,21 @@ carries the reasoning.
   downstream project that builds Kiln from source should move its own
   `.tool-versions` to the same versions.
 
+<a id="path-forward"></a>
+
+- **`docs/path-forward.md` sets Kiln's direction from 1.1: live content
+  delivery plus provable, governed publishing, with the 2.0, 3.0 and 4.0
+  milestones and the minors leading to each.** The page says what Kiln is
+  for from here on, why that changed, and the order of releases that get
+  there: 2.0 Provable publishing (minors 1.2 to 1.7), 3.0 Live delivery (2.1
+  to 2.6) and 4.0 Governed at scale (3.1 to 3.6), each gated by a passing
+  line of one demo rather than a date. Majors keep their contract meaning:
+  each also lands the breaking changes already queued in its milestone. The
+  issue tracker gained two labels, `wedge` for direction work and `frozen`
+  for areas kept and maintained but not extended, and seven off-direction
+  issues were closed as not planned. The README links the page beside the
+  project plan.
+
 <a id="custom-fields-under-the-blocks"></a>
 
 - **Custom fields sit in the editor's main column, under the blocks, instead
