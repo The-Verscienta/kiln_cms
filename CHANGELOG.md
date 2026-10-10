@@ -77,6 +77,12 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **`docs/path-forward.md` sets Kiln's direction from 1.1: live content
+  delivery plus provable, governed publishing, with the 2.0, 3.0 and 4.0
+  milestones and the minors leading to each. Off-direction issues are closed
+  or labelled `frozen`; direction work carries `wedge`.**
+  ([long form](docs/changelog/unreleased.md#path-forward))
+
 - **Custom fields sit in the editor's main column, under the blocks, instead
   of behind the inspector's Settings tab.**
   ([#1916](https://github.com/The-Verscienta/kiln_cms/pull/1916) · [long form](docs/changelog/unreleased.md#custom-fields-under-the-blocks))
