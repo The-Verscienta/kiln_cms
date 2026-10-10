@@ -8,7 +8,7 @@ Code.require_file(Path.expand("config/ml_flag.exs", __DIR__))
 defmodule KilnCMS.MixProject do
   use Mix.Project
 
-  @version "1.1.0"
+  @version "1.2.0"
   @source_url "https://github.com/The-Verscienta/kiln_cms"
 
   def project do
@@ -305,6 +305,7 @@ defmodule KilnCMS.MixProject do
       # Operations & deployment
       "docs/deploy.md": [],
       "docs/deploy-platforms.md": [title: "One-click deploy platforms"],
+      "docs/system-requirements.md": [title: "Minimum system requirements"],
       "docs/environment-variables.md": [],
       "docs/backups.md": [],
       "docs/observability.md": [],
@@ -466,6 +467,7 @@ defmodule KilnCMS.MixProject do
       "Operations & deployment": [
         "docs/deploy.md",
         "docs/deploy-platforms.md",
+        "docs/system-requirements.md",
         "docs/environment-variables.md",
         "docs/backups.md",
         "docs/observability.md",
