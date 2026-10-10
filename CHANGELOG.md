@@ -77,10 +77,8 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
-- **`docs/path-forward.md` sets Kiln's direction from 1.1: live content
-  delivery plus provable, governed publishing, with the 2.0, 3.0 and 4.0
-  milestones and the minors leading to each. Off-direction issues are closed
-  or labelled `frozen`; direction work carries `wedge`.**
+- **`docs/path-forward.md` sets Kiln's direction from 1.1 (live delivery plus
+  provable, governed publishing) and the 2.0, 3.0 and 4.0 milestones.**
   ([long form](docs/changelog/unreleased.md#path-forward))
 
 - **Custom fields sit in the editor's main column, under the blocks, instead
