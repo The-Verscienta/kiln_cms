@@ -161,6 +161,19 @@ agility of a live marketplace while staying compile-time-safe:
   picker once an admin selects the type, next to the core types' own
   descriptions.
 
+  A type that needs behaviour in the browser (an address type-ahead, a map
+  picker) declares `input_hook/1` (#1918): the editor wraps its widget in an
+  element carrying that `phx-hook`. The hook is a LiveView **colocated hook**
+  in the type's own module, so it is bundled into the host's `app.js` at build
+  time under a module-namespaced name — no runtime-loaded script, nothing new
+  for the Content-Security-Policy. A hook that needs the server pushes
+  `"kiln:field_event"`; the editor runs the type's `handle_input_event/3` in a
+  task and answers with a `"kiln:field_reply"` push event, so API keys stay
+  server-side and a slow lookup never blocks the editor. Hooks act on their own
+  field's inputs and dispatch `input`; they do not see the form's changeset,
+  and `cast/2` still validates what they fill in. `mix kiln.plugins.doctor`
+  checks every named hook was actually bundled.
+
   Two implementations ship in-tree and are written against exactly this
   contract rather than special-cased in the host, so they double as reference
   examples: `KilnCMS.CMS.FieldTypes.Geolocation` (#428, composite) and

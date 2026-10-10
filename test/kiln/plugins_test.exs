@@ -48,11 +48,12 @@ defmodule Kiln.PluginsTest do
 
     # Rating is the one with real behaviour; Tokenless and Exploding exist to
     # cover `type_token_definitions/1`'s probe and rescue branches (#804), which
-    # no CORE field type can reach.
+    # no CORE field type can reach. Lookup carries a client hook (#1918).
     assert manifest.field_types == [
              FixturePlugin.FieldTypes.Rating,
              FixturePlugin.FieldTypes.Tokenless,
-             FixturePlugin.FieldTypes.Exploding
+             FixturePlugin.FieldTypes.Exploding,
+             FixturePlugin.FieldTypes.Lookup
            ]
 
     # The fixture declares neither, but both keys must be in the manifest: a
@@ -86,7 +87,7 @@ defmodule Kiln.PluginsTest do
       assert output =~ "Test fixture exercising every plugin seam."
       assert output =~ "https://example.com/fixture-plugin"
       # Contribution summary is pluralized and omits zero-count kinds.
-      assert output =~ "5 blocks, 3 field types, 1 nav item, 1 admin route"
+      assert output =~ "5 blocks, 4 field types, 1 nav item, 1 admin route"
     end
 
     test "the contribution summary counts every route kind" do
@@ -317,6 +318,51 @@ defmodule Kiln.PluginsTest do
       assert error.message =~ "does not implement Kiln.FieldType"
       assert error.message =~ "field type :string collides with a built-in field type"
       assert error.message =~ "field type :geolocation collides with a built-in field type"
+    end
+
+    # #1918: the fixture's `Lookup` type names a bundled colocated hook, so
+    # "passes for the fixture plugin" above already covers the found case.
+    test "flags a field type hook that was never bundled, and a malformed or raising input_hook/1" do
+      defmodule UnbundledHookType do
+        use Kiln.FieldType
+        def cast(value, _definition), do: {:ok, value}
+
+        def input_hook(_definition),
+          do: %{hook: Kiln.FieldType.colocated_hook(__MODULE__, "Gone")}
+      end
+
+      defmodule MalformedHookType do
+        use Kiln.FieldType
+        def cast(value, _definition), do: {:ok, value}
+        def input_hook(_definition), do: "NotAMap"
+      end
+
+      defmodule RaisingHookType do
+        use Kiln.FieldType
+        def cast(value, _definition), do: {:ok, value}
+        def input_hook(_definition), do: raise("no hook for you")
+      end
+
+      defmodule HookPlugin do
+        use Kiln.Plugin
+
+        def field_types,
+          do: [
+            UnbundledHookType,
+            MalformedHookType,
+            RaisingHookType,
+            KilnCMS.FixturePlugin.FieldTypes.Lookup
+          ]
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [HookPlugin])
+
+      error = assert_raise Mix.Error, fn -> Mix.Tasks.Kiln.Plugins.Doctor.run([]) end
+      assert error.message =~ ~s(names hook "#{inspect(UnbundledHookType)}.Gone")
+      assert error.message =~ "is not a bundled colocated hook"
+      assert error.message =~ ~s(input_hook/1 returned "NotAMap")
+      assert error.message =~ "raised while building its input_hook/1 (no hook for you)"
+      refute error.message =~ "Lookup.Suggest"
     end
 
     test "flags queue redefinitions and malformed paths" do

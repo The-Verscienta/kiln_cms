@@ -47,7 +47,83 @@ defmodule Kiln.FieldType do
   (`…[custom_fields][<field>][<part>]`), and `cast/2` receives that map —
   string-keyed, values as submitted. `KilnCMS.CMS.FieldTypes.Geolocation` is
   the worked example. A type needing more than a grid of inputs (a map picker,
-  a bespoke chooser) should ship an admin LiveView instead.
+  a bespoke chooser) can attach a client hook to its input (below); one that
+  needs a whole page of its own should ship an admin LiveView instead.
+
+  ## Client hooks
+
+  A type that wants behaviour in the browser (an address type-ahead, a map
+  picker, a lookup against an external registry) declares `c:input_hook/1`.
+  The editor then wraps the field's input(s) in
+
+      <div id="cf-hook-<name>" phx-hook={hook}
+           data-field="<name>" data-config={JSON of data}>
+
+  so the hook sees every part of a composite field, not only one `<input>`.
+
+  The hook itself is a **colocated hook** (`Phoenix.LiveView.ColocatedHook`)
+  written in the type's own module. `projects/` compiles into the host
+  application, so the hook is bundled into the editor's `app.js` at build time
+  with the host's own hooks — no asset callback, no runtime-loaded script, and
+  nothing for a `script-src 'self'` Content-Security-Policy to object to. A
+  colocated hook is registered under its module's name
+  (`Clinics.FieldTypes.Address.Autocomplete`), so a plugin's hooks cannot
+  collide with the host's or another plugin's. `colocated_hook/2` spells that
+  name; `mix kiln.plugins.doctor` checks it was actually bundled.
+
+      defmodule Clinics.FieldTypes.Address do
+        use Kiln.FieldType
+        # `use`, not `import`: LiveView bundles colocated hooks only from
+        # modules that `use Phoenix.Component`.
+        use Phoenix.Component
+
+        @impl Kiln.FieldType
+        def input_hook(_definition),
+          do: %{hook: Kiln.FieldType.colocated_hook(__MODULE__, "Autocomplete"), data: %{}}
+
+        # Never rendered: compiling the template is what bundles the hook.
+        @doc false
+        def __hooks__(assigns) do
+          ~H'''
+          <script :type={Phoenix.LiveView.ColocatedHook} name=".Autocomplete">
+            export default {
+              mounted() {
+                this.ref = 0
+                this.handleEvent("kiln:field_reply", ({field, ref, reply, error}) => {
+                  if (field !== this.el.dataset.field || ref !== this.ref) return
+                  // render `reply` (or `error`) as suggestions …
+                })
+                // … and on (debounced) input:
+                // this.pushEvent("kiln:field_event",
+                //   {field: this.el.dataset.field, event: "suggest", params: {q}, ref: ++this.ref})
+              }
+            }
+          </script>
+          '''
+        end
+      end
+
+  A hook works on **its own field's inputs only**. It writes values into them
+  and dispatches an `input` event, so the editor form's ordinary change event
+  carries them — the server stays the source of truth, and `cast/2` still
+  validates whatever the hook filled in. Hooks are not handed the form's
+  changeset or other fields' values.
+
+  ## Server calls from a hook
+
+  A hook that needs the server (to call an API whose key must not reach the
+  browser) pushes `"kiln:field_event"` with `field`, `event`, `params` and a
+  `ref` of its choosing. The editor checks that `field` names a custom field of
+  the record being edited, then runs `c:handle_input_event/3` **in a task**,
+  so a slow lookup never stalls the editor. The result comes back as a
+  `"kiln:field_reply"` push event carrying the same `field` and `ref` plus
+  either `reply` (from `{:ok, reply}`) or `error`. A newer event for the same
+  field cancels an older one still in flight, so a type-ahead always shows the
+  answer to the latest keystroke. Every hook on the page receives every reply;
+  filter on `field` and `ref`.
+
+  `data-config` is rendered into the page — never put a secret in
+  `c:input_hook/1`'s `data`.
 
   ## Built-in types
 
@@ -183,6 +259,51 @@ defmodule Kiln.FieldType do
   """
   @callback json_schema(definition :: struct()) :: map()
 
+  @typedoc "A client hook for the field's editor widget: see `c:input_hook/1`."
+  @type input_hook :: %{required(:hook) => String.t(), optional(:data) => map()}
+
+  @doc """
+  The client hook to attach to this field's editor widget, or `nil` for none
+  (see "Client hooks" above). `hook` is the hook's registered name — for a
+  colocated hook, `colocated_hook/2`; `data` is JSON-encoded into the
+  wrapper's `data-config` attribute, so it must be JSON-encodable and is
+  **public**. Defaults to `nil`.
+
+  A raise here is contained: the editor logs it and renders the field without
+  its hook.
+  """
+  @callback input_hook(definition :: struct()) :: input_hook() | nil
+
+  @doc """
+  Answer a `"kiln:field_event"` pushed by this type's hook (see "Server calls
+  from a hook" above). `event` and `params` are what the hook sent; `context`
+  carries the field's `:definition`, the editing `:actor` and the `:org`.
+
+  Runs in a task linked to the editor, never in the editor process itself.
+  Return `{:ok, reply}` with a JSON-encodable reply, or `{:error, message}`;
+  the hook receives one or the other. A raise or exit reaches the hook as a
+  generic error and is logged. Bound your own I/O with a timeout: nothing else
+  stops a hung request except the editor closing or a newer event for the
+  same field.
+
+  Treat `params` as untrusted input — any signed-in editor of the record can
+  push any event.
+  """
+  @callback handle_input_event(event :: String.t(), params :: map(), context :: map()) ::
+              {:ok, term()} | {:error, String.t()}
+
+  @doc ~S"""
+  The registered name of a colocated hook declared in `module` as
+  `<script :type={ColocatedHook} name=".Name">` — the string
+  `c:input_hook/1` returns as `hook`.
+
+      iex> Kiln.FieldType.colocated_hook(Clinics.FieldTypes.Address, "Autocomplete")
+      "Clinics.FieldTypes.Address.Autocomplete"
+  """
+  @spec colocated_hook(module(), String.t()) :: String.t()
+  def colocated_hook(module, name) when is_atom(module) and is_binary(name),
+    do: "#{inspect(module)}.#{String.trim_leading(name, ".")}"
+
   # `input_parts/1`, `tokens/1` and `description/0` were added after this
   # contract shipped.
   # `use Kiln.FieldType` defaults them, but a plugin that hand-rolls
@@ -194,7 +315,15 @@ defmodule Kiln.FieldType do
   # `KilnCMS.SchemaExport` probes for it with `function_exported?` and falls
   # back to widget inference, so defining a default would mean every type
   # silently claiming to describe itself.
-  @optional_callbacks input_parts: 1, tokens: 1, json_schema: 1, description: 0
+  # `input_hook/1` (#1918) is the same story: defaulted to `nil` by `use`.
+  # `handle_input_event/3` is not defaulted — the editor probes for it, and a
+  # type without one answers its hook's events with an error.
+  @optional_callbacks input_parts: 1,
+                      tokens: 1,
+                      json_schema: 1,
+                      description: 0,
+                      input_hook: 1,
+                      handle_input_event: 3
 
   @doc ~S"""
   `Float.parse/1`, made total — the numeric parse a custom field type's
@@ -271,13 +400,17 @@ defmodule Kiln.FieldType do
       @impl Kiln.FieldType
       def tokens(_definition), do: []
 
+      @impl Kiln.FieldType
+      def input_hook(_definition), do: nil
+
       defoverridable name: 0,
                      label: 0,
                      description: 0,
                      input_type: 0,
                      input_attrs: 1,
                      input_parts: 1,
-                     tokens: 1
+                     tokens: 1,
+                     input_hook: 1
     end
   end
 end

@@ -48,6 +48,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.Search.Related
   alias KilnCMS.Slug
   alias KilnCMS.Unsplash
+  alias KilnCMSWeb.ContentEditor.FieldEvents
   alias KilnCMSWeb.ContentEditor.InlineTerms
   alias KilnCMSWeb.ContentEditor.NewDraft
   alias KilnCMSWeb.EditorTelemetry
@@ -671,6 +672,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # own return, so a successful generation arrives as `{:ok, {_version, {:ok, _}}}`.
   # All three arms must clear `seo_drafting?` or the button stays stuck forever.
   @impl true
+  # A plugin field type's hook asked the server something (#1918).
+  def handle_async({FieldEvents, _field} = key, result, socket),
+    do: {:noreply, FieldEvents.handle_async(key, result, socket)}
+
   def handle_async(:seo_draft, {:ok, {version, result}}, socket) do
     socket = assign(socket, :seo_drafting?, false)
 
@@ -1877,6 +1882,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   def handle_event(_event, _params, %{assigns: %{record: nil}} = socket), do: {:noreply, socket}
+
+  # A plugin field type's client hook calling its `handle_input_event/3`
+  # (#1918). Answered asynchronously as a "kiln:field_reply" push event.
+  def handle_event("kiln:field_event", payload, socket),
+    do: {:noreply, FieldEvents.start(socket, payload)}
 
   # A paste/drop upload starting (`BodyImageUploader` → `this.upload/2`) arrives
   # as the form's own change event with `_target` naming the file input. The
