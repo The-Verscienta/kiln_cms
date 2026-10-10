@@ -88,15 +88,15 @@ Dockerfile (Coolify, Render) all do the same thing.
 |---|---|---|---|
 | RAM | 2 GB (marginal) | 4 GB | Peak is `mix deps.compile`, not the app: the Ash ecosystem compiles in one BEAM. The Dockerfile caps the build BEAM to two schedulers so a small host is not OOM-killed |
 | Disk | 3 GB free | 6 GB | The builder stage pulls the dep tree and `node_modules`; the final image is a slim Debian trixie with the release only |
-| Toolchain | Pulled by the Dockerfile | | `hexpm/elixir:1.19.5-erlang-27.3.4.15` on Debian bookworm as the builder; nothing to install on the host but Docker |
+| Toolchain | Pulled by the Dockerfile | | `hexpm/elixir:1.20.4-erlang-29.1.1` on Debian bookworm as the builder, Node 22.23.3 installed into it; nothing to install on the host but Docker |
 | Network | Hex, npm, GitHub, Debian and PostgreSQL apt mirrors | | A build behind a proxy needs `HEX_MIRROR` and npm config as usual |
 
 ## Developing on it
 
 | | Requirement | Notes |
 |---|---|---|
-| Elixir / OTP | **1.19.5 on OTP 27.3.4.15**, exactly as `.tool-versions` says; 1.19.3+ and OTP 27+ is the floor | `config/dev.exs` uses a regex modifier Elixir 1.18 cannot parse. A newer OTP on a developer machine works; its dialyzer is stricter than CI's (OTP 27), so run `mix dialyzer` locally before a PR |
-| Node.js | 22 (what CI uses); any current LTS | Only for building assets: the editor bundles TipTap from `assets/node_modules`. Not needed at runtime |
+| Elixir / OTP | **1.20.4 on OTP 29.1.1**, exactly as `.tool-versions` says; `mix.exs` requires `~> 1.20` | The floor is 1.20 rather than 1.19 because 1.20's `mix format` breaks some lines differently, so a tree formatted on one fails the other's formatting check. CI and the release image run the same pins, so the dialyzer that runs in CI is the one you run locally |
+| Node.js | **22.23.3**, pinned in `.tool-versions` and read by CI and the Dockerfile | Only for building assets: the editor bundles TipTap from `assets/node_modules`. Not needed at runtime |
 | Postgres | 17 with `vector`, via `docker compose up -d postgres` | The compose file runs `pgvector/pgvector:pg17`. Two test suites running at once against one server can exhaust Postgres's default 100 connections; raise `max_connections` or run them one at a time |
 | Docker | Any recent Docker or compatible | For Postgres and the optional profiles; the app itself runs on the host |
 | libvips | `brew install vips` / `apt install libvips-dev` | `vix` builds against it; image tests need it |
