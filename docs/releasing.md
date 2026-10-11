@@ -40,7 +40,11 @@ people to pass the flag reflexively.
    `main`, tagged locally as the next `-rc.0`. Then it rebuilds with the
    project's unchanged overlay, migrates, runs `mix kiln.blocks.backfill` and
    reads every row back. It also checks that each old release prints the
-   Upgrade notes `upgrade_notes/3` expects for its range. To run one
+   Upgrade notes `upgrade_notes/3` expects for its range. A release from an
+   older major (0.12.1 → 1.x, picked with the workflow's `tags` input) is
+   rehearsed with `--allow-major`, as a downstream would pass it once it has
+   read the notes; the major-version guard itself is covered by
+   `kiln.update`'s own tests. To run one
    locally (it uses its own `kiln_cms_test_rehearse_*` database and drops it
    afterwards):
 

@@ -246,6 +246,35 @@ defmodule Kiln.PluginsTest do
       assert Mix.Tasks.Kiln.Plugins.Doctor.run([]) == :ok
     end
 
+    # A plugin that doesn't say what it does is a gap for operators, not a
+    # fault: the doctor names it and still passes.
+    test "notes a plugin with no summary, without failing" do
+      defmodule UndescribedPlugin do
+        use Kiln.Plugin
+        def name, do: "undescribed"
+      end
+
+      defmodule PlaceholderPlugin do
+        use Kiln.Plugin
+        def name, do: "placeholder"
+        def summary, do: "TODO: say what Placeholder adds to a Kiln site."
+      end
+
+      Application.put_env(:kiln_cms, :plugins, [
+        FixturePlugin,
+        UndescribedPlugin,
+        PlaceholderPlugin
+      ])
+
+      output =
+        ExUnit.CaptureIO.capture_io(fn -> assert Mix.Tasks.Kiln.Plugins.Doctor.run([]) == :ok end)
+
+      assert output =~ "note: undescribed has no summary/0"
+      assert output =~ "note: placeholder has no summary/0"
+      refute output =~ "note: fixture_plugin"
+      assert output =~ "3 plugin(s) OK"
+    end
+
     # #1540: a project.exs written before a core domain existed restates a
     # list without it, and `mix ash.codegen` then offers to DROP its tables.
     test "flags a core domain a project's :ash_domains list left out" do

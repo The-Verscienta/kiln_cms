@@ -29,6 +29,11 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       compiled, otherwise surfaces only as a silent no-op in the browser.
 
   Exits non-zero with every violation listed, so it can gate CI/precommit.
+
+  It also **notes**, without failing, a plugin that doesn't say what it does:
+  no `c:Kiln.Plugin.summary/0`, or the `TODO:` placeholder
+  `mix kiln.gen.plugin` scaffolds. The console's System → Plugins panel
+  still lists such a plugin's contributions, but not why it's installed.
   """
   use Mix.Task
 
@@ -62,6 +67,15 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         field_type_schema_problems(plugins, field_types_by_plugin) ++
         field_type_hook_problems(plugins, field_types_by_plugin)
 
+    # Printed before the verdict so a failing run still shows them, and never
+    # a problem: a missing description is a gap for operators, not a fault.
+    Enum.each(undescribed(plugins), fn plugin ->
+      Mix.shell().info(
+        "note: #{plugin.name()} has no summary/0 — add one line saying what it " <>
+          "adds; it's shown in System → Plugins and by mix kiln.plugins.list"
+      )
+    end)
+
     case problems do
       [] ->
         Mix.shell().info("#{length(plugins)} plugin(s) OK: #{names(plugins)}")
@@ -74,6 +88,24 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         """)
     end
   end
+
+  @doc false
+  # Plugins with no usable summary. The generator's `"TODO: …"` placeholder
+  # counts as none — otherwise every scaffolded plugin would pass for described.
+  # Skips a module that isn't a plugin at all; `plugin_problems/1` reports it.
+  def undescribed(plugins) do
+    Enum.filter(plugins, fn plugin ->
+      Code.ensure_loaded?(plugin) and function_exported?(plugin, :summary, 0) and
+        blank_summary?(plugin.summary())
+    end)
+  end
+
+  defp blank_summary?(summary) when is_binary(summary) do
+    trimmed = String.trim(summary)
+    trimmed == "" or String.starts_with?(trimmed, "TODO")
+  end
+
+  defp blank_summary?(_summary), do: true
 
   defp names([]), do: "(none)"
   defp names(plugins), do: Enum.map_join(plugins, ", ", & &1.name())

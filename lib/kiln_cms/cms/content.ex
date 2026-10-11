@@ -2878,6 +2878,7 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.ClearPublishedVersion
           change KilnCMS.CMS.Changes.DeleteArtifacts
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "unpublished"}
+          change KilnCMS.CMS.Changes.NotifySubscribersWithdrawn
           # Any open editorial calendar re-queries its window. NOT on
           # `:autosave`: a broadcast per debounce would wake every open grid
           # in the org every few seconds while one person types.
@@ -2898,6 +2899,7 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.ClearPublishedVersion
           change KilnCMS.CMS.Changes.DeleteArtifacts
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "unpublished"}
+          change KilnCMS.CMS.Changes.NotifySubscribersWithdrawn
           # Any open editorial calendar re-queries its window. NOT on
           # `:autosave`: a broadcast per debounce would wake every open grid
           # in the org every few seconds while one person types.
@@ -2932,6 +2934,7 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.ClearPublishedVersion
           change KilnCMS.CMS.Changes.DeleteArtifacts
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "unpublished"}
+          change KilnCMS.CMS.Changes.NotifySubscribersWithdrawn
           # As on `:archive`: every landing on `:archived` says so.
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "archived", payload: :tombstone}
           # Any open editorial calendar re-queries its window. NOT on
@@ -2998,6 +3001,8 @@ defmodule KilnCMS.CMS.Content do
           # correctly stays silent.
           change {KilnCMS.CMS.Changes.NotifyWebhooks,
                   event: "unpublished", only_when: :was_published}
+
+          change {KilnCMS.CMS.Changes.NotifySubscribersWithdrawn, only_when: :was_published}
 
           # …and `archived` fires from every state, as a body-less tombstone:
           # `unpublished` answers "did this leave delivery", `archived` answers
