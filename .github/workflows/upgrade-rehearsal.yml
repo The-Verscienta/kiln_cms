@@ -87,10 +87,14 @@ jobs:
           --health-retries 5
 
     env:
-      REHEARSAL_WORK: ${{ github.workspace }}/../rehearsal
       STEP_TIMEOUT: "1800"
 
     steps:
+      # Absolute and outside the checkout: upload-artifact refuses a path with
+      # `..` in it, and job-level `env` cannot read the `runner` context.
+      - name: Pick the scratch root
+        run: echo "REHEARSAL_WORK=$RUNNER_TEMP/rehearsal" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v5
         with:
           # Every tag, and history back to the oldest: kiln.update counts and
@@ -122,7 +126,7 @@ jobs:
 
       - name: Report
         if: always()
-        run: scripts/upgrade_rehearsal/summarize.sh "$REHEARSAL_WORK" >> "$GITHUB_STEP_SUMMARY"
+        run: bash scripts/upgrade_rehearsal/summarize.sh "$REHEARSAL_WORK" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload logs
         if: always()
