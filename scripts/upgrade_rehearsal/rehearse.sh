@@ -26,8 +26,9 @@
 #   notes       FROM's own `mix kiln.update --check`, against the simulated final
 #               and against the rc, compared with the candidate's
 #               `upgrade_notes/3` over the same changelog.
-#   update      FROM's own `mix kiln.update --to <rc>` inside the submodule, and
-#               the pin commit in the downstream repo.
+#   update      FROM's own `mix kiln.update --to <rc>` inside the submodule
+#               (with `--allow-major` when FROM is an older major), and the
+#               pin commit in the downstream repo.
 #   build_new   the rebuild at the candidate with the downstream's UNCHANGED
 #               overlay. If that overlay no longer compiles, the rehearsal says
 #               so and carries on with the candidate's own example.
@@ -332,15 +333,25 @@ notes() {
     "$DIR/rc_changelog.md" "${FROM#v}" "${RC_TAG#v}" >"$DIR/notes_rc_expected.txt"
 }
 
+# v1.2.0-rc.0 → 1
+major() { local v=${1#v}; echo "${v%%.*}"; }
+
 # The release headings printed under "What this update asks of you" (`  0.9.0`).
 printed_versions() {
   awk '/What this update asks of you/ { on = 1; next }
        on && /^  [0-9]+\.[0-9]+\.[0-9]+/ { print $1 }' "$1"
 }
 
+# Across a major boundary FROM's task refuses without `--allow-major`, by
+# design: a major bump says the overlay contract broke. A downstream on 0.12
+# moving to 1.x passes the flag once it has read the notes, so the rehearsal
+# does too — the path past the guard is the one worth rehearsing. Every
+# release since 0.5.0 accepts the flag.
 update() {
   set -e
-  old_kiln_update --to "$RC_TAG"
+  local allow_major=()
+  [ "$(major "$FROM")" -lt "$(major "$RC_TAG")" ] && allow_major=(--allow-major)
+  old_kiln_update --to "$RC_TAG" ${allow_major[@]+"${allow_major[@]}"}
   cd "$DS"
   git add upstream
   git -c user.name=rehearsal -c user.email=rehearsal@localhost commit --quiet \
@@ -382,7 +393,7 @@ FINAL_TAG=${FINAL_TAG:-$(echo "$LATEST" | awk -F. '{ printf "%s.%d.0", $1, $2 + 
 RC_TAG=${RC_TAG:-$FINAL_TAG-rc.0}
 
 export FROM HARNESS SRC_REPO WORK DIR DS BUILD MIRROR DB_NAME CANDIDATE_SHA FINAL_TAG RC_TAG REPAIRED_EXAMPLE_VERSIONS
-export -f psql_admin setup_mirror setup_downstream repair_from_candidate dedupe_overlay_migrations sync_build build seed_old old_kiln_update \
+export -f major psql_admin setup_mirror setup_downstream repair_from_candidate dedupe_overlay_migrations sync_build build seed_old old_kiln_update \
   notes update drift doctor migrate verify_before backfill verify_after
 
 step setup setup_mirror || fail "could not set up the upstream mirror"
