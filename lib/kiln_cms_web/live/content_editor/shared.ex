@@ -157,9 +157,28 @@ defmodule KilnCMSWeb.ContentEditor.Shared do
   # Current value of one custom field, from the form's `custom_fields` map
   # (param value mid-edit, otherwise the record's stored value). Keys are always
   # strings (jsonb / form params).
+  #
+  # A field that failed validation is absent from the cleaned map
+  # `ApplyCustomFields` writes back, so reading only that map blanked the whole
+  # widget (every part of a composite field) on the first half-filled day, and
+  # the next change event then posted the blanks — destroying what was typed.
+  # Fall back to what was submitted for a field the cleaned map lacks.
   def custom_field_value(form, name) do
     case AshPhoenix.Form.value(form, :custom_fields) do
-      map when is_map(map) -> Map.get(map, name)
+      map when is_map(map) ->
+        case Map.fetch(map, name) do
+          {:ok, value} -> value
+          :error -> submitted_custom_field(form, name)
+        end
+
+      _ ->
+        submitted_custom_field(form, name)
+    end
+  end
+
+  defp submitted_custom_field(form, name) do
+    case AshPhoenix.Form.params(form) do
+      %{"custom_fields" => %{} = submitted} -> Map.get(submitted, name)
       _ -> nil
     end
   end
