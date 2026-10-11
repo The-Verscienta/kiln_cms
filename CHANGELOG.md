@@ -60,6 +60,12 @@ Every summary line below that was shortened links to its own entry there.
   generator's `TODO:` placeholder) without failing the run.**
   ([#1942](https://github.com/The-Verscienta/kiln_cms/pull/1942))
 
+### Changed
+
+- **A `<type>Changed` GraphQL subscription now tells anonymous subscribers
+  when a published record is unpublished or archived, as `destroyed`.**
+  ([#1925](https://github.com/The-Verscienta/kiln_cms/issues/1925) · [long form](docs/changelog/unreleased.md#subscription-retraction))
+
 ## [1.2.0] - 2026-10-10
 
 Long form: [docs/changelog/v1.2.0.md](docs/changelog/v1.2.0.md) —

@@ -185,9 +185,17 @@ Each push carries the record under `created`/`updated` (or its id under
 queries**: an anonymous subscriber only ever receives published-visible data
 — draft edits simply never arrive — while a bearer-authed editor also sees
 draft activity. A record's *publish* arrives as an `updated` push (the
-workflow transition is an update); note that unpublishing makes the record
-invisible to anonymous subscribers, so they receive no event for it — poll or
-refetch on reconnect if you need deletion semantics.
+workflow transition is an update).
+
+**`destroyed` means the record left the published feed**, whichever action
+took it out: unpublished, archived, or deleted. A retraction is an update to
+Ash, and an anonymous subscriber can no longer read the record after it, so
+without this the one event a public reader most needs would never arrive;
+Kiln sends it as `destroyed` with the id, the one arm that needs no read
+(#1925). Treat it as "drop this from what you show". A bearer-authed editor
+receives the `updated` push for the same transition as well, since the
+record is still readable to them. Archiving or deleting a draft, which was
+never in the feed, stays silent for anonymous subscribers.
 
 Under load, notification fan-out batches through an out-of-band worker
 (`AshGraphql.Subscription.Batcher`), so publishing never blocks on slow
