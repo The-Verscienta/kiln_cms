@@ -54,7 +54,9 @@ defmodule KilnCMSWeb.GraphqlSubscriptionTest do
     {:ok, socket} = join_absinthe(socket)
 
     ref = push_doc(socket, doc)
-    assert_reply(ref, :ok, %{subscriptionId: subscription_id})
+    # The join and the subscribe document each take a round trip through the
+    # socket; the first one after boot can be slower than the 100ms default.
+    assert_reply(ref, :ok, %{subscriptionId: subscription_id}, 1_000)
     {socket, subscription_id}
   end
 
@@ -154,5 +156,65 @@ defmodule KilnCMSWeb.GraphqlSubscriptionTest do
     assert_push("subscription:data", %{result: %{data: %{"entryChanged" => changed}}})
     assert %{"updated" => %{"id" => id}} = changed
     assert id == entry.id
+  end
+
+  # A record leaving delivery (unpublish, archive) is an `:update` to Ash, and
+  # ash_graphql resolves an update per subscriber through the policy-scoped
+  # read: an anonymous subscriber can no longer read the record, the resolver
+  # answers not_found, and the batcher suppresses not_found results. Without
+  # the withdrawal notifier the retraction would simply never arrive — the one
+  # event a public reader most needs. It arrives as `destroyed`: the only arm
+  # of the union that carries an id without reading the record (#1925).
+  test "an anonymous subscriber is told when a published record is unpublished" do
+    actor = admin()
+    page = CMS.create_page!(%{title: "Live then gone", slug: slug()}, actor: actor, tenant: @org)
+    page = CMS.publish_page!(page, %{}, actor: actor, tenant: @org)
+
+    {_socket, subscription_id} = subscribe!(@page_changed)
+
+    CMS.unpublish_page!(page, %{}, actor: actor, tenant: @org)
+
+    assert_push(
+      "subscription:data",
+      %{
+        result: %{data: %{"pageChanged" => %{"destroyed" => id}}},
+        subscriptionId: ^subscription_id
+      },
+      2_000
+    )
+
+    assert id == page.id
+  end
+
+  test "archiving a published record tells an anonymous subscriber too" do
+    actor = admin()
+
+    page =
+      CMS.create_page!(%{title: "Live then archived", slug: slug()}, actor: actor, tenant: @org)
+
+    page = CMS.publish_page!(page, %{}, actor: actor, tenant: @org)
+
+    {_socket, _subscription_id} = subscribe!(@page_changed)
+
+    CMS.archive_page!(page, %{}, actor: actor, tenant: @org)
+
+    assert_push(
+      "subscription:data",
+      %{result: %{data: %{"pageChanged" => %{"destroyed" => id}}}},
+      2_000
+    )
+
+    assert id == page.id
+  end
+
+  test "archiving a draft stays silent for an anonymous subscriber" do
+    actor = admin()
+    page = CMS.create_page!(%{title: "Never live", slug: slug()}, actor: actor, tenant: @org)
+
+    {_socket, _subscription_id} = subscribe!(@page_changed)
+
+    CMS.archive_page!(page, %{}, actor: actor, tenant: @org)
+
+    refute_push("subscription:data", _any, 300)
   end
 end
