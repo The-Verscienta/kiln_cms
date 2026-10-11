@@ -58,13 +58,19 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`mix kiln.plugins.doctor` notes a plugin with no `summary/0` (or the
   generator's `TODO:` placeholder) without failing the run.**
-  ([#1942](https://github.com/The-Verscienta/kiln_cms/pull/1942))
+  ([#1942](https://github.com/The-Verscienta/kiln_cms/issues/1942))
 
 ### Changed
 
 - **A `<type>Changed` GraphQL subscription now tells anonymous subscribers
   when a published record is unpublished or archived, as `destroyed`.**
   ([#1925](https://github.com/The-Verscienta/kiln_cms/issues/1925) · [long form](docs/changelog/unreleased.md#subscription-retraction))
+
+### Fixed
+
+- **The reranker scores relevance instead of 1.0 for every pair, and a reranker
+  model that cannot be loaded no longer stops Kiln from booting.**
+  ([long form](docs/changelog/unreleased.md#the-reranker-scores-relevance-instead-of-10-for-every-pair-and-a-reranker-model))
 
 ## [1.2.1] - 2026-10-11
 
@@ -135,10 +141,6 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/v1.2.0.md#newsletter-pages-in-site-chrome))
 
 ### Fixed
-
-- **The reranker scores relevance instead of 1.0 for every pair, and a reranker
-  model that cannot be loaded no longer stops Kiln from booting.**
-  ([long form](docs/changelog/unreleased.md#the-reranker-scores-relevance-instead-of-10-for-every-pair-and-a-reranker-model))
 
 - **The plugin docs no longer promise Hex or git-dependency plugins: a plugin
   compiles only as a `projects/<name>/` directory, and is shared as a git
