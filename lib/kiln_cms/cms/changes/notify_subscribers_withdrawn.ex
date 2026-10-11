@@ -15,9 +15,10 @@ defmodule KilnCMS.CMS.Changes.NotifySubscribersWithdrawn do
   record as that subscriber and sends what the read returns. That is what
   keeps drafts out of an anonymous feed. It is also why a retraction never
   arrives: once the record has left `:published`, the anonymous read answers
-  not found, and `AshGraphql.Subscription.Batcher.should_send?/1` drops
-  not-found results rather than leak that a record exists. The one event a
-  public reader most needs is the one the model cannot deliver.
+  not found, and the batcher (`AshGraphql.Subscription.Batcher`, its private
+  `should_send?`) drops not-found results rather than leak that a record
+  exists. The one event a public reader most needs is the one the model
+  cannot deliver.
 
   `destroyed` is the only arm of the subscription union that carries an id
   without reading the record, so it is the honest shape for "this left your
@@ -29,7 +30,7 @@ defmodule KilnCMS.CMS.Changes.NotifySubscribersWithdrawn do
 
   Runs `after_transaction`, like `NotifyWebhooks`: a notification of a write
   that has already committed, which must not be able to undo it. It publishes
-  the same `AshGraphql.Subscription.Batcher.Notification` the resource's own
+  the same batcher notification struct the resource's own
   `AshGraphql.Subscription.Notifier` would for a real `:destroy`, to the same
   pubsub and topic, so the batcher, tenant guard and relay-id encoding all
   apply unchanged.
