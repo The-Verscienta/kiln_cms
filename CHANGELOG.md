@@ -54,12 +54,18 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+## [1.3.0] - 2026-10-12
+
+Long form: [docs/changelog/v1.3.0.md](docs/changelog/v1.3.0.md) —
+the 1.3.0 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
 ### Added
 
 - **Content webhooks carry `data.affected`: the published documents whose
   fired artifacts embed this one, so a consumer can invalidate those pages
   too instead of waiting out a TTL.**
-  ([#1925](https://github.com/The-Verscienta/kiln_cms/issues/1925) · [long form](docs/changelog/unreleased.md#webhook-affected))
+  ([#1925](https://github.com/The-Verscienta/kiln_cms/issues/1925) · [long form](docs/changelog/v1.3.0.md#webhook-affected))
 
 - **`mix kiln.plugins.doctor` notes a plugin with no `summary/0` (or the
   generator's `TODO:` placeholder) without failing the run.**
@@ -68,23 +74,23 @@ Every summary line below that was shortened links to its own entry there.
 - **The content list filters on records never reviewed (`?reviewed=never`) and
   on records missing a consent kind (`?consent_missing=<kind>`); the governance
   dashboard links both as work queues.**
-  ([long form](docs/changelog/unreleased.md#review-work-queues))
+  ([#1953](https://github.com/The-Verscienta/kiln_cms/pull/1953) · [long form](docs/changelog/v1.3.0.md#review-work-queues))
 
 ### Changed
 
 - **The path forward's wedge minors are 1.3 to 1.8: v1.2.0 shipped the
   toolchain move without them.**
-  ([long form](docs/changelog/unreleased.md#wedge-minors-renumbered))
+  ([#1945](https://github.com/The-Verscienta/kiln_cms/pull/1945) · [long form](docs/changelog/v1.3.0.md#wedge-minors-renumbered))
 
 - **A `<type>Changed` GraphQL subscription now tells anonymous subscribers
   when a published record is unpublished or archived, as `destroyed`.**
-  ([#1925](https://github.com/The-Verscienta/kiln_cms/issues/1925) · [long form](docs/changelog/unreleased.md#subscription-retraction))
+  ([#1925](https://github.com/The-Verscienta/kiln_cms/issues/1925) · [long form](docs/changelog/v1.3.0.md#subscription-retraction))
 
 ### Fixed
 
 - **The reranker scores relevance instead of 1.0 for every pair, and a reranker
   model that cannot be loaded no longer stops Kiln from booting.**
-  ([long form](docs/changelog/unreleased.md#the-reranker-scores-relevance-instead-of-10-for-every-pair-and-a-reranker-model))
+  ([#1941](https://github.com/The-Verscienta/kiln_cms/pull/1941) · [long form](docs/changelog/v1.3.0.md#the-reranker-scores-relevance-instead-of-10-for-every-pair-and-a-reranker-model))
 
 ## [1.2.1] - 2026-10-11
 
@@ -2497,7 +2503,8 @@ that `mix kiln.update` compares against.
   one that can't be described by a changelog diff.
   ([long form](docs/changelog/v0.1.0.md#if-your-project-pins-a-sha-from-before-this-tag-your-first-update-is-the-only))
 
-[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/The-Verscienta/kiln_cms/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/The-Verscienta/kiln_cms/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/The-Verscienta/kiln_cms/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/The-Verscienta/kiln_cms/compare/v1.0.0...v1.1.0
