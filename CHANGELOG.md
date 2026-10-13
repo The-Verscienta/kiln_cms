@@ -71,6 +71,10 @@ Every summary line below that was shortened links to its own entry there.
   renders their variants and transforms from URLs.**
   ([long form](docs/changelog/unreleased.md#image-backends))
 
+- **`mix kiln.embed_all --blocks` re-embeds the block index too, so a model,
+  pooling or `document_prefix` change reaches every block vector.**
+  ([long form](docs/changelog/unreleased.md#embed-all-blocks))
+
 ### Changed
 
 - **The browser suite now drives live co-editing: two peers type into one

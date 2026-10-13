@@ -28,9 +28,19 @@ defmodule KilnCMS.Search.BlockIndexer do
   # See the moduledoc: the indexer is the system, and says so.
   defp system_actor, do: SystemActor.new(:search)
 
-  @doc "Re-index a document's blocks. Returns `{:ok, count_embedded}`."
-  @spec reindex(struct()) :: {:ok, non_neg_integer()}
-  def reindex(document) do
+  @doc """
+  Re-index a document's blocks. Returns `{:ok, count_embedded}`.
+
+  ## Options
+
+    * `:force` — re-embed every block, ignoring the stored `content_hash`.
+      The hash covers what a block *says*, not the space it was embedded in,
+      so after a model or pooling swap every block still reads as unchanged
+      and an ordinary re-index embeds nothing. `mix kiln.embed_all --blocks`
+      is the caller. Defaults to `false`.
+  """
+  @spec reindex(struct(), keyword()) :: {:ok, non_neg_integer()}
+  def reindex(document, opts \\ []) do
     case Map.get(document, :blocks) do
       # A passphrase-locked document (#496) indexes as if it had no blocks, which
       # means `prune_stale/3` deletes every row it already had. That is the point:
@@ -42,10 +52,10 @@ defmodule KilnCMS.Search.BlockIndexer do
       # block indexing — so this runs on the edit that sets the passphrase, and
       # again (re-indexing for real) on the edit that removes it.
       _blocks when not is_nil(:erlang.map_get(:access_password_hash, document)) ->
-        reindex_blocks(document, [])
+        reindex_blocks(document, [], opts)
 
       blocks when is_list(blocks) ->
-        reindex_blocks(document, blocks)
+        reindex_blocks(document, blocks, opts)
 
       # Not loaded (a select-limited read) or NULL (the column is nullable, and
       # an import can leave it so). Both used to be harmless; they are not any
@@ -57,14 +67,19 @@ defmodule KilnCMS.Search.BlockIndexer do
     end
   end
 
-  defp reindex_blocks(document, blocks) do
+  defp reindex_blocks(document, blocks, opts) do
     type = Engine.document_type(document)
     # Block embeddings are tenant-scoped (epic #336); the tenant rides on the
     # document's own `org_id`.
     org_id = document.org_id
     context = document_context(document)
     existing = existing_rows(org_id, type, document.id)
-    hashes = Map.new(existing, &{&1.block_key, &1.content_hash})
+    # Forcing forgets the stored hashes rather than skipping the read:
+    # `existing` is still what `prune_stale/3` diffs against.
+    hashes =
+      if Keyword.get(opts, :force, false),
+        do: %{},
+        else: Map.new(existing, &{&1.block_key, &1.content_hash})
 
     expanded =
       blocks

@@ -75,6 +75,23 @@ carries the reasoning.
   Images plugin itself ships separately.
   ([#1955](https://github.com/The-Verscienta/kiln_cms/issues/1955))
 
+<a id="embed-all-blocks"></a>
+
+- **`mix kiln.embed_all --blocks` re-embeds the block index too, so a model,
+  pooling or `document_prefix` change reaches every block vector.**
+  `embed_all` re-embedded document and tag vectors only. Blocks are indexed on
+  fire, and the indexer skips a block whose `content_hash` is unchanged. That
+  hash covers what a block says, not the space it was embedded in, so after an
+  embedding-space change neither a publish nor a re-fire sweep
+  (`mix kiln.refire_all`) re-embedded a single block, and the block leg went
+  on comparing old-space block vectors with new-space queries. `--blocks`
+  enqueues one `BlockEmbeddingWorker` per published document, every org, with
+  `"force" => true`. `BlockIndexer.reindex/2` then ignores the stored hashes.
+  The jobs run on the `:search` queue and re-fire nothing else. Without the
+  flag the task behaves as before. Drafts have no block rows, so they are not
+  enqueued.
+  ([#1939](https://github.com/The-Verscienta/kiln_cms/issues/1939))
+
 <a id="prosemirror-view-paste-xss"></a>
 
 - **prosemirror-view 1.42.6 for GHSA-c8x8-7fp4-3x9w: pasting HTML into the

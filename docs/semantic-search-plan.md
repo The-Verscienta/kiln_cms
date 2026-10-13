@@ -353,9 +353,12 @@ config :kiln_cms, KilnCMS.Search,
   pooling: :mean_pooling
 ```
 
-Then `mix kiln.embed_all` (now covers Page, Post, **and** dynamic entries) —
-old English embeddings are meaningless under the new model, so every record
-must be recomputed.
+Then `mix kiln.embed_all --blocks` (covers Page, Post, **and** dynamic
+entries, their tags, and — with `--blocks` — every published document's block
+vectors). Old English embeddings are meaningless under the new model, so every
+record must be recomputed. Leave out `--blocks` and the block index stays in
+the old space: block re-indexing skips any block whose text is unchanged, and
+a model swap changes no text.
 
 ### Higher quality: a different-dimension model (needs a migration)
 
@@ -364,7 +367,7 @@ must be recomputed.
 the vector width. Set `dim:` to match, then migrate every content table's
 `embedding` column and its HNSW index (the dimension is fixed in the column
 type, so this is a one-time destructive-to-embeddings step, followed by
-`mix kiln.embed_all`):
+`mix kiln.embed_all --blocks`):
 
 ```elixir
 # priv/repo/migrations/..._widen_embedding.exs
