@@ -58,7 +58,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             BACKUP_ENABLED OEMBED_ENABLED
             KILN_READING_TIME_WPM BACKUP_KEEP_DAYS BACKUP_STALE_AFTER_HOURS
             KILN_EXPERIMENTS_STICKY_DAYS REQUIRE_AV_METADATA_STRIP
-            BRAND_PRIMARY_COLOR ASK_RERANK
+            BRAND_PRIMARY_COLOR ASK_RERANK SEARCH_CHUNK_LONG_DOCUMENTS
             KILN_DEMO_RESET KILN_DEMO_RESET_CRON KILN_DEMO_GOLDEN_PATH
             KILN_FEDERATION_ENABLED
             KILN_MEDIA_ROOT MEDIA_DIR S3_PUBLIC_BASE_URL
@@ -531,6 +531,42 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
 
     test "the block is skipped under :test so the suite is deterministic" do
       assert {:not_written, _} = ask_rerank("true", :test)
+    end
+  end
+
+  describe "SEARCH_CHUNK_LONG_DOCUMENTS (#1940)" do
+    # Chunked document embeddings. `fetch/1`, as `ASK_RERANK` is: unset
+    # writes nothing, so a project overlay's `chunk_long_documents: true`
+    # survives a deploy that never mentions the variable.
+    defp chunk_long_documents(value, env \\ :prod) do
+      {config, stderr} = eval_io(%{"SEARCH_CHUNK_LONG_DOCUMENTS" => value}, env)
+
+      written =
+        case get_in(config, [:kiln_cms, KilnCMS.Search, :chunk_long_documents]) do
+          nil -> :not_written
+          bool -> bool
+        end
+
+      {written, stderr}
+    end
+
+    test "on- and off-spellings write the boolean" do
+      for value <- ["true", " On ", "1"], do: assert({true, _} = chunk_long_documents(value))
+      for value <- ["false", "OFF", "0"], do: assert({false, _} = chunk_long_documents(value))
+    end
+
+    test "unset writes nothing, leaving the compile-time default in force" do
+      assert {:not_written, _} = chunk_long_documents(nil)
+    end
+
+    test "an unrecognized value keeps the default and warns" do
+      {written, stderr} = chunk_long_documents("sometimes")
+      assert written == :not_written
+      assert stderr =~ "SEARCH_CHUNK_LONG_DOCUMENTS is set to an unrecognized value"
+    end
+
+    test "the block is prod-only" do
+      assert {:not_written, _} = chunk_long_documents("true", :test)
     end
   end
 

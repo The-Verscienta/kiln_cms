@@ -197,6 +197,16 @@ config :kiln_cms, KilnCMS.Search,
   # query, at most `tag_leg_limit` tags per query, at half weight. On
   # wherever semantic search is on. See `KilnCMS.Search.tag_leg?/0`.
   tag_leg: true,
+  # Chunked document embeddings (#1940): also embed the part of a long
+  # record's `search_text` past the model's window, in overlapping chunks of
+  # `chunk_overlap` tokens' overlap, at most `chunk_max_per_document` per
+  # record, so the block leg and the relevance floor see the whole record.
+  # Off by default — about 2× the embedding work for long records; run
+  # `mix kiln.embed_all` after turning it on. Overridden at runtime by
+  # SEARCH_CHUNK_LONG_DOCUMENTS. See `KilnCMS.Search.chunk_long_documents?/0`.
+  chunk_long_documents: false,
+  chunk_overlap: 64,
+  chunk_max_per_document: 8,
   # Optional reranking of every search surface's fused results by a local
   # cross-encoder — the public search page, the editor palette, /api/search
   # and /api/ask alike. Off by default: it is CPU inference over every

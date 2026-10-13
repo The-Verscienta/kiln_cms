@@ -60,6 +60,10 @@ Every summary line below that was shortened links to its own entry there.
   first `COPY sdk/kiln_plugin sdk/kiln_plugin`; the core's own Dockerfile does.**
   ([long form](docs/changelog/unreleased.md#plugin-sdk-docker))
 
+- **A new, empty table — `document_chunk_embeddings` — arrives by migration;
+  nothing writes to it until `chunk_long_documents` is turned on.**
+  ([long form](docs/changelog/unreleased.md#chunked-embeddings-migration))
+
 ### Added
 
 - **Plugins can ship as Hex, git or `path:` dependencies: the plugin contract
@@ -70,6 +74,10 @@ Every summary line below that was shortened links to its own entry there.
   external service such as Cloudflare Images that takes new image uploads and
   renders their variants and transforms from URLs.**
   ([long form](docs/changelog/unreleased.md#image-backends))
+
+- **Semantic search can see past the first 512 tokens of a long record:
+  `chunk_long_documents` embeds the rest of its text in overlapping chunks.**
+  ([long form](docs/changelog/unreleased.md#chunked-embeddings))
 
 ### Changed
 

@@ -114,6 +114,13 @@ which is worse than the disclosure.
   when semantic search is disabled, so `/api/ask` works with no model stack;
   turning on semantic search (`config :kiln_cms, KilnCMS.Search, semantic: true`)
   improves retrieval quality automatically.
+- **Long records are seen whole only with chunking on.** A record's vector
+  covers the first 512 tokens of its text, so a question about a passage deep
+  in a long record retrieves it only through a keyword match or one of its
+  blocks. `chunk_long_documents: true` embeds the rest in overlapping windows
+  (about 2× the embedding work for long records; backfill with
+  `mix kiln.embed_all`) — see
+  [semantic-search-plan.md](semantic-search-plan.md#long-documents).
 - **Selection is by score, across types.** Every section comes back ranked
   within its type and every hit carries its fused score
   (`KilnCMS.Search.hit_score/1`); the sources are the top `limit` of all

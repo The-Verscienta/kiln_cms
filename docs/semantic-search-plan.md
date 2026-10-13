@@ -210,6 +210,63 @@ wherever semantic search is on (`block_leg: false` switches it off); block
 rows exist for fired documents only, so a draft is reached by the other legs.
 It sits out under facet filters, like the fuzzy leg.
 
+## Long documents
+
+Blocks only help a document that has them, and only once it is fired. A
+record whose text lives in searchable custom fields (#1585) has no blocks, and
+its `search_text` routinely runs past the model's 512-token window — on one
+production corpus half the records of one type did. Text past the window is
+invisible to the semantic side of hybrid search and to the relevance floor
+(#1940).
+
+`chunk_long_documents: true` (off by default; `SEARCH_CHUNK_LONG_DOCUMENTS` in
+a release) embeds that remainder too:
+
+```elixir
+config :kiln_cms, KilnCMS.Search,
+  chunk_long_documents: true,
+  # tokens shared by consecutive windows (and by the first window and the head)
+  chunk_overlap: 64,
+  # bounds a single huge record's inference; the tail past it stays unembedded
+  chunk_max_per_document: 8
+```
+
+- **What is embedded.** The document's own vector is unchanged: it still
+  covers the first window. The text after it is split into windows of the
+  serving's `sequence_length` with `chunk_overlap` tokens of overlap, each
+  prefixed with the record's title for context (the way a block carries its
+  title) and embedded with `document_prefix`. Rows live in their own table,
+  `document_chunk_embeddings` — not in `block_embeddings`, whose consumers
+  (block search, similar content, near-duplicates, centroids) read every row
+  as a block. See `KilnCMS.Search.DocumentChunkEmbedding`.
+- **Tokens are estimated.** The lean build has no tokenizer, and boundaries
+  must be reproducible, so `KilnCMS.Search.Chunker` counts whitespace words at
+  0.6 words a token. The estimate is pessimistic on purpose: the first chunk
+  starts a little before the head truly ends rather than after it, and no
+  chunk runs past the window.
+- **When it is written.** By the same job that writes the document vector
+  (`KilnCMS.Search.EmbeddingWorker`), so on every content write, for drafts as
+  well as published records, and by `mix kiln.embed_all`. A re-embed replaces a
+  document's chunks in one transaction, reusing any vector whose text did not
+  change; a record that shrinks back inside the window loses them; a
+  passphrase lock or a hard purge deletes them.
+- **How search uses it.** The block leg reads the nearest chunks beside the
+  nearest blocks and keeps each document at the nearer of the two, so the
+  document is reported as `block` in `legs` and the floor judges it by
+  `min(document, block, chunk, tag)`. The leg runs on chunks even with
+  `block_leg: false`, and sits out under facet filters, as it always has.
+- **Cost.** One more inference per window past the first on every re-embed of a
+  long record — about 2× the embedding work for a corpus whose long records run
+  to two or three windows — and one more indexed nearest-neighbour query per
+  content type per search. Chunk embedding is background indexing, like the
+  document vector, and is not charged to the on-demand
+  `embedding_per_org_limit` budget; the per-document cap is its bound.
+- **Turning it on.** Records pick it up as they are next saved. To backfill the
+  rest, run `mix kiln.embed_all` (it re-embeds every record, head included, so
+  budget the time a full re-embed takes on your host). Turning it off stops
+  both the writes and the reads; existing rows stay until the record is next
+  re-embedded with it on, locked or purged.
+
 ## Alias leg (2026-09-11)
 
 A title is not always the only name a record answers to: an herb has a Latin
