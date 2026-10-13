@@ -201,6 +201,60 @@ defmodule KilnCMS.Ask do
   @spec rerank?() :: boolean()
   def rerank?, do: cfg(:rerank, false) or Search.rerank?()
 
+  @doc """
+  Where the ask path reranks, when `rerank?/0` says it does (#1937):
+
+    * `:section` (the default) — each content type's candidates inside its
+      own `KilnCMS.Search.hybrid/3` call, then a flat sort of every section
+      by score. One reranker call per non-empty section.
+    * `:union` — no section reranks; the sections are merged by fused score,
+      the top `rerank_union/0` of that merge are reranked in **one** call
+      (`KilnCMS.Search.rerank_records/3`), and the sources are taken from the
+      result in that order.
+
+  `:section` stays the default because adopting `:union` waits on a
+  measurement (#1937's preregistered criteria, on a held-out real-traffic set
+  none of its numbers have seen). `ASK_RERANK_SCOPE` (`section` / `union`)
+  sets it in a release.
+  """
+  @spec rerank_scope() :: :section | :union
+  def rerank_scope, do: cfg(:rerank_scope, :section)
+
+  @doc """
+  How the ask path's rerank combines with the fused order — `:replace` or
+  `{:rrf, k}`, as `KilnCMS.Search.rerank_mode/0` describes — in either
+  `rerank_scope/0`. Defaults to `KilnCMS.Search.rerank_mode/0`, so one
+  setting covers both until this one is set. `ASK_RERANK_MODE` (`replace`,
+  `rrf`, `rrf:<k>`) sets it in a release. #1937's candidate is the union
+  scope at `{:rrf, 60}`.
+  """
+  @spec rerank_mode() :: Search.RerankOrder.mode()
+  def rerank_mode, do: cfg(:rerank_mode, Search.rerank_mode())
+
+  @doc """
+  Whether the union rerank holds every source the question **names** — a
+  hit whose legs include `:title` or `:alias` — at its fused position, and
+  reorders only the rest (`KilnCMS.Search.RerankOrder.pin/3`). Off by
+  default; `:union` scope only (a section has no cross-type fused rank to
+  hold). `ASK_RERANK_PIN` sets it in a release.
+
+  The cross-encoder prefers a record that *answers* a question to the record
+  the question *names*: in #1937's simulation, "what does ST36 treat" moved
+  from @1 to @3, behind point combinations. The pin is the preregistered fix
+  for exactly that, specified before it was measured.
+  """
+  @spec rerank_pin?() :: boolean()
+  def rerank_pin?, do: cfg(:rerank_pin, false)
+
+  @doc """
+  How many of the merged sections' strongest candidates the `:union` scope
+  reranks — the union's size. Default 30, #1937's preregistered union. A
+  candidate below it keeps its fused place after the reranked ones, which at
+  the default per-section depth (6) and `limit` ≤ 12 it can never reach.
+  """
+  @spec rerank_union() :: pos_integer()
+  def rerank_union, do: cfg(:rerank_union, 30)
+
   @doc "The configured provider name, from the `\"provider:model\"` spec."
   @spec provider() :: String.t() | nil
   def provider, do: LLM.provider(model())
@@ -338,29 +392,51 @@ defmodule KilnCMS.Ask do
   # --- retrieval -------------------------------------------------------------
 
   defp retrieve(question, read_opts) do
-    locale = Keyword.fetch!(read_opts, :locale)
     limit = Keyword.fetch!(read_opts, :limit)
+
+    hits =
+      if rerank?() and rerank_scope() == :union do
+        question
+        |> candidates(read_opts, rerank: false)
+        |> rerank_union(question)
+        |> Enum.take(limit)
+      else
+        # `rerank:` is this path's own verdict (`rerank?/0`), not the global
+        # switch's, which is what lets a deployment rerank here and nowhere
+        # else. Each section reranks its own candidates (`rerank_scope/0`
+        # `:section`), and every section's scores come from the same
+        # cross-encoder for the same question, so the flat sort in
+        # `candidates/3` is a rerank of the whole union — `limit` candidates
+        # per registered content type through the model, per question, in one
+        # call per section.
+        question
+        |> candidates(read_opts, rerank: rerank?(), rerank_mode: rerank_mode())
+        |> Enum.take(limit)
+      end
+
+    Enum.map(hits, fn {record, type, ct} -> source(record, type, ct, read_opts[:locale]) end)
+  end
+
+  # Every content section's hits for `question`, as `{record, type, ct}`,
+  # flat-sorted by score — fused, or the section's reranked score when
+  # `rerank_opts` reranks per section.
+  defp candidates(question, read_opts, rerank_opts) do
     # Only the sections this reads. `/api/ask` is public and anonymous, so the
     # sweep it triggers is the one most worth not paying for twice over — it
     # used to run media and every taxonomy resource and discard them (#960).
-    #
-    # `rerank:` is this path's own verdict (`rerank?/0`), not the global
-    # switch's, which is what lets a deployment rerank here and nowhere else.
-    # Each section reranks its own candidates, and that is enough: every
-    # section's scores come from the same cross-encoder for the same question,
-    # so the flat sort below is a rerank of the whole union — `limit`
-    # candidates per registered content type through the model, per question.
+    # `:limit` is the per-section depth: each section contributes at most
+    # `limit` hits, the depth #1937's union was preregistered at.
     sections =
       Search.global(
         question,
-        read_opts ++ [rerank: rerank?(), passage: true, sections: Search.content_sections()]
+        read_opts ++ rerank_opts ++ [passage: true, sections: Search.content_sections()]
       )
 
     compiled =
       Enum.flat_map(ContentTypes.all(), fn ct ->
         sections
         |> Map.get(ct.section, [])
-        |> Enum.map(&source(&1, to_string(ct.type), ct, locale))
+        |> Enum.map(&{&1, to_string(ct.type), ct})
       end)
 
     dynamic =
@@ -368,7 +444,7 @@ defmodule KilnCMS.Ask do
         # Resolve the entry's dynamic type within its own site (epic #336).
         case ContentTypes.get_dynamic(record.type_name, record.org_id) do
           nil -> []
-          ct -> [source(record, record.type_name, ct, locale)]
+          ct -> [{record, record.type_name, ct}]
         end
       end)
 
@@ -384,9 +460,42 @@ defmodule KilnCMS.Ask do
     # seventh and eighth. Ties (two keyword-only rank-1 hits score the same)
     # keep the registry order — the sort is stable — so nothing about the old
     # order survives except as the tiebreak.
-    (compiled ++ dynamic)
-    |> Enum.sort_by(&(&1.score || 0.0), :desc)
-    |> Enum.take(limit)
+    Enum.sort_by(
+      compiled ++ dynamic,
+      fn {record, _type, _ct} -> Search.hit_score(record) || 0.0 end,
+      :desc
+    )
+  end
+
+  # The `:union` scope (#1937): the fused merge's top `rerank_union/0`,
+  # reranked in ONE call, the rest after it in fused order. Per section, a
+  # question touching eight content types paid up to eight padded batches, and
+  # a blend with the fused order was impossible — the cross-type fused rank is
+  # not visible inside a section. Here it is the candidate's position in the
+  # merge, which is exactly what `{:rrf, k}` and the pin read.
+  #
+  # A failed call hands the union back as it came — fused order, fused scores
+  # — rather than the per-section path's partial mix, where one failed section
+  # kept its RRF scores (~0.01–0.05) beside the others' 0–1 reranker scores and
+  # the flat sort ranked every reranked source above every fused one.
+  defp rerank_union(candidates, question) do
+    {union, rest} = Enum.split(candidates, rerank_union())
+
+    meta =
+      Map.new(union, fn {record, type, ct} -> {{record.__struct__, record.id}, {type, ct}} end)
+
+    reranked =
+      question
+      |> Search.rerank_records(Enum.map(union, &elem(&1, 0)),
+        mode: rerank_mode(),
+        pin: rerank_pin?()
+      )
+      |> Enum.map(fn record ->
+        {type, ct} = Map.fetch!(meta, {record.__struct__, record.id})
+        {record, type, ct}
+      end)
+
+    reranked ++ rest
   end
 
   defp source(record, type, ct, locale) do

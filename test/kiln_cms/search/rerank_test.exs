@@ -266,4 +266,287 @@ defmodule KilnCMS.Search.RerankTest do
       assert Ask.rerank?()
     end
   end
+
+  # A `BoostReranker` that also reports every call to the test process — the
+  # docs it was handed. Sections may run in their own tasks
+  # (`section_concurrency/0`), so `self()` inside `scores/2` is not the test;
+  # the test's pid rides in app env instead (this file is async: false).
+  defmodule RecordingReranker do
+    @behaviour KilnCMS.Search.Reranker
+    @impl true
+    def scores(query, docs) do
+      if pid = Application.get_env(:kiln_cms, :rerank_test_pid), do: send(pid, {:reranked, docs})
+      BoostReranker.scores(query, docs)
+    end
+  end
+
+  defp record_reranks do
+    Application.put_env(:kiln_cms, :rerank_test_pid, self())
+    on_exit(fn -> Application.delete_env(:kiln_cms, :rerank_test_pid) end)
+    put_search_env(reranker: RecordingReranker)
+  end
+
+  # Every `{:reranked, docs}` already in the mailbox.
+  defp reranker_calls(acc \\ []) do
+    receive do
+      {:reranked, docs} -> reranker_calls([docs | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
+  describe "the text the reranker reads (#1938)" do
+    test "is the title and the record's search_text, not the title alone" do
+      record_reranks()
+      admin = admin()
+      term = "common#{System.unique_integer([:positive])}"
+
+      # A page has no excerpt attribute at all: before #1938 the model saw
+      # "<title>" and nothing else.
+      page =
+        CMS.create_page!(
+          %{title: "#{term} alpha", slug: slug(), seo_description: "intensely bitter and cold"},
+          actor: admin
+        )
+
+      KilnCMS.DataCase.drain_oban()
+
+      Search.hybrid(:page, term, actor: admin, rerank: true)
+      assert [[doc]] = reranker_calls()
+      assert doc =~ ~r/^#{term} alpha — /
+      assert doc =~ "intensely bitter and cold"
+      refute Map.has_key?(page, :excerpt)
+    end
+
+    test "survives a caller's narrow :select — GET /api/search's", %{conn: conn} do
+      # `/api/search` reads six fields (`@hit_fields`), none of them
+      # `search_text`. With reranking on, `hybrid/3` widens the select to
+      # what the reranker reads, or the model is back to the title alone.
+      record_reranks()
+      put_search_env(rerank: true)
+      admin = admin()
+      term = "common#{System.unique_integer([:positive])}"
+
+      page =
+        CMS.create_page!(
+          %{title: "#{term} alpha", slug: slug(), seo_description: "intensely bitter and cold"},
+          actor: admin
+        )
+
+      CMS.publish_page!(page, %{}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      assert %{"results" => %{"pages" => [_]}} =
+               conn |> get("/api/search?q=#{term}") |> json_response(200)
+
+      assert [[doc]] = reranker_calls() |> Enum.reject(&(&1 == []))
+      assert doc =~ "intensely bitter and cold"
+    end
+
+    test "falls back to the passage, then the excerpt, then the title, and is capped" do
+      assert Search.rerank_text(%{title: "T", search_text: "body", excerpt: "ex"}) == "T — body"
+
+      assert Search.rerank_text(%{title: "T", search_text: nil, passage: "p", excerpt: "e"}) ==
+               "T — p"
+
+      assert Search.rerank_text(%{title: "T", search_text: "", excerpt: "ex"}) == "T — ex"
+      assert Search.rerank_text(%{title: "T"}) == "T"
+
+      long = String.duplicate("word ", 5_000)
+      text = Search.rerank_text(%{title: "T", search_text: long})
+      assert String.length(text) == Search.rerank_text_limit()
+      assert Search.rerank_text_limit() == 4096
+    end
+  end
+
+  describe "defaults (#1938, #1937)" do
+    test "are what reranking always did" do
+      # Whatever the test config sets, minus every key this PR added: the
+      # setup's `on_exit` puts the original back.
+      search = Application.get_env(:kiln_cms, KilnCMS.Search, [])
+      added = [:rerank_mode, :rerank_batch_size, :rerank_sequence_length]
+      Application.put_env(:kiln_cms, KilnCMS.Search, Keyword.drop(search, added))
+      Application.put_env(:kiln_cms, KilnCMS.Ask, rerank: false)
+
+      assert Search.rerank_mode() == :replace
+      assert Search.rerank_batch_size() == 8
+      assert Search.rerank_sequence_length() == 512
+      assert Ask.rerank_scope() == :section
+      assert Ask.rerank_mode() == :replace
+      refute Ask.rerank_pin?()
+      assert Ask.rerank_union() == 30
+    end
+  end
+
+  # Three published records in a fused order nothing random decides — the
+  # describes below switch the stub-embedded semantic leg off, and three
+  # keyword hits keep the fuzzy leg from running: "alpha" has the term in its
+  # title and its SEO description, "gamma" in its title, and the "boost" page
+  # (the stub reranker's favourite) only in its SEO description.
+  defp seed_three_pages(admin, term) do
+    pages =
+      for {title, attrs} <- [
+            {"#{term} alpha", %{seo_description: "All about #{term}"}},
+            {"#{term} gamma", %{}},
+            {"Notes on boost", %{seo_description: "About #{term}"}}
+          ] do
+        page = CMS.create_page!(Map.merge(%{title: title, slug: slug()}, attrs), actor: admin)
+        CMS.publish_page!(page, %{}, actor: admin)
+      end
+
+    KilnCMS.DataCase.drain_oban()
+    pages
+  end
+
+  describe "rerank_mode {:rrf, k} (#1938)" do
+    setup do
+      put_search_env(semantic: false)
+      :ok
+    end
+
+    test "orders a section by RRF of the fused rank and the rerank rank" do
+      admin = admin()
+      term = "common#{System.unique_integer([:positive])}"
+      [_alpha, _gamma, boost] = seed_three_pages(admin, term)
+
+      fused = Search.hybrid(:page, term, actor: admin)
+      assert [first, second, %{id: last}] = fused
+      assert last == boost.id
+
+      replaced = Search.hybrid(:page, term, actor: admin, rerank: true)
+      assert hd(replaced).id == boost.id
+
+      # Blended: boost is rerank 1 and fused 3 (1/63 + 1/61), the fused
+      # second is fused 2 and rerank 3 (1/62 + 1/63) — boost passes it — and
+      # the fused first is fused 1 and rerank 2, which holds.
+      blended = Search.hybrid(:page, term, actor: admin, rerank: true, rerank_mode: {:rrf, 60})
+      assert Enum.map(blended, & &1.id) == [first.id, boost.id, second.id]
+
+      assert_in_delta Search.hit_score(hd(blended)), 1 / 61 + 1 / 62, 1.0e-12
+      assert Search.hit_legs(hd(blended)) == Search.hit_legs(first)
+    end
+
+    test "follows the configured mode when the call names none" do
+      admin = admin()
+      term = "common#{System.unique_integer([:positive])}"
+      [_alpha, _gamma, boost] = seed_three_pages(admin, term)
+
+      put_search_env(rerank_mode: {:rrf, 60})
+      assert [_, %{id: id}, _] = Search.hybrid(:page, term, actor: admin, rerank: true)
+      assert id == boost.id
+    end
+  end
+
+  describe "the union rerank for /api/ask (#1937)" do
+    setup do
+      # Semantic off: the stub embedder's vectors are hashes, and a fused
+      # order they decide is a fused order no test can state.
+      put_search_env(semantic: false, rerank: false, reranker: BoostReranker)
+      put_ask_env(rerank: true, rerank_scope: :union)
+      :ok
+    end
+
+    test "reranks every content type's candidates in ONE reranker call per question" do
+      record_reranks()
+      admin = admin()
+      term = "common#{System.unique_integer([:positive])}"
+      {_alpha, boost, _post} = seed_across_types(admin, term)
+
+      assert [first | _] = Ask.answer(term).sources
+      assert {first.title, first.score} == {boost.title, 1.0}
+
+      # One call, over the union of the page and post sections.
+      assert [docs] = reranker_calls()
+      assert length(docs) == 3
+
+      # The per-section scope, for contrast: one call per non-empty section.
+      put_ask_env(rerank_scope: :section)
+      Ask.answer(term)
+      assert length(reranker_calls()) == 2
+    end
+
+    test "the union is the fused merge's top rerank_union/0, and the rest follows in fused order" do
+      record_reranks()
+      admin = admin()
+      term = "common#{System.unique_integer([:positive])}"
+      {_alpha, boost, _post} = seed_across_types(admin, term)
+      put_ask_env(rerank: false)
+      fused = Ask.answer(term).sources
+
+      put_ask_env(rerank: true, rerank_union: 2)
+      reranked = Ask.answer(term).sources
+
+      # Boost was fused last, outside a union of two: never reranked, still last.
+      assert [[_, _]] = reranker_calls()
+      assert List.last(reranked).title == boost.title
+      assert List.last(reranked) == List.last(fused)
+    end
+
+    test "a failed union rerank keeps the fused order and the fused scores" do
+      admin = admin()
+      term = "common#{System.unique_integer([:positive])}"
+      seed_across_types(admin, term)
+
+      put_ask_env(rerank: false)
+      fused = Ask.answer(term).sources
+
+      put_search_env(reranker: FailReranker)
+      put_ask_env(rerank: true)
+      assert Ask.answer(term).sources == fused
+      assert Enum.all?(fused, &(&1.score < 0.1))
+    end
+
+    test "{:rrf, k} blends the global fused rank with the union rerank rank" do
+      admin = admin()
+      term = "common#{System.unique_integer([:positive])}"
+      {_alpha, boost, _post} = seed_across_types(admin, term)
+
+      put_ask_env(rerank: false)
+      # The alpha page and the post tie on fused score (keyword and fuzzy
+      # rank 1 each in their own section); the merge's stable sort orders
+      # them by registry, and that position is the fused rank the blend reads.
+      assert [f1, f2, %{title: last}] = Ask.answer(term).sources
+      assert last == boost.title
+
+      put_ask_env(rerank: true, rerank_mode: {:rrf, 60})
+      assert [b1, b2, b3] = Ask.answer(term).sources
+      # As in the section test: boost (fused 3, rerank 1) passes the fused
+      # second (fused 2, rerank 3) but not the fused first (fused 1, rerank 2)
+      # — across a page and a post this time.
+      assert Enum.map([b1, b2, b3], & &1.title) == [f1.title, boost.title, f2.title]
+      assert_in_delta b1.score, 1 / 61 + 1 / 62, 1.0e-12
+      assert_in_delta b2.score, 1 / 63 + 1 / 61, 1.0e-12
+    end
+
+    test "the pin holds a source the question names by title at its fused rank" do
+      admin = admin()
+      term = "common#{System.unique_integer([:positive])}"
+      {_alpha, boost, _post} = seed_across_types(admin, term)
+
+      # A page whose whole title is the question: the title leg names it.
+      named = CMS.create_page!(%{title: term, slug: slug()}, actor: admin)
+      named = CMS.publish_page!(named, %{}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+
+      put_ask_env(rerank: false)
+      fused = Ask.answer(term).sources
+      named_at = Enum.find_index(fused, &(&1.title == named.title))
+      assert :title in Enum.at(fused, named_at).legs
+
+      # Unpinned, the reranker (which scores only "boost") moves it.
+      put_ask_env(rerank: true, rerank_mode: :replace)
+      unpinned = Ask.answer(term).sources
+      assert hd(unpinned).title == boost.title
+      refute Enum.find_index(unpinned, &(&1.title == named.title)) == named_at
+
+      # Pinned: exactly its fused rank, and the boost page still rises
+      # among the rest.
+      put_ask_env(rerank_pin: true)
+      pinned = Ask.answer(term).sources
+      assert Enum.find_index(pinned, &(&1.title == named.title)) == named_at
+
+      assert pinned |> Enum.reject(&(&1.title == named.title)) |> hd() |> Map.get(:title) ==
+               boost.title
+    end
+  end
 end

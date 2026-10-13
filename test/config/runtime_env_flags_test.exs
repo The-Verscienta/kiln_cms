@@ -59,6 +59,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_READING_TIME_WPM BACKUP_KEEP_DAYS BACKUP_STALE_AFTER_HOURS
             KILN_EXPERIMENTS_STICKY_DAYS REQUIRE_AV_METADATA_STRIP
             BRAND_PRIMARY_COLOR ASK_RERANK
+            SEARCH_RERANK_MODE ASK_RERANK_MODE ASK_RERANK_SCOPE ASK_RERANK_PIN
             KILN_DEMO_RESET KILN_DEMO_RESET_CRON KILN_DEMO_GOLDEN_PATH
             KILN_FEDERATION_ENABLED
             KILN_MEDIA_ROOT MEDIA_DIR S3_PUBLIC_BASE_URL
@@ -531,6 +532,66 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
 
     test "the block is skipped under :test so the suite is deterministic" do
       assert {:not_written, _} = ask_rerank("true", :test)
+    end
+  end
+
+  describe "SEARCH_RERANK_MODE / ASK_RERANK_MODE / ASK_RERANK_SCOPE / ASK_RERANK_PIN (#1937, #1938)" do
+    # How a rerank combines with the fused order, and where the ask path
+    # reranks. Each only overrides when set, like ASK_RERANK; an unusable
+    # value keeps the configured one and is reported — never guessed at, and
+    # never turned into an atom.
+    defp written(vars, path, env \\ :prod) do
+      {config, stderr} = eval_io(vars, env)
+
+      written =
+        case get_in(config, path) do
+          nil -> :not_written
+          value -> value
+        end
+
+      {written, stderr}
+    end
+
+    test "a rerank mode reads replace, rrf and rrf:<k>, for each scope" do
+      for {var, path} <- [
+            {"SEARCH_RERANK_MODE", [:kiln_cms, KilnCMS.Search, :rerank_mode]},
+            {"ASK_RERANK_MODE", [:kiln_cms, KilnCMS.Ask, :rerank_mode]}
+          ] do
+        assert {:replace, _} = written(%{var => "replace"}, path)
+        assert {{:rrf, 60}, _} = written(%{var => " RRF "}, path)
+        assert {{:rrf, 30}, _} = written(%{var => "rrf:30"}, path)
+        assert {:not_written, _} = written(%{var => nil}, path)
+        assert {:not_written, _} = written(%{var => "  "}, path)
+
+        {value, stderr} = written(%{var => "rrf:sixty"}, path)
+        assert value == :not_written
+        assert stderr =~ "#{var} is set to an unrecognized value"
+        assert stderr =~ "rrf:<k>"
+      end
+    end
+
+    test "ASK_RERANK_SCOPE is section or union" do
+      path = [:kiln_cms, KilnCMS.Ask, :rerank_scope]
+      assert {:union, _} = written(%{"ASK_RERANK_SCOPE" => "Union"}, path)
+      assert {:section, _} = written(%{"ASK_RERANK_SCOPE" => "section"}, path)
+      assert {:not_written, _} = written(%{"ASK_RERANK_SCOPE" => nil}, path)
+
+      {value, stderr} = written(%{"ASK_RERANK_SCOPE" => "global"}, path)
+      assert value == :not_written
+      assert stderr =~ "ASK_RERANK_SCOPE is set to an unrecognized value"
+    end
+
+    test "ASK_RERANK_PIN is a flag that writes false as well as true" do
+      path = [:kiln_cms, KilnCMS.Ask, :rerank_pin]
+      assert {true, _} = written(%{"ASK_RERANK_PIN" => "true"}, path)
+      assert {false, _} = written(%{"ASK_RERANK_PIN" => "off"}, path)
+      assert {:not_written, _} = written(%{"ASK_RERANK_PIN" => nil}, path)
+    end
+
+    test "the block is skipped under :test" do
+      vars = %{"SEARCH_RERANK_MODE" => "rrf", "ASK_RERANK_SCOPE" => "union"}
+      assert {:not_written, _} = written(vars, [:kiln_cms, KilnCMS.Search, :rerank_mode], :test)
+      assert {:not_written, _} = written(vars, [:kiln_cms, KilnCMS.Ask, :rerank_scope], :test)
     end
   end
 

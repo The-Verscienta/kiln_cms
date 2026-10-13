@@ -144,3 +144,62 @@ carries the reasoning.
   `POST /dev/e2e-collab` (`KilnCMSWeb.Plugs.E2ECollab`). The route is mounted
   beside `/dev/e2e-identity` in the compile-gated dev-tools scope, which
   `KilnCMS.Application` refuses in `:prod`.
+
+<a id="ask-union-rerank"></a>
+
+- **`/api/ask` can rerank its merged candidates once instead of each content
+  type's, blend the reranker's order with the fused one, and hold a source
+  the question names at its fused rank; all off by default.** With reranking
+  on, each content type's candidates used to be reranked inside their own
+  `hybrid/3` call: one padded reranker batch per non-empty section, and no
+  way to blend with the fused order, because the cross-type fused rank is not
+  visible inside a section. `KilnCMS.Ask`'s new `rerank_scope: :union`
+  (`ASK_RERANK_SCOPE=union`) retrieves unreranked, merges the sections by
+  fused score, and reranks the top `rerank_union` (default 30) in one call
+  through `KilnCMS.Search.rerank_records/3`. `rerank_mode`
+  (`ASK_RERANK_MODE`; defaults to `KilnCMS.Search`'s) replaces or blends.
+  `rerank_pin: true` (`ASK_RERANK_PIN`) is the named-entity pin #1937
+  preregistered: a source whose legs include `title` or `alias` keeps its
+  fused position, and the rest fill the gaps in reranked order. If the union
+  call fails, the union keeps its fused order and scores, so the scope no
+  longer mixes RRF scores with 0–1 reranker scores the way a per-section
+  failure can. The default stays `rerank_scope: :section` with `:replace`,
+  today's behaviour, until a held-out measurement says otherwise.
+  docs/rag.md, "Measuring each variant", maps each preregistered variant
+  (F, R1–R4, R4 + pin) to its config for `mix kiln.search.eval --ask`.
+  ([#1937](https://github.com/The-Verscienta/kiln_cms/issues/1937))
+
+<a id="rerank-shape-and-mode"></a>
+
+- **The reranker's compiled shape (`rerank_batch_size`,
+  `rerank_sequence_length`) and how it meets the fused order (`rerank_mode`,
+  `SEARCH_RERANK_MODE`) are configurable; the defaults are unchanged.**
+  `RerankerServing` compiled a literal 8 × 512, and every call padded to it:
+  0.8–1.05 s a batch for `bge-reranker-base` under EXLA on a laptop CPU. The
+  shape now follows `KilnCMS.Search` config, mirroring the embedder's
+  `batch_size`/`sequence_length`, with a list of lengths compiling one bucket
+  each. `rerank_mode: {:rrf, k}` (`SEARCH_RERANK_MODE=rrf` or `rrf:<k>`)
+  orders by `1/(k + fused rank) + 1/(k + rerank rank)` instead of the
+  reranker's order outright, with ties going to fused order. Replacing
+  outright cut question-form MRR from 0.672 to 0.388 on the golden set,
+  because the cross-encoder prefers a record that answers a question to the
+  one it names. A blended hit's `score` is its blend: comparable within the
+  list that was reranked, which for a per-section rerank means within a
+  section. docs/rag.md also gains a licence note on the MS MARCO-trained
+  MiniLM cross-encoders.
+  ([#1938](https://github.com/The-Verscienta/kiln_cms/issues/1938))
+
+<a id="rerank-search-text"></a>
+
+- **The reranker reads a record's title and its `search_text`, not its title
+  and excerpt, so a record with no excerpt is no longer judged on its title
+  alone.** A content type whose substance lives in searchable custom fields
+  has no excerpt, so the cross-encoder scored "Huang Lian" at logit −8.1 for
+  "intensely bitter and cold" on its title alone, and +4.7 with its text. On
+  the golden set behind #1938, title + excerpt cut r@10 from the fused 0.851
+  to 0.667, while title + `search_text` held 0.808. The text falls back to
+  the `passage` calc, then the excerpt, and is capped at eight characters per
+  token of the compiled window. `hybrid/3` widens a caller's `:select` to
+  these fields when it reranks, so `GET /api/search`'s narrow read no longer
+  starves the model.
+  ([#1938](https://github.com/The-Verscienta/kiln_cms/issues/1938))

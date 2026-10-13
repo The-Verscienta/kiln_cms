@@ -31,7 +31,8 @@ clamped to 12).
 
 `sources` are in **relevance order across every content type**: each hit's
 `score` is the fused Reciprocal Rank Fusion score it was ranked by (the
-reranker's score instead, when reranking is enabled), and the scores are
+reranker's score instead when reranking is enabled, or the blend of the two
+ranks under `rrf` — see [Replace or blend](#replace-or-blend)), and the scores are
 comparable across types because every section of the sweep shares the same
 `k` and leg weights. `legs` names which of `keyword`, `keyword_any`, `semantic`,
 `block`, `title`, `alias`, `fuzzy` and `tag` returned the hit — a
@@ -157,7 +158,9 @@ and never running.
 are [already sorted by score across types](#how-it-works), reranking each
 section's candidates with the same model for the same question makes that sort
 a rerank of the whole union — at most `limit` candidates per registered content
-type through the model, per question. So the ask path has its own switch:
+type through the model, per question (or the merged union in one call, see
+[Rerank the union once](#rerank-the-union-once)). So
+the ask path has its own switch:
 
 ```
 ASK_RERANK=true
@@ -188,14 +191,6 @@ reranking is off. `KilnCMS.Search.RerankerServing.status/0` says which state a
 node is in (`:off`, `:running` or `{:unavailable, reason}`), and the adapter
 warns at most once a minute while reranking requests fail.
 
-One known rough edge: reranking happens **per section**. If the reranker
-fails for one section's call but not another's, the failed section keeps its
-fused scores (RRF, around 0.01–0.05), while the others carry 0–1 reranker
-scores. The flat sort then mixes the two scales and ranks every reranked
-source above every fused one. Reranking the merged candidates once, instead
-of per section, removes this
-([#1937](https://github.com/The-Verscienta/kiln_cms/issues/1937)).
-
 Two caveats before setting it, both from the report that asked for this
 (a production deployment's search-ranking report, 2026-09-04), quoted as
 written:
@@ -214,6 +209,128 @@ cross-encoder runs on the CPU through EXLA, whose kernels assume AVX2, and the
 per-question price on a host without it is what kept the report's deployment
 from enabling reranking at all. Try a question against a staging copy with the
 switch on before exposing it on a public endpoint.
+
+### What the reranker reads
+
+The cross-encoder scores the question against the record's title and its
+`search_text` — the plain text the keyword leg matches and the embedding is
+computed over — capped at eight characters per token of the compiled window
+(4096 at 512); the tokenizer cuts the pair at the window. It falls back to the
+`passage` calc, then the excerpt, then the title alone. It used to read the
+title and the excerpt, and a content type whose substance lives in searchable
+custom fields has no excerpt: the model judged "intensely bitter and cold"
+against the title "Huang Lian" alone (logit −8.1; +4.7 with its text). On the
+golden set behind [#1938](https://github.com/The-Verscienta/kiln_cms/issues/1938),
+reranking on title + excerpt cut r@10 from the fused 0.851 to 0.667; title +
+`search_text` held 0.808 and lifted MRR above fused. A caller that narrows
+`hybrid/3`'s `:select` (`GET /api/search` does) has the select widened to these
+fields whenever it reranks.
+
+### The compiled shape
+
+Every rerank call pads to the serving's compiled shape, so that shape — not
+the number of candidates — is what a call costs. It is configurable, like the
+embedder's:
+
+```elixir
+config :kiln_cms, KilnCMS.Search,
+  rerank_batch_size: 8,             # the default
+  rerank_sequence_length: 512       # the default; a list compiles buckets, e.g. [128, 256, 512]
+```
+
+Eight pairs, measured on an M5 laptop CPU (torch, 6 threads):
+
+| model | @128 | @256 | @512 |
+|---|---|---|---|
+| `BAAI/bge-reranker-base` (default) | 170 ms | 313 ms | 652 ms |
+| `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` | 58 ms | 120 ms | 261 ms |
+| `cross-encoder/ms-marco-MiniLM-L-6-v2` | 31 ms | 61 ms | 132 ms |
+
+**A licence note before choosing a smaller model.** The ms-marco and mmarco
+MiniLM cross-encoders carry Apache-2.0 model cards, but they are trained on
+MS MARCO, whose terms restrict it to non-commercial research use. Whether that
+reaches the weights is a question for each deployment to answer for itself.
+The default, `bge-reranker-base`, is MIT-licensed and does not name its
+training data.
+
+### Replace or blend
+
+`rerank_mode` (`SEARCH_RERANK_MODE`; `KilnCMS.Ask`'s own `rerank_mode` /
+`ASK_RERANK_MODE` for this path) says how the reranker's order meets the fused
+one:
+
+- **`:replace`** (the default) — the reranker's order outright; each hit's
+  `score` is the reranker's 0–1 relevance.
+- **`{:rrf, k}`** (`rrf`, `rrf:<k>`) — Reciprocal Rank Fusion of the two
+  orders: `1/(k + fused rank) + 1/(k + rerank rank)`, ranks 1-based, an exact
+  tie broken by fused order. Replacing outright regresses what fusion already
+  gets right: on the golden set, question-form MRR fell from 0.672 to 0.388,
+  because the cross-encoder prefers a record that *answers* the question over
+  the record the question *names*.
+
+A blended hit's `score` is its blend — the number its order came from, between
+`2/(k + n)` and `2/(k + 1)` (at most 0.0328 at k = 60). It is built from ranks
+*within the list that was reranked*, so it compares across that list and
+nothing else. In the `union` scope below that list is every content type at
+once, so `sources` compare exactly. Per section, a section's first hit carries
+nearly the same blend as every other section's first hit, however different
+their relevance, so the flat sort interleaves the sections rank by rank. The
+reranker's own score would compare across sections, but then the number would
+no longer be the one the order came from, and a client sorting or
+thresholding on it would quietly undo the blend.
+
+### Rerank the union once
+
+`ASK_RERANK_SCOPE=union`, or `rerank_scope: :union` on `KilnCMS.Ask`. By
+default (`rerank_scope: :section`) each content type's candidates are
+reranked on their own, one call per non-empty section, and the flat sort above
+merges them. With `rerank_scope: :union`, no section reranks. The sections are
+merged by fused score, the top `rerank_union` (default 30) of that merge are
+reranked in **one** call, and the sources are taken from the result in its
+order. That costs one padded call per question instead of one per section, and
+makes a blend meaningful: the fused rank `{:rrf, k}` reads is the candidate's
+place in the merge across every type.
+
+If that one call fails, the union keeps its fused order and fused scores. This
+removes the per-section path's rough edge. There, if one section's call failed
+while another's succeeded, the failed section kept its RRF scores (around
+0.01–0.05) beside the others' 0–1 reranker scores, and the flat sort ranked
+every reranked source above every fused one. That edge remains in the
+`section` scope.
+
+`rerank_pin: true` (`ASK_RERANK_PIN`, `union` scope only) adds the
+named-entity pin preregistered in
+[#1937](https://github.com/The-Verscienta/kiln_cms/issues/1937): a source whose
+`legs` include `title` or `alias`, one the question names, keeps its **fused**
+position. The pinned sources are placed first, at their fused ranks, and every
+other source fills the remaining positions in reranked (or blended) order.
+Under the pin the `score`s need not descend. A pinned source holds its slot
+whatever its own score says, so read the order, not the numbers.
+
+The default stays `section` with `replace`: adopting another variant waits on
+the held-out real-traffic measurement #1937 preregistered.
+
+### Measuring each variant
+
+`mix kiln.search.eval golden.json --ask` runs `/api/ask`'s retrieval
+in-process, under whatever `KilnCMS.Ask` and `KilnCMS.Search` config the run
+has. Each variant is therefore a config change, not a flag. Use `--limit 6`
+for `/api/ask`'s own per-section depth, which is the depth #1937 measures at.
+Reranking must be on (`rerank: true` on `KilnCMS.Ask`) with the model loadable.
+
+| variant | `KilnCMS.Ask` config | release env |
+|---|---|---|
+| F: fused, no rerank | `rerank: false` | `ASK_RERANK=false` |
+| R1: per-section replace | `rerank: true` | `ASK_RERANK=true` |
+| R2: per-section RRF | `rerank: true, rerank_mode: {:rrf, 60}` | `+ ASK_RERANK_MODE=rrf:60` |
+| R3: union replace | `rerank: true, rerank_scope: :union` | `+ ASK_RERANK_SCOPE=union` |
+| R4: union RRF | `… rerank_scope: :union, rerank_mode: {:rrf, 60}` | `+ ASK_RERANK_SCOPE=union ASK_RERANK_MODE=rrf:60` |
+| R4 + pin | `… rerank_pin: true` | `+ ASK_RERANK_PIN=true` |
+
+The environment variables are read by the production runtime config. To score a
+deployment running a variant, use `mix kiln.search.eval golden.json --ask
+--url https://your-site`. For an in-process run in dev, set the keys in
+`config/dev.exs` or a project overlay.
 
 ## Turning on generated answers
 

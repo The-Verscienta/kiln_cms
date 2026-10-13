@@ -50,6 +50,26 @@ defmodule KilnCMS.Search.RerankerServingTest do
       assert options[:compile] == [batch_size: 8, sequence_length: 512]
       assert options[:defn_options] == KilnCMS.Search.defn_options()
     end
+
+    # #1938: the shape was two literals, so every call padded to 8 × 512
+    # whatever the model or host. It follows `KilnCMS.Search` config now, and
+    # the defaults above are what it always was.
+    test "the compiled shape follows rerank_batch_size and rerank_sequence_length" do
+      original = Application.get_env(:kiln_cms, KilnCMS.Search, [])
+      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Search, original) end)
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Search,
+        Keyword.merge(original, rerank_batch_size: 4, rerank_sequence_length: [128, 256])
+      )
+
+      assert RerankerServing.serving_options(%{num_labels: 1})[:compile] ==
+               [batch_size: 4, sequence_length: [128, 256]]
+
+      # And the text cap follows the longest bucket: 8 characters a token.
+      assert KilnCMS.Search.rerank_text_limit() == 2048
+    end
   end
 
   # The boot decision `KilnCMS.Application` delegates to: a loaded model is a

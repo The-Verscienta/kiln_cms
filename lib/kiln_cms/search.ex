@@ -9,6 +9,8 @@ defmodule KilnCMS.Search do
   """
   require Logger
 
+  alias KilnCMS.Search.RerankOrder
+
   @doc "Whether semantic search is enabled."
   @spec semantic?() :: boolean()
   def semantic?, do: cfg(:semantic, false)
@@ -137,6 +139,101 @@ defmodule KilnCMS.Search do
   @doc "Hugging Face model id used for reranking."
   @spec rerank_model() :: String.t()
   def rerank_model, do: cfg(:rerank_model, "BAAI/bge-reranker-base")
+
+  @doc """
+  Compiled batch size of the reranker serving (`KilnCMS.Search.RerankerServing`),
+  the reranker's counterpart of `batch_size/0`. Default 8.
+
+  A rerank call is (query, document) pairs, and `Nx.Serving` pads a partial
+  batch up to this size, so the batch is the floor on what one call costs:
+  six candidates at batch 8 pay for eight. Measured on an M5 laptop CPU (torch,
+  6 threads, #1938), eight `bge-reranker-base` pairs take 170 ms at 128
+  tokens, 313 ms at 256 and 652 ms at 512, and a smaller model is several
+  times cheaper again (`ms-marco-MiniLM-L6`: 31 / 61 / 132 ms) — read the
+  licence note in docs/rag.md before choosing one.
+  """
+  @spec rerank_batch_size() :: pos_integer()
+  def rerank_batch_size, do: cfg(:rerank_batch_size, 8)
+
+  @doc """
+  Compiled sequence length of the reranker serving — the window a (query,
+  document) pair is padded or truncated to — the reranker's counterpart of
+  `sequence_length/0`, and like it, a **list** compiles one computation per
+  length and routes each batch to the smallest that fits (`[128, 256, 512]`).
+  Default 512, `bge-reranker-base`'s full window.
+
+  The pair shares the window: a long document is cut where the query plus
+  the document reach it, by the tokenizer. `rerank_text_limit/0` caps the
+  characters handed over before that, so a monograph's whole `search_text`
+  never travels to the serving to be thrown away there.
+  """
+  @spec rerank_sequence_length() :: pos_integer() | [pos_integer()]
+  def rerank_sequence_length, do: cfg(:rerank_sequence_length, 512)
+
+  @doc """
+  The most characters of a document the reranker is handed: eight per token
+  of the longest `rerank_sequence_length/0` (4096 at 512).
+
+  The tokenizer truncates at the window anyway; this only stops a long
+  document's text from being copied into the serving's input to be cut
+  there. Eight characters a token is generous — English runs nearer four or
+  five — so the cap binds before the window only on text with unusually
+  long tokens, and never cuts what the model would have read in ordinary
+  prose.
+  """
+  @spec rerank_text_limit() :: pos_integer()
+  def rerank_text_limit, do: 8 * Enum.max(List.wrap(rerank_sequence_length()))
+
+  @doc """
+  How the reranker's order combines with the fused one (#1938): `:replace`
+  (the default — the reranker's order and its 0–1 score outright) or
+  `{:rrf, k}` (Reciprocal Rank Fusion of the fused rank and the rerank rank).
+  See `KilnCMS.Search.RerankOrder` for both, and for what score a blended hit
+  carries. `hybrid/3`'s `:rerank_mode` option overrides it per call;
+  `SEARCH_RERANK_MODE` (`replace`, `rrf` or `rrf:<k>`) sets it in a release.
+  `KilnCMS.Ask` has its own (`KilnCMS.Ask.rerank_mode/0`).
+  """
+  @spec rerank_mode() :: KilnCMS.Search.RerankOrder.mode()
+  def rerank_mode, do: cfg(:rerank_mode, :replace)
+
+  @doc """
+  Parses a rerank mode as an operator writes it — `"replace"`, `"rrf"`
+  (k = 60, the constant fusion uses, and the one #1937 preregistered) or `"rrf:<k>"` with `k` a positive
+  integer up to 10000 — trimmed and case-insensitive. `:error` for anything
+  else: the caller (`config/runtime/prod/ai.exs`) keeps the configured mode
+  and reports the value, the `KilnCMS.Config.Env` contract. A whitelist, never
+  an atom minted from the input.
+
+      iex> KilnCMS.Search.parse_rerank_mode(" RRF:30 ")
+      {:ok, {:rrf, 30}}
+
+      iex> KilnCMS.Search.parse_rerank_mode("rrf")
+      {:ok, {:rrf, 60}}
+
+      iex> KilnCMS.Search.parse_rerank_mode("blend")
+      :error
+  """
+  @spec parse_rerank_mode(String.t()) :: {:ok, KilnCMS.Search.RerankOrder.mode()} | :error
+  def parse_rerank_mode(raw) when is_binary(raw) do
+    case raw |> String.trim() |> String.downcase() do
+      "replace" ->
+        {:ok, :replace}
+
+      # A literal, not `@rrf_k`: that attribute is defined further down, with
+      # fusion, and reads as nil up here.
+      "rrf" ->
+        {:ok, {:rrf, 60}}
+
+      "rrf:" <> k ->
+        case Integer.parse(k) do
+          {k, ""} when k > 0 and k <= 10_000 -> {:ok, {:rrf, k}}
+          _other -> :error
+        end
+
+      _other ->
+        :error
+    end
+  end
 
   @doc """
   Whether `hybrid/3` runs the block leg — the semantic leg at block grain.
@@ -578,9 +675,12 @@ defmodule KilnCMS.Search do
   all legs (e.g. the `highlight` snippet calc); `:select` limits the
   attributes read for the returned records (the primary key is always read,
   a field the type does not have is skipped, and omitted, every attribute is
-  read — a reranked caller must include `:title` and `:excerpt`, which the
-  reranker reads); `rerank: true` reorders the
-  fused results with the configured reranker. That option is the whole gate:
+  read — with `rerank: true` the select is widened to what the reranker
+  reads, `:title`, `:search_text` and `:excerpt`, so a narrow caller cannot
+  starve the model of its text); `rerank: true` reorders the
+  fused results with the configured reranker, combining the two orders by
+  `:rerank_mode` (default `rerank_mode/0`; see `KilnCMS.Search.RerankOrder`).
+  That option is the whole gate:
   the *scope* decision — every surface, ask alone, nowhere — is made by
   `global/2` from `rerank?/0` and `KilnCMS.Ask.rerank?/0`, and a direct
   caller passing `rerank: true` is asking for inference it has checked it can
@@ -627,7 +727,7 @@ defmodule KilnCMS.Search do
     # semantic leg's `semantic_distance`, which its ORDER BY computes anyway
     # (see `semantic_context/1`). The kept hits are read whole, with `:load`,
     # in one query (`hydrate/4`) — before the reranker, which reads their
-    # title and excerpt.
+    # title and `search_text` (`rerank_text/1`).
     #
     # Both keyword legs read `search_vector`, so they share one containment:
     # a type without the column loses both, and logs it once.
@@ -671,7 +771,7 @@ defmodule KilnCMS.Search do
       Map.merge(block_distances, tag_distances, fn _id, a, b -> min(a, b) end)
     )
     |> Enum.take(limit)
-    |> hydrate(resource, {Keyword.get(opts, :select), load}, read_opts)
+    |> hydrate(resource, {rerank_select(Keyword.get(opts, :select), opts), load}, read_opts)
     |> maybe_rerank(query, opts)
     |> Enum.map(&attach_hit/1)
   end
@@ -746,7 +846,24 @@ defmodule KilnCMS.Search do
   # veto the ask-only scope (`KilnCMS.Ask.rerank?/0`) on every call.
   @spec maybe_rerank([hit()], String.t(), keyword()) :: [hit()]
   defp maybe_rerank(hits, query, opts) do
-    if Keyword.get(opts, :rerank, false), do: rerank(query, hits), else: hits
+    if Keyword.get(opts, :rerank, false),
+      do: rerank(query, hits, Keyword.get(opts, :rerank_mode, rerank_mode())),
+      else: hits
+  end
+
+  # What `rerank_text/1` reads. `GET /api/search` selects the six fields it
+  # renders (#1712), and that select used to be the reranker's too — its
+  # `:excerpt` was all the reranker saw beyond the title, and a content type
+  # whose substance lives in searchable custom fields (#1585) has none, so the
+  # model judged "intensely bitter and cold" against the title "Huang Lian"
+  # alone (#1938). Widened here rather than left to each caller to remember:
+  # a select that forgets the field degrades the reranker silently.
+  @rerank_fields [:title, :search_text, :excerpt]
+
+  defp rerank_select(nil, _opts), do: nil
+
+  defp rerank_select(select, opts) do
+    if Keyword.get(opts, :rerank, false), do: Enum.uniq(select ++ @rerank_fields), else: select
   end
 
   # The legs read ids, not records (`@leg_select`); the records are read here,
@@ -1226,39 +1343,107 @@ defmodule KilnCMS.Search do
 
   # Rerank fused results by a stronger (query, doc) relevance model, falling back
   # to the fused order if the reranker errors. A reranked hit carries the
-  # reranker's score in place of its fused one: the score's contract
-  # (`hit_score/1`) is "the number this order came from", and a caller
-  # sorting reranked sections against each other by their RRF scores would
-  # quietly undo the reranking.
+  # score its new order came from — the reranker's under `:replace`, the
+  # blend under `{:rrf, k}` (`KilnCMS.Search.RerankOrder`): the score's
+  # contract (`hit_score/1`) is "the number this order came from", and a
+  # caller sorting reranked sections against each other by their RRF scores
+  # would quietly undo the reranking.
   #
   # An empty section never reaches the model: with the ask scope on, a sweep
   # runs one `hybrid/3` per registered content type and most of them match
   # nothing, and the Bumblebee adapter's batched run of zero documents is an
   # error it would rescue and pay for anyway.
-  @spec rerank(String.t(), [hit()]) :: [hit()]
-  defp rerank(_query, []), do: []
+  @spec rerank(String.t(), [hit()], RerankOrder.mode()) :: [hit()]
+  defp rerank(_query, [], _mode), do: []
 
-  defp rerank(query, hits) do
-    docs = Enum.map(hits, fn {record, _score, _legs} -> rerank_text(record) end)
-
-    case reranker().scores(query, docs) do
-      {:ok, scores} when length(scores) == length(hits) ->
-        hits
-        |> Enum.zip(scores)
-        |> Enum.map(fn {{record, _fused, legs}, score} -> {record, score, legs} end)
-        |> Enum.sort_by(fn {_record, score, _legs} -> score end, :desc)
-
-      _ ->
-        hits
+  defp rerank(query, hits, mode) do
+    case rerank_scores(query, hits) do
+      {:ok, scores} -> RerankOrder.order(hits, scores, mode)
+      :error -> hits
     end
   end
 
-  # Text handed to the reranker — title plus excerpt when present.
-  defp rerank_text(%{title: title} = record) do
-    case Map.get(record, :excerpt) do
-      excerpt when is_binary(excerpt) and excerpt != "" -> title <> " — " <> excerpt
-      _ -> title
+  # One reranker call over `hits`. `:error` for anything the order cannot be
+  # built from — the adapter's `{:error, _}`, or a score list that does not
+  # pair one score with each hit — which every caller answers by keeping the
+  # fused order.
+  defp rerank_scores(query, hits) do
+    docs = Enum.map(hits, fn {record, _score, _legs} -> rerank_text(record) end)
+
+    case reranker().scores(query, docs) do
+      {:ok, scores} when length(scores) == length(hits) -> {:ok, scores}
+      _error -> :error
     end
+  end
+
+  @doc """
+  Reranks records that already came out of `hybrid/3` or `global/2` — a
+  caller's own merge of several sections — in **one** reranker call, and
+  returns them in the new order carrying the new score (`hit_score/1`); their
+  legs are fusion's, unchanged.
+
+  `records` must be in fused order: `{:rrf, k}` reads each one's fused rank
+  from its position, and the pin holds pinned records at it. This is the
+  union stage `KilnCMS.Ask` runs (#1937); a section of `hybrid/3` is
+  reranked by its `rerank: true` instead. Options:
+
+    * `:mode` — `:replace` or `{:rrf, k}` (default `rerank_mode/0`).
+    * `:pin` — hold every record the query names (legs `:title` or `:alias`)
+      at its fused position, `KilnCMS.Search.RerankOrder.pin/3` (default
+      `false`).
+
+  When the reranker fails, the records come back exactly as given — fused
+  order, fused scores — so nothing downstream mixes the two scales. Each
+  record needs the fields `rerank_text/1` reads; a whole record, as
+  `KilnCMS.Ask` reads them, has them.
+  """
+  @spec rerank_records(String.t(), [struct()], keyword()) :: [struct()]
+  def rerank_records(query, records, opts \\ []) when is_binary(query) and is_list(records) do
+    hits = Enum.map(records, &{&1, hit_score(&1) || 0.0, hit_legs(&1)})
+
+    with [_ | _] <- hits,
+         {:ok, scores} <- rerank_scores(query, hits) do
+      reordered = RerankOrder.order(hits, scores, Keyword.get(opts, :mode, rerank_mode()))
+
+      if Keyword.get(opts, :pin, false),
+        do: hits |> RerankOrder.pin(reordered, &rerank_key/1) |> Enum.map(&attach_hit/1),
+        else: Enum.map(reordered, &attach_hit/1)
+    else
+      _empty_or_failed -> records
+    end
+  end
+
+  # Records from several content types meet in one list; an id is unique
+  # within a type, and the type keeps two tables' ids apart.
+  defp rerank_key(record), do: {record.__struct__, record.id}
+
+  @doc """
+  The text the reranker reads for `record` (#1938): its title, then the text
+  it is found by — `search_text`, the denormalized plain text the keyword leg
+  matches and the embedding is computed over; failing that the `passage`
+  calc (a query-focused extract of that same text, when the caller loaded
+  it); failing that the `excerpt`. Capped at `rerank_text_limit/0`
+  characters; the model's tokenizer cuts it at the window either way.
+
+  It was the title and the excerpt. A content type whose substance lives in
+  searchable custom fields has no excerpt, so the cross-encoder judged the
+  query against the title alone and scored "Huang Lian" at logit −8.1 for
+  "intensely bitter and cold" — +4.7 with its text. On the golden set behind
+  #1938, reranking on title + excerpt cut r@10 from the fused 0.851 to
+  0.667; on title + `search_text` it held 0.808 and raised MRR above fused.
+  """
+  @spec rerank_text(map()) :: String.t()
+  def rerank_text(%{title: title} = record) do
+    body =
+      Enum.find_value([:search_text, :passage, :excerpt], fn field ->
+        case Map.get(record, field) do
+          text when is_binary(text) and text != "" -> text
+          _absent -> nil
+        end
+      end)
+
+    text = if body, do: "#{title} — #{body}", else: to_string(title)
+    String.slice(text, 0, rerank_text_limit())
   end
 
   @doc """
@@ -1285,6 +1470,11 @@ defmodule KilnCMS.Search do
   Nothing here checks that a reranker is loaded: the switches that enable a
   scope are the switches that start the model (`KilnCMS.Application`), and a
   reranker that fails degrades the sweep to fused order.
+
+  `:rerank_mode` says how each reranked section combines the reranker's order
+  with its fused one (default `rerank_mode/0`; `KilnCMS.Search.RerankOrder`).
+  Reranking here is **per section**; `KilnCMS.Ask` can instead pass `rerank:
+  false` and rerank its merged union once (`rerank_records/3`).
 
   Content sections are locale-scoped (via `:locale`, default configured);
   media and taxonomy are keyword/trigram-only and locale-agnostic (no
@@ -1354,6 +1544,9 @@ defmodule KilnCMS.Search do
           # The scope verdict — see `:rerank` in the doc. This was a literal
           # `true`, and the config switch lived inside `hybrid/3` instead.
           rerank: Keyword.get(opts, :rerank, rerank?()),
+          # And how a reranked section combines the two orders — `KilnCMS.Ask`
+          # passes its own (`KilnCMS.Ask.rerank_mode/0`), as it does the scope.
+          rerank_mode: Keyword.get(opts, :rerank_mode, rerank_mode()),
           filters: Keyword.get(opts, :filters, %{}),
           select: Keyword.get(opts, :select),
           # Embed the query ONCE for the whole sweep. Every section below runs

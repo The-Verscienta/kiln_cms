@@ -98,6 +98,45 @@ with {:ok, ask_rerank?} <- Env.fetch("ASK_RERANK") do
   config :kiln_cms, KilnCMS.Ask, rerank: ask_rerank?
 end
 
+# How a rerank combines with the fused order (#1938, #1937): `replace` (the
+# default, the reranker's order outright), `rrf` (Reciprocal Rank Fusion of
+# the two orders at k = 60) or `rrf:<k>`. SEARCH_RERANK_MODE is every
+# reranked surface's; ASK_RERANK_MODE the ask path's alone (it defaults to
+# the former). ASK_RERANK_SCOPE `union` reranks /api/ask's merged candidates
+# in one call instead of each content type's (`section`, the default), and
+# ASK_RERANK_PIN holds a source the question names at its fused rank in that
+# union. All four only override when set; an unusable value keeps the
+# configured one and is reported. See docs/rag.md, "Reranking ask sources".
+rerank_mode = fn var ->
+  raw = System.get_env(var, "")
+
+  # Blank is unset, as `Env.fetch/1` reads it. Otherwise
+  # `KilnCMS.Search.parse_rerank_mode/1` is the whitelist — `rrf:<k>` has no
+  # finite spelling list for `Env.one_of/2` — and nothing here mints an atom
+  # from the input.
+  case {String.trim(raw), KilnCMS.Search.parse_rerank_mode(raw)} do
+    {"", _blank} -> :unset
+    {_raw, {:ok, mode}} -> {:ok, mode}
+    {_raw, :error} -> Env.record_unusable(var, raw, "replace, rrf or rrf:<k> (k from 1 to 10000)")
+  end
+end
+
+with {:ok, mode} <- rerank_mode.("SEARCH_RERANK_MODE") do
+  config :kiln_cms, KilnCMS.Search, rerank_mode: mode
+end
+
+with {:ok, mode} <- rerank_mode.("ASK_RERANK_MODE") do
+  config :kiln_cms, KilnCMS.Ask, rerank_mode: mode
+end
+
+with {:ok, scope} <- Env.one_of("ASK_RERANK_SCOPE", ~w(section union)) do
+  config :kiln_cms, KilnCMS.Ask, rerank_scope: %{"section" => :section, "union" => :union}[scope]
+end
+
+with {:ok, pin?} <- Env.fetch("ASK_RERANK_PIN") do
+  config :kiln_cms, KilnCMS.Ask, rerank_pin: pin?
+end
+
 # ## A site's own AI provider (#1557)
 #
 # Every AI switch above is the OPERATOR's layer. A site admin can give their

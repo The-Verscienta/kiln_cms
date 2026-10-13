@@ -62,11 +62,21 @@ defmodule KilnCMS.Search.RerankerServing do
   @doc """
   The options the serving is built with for a model whose spec is `spec`:
   the compiled shape, the defn options and `scores_function/1`'s choice.
+
+  The shape is `KilnCMS.Search.rerank_batch_size/0` ×
+  `KilnCMS.Search.rerank_sequence_length/0` (default 8 × 512), the
+  reranker's counterparts of the embedder's. It was those two numbers as
+  literals, so every call padded to 8 × 512 whatever the model or the host:
+  0.8–1.05 s a batch for `bge-reranker-base` under EXLA on a laptop CPU, and
+  `/api/ask` running several such batches a question (#1938).
   """
   @spec serving_options(map()) :: keyword()
   def serving_options(spec) do
     [
-      compile: [batch_size: 8, sequence_length: 512],
+      compile: [
+        batch_size: KilnCMS.Search.rerank_batch_size(),
+        sequence_length: KilnCMS.Search.rerank_sequence_length()
+      ],
       defn_options: KilnCMS.Search.defn_options(),
       scores_function: scores_function(spec)
     ]

@@ -71,11 +71,26 @@ Every summary line below that was shortened links to its own entry there.
   renders their variants and transforms from URLs.**
   ([long form](docs/changelog/unreleased.md#image-backends))
 
+- **`/api/ask` can rerank its merged candidates once instead of each content
+  type's, blend the reranker's order with the fused one, and hold a source
+  the question names at its fused rank; all off by default.**
+  ([long form](docs/changelog/unreleased.md#ask-union-rerank))
+
+- **The reranker's compiled shape (`rerank_batch_size`,
+  `rerank_sequence_length`) and how it meets the fused order (`rerank_mode`,
+  `SEARCH_RERANK_MODE`) are configurable; the defaults are unchanged.**
+  ([long form](docs/changelog/unreleased.md#rerank-shape-and-mode))
+
 ### Changed
 
 - **The browser suite now drives live co-editing: two peers type into one
   rich-text block and each sees the other's words and caret.**
   ([long form](docs/changelog/unreleased.md#collab-e2e))
+
+- **The reranker reads a record's title and its `search_text`, not its title
+  and excerpt, so a record with no excerpt is no longer judged on its title
+  alone.**
+  ([long form](docs/changelog/unreleased.md#rerank-search-text))
 
 ### Security
 
