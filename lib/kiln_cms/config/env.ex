@@ -151,7 +151,12 @@ defmodule KilnCMS.Config.Env do
   module has no reader for — see `record_unusable/3`.
   """
   @type expectation ::
-          :boolean | :positive_integer | {:one_of, [String.t()]} | {:expected, String.t()}
+          :boolean
+          | :positive_integer
+          | {:one_of, [String.t()]}
+          | {:float_in, number(), number(), boolean()}
+          | {:list_of, [String.t()], [String.t()]}
+          | {:expected, String.t()}
 
   @typedoc """
   One unrecognized read: the variable, exactly what the operator typed, and what
@@ -351,6 +356,138 @@ defmodule KilnCMS.Config.Env do
   end
 
   @doc """
+  Reads `var` as a **number within `min`..`max`**, returned as a float (#1936).
+
+  The fractional counterpart of `positive_integer/1`, with the same three-way
+  contract. Its callers are search's relevance knobs —
+  `SEARCH_SEMANTIC_MAX_DISTANCE`, a cosine distance in `[0, 2]`, and
+  `SEARCH_KEYWORD_ANY_IDF_COVERAGE`, a share in `(0, 1]` — which are tuned by
+  measurement and switched on a running deployment without a rebuild: the
+  floor goes to `0.0` for a model-swap window and back afterwards.
+
+  So **zero is a value here**, unlike in `positive_integer/1`, wherever `min`
+  allows it: a floor of `0.0` is the documented way to drop every
+  semantic-only hit. Pass `exclusive_min: true` where the lower bound itself
+  means nothing — an IDF share of `0` would keep every hit and is a typo, not
+  a setting.
+
+  Bounded on both sides for the reason `positive_integer/1` is bounded above:
+  a digit slip (`3.5` for `0.35`) must warn like a letter slip rather than
+  parse cleanly into a floor that admits everything. A partly-numeric value
+  (`0.35 cosine`) is refused rather than truncated, and an integer spelling
+  (`0`, `1`) is read as the float it names.
+
+      iex> System.put_env("KILN_FLOAT_DOCTEST", " 0.35 ")
+      iex> KilnCMS.Config.Env.float_in("KILN_FLOAT_DOCTEST", 0.0, 2.0)
+      {:ok, 0.35}
+
+      iex> System.put_env("KILN_FLOAT_DOCTEST", "0")
+      iex> KilnCMS.Config.Env.float_in("KILN_FLOAT_DOCTEST", 0.0, 2.0)
+      {:ok, 0.0}
+
+      iex> System.put_env("KILN_FLOAT_DOCTEST", "0")
+      iex> KilnCMS.Config.Env.float_in("KILN_FLOAT_DOCTEST", 0.0, 1.0, exclusive_min: true)
+      :unrecognized
+
+      iex> System.delete_env("KILN_FLOAT_DOCTEST")
+      iex> KilnCMS.Config.Env.float_in("KILN_FLOAT_DOCTEST", 0.0, 2.0)
+      :unset
+  """
+  @spec float_in(String.t(), number(), number(), keyword()) ::
+          {:ok, float()} | :unset | :unrecognized
+  def float_in(var, min, max, opts \\ [])
+      when is_binary(var) and is_number(min) and is_number(max) and min <= max do
+    raw = System.get_env(var, "")
+    exclusive_min? = Keyword.get(opts, :exclusive_min, false)
+    expected = {:float_in, min, max, exclusive_min?}
+
+    case raw |> String.trim() |> Float.parse() do
+      {parsed, ""} ->
+        if above_min?(parsed, min, exclusive_min?) and parsed <= max,
+          do: {:ok, parsed},
+          else: unusable(var, raw, expected)
+
+      _other ->
+        if String.trim(raw) == "", do: :unset, else: unusable(var, raw, expected)
+    end
+  end
+
+  defp above_min?(value, min, true), do: value > min
+  defp above_min?(value, min, false), do: value >= min
+
+  @doc """
+  Reads `var` as a **comma-separated list of names from `allowed`** (#1936).
+
+  The list counterpart of `one_of/2`: each item is trimmed and downcased, and
+  every one must be in `allowed` — one unknown name rejects the whole value
+  rather than being dropped, because a list with a typo quietly missing is a
+  list that means something the operator did not write. Duplicates collapse;
+  the order is the operator's.
+
+  `required:` names items the list must contain. `SEARCH_SEMANTIC_FLOOR_LEGS`
+  is the caller: the relevance floor always judges the semantic legs, and a
+  value that left one out would reopen #871 for its hits, so such a value is
+  refused at boot like any other unusable one instead of being accepted here
+  and raising on every search later.
+
+  Returns strings, never atoms: the caller maps them through a literal table,
+  so nothing an operator types can mint an atom.
+
+      iex> System.put_env("KILN_LIST_DOCTEST", "Semantic, block,tag ")
+      iex> KilnCMS.Config.Env.list_of("KILN_LIST_DOCTEST", ~w(semantic block tag fuzzy))
+      {:ok, ["semantic", "block", "tag"]}
+
+      iex> System.put_env("KILN_LIST_DOCTEST", "block,tag")
+      iex> KilnCMS.Config.Env.list_of("KILN_LIST_DOCTEST", ~w(semantic block tag),
+      ...>   required: ~w(semantic))
+      :unrecognized
+
+      iex> System.delete_env("KILN_LIST_DOCTEST")
+      iex> KilnCMS.Config.Env.list_of("KILN_LIST_DOCTEST", ~w(semantic block tag))
+      :unset
+  """
+  @spec list_of(String.t(), [String.t()], keyword()) ::
+          {:ok, [String.t()]} | :unset | :unrecognized
+  def list_of(var, allowed, opts \\ []) when is_binary(var) and is_list(allowed) do
+    raw = System.get_env(var, "")
+    required = Keyword.get(opts, :required, [])
+
+    items =
+      raw
+      |> String.split(",")
+      |> Enum.map(&(&1 |> String.trim() |> String.downcase()))
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+
+    cond do
+      String.trim(raw) == "" ->
+        :unset
+
+      # `items != []`: a value of only commas names nothing, which is a typo,
+      # not an operator writing "the empty list".
+      items != [] and Enum.all?(items, &(&1 in allowed)) and
+          Enum.all?(required, &(&1 in items)) ->
+        {:ok, items}
+
+      true ->
+        unusable(var, raw, {:list_of, allowed, required})
+    end
+  end
+
+  # The shared rejection for the readers whose advice carries its own bounds
+  # or lists — `raw`, not a normalized form, for `fetch/1`'s reason.
+  defp unusable(var, raw, expected) do
+    IO.warn(
+      "#{var} is set to an unrecognized value (#{inspect(raw)}); keeping the " <>
+        "configured default. #{advice(expected)}",
+      []
+    )
+
+    record_unrecognized(var, raw, expected)
+    :unrecognized
+  end
+
+  @doc """
   Warns about, and collects, a value this module has no reader for (#912).
 
   The collector without a parser. `expected` completes the sentence "Expected …"
@@ -534,6 +671,19 @@ defmodule KilnCMS.Config.Env do
   defp advice(:positive_integer), do: "Use a positive integer up to #{@max_integer}."
 
   defp advice({:one_of, allowed}), do: "Use one of: #{Enum.join(allowed, "/")}."
+
+  defp advice({:float_in, min, max, true}),
+    do: "Use a number greater than #{min} and at most #{max}."
+
+  defp advice({:float_in, min, max, false}), do: "Use a number from #{min} to #{max}."
+
+  defp advice({:list_of, allowed, []}),
+    do: "Use a comma-separated list of: #{Enum.join(allowed, ", ")}."
+
+  defp advice({:list_of, allowed, required}),
+    do:
+      "Use a comma-separated list of: #{Enum.join(allowed, ", ")}; it must include " <>
+        "every one of #{Enum.join(required, ", ")}."
 
   defp advice({:expected, phrase}), do: "Expected #{phrase}."
 

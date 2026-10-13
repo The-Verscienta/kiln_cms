@@ -200,11 +200,16 @@ defmodule KilnCMS.Search do
   ## Where it applies
 
   `hybrid/3` — and so `global/2`, the search page, `/api/search` and
-  `/api/ask` — applies it **after fusion, to semantic-only hits**: a record
-  only the semantic leg returned is dropped when its distance exceeds the
-  floor, while a record any other leg (keyword, its any-term relaxation,
-  title or fuzzy) also found is kept whatever its distance. A lexical match
-  needs no distance alibi. The per-type semantic actions
+  `/api/ask` — applies it **after fusion, to the hits of the judged legs**:
+  a record that only judged legs returned is dropped when its nearest
+  distance exceeds the floor, while a record any other leg also found is
+  kept whatever its distance. The judged legs are `semantic_floor_legs/0`;
+  by default the semantic legs alone (document, block, tag), so a record
+  any lexical leg (keyword, its any-term relaxation, title, alias or fuzzy)
+  also found needs no distance alibi. A deployment whose junk arrives
+  through the any-term relaxation can put `:keyword_any` (and `:fuzzy`)
+  under the floor too; the full keyword match, the title and the alias legs
+  always vouch. The per-type semantic actions
   (`:search_semantic` / `:search_semantic_published`, the `semantic-search`
   JSON:API routes) have no fusion to leave it to, so they filter the leg
   themselves — with what the title and alias legs give hybrid search: a row
@@ -220,6 +225,15 @@ defmodule KilnCMS.Search do
   noise and withheld the answers (the 2026-09-04 search-ranking report, D2).
   A junk query still returns nothing — with no lexical hit every fused hit is
   semantic-only, and every one of them is over the floor.
+
+  "No lexical hit" is the catch on a corpus of long prose: a several-word
+  junk query shares one ordinary word with dozens of documents, and the
+  any-term relaxation returns every one of them, unjudged. Measured on a
+  production deployment (#1936), that leg was how most junk queries came
+  back non-empty, and no floor value within the v1.1.0 rule could fix it —
+  the semantic-only hits it governs overlapped the junk band. That is what
+  `semantic_floor_legs/0` is for, with `keyword_any_idf_coverage/0` as an
+  opt-in variant to measure alongside it.
 
   ## Measuring it
 
@@ -252,6 +266,15 @@ defmodule KilnCMS.Search do
   floor sits at or beyond its distance. The task prints both edges,
   labelled.
 
+  `SEARCH_SEMANTIC_MAX_DISTANCE` overrides it at boot
+  (`config/runtime/prod/search.exs`), so a retune — or a model-swap window,
+  which runs the floor at `0.0` while the corpus re-embeds into the new
+  model's space and every distance between the two spaces is meaningless —
+  is a restart rather than a deploy each way. `0.0` is a legal value: it
+  drops every judged hit with any distance at all. During such a window keep
+  `:keyword_any` out of `semantic_floor_legs/0`, or every any-term hit with a
+  stale vector goes too.
+
   A non-numeric value **raises** on first use rather than being ignored.
   Erlang orders `number < atom < bitstring`, so a string or atom here — a
   `System.get_env/1` wired in without `String.to_float/1`, or `:none` for
@@ -274,6 +297,167 @@ defmodule KilnCMS.Search do
               "config :kiln_cms, KilnCMS.Search, semantic_max_distance: must be a number " <>
                 "or nil, got #{inspect(other)}. A non-number would compare as greater than " <>
                 "every cosine distance and quietly floor nothing."
+    end
+  end
+
+  # The legs the floor always judges — the same embedder's distance at three
+  # grains — and the two it may be told to judge as well. `semantic_floor_legs/0`
+  # accepts nothing outside the union; `@floor_vouching_legs` are named in its
+  # error because they are the likeliest mistake.
+  @floor_semantic_legs [:semantic, :block, :tag]
+  @floor_optional_legs [:keyword_any, :fuzzy]
+  @floor_vouching_legs [:keyword, :title, :alias]
+
+  @doc """
+  The legs whose hits the relevance floor judges (#1936). A fused hit is
+  floored only when **every** leg that returned it is in this list and its
+  nearest distance exceeds `semantic_max_distance/0`; one leg outside the list
+  vouches for it, whatever its distance.
+
+  Defaults to `[:semantic, :block, :tag]`, the v1.1.0 rule: only a hit the
+  semantic legs alone returned is judged.
+
+  The list must contain those three — a floor that stopped judging
+  semantic-only hits would reopen #871, and the way to have no floor is
+  `semantic_max_distance: nil` — and may add:
+
+    * `:keyword_any`, the any-term (OR) relaxation of the keyword leg. On a
+      corpus of long, prose-heavy documents it is where junk comes from: a
+      several-word query shares one ordinary word, or a prefix of its last
+      word, with dozens of documents, `:search_any` admits every one, and the
+      v1.1.0 floor never looks at them. Listing it puts those hits under the
+      floor too. Read "Long documents" below before you do.
+    * `:fuzzy`, the trigram title leg, which runs only when the full match
+      came up short. It is a typo guess rather than a match: "databse" is
+      near "Database Guide", and also near every title sharing a few
+      trigrams with the junk. Listing it judges those guesses by distance
+      too. A fuzzy hit on a record with no embedding yet is kept (below).
+
+  `:keyword`, `:title` and `:alias` cannot be listed, and listing one
+  **raises**, as does any leg `hybrid/3` does not have. Each is a lexical
+  claim strong enough to stand without a distance alibi — every query term
+  matched, or the query naming the record — and those are exactly the hits a
+  short query embeds far from: judging them would bring back the defect the
+  floor's post-fusion placement fixed (see `semantic_max_distance/0`).
+
+  ## How a lexical hit is judged
+
+  By the nearest distance it has: its document's distance (loaded for it if
+  the semantic leg did not return it), its nearest block's (one indexed query
+  over the hits' own blocks), and its tag's when the tag leg found it. A hit
+  whose record has no embedding — not yet embedded, or the query could not be
+  embedded at all — is **kept**: a lexical match with nothing to judge it by
+  is still a match, whereas the v1.1.0 rule floors a semantic-only hit with
+  no distance because that can only be a misconfigured resource.
+
+  ## Long documents
+
+  A document's vector covers only the first ~512 tokens of its text. A query
+  that matches only a late passage is therefore judged by a vector that never
+  saw that passage, and a real hit can be floored. Before listing
+  `:keyword_any`, either turn on chunked document vectors (#1940,
+  `chunk_long_documents`), so the late passage has a vector the floor can
+  find, or accept that blind spot. The measurement that motivated this knob
+  put half of a 100-document late-passage probe beyond the floor it chose.
+
+  `SEARCH_SEMANTIC_FLOOR_LEGS` (comma-separated) overrides it at boot —
+  `config/runtime/prod/search.exs`.
+  """
+  @spec semantic_floor_legs() :: [leg()]
+  def semantic_floor_legs do
+    legs = cfg(:semantic_floor_legs, @floor_semantic_legs)
+    allowed = @floor_semantic_legs ++ @floor_optional_legs
+
+    cond do
+      not is_list(legs) ->
+        raise_floor_legs(legs, "must be a list of legs")
+
+      Enum.any?(legs, &(&1 in @floor_vouching_legs)) ->
+        raise_floor_legs(
+          legs,
+          "cannot list #{inspect(Enum.filter(legs, &(&1 in @floor_vouching_legs)))}: those legs " <>
+            "vouch for a hit (every term matched, or the query names the record), and judging " <>
+            "them by distance floors the records a short query names"
+        )
+
+      not Enum.all?(legs, &(&1 in allowed)) ->
+        raise_floor_legs(
+          legs,
+          "unknown leg(s) #{inspect(Enum.reject(legs, &(&1 in allowed)))}; the floor can " <>
+            "judge #{inspect(allowed)}"
+        )
+
+      not Enum.all?(@floor_semantic_legs, &(&1 in legs)) ->
+        raise_floor_legs(
+          legs,
+          "must include #{inspect(@floor_semantic_legs)}: a floor that stops judging " <>
+            "semantic-only hits answers every query again (#871). Set " <>
+            "semantic_max_distance: nil for no floor"
+        )
+
+      true ->
+        legs
+    end
+  end
+
+  defp raise_floor_legs(legs, why) do
+    raise ArgumentError,
+          "config :kiln_cms, KilnCMS.Search, semantic_floor_legs: #{why}, got #{inspect(legs)}."
+  end
+
+  @doc """
+  The **IDF-coverage** variant of the `:keyword_any` floor, or `nil` (the
+  default) for off — the variant preregistered on #1936 for a replica
+  measurement, shipped opt-in so a deployment can measure it rather than
+  adopted as a rule.
+
+  A number `x` in `(0, 1]` turns it on. It acts only while `:keyword_any` is
+  in `semantic_floor_legs/0`, and only on a judged hit `:keyword_any` returned
+  that the floor would drop: that hit is **kept** when the query lexemes it
+  matches carry at least `x` of the query's IDF mass. The preregistration's
+  grid is `0.5`, `0.6` and `0.7`; a larger `x` keeps fewer hits.
+
+  The definition — all of it part of the variant, so a measurement of it is a
+  measurement of exactly this:
+
+    * **Lexemes** are the query's, parsed the way the keyword legs parse it:
+      `plainto_tsquery(kiln_regconfig(locale), query)` — the real
+      `to_tsvector` parse, Han and hyphen handling included, with no extra
+      splitting — each counted once.
+    * **The last lexeme matches as a prefix** (`'x':*`), as in `:search_any`.
+    * **IDF** is per section — one content type, in the query's locale — over
+      its **published** documents' `search_vector`, as the caller can read
+      them: `idf = ln(1 + (N - df + 0.5) / (df + 0.5))`, the smoothed
+      (BM25/Lucene) form, where `N` is the published count and `df` the
+      published documents matching the lexeme. It is positive for every `df`,
+      so a lexeme every document carries weighs almost nothing rather than
+      negatively, and one no document carries weighs most — a query whose
+      distinctive word matches nothing leaves every hit with low coverage.
+    * **Coverage** is the matched lexemes' IDF over all of the query's.
+
+  Computed only when it can change an answer — the variant on, and a
+  `:keyword_any` hit beyond the floor — in two queries per section: one
+  aggregate for `N` and every `df`, one read of the hits' matches. Both run
+  through the content resource's own read under the caller's read options,
+  so tenancy and policies scope them exactly as they scope the keyword legs:
+  a count never spans another organisation, or rows the caller cannot read.
+
+  `SEARCH_KEYWORD_ANY_IDF_COVERAGE` overrides it at boot. A value outside
+  `(0, 1]` raises here.
+  """
+  @spec keyword_any_idf_coverage() :: float() | nil
+  def keyword_any_idf_coverage do
+    case cfg(:keyword_any_idf_coverage, nil) do
+      nil ->
+        nil
+
+      value when is_number(value) and value > 0 and value <= 1 ->
+        value
+
+      other ->
+        raise ArgumentError,
+              "config :kiln_cms, KilnCMS.Search, keyword_any_idf_coverage: must be nil or a " <>
+                "number greater than 0 and at most 1, got #{inspect(other)}."
     end
   end
 
@@ -598,9 +782,11 @@ defmodule KilnCMS.Search do
   to declare the query unembeddable and skip the semantic leg outright.
 
   A configured `semantic_max_distance/0` is applied here, after fusion, to
-  hits only the semantic leg returned. The leg itself runs unfloored, so a
-  record any other leg also found keeps its semantic contribution
-  whatever its distance — see `semantic_max_distance/0` for why.
+  hits only the judged legs returned — the semantic legs, plus whichever
+  of `:keyword_any` and `:fuzzy` `semantic_floor_legs/0` adds. The legs
+  themselves run unfloored, so a record any other leg also found keeps its
+  semantic contribution whatever its distance — see
+  `semantic_max_distance/0` for why.
 
   Every record comes back carrying the score it was ranked by and the legs
   that returned it — read them with `hit_score/1` and `hit_legs/1`. The list
@@ -666,10 +852,18 @@ defmodule KilnCMS.Search do
       {:tag, tagged, @tag_weight}
     ]
     |> reciprocal_rank_fusion(k)
-    |> floor_semantic_only(
-      semantic_max_distance(),
-      Map.merge(block_distances, tag_distances, fn _id, a, b -> min(a, b) end)
-    )
+    |> floor_hits(%{
+      max_distance: semantic_max_distance(),
+      legs: semantic_floor_legs(),
+      distances: Map.merge(block_distances, tag_distances, fn _id, a, b -> min(a, b) end),
+      semantic: semantic,
+      resource: resource,
+      query: query,
+      locale: locale,
+      filters: filters,
+      read_opts: read_opts,
+      opts: opts
+    })
     |> Enum.take(limit)
     |> hydrate(resource, {Keyword.get(opts, :select), load}, read_opts)
     |> maybe_rerank(query, opts)
@@ -830,54 +1024,172 @@ defmodule KilnCMS.Search do
     end
   end
 
-  # The relevance floor, applied after fusion to hits only the semantic legs
-  # returned — the why is on `semantic_max_distance/0`. Runs before `limit`
-  # is taken, so a floored hit does not hold a slot, and the legs are sorted
-  # by distance, so the rows this drops sit at their tails and dropping them
-  # moves no other row's rank.
+  # The relevance floor, applied after fusion to hits only the judged legs
+  # returned — the why is on `semantic_max_distance/0`, which legs are judged
+  # on `semantic_floor_legs/0`. Runs before `limit` is taken, so a floored
+  # hit does not hold a slot, and the legs are sorted by distance or rank, so
+  # the rows this drops sit at their tails and dropping them moves no other
+  # row's rank.
   #
-  # "Only the semantic legs" is the document leg and the block leg together:
-  # both are the same embedder's distance, at two grains, and a hit they
-  # alone returned has no lexical alibi either. It is judged by the nearer
-  # of the two distances it has — the document's loaded `semantic_distance`
-  # calc, and the nearest block's distance the block leg kept — so a section
+  # The semantic legs are the document leg, the block leg and the tag leg
+  # together: the same embedder's distance, at three grains, and a hit they
+  # alone returned has no lexical alibi either. It is judged by the nearest
+  # distance it has — the document's loaded `semantic_distance` calc, the
+  # nearest block's distance the block leg kept, its tag's — so a section
   # within the floor keeps a document whose opening is not.
   #
   # `Ash.NotLoaded` is truthy, so a distance that is not a number is not a
-  # pass: a hit with no usable distance fails closed, with a line in the log,
-  # because that is also what a resource whose semantic prepare does not see
-  # the `:caller` context looks like, and the symptom otherwise is a type
-  # whose semantic-only hits simply never appear. The floor itself is a
-  # number or nil by the time it gets here — `semantic_max_distance/0` raises
-  # on anything else.
-  @spec floor_semantic_only([hit()], float() | nil, %{Ash.UUID.t() => float()}) :: [hit()]
-  defp floor_semantic_only(hits, nil, _distances), do: hits
+  # pass: a semantic-only hit with no usable distance fails closed, with a
+  # line in the log, because that is also what a resource whose semantic
+  # prepare does not see the `:caller` context looks like, and the symptom
+  # otherwise is a type whose semantic-only hits simply never appear. A
+  # judged *lexical* hit with no distance (`:keyword_any`, `:fuzzy`) is the
+  # opposite case — see `judged_distances/2`. The floor itself is a number or
+  # nil by the time it gets here — `semantic_max_distance/0` raises on
+  # anything else.
+  #
+  # With the default legs nothing below the `judged` filter reads the
+  # database: every judged hit is semantic-only and carries its distances
+  # already, so the v1.1.0 rule costs what it always did.
+  @spec floor_hits([hit()], map()) :: [hit()]
+  defp floor_hits(hits, %{max_distance: nil}), do: hits
 
-  defp floor_semantic_only(hits, max_distance, distances) do
-    Enum.reject(hits, &floored?(&1, max_distance, distances))
+  defp floor_hits(hits, floor) do
+    judged = Enum.filter(hits, &judged?(&1, floor.legs))
+    distances = judged_distances(judged, floor)
+
+    beyond = Enum.filter(judged, &beyond?(&1, floor.max_distance, distances))
+
+    floored =
+      beyond
+      |> MapSet.new(fn {record, _score, _legs} -> record.id end)
+      |> MapSet.difference(idf_kept(beyond, floor))
+
+    Enum.reject(hits, fn {record, _score, _legs} -> MapSet.member?(floored, record.id) end)
   end
 
-  # A hit some lexical leg returned needs no distance alibi. The tag leg is
-  # semantic too — a tag's name near the query — so a tag-only hit is judged
-  # like the rest, by the nearest distance it has (its tag's).
-  defp floored?({_record, _score, legs} = hit, max_distance, distances) do
-    Enum.all?(legs, &(&1 in [:semantic, :block, :tag])) and
-      beyond?(hit, max_distance, distances)
+  # A hit is judged when every leg that returned it is a judged leg: one leg
+  # outside the list — the full keyword match, the title or alias legs, or a
+  # relaxation the operator did not list — vouches for it.
+  defp judged?({_record, _score, legs}, floor_legs), do: Enum.all?(legs, &(&1 in floor_legs))
+
+  # A judged hit some lexical leg returned. The semantic legs measured every
+  # hit they returned; a lexical leg measured nothing.
+  defp lexical?({_record, _score, legs}), do: Enum.any?(legs, &(&1 not in @floor_semantic_legs))
+
+  # Every distance a judged hit can be measured by. The semantic legs' own
+  # (a `:keyword_any` + `:semantic` hit's record is the keyword leg's, which
+  # carries no `semantic_distance`, so the semantic leg's reading is folded in
+  # by id), then — for a judged lexical hit no semantic leg returned, and only
+  # then — its document's distance and its nearest block's, read for it here.
+  #
+  # Such a hit has no distance of its own when its record is not embedded yet,
+  # or when the query could not be embedded at all (semantic search off, the
+  # embedder failing). It is then kept, not floored: a lexical match with
+  # nothing to judge it by is still a match, and dropping every any-term hit
+  # whenever the embedder hiccups would make the floor a new way to return
+  # nothing for a real query.
+  defp judged_distances(judged, floor) do
+    semantic =
+      for %{semantic_distance: distance} = record <- floor.semantic,
+          is_number(distance),
+          into: %{},
+          do: {record.id, distance}
+
+    distances = Map.merge(floor.distances, semantic, fn _id, a, b -> min(a, b) end)
+
+    # No document reading yet — a tag distance alone is not one, so a
+    # `:keyword_any` + `:tag` hit is measured too and judged by the nearer.
+    unmeasured =
+      for {record, _score, _legs} = hit <- judged,
+          lexical?(hit),
+          not Map.has_key?(semantic, record.id),
+          do: record.id
+
+    with [_ | _] <- unmeasured,
+         {:ok, vector} <- leg_vector(nil, floor.opts) do
+      nearer = fn _id, a, b -> min(a, b) end
+
+      unmeasured
+      |> document_distances(vector, floor)
+      |> Map.merge(hit_block_distances(unmeasured, vector, floor), nearer)
+      |> Map.merge(distances, nearer)
+    else
+      _ -> distances
+    end
   end
 
-  defp beyond?({record, _score, _legs}, max_distance, distances) do
+  # The documents' own distances, read through the caller's read options like
+  # every leg — the rows are hits the caller could already read.
+  defp document_distances(ids, vector, floor) do
+    floor.resource
+    |> Ash.Query.new()
+    |> Ash.Query.select(@leg_select)
+    |> Ash.Query.filter(id in ^ids)
+    |> Ash.Query.load(semantic_distance: %{query_vector: vector})
+    |> Ash.read!(floor.read_opts)
+    |> Enum.flat_map(fn
+      %{semantic_distance: distance} = record when is_number(distance) ->
+        [{record.id, distance}]
+
+      _unembedded ->
+        []
+    end)
+    |> Map.new()
+  end
+
+  # The hits' nearest blocks, on the block leg's terms: only where that leg
+  # runs, so a lexical hit is never measured by a grain a semantic-only hit
+  # under the same query could not be.
+  defp hit_block_distances(ids, vector, floor) do
+    with true <- block_leg?(),
+         true <- floor.filters == %{},
+         type when is_atom(type) and not is_nil(type) <-
+           KilnCMS.CMS.ContentTypes.type_atom(floor.resource) do
+      vector |> nearest_blocks(type, floor.read_opts[:tenant], ids) |> Map.new()
+    else
+      _ -> %{}
+    end
+  end
+
+  # A semantic-only hit with no distance fails closed (above); a lexical one
+  # is kept (`judged_distances/2`).
+  defp beyond?({record, _score, _legs} = hit, max_distance, distances) do
     case nearest_distance(record, Map.get(distances, record.id)) do
       nil ->
-        Logger.warning(
-          "semantic-only hit #{inspect(record.__struct__)} #{record.id} carries no " <>
-            "distance; floored. Does its :search_semantic prepare honour the " <>
-            "semantic_floor: :caller context?"
-        )
+        if lexical?(hit) do
+          false
+        else
+          Logger.warning(
+            "semantic-only hit #{inspect(record.__struct__)} #{record.id} carries no " <>
+              "distance; floored. Does its :search_semantic prepare honour the " <>
+              "semantic_floor: :caller context?"
+          )
 
-        true
+          true
+        end
 
       distance ->
         distance > max_distance
+    end
+  end
+
+  # The IDF-coverage variant (`keyword_any_idf_coverage/0`): of the
+  # `:keyword_any` hits the floor is about to drop, the ids whose matched
+  # lexemes carry enough of the query's IDF mass to stay. Nothing is computed
+  # unless the variant is on, `:keyword_any` is judged, and such a hit exists
+  # — the two queries it costs run only when they can change the answer.
+  defp idf_kept(beyond, floor) do
+    with coverage when is_number(coverage) <- keyword_any_idf_coverage(),
+         true <- :keyword_any in floor.legs,
+         [_ | _] = ids <-
+           for({record, _score, legs} <- beyond, :keyword_any in legs, do: record.id) do
+      floor.resource
+      |> KilnCMS.Search.IdfCoverage.coverages(floor.query, floor.locale, ids, floor.read_opts)
+      |> Enum.filter(fn {_id, share} -> share >= coverage end)
+      |> MapSet.new(fn {id, _share} -> id end)
+    else
+      _ -> MapSet.new()
     end
   end
 
@@ -930,13 +1242,19 @@ defmodule KilnCMS.Search do
   # `[{document_id, distance}]`, nearest first, each document once — at its
   # nearest block. Reads a multiple of the candidate count in blocks because
   # a long document contributes many of them.
-  defp nearest_blocks(vector, type, tenant) do
+  #
+  # `ids` narrows the read to those documents' blocks — the floor measuring
+  # a lexical hit (`hit_block_distances/3`). Still the nearest
+  # `@block_candidates` blocks, nearest first, so each listed document comes
+  # back at its nearest block unless that many of the others' are nearer.
+  defp nearest_blocks(vector, type, tenant, ids \\ nil) do
     KilnCMS.Search.BlockEmbedding
     |> Ash.Query.for_read(:nearest_to_vector, %{
       vector: vector,
       document_type: type,
       limit: @block_candidates
     })
+    |> then(&if(ids, do: Ash.Query.filter(&1, document_id in ^ids), else: &1))
     |> Ash.Query.load(semantic_distance: %{query_vector: vector})
     |> Ash.read!(actor: KilnCMS.SystemActor.new(:search), tenant: tenant)
     |> Enum.reduce({[], MapSet.new()}, fn row, {acc, seen} ->

@@ -59,6 +59,8 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_READING_TIME_WPM BACKUP_KEEP_DAYS BACKUP_STALE_AFTER_HOURS
             KILN_EXPERIMENTS_STICKY_DAYS REQUIRE_AV_METADATA_STRIP
             BRAND_PRIMARY_COLOR ASK_RERANK
+            SEARCH_SEMANTIC_MAX_DISTANCE SEARCH_SEMANTIC_FLOOR_LEGS
+            SEARCH_KEYWORD_ANY_IDF_COVERAGE
             KILN_DEMO_RESET KILN_DEMO_RESET_CRON KILN_DEMO_GOLDEN_PATH
             KILN_FEDERATION_ENABLED
             KILN_MEDIA_ROOT MEDIA_DIR S3_PUBLIC_BASE_URL
@@ -531,6 +533,94 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
 
     test "the block is skipped under :test so the suite is deterministic" do
       assert {:not_written, _} = ask_rerank("true", :test)
+    end
+  end
+
+  describe "SEARCH_* relevance-floor overrides (#1936)" do
+    # The floor, the legs it judges and the IDF-coverage variant, each a
+    # runtime override of compiled `KilnCMS.Search` config: unset writes
+    # nothing, so a project overlay's value survives; an unusable value
+    # writes nothing and warns, so a typo cannot loosen the floor.
+    defp search_config(vars, env \\ :prod) do
+      {config, stderr} = eval_io(vars, env)
+      {get_in(config, [:kiln_cms, KilnCMS.Search]) || [], stderr}
+    end
+
+    test "unset writes none of them" do
+      {search, _} = search_config(%{})
+      refute Keyword.has_key?(search, :semantic_max_distance)
+      refute Keyword.has_key?(search, :semantic_floor_legs)
+      refute Keyword.has_key?(search, :keyword_any_idf_coverage)
+    end
+
+    test "SEARCH_SEMANTIC_MAX_DISTANCE sets the floor, 0.0 included" do
+      for {value, parsed} <- [{"0.39", 0.39}, {" 0.35 ", 0.35}, {"0.0", 0.0}, {"0", 0.0}] do
+        {search, _} = search_config(%{"SEARCH_SEMANTIC_MAX_DISTANCE" => value})
+        assert search[:semantic_max_distance] == parsed, "#{inspect(value)}"
+      end
+    end
+
+    test "an unusable SEARCH_SEMANTIC_MAX_DISTANCE writes nothing and warns" do
+      for value <- ["3.9", "-1", "off", "0.39cos"] do
+        {search, stderr} = search_config(%{"SEARCH_SEMANTIC_MAX_DISTANCE" => value})
+        refute Keyword.has_key?(search, :semantic_max_distance), "#{inspect(value)}"
+        assert stderr =~ "SEARCH_SEMANTIC_MAX_DISTANCE is set to an unrecognized value"
+      end
+    end
+
+    test "SEARCH_SEMANTIC_FLOOR_LEGS becomes a list of leg atoms" do
+      {search, _} =
+        search_config(%{"SEARCH_SEMANTIC_FLOOR_LEGS" => "semantic,block,tag,keyword_any"})
+
+      assert search[:semantic_floor_legs] == [:semantic, :block, :tag, :keyword_any]
+    end
+
+    test "a vouching leg, an unknown leg or a missing semantic leg writes nothing and warns" do
+      for value <- [
+            "semantic,block,tag,keyword",
+            "semantic,block,tag,title",
+            "semantic,block,tag,alias",
+            "semantic,block,tag,bogus",
+            "block,tag,keyword_any"
+          ] do
+        {search, stderr} = search_config(%{"SEARCH_SEMANTIC_FLOOR_LEGS" => value})
+        refute Keyword.has_key?(search, :semantic_floor_legs), "#{inspect(value)}"
+        assert stderr =~ "SEARCH_SEMANTIC_FLOOR_LEGS is set to an unrecognized value"
+      end
+    end
+
+    test "SEARCH_KEYWORD_ANY_IDF_COVERAGE is a share in (0, 1]" do
+      {search, _} = search_config(%{"SEARCH_KEYWORD_ANY_IDF_COVERAGE" => "0.6"})
+      assert search[:keyword_any_idf_coverage] == 0.6
+
+      for value <- ["0", "0.0", "1.5", "most"] do
+        {search, stderr} = search_config(%{"SEARCH_KEYWORD_ANY_IDF_COVERAGE" => value})
+        refute Keyword.has_key?(search, :keyword_any_idf_coverage), "#{inspect(value)}"
+        assert stderr =~ "SEARCH_KEYWORD_ANY_IDF_COVERAGE is set to an unrecognized value"
+      end
+    end
+
+    test "every one reaches :config_warnings, for the Logger and Sentry replay" do
+      {config, _} =
+        eval_io(
+          %{
+            "SEARCH_SEMANTIC_MAX_DISTANCE" => "off",
+            "SEARCH_SEMANTIC_FLOOR_LEGS" => "keyword",
+            "SEARCH_KEYWORD_ANY_IDF_COVERAGE" => "0"
+          },
+          :prod
+        )
+
+      vars = config |> get_in([:kiln_cms, :config_warnings]) |> Enum.map(&elem(&1, 0))
+
+      assert "SEARCH_SEMANTIC_MAX_DISTANCE" in vars
+      assert "SEARCH_SEMANTIC_FLOOR_LEGS" in vars
+      assert "SEARCH_KEYWORD_ANY_IDF_COVERAGE" in vars
+    end
+
+    test "the block is skipped under :test, like every production fragment" do
+      {search, _} = search_config(%{"SEARCH_SEMANTIC_MAX_DISTANCE" => "0.39"}, :test)
+      refute Keyword.has_key?(search, :semantic_max_distance)
     end
   end
 

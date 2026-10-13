@@ -75,6 +75,36 @@ carries the reasoning.
   Images plugin itself ships separately.
   ([#1955](https://github.com/The-Verscienta/kiln_cms/issues/1955))
 
+<a id="search-floor-legs"></a>
+
+- **Hybrid search's relevance floor can judge the any-term (OR) keyword leg's
+  hits too, and the floor is a runtime setting.** On a production corpus of
+  long prose, `keyword_any` was how most junk queries came back non-empty: a
+  several-word query shares one ordinary word with dozens of documents, the
+  relaxation admits every one, and the floor judged only hits the semantic
+  legs alone returned. A new `KilnCMS.Search` key, `semantic_floor_legs`,
+  names the legs whose hits the floor judges — a hit is floored only when
+  every leg that returned it is listed. The default, `[:semantic, :block,
+  :tag]`, is the v1.1.0 rule unchanged; `:keyword_any` and `:fuzzy` may be
+  added; `:keyword`, `:title` and `:alias` vouch for a hit and raise if
+  listed. A judged lexical hit is measured by the nearest distance it has —
+  the semantic leg's reading, else its document's and nearest block's, read
+  for it — and kept when it has no vector at all. Judge `:keyword_any` with
+  chunked document vectors (#1940), or accept that a late-passage match in a
+  long document is judged by a vector that never saw it. The preregistered
+  IDF-coverage variant ships opt-in for measurement: `keyword_any_idf_coverage:
+  x` keeps a judged `keyword_any` hit beyond the floor when its matched query
+  lexemes carry at least `x` of the query's IDF mass (per content type and
+  locale, over published documents, smoothed BM25 IDF; the definition is on
+  `KilnCMS.Search.keyword_any_idf_coverage/0`). Three variables override the
+  compiled values at boot — `SEARCH_SEMANTIC_MAX_DISTANCE` (`0.0` legal, the
+  model-swap setting), `SEARCH_SEMANTIC_FLOOR_LEGS` and
+  `SEARCH_KEYWORD_ANY_IDF_COVERAGE` — so a retune or a model-swap window is a
+  restart rather than a deploy each way. `KilnCMS.Config.Env` gains the two
+  readers they need, `float_in/4` and `list_of/3`; an unusable value keeps
+  the compiled one and warns through Logger and Sentry.
+  ([#1936](https://github.com/The-Verscienta/kiln_cms/issues/1936))
+
 <a id="prosemirror-view-paste-xss"></a>
 
 - **prosemirror-view 1.42.6 for GHSA-c8x8-7fp4-3x9w: pasting HTML into the
