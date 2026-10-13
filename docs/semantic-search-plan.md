@@ -258,12 +258,23 @@ config :kiln_cms, KilnCMS.Search,
 - **Cost.** One more inference per window past the first on every re-embed of a
   long record — about 2× the embedding work for a corpus whose long records run
   to two or three windows — and one more indexed nearest-neighbour query per
-  content type per search. Chunk embedding is background indexing, like the
-  document vector, and is not charged to the on-demand
-  `embedding_per_org_limit` budget; the per-document cap is its bound.
+  content type per search.
+- **The embedding budget.** Each chunk that reaches the model costs one unit
+  of the `"search_embedding"` budget (`embedding_per_org_limit`); a chunk
+  whose vector is reused is free, and the head vector stays uncharged as it
+  always was. The charge is unattended, so chunking stops at
+  `embedding_unattended_share` of the org's window and leaves the rest for
+  editors. When the window is spent, the embedding job is snoozed until it
+  rolls over, charging nothing and leaving the stored chunks as they were, so
+  a document's chunks can lag its text by up to one window. A share of `0`, or
+  one too small to hold a single document's chunks, clears that document's
+  chunks rather than wait forever: it falls back to its head vector.
 - **Turning it on.** Records pick it up as they are next saved. To backfill the
   rest, run `mix kiln.embed_all` (it re-embeds every record, head included, so
-  budget the time a full re-embed takes on your host). Turning it off stops
+  budget the time a full re-embed takes on your host). The chunks of a backfill
+  pace themselves through the budget: at the defaults (600 units an hour, half
+  of them unattended) that is 300 chunks an hour per org, so raise
+  `embedding_per_org_limit` for the backfill if your corpus has more. Turning it off stops
   both the writes and the reads; existing rows stay until the record is next
   re-embedded with it on, locked or purged.
 

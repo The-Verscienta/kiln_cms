@@ -113,11 +113,33 @@ defmodule KilnCMS.Search.EmbeddingWorker do
   # that turning it off changes no stored vector. An embed failure is
   # returned so Oban retries the job; the stored chunks stay as they were
   # (`DocumentChunkIndexer`, "A failed embed changes nothing").
+  #
+  # The chunks are charged to the embedding budget (`DocumentChunkIndexer`,
+  # "Cost and the embedding budget"). A spent window snoozes the job until it
+  # rolls over — a snooze does not use up one of the job's attempts, so a
+  # backfill paces itself across windows instead of failing. The retry embeds
+  # the head vector again, uncharged as ever. A budget that can never hold
+  # this document clears its chunks instead: the record falls back to its
+  # head vector rather than keeping chunks of text it may no longer have.
   defp write_chunks(record, org_id, text) do
     if Search.chunk_long_documents?() do
       case DocumentChunkIndexer.reindex(record, org_id, text) do
-        {:ok, _count} -> :ok
-        {:error, reason} -> {:error, reason}
+        {:ok, _count} ->
+          :ok
+
+        {:error, {:rate_limited, retry_after_ms}} ->
+          {:snooze, max(1, ceil(retry_after_ms / 1_000))}
+
+        {:error, :unattended_disabled} ->
+          Logger.warning(
+            "chunk embeddings for #{inspect(record.__struct__)} #{record.id} do not fit the " <>
+              "unattended share of the search_embedding budget; clearing them"
+          )
+
+          clear_chunks(record, org_id)
+
+        {:error, reason} ->
+          {:error, reason}
       end
     else
       :ok

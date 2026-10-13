@@ -150,6 +150,20 @@ defmodule KilnCMS.LLM.Budget do
     |> Enum.reduce(:infinity, &tighter/2)
   end
 
+  @doc """
+  Milliseconds until the current window of length `window_ms` rolls over —
+  when a bucket over that window next has room.
+
+  Hammer's fixed window is `div(System.system_time(:millisecond), window_ms)`
+  (`Hammer.ETS.now/0`), so every bucket with the same window length resets
+  at the same instant, and this is exactly the `retry_after` a refused
+  `check/4` would have reported. For a caller that read `remaining/4` and
+  stopped *without* charging, which therefore has no refusal to read it from.
+  """
+  @spec window_reset_ms(pos_integer()) :: pos_integer()
+  def window_reset_ms(window_ms) when is_integer(window_ms) and window_ms > 0,
+    do: window_ms - rem(System.system_time(:millisecond), window_ms)
+
   defp tighter(:infinity, acc), do: acc
   defp tighter(n, :infinity), do: n
   defp tighter(n, acc), do: min(n, acc)

@@ -37,20 +37,39 @@ defmodule KilnCMS.Search.DocumentChunkIndexer do
   Each chunk is one more inference per re-embed of a long record: about 2×
   the embedding work for a corpus whose long records run to two or three
   windows (#1940), bounded per document by `chunk_max_per_document/0`.
-  This is **not** charged to the `"search_embedding"` budget
-  (`KilnCMS.Search.embedding_budget_limits/2`). That budget meters inference
-  a person or an automation asks for *on demand* — a related-content
-  fallback, a tag suggestion, a block search — and the background indexing
-  pipeline it would sit in (the document vector this runs beside, and
-  `BlockIndexer`) has never been charged to it. Charging chunks alone would
-  let an org's editor-panel use starve its search index, or a backfill after
-  turning the knob on starve the editors, and a refused charge would leave a
-  document's chunks describing text it no longer has. The cost control here
-  is the per-document cap and the knob itself.
+
+  That inference is charged to the `"search_embedding"` budget
+  (`KilnCMS.Search.embedding_budget_limits/2`), one unit per chunk that
+  actually reaches the model. A chunk whose vector is reused from the stored
+  set is free, and a save that changes nothing past the window charges
+  nothing. The document's own head vector stays uncharged, as it always was:
+  chunks are the opt-in extra cost, and the budget is what bounds it.
+
+  The charge is **unattended** (`unattended?: true`, no user): nobody is
+  waiting on a chunk, so the work stops at `embedding_unattended_share/0` of
+  the org's window and leaves the rest for editors' own panels. A backfill
+  after turning the knob on therefore paces itself across windows instead of
+  starving the editors.
+
+  The room is read first (`Search.embedding_remaining/3`) and the charge made
+  only when the whole document fits, because a Hammer window counts a
+  refused charge too. When it does not fit:
+
+    * `{:error, {:rate_limited, ms}}` — the window is spent; nothing was
+      charged and the stored rows are untouched. `EmbeddingWorker` snoozes
+      the job until the window rolls over, so for at most one window a
+      document's chunks may describe text it had before this save.
+    * `{:error, :unattended_disabled}` — the share is `0`, or smaller than
+      this one document's chunk count, so this document can never be
+      chunked under the current budget. `EmbeddingWorker` clears its chunks
+      (the document falls back to its head vector, the behaviour before
+      #1940) and logs, rather than retrying forever or keeping chunks that
+      describe text the document no longer has.
   """
   require Ash.Query
 
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.LLM.Budget
   alias KilnCMS.Search
   alias KilnCMS.Search.{Chunker, DocumentChunkEmbedding}
   alias KilnCMS.SearchIndex
@@ -81,7 +100,8 @@ defmodule KilnCMS.Search.DocumentChunkIndexer do
   Replace `record`'s stored chunks with the ones its `search_text` (`text`)
   has now, under tenant `org_id`. Returns `{:ok, count}` — the number of
   chunks the document now has — or `{:error, reason}` with the stored rows
-  untouched.
+  untouched, including the budget's `{:rate_limited, ms}` and
+  `:unattended_disabled` (moduledoc, "Cost and the embedding budget").
   """
   @spec reindex(struct(), Ash.UUID.t(), String.t() | nil) ::
           {:ok, non_neg_integer()} | {:error, term()}
@@ -109,11 +129,43 @@ defmodule KilnCMS.Search.DocumentChunkIndexer do
   defp do_reindex(type, id, org_id, inputs) do
     existing = existing(type, id, org_id)
     reusable = Map.new(existing, &{&1.content_hash, &1.embedding})
+    units = Enum.count(inputs, &(reused(&1 |> hash(), reusable) == :error))
 
-    with {:ok, rows} <- embed_all(inputs, reusable, type, id),
+    with {:ok, rows} <- charged(org_id, units, fn -> embed_all(inputs, reusable, type, id) end),
          {:ok, _} <- replace(existing, rows, org_id) do
       {:ok, length(rows)}
     end
+  end
+
+  # The budget charge around `fun` — see the moduledoc, "Cost and the
+  # embedding budget". Nothing to infer is free and never reads the budget.
+  defp charged(_org_id, 0, fun), do: fun.()
+
+  defp charged(org_id, units, fun) do
+    case Search.embedding_remaining(org_id, nil, true) do
+      room when room == :infinity or room >= units ->
+        Budget.charge(
+          "search_embedding",
+          org_id,
+          nil,
+          Search.embedding_budget_limits(true, units),
+          fun
+        )
+
+      _short ->
+        {:error, refusal(units)}
+    end
+  end
+
+  # What `Budget.check/4` would have said, without the charge it would have
+  # counted. A document bigger than the whole unattended ceiling can never
+  # fit, so it is reported as the standing refusal it is, not as a wait.
+  defp refusal(units) do
+    {_count, window_ms} = per_org = Search.embedding_per_org_limit()
+
+    if Budget.unattended_ceiling(per_org, Search.embedding_unattended_share()) < units,
+      do: :unattended_disabled,
+      else: {:rate_limited, Budget.window_reset_ms(window_ms)}
   end
 
   # Every chunk embedded (or reused), or the first failure — see the
@@ -150,9 +202,18 @@ defmodule KilnCMS.Search.DocumentChunkIndexer do
   end
 
   defp vector_for(input, hash, reusable) do
+    case reused(hash, reusable) do
+      {:ok, vector} -> {:ok, vector}
+      :error -> embed(input)
+    end
+  end
+
+  # One answer to "is this chunk free?", shared by the charge (`units`) and
+  # the embed, so the budget is charged for exactly the inferences made.
+  defp reused(hash, reusable) do
     case Map.fetch(reusable, hash) do
       {:ok, vector} when is_list(vector) -> {:ok, vector}
-      _miss -> embed(input)
+      _miss -> :error
     end
   end
 

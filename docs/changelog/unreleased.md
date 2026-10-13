@@ -26,8 +26,10 @@ carries the reasoning.
   the knob on (`SEARCH_CHUNK_LONG_DOCUMENTS=true`, or `chunk_long_documents:
   true` in `config :kiln_cms, KilnCMS.Search`) embeds long records as they are
   next saved; run `mix kiln.embed_all` to backfill the rest, which costs about
-  twice a full re-embed for a corpus of long records. See the next entry under
-  Added.
+  twice a full re-embed for a corpus of long records. Chunks are charged to the
+  `"search_embedding"` budget as unattended work, 300 chunks an hour per org
+  at the defaults, so a large backfill takes several hours unless
+  `embedding_per_org_limit` is raised for it. See the next entry under Added.
   ([#1940](https://github.com/The-Verscienta/kiln_cms/issues/1940))
 
 <a id="plugin-sdk"></a>
@@ -107,7 +109,11 @@ carries the reasoning.
   0.6 words a token — the lean build has no tokenizer, and the estimate errs
   towards overlap, never towards a gap. A re-embed replaces a record's chunks
   in one transaction and reuses unchanged ones; a lock or a hard purge deletes
-  them. Off, nothing is written and no stored vector changes. See
+  them. Each chunk that reaches the model costs one unit of the
+  `"search_embedding"` budget, charged as unattended work so it stops at
+  `embedding_unattended_share` and leaves editors their reserve; a spent window
+  snoozes the job until it rolls over. Off, nothing is written and no stored
+  vector changes. See
   `docs/semantic-search-plan.md`, "Long documents".
   ([#1940](https://github.com/The-Verscienta/kiln_cms/issues/1940))
 

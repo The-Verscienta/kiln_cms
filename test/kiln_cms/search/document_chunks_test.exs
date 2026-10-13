@@ -76,7 +76,12 @@ defmodule KilnCMS.Search.DocumentChunksTest do
       embedder: TruncatingEmbedder,
       sequence_length: @sequence_length,
       chunk_overlap: 10,
-      chunk_long_documents: true
+      chunk_long_documents: true,
+      # Chunks are charged to the embedding budget, and the default org's
+      # bucket is shared with every other suite in this window: generous
+      # here, tightened per test (on a private org) under "the embedding
+      # budget" below.
+      embedding_per_org_limit: {1_000_000, :timer.hours(1)}
     )
 
     :ok
@@ -284,6 +289,91 @@ defmodule KilnCMS.Search.DocumentChunksTest do
 
       CMS.purge_page!(trashed, actor: admin)
       assert chunks_of(page) == []
+    end
+  end
+
+  describe "the embedding budget" do
+    # A private org per test: the org bucket is keyed by org id, so no other
+    # test's spend reaches these counts.
+    defp spent(org), do: KilnCMS.LLM.Budget.get("search_embedding:org:#{org.id}", :timer.hours(1))
+
+    defp embedding_job(page) do
+      %{"org_id" => page.org_id, "resource" => to_string(KilnCMS.CMS.Page), "id" => page.id}
+    end
+
+    defp rewrite_past_window(page, admin) do
+      CMS.update_page!(
+        page,
+        %{
+          blocks: typed_blocks([%{type: :rich_text, content: long_body(300, "otter"), order: 0}])
+        },
+        actor: admin,
+        tenant: page.org_id
+      )
+    end
+
+    test "each chunk that reaches the model costs one unit; a reused chunk is free" do
+      admin = user(:admin)
+      org = org("chunkbudget")
+      put_search_env(embedding_unattended_share: 1.0)
+
+      page = long_page(admin, tenant: org)
+      KilnCMS.DataCase.drain_oban()
+      rows = chunks_of(page, org.id)
+      assert length(rows) >= 2
+      assert spent(org) == length(rows)
+
+      # Nothing past the window changed: every chunk is reused, nothing charged.
+      CMS.update_page!(reload(page), %{slug: slug()}, actor: admin, tenant: org.id)
+      KilnCMS.DataCase.drain_oban()
+      assert spent(org) == length(rows)
+    end
+
+    test "a spent window snoozes the job, charges nothing and leaves the chunks" do
+      admin = user(:admin)
+      org = org("chunkspent")
+      put_search_env(embedding_unattended_share: 1.0)
+
+      page = long_page(admin, tenant: org)
+      KilnCMS.DataCase.drain_oban()
+      before = chunks_of(page, org.id)
+      charged = spent(org)
+
+      # One unit of room left; the rewrite needs several.
+      put_search_env(embedding_per_org_limit: {charged + 1, :timer.hours(1)})
+      page = rewrite_past_window(reload(page), admin)
+
+      assert {:snooze, seconds} =
+               Oban.Testing.perform_job(KilnCMS.Search.EmbeddingWorker, embedding_job(page),
+                 repo: KilnCMS.Repo
+               )
+
+      assert seconds in 1..3600
+      # Refused before charging: a Hammer window counts a refused charge too.
+      assert spent(org) == charged
+      assert chunks_of(page, org.id) == before
+    end
+
+    test "a budget that can never hold the document clears its chunks" do
+      admin = user(:admin)
+      org = org("chunkdisabled")
+      put_search_env(embedding_unattended_share: 1.0)
+
+      page = long_page(admin, tenant: org)
+      KilnCMS.DataCase.drain_oban()
+      refute chunks_of(page, org.id) == []
+
+      # Share 0: unattended work is off for good, so waiting would never end,
+      # and keeping the old chunks would vouch for text the record lost.
+      put_search_env(embedding_unattended_share: 0.0)
+      page = rewrite_past_window(reload(page), admin)
+
+      assert :ok =
+               Oban.Testing.perform_job(KilnCMS.Search.EmbeddingWorker, embedding_job(page),
+                 repo: KilnCMS.Repo
+               )
+
+      assert chunks_of(page, org.id) == []
     end
   end
 
