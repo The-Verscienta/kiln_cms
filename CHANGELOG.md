@@ -80,6 +80,11 @@ Every summary line below that was shortened links to its own entry there.
   hits too, and the floor is a runtime setting.**
   ([long form](docs/changelog/unreleased.md#search-floor-legs))
 
+- **Search measurement runs can scan vectors at `ef_search` 200 or exactly
+  (`KILN_HNSW_EF_SEARCH`, `KILN_VECTOR_SEARCH_EXACT`, `--ef-search`, `--exact`),
+  and the search eval reports name the scan mode they ran under.**
+  ([long form](docs/changelog/unreleased.md#vector-scan-knob))
+
 ### Changed
 
 - **The browser suite now drives live co-editing: two peers type into one

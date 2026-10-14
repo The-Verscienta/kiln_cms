@@ -284,6 +284,7 @@ mix kiln.search.eval golden.json --ask                      # the order /api/ask
 mix kiln.search.eval golden.json --url https://example.com  # a live deployment, over HTTP
 mix kiln.search.eval golden.json --json > after.json        # for diffing against before.json
 mix kiln.search.eval golden.json --fail-below single_entity=0.9@5 --fail-below junk=1.0
+mix kiln.search.eval golden.json --ef-search 200            # measurement-grade vector recall (or --exact)
 ```
 
 The golden set is a JSON array of rows:

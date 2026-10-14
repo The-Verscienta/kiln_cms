@@ -120,6 +120,30 @@ carries the reasoning.
   the compiled one and warns through Logger and Sentry.
   ([#1936](https://github.com/The-Verscienta/kiln_cms/issues/1936))
 
+<a id="vector-scan-knob"></a>
+
+- **Search measurement runs can scan vectors at `ef_search` 200 or exactly
+  (`KILN_HNSW_EF_SEARCH`, `KILN_VECTOR_SEARCH_EXACT`, `--ef-search`, `--exact`),
+  and the search eval reports name the scan mode they ran under.** Every semantic leg
+  used pgvector's default `hnsw.ef_search` of 40, which is approximate: it can
+  miss a row nearer than the ones it returns. The pre-registered measurements
+  for #1936, #1937 and an embedder decision (verscienta-base#894) are taken on
+  a replica and must exclude that noise, and nothing could set it.
+  `KilnCMS.Search.VectorScan` adds one `SET` to each repo connection:
+  `hnsw.ef_search = N` (1–1000), or, for exact search,
+  `enable_indexscan = off`. HNSW serves a query only through an ordered index
+  scan, so turning those off keeps vector queries off the index, while btree
+  indexes stay usable through bitmap scans. It is still connection-wide: no
+  query gets an ordered btree walk, so exact mode is for measurement replicas,
+  not traffic. Unset sends exactly the one `SET` as before. An unusable value,
+  or both at once, refuses to boot instead of keeping the default and warning,
+  because falling back to 40 is the contamination being excluded. The task
+  flags override the env vars for a local run. Both reports print the mode
+  read back from the database connection (`scan` in `--json`) and warn below
+  ef_search 200; a flag that didn't reach the pool is refused. A `--url` run
+  says the scan mode is the server's, and refuses the flags.
+  ([#1969](https://github.com/The-Verscienta/kiln_cms/issues/1969))
+
 <a id="prosemirror-view-paste-xss"></a>
 
 - **prosemirror-view 1.42.6 for GHSA-c8x8-7fp4-3x9w: pasting HTML into the

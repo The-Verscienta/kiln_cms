@@ -144,6 +144,7 @@ fragment.("schedules.exs")
 fragment.("feature_gates.exs")
 fragment.("updates.exs")
 fragment.("analytics.exs")
+fragment.("search.exs")
 
 # Production-only. Each fragment holds the block it always had; the guard stays
 # here so the whole production surface reads as one list.

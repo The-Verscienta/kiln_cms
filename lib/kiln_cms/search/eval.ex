@@ -50,6 +50,8 @@ defmodule KilnCMS.Search.Eval do
   overall line is the mean over every row (junk included, as pass/fail).
   """
 
+  alias KilnCMS.Search.VectorScan
+
   @classes ~w(single_entity multi_entity paraphrase question_form typo junk)
   @default_ks [1, 3, 5, 10]
 
@@ -417,7 +419,22 @@ defmodule KilnCMS.Search.Eval do
       "Search eval — #{length(report.queries)} queries, source: #{source}, " <>
         "k = #{Enum.join(report.ks, ",")}"
 
-    Enum.join([header, "", summary_table(report), "", "Per query:" | query_lines(report)], "\n")
+    Enum.join(
+      [header | scan_lines(opts)] ++
+        ["", summary_table(report), "", "Per query:" | query_lines(report)],
+      "\n"
+    )
+  end
+
+  # `:scan` is how the vector legs were scanned (`KilnCMS.Search.VectorScan`),
+  # carried by the task into every rendering so a number never travels without
+  # it. Absent — a caller that does not know — renders nothing rather than a
+  # guess.
+  defp scan_lines(opts) do
+    case Keyword.fetch(opts, :scan) do
+      {:ok, scan} -> [VectorScan.header(scan)]
+      :error -> []
+    end
   end
 
   defp summary_table(%{ks: ks, summary: summary}) do
@@ -526,9 +543,15 @@ defmodule KilnCMS.Search.Eval do
       |> Enum.filter(&(&1.class == "junk" and not junk_passed?(&1)))
       |> Enum.map(&"- `#{&1.query}` returned #{&1.returned} (junk should return nothing)")
 
+    scan =
+      case scan_lines(opts) do
+        [] -> ""
+        [lines] -> "\n" <> Enum.map_join(String.split(lines, "\n"), "\n", &("> " <> &1)) <> "\n"
+      end
+
     """
     ### Search ranking eval (#{source}, #{length(report.queries)} queries)
-
+    #{scan}
     | class | queries | #{Enum.map_join(ks, " | ", &"r@#{&1}")} | MRR |
     | --- | ---: | #{Enum.map_join(ks, " | ", fn _ -> "---:" end)} | ---: |
     #{body}
@@ -546,7 +569,13 @@ defmodule KilnCMS.Search.Eval do
   """
   @spec to_json_map(map(), keyword()) :: map()
   def to_json_map(report, opts \\ []) do
-    %{
+    scan =
+      case Keyword.fetch(opts, :scan) do
+        {:ok, scan} -> %{scan: VectorScan.to_json(scan)}
+        :error -> %{}
+      end
+
+    Map.merge(scan, %{
       source: Keyword.get(opts, :source, "global"),
       ks: report.ks,
       summary: %{
@@ -567,7 +596,7 @@ defmodule KilnCMS.Search.Eval do
             reciprocal_rank: reciprocal_rank(judged)
           }
         end)
-    }
+    })
   end
 
   defp json_stats(stats) do
