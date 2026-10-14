@@ -309,11 +309,20 @@ if Code.ensure_loaded?(Igniter) do
         # requirement accepts that version.
         defp deps do
           [
-            {:kiln_plugin, "~> 1.0"}#{phoenix_html}
+            {:kiln_plugin, "#{sdk_requirement()}"}#{phoenix_html}
           ]
         end
       end
       """
+    end
+
+    @doc false
+    # The bundled SDK's minor, so a generated plugin can use everything this
+    # core offers and still accepts every later 1.x (`~> 1.1` for 1.1.0).
+    def sdk_requirement do
+      _ = Application.load(:kiln_plugin)
+      version = :kiln_plugin |> Application.spec(:vsn) |> to_string() |> Version.parse!()
+      "~> #{version.major}.#{version.minor}"
     end
 
     defp dep_formatter_source do

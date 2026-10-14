@@ -852,9 +852,15 @@ jobs:
 
       - name: Compile the fixture plugin against only the SDK
         working-directory: sdk/fixtures/dep_plugin
+        # `deps.compile kiln_plugin` first: Mix checks a path dependency's
+        # version against the requirement using the copy already in _build, so
+        # a cache restored from before an SDK version bump fails "does not
+        # match the requirement" until the SDK is rebuilt. The cache key can't
+        # prevent it: restore-keys falls back to that cache.
         run: |
           mix deps.get
           mix format --check-formatted
+          mix deps.compile kiln_plugin
           mix compile --warnings-as-errors
 
   client-js:

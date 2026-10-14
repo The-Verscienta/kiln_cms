@@ -21,7 +21,7 @@ defmodule KilnDepFixture.MixProject do
       app: :kiln_dep_fixture,
       version: "0.1.0",
       elixir: "~> 1.20",
-      deps: [{:kiln_plugin, "~> 1.0", path: "../../kiln_plugin"}]
+      deps: [{:kiln_plugin, "~> 1.1", path: "../../kiln_plugin"}]
     ]
   end
 end

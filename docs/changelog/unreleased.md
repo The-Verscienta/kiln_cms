@@ -80,7 +80,7 @@ carries the reasoning.
 
 - **Advisory checks can ship in a dependency plugin, and `mix kiln.gen.plugin
   --dep` scaffolds one.** `Kiln.Advisory` and its `Finding`, `Context` and
-  `Body` structs moved into `kiln_plugin`, under the same names, so a check
+  `Body` structs moved into `kiln_plugin` (1.1.0), under the same names, so a check
   that matches `%Kiln.Advisory.Context{}` compiles without the core. The
   block walk that fills a `Body` matches the core's block types, so it stays
   in the core as `Kiln.Advisory.Walk` (`compute/1`, `from_typed/1`,

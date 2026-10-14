@@ -10,7 +10,7 @@ the behaviours and macros a plugin `use`s.
 | `Kiln.FieldType` (+ `Kiln.Tokens`) | A custom-field value type admins can pick |
 | `Kiln.Forms.SpamCheck` (+ `Kiln.Forms.SpamCheck.Context`) | A heuristic run on every public form submission |
 | `Kiln.ImageBackend` | An external image service new uploads can go to |
-| `Kiln.Advisory` (+ `Finding`, `Context`, `Body`) | An editorial check shown in the content editor's advice panels |
+| `Kiln.Advisory` (+ `Finding`, `Context`, `Body`), since 1.1 | An editorial check shown in the content editor's advice panels |
 
 These modules used to live inside the KilnCMS core, which made it impossible
 to compile a plugin as a Mix dependency: Mix compiles a dependency before the
@@ -28,7 +28,7 @@ In the plugin's own `mix.exs`:
 ```elixir
 def deps do
   [
-    {:kiln_plugin, "~> 1.0"}
+    {:kiln_plugin, "~> 1.1"}
   ]
 end
 ```
@@ -84,7 +84,7 @@ has to be a `projects/<name>/` overlay, which is compiled *inside* the core.
 | Nav items, supervision children, Oban queues | Yes |
 | Admin, editor and public routes | Only for a LiveView that depends on `phoenix_live_view` directly; one that does `use KilnCMSWeb, :live_view` or renders `Layouts.app` needs the core, so it stays an overlay |
 | Content types (`use KilnCMS.CMS.Content`), Ash domains (`domains/0`) | No: they need the core's repo, domains and policies. Overlay only |
-| Advisory checks (`advisories/0`, `Kiln.Advisory`) | Yes. The core walks the blocks and fills `%Kiln.Advisory.Body{}`; a check only reads it |
+| Advisory checks (`advisories/0`, `Kiln.Advisory`) | Yes, from 1.1 (`{:kiln_plugin, "~> 1.1"}`). The core walks the blocks and fills `%Kiln.Advisory.Body{}`; a check only reads it |
 
 ## Versioning
 
