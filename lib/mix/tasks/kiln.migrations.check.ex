@@ -101,6 +101,7 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
   # Add a table here when it is expected to reach ~1M rows on a real site.
   @large_tables ~w(
     block_embeddings
+    document_chunk_embeddings
     content_links
     content_view_days
     content_views

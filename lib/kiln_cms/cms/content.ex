@@ -3092,6 +3092,8 @@ defmodule KilnCMS.CMS.Content do
         # nightly auto-purge; admin/system only via the destroy policy.
         destroy :purge do
           require_atomic? false
+          # No FK can reach the chunk table from every content table (#1940).
+          change KilnCMS.CMS.Changes.DeleteChunkEmbeddings
         end
 
         # Background-maintained semantic embedding, written by

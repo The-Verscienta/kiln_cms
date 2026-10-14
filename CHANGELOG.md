@@ -60,6 +60,10 @@ Every summary line below that was shortened links to its own entry there.
   first `COPY sdk/kiln_plugin sdk/kiln_plugin`; the core's own Dockerfile does.**
   ([long form](docs/changelog/unreleased.md#plugin-sdk-docker))
 
+- **A new, empty table — `document_chunk_embeddings` — arrives by migration;
+  nothing writes to it until `chunk_long_documents` is turned on.**
+  ([long form](docs/changelog/unreleased.md#chunked-embeddings-migration))
+
 - **Changing `document_prefix` (as an e5 model swap does) now needs block
   vectors re-embedded too: `mix kiln.embed_all --blocks`, or a firing sweep
   (`mix kiln.refire_all`), as well as documents and tags.**
@@ -85,6 +89,10 @@ Every summary line below that was shortened links to its own entry there.
   `rerank_sequence_length`) and how it meets the fused order (`rerank_mode`,
   `SEARCH_RERANK_MODE`) are configurable; the defaults are unchanged.**
   ([long form](docs/changelog/unreleased.md#rerank-shape-and-mode))
+
+- **Semantic search can see past the first 512 tokens of a long record:
+  `chunk_long_documents` embeds the rest of its text in overlapping chunks.**
+  ([long form](docs/changelog/unreleased.md#chunked-embeddings))
 
 - **Hybrid search's relevance floor can judge the any-term (OR) keyword leg's
   hits too, and the floor is a runtime setting.**

@@ -58,7 +58,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             BACKUP_ENABLED OEMBED_ENABLED
             KILN_READING_TIME_WPM BACKUP_KEEP_DAYS BACKUP_STALE_AFTER_HOURS
             KILN_EXPERIMENTS_STICKY_DAYS REQUIRE_AV_METADATA_STRIP
-            BRAND_PRIMARY_COLOR ASK_RERANK
+            BRAND_PRIMARY_COLOR ASK_RERANK SEARCH_CHUNK_LONG_DOCUMENTS
             SEARCH_RERANK_MODE ASK_RERANK_MODE ASK_RERANK_SCOPE ASK_RERANK_PIN
             SEARCH_SEMANTIC_MAX_DISTANCE SEARCH_SEMANTIC_FLOOR_LEGS
             SEARCH_KEYWORD_ANY_IDF_COVERAGE
@@ -594,6 +594,42 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
       vars = %{"SEARCH_RERANK_MODE" => "rrf", "ASK_RERANK_SCOPE" => "union"}
       assert {:not_written, _} = written(vars, [:kiln_cms, KilnCMS.Search, :rerank_mode], :test)
       assert {:not_written, _} = written(vars, [:kiln_cms, KilnCMS.Ask, :rerank_scope], :test)
+    end
+  end
+
+  describe "SEARCH_CHUNK_LONG_DOCUMENTS (#1940)" do
+    # Chunked document embeddings. `fetch/1`, as `ASK_RERANK` is: unset
+    # writes nothing, so a project overlay's `chunk_long_documents: true`
+    # survives a deploy that never mentions the variable.
+    defp chunk_long_documents(value, env \\ :prod) do
+      {config, stderr} = eval_io(%{"SEARCH_CHUNK_LONG_DOCUMENTS" => value}, env)
+
+      written =
+        case get_in(config, [:kiln_cms, KilnCMS.Search, :chunk_long_documents]) do
+          nil -> :not_written
+          bool -> bool
+        end
+
+      {written, stderr}
+    end
+
+    test "on- and off-spellings write the boolean" do
+      for value <- ["true", " On ", "1"], do: assert({true, _} = chunk_long_documents(value))
+      for value <- ["false", "OFF", "0"], do: assert({false, _} = chunk_long_documents(value))
+    end
+
+    test "unset writes nothing, leaving the compile-time default in force" do
+      assert {:not_written, _} = chunk_long_documents(nil)
+    end
+
+    test "an unrecognized value keeps the default and warns" do
+      {written, stderr} = chunk_long_documents("sometimes")
+      assert written == :not_written
+      assert stderr =~ "SEARCH_CHUNK_LONG_DOCUMENTS is set to an unrecognized value"
+    end
+
+    test "the block is prod-only" do
+      assert {:not_written, _} = chunk_long_documents("true", :test)
     end
   end
 

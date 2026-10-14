@@ -21,6 +21,21 @@ defmodule KilnCMS.SearchIndex do
         get_by: [:document_type, :document_id, :block_key]
     end
 
+    # Vectors over the part of a long document's `search_text` past the
+    # embedder's window (#1940), written beside the document's own vector by
+    # `KilnCMS.Search.DocumentChunkIndexer`.
+    resource KilnCMS.Search.DocumentChunkEmbedding do
+      define :create_document_chunk_embedding, action: :create
+
+      define :document_chunk_embeddings_for,
+        action: :for_document,
+        args: [:document_type, :document_id]
+
+      define :nearest_document_chunk_embeddings, action: :nearest_to_vector
+      define :destroy_document_chunk_embedding, action: :destroy
+      define :list_document_chunk_embeddings, action: :read
+    end
+
     # Persisted tag-name vectors for `Search.Related.suggest_tags/2` (#1085).
     resource KilnCMS.Search.TagEmbedding do
       define :upsert_tag_embedding, action: :upsert

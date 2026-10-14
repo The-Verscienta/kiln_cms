@@ -221,4 +221,17 @@ defmodule KilnCMS.LLM.BudgetTest do
       assert Budget.remaining(f, nil, nil, lim) == :infinity
     end
   end
+
+  describe "window_reset_ms/1" do
+    test "is the time left in the current fixed window — when a refused bucket has room again" do
+      window = :timer.hours(1)
+      before = System.system_time(:millisecond)
+      reset = Budget.window_reset_ms(window)
+      after_ms = System.system_time(:millisecond)
+
+      assert reset in 1..window
+      # Hammer's window boundary is a multiple of the window length.
+      assert rem(before + reset, window) in 0..(after_ms - before)
+    end
+  end
 end

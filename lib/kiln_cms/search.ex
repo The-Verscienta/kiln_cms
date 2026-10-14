@@ -255,6 +255,62 @@ defmodule KilnCMS.Search do
   def block_leg?, do: semantic?() and cfg(:block_leg, true)
 
   @doc """
+  Whether long documents are embedded in chunks (#1940) — `chunk_long_documents`,
+  off by default; `SEARCH_CHUNK_LONG_DOCUMENTS` overrides it at runtime in a
+  release.
+
+  A document's own vector sees the first window of its `search_text` (512
+  tokens) and nothing after it, and a record with no blocks — all of its
+  text in custom fields — has no block vectors to make up for that. With
+  this on, `KilnCMS.Search.EmbeddingWorker` also embeds the text past the
+  window as overlapping windows of its own (`KilnCMS.Search.Chunker`, stored
+  as `KilnCMS.Search.DocumentChunkEmbedding`), and the block leg of
+  `hybrid/3` reaches a document through its nearest chunk as well as its
+  nearest block — so the relevance floor judges it by the nearest of its
+  head, block and chunk distances.
+
+  The cost is inference: one more embedding per window past the first on
+  every re-embed of a long record, roughly 2× the embedding work for a corpus
+  whose long records run to two or three windows. Off, nothing is written and
+  no stored vector changes. Turning it on affects records as they are next
+  embedded; run `mix kiln.embed_all` to backfill the rest — see
+  `docs/semantic-search-plan.md`, "Long documents".
+  """
+  @spec chunk_long_documents?() :: boolean()
+  def chunk_long_documents?, do: semantic?() and cfg(:chunk_long_documents, false) == true
+
+  @doc """
+  How many tokens consecutive chunks (and the first chunk and the document's
+  own window) share — `chunk_overlap`, default 64. A sentence cut by a window
+  boundary is then whole in one of the two. Counted the way
+  `KilnCMS.Search.Chunker` counts tokens, which is an estimate.
+  """
+  @spec chunk_overlap() :: non_neg_integer()
+  def chunk_overlap, do: cfg(:chunk_overlap, 64)
+
+  @doc """
+  The most chunks one document gets — `chunk_max_per_document`, default 8,
+  which with the default window covers roughly the next 2,000 words past the
+  first window. Text beyond the cap stays unembedded, as all of it was before
+  #1940; the cap is what bounds a single huge record's inference.
+  """
+  @spec chunk_max_per_document() :: non_neg_integer()
+  def chunk_max_per_document, do: cfg(:chunk_max_per_document, 8)
+
+  @doc """
+  The window, in tokens, a chunk is sized to: the largest compiled
+  `sequence_length/0`, since an input longer than that is what the serving
+  truncates.
+  """
+  @spec chunk_window_tokens() :: pos_integer()
+  def chunk_window_tokens do
+    case sequence_length() do
+      lengths when is_list(lengths) -> Enum.max(lengths)
+      length -> length
+    end
+  end
+
+  @doc """
   Whether `hybrid/3` runs the tag leg: documents carrying a tag whose name
   embeds within `tag_leg_threshold/0` of the query.
 
@@ -999,8 +1055,9 @@ defmodule KilnCMS.Search do
   short on a multi-word query, so its presence on a hit means "matched some
   of the terms"; `:semantic` is the embedding leg over the whole document;
   `:block` the same embedding at block grain, a document reached through
-  its nearest section (`block_leg?/0`); `:title` a record the query names
-  outright (its whole title appears in the query); `:alias` a record the
+  its nearest section (`block_leg?/0`) — a block or, with
+  `chunk_long_documents?/0` on, a window of its text past the first;
+  `:title` a record the query names outright (its whole title appears in the query); `:alias` a record the
   query names by one of its other names — a custom field an admin flagged
   `names_record` (`KilnCMS.CMS.NameFields`), matched the way the title is
   and weighted the same; `:fuzzy` the trigram title leg that runs only when
@@ -1202,7 +1259,8 @@ defmodule KilnCMS.Search do
   # (a `:keyword_any` + `:semantic` hit's record is the keyword leg's, which
   # carries no `semantic_distance`, so the semantic leg's reading is folded in
   # by id), then — for a judged lexical hit no semantic leg returned, and only
-  # then — its document's distance and its nearest block's, read for it here.
+  # then — its document's distance and its nearest block's or chunk's, read
+  # for it here.
   #
   # Such a hit has no distance of its own when its record is not embedded yet,
   # or when the query could not be embedded at all (semantic search off, the
@@ -1259,15 +1317,26 @@ defmodule KilnCMS.Search do
     |> Map.new()
   end
 
-  # The hits' nearest blocks, on the block leg's terms: only where that leg
-  # runs, so a lexical hit is never measured by a grain a semantic-only hit
-  # under the same query could not be.
+  # The hits' nearest blocks and chunks, on the block leg's terms: only the
+  # grains that leg reads, so a lexical hit is never measured by one a
+  # semantic-only hit under the same query could not be. The chunks matter
+  # most here: a `:keyword_any` match in a long document's late passage
+  # (#1940) is exactly the hit whose head vector never saw that passage, and
+  # judging it by the head alone is the blind spot `semantic_floor_legs/0`
+  # documents.
   defp hit_block_distances(ids, vector, floor) do
-    with true <- block_leg?(),
+    with true <- block_leg?() or chunk_long_documents?(),
          true <- floor.filters == %{},
          type when is_atom(type) and not is_nil(type) <-
            KilnCMS.CMS.ContentTypes.type_atom(floor.resource) do
-      vector |> nearest_blocks(type, floor.read_opts[:tenant], ids) |> Map.new()
+      tenant = floor.read_opts[:tenant]
+
+      [
+        if(block_leg?(), do: nearest_blocks(vector, type, tenant, ids), else: []),
+        if(chunk_long_documents?(), do: nearest_chunks(vector, type, tenant, ids), else: [])
+      ]
+      |> nearest_sections()
+      |> Map.new()
     else
       _ -> %{}
     end
@@ -1337,15 +1406,34 @@ defmodule KilnCMS.Search do
   # no facets, and applying them to the document read would give a leg whose
   # candidate count is decided after the fact. A resource that declares no
   # content type, or whose type the block index does not hold, gets no leg.
+  #
+  # With `chunk_long_documents?/0` on, the leg also reads the nearest chunk
+  # embeddings (#1940) — the same embedder's distance over the text past a
+  # long document's window — and keeps each document at the nearer of its
+  # nearest block and its nearest chunk (`nearest_sections/1`). A chunk is a
+  # section of `search_text` the way a block is a section of the tree, so
+  # it rides this leg and its `:block` label rather than adding a leg: the
+  # floor already judges `:block` hits by the distance this map carries, and
+  # a ninth leg would be one more name every reader of `hit_legs/1` and of
+  # the floor's leg list would have to learn. It runs with `block_leg: false`
+  # too — the switch is about block rows; the chunk knob is its own.
   @spec block_leg(module(), String.t(), String.t(), map(), keyword(), keyword()) ::
           {[struct()], %{Ash.UUID.t() => float()}}
   defp block_leg(resource, query, locale, filters, read_opts, opts) do
-    with true <- block_leg?(),
+    with true <- block_leg?() or chunk_long_documents?(),
          true <- filters == %{},
          {:ok, vector} <- leg_vector(query, opts),
          type when is_atom(type) and not is_nil(type) <-
            KilnCMS.CMS.ContentTypes.type_atom(resource) do
-      nearest = nearest_blocks(vector, type, read_opts[:tenant])
+      nearest =
+        nearest_sections([
+          if(block_leg?(), do: nearest_blocks(vector, type, read_opts[:tenant]), else: []),
+          if(chunk_long_documents?(),
+            do: nearest_chunks(vector, type, read_opts[:tenant]),
+            else: []
+          )
+        ])
+
       ids = Enum.map(nearest, &elem(&1, 0))
 
       by_id =
@@ -1391,6 +1479,41 @@ defmodule KilnCMS.Search do
     |> elem(0)
     |> Enum.reverse()
     |> Enum.take(@hybrid_candidates)
+  end
+
+  @doc false
+  # `[{document_id, distance}]` lists, each nearest first, merged into one:
+  # nearest first, each document once — at the smallest distance any list
+  # gave it — capped at the leg's candidate count. `Enum.sort_by/2` is
+  # stable, so a single list (chunks off) keeps the order the database
+  # returned it in, ties included. Public for its unit test only: this
+  # min-per-document is what makes a chunk vouch for a document whose head
+  # and blocks are far from the query.
+  @spec nearest_sections([[{Ash.UUID.t(), float()}]]) :: [{Ash.UUID.t(), float()}]
+  def nearest_sections(lists) do
+    lists
+    |> Enum.concat()
+    |> Enum.sort_by(&elem(&1, 1))
+    |> Enum.uniq_by(&elem(&1, 0))
+    |> Enum.take(@hybrid_candidates)
+  end
+
+  # `[{document_id, distance}]`, nearest first, each document once — at its
+  # nearest chunk. A long document has up to `chunk_max_per_document/0`
+  # chunks, so the leg reads the block leg's multiple of the candidate count.
+  #
+  # `ids` narrows the read to those documents' chunks — the floor measuring
+  # a lexical hit (`hit_block_distances/3`), as `nearest_blocks/4` does.
+  defp nearest_chunks(vector, type, tenant, ids \\ nil) do
+    %{vector: vector, document_type: type, limit: @block_candidates}
+    |> KilnCMS.SearchIndex.nearest_document_chunk_embeddings!(
+      actor: KilnCMS.SystemActor.new(:search),
+      tenant: tenant,
+      load: [semantic_distance: %{query_vector: vector}],
+      query: if(ids, do: [filter: [document_id: [in: ids]]], else: [])
+    )
+    |> Enum.map(&{&1.document_id, &1.semantic_distance})
+    |> then(&nearest_sections([&1]))
   end
 
   # The tag leg: the site's tags whose names embed within the threshold of
