@@ -105,6 +105,6 @@ byte-identical, and runs `mix hex.publish --yes`.
 2. Tag the merge commit `kiln_plugin-vX.Y.Z` and push the tag.
 3. Approve the run in the `hex` environment.
 
-Before the first run, a maintainer has to allow `kiln_plugin-v*` tags on the
-`hex` environment (it accepts only `kiln_client-v*` today). The `HEX_API_KEY`
-there needs to be allowed to publish a new package.
+The `hex` environment's deployment-tag rule allows both `kiln_client-v*` and
+`kiln_plugin-v*`; a tag matching neither never reaches the publish step. The
+`HEX_API_KEY` there must be allowed to publish `kiln_plugin`.
