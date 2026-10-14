@@ -60,6 +60,11 @@ Every summary line below that was shortened links to its own entry there.
   first `COPY sdk/kiln_plugin sdk/kiln_plugin`; the core's own Dockerfile does.**
   ([long form](docs/changelog/unreleased.md#plugin-sdk-docker))
 
+- **Changing `document_prefix` (as an e5 model swap does) now needs a firing
+  sweep (`mix kiln.refire_all`) to re-embed block vectors, as well as
+  `mix kiln.embed_all` for documents and tags.**
+  ([long form](docs/changelog/unreleased.md#block-embedding-prefixes-upgrade))
+
 ### Added
 
 - **Plugins can ship as Hex, git or `path:` dependencies: the plugin contract
@@ -97,6 +102,11 @@ Every summary line below that was shortened links to its own entry there.
 - **Clicking a rich-text block's toolbar button keeps the caret in the text, so
   the first letters typed straight after Bold are no longer lost.**
   ([long form](docs/changelog/unreleased.md#toolbar-keeps-editor-focus))
+
+- **Block vectors and the block search query now get `document_prefix` and
+  `query_prefix`, so an asymmetric model such as multilingual-e5 embeds the
+  block leg to spec.**
+  ([long form](docs/changelog/unreleased.md#block-embedding-prefixes))
 
 ## [1.3.0] - 2026-10-12
 

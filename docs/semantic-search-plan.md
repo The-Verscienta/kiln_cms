@@ -407,7 +407,11 @@ family needs:
   (MiniLM / e5). Must match the model's training.
 - **`query_prefix` / `document_prefix`** — instruction prefixes prepended
   before embedding (`Search.embed_query/1` / `embed_document/1`). Default
-  `""`; e5 needs `"query: "` / `"passage: "`.
+  `""`; e5 needs `"query: "` / `"passage: "`. Every content-side vector takes
+  `document_prefix` — document, tag name, and block (as
+  `document_prefix <> title <> "\n\n" <> block text`, the context line after
+  the prefix) — and every query takes `query_prefix`, including the block
+  leg's and `BlockSearch`'s (#1939).
 - **`model` / `dim`** — the HF id and its vector width. `dim` is read at
   **compile time** by `KilnCMS.Search.Vector`, so it defines the
   `vector(N)` column type.
@@ -429,6 +433,23 @@ config :kiln_cms, KilnCMS.Search,
 Then `mix kiln.embed_all` (now covers Page, Post, **and** dynamic entries) —
 old English embeddings are meaningless under the new model, so every record
 must be recomputed.
+
+### Re-embedding after a swap: documents, tags **and blocks**
+
+`mix kiln.embed_all` re-embeds document vectors and tag names. It does not
+touch **block** vectors (`block_embeddings`, the block leg): those are written
+only by firing, so they are re-indexed by a firing sweep —
+`mix kiln.refire_all`, or `bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"` on a
+release. A swap needs both.
+
+A block is re-embedded only when its `content_hash` changes. That hash covers
+the block text, its ancestor context and, when set, `document_prefix`, so a
+swap that changes `document_prefix` (any e5 model) re-embeds every block on
+the sweep. A swap that keeps the prefixes (bge-small → MiniLM above) leaves
+the hashes equal, and the sweep skips every block as unchanged — clear the
+block rows first (`DELETE FROM block_embeddings`) so the sweep rebuilds them.
+Changing only `query_prefix` needs no re-embed: queries are embedded when
+they are asked.
 
 ### Higher quality: a different-dimension model (needs a migration)
 

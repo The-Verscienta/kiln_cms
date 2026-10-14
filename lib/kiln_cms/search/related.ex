@@ -478,8 +478,9 @@ defmodule KilnCMS.Search.Related do
 
   # Charges one unit per block the embed will actually reach the model for —
   # not one flat unit per call — so the budget tracks real inference volume.
-  # `raw_cached?/1` uses the exact key `computed_centroid/1` (by way of
-  # `BlockIndexer.block_vectors/1`) is about to look up, so a document whose
+  # `cached?/1` uses the exact key `computed_centroid/1` (by way of
+  # `BlockIndexer.block_vectors/1`, which embeds document-side — #1939) is
+  # about to look up, so a document whose
   # centroid was already computed and cached (by an earlier call in the same
   # panel load, say) costs nothing here, matching `ensure_tag_embeddings/3`
   # below.
@@ -487,7 +488,7 @@ defmodule KilnCMS.Search.Related do
     uncached =
       record
       |> BlockIndexer.embedding_inputs()
-      |> Enum.count(&(not VectorCache.raw_cached?(&1)))
+      |> Enum.count(&(not VectorCache.cached?(&1)))
 
     embedding_charge(budget_ctx, uncached, fn -> computed_centroid(record) end)
   end

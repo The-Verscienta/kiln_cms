@@ -787,7 +787,7 @@ defmodule KilnCMS.AutomationIntelligenceTest do
       second = draft_in(org, actor, "rule-reserve link passage two", "Rule two")
 
       centroid_cached? = fn draft ->
-        draft |> BlockIndexer.embedding_inputs() |> Enum.all?(&VectorCache.raw_cached?/1)
+        draft |> BlockIndexer.embedding_inputs() |> Enum.all?(&VectorCache.cached?/1)
       end
 
       # Half of 2 is 1 — the rule's first run computes and caches `first`'s

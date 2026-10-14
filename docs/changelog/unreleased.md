@@ -18,6 +18,21 @@ carries the reasoning.
   prod `deps.get` doesn't read.
   ([#1909](https://github.com/The-Verscienta/kiln_cms/issues/1909))
 
+<a id="block-embedding-prefixes-upgrade"></a>
+
+- **Changing `document_prefix` (as an e5 model swap does) now needs a firing
+  sweep (`mix kiln.refire_all`) to re-embed block vectors, as well as
+  `mix kiln.embed_all` for documents and tags.** Block vectors are written
+  only by firing (`KilnCMS.Search.BlockIndexer`), and `mix kiln.embed_all`
+  re-embeds document vectors and tag names, not blocks. A block's `content_hash` now includes `document_prefix` when it is
+  set, so the sweep re-embeds every block under the new prefix and skips
+  nothing as unchanged. On a release, run
+  `bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"`. Changing only
+  `query_prefix` needs no re-embed, because queries are embedded when they
+  are asked. With the default empty prefixes (bge-small), the inputs and
+  hashes are what they were, so upgrading re-embeds nothing.
+  ([#1939](https://github.com/The-Verscienta/kiln_cms/issues/1939))
+
 <a id="plugin-sdk"></a>
 
 - **Plugins can ship as Hex, git or `path:` dependencies: the plugin contract
@@ -174,3 +189,23 @@ carries the reasoning.
   `POST /dev/e2e-collab` (`KilnCMSWeb.Plugs.E2ECollab`). The route is mounted
   beside `/dev/e2e-identity` in the compile-gated dev-tools scope, which
   `KilnCMS.Application` refuses in `:prod`.
+
+<a id="block-embedding-prefixes"></a>
+
+- **Block vectors and the block search query now get `document_prefix` and
+  `query_prefix`, so an asymmetric model such as multilingual-e5 embeds the
+  block leg to spec.** Documents and tags already went through
+  `Search.embed_document/1`, but `BlockIndexer` embedded each block with the
+  raw `Search.embed/1`, and `BlockEmbedding`'s `:nearest` action embedded its
+  query the same way. Under e5 (`"query: "` / `"passage: "`) the block leg of
+  `hybrid/3` compared unprefixed block vectors with the prefixed query vector
+  it shares with the document leg, which moved the block distances the
+  relevance floor reads. Blocks now embed as `document_prefix` + the ancestor
+  context line + the block text, on both the stored path and the
+  compute-on-demand `block_vectors/1`, and `:nearest` uses
+  `Search.embed_query/1`. `KilnCMS.Search.VectorCache`'s key gains `pooling`,
+  since CLS and mean pooling give different vectors for one string; the cache
+  is in memory, so the new key shape costs one cold cache after a deploy.
+  `VectorCache.raw_cached?/1` is removed: no unprefixed path is left, and its
+  two callers ask `cached?/1`.
+  ([#1939](https://github.com/The-Verscienta/kiln_cms/issues/1939))
