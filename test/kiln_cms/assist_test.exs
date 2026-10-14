@@ -8,6 +8,8 @@ defmodule KilnCMS.AssistTest do
   """
   use ExUnit.Case, async: false
 
+  import KilnCMS.Test.BudgetWindow
+
   alias KilnCMS.Assist
   alias KilnCMS.Assist.Prompt
   alias KilnCMS.Assist.Request
@@ -190,7 +192,7 @@ defmodule KilnCMS.AssistTest do
   describe "budget" do
     test "the per-user bucket stops a runaway loop" do
       enable()
-      put_assist(per_user_limit: {2, :timer.minutes(1)})
+      put_assist(per_user_limit: {2, fresh_window_ms()})
       user = "budget-user-#{System.unique_integer([:positive])}"
 
       assert {:ok, _} = Assist.run(request(), user_id: user)
@@ -200,7 +202,7 @@ defmodule KilnCMS.AssistTest do
 
     test "a caller with no request context is not blocked by a limiter that can't identify it" do
       enable()
-      put_assist(per_user_limit: {1, :timer.minutes(1)})
+      put_assist(per_user_limit: {1, fresh_window_ms()})
 
       assert {:ok, _} = Assist.run(request())
       assert {:ok, _} = Assist.run(request())
@@ -211,7 +213,7 @@ defmodule KilnCMS.AssistTest do
       # wired to the wrong config key and the suite would have stayed green
       # while a hosted provider billed without limit.
       enable()
-      put_assist(per_org_limit: {2, :timer.hours(1)}, per_user_limit: {99, :timer.minutes(1)})
+      put_assist(per_org_limit: {2, fresh_window_ms()}, per_user_limit: {99, fresh_window_ms()})
       org = "budget-org-#{System.unique_integer([:positive])}"
 
       assert {:ok, _} = Assist.run(request(), org_id: org)
@@ -230,7 +232,7 @@ defmodule KilnCMS.AssistTest do
       # Same Hammer table, namespaced keys: exhausting one feature must not
       # silently disable the other.
       enable()
-      put_assist(per_user_limit: {1, :timer.minutes(1)})
+      put_assist(per_user_limit: {1, fresh_window_ms()})
       user = "shared-#{System.unique_integer([:positive])}"
 
       assert {:ok, _} = Assist.run(request(), user_id: user)
@@ -238,8 +240,8 @@ defmodule KilnCMS.AssistTest do
 
       assert :ok =
                KilnCMS.LLM.Budget.check("seo", nil, user,
-                 per_user: {1, :timer.minutes(1)},
-                 per_org: {10, :timer.hours(1)}
+                 per_user: {1, fresh_window_ms()},
+                 per_org: {10, fresh_window_ms()}
                )
     end
   end

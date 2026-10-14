@@ -20,7 +20,23 @@ Releases are tagged `kiln_plugin-vX.Y.Z` in the
 - **`Kiln.ImageBackend.check/0` (kiln_cms#1955).** A backend can say whether
   its service answers with the settings it has, and what it found there, for
   System → Image backend. Optional: `use Kiln.ImageBackend` defaults it to
-  `:unsupported`. A backend that implements it needs this minor.
+  `:unsupported`. A backend that implements it should require
+  `{:kiln_plugin, "~> 1.2"}` once this ships.
+
+## 1.1.0
+
+### Added
+
+- **Advisory checks (kiln_cms#1909).** `Kiln.Advisory` moved out of the
+  KilnCMS core into this package with its `Finding`, `Context` and `Body`
+  structs, under the same names, so a plugin that ships a check matching
+  `%Kiln.Advisory.Context{}` can be a dependency. Such a plugin should
+  require `{:kiln_plugin, "~> 1.1"}`. One part of `Kiln.Advisory.Body` did
+  not come along: the block walk (`compute`, `from_typed`, `from_indexed`)
+  matches the core's block types, so it stays in the core as
+  `Kiln.Advisory.Walk`. `Body` keeps the three as deprecated delegates,
+  which work only inside a KilnCMS build. A check never called them; it
+  only reads the body the core hands it.
 
 ## 1.0.0
 
@@ -29,14 +45,8 @@ Releases are tagged `kiln_plugin-vX.Y.Z` in the
 - **First release (kiln_cms#1909).** The compile-time plugin contract moved
   out of the KilnCMS core into this package, under the same module names:
   `Kiln.Plugin`, `Kiln.Block` and `Kiln.Block.*`, `Kiln.FieldType`,
-  `Kiln.Tokens`, `Kiln.Forms.SpamCheck` (with its `Context`),
-  `Kiln.ImageBackend`, and `Kiln.Advisory` with its `Finding`, `Context` and
-  `Body` structs. Nothing about them changed; what changed is that a
+  `Kiln.Tokens`, `Kiln.Forms.SpamCheck` (with its `Context`) and
+  `Kiln.ImageBackend`. Nothing about them changed; what changed is that a
   plugin can now depend on them without depending on the core, so it can
   ship as a Hex, git or `path:` dependency. The first KilnCMS release after
-  1.3.0 is the first core that builds against it. One part of
-  `Kiln.Advisory.Body` did not come along: the block walk (`compute`,
-  `from_typed`, `from_indexed`) matches the core's block types, so it stays
-  in the core as `Kiln.Advisory.Walk`. `Body` keeps the three as deprecated
-  delegates, which work only inside a KilnCMS build. A check never called
-  them; it only reads the body the core hands it.
+  1.3.0 is the first core that builds against it.

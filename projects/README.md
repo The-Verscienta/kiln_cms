@@ -40,6 +40,37 @@ config :kiln_cms, :plugins, [MyProject.Plugin]
 JSON:API router, so registering a domain there exposes its types on every
 delivery surface with no core edits.
 
+### Dependency plugins: `config/project_deps.exs`
+
+A plugin that ships as a Mix dependency (Hex, `git:` or `path:`, built on
+`kiln_plugin`) is installed the same config-only way (#1967). The overlay
+ships `config/project_deps.exs`, a list of dependencies written as in a
+`mix.exs` deps list, and the core's `mix.exs` appends it to its own:
+
+```elixir
+# config/project_deps.exs
+[
+  {:kiln_ratings, "~> 1.0"},
+  {:kiln_cloudflare_images, github: "The-Verscienta/kiln_cloudflare_images", tag: "v0.1.0"}
+]
+```
+
+While that file exists, Mix locks into `config/project.lock` instead of the
+core's `mix.lock`. The first `mix deps.get` seeds it from `mix.lock`, so the
+core's own dependencies stay at the versions the release was tested with, and
+adds the overlay's entries. Both files are git-ignored in the core, so the pin
+never looks patched, and the overlay commits both: `project.lock` is its
+reproducibility record. The rules:
+
+- an entry may not set `override: true`, which would silently replace a
+  version the release was tested with. A real conflict fails where Mix reports
+  a diverged dependency;
+- `only:` works as in mix.exs, for an overlay's dev or test helpers;
+- a `path:` is relative to the core checkout;
+- `mix kiln.plugins.doctor` fails if a core dependency moved inside
+  `project.lock`, and notes a plugin installed here but missing from
+  `config :kiln_cms, :plugins`.
+
 ## Building an overlaid image
 
 The downstream repo pins this repo (submodule or fetched ref) and its
@@ -49,7 +80,13 @@ Dockerfile copies the core plus its overlay:
 COPY upstream/ ...                     # this repo, pinned
 COPY projects  projects                # the subproject
 COPY config/project.exs config/        # activation config
+COPY config/project_deps.exs config/project.lock config/   # its dependencies, if any
 ```
+
+The core's own Dockerfile copies `config/project_deps.exs` and
+`config/project.lock` before `mix deps.get` when the build context has them.
+A downstream Dockerfile that runs `mix deps.get` itself has to copy them (and
+`config/project_deps_hook.exs`, which `mix.exs` requires) before that step.
 
 ## Staying up to date
 
@@ -69,7 +106,10 @@ migrations and changelog as Kiln's. It targets tagged releases, refuses to move
 a dirty or locally-patched pin, and refuses a major jump (which by this repo's
 versioning means *your subproject needs code changes*) without `--allow-major`.
 It never runs migrations or deploys — it prints those steps, in the order you
-run them.
+run them. With a `config/project_deps.exs`, it re-seeds `config/project.lock`
+after moving the pin: the new release's versions for every core dependency,
+the overlay's own entries carried over. Commit the re-seeded lock in the
+overlay after the `mix deps.get` it prints.
 
 A deployed instance also reports its version and whether it's behind at
 `/editor/system`, and prints the same command. The image cannot know where your

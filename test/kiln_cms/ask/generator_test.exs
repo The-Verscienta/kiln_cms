@@ -9,6 +9,8 @@ defmodule KilnCMS.Ask.GeneratorTest do
   """
   use KilnCMS.DataCase, async: false
 
+  import KilnCMS.Test.BudgetWindow
+
   alias KilnCMS.Ask
 
   # A generator on the OLD (#361) contract: two arities only. Its continued
@@ -184,7 +186,7 @@ defmodule KilnCMS.Ask.GeneratorTest do
     test "an exhausted caller bucket degrades to retrieval-only, it does not fail" do
       # /api/ask is public: the per-caller bucket is usually keyed on an IP.
       client = "ip:198.51.100.#{System.unique_integer([:positive])}"
-      put_ask(generator: LegacyGenerator, per_user_limit: {2, :timer.minutes(1)})
+      put_ask(generator: LegacyGenerator, per_user_limit: {2, fresh_window_ms()})
 
       assert %{generated: true} = ask("q", caller_id: client)
       assert %{generated: true} = ask("q", caller_id: client)
@@ -197,11 +199,11 @@ defmodule KilnCMS.Ask.GeneratorTest do
       # `generated: false` alone cannot be acted on — it is the same value a
       # deployment with no generator returns, and only this one has a recovery.
       client = "ip:198.51.100.#{System.unique_integer([:positive])}"
-      # Widened, not tightened. Hammer's windows are clock-aligned
-      # (`div(now, scale)`), so a rollover between the two calls is possible at
-      # any scale and a wider one only makes it rarer — this is #697's shape,
-      # narrowed, not eliminated.
-      put_ask(generator: LegacyGenerator, per_user_limit: {1, :timer.hours(1)})
+      # Hammer's windows are clock-aligned (`div(now, scale)`), so a rollover
+      # between the two calls is possible at any fixed scale (#697's shape) —
+      # `fresh_window_ms/0` is a window that opened as the test started.
+      window_ms = fresh_window_ms()
+      put_ask(generator: LegacyGenerator, per_user_limit: {1, window_ms})
 
       assert %{generation: nil, retry_after: nil} = ask("q", caller_id: client)
 
@@ -211,13 +213,13 @@ defmodule KilnCMS.Ask.GeneratorTest do
       # Rounded up and never 0, via the same helper the auth surfaces use — a
       # `retry_after` of 0 invites an immediate retry into another refusal.
       assert is_integer(retry) and retry > 0
-      assert retry <= 3600
+      assert retry <= div(window_ms, 1000) + 1
     end
 
     test "a different client is not affected by an exhausted neighbour" do
       one = "ip:198.51.100.#{System.unique_integer([:positive])}"
       two = "ip:198.51.100.#{System.unique_integer([:positive])}"
-      put_ask(generator: LegacyGenerator, per_user_limit: {1, :timer.minutes(1)})
+      put_ask(generator: LegacyGenerator, per_user_limit: {1, fresh_window_ms()})
 
       assert %{generated: true} = ask("q", caller_id: one)
       assert %{generated: false} = ask("q", caller_id: one)
@@ -227,14 +229,14 @@ defmodule KilnCMS.Ask.GeneratorTest do
     test "with neither an actor nor a client id the caller bucket is skipped" do
       # A mix task or a test has no request context; `KilnCMS.LLM.Budget` treats
       # a nil id as "not identifiable" everywhere else and this is no different.
-      put_ask(generator: LegacyGenerator, per_user_limit: {1, :timer.minutes(1)})
+      put_ask(generator: LegacyGenerator, per_user_limit: {1, fresh_window_ms()})
 
       assert %{generated: true} = ask("q")
       assert %{generated: true} = ask("q")
     end
 
     test "an empty question never reaches the generator or the budget" do
-      put_ask(generator: LegacyGenerator, per_user_limit: {1, :timer.minutes(1)})
+      put_ask(generator: LegacyGenerator, per_user_limit: {1, fresh_window_ms()})
 
       assert %{question: "", answer: nil, generated: false, sources: []} = ask("   ")
     end

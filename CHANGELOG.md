@@ -57,6 +57,10 @@ Every summary line below that was shortened links to its own entry there.
 ### Upgrade notes
 
 - **A Dockerfile that runs `mix deps.get` before copying the whole core must
+  also copy `config/project_deps_hook.exs`, which `mix.exs` now requires.**
+  ([long form](docs/changelog/unreleased.md#project-deps-docker))
+
+- **A Dockerfile that runs `mix deps.get` before copying the whole core must
   first `COPY sdk/kiln_plugin sdk/kiln_plugin`; the core's own Dockerfile does.**
   ([long form](docs/changelog/unreleased.md#plugin-sdk-docker))
 
@@ -70,6 +74,11 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#block-embedding-prefixes-upgrade))
 
 ### Added
+
+- **An overlay installs dependency plugins through a git-ignored
+  `config/project_deps.exs`, locked in `config/project.lock`, so the core's
+  `mix.exs` and `mix.lock` never change.**
+  ([long form](docs/changelog/unreleased.md#project-deps))
 
 - **Plugins can ship as Hex, git or `path:` dependencies: the plugin contract
   moved, under the same module names, into its own package, `kiln_plugin`.**

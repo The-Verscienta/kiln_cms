@@ -386,6 +386,7 @@ defmodule KilnCMS.FixturePlugin.ImageBackend do
 
     * `configured?: false` — installed and selected, but missing settings;
     * `accepts?: false` — declines every upload;
+    * `max_bytes: n` — declines an image larger than `n` bytes;
     * `renders?: false` — `render_url/2` answers `:unsupported`;
     * `check: answer` — what `check/0` returns, or a 0-arity function it
       calls (to raise or exit); `{:ok, [{"Stored images", n}]}` by default.
@@ -401,7 +402,11 @@ defmodule KilnCMS.FixturePlugin.ImageBackend do
   def configured?, do: opt(:configured?, true)
 
   @impl true
-  def accepts?(%{content_type: "image/" <> _}), do: opt(:accepts?, true)
+  def accepts?(%{content_type: "image/" <> _, byte_size: size}) do
+    max = opt(:max_bytes, nil)
+    opt(:accepts?, true) and (is_nil(max) or size <= max)
+  end
+
   def accepts?(_candidate), do: false
 
   @impl true

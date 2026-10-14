@@ -15,8 +15,6 @@ defmodule KilnCMS.Organize.SignalsTest do
   alias KilnCMS.Organize.Queue
   alias KilnCMS.Organize.Terms
 
-  @minute :timer.minutes(1)
-
   # Text naming a topic embeds on that topic's axis (+ a little noise), and
   # "colour" is spelt "color" first, so the two tag names are one vector.
   defmodule AxisEmbedder do
@@ -180,10 +178,10 @@ defmodule KilnCMS.Organize.SignalsTest do
       assert missing.signal == :term_missing
 
       # The query embeddings were charged once, interactively: two units.
-      assert spent("user", editor.id, @minute) == 2
+      assert spent("user", editor.id) == 2
       # A reload costs nothing — both queries are cached now.
       assert %{skipped: nil} = Gaps.signals(org, editor)
-      assert spent("user", editor.id, @minute) == 2
+      assert spent("user", editor.id) == 2
     end
 
     test "no room for the query embeddings: the gaps still show, unclassified, uncharged",
@@ -191,7 +189,7 @@ defmodule KilnCMS.Organize.SignalsTest do
       tag!(org, admin, "sourdough")
       {:ok, _} = Terms.index_tag_vectors(org, admin)
       editor = user!(:admin)
-      put_search_env(embedding_per_user_limit: {1, @minute})
+      put_search_env(embedding_per_user_limit: {1, fresh_window_ms()})
       zero_result(org, "sourdough a #{uniq()}", 1)
       zero_result(org, "sourdough b #{uniq()}", 1)
 
@@ -199,7 +197,7 @@ defmodule KilnCMS.Organize.SignalsTest do
 
       assert length(gaps) == 2
       assert Enum.all?(gaps, &(&1.signal == :unclassified))
-      assert spent("user", editor.id, @minute) == 0
+      assert spent("user", editor.id) == 0
     end
   end
 
@@ -214,6 +212,6 @@ defmodule KilnCMS.Organize.SignalsTest do
              Health.report(org, admin)
 
     assert Gaps.signals(org, admin) == %{gaps: [], skipped: nil, vocabulary_truncated?: false}
-    assert spent("user", admin.id, @minute) == 0
+    assert spent("user", admin.id) == 0
   end
 end

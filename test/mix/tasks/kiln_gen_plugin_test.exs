@@ -82,11 +82,15 @@ defmodule Mix.Tasks.Kiln.Gen.PluginTest do
         end)
       end
 
+      # The bundled SDK's minor: 1.1.0 → "~> 1.1".
+      sdk = Plugin.sdk_requirement()
+      assert sdk == "~> 1.1"
+
       assert deps.(Plugin.dep_mix_source("Ratings", "ratings", nil)) ==
-               [{:kiln_plugin, "~> 1.0"}]
+               [{:kiln_plugin, sdk}]
 
       assert deps.(Plugin.dep_mix_source("Ratings", "ratings", "star_rating")) ==
-               [{:kiln_plugin, "~> 1.0"}, {:phoenix_html, "~> 4.1"}]
+               [{:kiln_plugin, sdk}, {:phoenix_html, "~> 4.1"}]
     end
 
     test "the plugin module compiles, and points content types at an overlay" do

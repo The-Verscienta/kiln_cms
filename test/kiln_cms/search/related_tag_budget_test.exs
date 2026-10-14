@@ -11,8 +11,9 @@ defmodule KilnCMS.Search.RelatedTagBudgetTest do
   near-duplicate and link suggestions for the rest of the window. Every test
   here asserts the exact counters, because the counter is the defect.
 
-  A "next window" without sleeping: Hammer keys a bucket on
-  `div(now, window_ms)`, so a per-user window of `@minute + n` is a fresh one.
+  Windows come from `KilnCMS.OrganizeFixtures.fresh_window_ms/1`: they open as
+  the test starts, so no boundary falls between a charge and its read-back,
+  and `fresh_window_ms(n)` is the "next window" without sleeping.
   """
   # async: false — swaps the global KilnCMS.Search env (stub embedder).
   use KilnCMS.DataCase, async: false
@@ -22,9 +23,6 @@ defmodule KilnCMS.Search.RelatedTagBudgetTest do
   alias KilnCMS.LLM.Budget
   alias KilnCMS.Search
   alias KilnCMS.Search.Related
-
-  @minute :timer.minutes(1)
-  @hour :timer.hours(1)
 
   defmodule RaisingEmbedder do
     @moduledoc false
@@ -54,10 +52,11 @@ defmodule KilnCMS.Search.RelatedTagBudgetTest do
     %{org: org, admin: admin, editor: user!(:admin), post: post}
   end
 
-  defp window(per_user_window_ms) do
+  # The per-user window `nth` from now: `window(1)` is the editor's next one.
+  defp window(nth \\ 0) do
     put_search_env(
-      embedding_per_user_limit: {60, per_user_window_ms},
-      embedding_per_org_limit: {600, @hour}
+      embedding_per_user_limit: {60, fresh_window_ms(nth)},
+      embedding_per_org_limit: {600, fresh_window_ms()}
     )
   end
 
@@ -71,7 +70,7 @@ defmodule KilnCMS.Search.RelatedTagBudgetTest do
   describe "suggest_tags/2 — the strict path" do
     test "a set larger than the window is refused WITHOUT being counted",
          %{org: org, admin: admin, editor: editor, post: post} do
-      window(@minute)
+      window()
       tags!(org, admin, 70)
 
       assert {:error, {:rate_limited, _}} =
@@ -79,8 +78,8 @@ defmodule KilnCMS.Search.RelatedTagBudgetTest do
 
       # Before the fix: 70 — the refused charge counted, and the editor's
       # whole window was gone.
-      assert spent("user", editor.id, @minute) == 0
-      assert spent("org", org.id, @hour) == 0
+      assert spent("user", editor.id) == 0
+      assert spent("org", org.id) == 0
       # Nothing embedded on refusal.
       assert length(Related.missing_tag_vectors(org.id, KilnCMS.CMS.list_tags!(tenant: org))) ==
                70
@@ -88,19 +87,19 @@ defmodule KilnCMS.Search.RelatedTagBudgetTest do
 
     test "a set that fits is still one charge for the whole set",
          %{org: org, admin: admin, editor: editor, post: post} do
-      window(@minute)
+      window()
       tags!(org, admin, 10)
 
       suggestions = Related.suggest_tags(reload(post, org, admin), opts(editor))
 
       assert is_list(suggestions) and suggestions != []
-      assert spent("user", editor.id, @minute) == 10
-      assert spent("org", org.id, @hour) == 10
+      assert spent("user", editor.id) == 10
+      assert spent("org", org.id) == 10
     end
 
     test "unattended share 0: :unattended_disabled, and nothing counted",
          %{org: org, admin: admin, post: post} do
-      window(@minute)
+      window()
       put_search_env(embedding_unattended_share: 0.0)
       tags!(org, admin, 5)
       bot = "automation:#{uniq()}"
@@ -110,35 +109,35 @@ defmodule KilnCMS.Search.RelatedTagBudgetTest do
 
       # Before the fix the user bucket was hit (5) on the way to the reserve's
       # refusal.
-      assert spent("user", bot, @minute) == 0
-      assert spent("org", org.id, @hour) == 0
+      assert spent("user", bot) == 0
+      assert spent("org", org.id) == 0
     end
   end
 
   describe "suggest_tags_partial/2 — the editor panel" do
     test "a 70-tag org indexes 60, ranks them, and reopening in the window charges nothing",
          %{org: org, admin: admin, editor: editor, post: post} do
-      window(@minute)
+      window()
       tags!(org, admin, 70)
       post = reload(post, org, admin)
 
       assert {:ok, %{suggestions: [_ | _], unindexed: 10, failed: []}} =
                Related.suggest_tags_partial(post, opts(editor))
 
-      assert spent("user", editor.id, @minute) == 60
-      assert spent("org", org.id, @hour) == 60
+      assert spent("user", editor.id) == 60
+      assert spent("org", org.id) == 60
 
       # No room left: ranks what is indexed, charges 0.
       assert {:ok, %{suggestions: [_ | _], unindexed: 10}} =
                Related.suggest_tags_partial(post, opts(editor))
 
-      assert spent("user", editor.id, @minute) == 60
-      assert spent("org", org.id, @hour) == 60
+      assert spent("user", editor.id) == 60
+      assert spent("org", org.id) == 60
     end
 
     test "a partly spent editor indexes exactly the room left",
          %{org: org, admin: admin, editor: editor, post: post} do
-      window(@minute)
+      window()
       tags!(org, admin, 20)
 
       :ok =
@@ -152,8 +151,8 @@ defmodule KilnCMS.Search.RelatedTagBudgetTest do
       assert {:ok, %{unindexed: 15}} =
                Related.suggest_tags_partial(reload(post, org, admin), opts(editor))
 
-      assert spent("user", editor.id, @minute) == 60
-      assert spent("org", org.id, @hour) == 60
+      assert spent("user", editor.id) == 60
+      assert spent("org", org.id) == 60
     end
 
     test "150 tags converge over successive windows: 60, 60, 30, then 0",
@@ -162,18 +161,18 @@ defmodule KilnCMS.Search.RelatedTagBudgetTest do
       post = reload(post, org, admin)
 
       for {n, charged, unindexed} <- [{0, 60, 90}, {1, 60, 30}, {2, 30, 0}, {3, 0, 0}] do
-        window(@minute + n)
+        window(n)
 
         assert {:ok, %{unindexed: ^unindexed}} = Related.suggest_tags_partial(post, opts(editor))
-        assert spent("user", editor.id, @minute + n) == charged
+        assert spent("user", editor.id) == charged
       end
 
-      assert spent("org", org.id, @hour) == 150
+      assert spent("org", org.id) == 150
     end
 
     test "a stale (pre-rename) vector is never ranked",
          %{org: org, admin: admin, editor: editor, post: post} do
-      window(@minute)
+      window()
       [tag] = tags!(org, admin, 1)
       post = reload(post, org, admin)
 
@@ -201,8 +200,8 @@ defmodule KilnCMS.Search.RelatedTagBudgetTest do
          %{org: org, admin: admin, editor: editor, post: post} do
       put_search_env(
         embedder: PickyEmbedder,
-        embedding_per_user_limit: {1, @minute},
-        embedding_per_org_limit: {600, @hour}
+        embedding_per_user_limit: {1, fresh_window_ms()},
+        embedding_per_org_limit: {600, fresh_window_ms()}
       )
 
       bad = tag!(org, admin, "aaa unembeddable #{uniq()}")
@@ -214,7 +213,7 @@ defmodule KilnCMS.Search.RelatedTagBudgetTest do
 
       assert failed_id == bad.id
 
-      put_search_env(embedding_per_user_limit: {1, @minute + 1})
+      put_search_env(embedding_per_user_limit: {1, fresh_window_ms(1)})
 
       assert {:ok, %{suggestions: [%{tag: %{id: good_id}}], unindexed: 0, failed: []}} =
                Related.suggest_tags_partial(post, opts(editor) ++ [exclude: [bad.id]])
@@ -230,8 +229,8 @@ defmodule KilnCMS.Search.RelatedTagBudgetTest do
       assert {:ok, %{suggestions: [], unindexed: 0, failed: []}} =
                Related.suggest_tags_partial(reload(post, org, admin), opts(editor))
 
-      assert spent("user", editor.id, @minute) == 0
-      assert spent("org", org.id, @hour) == 0
+      assert spent("user", editor.id) == 0
+      assert spent("org", org.id) == 0
     end
   end
 end

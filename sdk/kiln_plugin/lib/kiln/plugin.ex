@@ -74,8 +74,9 @@ defmodule Kiln.Plugin do
 
   A plugin that defines content types (`use KilnCMS.CMS.Content`) or Ash
   domains, uses `KilnCMSWeb`, or gives a field type a colocated client hook
-  has to be a `projects/<name>/` overlay, which is compiled inside the core. A dependency plugin also needs a line in the
-  core's `mix.exs`, which edits the pinned core; see
+  has to be a `projects/<name>/` overlay, which is compiled inside the core.
+  A site installs a dependency plugin through its overlay's
+  `config/project_deps.exs`, never the core's `mix.exs`; see
   `docs/plugin-extensibility.md`.
   """
 

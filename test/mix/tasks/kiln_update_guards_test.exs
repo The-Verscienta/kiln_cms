@@ -51,10 +51,19 @@ defmodule Mix.Tasks.Kiln.UpdateGuardsTest do
     File.write!(Path.join(dir, "lib/kiln_cms/application.ex"), "defmodule X do\nend\n")
     File.write!(Path.join(dir, "mix.exs"), "def project, do: [app: :kiln_cms]\n")
     File.write!(Path.join(dir, "CHANGELOG.md"), changelog())
+    # The overlay's dependency files are git-ignored, as in the real core (#1967).
+    File.write!(Path.join(dir, ".gitignore"), "/config/project_deps.exs\n/config/project.lock\n")
+    write_lock!(Path.join(dir, "mix.lock"), %{"jason" => hex_entry(:jason, "1.4.0")})
     commit!(dir, "first")
     git!(dir, ["tag", "v0.1.0"])
 
     File.write!(Path.join(dir, "README.md"), "second\n")
+    # v0.2.0 moves one core dependency and adds another.
+    write_lock!(Path.join(dir, "mix.lock"), %{
+      "jason" => hex_entry(:jason, "1.4.4"),
+      "telemetry" => hex_entry(:telemetry, "1.3.0")
+    })
+
     commit!(dir, "second")
     git!(dir, ["tag", "v0.2.0"])
 
@@ -80,6 +89,11 @@ defmodule Mix.Tasks.Kiln.UpdateGuardsTest do
     - `POST /api/thing` answers 200 where it answered 201.
     """
   end
+
+  defp hex_entry(app, version),
+    do: {:hex, app, version, "inner-#{version}", [:mix], [], "hexpm", "outer-#{version}"}
+
+  defp write_lock!(path, lock), do: Mix.Kiln.ProjectLock.write!(path, lock)
 
   defp commit!(dir, message) do
     git!(dir, ["add", "-A"])
@@ -461,6 +475,44 @@ defmodule Mix.Tasks.Kiln.UpdateGuardsTest do
       assert_raise Mix.Error, ~r/No release tags found upstream/, fn ->
         run(bare, ["--check", "--no-fetch"])
       end
+    end
+  end
+
+  describe "an overlay's own dependencies (#1967)" do
+    test "the update re-seeds config/project.lock and keeps the overlay's entries",
+         %{clone: clone} do
+      checkout!(clone, "v0.1.0")
+      File.mkdir_p!(Path.join(clone, "config"))
+      File.write!(Path.join(clone, "config/project_deps.exs"), "[{:recase, \"~> 0.8\"}]\n")
+
+      lock = Path.join(clone, "config/project.lock")
+      recase = hex_entry(:recase, "0.8.1")
+      write_lock!(lock, %{"jason" => hex_entry(:jason, "1.4.0"), "recase" => recase})
+
+      run(clone, ["--to", "v0.2.0", "--no-fetch"])
+
+      assert head(clone) == git!(clone, ["rev-parse", "v0.2.0^{commit}"])
+      # Core entries are the new release's, the overlay's own carries over.
+      assert Mix.Kiln.ProjectLock.read(lock) == %{
+               "jason" => hex_entry(:jason, "1.4.4"),
+               "telemetry" => hex_entry(:telemetry, "1.3.0"),
+               "recase" => recase
+             }
+
+      assert output() =~
+               "Re-seeded config/project.lock from the new mix.lock (1 overlay-only entry kept)."
+
+      # Both files are git-ignored: the pin never looked patched.
+      assert git!(clone, ["status", "--porcelain"]) == ""
+    end
+
+    test "without config/project_deps.exs nothing is written", %{clone: clone} do
+      checkout!(clone, "v0.1.0")
+
+      run(clone, ["--to", "v0.2.0", "--no-fetch"])
+
+      refute File.exists?(Path.join(clone, "config/project.lock"))
+      refute output() =~ "Re-seeded"
     end
   end
 end

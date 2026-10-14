@@ -33,6 +33,18 @@ defmodule Mix.Tasks.Kiln.Update do
       means the overlay contract broke and your subproject needs code changes —
       `--allow-major` proceeds after you've read the upgrade notes.
 
+  ## An overlay's own dependencies
+
+  A pin with an overlay dependency list (`config/project_deps.exs`, #1967)
+  locks into `config/project.lock`, which starts as a copy of `mix.lock`.
+  Both files are git-ignored, so they never make the pin look patched. After
+  moving the pin, the task re-seeds that lock: every dependency the new
+  release's `mix.lock` names takes the release's version, and the overlay's
+  own entries carry over. The `mix deps.get` in the printed next steps then
+  resolves the overlay's dependencies against the new core; if one needs a
+  version the release doesn't pin, Mix fails there, loudly, rather than
+  quietly moving a core dependency.
+
   It never runs migrations, rebuilds an image, or deploys. Those touch a live
   database and a live site, so they stay explicit steps you run yourself; the
   task prints them in order when it finishes.
@@ -89,6 +101,8 @@ defmodule Mix.Tasks.Kiln.Update do
   """
 
   use Mix.Task
+
+  alias Mix.Kiln.ProjectLock
 
   # Deliberately empty: an update must work even when the currently pinned
   # core doesn't compile — that's often *why* you're updating.
@@ -174,6 +188,7 @@ defmodule Mix.Tasks.Kiln.Update do
       guard!(repo, current, target, opts)
       check_report_complete!(report, opts)
       apply_update!(repo, target)
+      reseed_project_lock(repo.root)
       print_next_steps(repo, target)
     end
   end
@@ -689,6 +704,23 @@ defmodule Mix.Tasks.Kiln.Update do
     Mix.shell().info("\nChecking out #{describe(target)}...")
     git!(repo.root, ["checkout", "--detach", target.sha])
     Mix.shell().info([:green, "Pin moved.", :reset])
+  end
+
+  defp reseed_project_lock(root) do
+    if ProjectLock.present?(root) do
+      lock = ProjectLock.lock_path(root)
+      core = root |> ProjectLock.core_lock_path() |> ProjectLock.read()
+      overlay = ProjectLock.read(lock)
+
+      ProjectLock.write!(lock, ProjectLock.reseed(overlay, core))
+
+      kept = overlay |> Map.drop(Map.keys(core)) |> map_size()
+
+      Mix.shell().info(
+        "Re-seeded config/project.lock from the new mix.lock " <>
+          "(#{kept} overlay-only #{if kept == 1, do: "entry", else: "entries"} kept)."
+      )
+    end
   end
 
   # The steps are meant to be run top to bottom from where the task just ran,

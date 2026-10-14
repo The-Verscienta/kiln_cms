@@ -69,10 +69,14 @@ Once it boots, the surfaces worth opening:
   module beside it (`cms.ex`, `accounts.ex`, …).
 - **`lib/kiln_cms_web/`** — endpoint, router, LiveViews (`*Live`), controllers
   and the component kit.
-- **`lib/kiln/`** — the extension points a downstream project or plugin builds
-  against: `Kiln.Plugin`, `Kiln.Block`, `Kiln.FieldType`, `Kiln.Advisory`.
+- **`sdk/kiln_plugin/`** — the extension points a downstream project or plugin
+  builds against: `Kiln.Plugin`, `Kiln.Block`, `Kiln.FieldType`,
+  `Kiln.Advisory`, published to Hex as `kiln_plugin`. **`lib/kiln/`** holds the
+  core side: the plugin registry, `Kiln.Version`, `Kiln.Updates`.
 - **`projects/`** — downstream overlays. `projects/example/` is the worked
-  example.
+  example. A plugin shipped as a Mix dependency is installed through the
+  overlay's git-ignored `config/project_deps.exs`, not the core's `mix.exs`
+  (see [Downstream projects](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/README.md)).
 - **`lib/mix/tasks/`** — the operator surface (`mix kiln.*`).
 
 Read the resource modules before changing behaviour — `lib/kiln_cms/cms/content.ex`

@@ -23,9 +23,9 @@ publisher pattern that already runs against kilncms.dev.
 >   therefore also needs a `shape` (`dependency` | `overlay`): an overlay's
 >   coordinates are a git repository and a tag/SHA, and "install" means
 >   vendoring it into `projects/`.
-> - **"Add the dep" edits the pinned core's `mix.exs`** until an overlay-level
->   dependency hook exists (still open in #1967), which `mix kiln.update`
->   refuses on update.
+> - **"Add the dep" is one line in the overlay's `config/project_deps.exs`**
+>   (#1967): a `source: hex | git` entry maps directly onto it, and the
+>   pinned core's `mix.exs` never changes.
 >
 > The verification pipeline (§5) should also record the plugin's
 > `kiln_plugin` requirement: `mix kiln.plugins.doctor` checks it against the

@@ -70,8 +70,9 @@ exactly what the project plan called for.
 > hooks), spam checks, advisory checks, image backends, nav items, children
 > and queues. Content types (`KilnCMS.CMS.Content`), domains and LiveViews on
 > `KilnCMSWeb` still need the core, so those plugins stay `projects/`
-> overlays. A dependency plugin is still added to the core's `mix.exs`, which
-> edits the pin; an overlay-level hook for that is open in #1967.
+> overlays. A site installs a dependency plugin through its overlay's
+> git-ignored `config/project_deps.exs`, locked in `config/project.lock`, so
+> the pinned core's `mix.exs` and `mix.lock` never change (#1967).
 >
 > The SDK versions separately from the core (`kiln_plugin-vX.Y.Z` tags). It
 > is under the same 1.x contract (minors add; a major only with a core

@@ -64,7 +64,7 @@ you*).
 | `KilnCMS.SchemaExport`, `KilnCMS.Branding` | The exported schema shape, and the theme list a preset is selected from |
 | `KilnCMSWeb.PluginRouter` | The three route macros |
 | `KilnCMSWeb.AshJsonApiRouter` | That a domain registered in `:content_domains` is exposed on the JSON:API surface with no core edit |
-| Config keys | `:ash_domains`, `:content_domains`, `:plugins`, `:audiences`, `:mcp_tools`, and `config/project.exs` as the import point |
+| Config keys | `:ash_domains`, `:content_domains`, `:plugins`, `:audiences`, `:mcp_tools`, `config/project.exs` as the import point, and `config/project_deps.exs` as the dependency hook (a list of Mix dependency tuples, locked in `config/project.lock`; no `override:`) (#1967) |
 | Build conventions | The `PROJECT` Docker build arg, and that an overlay's `priv/repo/migrations` and `priv/resource_snapshots` merge into the core's `priv/` |
 | `public-*` CSS hook classes | Named in [public theming](public-theming.md); site stylesheets and presets both hang off them |
 | Environment variables | The name and meaning of every variable in [Environment variables](environment-variables.md). The promise is that a minor leaves your tree *booting*, and a deployment boots from these |

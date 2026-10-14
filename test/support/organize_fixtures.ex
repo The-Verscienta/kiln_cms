@@ -11,7 +11,13 @@ defmodule KilnCMS.OrganizeFixtures do
   alias KilnCMS.CMS
   alias KilnCMS.Search.BlockIndexer
 
-  @doc "Turns semantic search on with `KilnCMS.StubEmbedder`, restoring on exit."
+  @doc """
+  Turns semantic search on with `KilnCMS.StubEmbedder`, restoring on exit.
+
+  The embedding budget keeps its configured counts but runs on
+  `fresh_window_ms/0` windows, so a counter the test charges is still there
+  when it reads it back with `spent/2`.
+  """
   def semantic_on!(overrides \\ []) do
     original = Application.get_env(:kiln_cms, KilnCMS.Search, [])
     ExUnit.Callbacks.on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Search, original) end)
@@ -19,9 +25,18 @@ defmodule KilnCMS.OrganizeFixtures do
     Application.put_env(
       :kiln_cms,
       KilnCMS.Search,
-      original |> Keyword.merge(KilnCMS.StubEmbedder.search_env()) |> Keyword.merge(overrides)
+      original
+      |> Keyword.merge(KilnCMS.StubEmbedder.search_env())
+      |> Keyword.merge(
+        embedding_per_user_limit: {60, fresh_window_ms()},
+        embedding_per_org_limit: {600, fresh_window_ms()}
+      )
+      |> Keyword.merge(overrides)
     )
   end
+
+  @doc "See `KilnCMS.Test.BudgetWindow.fresh_window_ms/2`."
+  defdelegate fresh_window_ms(nth \\ 0), to: KilnCMS.Test.BudgetWindow
 
   @doc "Merges `overrides` into the live `KilnCMS.Search` env."
   def put_search_env(overrides) do
@@ -104,9 +119,20 @@ defmodule KilnCMS.OrganizeFixtures do
 
   defp slugify(name), do: name |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-")
 
-  @doc "The live count in a `KilnCMS.LLM.Budget` bucket for this window."
-  def spent(kind, id, window_ms),
-    do: KilnCMS.LLM.Budget.get("search_embedding:#{kind}:#{id}", window_ms)
+  @doc """
+  The live count in the `"search_embedding"` `KilnCMS.LLM.Budget` bucket of
+  `kind` (`"user"` or `"org"`), in the window the live `KilnCMS.Search` env
+  configures for that kind.
+  """
+  def spent(kind, id) do
+    {_count, window_ms} =
+      case kind do
+        "user" -> KilnCMS.Search.embedding_per_user_limit()
+        "org" -> KilnCMS.Search.embedding_per_org_limit()
+      end
+
+    KilnCMS.LLM.Budget.get("search_embedding:#{kind}:#{id}", window_ms)
+  end
 
   def uniq, do: System.unique_integer([:positive])
 

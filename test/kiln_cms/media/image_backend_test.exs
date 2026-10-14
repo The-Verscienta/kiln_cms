@@ -65,6 +65,22 @@ defmodule KilnCMS.Media.ImageBackendTest do
     path
   end
 
+  # A JPEG carrying an EXIF Artist tag (standing in for GPS/device metadata).
+  defp jpeg_with_artist(artist) do
+    path = Path.join(System.tmp_dir!(), "ib-#{System.unique_integer([:positive])}.jpg")
+    {:ok, image} = Image.new(600, 400, color: :green)
+
+    {:ok, tagged} =
+      Vix.Vips.Image.mutate(image, fn mut ->
+        :ok = Vix.Vips.MutableImage.set(mut, "exif-ifd0-Artist", :gchararray, artist)
+      end)
+
+    {:ok, _} = Image.write(tagged, path)
+    on_exit(fn -> File.rm(path) end)
+    assert File.read!(path) =~ artist
+    path
+  end
+
   defp upload(path, name), do: Ingest.store_file(path, name, actor: actor())
 
   # A backend item as ingest leaves it: the file in the backend, the row naming it.
@@ -209,6 +225,30 @@ defmodule KilnCMS.Media.ImageBackendTest do
 
       assert item.image_backend == nil
       assert File.exists?(Path.join(root, item.storage_key))
+    end
+
+    test "an image over the backend's size limit stays in the operator's store",
+         %{root: root} do
+      select_backend(max_bytes: 10)
+
+      assert {:ok, item} = upload(png(600, 400), "cat.png")
+
+      assert item.image_backend == nil
+      assert File.exists?(Path.join(root, item.storage_key))
+    end
+
+    # #215 runs before the hand-off: what the third party holds is the
+    # stripped copy, never the upload as it arrived.
+    test "the backend receives the image with its metadata stripped" do
+      select_backend()
+
+      assert {:ok, item} = upload(jpeg_with_artist("Secret Person"), "photo.jpg")
+
+      assert item.image_backend == "fixture_images"
+      {:ok, held} = Fixture.fetch(item.storage_key)
+      refute String.contains?(held, "Secret Person")
+      {:ok, image} = Image.from_binary(held)
+      assert {Image.width(image), Image.height(image)} == {600, 400}
     end
   end
 

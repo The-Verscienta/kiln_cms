@@ -77,8 +77,8 @@ defmodule KilnCMS.Organize.FoundationsTest do
     test "fills a taxonomy larger than the per-user window, one window at a time",
          %{org: org, admin: admin} do
       put_search_env(
-        embedding_per_user_limit: {3, :timer.minutes(1)},
-        embedding_per_org_limit: {100, :timer.hours(1)}
+        embedding_per_user_limit: {3, fresh_window_ms()},
+        embedding_per_org_limit: {100, fresh_window_ms()}
       )
 
       tags = for i <- 1..7, do: tag!(org, admin, "chunk tag #{i} #{uniq()}")
@@ -90,7 +90,7 @@ defmodule KilnCMS.Organize.FoundationsTest do
       assert {:ok, %{indexed: 3, remaining: 4}} =
                Related.ensure_tag_vectors(org.id, tag_maps, max: 3, user_id: user)
 
-      assert spent("user", user, :timer.minutes(1)) == 3
+      assert spent("user", user) == 3
 
       # Same window, same user: refused, and nothing more embedded.
       assert {:error, {:rate_limited, _}} =
@@ -109,26 +109,26 @@ defmodule KilnCMS.Organize.FoundationsTest do
       assert {:ok, %{indexed: 1, remaining: 0}} =
                Related.ensure_tag_vectors(org.id, tag_maps, max: 3, user_id: user3)
 
-      assert spent("user", user3, :timer.minutes(1)) == 1
+      assert spent("user", user3) == 1
       assert Related.missing_tag_vectors(org.id, tag_maps) == []
 
       # Nothing left: a further call is free.
       assert {:ok, %{indexed: 0, remaining: 0}} =
                Related.ensure_tag_vectors(org.id, tag_maps, max: 3, user_id: user3)
 
-      assert spent("user", user3, :timer.minutes(1)) == 1
+      assert spent("user", user3) == 1
     end
 
     test "semantic off: a no-op that never touches the budget", %{org: org, admin: admin} do
       tag = tag!(org, admin)
-      put_search_env(semantic: false, embedding_per_user_limit: {1, :timer.minutes(1)})
+      put_search_env(semantic: false, embedding_per_user_limit: {1, fresh_window_ms()})
       user = "off-user-#{uniq()}"
 
       assert {:ok, %{indexed: 0, remaining: 0}} =
                Related.ensure_tag_vectors(org.id, [Map.take(tag, [:id, :name])], user_id: user)
 
       assert Related.missing_tag_vectors(org.id, [Map.take(tag, [:id, :name])]) == []
-      assert spent("user", user, :timer.minutes(1)) == 0
+      assert spent("user", user) == 0
     end
 
     test "Terms.index_tag_vectors sizes the chunk to the room LEFT in the window",
@@ -138,8 +138,8 @@ defmodule KilnCMS.Organize.FoundationsTest do
       # the counter at 5 and the panel blocked. Sized to the room left, it
       # indexes 1 and the counter lands exactly on the limit.
       put_search_env(
-        embedding_per_user_limit: {3, :timer.minutes(1)},
-        embedding_per_org_limit: {100, :timer.hours(1)}
+        embedding_per_user_limit: {3, fresh_window_ms()},
+        embedding_per_org_limit: {100, fresh_window_ms()}
       )
 
       editor = user!(:admin)
@@ -153,14 +153,14 @@ defmodule KilnCMS.Organize.FoundationsTest do
           KilnCMS.Search.embedding_budget_limits(false, 2)
         )
 
-      assert spent("user", editor.id, :timer.minutes(1)) == 2
+      assert spent("user", editor.id) == 2
 
       assert {:ok, %{indexed: 1, remaining: 2}} = Terms.index_tag_vectors(org, editor)
-      assert spent("user", editor.id, :timer.minutes(1)) == 3
+      assert spent("user", editor.id) == 3
 
       # No room left: refused without charging anything further.
       assert {:error, {:rate_limited, _}} = Terms.index_tag_vectors(org, editor)
-      assert spent("user", editor.id, :timer.minutes(1)) == 3
+      assert spent("user", editor.id) == 3
       assert Terms.missing_tag_vectors(org, editor) == 2
     end
 

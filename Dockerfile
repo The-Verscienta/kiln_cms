@@ -81,9 +81,18 @@ ENV KILN_ML=${KILN_ML}
 
 COPY mix.exs mix.lock ./
 # mix.exs requires config/ml_flag.exs (which requires strict_test_flag.exs) to
-# decide its dep list (#1321), so both have
-# to be in the image before the first `mix` command that loads the project.
-COPY config/ml_flag.exs config/strict_test_flag.exs config/
+# decide its dep list (#1321), and config/project_deps_hook.exs to add an
+# overlay's own dependencies (#1967), so all three have to be in the image
+# before the first `mix` command that loads the project.
+#
+# The overlay's dependency list and its lock, `config/project_deps.exs` and
+# `config/project.lock`, come along when the build context has them. The
+# bracket globs are what make them optional: COPY fails on a missing file, but
+# a glob that matches nothing is skipped as long as another source matches.
+# Without them, `deps.get` would never see the overlay's dependencies, or would
+# resolve them from scratch instead of from the overlay's lock.
+COPY config/ml_flag.exs config/strict_test_flag.exs config/project_deps_hook.exs \
+  config/project_dep[s].exs config/project.loc[k] config/
 # The plugin SDK is a `path:` dependency of the core (#1909), so `deps.get`
 # needs its source. Only the package itself: `sdk/fixtures/` is a test-only
 # dependency that a prod `deps.get` never reads.

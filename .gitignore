@@ -62,6 +62,10 @@ err.log
 
 # Downstream project overlay config (never committed to the reusable core).
 /config/project.exs
+# ...and its dependency list and the lock Mix keeps for it (#1967). The overlay
+# repo commits both; the core never does, so `mix.lock` stays the release's.
+/config/project_deps.exs
+/config/project.lock
 _build_strict/
 
 # Playwright output written when tests are run from the repo root instead of

@@ -93,7 +93,7 @@ what it contributes:
 
 | Shape | How it's installed | What it can contribute |
 |---|---|---|
-| **Mix dependency** — Hex, `git:` or `path:` | Depends on [`kiln_plugin`](https://github.com/The-Verscienta/kiln_cms/blob/main/sdk/kiln_plugin/README.md), the package the plugin contract ships in (#1909); the site adds it to the core's `mix.exs` | Blocks, field types (no colocated client hooks), spam checks, advisory checks, image backends, nav items, supervision children, Oban queues; routes only to a LiveView that doesn't `use KilnCMSWeb` |
+| **Mix dependency** — Hex, `git:` or `path:` | Depends on [`kiln_plugin`](https://github.com/The-Verscienta/kiln_cms/blob/main/sdk/kiln_plugin/README.md), the package the plugin contract ships in (#1909); the site lists it in the overlay's `config/project_deps.exs` (#1967) | Blocks, field types (no colocated client hooks), spam checks, advisory checks, image backends, nav items, supervision children, Oban queues; routes only to a LiveView that doesn't `use KilnCMSWeb` |
 | **`projects/<name>/` overlay** | Vendored into the overlay and compiled inside the core | Everything above, plus content types (`KilnCMS.CMS.Content`), Ash domains, and LiveViews built on `KilnCMSWeb` |
 
 A dependency compiles before the core and sees only its own dependencies, so
@@ -101,13 +101,17 @@ it can build on `kiln_plugin` but not on anything that lives in the core.
 That is the whole split: a plugin that needs the core's repo, domains,
 policies or web layer is an overlay.
 
-1. **Add it** — as a dependency: `{:kiln_ratings, "~> 1.0"}` (Hex) or a
-   `git:`/`path:` dep, in the core's `mix.exs`. **This edits the pinned
-   core**, and `mix kiln.update` refuses a locally patched pin, so an update
-   means reapplying the line; an overlay-level dependency hook is still open
-   in #1967. As an overlay: copy, `git subtree` or `git submodule` the
-   plugin's repository into `projects/<name>/` in your overlay, pinned to a
-   tag.
+1. **Add it** — as a dependency: one entry in the overlay's
+   `config/project_deps.exs` (#1967), written as in a `mix.exs` deps list:
+   `{:kiln_ratings, "~> 1.0"}` (Hex) or a `git:`/`path:` dep. The core's
+   own `mix.exs` and `mix.lock` never change: while that file exists, Mix
+   locks into `config/project.lock`, seeded from `mix.lock` so the core's
+   dependencies stay at the release's versions. Both files are git-ignored
+   in the core and committed in the overlay, like `config/project.exs`, and
+   `mix kiln.update` re-seeds the lock when it moves the pin. An entry may
+   not set `override: true`. As an overlay: copy, `git subtree` or
+   `git submodule` the plugin's repository into `projects/<name>/` in your
+   overlay, pinned to a tag.
 2. **Register it** — one line: `config :kiln_cms, :plugins, [Ratings.Plugin]`
    (plus its domains in `:ash_domains`/`:content_domains` if it ships content
    types — Ash's own mix tasks read those keys directly).
@@ -116,6 +120,9 @@ policies or web layer is an overlay.
    collisions, well-formed routes, and, for a dependency, that its
    `kiln_plugin` requirement accepts the version the core bundles. (The core
    takes `kiln_plugin` with `override: true`, so Mix itself never checks it.)
+   With `config/project_deps.exs` it also fails a core dependency that moved
+   in `config/project.lock`, notes a plugin installed there but not
+   registered, and names each plugin's source.
 4. **Discover what's installed** — `mix kiln.plugins.list` prints every
    installed plugin with its catalog metadata and contribution surface.
 

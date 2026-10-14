@@ -5,6 +5,38 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+<a id="project-deps-docker"></a>
+
+- **A Dockerfile that runs `mix deps.get` before copying the whole core must
+  also copy `config/project_deps_hook.exs`, which `mix.exs` now requires.**
+  `mix.exs` requires it, the way it requires `config/ml_flag.exs`, to read an
+  overlay's dependency list, so without it every `mix` command in that layer
+  fails to load the project. An overlay with a `config/project_deps.exs`
+  copies that file and `config/project.lock` into the same layer too, or
+  `deps.get` never sees its plugins. The core's own Dockerfile copies all
+  three, the overlay's two only when the build context has them.
+  ([#1967](https://github.com/The-Verscienta/kiln_cms/issues/1967))
+
+<a id="project-deps"></a>
+
+- **An overlay installs dependency plugins through a git-ignored
+  `config/project_deps.exs`, locked in `config/project.lock`, so the core's
+  `mix.exs` and `mix.lock` never change.** Installing a plugin shipped as a
+  dependency used to mean a line in the core's `mix.exs` and a changed
+  `mix.lock`, which made the pin look patched, so `mix kiln.update` refused
+  it. `config/project_deps.exs` is the dependency counterpart of
+  `config/project.exs`: a list of dependency tuples that `mix.exs` appends to
+  its own. While it exists Mix locks into `config/project.lock`, seeded from
+  `mix.lock` so the core's dependencies stay at the release's versions; both
+  files are git-ignored in the core and committed in the overlay. An entry
+  may not set `override: true`. `mix kiln.update` re-seeds the lock after
+  moving the pin (the release's entries for every core dependency, the
+  overlay's own carried over), and `mix kiln.plugins.doctor` fails a core
+  dependency that moved in it, notes a plugin installed there but not
+  registered, and names where each plugin came from. CI installs a fixture
+  plugin this way and fails unless `mix.lock` and `git status` are unchanged.
+  ([#1967](https://github.com/The-Verscienta/kiln_cms/issues/1967))
+
 <a id="plugin-sdk-docker"></a>
 
 - **A Dockerfile that runs `mix deps.get` before copying the whole core must
@@ -80,7 +112,7 @@ carries the reasoning.
 
 - **Advisory checks can ship in a dependency plugin, and `mix kiln.gen.plugin
   --dep` scaffolds one.** `Kiln.Advisory` and its `Finding`, `Context` and
-  `Body` structs moved into `kiln_plugin`, under the same names, so a check
+  `Body` structs moved into `kiln_plugin` (1.1.0), under the same names, so a check
   that matches `%Kiln.Advisory.Context{}` compiles without the core. The
   block walk that fills a `Body` matches the core's block types, so it stays
   in the core as `Kiln.Advisory.Walk` (`compute/1`, `from_typed/1`,

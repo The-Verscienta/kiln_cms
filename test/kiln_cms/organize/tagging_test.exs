@@ -15,9 +15,6 @@ defmodule KilnCMS.Organize.TaggingTest do
   alias KilnCMS.Organize.Tagging
   alias KilnCMS.Organize.Terms
 
-  @minute :timer.minutes(1)
-  @hour :timer.hours(1)
-
   defmodule RaisingEmbedder do
     @moduledoc false
     @behaviour KilnCMS.Search.Embedder
@@ -34,15 +31,15 @@ defmodule KilnCMS.Organize.TaggingTest do
     {:ok, %{remaining: 0}} = Terms.index_tag_vectors(org, admin)
     # That indexing charged the org bucket (3 tag names). Every org-counter
     # assertion below is relative to this.
-    base = spent("org", org.id, @hour)
+    base = spent("org", org.id)
     assert base == 3
     %{org: org, admin: admin, editor: user!(:admin), tags: tags, base: base}
   end
 
   defp budget(per_user, per_org \\ 600, share \\ 0.5) do
     put_search_env(
-      embedding_per_user_limit: {per_user, @minute},
-      embedding_per_org_limit: {per_org, @hour},
+      embedding_per_user_limit: {per_user, fresh_window_ms()},
+      embedding_per_org_limit: {per_org, fresh_window_ms()},
       embedding_unattended_share: share
     )
   end
@@ -68,8 +65,8 @@ defmodule KilnCMS.Organize.TaggingTest do
     assert run.stopped == nil
     assert run.spent == 0
     assert Enum.map(run.rows, & &1.status) == [:proposed, :proposed, :proposed]
-    assert spent("user", editor.id, @minute) == 0
-    assert spent("org", org.id, @hour) == base
+    assert spent("user", editor.id) == 0
+    assert spent("org", org.id) == base
   end
 
   test "stops BEFORE the document that would pass the run cap, then before the window",
@@ -85,7 +82,7 @@ defmodule KilnCMS.Organize.TaggingTest do
     assert run.stopped == :run_cap
     assert Enum.map(run.pending, & &1.id) == [Enum.at(docs, 2).id]
     assert run.spent == 4
-    assert spent("user", editor.id, @minute) == 4
+    assert spent("user", editor.id) == 4
 
     # Continue in the same window: one unit of room, a two-unit document —
     # stopped before the call, so nothing is charged (a refused charge would
@@ -94,7 +91,7 @@ defmodule KilnCMS.Organize.TaggingTest do
     assert again.rows == []
     assert {:rate_limited, _} = again.stopped
     assert Enum.map(again.pending, & &1.id) == [Enum.at(docs, 2).id]
-    assert spent("user", editor.id, @minute) == 4
+    assert spent("user", editor.id) == 4
   end
 
   test "a document too large for any run is marked and skipped, never retried",
@@ -109,7 +106,7 @@ defmodule KilnCMS.Organize.TaggingTest do
 
     assert run.stopped == nil
     assert run.pending == []
-    assert spent("user", editor.id, @minute) == 4
+    assert spent("user", editor.id) == 4
   end
 
   test "unattended embedding switched off: a costed document stops the run with that reason",
@@ -125,7 +122,7 @@ defmodule KilnCMS.Organize.TaggingTest do
     assert id == live.id
     assert run.stopped == :unattended_disabled
     assert Enum.map(run.pending, & &1.id) == [costly.id]
-    assert spent("org", org.id, @hour) == base
+    assert spent("org", org.id) == base
   end
 
   test "a budget stop holds back costed documents only, never the free ones behind it",
@@ -140,7 +137,7 @@ defmodule KilnCMS.Organize.TaggingTest do
     assert Enum.map(run.rows, &{&1.id, &1.status}) == [{pub1.id, :proposed}, {pub2.id, :proposed}]
     assert run.stopped == :unattended_disabled
     assert Enum.map(run.pending, & &1.id) == [costly.id]
-    assert spent("org", org.id, @hour) == base
+    assert spent("org", org.id) == base
   end
 
   test "a published document with no stored vectors says so, rather than 'no tag fits'",
@@ -172,7 +169,7 @@ defmodule KilnCMS.Organize.TaggingTest do
     assert [%{cost: 2, status: :proposed}] =
              Tagging.propose(org, editor, selection(org, editor, [live])).rows
 
-    assert spent("user", editor.id, @minute) == 2
+    assert spent("user", editor.id) == 2
     assert Terms.missing_tag_vectors(org, editor) == 0
     assert length(Terms.all_tags(org, editor)) == 5
     assert length(Terms.tags(org, editor)) == 3
@@ -193,14 +190,14 @@ defmodule KilnCMS.Organize.TaggingTest do
         KilnCMS.Search.embedding_budget_limits(true, 2)
       )
 
-    assert spent("org", org.id, @hour) == 5
+    assert spent("org", org.id) == 5
 
     run = Tagging.propose(org, editor, selection(org, editor, [draft(org, admin, 2)]))
 
     assert {:rate_limited, _} = run.stopped
     assert run.rows == []
-    assert spent("org", org.id, @hour) == 5
-    assert spent("user", editor.id, @minute) == 0
+    assert spent("org", org.id) == 5
+    assert spent("user", editor.id) == 0
   end
 
   test "the run charges unattended: it can never reach the interactive reserve",
@@ -215,7 +212,7 @@ defmodule KilnCMS.Organize.TaggingTest do
     # Two fit under the ceiling; the third would cross it, and is not tried.
     assert length(run.rows) == 2
     assert {:rate_limited, _} = run.stopped
-    assert spent("org", org.id, @hour) == 7
+    assert spent("org", org.id) == 7
     # The other 7 — the interactive half — are untouched.
   end
 
@@ -270,6 +267,6 @@ defmodule KilnCMS.Organize.TaggingTest do
     assert Tagging.propose(org, editor, [%{id: doc.id, type: "post"}]) ==
              %{rows: [], stopped: nil, pending: [], spent: 0}
 
-    assert spent("user", editor.id, @minute) == 0
+    assert spent("user", editor.id) == 0
   end
 end

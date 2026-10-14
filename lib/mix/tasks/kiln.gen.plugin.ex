@@ -309,11 +309,20 @@ if Code.ensure_loaded?(Igniter) do
         # requirement accepts that version.
         defp deps do
           [
-            {:kiln_plugin, "~> 1.0"}#{phoenix_html}
+            {:kiln_plugin, "#{sdk_requirement()}"}#{phoenix_html}
           ]
         end
       end
       """
+    end
+
+    @doc false
+    # The bundled SDK's minor, so a generated plugin can use everything this
+    # core offers and still accepts every later 1.x (`~> 1.1` for 1.1.0).
+    def sdk_requirement do
+      _ = Application.load(:kiln_plugin)
+      version = :kiln_plugin |> Application.spec(:vsn) |> to_string() |> Version.parse!()
+      "~> #{version.major}.#{version.minor}"
     end
 
     defp dep_formatter_source do
@@ -361,10 +370,10 @@ if Code.ensure_loaded?(Igniter) do
 
       ## Installing
 
-      1. Add the dependency to the KilnCMS project:
+      1. Add the dependency to the site's overlay, in `config/project_deps.exs`:
 
          ```elixir
-         {:#{snake}, git: "https://github.com/<you>/#{snake}", tag: "v0.1.0"}
+         [{:#{snake}, git: "https://github.com/<you>/#{snake}", tag: "v0.1.0"}]
          ```
 
       2. Register the plugin, in `config/project.exs`:
@@ -385,8 +394,8 @@ if Code.ensure_loaded?(Igniter) do
       Next:
         * Build it on its own: cd #{root} && mix deps.get && mix test
         * Install it in a site: add {:#{snake}, ...} (Hex, git: or path:) to the
-          site's dependencies, then config :kiln_cms, :plugins, [#{camel}.Plugin]
-          (see #{root}/README.md).
+          overlay's config/project_deps.exs, then
+          config :kiln_cms, :plugins, [#{camel}.Plugin] (see #{root}/README.md).
         * Verify the install: mix kiln.plugins.doctor.
       """
     end

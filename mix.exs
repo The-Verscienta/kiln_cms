@@ -4,6 +4,9 @@
 # same snippet for the same answer. See `config/ml_flag.exs` for why the flag
 # lives in a standalone `.exs` and not in `lib/`.
 Code.require_file(Path.expand("config/ml_flag.exs", __DIR__))
+# An overlay's own dependencies (#1967): `config/project_deps.exs`, appended to
+# `deps/0`, locked in `config/project.lock`. See the file for the contract.
+Code.require_file(Path.expand("config/project_deps_hook.exs", __DIR__))
 
 defmodule KilnCMS.MixProject do
   use Mix.Project
@@ -51,6 +54,12 @@ defmodule KilnCMS.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
+      # `mix.lock` unless the overlay ships `config/project_deps.exs` (#1967):
+      # then `config/project.lock`, so the core's committed lock never changes.
+      lockfile: KilnCMS.Config.ProjectDeps.lockfile(__DIR__),
+      # Not a Mix key: read by `mix kiln.plugins.doctor` to say which plugins
+      # came from the overlay's dependency list.
+      kiln_project_deps: KilnCMS.Config.ProjectDeps.apps(__DIR__),
       releases: releases(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader],
@@ -845,7 +854,7 @@ defmodule KilnCMS.MixProject do
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"}
-    ] ++ ml_deps()
+    ] ++ ml_deps() ++ KilnCMS.Config.ProjectDeps.deps(__DIR__)
   end
 
   # The optional ML stack, in the tree only when `KILN_ML` is on (#1321).
