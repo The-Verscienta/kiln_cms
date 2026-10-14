@@ -472,26 +472,32 @@ config :kiln_cms, KilnCMS.Search,
   pooling: :mean_pooling
 ```
 
-Then `mix kiln.embed_all` (now covers Page, Post, **and** dynamic entries) —
-old English embeddings are meaningless under the new model, so every record
-must be recomputed.
+Then `mix kiln.embed_all --blocks` (covers Page, Post, **and** dynamic
+entries, their tags, and — with `--blocks` — every published document's block
+vectors). Old English embeddings are meaningless under the new model, so every
+record must be recomputed. Leave out `--blocks` and the block index stays in
+the old space: block re-indexing skips any block whose text is unchanged, and
+a model swap changes no text.
 
 ### Re-embedding after a swap: documents, tags **and blocks**
 
-`mix kiln.embed_all` re-embeds document vectors and tag names. It does not
-touch **block** vectors (`block_embeddings`, the block leg): those are written
-only by firing, so they are re-indexed by a firing sweep —
-`mix kiln.refire_all`, or `bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"` on a
-release. A swap needs both.
+`mix kiln.embed_all --blocks` re-embeds all three: document vectors, tag
+names, and the **block** vectors (`block_embeddings`, the block leg) of every
+published document. Without `--blocks` the block index is left alone, and
+that is the wrong answer after any swap.
 
-A block is re-embedded only when its `content_hash` changes. That hash covers
+Block vectors are otherwise written only by firing, and a block is
+re-embedded on fire only when its `content_hash` changes. That hash covers
 the block text, its ancestor context and, when set, `document_prefix`, so a
-swap that changes `document_prefix` (any e5 model) re-embeds every block on
-the sweep. A swap that keeps the prefixes (bge-small → MiniLM above) leaves
-the hashes equal, and the sweep skips every block as unchanged — clear the
-block rows first (`DELETE FROM block_embeddings`) so the sweep rebuilds them.
-Changing only `query_prefix` needs no re-embed: queries are embedded when
-they are asked.
+firing sweep (`mix kiln.refire_all`, or `bin/kiln_cms rpc
+"KilnCMS.Firing.Sweep.run()"` on a release) does re-embed every block after a
+swap that changes `document_prefix` (any e5 model). A swap that keeps the
+prefixes (bge-small → MiniLM above) leaves the hashes equal, and the sweep
+skips every block as unchanged. `--blocks` forces the re-embed whatever the
+hash says, so it covers both cases and re-fires nothing else. `embed_all` is
+a Mix task; a release has no Mix, so there the sweep is the path for a prefix
+change. Changing only `query_prefix` needs no re-embed: queries are embedded
+when they are asked.
 
 ### Higher quality: a different-dimension model (needs a migration)
 
@@ -500,7 +506,7 @@ they are asked.
 the vector width. Set `dim:` to match, then migrate every content table's
 `embedding` column and its HNSW index (the dimension is fixed in the column
 type, so this is a one-time destructive-to-embeddings step, followed by
-`mix kiln.embed_all`):
+`mix kiln.embed_all --blocks`):
 
 ```elixir
 # priv/repo/migrations/..._widen_embedding.exs

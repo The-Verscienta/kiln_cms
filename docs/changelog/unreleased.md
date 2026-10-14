@@ -20,9 +20,9 @@ carries the reasoning.
 
 <a id="block-embedding-prefixes-upgrade"></a>
 
-- **Changing `document_prefix` (as an e5 model swap does) now needs a firing
-  sweep (`mix kiln.refire_all`) to re-embed block vectors, as well as
-  `mix kiln.embed_all` for documents and tags.** Block vectors are written
+- **Changing `document_prefix` (as an e5 model swap does) now needs block
+  vectors re-embedded too: `mix kiln.embed_all --blocks`, or a firing sweep
+  (`mix kiln.refire_all`), as well as documents and tags.** Block vectors are written
   only by firing (`KilnCMS.Search.BlockIndexer`), and `mix kiln.embed_all`
   re-embeds document vectors and tag names, not blocks. A block's `content_hash` now includes `document_prefix` when it is
   set, so the sweep re-embeds every block under the new prefix and skips
@@ -119,6 +119,23 @@ carries the reasoning.
   readers they need, `float_in/4` and `list_of/3`; an unusable value keeps
   the compiled one and warns through Logger and Sentry.
   ([#1936](https://github.com/The-Verscienta/kiln_cms/issues/1936))
+
+<a id="embed-all-blocks"></a>
+
+- **`mix kiln.embed_all --blocks` re-embeds the block index too, so a model,
+  pooling or `document_prefix` change reaches every block vector.**
+  `embed_all` re-embedded document and tag vectors only. Blocks are indexed on
+  fire, and the indexer skips a block whose `content_hash` is unchanged. That
+  hash covers what a block says, not the space it was embedded in, so after an
+  embedding-space change neither a publish nor a re-fire sweep
+  (`mix kiln.refire_all`) re-embedded a single block, and the block leg went
+  on comparing old-space block vectors with new-space queries. `--blocks`
+  enqueues one `BlockEmbeddingWorker` per published document, every org, with
+  `"force" => true`. `BlockIndexer.reindex/2` then ignores the stored hashes.
+  The jobs run on the `:search` queue and re-fire nothing else. Without the
+  flag the task behaves as before. Drafts have no block rows, so they are not
+  enqueued.
+  ([#1939](https://github.com/The-Verscienta/kiln_cms/issues/1939))
 
 <a id="vector-scan-knob"></a>
 
