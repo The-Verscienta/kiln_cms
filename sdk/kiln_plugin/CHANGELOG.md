@@ -13,7 +13,7 @@ read for a plugin contract:
 Releases are tagged `kiln_plugin-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
-## Unreleased
+## 1.2.0
 
 ### Added
 
@@ -21,7 +21,7 @@ Releases are tagged `kiln_plugin-vX.Y.Z` in the
   its service answers with the settings it has, and what it found there, for
   System → Image backend. Optional: `use Kiln.ImageBackend` defaults it to
   `:unsupported`. A backend that implements it should require
-  `{:kiln_plugin, "~> 1.2"}` once this ships.
+  `{:kiln_plugin, "~> 1.2"}`.
 
 ## 1.1.0
 

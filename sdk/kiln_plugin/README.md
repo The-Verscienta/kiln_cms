@@ -9,7 +9,7 @@ the behaviours and macros a plugin `use`s.
 | `Kiln.Block` (+ `Kiln.Block.Renderer`, `Kiln.Block.Info`, …) | A typed content block: `use Kiln.Block` and its `block`/`field`/`migrate` DSL |
 | `Kiln.FieldType` (+ `Kiln.Tokens`) | A custom-field value type admins can pick |
 | `Kiln.Forms.SpamCheck` (+ `Kiln.Forms.SpamCheck.Context`) | A heuristic run on every public form submission |
-| `Kiln.ImageBackend` | An external image service new uploads can go to |
+| `Kiln.ImageBackend` (`check/0` since 1.2) | An external image service new uploads can go to |
 | `Kiln.Advisory` (+ `Finding`, `Context`, `Body`), since 1.1 | An editorial check shown in the content editor's advice panels |
 
 These modules used to live inside the KilnCMS core, which made it impossible
@@ -28,7 +28,7 @@ In the plugin's own `mix.exs`:
 ```elixir
 def deps do
   [
-    {:kiln_plugin, "~> 1.1"}
+    {:kiln_plugin, "~> 1.2"}
   ]
 end
 ```
@@ -80,7 +80,7 @@ has to be a `projects/<name>/` overlay, which is compiled *inside* the core.
 | Blocks (`blocks/0`) | Yes |
 | Field types (`field_types/0`) | Yes, except a colocated client hook (`input_hook/1`): Phoenix writes a dependency's colocated hooks under its own app name, which the core's `app.js` does not import |
 | Spam checks (`spam_checks/0`) | Yes |
-| Image backends (`image_backends/0`) | Yes |
+| Image backends (`image_backends/0`) | Yes. The connection check, `check/0`, from 1.2 (`{:kiln_plugin, "~> 1.2"}`) |
 | Nav items, supervision children, Oban queues | Yes |
 | Admin, editor and public routes | Only for a LiveView that depends on `phoenix_live_view` directly; one that does `use KilnCMSWeb, :live_view` or renders `Layouts.app` needs the core, so it stays an overlay |
 | Content types (`use KilnCMS.CMS.Content`), Ash domains (`domains/0`) | No: they need the core's repo, domains and policies. Overlay only |

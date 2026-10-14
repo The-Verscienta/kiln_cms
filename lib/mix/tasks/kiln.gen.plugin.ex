@@ -318,7 +318,7 @@ if Code.ensure_loaded?(Igniter) do
 
     @doc false
     # The bundled SDK's minor, so a generated plugin can use everything this
-    # core offers and still accepts every later 1.x (`~> 1.1` for 1.1.0).
+    # core offers and still accepts every later 1.x (`~> 1.2` for 1.2.0).
     def sdk_requirement do
       _ = Application.load(:kiln_plugin)
       version = :kiln_plugin |> Application.spec(:vsn) |> to_string() |> Version.parse!()
