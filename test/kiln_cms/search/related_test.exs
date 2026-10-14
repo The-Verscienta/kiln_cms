@@ -656,7 +656,7 @@ defmodule KilnCMS.Search.RelatedTest do
         )
 
       any_cached? = fn ->
-        post |> BlockIndexer.embedding_inputs() |> Enum.any?(&VectorCache.raw_cached?/1)
+        post |> BlockIndexer.embedding_inputs() |> Enum.any?(&VectorCache.cached?/1)
       end
 
       # Room for the centroid call to be *checked*, but not enough for all
@@ -678,7 +678,7 @@ defmodule KilnCMS.Search.RelatedTest do
       # Room for all three: the call succeeds, and every block is now cached.
       put_embedding_budget(embedding_per_org_limit: {100, :timer.hours(1)})
       assert is_list(Related.near_duplicates(post, user_id: "caller"))
-      assert post |> BlockIndexer.embedding_inputs() |> Enum.all?(&VectorCache.raw_cached?/1)
+      assert post |> BlockIndexer.embedding_inputs() |> Enum.all?(&VectorCache.cached?/1)
 
       # A second call against the same content is a pure cache hit for every
       # block — free even at zero remaining budget, unlike the flat per-call

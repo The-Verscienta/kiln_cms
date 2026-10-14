@@ -414,6 +414,28 @@ internal instance belongs here, where the operator sets it.
 | `MEILI_MASTER_KEY` | unset | Meilisearch API master key. | [`config/runtime/prod/search.exs:17`](../config/runtime/prod/search.exs#L17), [`lib/kiln_cms/search/meilisearch.ex:14`](../lib/kiln_cms/search/meilisearch.ex#L14) |
 | `MEILI_INDEX` | `kiln_content` | Index name. | [`config/runtime/prod/search.exs:18`](../config/runtime/prod/search.exs#L18) |
 
+### vector search scan (measurement runs)
+
+How the semantic legs scan pgvector's HNSW indexes. **Leave both unset on a
+deployment serving traffic** — unset is what every release has always done
+(`hnsw.iterative_scan = strict_order`, pgvector's default `ef_search` of 40).
+They exist for a **measurement replica**: recall@k and MRR comparisons
+(`mix kiln.search.eval`, `mix kiln.search.measure_floor`) taken at the default
+ef_search carry approximate-recall noise, so measurement runs use ef_search 200
+or exact. Read in every environment. Unlike every other variable in this
+document, **an unusable value refuses to boot** instead of keeping the default
+and warning: a typo that fell back to ef_search 40 would produce exactly the
+numbers the setting exists to exclude. Setting both is refused too. The search
+tasks take the same settings as `--ef-search N` / `--exact` for a local run,
+and print the mode in effect in their header. See
+[`KilnCMS.Search.VectorScan`](../lib/kiln_cms/search/vector_scan.ex) and
+[semantic-search-plan.md](semantic-search-plan.md#measurement-runs).
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `KILN_HNSW_EF_SEARCH` | unset (pgvector's `40`) | `SET hnsw.ef_search = N` on every database connection, `1`–`1000` (pgvector's range). A wider candidate list per HNSW batch: better recall, more latency, still approximate. `200` is the measurement setting. Read with `Env.positive_integer/1`; out of range or unparseable refuses to boot. | [`config/runtime/search.exs:25`](../config/runtime/search.exs#L25) |
+| `KILN_VECTOR_SEARCH_EXACT` | unset (`false`) | Exact vector search: `SET enable_indexscan = off` on every database connection, so no query can use an HNSW index and every vector query sorts its filtered rows by true distance. Btree indexes stay usable through bitmap scans (HNSW has none), but nothing gets an ordered index walk any more — **for a measurement replica only**. Parsed by the shared [on/off rules](#boolean-variables), except that an unrecognized value refuses to boot; set together with `KILN_HNSW_EF_SEARCH` it refuses to boot. | [`config/runtime/search.exs:32`](../config/runtime/search.exs#L32) |
+
 ### AI-assisted SEO drafting
 
 Opt in by setting `SEO_MODEL`. Unset, the editor's suggest control never
@@ -808,7 +830,7 @@ production.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
-| `MIX_TEST_PARTITION` | unset | Suffix appended to the test database name for partitioned test runs — also what keeps two concurrent worktrees off the same database. | [`config/runtime.exs:211`](../config/runtime.exs#L211) |
+| `MIX_TEST_PARTITION` | unset | Suffix appended to the test database name for partitioned test runs — also what keeps two concurrent worktrees off the same database. | [`config/runtime.exs:212`](../config/runtime.exs#L212) |
 | `KILN_STRICT_TEST` | unset | Set to an on-spelling (`true`/`1`/`yes`/`on`) to select the strict-tenancy CI leg: `:strict_tenancy` is flipped on so tenancy scoping compiles fail-closed, and the suite runs **only** the `strict_tenancy`-tagged tests. Uses the same spellings as every other flag in this document, via the standalone [`config/strict_test_flag.exs`](../config/strict_test_flag.exs) (#646) — it can't call `KilnCMS.Config.Env` directly because it's read in `config/test.exs`, which cannot call project modules. An unrecognized value stays non-strict **and warns on stderr**, like every other flag: without that the strict leg runs zero tests and exits 0, which is indistinguishable from never having invoked it. | [`config/test.exs:361`](../config/test.exs#L361) |
 | `KILN_ML` | unset | Set to an on-spelling (`true`/`1`/`yes`/`on`) to put the optional ML stack — Bumblebee, Nx and EXLA — into the dependency tree (#1321). Unset, `mix deps.get` fetches 102 MB instead of 773 MB and skips a one-time 110 MB XLA archive download, because semantic search ships disabled. Read in `mix.exs` (it decides `deps/0`) and in `config/dev.exs` / `config/test.exs` (which point Nx at `EXLA.Backend` only when it is on), so like `KILN_STRICT_TEST` it goes through a standalone snippet — [`config/ml_flag.exs`](../config/ml_flag.exs) — that cannot call `KilnCMS.Config.Env`. It is a **build-time** flag: it must be set for `mix deps.get` and `mix compile`, and exporting it afterwards changes nothing on its own. `KilnCMS.Search.ML.available?/0` reports what actually compiled, and `mix kiln.ml.note` prints it. An unrecognized value stays off **and warns on stderr**. | [`config/ml_flag.exs:37`](../config/ml_flag.exs#L37) |
 | `POSTGRES_USER` | `postgres` | E2E database user. | [`config/e2e.exs:28`](../config/e2e.exs#L28) |

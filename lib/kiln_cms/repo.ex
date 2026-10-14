@@ -39,7 +39,11 @@ defmodule KilnCMS.Repo do
   # "nearest" to lose. Guessing low would reintroduce the silent short list this
   # is fixing. Left at the default, measured, and documented as the knob to
   # reach for — see docs/semantic-search-plan.md.
-  @vector_scan_settings ["SET hnsw.iterative_scan = strict_order"]
+  #
+  # The statements themselves now come from `KilnCMS.Search.VectorScan`, which
+  # adds the one knob this comment does not cover: `vector_scan: [ef_search: N]`
+  # or `[exact: true]` for measurement runs. Unset, it is the single
+  # `SET hnsw.iterative_scan = strict_order` this always sent.
 
   # Every semantic-search query is a FILTERED approximate search, and pgvector
   # post-filters (#998).
@@ -74,23 +78,36 @@ defmodule KilnCMS.Repo do
   # function lists on, so losing it makes `vector_cosine_distance/2` and
   # `trigram_similarity/2` unresolvable in any expression that ever tries to use
   # them — on a repo whose own `installed_extensions/0` plainly lists both.
+  #
+  # The statement list is resolved HERE, once, and carried in the MFA rather
+  # than re-read from config on every connect: `init/2` is where the repo's
+  # config is final (runtime.exs merged, a mix task's `--exact` written), and
+  # `normalize!/1` raising here stops the pool from starting at all — a
+  # measurement replica with an unusable `vector_scan:` must not boot onto the
+  # default and report approximate numbers as if they were exact.
   @impl true
   def init(type, config) do
     {:ok, config} = super(type, config)
+
+    statements =
+      config
+      |> Keyword.get(:vector_scan)
+      |> KilnCMS.Search.VectorScan.normalize!()
+      |> KilnCMS.Search.VectorScan.statements()
 
     {:ok,
      Keyword.put_new(
        config,
        :after_connect,
-       {__MODULE__, :configure_vector_scan, []}
+       {__MODULE__, :configure_vector_scan, [statements]}
      )}
   end
 
   @doc false
   # `after_connect` target. Runs on every checked-out connection, including the
   # sandbox's, so tests exercise the same scan behaviour production does.
-  def configure_vector_scan(conn) do
-    Enum.each(@vector_scan_settings, &Postgrex.query!(conn, &1, []))
+  def configure_vector_scan(conn, statements) do
+    Enum.each(statements, &Postgrex.query!(conn, &1, []))
   end
 
   @doc """

@@ -18,6 +18,21 @@ carries the reasoning.
   prod `deps.get` doesn't read.
   ([#1909](https://github.com/The-Verscienta/kiln_cms/issues/1909))
 
+<a id="block-embedding-prefixes-upgrade"></a>
+
+- **Changing `document_prefix` (as an e5 model swap does) now needs a firing
+  sweep (`mix kiln.refire_all`) to re-embed block vectors, as well as
+  `mix kiln.embed_all` for documents and tags.** Block vectors are written
+  only by firing (`KilnCMS.Search.BlockIndexer`), and `mix kiln.embed_all`
+  re-embeds document vectors and tag names, not blocks. A block's `content_hash` now includes `document_prefix` when it is
+  set, so the sweep re-embeds every block under the new prefix and skips
+  nothing as unchanged. On a release, run
+  `bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"`. Changing only
+  `query_prefix` needs no re-embed, because queries are embedded when they
+  are asked. With the default empty prefixes (bge-small), the inputs and
+  hashes are what they were, so upgrading re-embeds nothing.
+  ([#1939](https://github.com/The-Verscienta/kiln_cms/issues/1939))
+
 <a id="plugin-sdk"></a>
 
 - **Plugins can ship as Hex, git or `path:` dependencies: the plugin contract
@@ -74,6 +89,30 @@ carries the reasoning.
   system-only `adopt_into_image_backend` action on media items. The Cloudflare
   Images plugin itself ships separately.
   ([#1955](https://github.com/The-Verscienta/kiln_cms/issues/1955))
+
+<a id="vector-scan-knob"></a>
+
+- **Search measurement runs can scan vectors at `ef_search` 200 or exactly
+  (`KILN_HNSW_EF_SEARCH`, `KILN_VECTOR_SEARCH_EXACT`, `--ef-search`, `--exact`),
+  and the search eval reports name the scan mode they ran under.** Every semantic leg
+  used pgvector's default `hnsw.ef_search` of 40, which is approximate: it can
+  miss a row nearer than the ones it returns. The pre-registered measurements
+  for #1936, #1937 and an embedder decision (verscienta-base#894) are taken on
+  a replica and must exclude that noise, and nothing could set it.
+  `KilnCMS.Search.VectorScan` adds one `SET` to each repo connection:
+  `hnsw.ef_search = N` (1–1000), or, for exact search,
+  `enable_indexscan = off`. HNSW serves a query only through an ordered index
+  scan, so turning those off keeps vector queries off the index, while btree
+  indexes stay usable through bitmap scans. It is still connection-wide: no
+  query gets an ordered btree walk, so exact mode is for measurement replicas,
+  not traffic. Unset sends exactly the one `SET` as before. An unusable value,
+  or both at once, refuses to boot instead of keeping the default and warning,
+  because falling back to 40 is the contamination being excluded. The task
+  flags override the env vars for a local run. Both reports print the mode
+  read back from the database connection (`scan` in `--json`) and warn below
+  ef_search 200; a flag that didn't reach the pool is refused. A `--url` run
+  says the scan mode is the server's, and refuses the flags.
+  ([#1969](https://github.com/The-Verscienta/kiln_cms/issues/1969))
 
 <a id="prosemirror-view-paste-xss"></a>
 
@@ -203,3 +242,23 @@ carries the reasoning.
   these fields when it reranks, so `GET /api/search`'s narrow read no longer
   starves the model.
   ([#1938](https://github.com/The-Verscienta/kiln_cms/issues/1938))
+
+<a id="block-embedding-prefixes"></a>
+
+- **Block vectors and the block search query now get `document_prefix` and
+  `query_prefix`, so an asymmetric model such as multilingual-e5 embeds the
+  block leg to spec.** Documents and tags already went through
+  `Search.embed_document/1`, but `BlockIndexer` embedded each block with the
+  raw `Search.embed/1`, and `BlockEmbedding`'s `:nearest` action embedded its
+  query the same way. Under e5 (`"query: "` / `"passage: "`) the block leg of
+  `hybrid/3` compared unprefixed block vectors with the prefixed query vector
+  it shares with the document leg, which moved the block distances the
+  relevance floor reads. Blocks now embed as `document_prefix` + the ancestor
+  context line + the block text, on both the stored path and the
+  compute-on-demand `block_vectors/1`, and `:nearest` uses
+  `Search.embed_query/1`. `KilnCMS.Search.VectorCache`'s key gains `pooling`,
+  since CLS and mean pooling give different vectors for one string; the cache
+  is in memory, so the new key shape costs one cold cache after a deploy.
+  `VectorCache.raw_cached?/1` is removed: no unprefixed path is left, and its
+  two callers ask `cached?/1`.
+  ([#1939](https://github.com/The-Verscienta/kiln_cms/issues/1939))

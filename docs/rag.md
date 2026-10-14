@@ -141,6 +141,12 @@ deployment itself, where it reads the `score`/`legs` fields above. The
 format, the classes and how to write a set for your own corpus are in
 [`search-roadmap.md`](./search-roadmap.md), §11 *Ranking eval harness*.
 
+A number you will compare against another run wants `--ef-search 200` or
+`--exact` (or `KILN_HNSW_EF_SEARCH=200` / `KILN_VECTOR_SEARCH_EXACT=true` on the
+server a `--url` run reads): at pgvector's default ef_search the semantic legs'
+recall is approximate, and the report's header says which mode it ran under.
+See [semantic-search-plan.md](semantic-search-plan.md#measurement-runs).
+
 ## Reranking ask sources
 
 Kiln ships a cross-encoder reranker — `BAAI/bge-reranker-base` behind a
