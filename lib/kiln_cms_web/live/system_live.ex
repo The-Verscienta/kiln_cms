@@ -55,6 +55,7 @@ defmodule KilnCMSWeb.SystemLive do
        |> assign_tenancy_notices()
        |> assign_embed_overreach()
        |> assign(:plugins, Plugins.manifests())
+       |> assign(:image_backends?, Kiln.ImageBackend.Registry.installed() != [])
        |> assign(:update, :loading)
        |> assign(:flushed, nil)
        |> check_for_updates()}
@@ -333,6 +334,16 @@ defmodule KilnCMSWeb.SystemLive do
           <p :if={@plugins == []} class="mt-4 text-sm text-base-content/70">
             {gettext("No plugins are installed on this instance.")}
           </p>
+
+          <.link
+            :if={@image_backends?}
+            id="image-backend-link"
+            navigate={~p"/editor/system/image-backend"}
+            class="mt-4 inline-flex items-center gap-1 text-sm hover:underline"
+          >
+            {gettext("Image backend status")}
+            <.icon name="hero-arrow-right" class="size-3.5" />
+          </.link>
 
           <p class="mt-4 text-xs text-base-content/60">
             {gettext(

@@ -1953,6 +1953,11 @@ msgstr "Esto lo gestionan los administradores. Pide a uno si necesitas un cambio
 msgid "Admins, editors and viewers, enforced by policies on every read and write — in the editor and the APIs alike."
 msgstr "Administradores, editores y lectores, aplicados mediante políticas en cada lectura y escritura — tanto en el editor como en las API."
 
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Adopting needs the backend's settings in place first."
+msgstr "Para adoptarlas, el servicio necesita antes su configuración."
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Advice only (warning)"
@@ -2181,6 +2186,11 @@ msgstr "Un icono de aplicación debe pesar menos de %{max} MB; ese pesa más."
 msgid "An export is capped at %{max} records — %{over} selected rows are not in this file."
 msgstr "Una exportación se limita a %{max} registros — %{over} filas seleccionadas no están en este archivo."
 
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "An external image service, from a plugin, that stores new image uploads and renders their sizes and formats."
+msgstr "Un servicio de imágenes externo, aportado por un complemento, que guarda las nuevas imágenes subidas y genera sus tamaños y formatos."
+
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format
 msgid "An https:// URL to a public key, or an openpgp4fpr: fingerprint."
@@ -2190,6 +2200,11 @@ msgstr "Una URL https:// a una clave pública, o una huella openpgp4fpr:."
 #, elixir-autogen, elixir-format
 msgid "An image or file from the media library. For a hero image, a logo or a PDF."
 msgstr "Una imagen o un archivo de la biblioteca de medios. Para una imagen principal, un logotipo o un PDF."
+
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "An imported link is a row with a URL and no file in Kiln, so Kiln can't make its sizes, rotate it or delete the image. Adopting hands the backend the ones it already holds."
+msgstr "Un enlace importado es una fila con una URL y sin archivo en Kiln, así que Kiln no puede generar sus tamaños, girarla ni eliminar la imagen. Adoptarlas entrega al servicio las que ya guarda."
 
 #: lib/kiln_cms_web/live/automation_live/preview.ex
 #, elixir-autogen, elixir-format
@@ -3192,6 +3207,7 @@ msgstr "Cambios solicitados — contenido de mi autoría volvió a borrador"
 msgid "Changing this moves nothing. Files already uploaded stay where they were stored and are still read from there, so keep an old bucket and its key working until you have moved its files yourself."
 msgstr "Cambiar esto no mueve nada. Los archivos ya subidos se quedan donde se guardaron y se siguen leyendo desde allí, así que mantén el bucket anterior y su clave funcionando hasta que hayas movido sus archivos tú mismo."
 
+#: lib/kiln_cms_web/live/image_backend_live.ex
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Check again"
@@ -3238,6 +3254,11 @@ msgstr "Revisa tu bandeja de entrada para encontrar el enlace de confirmación. 
 msgid "Checkbox"
 msgstr "Casilla de verificación"
 
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Checked at %{time}."
+msgstr "Comprobado a las %{time}."
+
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "Checked the %{count} most recently updated published documents."
@@ -3254,6 +3275,7 @@ msgid "Checking for updates..."
 msgstr "Buscando actualizaciones…"
 
 #: lib/kiln_cms_web/live/billing_live.ex
+#: lib/kiln_cms_web/live/image_backend_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
@@ -3811,6 +3833,11 @@ msgstr "Conectadas"
 msgid "Connected to the payment provider."
 msgstr "Conectado al proveedor de pagos."
 
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Connection"
+msgstr "Conexión"
+
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Connection failed: %{reason}"
@@ -4163,6 +4190,11 @@ msgstr "No se pudieron comparar esas versiones."
 msgid "Couldn't confirm that subscriber."
 msgstr "No se pudo confirmar ese suscriptor."
 
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't count this site's images. The server log has the reason."
+msgstr "No se pudieron contar las imágenes de este sitio. El registro del servidor indica el motivo."
+
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't create that key. Give it a name."
@@ -4512,6 +4544,11 @@ msgstr "No se pudo verificar esa clave de acceso: inténtelo de nuevo."
 #, elixir-autogen, elixir-format
 msgid "Count"
 msgstr "Recuento"
+
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Counting…"
+msgstr "Contando…"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -7327,6 +7364,11 @@ msgstr "Etiquetas de estado"
 msgid "Health says whether published content still needs a check. It is due when its review date arrives and overdue a week later; expired means it has passed its unpublish date. Pick one to find the content that needs attention."
 msgstr "El estado indica si el contenido publicado necesita una revisión. Está pendiente cuando llega su fecha de revisión y atrasado una semana después; caducado significa que ha pasado su fecha de despublicación. Elige uno para encontrar el contenido que necesita atención."
 
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Held by the backend"
+msgstr "Guardadas en el servicio"
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -7475,6 +7517,16 @@ msgstr "Si la cuenta tiene la autenticación de dos factores activada, el inicio
 msgid "Image URL"
 msgstr "URL de la imagen"
 
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Image backend"
+msgstr "Servicio de imágenes"
+
+#: lib/kiln_cms_web/live/system_live.ex
+#, elixir-autogen, elixir-format
+msgid "Image backend status"
+msgstr "Estado del servicio de imágenes"
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Image backends"
@@ -7549,6 +7601,16 @@ msgstr "Se importó %{name} a la biblioteca."
 #, elixir-autogen, elixir-format
 msgid "Imported %{name}: %{count} translations applied."
 msgstr "Importado %{name}: %{count} traducciones aplicadas."
+
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Imported links it doesn't recognise"
+msgstr "Enlaces importados que no reconoce"
+
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Imported links it holds, not yet adopted"
+msgstr "Enlaces importados que guarda, aún sin adoptar"
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/media_live.ex
@@ -7758,6 +7820,11 @@ msgstr "Insertar:"
 msgid "Inspector"
 msgstr "Inspector"
 
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Installed, and available to select in config/runtime.exs:"
+msgstr "Instalados y disponibles para seleccionar en config/runtime.exs:"
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Installed, not selected"
@@ -7803,6 +7870,11 @@ msgstr "URL del emisor"
 #, elixir-autogen, elixir-format
 msgid "It answers 404 until a contact is set below. Add at least one contact and an expiry date to publish it."
 msgstr "Responde 404 hasta que se defina un contacto abajo. Añada al menos un contacto y una fecha de caducidad para publicarlo."
+
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "It is selected but reports its settings missing, so new uploads go to this server's storage. Images it already holds are still served from it. Its plugin's README lists the settings it needs."
+msgstr "Está seleccionado pero indica que le falta configuración, así que las nuevas subidas van al almacenamiento de este servidor. Las imágenes que ya guarda se siguen sirviendo desde él. El README de su complemento enumera la configuración que necesita."
 
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format
@@ -8733,6 +8805,11 @@ msgstr "Sin consentimiento"
 msgid "Missing hub page"
 msgstr "Falta una página central"
 
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Missing settings"
+msgstr "Falta configuración"
+
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "Missing term"
@@ -8757,6 +8834,11 @@ msgstr "Modele el contenido una vez. Publíquelo en todas partes."
 #, elixir-autogen, elixir-format
 msgid "Models"
 msgstr "Modelos"
+
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Module"
+msgstr "Módulo"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -8943,6 +9025,7 @@ msgstr "Mis tareas"
 #: lib/kiln_cms_web/live/form_live.ex
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #: lib/kiln_cms_web/live/funnel_live.ex
+#: lib/kiln_cms_web/live/image_backend_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #: lib/kiln_cms_web/live/release_live.ex
@@ -9104,6 +9187,11 @@ msgstr "Los dispositivos nuevos de este sitio se suscriben con la clave propia d
 #, elixir-autogen, elixir-format
 msgid "New experiment"
 msgstr "Nuevo experimento"
+
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "New image uploads go to it once their metadata is stripped. Documents, video and audio, uploads to a site's own bucket, and images whose strip failed stay in this server's storage."
+msgstr "Las nuevas imágenes subidas van a él una vez eliminados sus metadatos. Los documentos, el vídeo y el audio, las subidas al bucket propio de un sitio y las imágenes cuya limpieza falló se quedan en el almacenamiento de este servidor."
 
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
@@ -9479,6 +9567,11 @@ msgstr "Sin encabezados — las páginas largas se leen mejor divididas en secci
 msgid "No headings — there's no outline to navigate by, so the page can only be read start to finish."
 msgstr "Sin encabezados: no hay un esquema por el que navegar, así que la página solo puede leerse de principio a fin."
 
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "No image backend is selected. New images go to this server's storage."
+msgstr "No hay ningún servicio de imágenes seleccionado. Las nuevas imágenes van al almacenamiento de este servidor."
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
 msgid "No images yet — upload one in the"
@@ -9488,6 +9581,11 @@ msgstr "Aún no hay imágenes: sube una en la"
 #, elixir-autogen, elixir-format
 msgid "No images yet."
 msgstr "Todavía no hay imágenes."
+
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "No installed plugin provides one."
+msgstr "Ningún complemento instalado ofrece uno."
 
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
@@ -9827,9 +9925,15 @@ msgid "None"
 msgstr "Ninguno"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
 msgid "None selected"
 msgstr "Ninguno seleccionado"
+
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "None — set in config without a plugin declaring it"
+msgstr "Ninguno — definido en la configuración sin que un complemento lo declare"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -9861,10 +9965,20 @@ msgstr "En ningún menú"
 msgid "Not in feeds"
 msgstr "Fuera de los feeds"
 
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not installed"
+msgstr "No instalado"
+
 #: lib/kiln_cms_web/live/form_live.ex
 #, elixir-autogen, elixir-format
 msgid "Not public yet: activate it in the form builder to get its hosted page, embed code and API address."
 msgstr "Aún no es público: actívalo en el editor de formularios para obtener su página alojada, su código de inserción y su dirección de API."
+
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not reachable"
+msgstr "No disponible"
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format
@@ -10931,6 +11045,11 @@ msgstr "Rol de plataforma"
 msgid "Please fix the errors below."
 msgstr "Corrija los errores a continuación."
 
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Plugin"
+msgstr "Complemento"
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Plugins"
@@ -11496,6 +11615,11 @@ msgstr "¿Cambiar la clave de este actor? El identificador no cambia, pero su cl
 msgid "Re-keyed. Followers are being sent the new key; some servers may keep the old one until they re-fetch this actor."
 msgstr "Clave cambiada. Se está enviando la nueva clave a los seguidores; algunos servidores pueden conservar la anterior hasta que vuelvan a obtener este actor."
 
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reachable"
+msgstr "Disponible"
+
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reaches a page"
@@ -11570,6 +11694,11 @@ msgstr "Recibe contenido no publicado"
 #, elixir-autogen, elixir-format
 msgid "Receiving new image uploads"
 msgstr "Recibe las nuevas imágenes subidas"
+
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Receiving uploads"
+msgstr "Recibe subidas"
 
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
@@ -13242,6 +13371,11 @@ msgstr "Selecciona dos para ver qué cambió entre ellas."
 msgid "Selected but not configured"
 msgstr "Seleccionado pero sin configurar"
 
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "Selection"
+msgstr "Selección"
+
 #: lib/kiln_cms_web/components/block_components.ex
 #, elixir-autogen, elixir-format
 msgid "Select…"
@@ -14425,6 +14559,7 @@ msgstr "Sindicar el cuerpo completo de cada %{type}"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/image_backend_live.ex
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "System"
@@ -15662,6 +15797,11 @@ msgstr "Esta cuenta no ha escrito nada."
 msgid "This account was erased on %{when}. Nothing personal remains on it."
 msgstr "Esta cuenta se borró el %{when}. No queda nada personal en ella."
 
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "This backend can't check its connection."
+msgstr "Este servicio no puede comprobar su conexión."
+
 #: lib/kiln_cms_web/live/content_editor/block_ops.ex
 #, elixir-autogen, elixir-format
 msgid "This block has settings only an admin can change, so only an admin can move it."
@@ -16035,6 +16175,11 @@ msgstr "El contenido de este sitio se indexa en %{url}, índice %{index}."
 msgid "This site's content is indexed into the deployment's Meilisearch instance."
 msgstr "El contenido de este sitio se indexa en la instancia de Meilisearch del despliegue."
 
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site's images"
+msgstr "Imágenes de este sitio"
+
 #: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site's key"
@@ -16205,6 +16350,11 @@ msgstr "El título contiene «%{text}»"
 #, elixir-autogen, elixir-format
 msgid "To (current)"
 msgstr "Destino (actual)"
+
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "To adopt them, run one of these on the server:"
+msgstr "Para adoptarlas, ejecuta uno de estos comandos en el servidor:"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -17750,6 +17900,7 @@ msgstr "Necesitas acceso de administrador para ejecutar una comprobación."
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #: lib/kiln_cms_web/live/funnel_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
+#: lib/kiln_cms_web/live/image_backend_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #: lib/kiln_cms_web/live/redirect_live.ex
@@ -18187,6 +18338,11 @@ msgstr "cerrar"
 #, elixir-autogen, elixir-format
 msgid "closest: %{tag} (%{pct}%)"
 msgstr "más cercana: %{tag} (%{pct}%)"
+
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "config :kiln_cms, :image_backend names %{module}, which isn't an installed image backend, so new uploads go to this server's storage. %{doctor} says what's wrong."
+msgstr "config :kiln_cms, :image_backend indica %{module}, que no es un servicio de imágenes instalado, así que las nuevas subidas van al almacenamiento de este servidor. %{doctor} indica qué falla."
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format

@@ -104,6 +104,52 @@ defmodule Kiln.ImageBackend.Registry do
     end
   end
 
+  @doc """
+  Asks `backend` whether its service answers (`c:Kiln.ImageBackend.check/0`),
+  for System → Image backend.
+
+  Never raises, whatever the plugin does: a raise, an exit or an answer of
+  the wrong shape is `{:error, message}`, and a backend written without
+  `use Kiln.ImageBackend` — so with no `check/0` — is `:unsupported`. Facts
+  that aren't string pairs are dropped rather than rendered.
+  """
+  @spec check(module()) ::
+          {:ok, [{String.t(), String.t()}]} | {:error, String.t()} | :unsupported
+  def check(backend) do
+    if Code.ensure_loaded?(backend) and function_exported?(backend, :check, 0) do
+      backend.check() |> normalize_check(backend)
+    else
+      :unsupported
+    end
+  rescue
+    error -> check_failed(backend, Exception.message(error))
+  catch
+    kind, reason -> check_failed(backend, Exception.format_banner(kind, reason))
+  end
+
+  defp normalize_check({:ok, facts}, _backend) when is_list(facts),
+    do:
+      {:ok,
+       for({label, value} when is_binary(label) and is_binary(value) <- facts, do: {label, value})}
+
+  defp normalize_check({:error, reason}, _backend) when is_binary(reason), do: {:error, reason}
+  defp normalize_check({:error, reason}, _backend), do: {:error, inspect(reason)}
+  defp normalize_check(:unsupported, _backend), do: :unsupported
+
+  defp normalize_check(other, backend),
+    do: check_failed(backend, "unexpected answer: #{inspect(other, limit: 5)}")
+
+  defp check_failed(backend, message) do
+    Logger.error("Image backend #{inspect(backend)}.check/0 failed: #{message}")
+    {:error, message}
+  end
+
+  @doc "The installed plugin that contributes `backend`, or `nil` (one wired straight into config)."
+  @spec plugin_for(module()) :: module() | nil
+  def plugin_for(backend) do
+    Enum.find(Kiln.Plugins.all(), &(backend in &1.image_backends()))
+  end
+
   @doc "Whether `module` is loaded and implements `Kiln.ImageBackend`."
   @spec backend?(module()) :: boolean()
   def backend?(module) when is_atom(module) do

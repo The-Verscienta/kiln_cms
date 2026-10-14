@@ -55,6 +55,48 @@ defmodule KilnCMS.Media.Adoption do
     end
   end
 
+  @type census :: %{
+          held: non_neg_integer(),
+          awaiting: non_neg_integer(),
+          unrecognised: non_neg_integer()
+        }
+
+  @doc """
+  Where `org_id`'s library stands with `backend`, for System → Image backend:
+
+    * `held` — rows whose file the backend holds, uploaded or adopted;
+    * `awaiting` — rows with no stored file whose URL the backend recognises,
+      which `run/2` would adopt;
+    * `unrecognised` — rows with no stored file whose URL it doesn't, which
+      stay as links (another service's images, or a backend that recognises
+      none of them).
+
+  Asks `backend` whether or not it is the active one, so an operator can see
+  what adoption would do before giving it its settings. Reads every row with
+  no stored file, so it is for a page that asks on demand, not a hot path.
+  """
+  @spec census(Ash.UUID.t(), module()) :: census()
+  def census(org_id, backend) do
+    # The scan goes first: it reads with `authorize_with: :error`, so a
+    # missing grant raises there rather than letting the count below — which
+    # can't fail on a refused read — report an empty library.
+    {awaiting, unrecognised} =
+      org_id
+      |> stream_unheld()
+      |> Enum.reduce({0, 0}, fn item, {yes, no} ->
+        if recognised(item, backend) == :error, do: {yes, no + 1}, else: {yes + 1, no}
+      end)
+
+    name = backend.name()
+
+    held =
+      MediaItem
+      |> Ash.Query.filter(image_backend == ^name)
+      |> Ash.count!(actor: Media.system(), tenant: org_id)
+
+    %{held: held, awaiting: awaiting, unrecognised: unrecognised}
+  end
+
   defp adopt_all(org_id, backend, dry_run?) do
     org_id
     |> stream_unheld()
@@ -69,17 +111,22 @@ defmodule KilnCMS.Media.Adoption do
     end)
   end
 
-  defp adopt(%{url: url} = item, backend, org_id, dry_run?) when is_binary(url) do
-    case backend.key_for_url(url) do
-      {:ok, key} when is_binary(key) and key != "" ->
-        if dry_run?, do: :adopted, else: record(item, backend, key, org_id)
-
-      _ ->
-        :not_ours
+  defp adopt(item, backend, org_id, dry_run?) do
+    case recognised(item, backend) do
+      {:ok, key} -> if dry_run?, do: :adopted, else: record(item, backend, key, org_id)
+      :error -> :not_ours
     end
   end
 
-  defp adopt(_item, _backend, _org_id, _dry_run?), do: :not_ours
+  # The backend's key for the image `item`'s URL names, if it names one.
+  defp recognised(%{url: url}, backend) when is_binary(url) do
+    case backend.key_for_url(url) do
+      {:ok, key} when is_binary(key) and key != "" -> {:ok, key}
+      _ -> :error
+    end
+  end
+
+  defp recognised(_item, _backend), do: :error
 
   defp record(item, backend, key, org_id) do
     attrs = %{image_backend: backend.name(), storage_key: key, url: backend.url(key)}

@@ -108,6 +108,59 @@ defmodule KilnCMS.Media.ImageBackendTest do
     end
   end
 
+  describe "Registry.check/1" do
+    defmodule NoCheck do
+      # Written against the behaviour directly, not `use`d: no check/0 at all.
+      @behaviour Kiln.ImageBackend
+      def name, do: "no_check"
+      def configured?, do: true
+      def accepts?(_candidate), do: false
+      def store(key, _path), do: {:ok, key}
+      def fetch(_key), do: {:error, :enoent}
+      def delete(_key), do: :ok
+      def url(key), do: key
+      def render_url(_key, _spec), do: :unsupported
+      def key_for_url(_url), do: :error
+      def csp_hosts, do: []
+    end
+
+    test "passes on what the backend found, keeping only string pairs" do
+      select_backend(check: {:ok, [{"Stored images", "3"}, {:bad, 1}, "loose"]})
+      assert Registry.check(Fixture) == {:ok, [{"Stored images", "3"}]}
+    end
+
+    test "an error reads as a sentence, whatever the backend handed back" do
+      select_backend(check: {:error, "Token revoked"})
+      assert Registry.check(Fixture) == {:error, "Token revoked"}
+
+      select_backend(check: {:error, :timeout})
+      assert Registry.check(Fixture) == {:error, ":timeout"}
+    end
+
+    @tag :capture_log
+    test "a check that raises, exits or answers nonsense is a failure, never a crash" do
+      select_backend(check: fn -> raise "boom" end)
+      assert Registry.check(Fixture) == {:error, "boom"}
+
+      select_backend(check: fn -> exit(:down) end)
+      assert {:error, "** (exit) :down"} = Registry.check(Fixture)
+
+      select_backend(check: :yes)
+      assert {:error, "unexpected answer: :yes"} = Registry.check(Fixture)
+    end
+
+    test "a backend that can't check says so" do
+      select_backend(check: :unsupported)
+      assert Registry.check(Fixture) == :unsupported
+      assert Registry.check(NoCheck) == :unsupported
+    end
+
+    test "names the plugin a backend came from" do
+      assert Registry.plugin_for(Fixture) == KilnCMS.FixturePlugin
+      assert Registry.plugin_for(NoCheck) == nil
+    end
+  end
+
   describe "ingest" do
     test "an image goes to the selected backend, and the row says so", %{root: root} do
       select_backend()
@@ -383,6 +436,21 @@ defmodule KilnCMS.Media.ImageBackendTest do
                  actor: editor,
                  tenant: item.org_id
                )
+    end
+
+    test "a census counts what the backend holds, what it would adopt, and the rest",
+         %{root: root} do
+      backend_item(10, 10)
+      imported("https://images.fixture.test/#{held_by_fixture(10, 10)}/public")
+      imported("https://cdn.example.com/photo.jpg")
+      # A file Kiln holds is none of the three.
+      {:ok, local} = upload(png(10, 10), "local.png")
+      assert File.exists?(Path.join(root, local.storage_key))
+
+      # Asked of the backend whether or not it's selected: the page shows
+      # what adoption would do before the operator gives it its settings.
+      assert Adoption.census(KilnCMS.Accounts.default_org_id(), Fixture) ==
+               %{held: 1, awaiting: 1, unrecognised: 1}
     end
 
     test "needs an active backend" do

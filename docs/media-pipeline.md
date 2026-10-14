@@ -1024,9 +1024,16 @@ config :kiln_cms, :image_backend, MyPlugin.ImageBackend
 
 Installing the plugin changes nothing until then, and a selected backend that
 is missing its own settings (`configured?/0` false) is never offered an
-upload. **System → Plugins** says which backend is receiving uploads, and
-`mix kiln.plugins.doctor` fails on a selected backend no installed plugin
-declares.
+upload. `mix kiln.plugins.doctor` fails on a selected backend no installed
+plugin declares.
+
+**System → Image backend** (`/editor/system/image-backend`, platform admins;
+linked from System → Plugins) shows the state in one place: which backend is
+selected and whether it is receiving uploads, whether its service answers,
+and how much of the current site's library it holds. The connection check is
+the backend's optional `check/0`, run when the page opens and on **Check
+again**. A backend without one says it can't check. A revoked token shows up
+here rather than as an editor's failed upload.
 
 **What goes to it.** A new image upload bound for the operator's store, after
 its metadata is stripped, when the backend `accepts?/1` it. Not documents,
@@ -1072,3 +1079,10 @@ hands it every row with no stored file whose URL it recognises as its own
 dimensions back from the backend. A row Kiln holds a file for is never
 touched. Content already published keeps the URL its snapshot recorded, which
 the backend still serves.
+
+System → Image backend counts the same rows before you run it: those the
+backend holds, the imported links it recognises but doesn't hold yet (what
+the task would adopt), and the imported links it doesn't recognise. When
+there is something to adopt it prints the command with the site's `--org`
+filled in, and the `bin/kiln_cms rpc` form for a release, which has no
+`mix`.

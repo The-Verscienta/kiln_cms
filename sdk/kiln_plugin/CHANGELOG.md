@@ -13,6 +13,15 @@ read for a plugin contract:
 Releases are tagged `kiln_plugin-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## Unreleased
+
+### Added
+
+- **`Kiln.ImageBackend.check/0` (kiln_cms#1955).** A backend can say whether
+  its service answers with the settings it has, and what it found there, for
+  System → Image backend. Optional: `use Kiln.ImageBackend` defaults it to
+  `:unsupported`. A backend that implements it needs this minor.
+
 ## 1.0.0
 
 ### Added

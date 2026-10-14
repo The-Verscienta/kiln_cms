@@ -84,6 +84,10 @@ Every summary line below that was shortened links to its own entry there.
   renders their variants and transforms from URLs.**
   ([long form](docs/changelog/unreleased.md#image-backends))
 
+- **System → Image backend shows the selected backend's state, whether its
+  service answers, and how much of the site's library it holds.**
+  ([long form](docs/changelog/unreleased.md#image-backend-status))
+
 - **`/api/ask` can rerank its merged candidates once instead of each content
   type's, blend the reranker's order with the fused one, and hold a source
   the question names at its fused rank; all off by default.**

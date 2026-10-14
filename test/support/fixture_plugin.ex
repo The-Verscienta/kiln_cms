@@ -386,7 +386,9 @@ defmodule KilnCMS.FixturePlugin.ImageBackend do
 
     * `configured?: false` — installed and selected, but missing settings;
     * `accepts?: false` — declines every upload;
-    * `renders?: false` — `render_url/2` answers `:unsupported`.
+    * `renders?: false` — `render_url/2` answers `:unsupported`;
+    * `check: answer` — what `check/0` returns, or a 0-arity function it
+      calls (to raise or exit); `{:ok, [{"Stored images", n}]}` by default.
   """
   use Kiln.ImageBackend
 
@@ -438,6 +440,18 @@ defmodule KilnCMS.FixturePlugin.ImageBackend do
 
   @impl true
   def csp_hosts, do: [@host]
+
+  @impl true
+  def check do
+    case opt(:check, nil) do
+      nil -> {:ok, [{"Stored images", root() |> File.ls() |> stored_count()}]}
+      answer when is_function(answer, 0) -> answer.()
+      answer -> answer
+    end
+  end
+
+  defp stored_count({:ok, files}), do: files |> length() |> Integer.to_string()
+  defp stored_count({:error, _}), do: "0"
 
   # Recognises its own delivery URLs, variant segment or none — the shape an
   # import that recorded them would carry.

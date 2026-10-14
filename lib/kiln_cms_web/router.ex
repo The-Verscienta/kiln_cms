@@ -592,6 +592,9 @@ defmodule KilnCMSWeb.Router do
       # Which Kiln core this instance runs, and whether upstream has a newer
       # release. Reports only — updating is `mix kiln.update` (see SystemLive).
       live "/editor/system", SystemLive, :index
+      # The selected image backend (#1955): its state, its connection, and how
+      # much of the site's library it holds. Platform-gated like System.
+      live "/editor/system/image-backend", ImageBackendLive, :index
 
       # Plugin admin panels (D18) — compiled in from each installed plugin's
       # `admin_routes/0`, admin-gated by this live_session like the rest.

@@ -120,6 +120,22 @@ carries the reasoning.
   Images plugin itself ships separately.
   ([#1955](https://github.com/The-Verscienta/kiln_cms/issues/1955))
 
+<a id="image-backend-status"></a>
+
+- **System → Image backend shows the selected backend's state, whether its
+  service answers, and how much of the site's library it holds.** A new
+  platform-admin page, `/editor/system/image-backend`, linked from System →
+  Plugins. It says which backend is selected and whether it is receiving
+  uploads, missing its settings or not an installed backend at all. It asks
+  the service whether it answers, through a new optional callback,
+  `Kiln.ImageBackend.check/0` (kiln_plugin, Unreleased), which may report
+  what it found, and shows the reason when it doesn't. It counts the site's
+  rows the backend holds, the imported links it would adopt and those it
+  doesn't recognise (`KilnCMS.Media.Adoption.census/2`), and prints the
+  adoption command when there is something to adopt. Like System, it
+  reports and doesn't act.
+  ([#1955](https://github.com/The-Verscienta/kiln_cms/issues/1955))
+
 <a id="chunked-embeddings"></a>
 
 - **Semantic search can see past the first 512 tokens of a long record:

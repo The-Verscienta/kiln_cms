@@ -56,6 +56,15 @@ defmodule Kiln.ImageBackend do
   or delete them. `key_for_url/1` lets `mix kiln.media.adopt_image_backend`
   recognise those URLs and hand the rows to the backend
   (`KilnCMS.Media.Adoption`).
+
+  ## Checking the account
+
+  `check/0` answers System → Image backend's "can Kiln reach it?" — a
+  credential that has lapsed or been revoked shows there rather than as the
+  next upload's error. It may say what it found, as label/value pairs the page
+  lists (`{"Stored images", "1,204 of 100,000"}`); those are shown as they
+  are, so translate them in the plugin if it translates anything. The default
+  doesn't check, and the page says so.
   """
 
   @typedoc """
@@ -120,6 +129,20 @@ defmodule Kiln.ImageBackend do
   @callback key_for_url(url :: String.t()) :: {:ok, String.t()} | :error
 
   @doc """
+  Whether the service answers with the backend's settings, for an operator
+  to see. `{:ok, facts}` when it does — `facts` are label/value pairs to show
+  beside it, `[]` for none — and `{:error, reason}` when it doesn't, where
+  `reason` is a sentence an operator can act on. Called on demand, never on
+  a request path. The default, `:unsupported`, means the backend can't tell.
+  """
+  @callback check() :: {:ok, [{String.t(), String.t()}]} | {:error, String.t()} | :unsupported
+
+  # Optional, unlike the other defaulted callbacks: it arrived after 1.0, and a
+  # backend written with a bare `@behaviour` must not start warning (and, under
+  # `--warnings-as-errors`, failing) for a callback it never needed.
+  @optional_callbacks check: 0
+
+  @doc """
   Origins the browser must be allowed to load images from (`img-src`), e.g.
   `["https://imagedelivery.net"]`.
   """
@@ -138,7 +161,10 @@ defmodule Kiln.ImageBackend do
       @impl Kiln.ImageBackend
       def key_for_url(_url), do: :error
 
-      defoverridable render_url: 2, csp_hosts: 0, key_for_url: 1
+      @impl Kiln.ImageBackend
+      def check, do: :unsupported
+
+      defoverridable render_url: 2, csp_hosts: 0, key_for_url: 1, check: 0
     end
   end
 end

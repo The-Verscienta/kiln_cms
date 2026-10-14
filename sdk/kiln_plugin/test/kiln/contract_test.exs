@@ -57,5 +57,6 @@ defmodule Kiln.ContractTest do
     assert Backend.render_url("k", %{}) == :unsupported
     assert Backend.csp_hosts() == []
     assert Backend.key_for_url("https://img.example/k") == :error
+    assert Backend.check() == :unsupported
   end
 end
