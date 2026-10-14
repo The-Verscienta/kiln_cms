@@ -180,13 +180,22 @@ defmodule KilnCMS.Search.BlockIndexer do
   Memoized per input by `KilnCMS.Search.VectorCache`, so editing one paragraph
   of a long draft re-embeds that paragraph and reuses the rest — the stored path
   gets the same reuse from `content_hash`, and this is its equivalent (#964).
+
+  Both paths embed through the **document** side
+  (`VectorCache.embed_document/1` here, `Search.embed_document/1` in
+  `reindex/1`), so `KilnCMS.Search.document_prefix/0` comes first and the
+  ancestor-context line follows it (#1939). A block is content, and an
+  asymmetric model (the e5 family: `"passage: "` / `"query: "`) places an
+  unprefixed span somewhere neither side of the space expects — which moves
+  every block-leg distance the relevance floor reads. With the default empty
+  prefix the input is byte-identical to the unprefixed one.
   """
   @spec block_vectors(struct()) :: [[float()]]
   def block_vectors(document) do
     document
     |> embedding_inputs()
     |> Enum.flat_map(fn input ->
-      case VectorCache.embed(input) do
+      case VectorCache.embed_document(input) do
         nil -> []
         vector -> [vector]
       end
@@ -194,7 +203,10 @@ defmodule KilnCMS.Search.BlockIndexer do
   end
 
   @doc """
-  Exactly the strings `block_vectors/1` would embed, in order.
+  Exactly the strings `block_vectors/1` would embed, in order — before
+  `KilnCMS.Search.document_prefix/0` is applied, which is the form
+  `KilnCMS.Search.VectorCache.embed_document/1` and `cached?/1` take, so a
+  caller counting uncached inputs asks `cached?/1` about these directly.
 
   One function rather than two so a caller can key a cache on the inputs and
   then embed the same list: a fingerprint computed by a second walk would have
@@ -270,7 +282,7 @@ defmodule KilnCMS.Search.BlockIndexer do
   end
 
   defp embed_and_store(org_id, type, document_id, block_key, module, hash, context, text) do
-    case Search.embed("#{context}\n\n#{text}") do
+    case Search.embed_document("#{context}\n\n#{text}") do
       {:ok, vector} ->
         store(org_id, type, document_id, block_key, module, hash, context, vector)
 
@@ -342,5 +354,20 @@ defmodule KilnCMS.Search.BlockIndexer do
     end
   end
 
-  defp hash(text, context), do: Integer.to_string(:erlang.phash2({text, context}))
+  # The document prefix is part of what a stored vector *is*, so it has to be
+  # part of what `content_hash` says the row was built from (#1939). Without it
+  # a changed `document_prefix` leaves every hash equal, `index_block/7`
+  # answers `:unchanged` for every block, and a firing sweep — the documented
+  # way to re-index blocks — re-embeds nothing: the index keeps vectors built
+  # under the old instruction indefinitely, next to query vectors built under
+  # the new one.
+  #
+  # Folded in only when non-empty, so the default configuration (bge-small, no
+  # prefixes) hashes exactly as it always has and an upgrade re-embeds nothing.
+  defp hash(text, context) do
+    case Search.document_prefix() do
+      "" -> Integer.to_string(:erlang.phash2({text, context}))
+      prefix -> Integer.to_string(:erlang.phash2({text, context, prefix}))
+    end
+  end
 end

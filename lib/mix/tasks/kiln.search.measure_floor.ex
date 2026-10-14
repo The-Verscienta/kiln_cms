@@ -13,6 +13,8 @@ defmodule Mix.Tasks.Kiln.Search.MeasureFloor do
   mix kiln.search.measure_floor golden.json
   mix kiln.search.measure_floor golden.json --type recipe --limit 50
   mix kiln.search.measure_floor golden.json --org acme --locale fr
+  mix kiln.search.measure_floor golden.json --ef-search 200
+  mix kiln.search.measure_floor golden.json --exact
   ```
 
   ## The golden set
@@ -82,6 +84,24 @@ defmodule Mix.Tasks.Kiln.Search.MeasureFloor do
   Reads run against one tenant — `--org` (a slug) or, absent, the default
   organization — through the published-only action with no actor, the way
   an anonymous `/api/search` reads.
+
+  ## How the neighbours were scanned
+
+  Every distance here comes out of the HNSW index, which is approximate: at
+  pgvector's default `hnsw.ef_search` of 40 a record nearer than the ones
+  returned can be missed, which moves a band edge for no reason the corpus
+  explains. The header names the scan mode the run used — read back from the
+  database connection — and warns below ef_search 200. **For a floor you will
+  ship, measure with `--ef-search 200` or `--exact`**:
+
+    * `--ef-search N` — `SET hnsw.ef_search = N` (1..1000) on this run's
+      connections.
+    * `--exact` — `SET enable_indexscan = off`: the HNSW index is bypassed and
+      every neighbour list is exact. Slower, and fine for a one-off run.
+
+  Either overrides `KILN_HNSW_EF_SEARCH` / `KILN_VECTOR_SEARCH_EXACT` for this
+  run; without them the configured mode is used and reported. See
+  `KilnCMS.Search.VectorScan`.
   """
   @shortdoc "Measure where to set semantic_max_distance for this corpus"
 
@@ -93,10 +113,19 @@ defmodule Mix.Tasks.Kiln.Search.MeasureFloor do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Search
   alias KilnCMS.Search.Eval
+  alias KilnCMS.Search.VectorScan
 
-  @requirements ["app.start"]
-
-  @switches [type: :string, org: :string, limit: :integer, locale: :string]
+  # No `@requirements ["app.start"]`: `--ef-search`/`--exact` must be written
+  # into the repo config after `app.config` and before the pool starts, so the
+  # task starts the application itself (see `start!/1`).
+  @switches [
+    type: :string,
+    org: :string,
+    limit: :integer,
+    locale: :string,
+    ef_search: :integer,
+    exact: :boolean
+  ]
 
   @impl Mix.Task
   def run(args) do
@@ -114,9 +143,11 @@ defmodule Mix.Tasks.Kiln.Search.MeasureFloor do
         _ ->
           Mix.raise(
             "Usage: mix kiln.search.measure_floor GOLDEN_SET.json " <>
-              "[--type T] [--org SLUG] [--locale L] [--limit N]"
+              "[--type T] [--org SLUG] [--locale L] [--limit N] [--ef-search N | --exact]"
           )
       end
+
+    scan = start!(opts)
 
     unless Search.semantic?() do
       Mix.raise("""
@@ -143,13 +174,32 @@ defmodule Mix.Tasks.Kiln.Search.MeasureFloor do
 
     shell.info(
       "tenant: #{tenant}   locale: #{locale}   embedder: #{inspect(Search.embedder())}   " <>
-        "configured floor: #{inspect(Search.semantic_max_distance())} (ignored here)\n"
+        "configured floor: #{inspect(Search.semantic_max_distance())} (ignored here)"
     )
+
+    shell.info(VectorScan.header(scan) <> "\n")
 
     results = Enum.map(rows, &measure(&1, targets, locale, read_opts, limit))
 
     Enum.each(results, &shell.info(render(&1)))
     shell.info(suggestion(results))
+  end
+
+  # Validates the scan flags, applies them between `app.config` (which would
+  # overwrite them from runtime.exs) and `app.start` (whose repo `init/2` reads
+  # them), and returns the mode a live connection reports — so the header says
+  # what the neighbours were measured under, and a flag that did not reach the
+  # pool (the application was already up) is refused rather than mislabelled.
+  defp start!(opts) do
+    mode = VectorScan.from_flags!(opts)
+    Mix.Task.run("app.config")
+    VectorScan.put_repo_config(mode)
+    Mix.Task.run("app.start")
+    scan = VectorScan.effective()
+    VectorScan.check!(mode, scan)
+    scan
+  rescue
+    error in ArgumentError -> Mix.raise(Exception.message(error))
   end
 
   # --- the golden set --------------------------------------------------------

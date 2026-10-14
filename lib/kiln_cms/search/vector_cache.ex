@@ -33,6 +33,13 @@ defmodule KilnCMS.Search.VectorCache do
   cached, which is silent: the numbers are well-formed, just from a different
   space.
 
+  `pooling` is in the key for the same reason (#1939): CLS and mean pooling of
+  the same hidden states are two different vectors for one string. The
+  instruction prefixes are not, and need not be — `embed_document/1` prepends
+  `KilnCMS.Search.document_prefix/0` before hashing, so the prefix is already
+  in the digest. The cache lives in ETS, so a key-shape change costs at most
+  one cold cache after a deploy, never a stale entry.
+
   SHA-256 rather than `:erlang.phash2/1`: the latter is 32-bit, and at this
   cache's size a birthday collision is around one in a few hundred — which would
   hand a block another block's vector and quietly corrupt every distance
@@ -144,7 +151,11 @@ defmodule KilnCMS.Search.VectorCache do
   `KilnCMS.LLM.Budget` unit on a tag (#1076): a name this cache (or any earlier
   caller's) has already embedded costs nothing to embed again, and charging
   for it anyway would size the budget to the taxonomy's word list rather than
-  to genuine inference volume.
+  to genuine inference volume. `KilnCMS.Search.Related` and
+  `KilnCMS.Organize.Tagging` ask it the same about
+  `KilnCMS.Search.BlockIndexer.embedding_inputs/1`'s strings, which
+  `block_vectors/1` embeds through `embed_document/1` too (#1939) — there is
+  no unprefixed path left, so there is no second key to ask about.
 
   Racy against a concurrent `embed_document/1` committing the same key, same
   as everywhere else this cache is read — the worst case is one avoidable
@@ -155,28 +166,12 @@ defmodule KilnCMS.Search.VectorCache do
     match?({:ok, true}, Cachex.exists?(@cache, key(Search.document_prefix() <> text)))
   end
 
-  @doc """
-  As `cached?/1`, but for `embed/1`'s key — no `KilnCMS.Search.document_prefix/0`
-  applied.
-
-  `KilnCMS.Search.BlockIndexer.block_vectors/1` calls `embed/1` directly, not
-  `embed_document/1`: a block's embedding input already carries its ancestor
-  context (the heading trail above it), so it is not the bare span the
-  document/query instruction prefix is meant for, and `cached?/1`'s
-  prefixed key would never match what a block actually hashes to.
-  `KilnCMS.Search.Related.unindexed_centroid/2` checks this — not `cached?/1`
-  — to count the blocks a centroid computation would actually pay for (#1076).
-  """
-  @spec raw_cached?(String.t()) :: boolean()
-  def raw_cached?(text) when is_binary(text) do
-    match?({:ok, true}, Cachex.exists?(@cache, key(text)))
-  end
-
   @doc false
   # Exported so a test can assert on an entry's presence and expiry without
   # restating the key shape — a second spelling would drift and quietly test
   # nothing.
-  def key(text), do: {Search.embedder(), Search.model(), Search.dim(), sha256(text)}
+  def key(text),
+    do: {Search.embedder(), Search.model(), Search.dim(), Search.pooling(), sha256(text)}
 
   defp sha256(text), do: :crypto.hash(:sha256, text)
 end

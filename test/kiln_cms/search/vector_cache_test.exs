@@ -214,18 +214,17 @@ defmodule KilnCMS.Search.VectorCacheTest do
     # failure would never be *served* — but it would still occupy one of this
     # instance's capped entries, and an outage would evict real vectors to hold
     # placeholders that can only produce a miss.
+    #
+    # `VectorCache.key/1`, not a spelling of it: this used to build
+    # `{model, sha256}`, a shape the cache has not used since #964 widened the
+    # key — so the assertion held whatever was committed (#1939).
     assert {:ok, false} =
-             Cachex.exists?(
-               VectorCache.cache_name(),
-               {KilnCMS.Search.model(), key("transient")}
-             )
+             Cachex.exists?(VectorCache.cache_name(), VectorCache.key("transient"))
 
     # And the outage clearing is enough; nothing has to expire first.
     Application.put_env(:kiln_cms, KilnCMS.Search, previous)
     assert is_list(VectorCache.embed("transient"))
   end
-
-  defp key(text), do: :crypto.hash(:sha256, text)
 
   test "the vector cache is a different instance from the delivery cache" do
     # The whole point of #964: an editing session must not evict the

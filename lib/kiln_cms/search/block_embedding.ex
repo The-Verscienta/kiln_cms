@@ -107,9 +107,13 @@ defmodule KilnCMS.Search.BlockEmbedding do
       filter expr(not is_nil(^ref(:embedding)))
       filter expr(is_nil(^arg(:block_type)) or ^ref(:block_type) == ^arg(:block_type))
 
+      # `embed_query/1`, not the raw `embed/1` (#1939): the stored rows are
+      # embedded document-side (`BlockIndexer`), so the argument is the query
+      # side of an asymmetric comparison and takes `query_prefix/0` — the same
+      # vector `KilnCMS.Search.hybrid/3` hands its block leg.
       prepare fn query, _context ->
         with true <- KilnCMS.Search.semantic?(),
-             {:ok, vector} <- KilnCMS.Search.embed(Ash.Query.get_argument(query, :query)) do
+             {:ok, vector} <- KilnCMS.Search.embed_query(Ash.Query.get_argument(query, :query)) do
           query
           |> Ash.Query.sort([{:semantic_distance, {%{query_vector: vector}, :asc}}])
           |> Ash.Query.limit(Ash.Query.get_argument(query, :limit))

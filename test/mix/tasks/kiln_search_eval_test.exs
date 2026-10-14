@@ -84,6 +84,69 @@ defmodule Mix.Tasks.Kiln.Search.EvalTest do
     assert text =~ ~r/^    #{ctx.slug}\s+#1  keyword/m
     assert text =~ ~r/^    absent-slug\s+missing$/m
     assert text =~ ~s([junk] "asdfghjkl zzqqxx"  PASS)
+
+    # How the vector legs were scanned rides in the header, read back from the
+    # connection — this suite runs the default, so it is flagged approximate.
+    assert text =~
+             "\nvector scan: approximate HNSW, hnsw.ef_search = 40 (pgvector default), " <>
+               "iterative_scan = strict_order\nWARNING: approximate vector recall"
+  end
+
+  describe "--ef-search / --exact" do
+    setup do
+      repo_config = Application.get_env(:kiln_cms, KilnCMS.Repo)
+      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Repo, repo_config) end)
+      :ok
+    end
+
+    test "the header and the JSON carry the scan mode the run measured under", ctx do
+      path = golden([%{query: ctx.word, expected: [ctx.slug], class: "single_entity"}])
+
+      # The pool is already up in a test, so stand in for its `after_connect`
+      # on the sandboxed connection; the flag's own job is checked below.
+      KilnCMS.Repo.query!("SET hnsw.ef_search = 200", [])
+
+      assert :ok = Task.run([path, "--org", ctx.org.slug, "--ef-search", "200"])
+      text = output()
+
+      assert text =~
+               "\nvector scan: approximate HNSW, hnsw.ef_search = 200, iterative_scan = strict_order\n"
+
+      refute text =~ "WARNING"
+
+      assert :ok = Task.run([path, "--org", ctx.org.slug, "--ef-search", "200", "--json"])
+
+      assert %{"mode" => "approximate", "ef_search" => 200, "measurement_grade" => true} =
+               Jason.decode!(output())["scan"]
+    end
+
+    test "a flag that did not reach the pool is refused, not mislabelled", ctx do
+      path = golden([%{query: ctx.word, expected: [ctx.slug], class: "single_entity"}])
+
+      # The application is already running, so writing the repo config cannot
+      # change the pool's connections — exactly the case `check!/2` exists for.
+      assert_raise Mix.Error, ~r/did not reach the connection pool/, fn ->
+        Task.run([path, "--org", ctx.org.slug, "--exact"])
+      end
+
+      assert Application.get_env(:kiln_cms, KilnCMS.Repo)[:vector_scan] == [exact: true]
+    end
+
+    test "unusable values and --url combinations are refused up front", ctx do
+      path = golden([%{query: ctx.word, expected: [ctx.slug], class: "single_entity"}])
+
+      assert_raise Mix.Error, ~r/must be an integer in 1\.\.1000/, fn ->
+        Task.run([path, "--ef-search", "0"])
+      end
+
+      assert_raise Mix.Error, ~r/sets both ef_search and exact/, fn ->
+        Task.run([path, "--ef-search", "200", "--exact"])
+      end
+
+      assert_raise Mix.Error, ~r/a --url run uses the server's/, fn ->
+        Task.run([path, "--url", "https://example.com", "--exact"])
+      end
+    end
   end
 
   test "--json prints the report as JSON", ctx do
