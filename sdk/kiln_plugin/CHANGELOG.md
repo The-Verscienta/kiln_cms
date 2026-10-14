@@ -17,7 +17,7 @@ Releases are tagged `kiln_plugin-vX.Y.Z` in the
 
 ### Added
 
-- **`Kiln.ImageBackend.check/0` (kiln_cms#1955).** A backend can say whether
+- **`c:Kiln.ImageBackend.check/0` (kiln_cms#1955).** A backend can say whether
   its service answers with the settings it has, and what it found there, for
   System → Image backend. Optional: `use Kiln.ImageBackend` defaults it to
   `:unsupported`. A backend that implements it should require

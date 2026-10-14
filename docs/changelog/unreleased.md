@@ -160,7 +160,7 @@ carries the reasoning.
   Plugins. It says which backend is selected and whether it is receiving
   uploads, missing its settings or not an installed backend at all. It asks
   the service whether it answers, through a new optional callback,
-  `Kiln.ImageBackend.check/0` (kiln_plugin, Unreleased), which may report
+  `c:Kiln.ImageBackend.check/0` (kiln_plugin, Unreleased), which may report
   what it found, and shows the reason when it doesn't. It counts the site's
   rows the backend holds, the imported links it would adopt and those it
   doesn't recognise (`KilnCMS.Media.Adoption.census/2`), and prints the
