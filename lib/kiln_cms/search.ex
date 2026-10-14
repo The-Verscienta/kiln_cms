@@ -1060,10 +1060,14 @@ defmodule KilnCMS.Search do
 
     beyond = Enum.filter(judged, &beyond?(&1, floor.max_distance, distances))
 
+    kept = MapSet.new(idf_kept(beyond, floor))
+
     floored =
-      beyond
-      |> MapSet.new(fn {record, _score, _legs} -> record.id end)
-      |> MapSet.difference(idf_kept(beyond, floor))
+      MapSet.new(
+        for {record, _score, _legs} <- beyond,
+            not MapSet.member?(kept, record.id),
+            do: record.id
+      )
 
     Enum.reject(hits, fn {record, _score, _legs} -> MapSet.member?(floored, record.id) end)
   end
@@ -1179,6 +1183,9 @@ defmodule KilnCMS.Search do
   # lexemes carry enough of the query's IDF mass to stay. Nothing is computed
   # unless the variant is on, `:keyword_any` is judged, and such a hit exists
   # — the two queries it costs run only when they can change the answer.
+  # A list, not a MapSet: the caller builds the set once. A helper returning
+  # `MapSet.new()` on one branch and `MapSet.new(enum, fun)` on the other is
+  # the union OTP 29's dialyzer strips opacity from (`call_without_opaque`).
   defp idf_kept(beyond, floor) do
     with coverage when is_number(coverage) <- keyword_any_idf_coverage(),
          true <- :keyword_any in floor.legs,
@@ -1187,9 +1194,9 @@ defmodule KilnCMS.Search do
       floor.resource
       |> KilnCMS.Search.IdfCoverage.coverages(floor.query, floor.locale, ids, floor.read_opts)
       |> Enum.filter(fn {_id, share} -> share >= coverage end)
-      |> MapSet.new(fn {id, _share} -> id end)
+      |> Enum.map(fn {id, _share} -> id end)
     else
-      _ -> MapSet.new()
+      _ -> []
     end
   end
 
