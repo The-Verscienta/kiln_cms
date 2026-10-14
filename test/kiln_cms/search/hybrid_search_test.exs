@@ -672,6 +672,260 @@ defmodule KilnCMS.Search.HybridTest do
     end
   end
 
+  describe "the floor's judged legs: semantic_floor_legs (#1936)" do
+    # On a corpus of long prose the any-term relaxation was how junk got
+    # through: a several-word query shares one word with dozens of documents,
+    # `:search_any` admits each, and the v1.1.0 floor judged only hits the
+    # semantic legs alone returned. `semantic_floor_legs` lets a deployment
+    # judge `:keyword_any` (and `:fuzzy`) hits by distance too, while the full
+    # keyword match, the title and the alias legs always vouch.
+    #
+    # Four words, so the relaxation runs (no page carries them all) and the
+    # fuzzy leg's word similarity cannot reach a two-word title from them.
+    @query "alpha beta delta epsilon"
+    @with_any [:semantic, :block, :tag, :keyword_any]
+
+    defp any_term_page(admin) do
+      # Shares one word with the query: the relaxation's find, nobody else's.
+      CMS.create_page!(%{title: "alpha gamma", slug: slug()}, actor: admin)
+    end
+
+    defp distance_by_slug(page, query, admin) do
+      {:ok, [%{distance: distance}]} =
+        Search.semantic_neighbours(:page, query, actor: admin, slug: page.slug)
+
+      distance
+    end
+
+    defp hit(results, page), do: Enum.find(results, &(&1.id == page.id))
+
+    test "the default judges what v1.1.0 judged: an any-term hit is kept at any distance" do
+      admin = admin()
+      page = any_term_page(admin)
+      KilnCMS.DataCase.drain_oban()
+
+      assert Search.semantic_floor_legs() == [:semantic, :block, :tag]
+      put_search_env(semantic_max_distance: 0.0)
+
+      kept = hit(Search.hybrid(:page, @query, actor: admin), page)
+      assert kept, "the default must not judge an any-term hit"
+      # Returned by the semantic leg too — the fused record is the keyword
+      # leg's, so a judged hit's distance has to come from the semantic leg's.
+      assert Search.hit_legs(kept) == [:keyword_any, :semantic]
+    end
+
+    test "with :keyword_any listed, an any-term hit is judged by its distance" do
+      admin = admin()
+      page = any_term_page(admin)
+      KilnCMS.DataCase.drain_oban()
+
+      distance = distance_by_slug(page, @query, admin)
+      assert distance > 0.0
+
+      put_search_env(semantic_floor_legs: @with_any, semantic_max_distance: distance * 0.99)
+      refute hit(Search.hybrid(:page, @query, actor: admin), page)
+
+      put_search_env(semantic_max_distance: distance * 1.01)
+      assert hit(Search.hybrid(:page, @query, actor: admin), page)
+
+      # Off the list again, the same floor keeps it — the list is the switch.
+      put_search_env(
+        semantic_floor_legs: [:semantic, :block, :tag],
+        semantic_max_distance: distance * 0.99
+      )
+
+      assert hit(Search.hybrid(:page, @query, actor: admin), page)
+    end
+
+    test "an any-term hit no semantic leg returned is measured for the floor" do
+      # The semantic leg returns its nearest 50; a document beyond them that
+      # the relaxation found carries no distance of its own, so the floor
+      # reads its document distance for it. Fifty pages sitting exactly on the
+      # query's vector fill the leg.
+      admin = admin()
+      page = any_term_page(admin)
+      {:ok, vector} = StubEmbedder.embed(@query)
+
+      fillers =
+        for n <- 1..50, do: CMS.create_page!(%{title: "filler #{n}", slug: slug()}, actor: admin)
+
+      # After the drain, so the embedding worker does not overwrite them.
+      KilnCMS.DataCase.drain_oban()
+
+      for filler <- fillers,
+          do: Ash.Seed.update!(filler, %{embedding: vector, embedded_at: DateTime.utc_now()})
+
+      distance = distance_by_slug(page, @query, admin)
+      assert distance > 0.0
+
+      put_search_env(semantic_max_distance: distance * 0.99)
+      kept = hit(Search.hybrid(:page, @query, actor: admin, limit: 60), page)
+      assert Search.hit_legs(kept) == [:keyword_any]
+
+      put_search_env(semantic_floor_legs: @with_any)
+      refute hit(Search.hybrid(:page, @query, actor: admin, limit: 60), page)
+
+      put_search_env(semantic_max_distance: distance * 1.01)
+      assert hit(Search.hybrid(:page, @query, actor: admin, limit: 60), page)
+    end
+
+    test "an any-term hit with nothing to judge it by is kept, not floored" do
+      admin = admin()
+      KilnCMS.DataCase.drain_oban()
+      # Created after the drain: no embedding, so no distance exists for it.
+      unembedded = any_term_page(admin)
+      put_search_env(semantic_floor_legs: @with_any, semantic_max_distance: 0.0)
+
+      kept = hit(Search.hybrid(:page, @query, actor: admin), unembedded)
+      assert Search.hit_legs(kept) == [:keyword_any]
+
+      # Nor when the query itself cannot be embedded.
+      assert hit(
+               Search.hybrid(:page, @query, actor: admin, query_vector: :unavailable),
+               unembedded
+             )
+    end
+
+    test "the full keyword match, the title and the alias legs vouch whatever the distance" do
+      admin = admin()
+
+      CMS.create_field_definition!(
+        %{
+          content_type: :page,
+          name: "latin_name",
+          label: "latin_name",
+          field_type: :string,
+          names_record: true
+        },
+        actor: admin
+      )
+
+      keyword =
+        CMS.create_page!(%{title: "alpha beta delta epsilon notes", slug: slug()}, actor: admin)
+
+      titled = CMS.create_page!(%{title: "Delta Epsilon", slug: slug()}, actor: admin)
+
+      aliased =
+        CMS.create_page!(
+          %{title: "Huang Qi", slug: slug(), custom_fields: %{"latin_name" => "alpha beta"}},
+          actor: admin
+        )
+
+      KilnCMS.DataCase.drain_oban()
+
+      put_search_env(
+        semantic_floor_legs: @with_any ++ [:fuzzy],
+        semantic_max_distance: 0.0
+      )
+
+      results = Search.hybrid(:page, @query, actor: admin)
+
+      assert :keyword in Search.hit_legs(hit(results, keyword))
+      assert :title in Search.hit_legs(hit(results, titled))
+      assert :alias in Search.hit_legs(hit(results, aliased))
+    end
+
+    test "a leg that vouches, an unknown leg, or a missing semantic leg raises" do
+      admin = admin()
+      put_search_env(semantic_max_distance: 0.5)
+
+      for {legs, message} <- [
+            {@with_any ++ [:keyword], ~r/cannot list \[:keyword\]/},
+            {@with_any ++ [:title], ~r/cannot list \[:title\]/},
+            {@with_any ++ [:alias], ~r/cannot list \[:alias\]/},
+            {@with_any ++ [:nope], ~r/unknown leg\(s\) \[:nope\]/},
+            {[:block, :tag, :keyword_any], ~r/must include \[:semantic, :block, :tag\]/},
+            {"semantic,block,tag", ~r/must be a list of legs/}
+          ] do
+        put_search_env(semantic_floor_legs: legs)
+
+        assert_raise ArgumentError, message, fn ->
+          Search.hybrid(:page, @query, actor: admin)
+        end
+      end
+
+      # `:fuzzy` is the other leg it may judge.
+      put_search_env(semantic_floor_legs: [:semantic, :block, :tag, :fuzzy])
+      assert is_list(Search.hybrid(:page, @query, actor: admin))
+    end
+  end
+
+  describe "the IDF-coverage variant (#1936, preregistered)" do
+    # A `:keyword_any` hit the floor would drop is kept when the query
+    # lexemes it matches carry at least `keyword_any_idf_coverage` of the
+    # query's IDF mass, IDF taken over the section's published documents.
+    # Five published pages carry "common"; one carries "zyxw". Smoothed IDF
+    # over N = 6: common (df 5) ≈ 0.24, zyxw (df 1) ≈ 1.54 — so the rare-word
+    # page covers ≈ 0.87 of the query and the common-word page ≈ 0.13.
+    #
+    # The floor sits at 0.0 and the fuzzy leg is judged too, so every hit
+    # here is beyond the floor and only the variant can keep one.
+    @legs [:semantic, :block, :tag, :keyword_any, :fuzzy]
+
+    setup do
+      admin = admin()
+
+      publish = fn title ->
+        page = CMS.create_page!(%{title: title, slug: slug()}, actor: admin)
+        CMS.publish_page!(page, %{}, actor: admin)
+      end
+
+      rare = publish.("zyxw notes")
+      common = publish.("common notes")
+      for n <- 1..4, do: publish.("common ground #{n}")
+      KilnCMS.DataCase.drain_oban()
+
+      put_search_env(semantic_floor_legs: @legs, semantic_max_distance: 0.0)
+      %{admin: admin, rare: rare, common: common}
+    end
+
+    defp found(ctx, query) do
+      ids = Search.hybrid(:page, query, actor: ctx.admin) |> ids()
+      {ctx.rare.id in ids, ctx.common.id in ids}
+    end
+
+    test "off by default: the floor drops both", ctx do
+      assert Search.keyword_any_idf_coverage() == nil
+      assert found(ctx, "common zyxw") == {false, false}
+    end
+
+    test "a hit matching the query's high-IDF lexeme is kept, a low-coverage one dropped", ctx do
+      put_search_env(keyword_any_idf_coverage: 0.5)
+      assert found(ctx, "common zyxw") == {true, false}
+
+      # Coverage is a share: above the rare page's ≈ 0.87, nothing qualifies.
+      put_search_env(keyword_any_idf_coverage: 0.9)
+      assert found(ctx, "common zyxw") == {false, false}
+    end
+
+    test "the last lexeme matches as a prefix, as the any-term leg does", ctx do
+      put_search_env(keyword_any_idf_coverage: 0.5)
+      # "zyx" is the start of "zyxw": the leg finds the rare page by prefix,
+      # and the coverage credits it with the same prefix match.
+      assert found(ctx, "common zyx") == {true, false}
+    end
+
+    test "only while :keyword_any is judged", ctx do
+      put_search_env(
+        keyword_any_idf_coverage: 0.5,
+        semantic_floor_legs: [:semantic, :block, :tag]
+      )
+
+      # Unjudged, every any-term hit is kept as in v1.1.0, whatever its coverage.
+      assert found(ctx, "common zyxw") == {true, true}
+    end
+
+    test "a value outside (0, 1] raises", ctx do
+      for bad <- [0, 0.0, 1.5, -0.2, "0.5"] do
+        put_search_env(keyword_any_idf_coverage: bad)
+
+        assert_raise ArgumentError, ~r/keyword_any_idf_coverage: must be nil or a number/, fn ->
+          Search.hybrid(:page, "common zyxw", actor: ctx.admin)
+        end
+      end
+    end
+  end
+
   describe "the block leg: a document reached through its nearest section (D16)" do
     # The per-block embeddings the fire pipeline writes describe each
     # section; the leg ranks documents by their nearest block. Under the

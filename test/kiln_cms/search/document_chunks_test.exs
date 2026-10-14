@@ -401,6 +401,69 @@ defmodule KilnCMS.Search.DocumentChunksTest do
       refute page.id in hit_ids(Search.hybrid(:page, @query, actor: admin))
     end
 
+    test "an any-term hit no semantic leg returned is judged by its chunk too (#1936)" do
+      # With `:keyword_any` among the floor legs, a hit only the any-term
+      # relaxation found is measured for the floor by a lookup of its own
+      # distances. That lookup must read the chunks as the block leg does,
+      # or a late-passage match is judged by the head vector that never saw
+      # it — the blind spot the floor-legs docs send operators here to close.
+      admin = user(:admin)
+      unit = [1.0 | List.duplicate(0.0, 383)]
+      # Cosine distance 0.1 from `unit`.
+      near = [0.9, :math.sqrt(1 - 0.81) | List.duplicate(0.0, 382)]
+
+      page = long_page(admin)
+
+      # Enough documents sitting exactly on the query, head and chunk, to
+      # fill the semantic and block legs, so the target arrives through
+      # `:keyword_any` alone.
+      fillers =
+        for n <- 1..55,
+            do: CMS.create_page!(%{title: "filler #{n}", slug: slug()}, actor: admin)
+
+      KilnCMS.DataCase.drain_oban()
+
+      for filler <- fillers do
+        Ash.Seed.update!(filler, %{embedding: unit, embedded_at: DateTime.utc_now()})
+
+        SearchIndex.create_document_chunk_embedding!(
+          [
+            %{
+              document_type: :page,
+              document_id: filler.id,
+              chunk_index: 0,
+              content_hash: "filler-#{filler.id}",
+              embedding: unit,
+              embedded_at: DateTime.utc_now()
+            }
+          ],
+          actor: system(),
+          tenant: filler.org_id
+        )
+      end
+
+      # The target's chunk sits at 0.1 — inside the floor, behind every filler.
+      [chunk | _] = page |> chunks_of() |> Enum.reverse()
+      Ash.Seed.update!(chunk, %{embedding: near})
+
+      # "zebra" is in no document, so the full keyword leg misses; the
+      # marker's lexeme is the any-term match. The query embeds onto `unit`.
+      query = "#{@marker} zebra"
+
+      put_search_env(
+        semantic_floor_legs: [:semantic, :block, :tag, :keyword_any],
+        semantic_max_distance: 0.2
+      )
+
+      kept = Enum.find(Search.hybrid(:page, query, actor: admin, limit: 80), &(&1.id == page.id))
+      assert kept, "judged by its chunk (0.1), within the floor"
+      assert Search.hit_legs(kept) == [:keyword_any]
+
+      # Its head alone is far beyond 0.2: without chunks the floor drops it.
+      put_search_env(chunk_long_documents: false)
+      refute page.id in hit_ids(Search.hybrid(:page, query, actor: admin, limit: 80))
+    end
+
     test "the floor judges by min(head, chunk): a chunk beyond the floor does not rescue" do
       admin = user(:admin)
       # The marker is not in the text at all — every chunk is hash-derived.

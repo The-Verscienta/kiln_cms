@@ -93,6 +93,25 @@ defmodule KilnCMS.Search.BlockSearchTest do
       assert {:ok, 0} = BlockIndexer.reindex(page)
     end
 
+    test "force: true re-embeds blocks whose text is unchanged" do
+      # The content hash covers what a block says, not the space it was
+      # embedded in — so after a model swap only a forced run re-embeds.
+      actor = admin()
+
+      page =
+        page_with_blocks(actor, [
+          %{type: :heading, content: "Otters", order: 0},
+          %{type: :rich_text, content: "<p>rivers and streams</p>", order: 1}
+        ])
+
+      {:ok, 2} = BlockIndexer.reindex(page)
+      assert {:ok, 0} = BlockIndexer.reindex(page)
+      assert {:ok, 2} = BlockIndexer.reindex(page, force: true)
+
+      {:ok, rows} = SearchIndex.block_embeddings_for(:page, page.id, authorize?: false)
+      assert length(rows) == 2
+    end
+
     test "a deleted block's row is deleted too (#965)" do
       # `upsert` was the only write, so the index only ever grew. A stored
       # centroid averages EVERY row for the document, so a trimmed page kept

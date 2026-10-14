@@ -138,8 +138,9 @@ empty another, and a value measured on a sample of the corpus drifts as the
 corpus grows around it.
 
 **Where it applies.** `hybrid/3` — the search page, `/api/search`, `/api/ask`
-— applies the floor *after* fusion, to hits only the semantic leg returned. A
-record any other leg (keyword, its any-term relaxation, title or fuzzy)
+— applies the floor *after* fusion, to hits only the judged legs returned —
+by default the semantic legs alone (see "Which legs it judges" below). A
+record any other leg (keyword, its any-term relaxation, title, alias or fuzzy)
 also found is kept whatever its distance: a lexical match needs no distance
 alibi. The per-type `semantic-search` API routes have no fusion to leave it
 to, so they filter the leg themselves — exempting a row the query names (by
@@ -163,6 +164,71 @@ thai tom yum" kept two marginal neighbours and dropped both named records,
 so the semantic leg fed fusion noise and withheld the answers (the 2026-09-04
 search-ranking report, D2/P3). Junk still returns nothing: with no lexical hit
 every fused hit is semantic-only, and every one is over the floor.
+
+**Which legs it judges (#1936).** "No lexical hit" turned out to be the catch
+on a corpus of long prose. A several-word junk query ("best pizza near me")
+shares one ordinary word, or a prefix of its last word, with dozens of long
+documents; the any-term relaxation (`keyword_any`) admits every one, and the
+floor never looked at them. Measured on a production deployment (bge-small,
+floor 0.35), that leg was behind 21 of 40 and 20 of 32 junk failures on two
+independent query sets — and no floor value inside the old rule could help,
+because the semantic-only hits it judged overlapped the junk band.
+
+`semantic_floor_legs` names the legs whose hits the floor judges; a hit is
+floored only when *every* leg that returned it is listed:
+
+```elixir
+config :kiln_cms, KilnCMS.Search,
+  semantic_max_distance: 0.39,
+  semantic_floor_legs: [:semantic, :block, :tag, :keyword_any]
+```
+
+The default, `[:semantic, :block, :tag]`, is the v1.1.0 rule exactly. The
+three semantic legs are required (dropping one would reopen #871 for its
+hits); `:keyword_any` and `:fuzzy` are the optional additions; `:keyword`,
+`:title` and `:alias` vouch for a hit — every term matched, or the query names
+the record — and listing one raises. A judged lexical hit is measured by the
+nearest distance it has: the semantic leg's reading of it, else its document
+distance read for it, its nearest block's, and its tag's. One with no vector
+at all (not yet embedded, or the query could not be embedded) is kept — a
+lexical match with nothing to judge it by is still a match.
+
+Simulated on the same deployment's hit lists, judging `keyword_any` at a floor
+of 0.37–0.40 let 40 of 45 and 29 of 32 junk queries return nothing, keeping
+every one of the 23 + 5 real hits it judged. That is a direction, not a value:
+the decisive band was the farthest real `keyword_any`-only hit (0.370) against
+the nearest junk one (0.405). Measure your own before you copy a number.
+
+**Long documents.** A document's vector covers its first ~512 tokens. A query
+that matches only a late passage of a long document is judged, under
+`:keyword_any`, by a vector that never saw that passage — in the issue's
+late-passage probe, half of 100 such targets sat beyond the 0.39 floor. A
+deployment that judges `:keyword_any` should have chunked document vectors
+(#1940, `chunk_long_documents`), so the late passage has a vector the floor
+can find, or accept that blind spot.
+
+**The IDF-coverage variant.** Preregistered on #1936 and shipped opt-in so a
+deployment can measure it rather than adopted as a rule:
+`keyword_any_idf_coverage: x` (or `SEARCH_KEYWORD_ANY_IDF_COVERAGE`) keeps a
+judged `keyword_any` hit beyond the floor when the query lexemes it matches
+carry at least `x` of the query's IDF mass. Lexemes are the keyword legs' own
+`plainto_tsquery(kiln_regconfig(locale), …)` parse, each once, with the last
+matched as a prefix; IDF is `ln(1 + (N − df + 0.5) / (df + 0.5))` per section
+(content type and locale) over its published documents, read under the
+caller's tenant and policies like every leg. The whole definition is part of
+the variant — `KilnCMS.Search.keyword_any_idf_coverage/0` spells it out. Off
+(`nil`) by default; it acts only while `:keyword_any` is judged, and costs two
+queries per section only when a judged `keyword_any` hit is beyond the floor.
+
+**Runtime overrides.** `SEARCH_SEMANTIC_MAX_DISTANCE`,
+`SEARCH_SEMANTIC_FLOOR_LEGS` and `SEARCH_KEYWORD_ANY_IDF_COVERAGE` override the
+compiled values at boot ([environment-variables.md](environment-variables.md#search-relevance-floor-1936)),
+so none of them needs a rebuild. That matters most for a **model swap**: while
+the corpus re-embeds into the new model's space, distances between a new query
+vector and an old document vector mean nothing, so the runbook runs the floor
+at `0.0` for the window — every judged hit with a vector is dropped, lexical
+hits stay — with `keyword_any` out of the floor legs, then re-measures and sets
+the new model's floor. Before this it was a deploy each way.
 
 **Measuring it.** Use the golden set `mix kiln.search.eval` scores
 ([search-roadmap.md](search-roadmap.md) §11, *Ranking eval harness*) — rows of
@@ -196,6 +262,13 @@ only):
 KilnCMS.Search.semantic_distances(:page, "a query that should match")
 KilnCMS.Search.semantic_distances(:page, "asdfghjkl")
 ```
+
+The task measures documents' distances; it does not split them by which leg
+would have returned each hit, so it cannot report the `keyword_any` band (the
+farthest real hit only that leg finds against the nearest junk one) that
+judging `:keyword_any` turns on. Take that band from `hybrid/3`'s `legs`
+provenance (`/api/search` returns it per hit) with the floor at `2.0`, as
+#1936's measurement did.
 
 ## Block leg (2026-09-11)
 
@@ -467,26 +540,32 @@ config :kiln_cms, KilnCMS.Search,
   pooling: :mean_pooling
 ```
 
-Then `mix kiln.embed_all` (now covers Page, Post, **and** dynamic entries) —
-old English embeddings are meaningless under the new model, so every record
-must be recomputed.
+Then `mix kiln.embed_all --blocks` (covers Page, Post, **and** dynamic
+entries, their tags, and — with `--blocks` — every published document's block
+vectors). Old English embeddings are meaningless under the new model, so every
+record must be recomputed. Leave out `--blocks` and the block index stays in
+the old space: block re-indexing skips any block whose text is unchanged, and
+a model swap changes no text.
 
 ### Re-embedding after a swap: documents, tags **and blocks**
 
-`mix kiln.embed_all` re-embeds document vectors and tag names. It does not
-touch **block** vectors (`block_embeddings`, the block leg): those are written
-only by firing, so they are re-indexed by a firing sweep —
-`mix kiln.refire_all`, or `bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"` on a
-release. A swap needs both.
+`mix kiln.embed_all --blocks` re-embeds all three: document vectors, tag
+names, and the **block** vectors (`block_embeddings`, the block leg) of every
+published document. Without `--blocks` the block index is left alone, and
+that is the wrong answer after any swap.
 
-A block is re-embedded only when its `content_hash` changes. That hash covers
+Block vectors are otherwise written only by firing, and a block is
+re-embedded on fire only when its `content_hash` changes. That hash covers
 the block text, its ancestor context and, when set, `document_prefix`, so a
-swap that changes `document_prefix` (any e5 model) re-embeds every block on
-the sweep. A swap that keeps the prefixes (bge-small → MiniLM above) leaves
-the hashes equal, and the sweep skips every block as unchanged — clear the
-block rows first (`DELETE FROM block_embeddings`) so the sweep rebuilds them.
-Changing only `query_prefix` needs no re-embed: queries are embedded when
-they are asked.
+firing sweep (`mix kiln.refire_all`, or `bin/kiln_cms rpc
+"KilnCMS.Firing.Sweep.run()"` on a release) does re-embed every block after a
+swap that changes `document_prefix` (any e5 model). A swap that keeps the
+prefixes (bge-small → MiniLM above) leaves the hashes equal, and the sweep
+skips every block as unchanged. `--blocks` forces the re-embed whatever the
+hash says, so it covers both cases and re-fires nothing else. `embed_all` is
+a Mix task; a release has no Mix, so there the sweep is the path for a prefix
+change. Changing only `query_prefix` needs no re-embed: queries are embedded
+when they are asked.
 
 ### Higher quality: a different-dimension model (needs a migration)
 
@@ -495,7 +574,7 @@ they are asked.
 the vector width. Set `dim:` to match, then migrate every content table's
 `embedding` column and its HNSW index (the dimension is fixed in the column
 type, so this is a one-time destructive-to-embeddings step, followed by
-`mix kiln.embed_all`):
+`mix kiln.embed_all --blocks`):
 
 ```elixir
 # priv/repo/migrations/..._widen_embedding.exs

@@ -34,9 +34,9 @@ carries the reasoning.
 
 <a id="block-embedding-prefixes-upgrade"></a>
 
-- **Changing `document_prefix` (as an e5 model swap does) now needs a firing
-  sweep (`mix kiln.refire_all`) to re-embed block vectors, as well as
-  `mix kiln.embed_all` for documents and tags.** Block vectors are written
+- **Changing `document_prefix` (as an e5 model swap does) now needs block
+  vectors re-embedded too: `mix kiln.embed_all --blocks`, or a firing sweep
+  (`mix kiln.refire_all`), as well as documents and tags.** Block vectors are written
   only by firing (`KilnCMS.Search.BlockIndexer`), and `mix kiln.embed_all`
   re-embeds document vectors and tag names, not blocks. A block's `content_hash` now includes `document_prefix` when it is
   set, so the sweep re-embeds every block under the new prefix and skips
@@ -120,7 +120,10 @@ carries the reasoning.
   `block_embeddings`, whose consumers read every row as a block. Hybrid
   search's block leg then reaches a record through its nearest chunk as well
   as its nearest block, so it is reported as `block` and the floor judges it
-  by `min(document, block, chunk, tag)`. Boundaries are counted in words at
+  by `min(document, block, chunk, tag)`. That includes a `:keyword_any` hit
+  the floor judges (#1936, `semantic_floor_legs`) that no semantic leg
+  returned: the lookup that measures it reads its chunks too, so a match in a
+  late passage is judged by the chunk that holds it. Boundaries are counted in words at
   0.6 words a token — the lean build has no tokenizer, and the estimate errs
   towards overlap, never towards a gap. A re-embed replaces a record's chunks
   in one transaction and reuses unchanged ones; a lock or a hard purge deletes
@@ -131,6 +134,53 @@ carries the reasoning.
   vector changes. See
   `docs/semantic-search-plan.md`, "Long documents".
   ([#1940](https://github.com/The-Verscienta/kiln_cms/issues/1940))
+
+<a id="search-floor-legs"></a>
+
+- **Hybrid search's relevance floor can judge the any-term (OR) keyword leg's
+  hits too, and the floor is a runtime setting.** On a production corpus of
+  long prose, `keyword_any` was how most junk queries came back non-empty: a
+  several-word query shares one ordinary word with dozens of documents, the
+  relaxation admits every one, and the floor judged only hits the semantic
+  legs alone returned. A new `KilnCMS.Search` key, `semantic_floor_legs`,
+  names the legs whose hits the floor judges — a hit is floored only when
+  every leg that returned it is listed. The default, `[:semantic, :block,
+  :tag]`, is the v1.1.0 rule unchanged; `:keyword_any` and `:fuzzy` may be
+  added; `:keyword`, `:title` and `:alias` vouch for a hit and raise if
+  listed. A judged lexical hit is measured by the nearest distance it has —
+  the semantic leg's reading, else its document's and nearest block's, read
+  for it — and kept when it has no vector at all. Judge `:keyword_any` with
+  chunked document vectors (#1940), or accept that a late-passage match in a
+  long document is judged by a vector that never saw it. The preregistered
+  IDF-coverage variant ships opt-in for measurement: `keyword_any_idf_coverage:
+  x` keeps a judged `keyword_any` hit beyond the floor when its matched query
+  lexemes carry at least `x` of the query's IDF mass (per content type and
+  locale, over published documents, smoothed BM25 IDF; the definition is on
+  `KilnCMS.Search.keyword_any_idf_coverage/0`). Three variables override the
+  compiled values at boot — `SEARCH_SEMANTIC_MAX_DISTANCE` (`0.0` legal, the
+  model-swap setting), `SEARCH_SEMANTIC_FLOOR_LEGS` and
+  `SEARCH_KEYWORD_ANY_IDF_COVERAGE` — so a retune or a model-swap window is a
+  restart rather than a deploy each way. `KilnCMS.Config.Env` gains the two
+  readers they need, `float_in/4` and `list_of/3`; an unusable value keeps
+  the compiled one and warns through Logger and Sentry.
+  ([#1936](https://github.com/The-Verscienta/kiln_cms/issues/1936))
+
+<a id="embed-all-blocks"></a>
+
+- **`mix kiln.embed_all --blocks` re-embeds the block index too, so a model,
+  pooling or `document_prefix` change reaches every block vector.**
+  `embed_all` re-embedded document and tag vectors only. Blocks are indexed on
+  fire, and the indexer skips a block whose `content_hash` is unchanged. That
+  hash covers what a block says, not the space it was embedded in, so after an
+  embedding-space change neither a publish nor a re-fire sweep
+  (`mix kiln.refire_all`) re-embedded a single block, and the block leg went
+  on comparing old-space block vectors with new-space queries. `--blocks`
+  enqueues one `BlockEmbeddingWorker` per published document, every org, with
+  `"force" => true`. `BlockIndexer.reindex/2` then ignores the stored hashes.
+  The jobs run on the `:search` queue and re-fire nothing else. Without the
+  flag the task behaves as before. Drafts have no block rows, so they are not
+  enqueued.
+  ([#1939](https://github.com/The-Verscienta/kiln_cms/issues/1939))
 
 <a id="vector-scan-knob"></a>
 

@@ -12,7 +12,10 @@ defmodule KilnCMS.Search.BlockEmbeddingWorker do
       period: 60,
       # `:org_id` in the dedup key so the same doc in two orgs re-indexes
       # separately (epic #336).
-      keys: [:org_id, :type, :id],
+      # `:force` too: a forced re-embed (`mix kiln.embed_all --blocks`) must not
+      # be swallowed by an ordinary fire-path job for the same document, which
+      # would skip every block whose text is unchanged.
+      keys: [:org_id, :type, :id, :force],
       states: [:scheduled, :available, :executing, :retryable, :suspended]
     ]
 
@@ -20,9 +23,9 @@ defmodule KilnCMS.Search.BlockEmbeddingWorker do
   alias KilnCMS.Search.BlockIndexer
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"org_id" => org_id, "type" => type, "id" => id}}) do
+  def perform(%Oban.Job{args: %{"org_id" => org_id, "type" => type, "id" => id} = args}) do
     if Search.semantic?() do
-      org_id |> load(type, id) |> reindex()
+      org_id |> load(type, id) |> reindex(force: args["force"] == true)
     else
       :ok
     end
@@ -57,10 +60,10 @@ defmodule KilnCMS.Search.BlockEmbeddingWorker do
   defp load(org_id, "entry", id), do: CMS.get_entry(id, authorize?: false, tenant: org_id)
   defp load(_org_id, _type, _id), do: :error
 
-  defp reindex({:ok, document}) do
-    {:ok, _count} = BlockIndexer.reindex(document)
+  defp reindex({:ok, document}, opts) do
+    {:ok, _count} = BlockIndexer.reindex(document, opts)
     :ok
   end
 
-  defp reindex(_), do: :ok
+  defp reindex(_, _opts), do: :ok
 end
