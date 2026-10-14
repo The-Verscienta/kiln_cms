@@ -47,7 +47,7 @@ defmodule Kiln.Advisory.Context do
   """
   @spec new(map(), Body.t(), keyword()) :: t()
   def new(fields, %Body{} = body, opts \\ []) do
-    locale = opts |> Keyword.get(:locale) |> presence() || KilnCMS.I18n.default_locale()
+    locale = opts |> Keyword.get(:locale) |> presence() || default_locale()
 
     %__MODULE__{
       fields: normalize(fields),
@@ -107,6 +107,12 @@ defmodule Kiln.Advisory.Context do
   defp normalize_value(nil), do: ""
   defp normalize_value(value) when is_binary(value), do: String.trim(value)
   defp normalize_value(value), do: value
+
+  # The host's `config :kiln_cms, :i18n, default_locale:` — what
+  # `KilnCMS.I18n.default_locale/0` reads. Read here rather than called: this
+  # module ships in `kiln_plugin`, which compiles before the core (#1909).
+  defp default_locale,
+    do: :kiln_cms |> Application.get_env(:i18n, []) |> Keyword.get(:default_locale, "en")
 
   defp presence(nil), do: nil
 

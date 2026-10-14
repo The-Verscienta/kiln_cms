@@ -9,6 +9,7 @@ defmodule Kiln.Advisory.RegistryTest do
   alias Kiln.Advisory.Context
   alias Kiln.Advisory.Finding
   alias Kiln.Advisory.Registry
+  alias Kiln.Advisory.Walk
 
   defmodule PassingCheck do
     use Kiln.Advisory
@@ -157,7 +158,7 @@ defmodule Kiln.Advisory.RegistryTest do
             seo_keywords: "kiln firing",
             seo_image: "/a.jpg"
           },
-          Body.compute([
+          Walk.compute([
             %{"_type" => "heading", "text" => "H", "level" => 2},
             %{"_type" => "image", "url" => "/a.jpg", "alt" => ""}
           ])

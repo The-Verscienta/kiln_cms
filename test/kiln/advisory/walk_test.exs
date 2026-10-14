@@ -1,7 +1,8 @@
-defmodule Kiln.Advisory.BodyTest do
+defmodule Kiln.Advisory.WalkTest do
   use ExUnit.Case, async: true
 
   alias Kiln.Advisory.Body
+  alias Kiln.Advisory.Walk
   alias KilnCMS.CMS.TypedBlocks
 
   defp para(text),
@@ -12,8 +13,23 @@ defmodule Kiln.Advisory.BodyTest do
   describe "compute/1 is total" do
     test "handles nil, an empty list, and unknown blocks without raising" do
       for input <- [nil, [], [%{"_type" => "who_knows", "wat" => 1}], "not a list"] do
-        assert %Body{} = Body.compute(input)
+        assert %Body{} = Walk.compute(input)
       end
+    end
+
+    # The walk moved off `Body` when `Body` went into kiln_plugin (#1909); the
+    # deprecated delegates keep an overlay that called them working. Called
+    # through a variable so the deprecation warning doesn't fail a
+    # --warnings-as-errors build.
+    test "Body's deprecated delegates reach the walk" do
+      body = Body
+      blocks = [rich([para("One two three.")])]
+
+      assert body.compute(blocks) == Walk.compute(blocks)
+
+      typed = TypedBlocks.to_typed(blocks)
+      assert body.from_typed(typed) == Walk.from_typed(typed)
+      assert body.from_indexed([{hd(typed), 3}]) == Walk.from_indexed([{hd(typed), 3}])
     end
   end
 
@@ -23,7 +39,7 @@ defmodule Kiln.Advisory.BodyTest do
         rich([para("Alpha comes first."), para("Beta is second."), para("Gamma is last here.")])
       ]
 
-      stats = Body.compute(blocks)
+      stats = Walk.compute(blocks)
 
       assert stats.first_paragraph == "Alpha comes first."
       # Per-paragraph word counts stay in document order too — 3, 3, 4.
@@ -39,7 +55,7 @@ defmodule Kiln.Advisory.BodyTest do
 
       # Each carries the top-level index it lives in — what the editor's
       # click-to-locate scrolls to when a check names the heading.
-      assert Body.compute(blocks).headings == [
+      assert Walk.compute(blocks).headings == [
                %{level: 1, text: "Top", index: 0},
                %{level: 3, text: "Nested", index: 1},
                %{level: 2, text: "Second", index: 2}
@@ -56,7 +72,7 @@ defmodule Kiln.Advisory.BodyTest do
         %{"_type" => "image", "url" => "/c.jpg", "alt" => "   "}
       ]
 
-      stats = Body.compute(blocks)
+      stats = Walk.compute(blocks)
 
       assert stats.image_count == 3
       assert stats.images_missing_alt == [2, 3]
@@ -77,7 +93,7 @@ defmodule Kiln.Advisory.BodyTest do
         }
       ]
 
-      stats = Body.compute(blocks)
+      stats = Walk.compute(blocks)
 
       assert stats.headings == [%{level: 2, text: "In a column", index: 1}]
       assert stats.image_count == 1
@@ -110,7 +126,7 @@ defmodule Kiln.Advisory.BodyTest do
         ])
       ]
 
-      assert Body.compute(blocks).internal_link_paths == ["/guides/firing"]
+      assert Walk.compute(blocks).internal_link_paths == ["/guides/firing"]
     end
 
     test "finds links nested inside table cells" do
@@ -132,7 +148,7 @@ defmodule Kiln.Advisory.BodyTest do
         ])
       ]
 
-      assert Body.compute(blocks).internal_link_paths == ["/in/a/table"]
+      assert Walk.compute(blocks).internal_link_paths == ["/in/a/table"]
     end
   end
 
@@ -160,7 +176,7 @@ defmodule Kiln.Advisory.BodyTest do
       assert [
                %{text: "our refund policy", href: "/refunds", index: 0},
                %{text: "click here", href: "/help", index: 0}
-             ] = Body.compute(blocks).links
+             ] = Walk.compute(blocks).links
     end
 
     test "joins spans that share one annotation, and ignores other marks" do
@@ -180,7 +196,7 @@ defmodule Kiln.Advisory.BodyTest do
         ])
       ]
 
-      assert [%{text: "the annual report"}] = Body.compute(blocks).links
+      assert [%{text: "the annual report"}] = Walk.compute(blocks).links
     end
 
     test "an annotation with no matching span yields empty text, not a dropped link" do
@@ -197,7 +213,7 @@ defmodule Kiln.Advisory.BodyTest do
         ])
       ]
 
-      assert [%{text: "", href: "/x"}] = Body.compute(blocks).links
+      assert [%{text: "", href: "/x"}] = Walk.compute(blocks).links
     end
 
     test "attributes a link to its TOP-LEVEL block index" do
@@ -213,7 +229,7 @@ defmodule Kiln.Advisory.BodyTest do
         ])
       ]
 
-      assert [%{index: 1}] = Body.compute(blocks).links
+      assert [%{index: 1}] = Walk.compute(blocks).links
     end
 
     test "internal_link_paths is still derived from the same walk" do
@@ -231,7 +247,7 @@ defmodule Kiln.Advisory.BodyTest do
         ])
       ]
 
-      body = Body.compute(blocks)
+      body = Walk.compute(blocks)
       assert body.internal_link_paths == ["/internal"]
       assert length(body.links) == 2
     end
@@ -244,7 +260,7 @@ defmodule Kiln.Advisory.BodyTest do
         %{"_type" => "heading", "level" => 2, "text" => "   "}
       ]
 
-      body = Body.compute(blocks)
+      body = Walk.compute(blocks)
 
       assert body.empty_headings == [1]
       # It stays OUT of `headings`, so the level-order check isn't judging a
@@ -257,7 +273,7 @@ defmodule Kiln.Advisory.BodyTest do
         rich([%{"_type" => "block", "style" => "h2", "children" => [%{"text" => ""}]}])
       ]
 
-      assert Body.compute(blocks).empty_headings == [0]
+      assert Walk.compute(blocks).empty_headings == [0]
     end
 
     test "from_indexed/1 reports against the index each block carries" do
@@ -270,7 +286,7 @@ defmodule Kiln.Advisory.BodyTest do
         ])
 
       # Two blocks inlined from the fragment at 0, then the host's own 1 and 2.
-      body = Body.from_indexed([{inlined_a, 0}, {inlined_b, 0}, {heading, 1}, {rich, 2}])
+      body = Walk.from_indexed([{inlined_a, 0}, {inlined_b, 0}, {heading, 1}, {rich, 2}])
 
       assert body.empty_headings == [0, 2]
       assert Enum.map(body.headings, & &1.index) == [0, 1]
@@ -279,7 +295,7 @@ defmodule Kiln.Advisory.BodyTest do
     test "no empty headings on a well-formed document" do
       blocks = [%{"_type" => "heading", "level" => 2, "text" => "Fine"}]
 
-      assert Body.compute(blocks).empty_headings == []
+      assert Walk.compute(blocks).empty_headings == []
     end
   end
 

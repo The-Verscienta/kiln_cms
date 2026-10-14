@@ -105,7 +105,7 @@ defmodule KilnCMSWeb.ContentEditor.Preview do
     if digest == socket.assigns[:seo_body_digest] do
       socket
     else
-      body = Kiln.Advisory.Body.from_indexed(indexed)
+      body = Kiln.Advisory.Walk.from_indexed(indexed)
 
       socket
       |> assign(:seo_body_digest, digest)
@@ -175,7 +175,7 @@ defmodule KilnCMSWeb.ContentEditor.Preview do
   # "Precomputed" is the load-bearing word, and the reason a check must never
   # scan `body.text` itself: that puts full-document string work into every
   # validate, including the ones that only touched the title. `AllCaps` reads
-  # `Body.capitalised_runs` for exactly this reason (#495).
+  # `Kiln.Advisory.Walk`'s capitalised runs for exactly this reason (#495).
   defp refresh_seo_report(socket) do
     form = socket.assigns.form
 

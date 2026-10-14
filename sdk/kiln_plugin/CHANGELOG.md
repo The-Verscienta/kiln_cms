@@ -20,8 +20,14 @@ Releases are tagged `kiln_plugin-vX.Y.Z` in the
 - **First release (kiln_cms#1909).** The compile-time plugin contract moved
   out of the KilnCMS core into this package, under the same module names:
   `Kiln.Plugin`, `Kiln.Block` and `Kiln.Block.*`, `Kiln.FieldType`,
-  `Kiln.Tokens`, `Kiln.Forms.SpamCheck` (with its `Context`) and
-  `Kiln.ImageBackend`. Nothing about them changed; what changed is that a
+  `Kiln.Tokens`, `Kiln.Forms.SpamCheck` (with its `Context`),
+  `Kiln.ImageBackend`, and `Kiln.Advisory` with its `Finding`, `Context` and
+  `Body` structs. Nothing about them changed; what changed is that a
   plugin can now depend on them without depending on the core, so it can
   ship as a Hex, git or `path:` dependency. The first KilnCMS release after
-  1.3.0 is the first core that builds against it.
+  1.3.0 is the first core that builds against it. One part of
+  `Kiln.Advisory.Body` did not come along: the block walk (`compute`,
+  `from_typed`, `from_indexed`) matches the core's block types, so it stays
+  in the core as `Kiln.Advisory.Walk`. `Body` keeps the three as deprecated
+  delegates, which work only inside a KilnCMS build. A check never called
+  them; it only reads the body the core hands it.

@@ -34,6 +34,7 @@ defmodule KilnCMS.Seo.Analyzer do
   alias Kiln.Advisory.Context
   alias Kiln.Advisory.Registry
   alias Kiln.Advisory.Report
+  alias Kiln.Advisory.Walk
 
   @type grade :: Report.grade()
   @type report :: Report.t()
@@ -77,7 +78,7 @@ defmodule KilnCMS.Seo.Analyzer do
   @doc "Analyze with body facts derived from `blocks` in one call."
   @spec analyze_blocks(map(), term(), keyword()) :: report()
   def analyze_blocks(fields, blocks, opts \\ []),
-    do: analyze(fields, Body.compute(blocks), opts)
+    do: analyze(fields, Walk.compute(blocks), opts)
 
   @doc "An empty report — for call sites that need the shape before any analysis."
   @spec empty() :: report()

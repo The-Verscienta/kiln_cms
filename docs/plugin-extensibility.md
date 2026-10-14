@@ -93,19 +93,19 @@ what it contributes:
 
 | Shape | How it's installed | What it can contribute |
 |---|---|---|
-| **Mix dependency** — Hex, `git:` or `path:` | Depends on [`kiln_plugin`](https://github.com/The-Verscienta/kiln_cms/blob/main/sdk/kiln_plugin/README.md), the package the plugin contract ships in (#1909); the site adds it to the core's `mix.exs` | Blocks, field types (no colocated client hooks), spam checks, image backends, nav items, supervision children, Oban queues; routes only to a LiveView that doesn't `use KilnCMSWeb` |
-| **`projects/<name>/` overlay** | Vendored into the overlay and compiled inside the core | Everything above, plus content types (`KilnCMS.CMS.Content`), Ash domains, advisory checks, and LiveViews built on `KilnCMSWeb` |
+| **Mix dependency** — Hex, `git:` or `path:` | Depends on [`kiln_plugin`](https://github.com/The-Verscienta/kiln_cms/blob/main/sdk/kiln_plugin/README.md), the package the plugin contract ships in (#1909); the site adds it to the core's `mix.exs` | Blocks, field types (no colocated client hooks), spam checks, advisory checks, image backends, nav items, supervision children, Oban queues; routes only to a LiveView that doesn't `use KilnCMSWeb` |
+| **`projects/<name>/` overlay** | Vendored into the overlay and compiled inside the core | Everything above, plus content types (`KilnCMS.CMS.Content`), Ash domains, and LiveViews built on `KilnCMSWeb` |
 
 A dependency compiles before the core and sees only its own dependencies, so
 it can build on `kiln_plugin` but not on anything that lives in the core.
 That is the whole split: a plugin that needs the core's repo, domains,
-policies, web layer or advisory context is an overlay.
+policies or web layer is an overlay.
 
 1. **Add it** — as a dependency: `{:kiln_ratings, "~> 1.0"}` (Hex) or a
    `git:`/`path:` dep, in the core's `mix.exs`. **This edits the pinned
    core**, and `mix kiln.update` refuses a locally patched pin, so an update
    means reapplying the line; an overlay-level dependency hook is still open
-   in #1909. As an overlay: copy, `git subtree` or `git submodule` the
+   in #1967. As an overlay: copy, `git subtree` or `git submodule` the
    plugin's repository into `projects/<name>/` in your overlay, pinned to a
    tag.
 2. **Register it** — one line: `config :kiln_cms, :plugins, [Ratings.Plugin]`
@@ -122,8 +122,9 @@ policies, web layer or advisory context is an overlay.
 The `mix kiln.gen.plugin <Name>` scaffold produces a distribution-shaped
 skeleton in `projects/<name>/`; an overlay plugin is that directory, filled in
 and published as its own git repository. A dependency plugin is an ordinary
-Mix project depending on `kiln_plugin`; `sdk/fixtures/dep_plugin` is a worked,
-CI-compiled example.
+Mix project depending on `kiln_plugin`: `mix kiln.gen.plugin <Name> --dep`
+scaffolds one at `../<name>` (or `--path`), and `sdk/fixtures/dep_plugin` is
+a worked, CI-compiled example.
 
 ### 2b. Catalog metadata (the "registry")
 

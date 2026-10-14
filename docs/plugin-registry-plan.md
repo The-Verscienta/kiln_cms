@@ -17,14 +17,14 @@ publisher pattern that already runs against kilncms.dev.
 > below means what it says. Two limits shape the data model:
 >
 > - **Not every plugin can be a dependency.** Blocks, field types, spam
->   checks, image backends, nav items, children and queues can; content types
->   (`KilnCMS.CMS.Content`), domains, advisory checks and `KilnCMSWeb`
+>   checks, advisory checks, image backends, nav items, children and queues
+>   can; content types (`KilnCMS.CMS.Content`), domains and `KilnCMSWeb`
 >   LiveViews need the core and stay `projects/<name>/` overlays. A listing
 >   therefore also needs a `shape` (`dependency` | `overlay`): an overlay's
 >   coordinates are a git repository and a tag/SHA, and "install" means
 >   vendoring it into `projects/`.
 > - **"Add the dep" edits the pinned core's `mix.exs`** until an overlay-level
->   dependency hook exists (still open in #1909), which `mix kiln.update`
+>   dependency hook exists (still open in #1967), which `mix kiln.update`
 >   refuses on update.
 >
 > The verification pipeline (§5) should also record the plugin's

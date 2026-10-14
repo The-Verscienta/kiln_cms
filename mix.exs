@@ -197,7 +197,11 @@ defmodule KilnCMS.MixProject do
         # Mix's recompile hook (`@doc false`, it is Mix's API rather than the
         # module's), named by docs/plugin-system-plan.md for how a dependency
         # plugin's edit reaches the compile-time registries (#1909).
-        "Kiln.Plugins.__mix_recompile__?/0"
+        "Kiln.Plugins.__mix_recompile__?/0",
+        # CHANGELOG history (1.0.0) naming the body walk before it moved to
+        # `Kiln.Advisory.Walk`, when `Kiln.Advisory.Body` went into the
+        # `kiln_plugin` SDK (#1909).
+        "Kiln.Advisory.Body.from_indexed/1"
       ],
       extras: extras(),
       # The committed API specs (`mix kiln.api.specs`) ship with the docs build,

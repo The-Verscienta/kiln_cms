@@ -62,6 +62,22 @@ carries the reasoning.
   the core's reference 404.
   ([#1909](https://github.com/The-Verscienta/kiln_cms/issues/1909))
 
+<a id="plugin-sdk-advisories"></a>
+
+- **Advisory checks can ship in a dependency plugin, and `mix kiln.gen.plugin
+  --dep` scaffolds one.** `Kiln.Advisory` and its `Finding`, `Context` and
+  `Body` structs moved into `kiln_plugin`, under the same names, so a check
+  that matches `%Kiln.Advisory.Context{}` compiles without the core. The
+  block walk that fills a `Body` matches the core's block types, so it stays
+  in the core as `Kiln.Advisory.Walk` (`compute/1`, `from_typed/1`,
+  `from_indexed/1`); the same functions on `Body` still work, deprecated.
+  `mix kiln.gen.plugin <Name> --dep` writes a standalone Mix project that
+  depends only on `kiln_plugin` to `../<name>` (or `--path`), with
+  `--block`/`--field` samples, its own config, formatter and a test, and
+  changes nothing in the core checkout. The fixture dependency plugin gains an
+  advisory check the suite runs against a core-built context.
+  ([#1909](https://github.com/The-Verscienta/kiln_cms/issues/1909))
+
 <a id="image-backends"></a>
 
 - **A plugin can contribute an image backend (`Kiln.ImageBackend`) — an

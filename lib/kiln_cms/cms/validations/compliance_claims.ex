@@ -51,6 +51,7 @@ defmodule KilnCMS.CMS.Validations.ComplianceClaims do
   use Ash.Resource.Validation
 
   alias Kiln.Advisory.Body
+  alias Kiln.Advisory.Walk
   alias KilnCMS.Compliance
   alias KilnCMS.Compliance.Settings
 
@@ -154,7 +155,7 @@ defmodule KilnCMS.CMS.Validations.ComplianceClaims do
         end
       end)
 
-    [Body.compute(blocks).text | fields]
+    [Walk.compute(blocks).text | fields]
   end
 
   defp value(changeset, :new, field), do: Ash.Changeset.get_attribute(changeset, field)

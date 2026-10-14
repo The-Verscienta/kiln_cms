@@ -67,16 +67,14 @@ defmodule Kiln.Plugin do
   dependencies loaded, so what a dependency plugin can contribute is what it
   can build from this package alone:
 
-    * blocks, field types, spam checks and image backends;
+    * blocks, field types, spam checks, advisory checks and image backends;
     * nav items, supervision children and Oban queues;
     * routes, but only to a LiveView that depends on `phoenix_live_view`
       directly — one that does `use KilnCMSWeb, :live_view` needs the core.
 
   A plugin that defines content types (`use KilnCMS.CMS.Content`) or Ash
-  domains, contributes advisory checks (`Kiln.Advisory` stays in the core,
-  with the context its checks match on), uses `KilnCMSWeb`, or gives a field
-  type a colocated client hook has to be a `projects/<name>/` overlay, which
-  is compiled inside the core. A dependency plugin also needs a line in the
+  domains, uses `KilnCMSWeb`, or gives a field type a colocated client hook
+  has to be a `projects/<name>/` overlay, which is compiled inside the core. A dependency plugin also needs a line in the
   core's `mix.exs`, which edits the pinned core; see
   `docs/plugin-extensibility.md`.
   """

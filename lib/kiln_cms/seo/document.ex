@@ -9,6 +9,7 @@ defmodule KilnCMS.Seo.Document do
   """
 
   alias Kiln.Advisory.Body
+  alias Kiln.Advisory.Walk
 
   @type t :: %__MODULE__{
           title: String.t(),
@@ -106,7 +107,7 @@ defmodule KilnCMS.Seo.Document do
   defp body_stats(nil, body_text), do: %Body{text: string(body_text)}
 
   defp body_stats(blocks, body_text) do
-    case Body.compute(blocks) do
+    case Walk.compute(blocks) do
       %Body{text: ""} = stats -> %{stats | text: string(body_text)}
       stats -> stats
     end

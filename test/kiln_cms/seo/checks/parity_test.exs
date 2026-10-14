@@ -11,17 +11,18 @@ defmodule KilnCMS.Seo.Checks.ParityTest do
 
   alias Kiln.Advisory.Body
   alias Kiln.Advisory.Context
+  alias Kiln.Advisory.Walk
   alias KilnCMS.Seo.Checks.Keyphrase
   alias KilnCMS.Seo.Checks.PassiveVoice
   alias KilnCMS.Seo.Checks.PixelWidth
 
-  # Through `Body.compute/1` rather than a hand-built `%Body{}`, for the same
+  # Through `Walk.compute/1` rather than a hand-built `%Body{}`, for the same
   # reason `AllCapsTest` does: the facts these checks read are produced by the
   # walk, and a test that set them by hand would pass with the walk deleted.
   defp context(fields, blocks \\ []) do
     {locale, fields} = Map.pop(fields, :locale, "en")
 
-    Context.new(Map.merge(%{title: "T", slug: "t"}, fields), Body.compute(blocks), locale: locale)
+    Context.new(Map.merge(%{title: "T", slug: "t"}, fields), Walk.compute(blocks), locale: locale)
   end
 
   defp paragraph(text) do

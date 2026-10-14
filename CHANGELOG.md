@@ -71,6 +71,10 @@ Every summary line below that was shortened links to its own entry there.
   moved, under the same module names, into its own package, `kiln_plugin`.**
   ([long form](docs/changelog/unreleased.md#plugin-sdk))
 
+- **Advisory checks can ship in a dependency plugin, and `mix kiln.gen.plugin
+  --dep` scaffolds one.**
+  ([long form](docs/changelog/unreleased.md#plugin-sdk-advisories))
+
 - **A plugin can contribute an image backend (`Kiln.ImageBackend`) — an
   external service such as Cloudflare Images that takes new image uploads and
   renders their variants and transforms from URLs.**

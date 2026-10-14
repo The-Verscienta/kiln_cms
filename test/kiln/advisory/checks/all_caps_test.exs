@@ -11,8 +11,9 @@ defmodule Kiln.Advisory.Checks.AllCapsTest do
   alias Kiln.Advisory.Body
   alias Kiln.Advisory.Checks.AllCaps
   alias Kiln.Advisory.Context
+  alias Kiln.Advisory.Walk
 
-  # Through `Body.compute/1`, not a hand-built `%Body{}`: the run detection
+  # Through `Walk.compute/1`, not a hand-built `%Body{}`: the run detection
   # lives in the walk (so the editor memoizes it), and a test that set
   # `capitalised_runs` by hand would pass with the detection deleted.
   defp check(text) do
@@ -25,14 +26,14 @@ defmodule Kiln.Advisory.Checks.AllCapsTest do
       }
     ]
 
-    AllCaps.check(%Context{body: Body.compute(blocks)})
+    AllCaps.check(%Context{body: Walk.compute(blocks)})
   end
 
   defp flagged?(text), do: match?(%{code: :all_caps_run}, check(text))
 
   test "an empty body has nothing to judge" do
     assert AllCaps.check(%Context{body: %Body{}}) == :n_a
-    assert Body.compute([]) |> then(&AllCaps.check(%Context{body: &1})) == :n_a
+    assert Walk.compute([]) |> then(&AllCaps.check(%Context{body: &1})) == :n_a
   end
 
   describe "stays quiet about" do
@@ -63,7 +64,7 @@ defmodule Kiln.Advisory.Checks.AllCapsTest do
         %{"_type" => "heading", "level" => 2, "text" => "RETURNS POLICY"}
       ]
 
-      refute match?(%{code: :all_caps_run}, AllCaps.check(%Context{body: Body.compute(blocks)}))
+      refute match?(%{code: :all_caps_run}, AllCaps.check(%Context{body: Walk.compute(blocks)}))
     end
 
     test "a single short shouted phrase in a long document" do

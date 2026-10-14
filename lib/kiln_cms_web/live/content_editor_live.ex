@@ -5330,11 +5330,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # the page — but no other block's prose does, so a fifty-block page ships one
   # block, not fifty.
   #
-  # `BlockText.to_text/1` over the single block, not `Body.compute/1`: that
+  # `BlockText.to_text/1` over the single block, not `Walk.compute/1`: that
   # computes twelve facts (syllables, sentences, link paths, alt-text gaps) and
   # keeps one, and it runs synchronously in the LiveView process before
   # `start_async` — i.e. it blocks the author's own keystrokes. `:text` is
-  # literally `BlockText.to_text/1` (see `Kiln.Advisory.Body.from_typed/1`), so
+  # literally `BlockText.to_text/1` (see `Kiln.Advisory.Walk.from_typed/1`), so
   # the output is identical.
   defp assist_request(socket, block_id) do
     form = socket.assigns.form

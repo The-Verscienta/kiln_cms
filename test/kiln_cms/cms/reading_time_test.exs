@@ -163,7 +163,7 @@ defmodule KilnCMS.CMS.ReadingTimeTest do
       typed = KilnCMS.CMS.TypedBlocks.to_typed(blocks)
 
       assert KilnCMS.CMS.BlockText.word_count(blocks) == 4
-      assert Kiln.Advisory.Body.from_typed(typed).word_count == 4
+      assert Kiln.Advisory.Walk.from_typed(typed).word_count == 4
     end
 
     # The `reading_time` computed-field function used its own 200 wpm and

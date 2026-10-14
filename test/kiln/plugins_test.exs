@@ -211,6 +211,27 @@ defmodule Kiln.PluginsTest do
       assert %{"_type" => "dep_badge", "label" => "New"} = Blocks.render(block, :json)
       assert Blocks.search_text(block) == "New"
     end
+
+    test "its advisory check runs against a context the core built" do
+      check = KilnDepFixture.Advisories.MissingSummary
+      body = Kiln.Advisory.Walk.compute([%{"_type" => "heading", "level" => 2, "text" => "Hi"}])
+
+      assert [{^check, %Kiln.Advisory.Finding{code: :dep_missing_summary, field: :summary}}] =
+               Kiln.Advisory.Registry.run(Kiln.Advisory.Context.new(%{summary: nil}, body), [
+                 check
+               ])
+
+      assert [{^check, :ok}] =
+               Kiln.Advisory.Registry.run(Kiln.Advisory.Context.new(%{summary: "S"}, body), [
+                 check
+               ])
+
+      assert [{^check, :n_a}] =
+               Kiln.Advisory.Registry.run(
+                 Kiln.Advisory.Context.new(%{}, Kiln.Advisory.Walk.compute([])),
+                 [check]
+               )
+    end
   end
 
   describe "the recompile digest (Kiln.Plugins.__mix_recompile__?/0)" do

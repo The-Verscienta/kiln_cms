@@ -51,6 +51,7 @@ defmodule KilnCMS.Compliance.Report do
   require Ash.Query
 
   alias Kiln.Advisory.Body
+  alias Kiln.Advisory.Walk
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Compliance
   alias KilnCMS.Compliance.Settings
@@ -158,7 +159,7 @@ defmodule KilnCMS.Compliance.Report do
         end
       end)
 
-    [Body.compute(Map.get(record, :blocks)).text | fields]
+    [Walk.compute(Map.get(record, :blocks)).text | fields]
   end
 
   # Compiled types and dynamic entries both, mirroring

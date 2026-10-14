@@ -61,17 +61,17 @@ exactly what the project plan called for.
 > The second extracted the compile-time contract into its own package,
 > [`kiln_plugin`](https://github.com/The-Verscienta/kiln_cms/blob/main/sdk/kiln_plugin/README.md): `Kiln.Plugin`, `Kiln.Block`
 > and `Kiln.Block.*`, `Kiln.FieldType`, `Kiln.Tokens`,
-> `Kiln.Forms.SpamCheck` and `Kiln.ImageBackend`, under the same names. The
+> `Kiln.Forms.SpamCheck`, `Kiln.ImageBackend` and `Kiln.Advisory` (with its
+> `Finding`, `Context` and `Body` structs), under the same names. The
 > core depends on it as a `path:` dependency (`override: true`), so overlays
 > see no change, and a plugin that depends on it can be a Hex, git or path
 > dependency. What such a plugin can contribute is bounded by what it can
 > build from that package alone: blocks, field types (without colocated
-> hooks), spam checks, image backends, nav items, children and queues.
-> Content types (`KilnCMS.CMS.Content`), domains, advisory checks
-> (`Kiln.Advisory`'s context is computed by the core) and LiveViews on
+> hooks), spam checks, advisory checks, image backends, nav items, children
+> and queues. Content types (`KilnCMS.CMS.Content`), domains and LiveViews on
 > `KilnCMSWeb` still need the core, so those plugins stay `projects/`
 > overlays. A dependency plugin is still added to the core's `mix.exs`, which
-> edits the pin; an overlay-level hook for that is open in #1909.
+> edits the pin; an overlay-level hook for that is open in #1967.
 >
 > The SDK versions separately from the core (`kiln_plugin-vX.Y.Z` tags). It
 > is under the same 1.x contract (minors add; a major only with a core

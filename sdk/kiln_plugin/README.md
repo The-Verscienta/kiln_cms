@@ -10,6 +10,7 @@ the behaviours and macros a plugin `use`s.
 | `Kiln.FieldType` (+ `Kiln.Tokens`) | A custom-field value type admins can pick |
 | `Kiln.Forms.SpamCheck` (+ `Kiln.Forms.SpamCheck.Context`) | A heuristic run on every public form submission |
 | `Kiln.ImageBackend` | An external image service new uploads can go to |
+| `Kiln.Advisory` (+ `Finding`, `Context`, `Body`) | An editorial check shown in the content editor's advice panels |
 
 These modules used to live inside the KilnCMS core, which made it impossible
 to compile a plugin as a Mix dependency: Mix compiles a dependency before the
@@ -18,6 +19,9 @@ not loaded" (kiln_cms#1909). The core now builds against this package, under
 the same module names, so a `projects/` overlay sees no difference.
 
 ## Installation
+
+To start a new plugin, run `mix kiln.gen.plugin <Name> --dep` in a KilnCMS
+checkout. It writes a standalone Mix project to `../<name>`, set up as below.
 
 In the plugin's own `mix.exs`:
 
@@ -55,7 +59,7 @@ Then, in the site, the plugin is a dependency of the KilnCMS project and one
 config line activates it. The dependency line goes in the core's own
 `mix.exs`, which edits the pinned core: `mix kiln.update` refuses a locally
 patched pin, so for now an update means reapplying that line. A
-dependency-list hook for overlays is tracked in kiln_cms#1909.
+dependency-list hook for overlays is tracked in kiln_cms#1967.
 
 ```elixir
 # the KilnCMS mix.exs
@@ -80,7 +84,7 @@ has to be a `projects/<name>/` overlay, which is compiled *inside* the core.
 | Nav items, supervision children, Oban queues | Yes |
 | Admin, editor and public routes | Only for a LiveView that depends on `phoenix_live_view` directly; one that does `use KilnCMSWeb, :live_view` or renders `Layouts.app` needs the core, so it stays an overlay |
 | Content types (`use KilnCMS.CMS.Content`), Ash domains (`domains/0`) | No: they need the core's repo, domains and policies. Overlay only |
-| Advisory checks (`advisories/0`, `Kiln.Advisory`) | No: a check matches `%Kiln.Advisory.Context{}`, whose body is computed by the core. Overlay only, for now |
+| Advisory checks (`advisories/0`, `Kiln.Advisory`) | Yes. The core walks the blocks and fills `%Kiln.Advisory.Body{}`; a check only reads it |
 
 ## Versioning
 
