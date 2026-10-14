@@ -309,7 +309,7 @@ defmodule KilnCMS.Organize.Tagging do
         case BlockIndexer.embedding_inputs(record) do
           # Nothing to embed: no centroid, so it stops there too.
           [] -> 0
-          inputs -> Enum.count(inputs, &(not VectorCache.raw_cached?(&1))) + tag_cost
+          inputs -> Enum.count(inputs, &(not VectorCache.cached?(&1))) + tag_cost
         end
     end
   end

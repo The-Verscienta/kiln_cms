@@ -174,6 +174,7 @@ slug exists in more than one type) and `locale`; a `junk` row expects nothing
 mix kiln.search.measure_floor golden.json          # every content type
 mix kiln.search.measure_floor golden.json --type recipe --limit 50
 mix kiln.search.measure_floor golden.json --org acme --locale fr
+mix kiln.search.measure_floor golden.json --exact  # exact neighbours (see "Measurement runs")
 ```
 
 It measures each query through **the semantic leg hybrid search runs** — the
@@ -349,10 +350,51 @@ Two things follow:
 - **Recall is good, not guaranteed.** At the scan-tuple ceiling the answer is
   still a short list. Nothing downstream may claim exhaustiveness — near-
   duplicate detection reads as if it does, and it does not.
-- **If searches feel lossy on a large corpus**, raise `hnsw.ef_search` (per
-  connection or per transaction) before reaching for a bigger index; it widens
-  each batch. `hnsw.scan_mem_multiplier` is the other knob, and buys iterative
-  scans more working memory.
+- **If searches feel lossy on a large corpus**, raise `hnsw.ef_search` before
+  reaching for a bigger index; it widens each batch. `KILN_HNSW_EF_SEARCH`
+  (or `config :kiln_cms, KilnCMS.Repo, vector_scan: [ef_search: N]`) sets it on
+  every connection. `hnsw.scan_mem_multiplier` is the other knob, and buys
+  iterative scans more working memory.
+
+### Measurement runs
+
+A recall@k or MRR number taken at the default `ef_search` (40) carries the
+index's own approximation: the semantic legs can miss a row nearer than the
+ones they return, so a before/after comparison moves for reasons the change
+did not cause. **Measurement runs use ef_search 200 or exact search.**
+`KilnCMS.Search.VectorScan` holds both; each is one extra `SET` per connection,
+and unset sends exactly the one `SET` above.
+
+| | the app (a replica) | `mix kiln.search.eval` / `mix kiln.search.measure_floor` |
+|---|---|---|
+| ef_search 200 | `KILN_HNSW_EF_SEARCH=200` | `--ef-search 200` |
+| exact | `KILN_VECTOR_SEARCH_EXACT=true` | `--exact` |
+
+- **Exact** is `SET enable_indexscan = off`. An HNSW index serves a query only
+  as an ordered index scan — it has no bitmap scan — so this removes it from
+  every plan, and the query becomes a sequential scan sorted by true distance.
+  `enable_bitmapscan` stays on, which keeps every btree index usable for
+  filters and lookups. It is still connection-wide: nothing gets an ordered
+  btree walk any more (`ORDER BY … LIMIT` on an indexed column reads and sorts
+  every match, Oban's fetch included), and every vector query reads its whole
+  filtered set. Right for a replica, wrong for traffic.
+- **ef_search 200** stays approximate, but close: a wider beam makes a miss
+  much less likely, not impossible. It also measures what a deployment would
+  actually serve if it raised `ef_search`, which exact does not.
+- Setting both is refused — at boot and by the tasks — rather than one winning
+  silently: a run would otherwise be labelled with a setting it was not
+  measured under.
+- **The tasks print the mode in effect**, read back from the database
+  connection rather than from config, in the report header (and as `scan` in
+  `--json`), and warn below ef_search 200. A flag that cannot reach the pool is
+  refused rather than reported. A `--url` run measures someone else's
+  connections: the header says the scan mode is the server's, and the env vars
+  on that deployment are the way to set it (combining `--url` with a flag is
+  refused).
+- Unusable values (`KILN_HNSW_EF_SEARCH=2000`, `=abc`) **refuse to boot**
+  instead of warning and keeping the default — the one exception to the rule
+  in [environment-variables.md](environment-variables.md#boolean-variables),
+  because a silent fallback to 40 is exactly the contamination being excluded.
 
 ### The cost, and the knob that caps it
 
@@ -402,7 +444,11 @@ family needs:
   (MiniLM / e5). Must match the model's training.
 - **`query_prefix` / `document_prefix`** — instruction prefixes prepended
   before embedding (`Search.embed_query/1` / `embed_document/1`). Default
-  `""`; e5 needs `"query: "` / `"passage: "`.
+  `""`; e5 needs `"query: "` / `"passage: "`. Every content-side vector takes
+  `document_prefix` — document, tag name, and block (as
+  `document_prefix <> title <> "\n\n" <> block text`, the context line after
+  the prefix) — and every query takes `query_prefix`, including the block
+  leg's and `BlockSearch`'s (#1939).
 - **`model` / `dim`** — the HF id and its vector width. `dim` is read at
   **compile time** by `KilnCMS.Search.Vector`, so it defines the
   `vector(N)` column type.
@@ -424,6 +470,23 @@ config :kiln_cms, KilnCMS.Search,
 Then `mix kiln.embed_all` (now covers Page, Post, **and** dynamic entries) —
 old English embeddings are meaningless under the new model, so every record
 must be recomputed.
+
+### Re-embedding after a swap: documents, tags **and blocks**
+
+`mix kiln.embed_all` re-embeds document vectors and tag names. It does not
+touch **block** vectors (`block_embeddings`, the block leg): those are written
+only by firing, so they are re-indexed by a firing sweep —
+`mix kiln.refire_all`, or `bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"` on a
+release. A swap needs both.
+
+A block is re-embedded only when its `content_hash` changes. That hash covers
+the block text, its ancestor context and, when set, `document_prefix`, so a
+swap that changes `document_prefix` (any e5 model) re-embeds every block on
+the sweep. A swap that keeps the prefixes (bge-small → MiniLM above) leaves
+the hashes equal, and the sweep skips every block as unchanged — clear the
+block rows first (`DELETE FROM block_embeddings`) so the sweep rebuilds them.
+Changing only `query_prefix` needs no re-embed: queries are embedded when
+they are asked.
 
 ### Higher quality: a different-dimension model (needs a migration)
 

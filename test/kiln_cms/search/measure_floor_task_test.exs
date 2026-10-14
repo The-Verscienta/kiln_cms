@@ -91,6 +91,9 @@ defmodule KilnCMS.Search.MeasureFloorTaskTest do
     assert output =~ ~s|"nothing like this exists"  [junk]  → expects nothing|
     assert output =~ ~r/nearest\s+page\s+(#{alpha.slug}|#{beta.slug})\s+\d\.\d{4}/
     assert output =~ "configured floor: 0.0 (ignored here)"
+    # The scan mode the neighbours were measured under, from the connection.
+    assert output =~ "vector scan: approximate HNSW, hnsw.ef_search = 40 (pgvector default)"
+    assert output =~ "WARNING: approximate vector recall (ef_search 40)"
     # The bands come out per class as well as overall.
     assert output =~ ~r/single_entity\s+0\.0000 – 0\.0000\s+\(n=1\)/
 
@@ -365,6 +368,45 @@ defmodule KilnCMS.Search.MeasureFloorTaskTest do
 
     assert_raise Mix.Error, ~r/Semantic search is disabled/, fn ->
       MeasureFloor.run([set])
+    end
+  end
+
+  describe "--ef-search / --exact" do
+    setup do
+      repo_config = Application.get_env(:kiln_cms, KilnCMS.Repo)
+      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Repo, repo_config) end)
+      :ok
+    end
+
+    @tag :tmp_dir
+    test "reports exact mode when the connection is in it", %{tmp_dir: dir} do
+      admin = admin()
+      alpha = published_page(admin, %{title: "Alpha", slug: slug()})
+      KilnCMS.DataCase.drain_oban()
+      set = golden(dir, [expects("Alpha", alpha.slug, "single_entity")])
+
+      # Stands in for the pool's `after_connect` on the sandboxed connection.
+      KilnCMS.Repo.query!("SET enable_indexscan = off", [])
+
+      output = capture_io(fn -> MeasureFloor.run([set, "--type", "page", "--exact"]) end)
+
+      assert output =~ "vector scan: exact (enable_indexscan = off"
+      refute output =~ "WARNING"
+      # Exact neighbours are still the right neighbours.
+      assert output =~ ~r/expected\s+page\s+#{alpha.slug}\s+0\.0000\s+\(rank 1 of its type\)/
+    end
+
+    @tag :tmp_dir
+    test "refuses a flag that did not take, and an unusable one", %{tmp_dir: dir} do
+      set = golden(dir, [junk("nothing")])
+
+      assert_raise Mix.Error, ~r/did not reach the connection pool/, fn ->
+        MeasureFloor.run([set, "--ef-search", "200"])
+      end
+
+      assert_raise Mix.Error, ~r/must be an integer in 1\.\.1000/, fn ->
+        MeasureFloor.run([set, "--ef-search", "1001"])
+      end
     end
   end
 end
