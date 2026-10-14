@@ -345,8 +345,8 @@ defmodule Kiln.PluginsTest do
     # #1909: the core overrides `kiln_plugin` so a plugin's Hex requirement
     # converges on the bundled copy, and Mix then checks no requirement on it.
     test "reads each dependency's kiln_plugin requirement from the resolved graph" do
-      # The real one: sdk/fixtures/dep_plugin/mix.exs declares "~> 1.0".
-      assert {:kiln_dep_fixture, "~> 1.0"} in Mix.Tasks.Kiln.Plugins.Doctor.sdk_requirements(
+      # The real one: sdk/fixtures/dep_plugin/mix.exs declares "~> 1.1".
+      assert {:kiln_dep_fixture, "~> 1.1"} in Mix.Tasks.Kiln.Plugins.Doctor.sdk_requirements(
                Mix.Tasks.Kiln.Plugins.Doctor.declared_deps()
              )
 
