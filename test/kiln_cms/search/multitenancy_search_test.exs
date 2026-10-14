@@ -61,6 +61,33 @@ defmodule KilnCMS.Search.MultitenancySearchTest do
       refute ctx.pa.id in b_ids
     end
 
+    test "the IDF-coverage corpus is the tenant's own published pages (#1936)", ctx do
+      # In org A the query's second word is rare (one page of five carries
+      # it); org B publishes it on ten pages. Counted across orgs, B's pages
+      # would make it common and A's rare-word page's coverage collapse; scoped
+      # to A, the page covers most of the query's IDF mass.
+      rare = page(ctx.a, "zyxw")
+      for _ <- 1..3, do: page(ctx.a, "common")
+      for _ <- 1..10, do: page(ctx.b, "zyxw")
+
+      coverage = fn tenant, ids ->
+        KilnCMS.Search.IdfCoverage.coverages(KilnCMS.CMS.Page, "common zyxw", "en", ids,
+          tenant: tenant,
+          authorize?: false
+        )
+      end
+
+      # N = 5 in A (the setup's page included): common df 3, zyxw df 1 —
+      # ≈ 0.72. Across both orgs (N = 15, zyxw df 11) it would be ≈ 0.18.
+      idf = fn n, df -> :math.log(1 + (n - df + 0.5) / (df + 0.5)) end
+      expected = idf.(5, 1) / (idf.(5, 1) + idf.(5, 3))
+
+      assert_in_delta coverage.(ctx.a, [rare.id])[rare.id], expected, 1.0e-9
+
+      # Another org's row is not a hit A's search can be asked about.
+      assert coverage.(ctx.a, [ctx.pb.id]) == %{}
+    end
+
     test "a tenant-less search spans both orgs (global? true)", ctx do
       ids =
         ctx.term |> Search.global(authorize?: false) |> Map.fetch!(:pages) |> Enum.map(& &1.id)

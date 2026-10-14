@@ -60,9 +60,9 @@ Every summary line below that was shortened links to its own entry there.
   first `COPY sdk/kiln_plugin sdk/kiln_plugin`; the core's own Dockerfile does.**
   ([long form](docs/changelog/unreleased.md#plugin-sdk-docker))
 
-- **Changing `document_prefix` (as an e5 model swap does) now needs a firing
-  sweep (`mix kiln.refire_all`) to re-embed block vectors, as well as
-  `mix kiln.embed_all` for documents and tags.**
+- **Changing `document_prefix` (as an e5 model swap does) now needs block
+  vectors re-embedded too: `mix kiln.embed_all --blocks`, or a firing sweep
+  (`mix kiln.refire_all`), as well as documents and tags.**
   ([long form](docs/changelog/unreleased.md#block-embedding-prefixes-upgrade))
 
 ### Added
@@ -85,6 +85,14 @@ Every summary line below that was shortened links to its own entry there.
   `rerank_sequence_length`) and how it meets the fused order (`rerank_mode`,
   `SEARCH_RERANK_MODE`) are configurable; the defaults are unchanged.**
   ([long form](docs/changelog/unreleased.md#rerank-shape-and-mode))
+
+- **Hybrid search's relevance floor can judge the any-term (OR) keyword leg's
+  hits too, and the floor is a runtime setting.**
+  ([long form](docs/changelog/unreleased.md#search-floor-legs))
+
+- **`mix kiln.embed_all --blocks` re-embeds the block index too, so a model,
+  pooling or `document_prefix` change reaches every block vector.**
+  ([long form](docs/changelog/unreleased.md#embed-all-blocks))
 
 - **Search measurement runs can scan vectors at `ef_search` 200 or exactly
   (`KILN_HNSW_EF_SEARCH`, `KILN_VECTOR_SEARCH_EXACT`, `--ef-search`, `--exact`),

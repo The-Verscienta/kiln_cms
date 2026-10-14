@@ -246,6 +246,115 @@ defmodule KilnCMS.Config.EnvTest do
     end
   end
 
+  describe "float_in/4" do
+    # `SEARCH_SEMANTIC_MAX_DISTANCE` and `SEARCH_KEYWORD_ANY_IDF_COVERAGE`
+    # (#1936). Zero is a value for the first — the model-swap window — and a
+    # typo for the second.
+
+    test "a number in range is returned as a float, trimmed" do
+      for {value, parsed} <- [
+            {"0.35", 0.35},
+            {" 0.35 ", 0.35},
+            {"0", 0.0},
+            {"2", 2.0},
+            {"1e-1", 0.1}
+          ] do
+        put(value)
+        assert Env.float_in(@var, 0.0, 2.0) == {:ok, parsed}, "#{inspect(value)}"
+      end
+    end
+
+    test "0.0 is legal where the minimum allows it" do
+      put("0.0")
+      assert Env.float_in(@var, 0.0, 2.0) == {:ok, 0.0}
+    end
+
+    test "unset, blank and whitespace-only are :unset" do
+      for value <- [nil, "", " ", "\t\n"] do
+        put(value)
+        assert Env.float_in(@var, 0.0, 2.0) == :unset, "#{inspect(value)} should be unset"
+      end
+    end
+
+    test "out of range, an excluded minimum, or a partly-numeric value is refused" do
+      for {value, opts} <- [
+            {"3.5", []},
+            {"-0.1", []},
+            {"0.35 cosine", []},
+            {"none", []},
+            {"0", [exclusive_min: true]},
+            {"1.01", [exclusive_min: true]}
+          ] do
+        put(value)
+        max = if opts == [], do: 2.0, else: 1.0
+
+        assert quietly(fn -> Env.float_in(@var, 0.0, max, opts) end) == :unrecognized,
+               "#{inspect(value)} should be refused"
+      end
+    end
+
+    test "a refused value warns with the bounds and is recorded" do
+      Env.take_collected()
+      put("3.5")
+
+      stderr =
+        capture_io(:stderr, fn -> assert Env.float_in(@var, 0.0, 2.0) == :unrecognized end)
+
+      assert stderr =~ ~s("3.5")
+      assert stderr =~ "Use a number from 0.0 to 2.0."
+      assert Env.collected() == [{@var, "3.5", {:float_in, 0.0, 2.0, false}}]
+
+      put("0")
+
+      assert capture_io(:stderr, fn -> Env.float_in(@var, 0.0, 1.0, exclusive_min: true) end) =~
+               "Use a number greater than 0.0 and at most 1.0."
+    end
+  end
+
+  describe "list_of/3" do
+    # `SEARCH_SEMANTIC_FLOOR_LEGS` (#1936).
+    @legs ~w(semantic block tag keyword_any fuzzy)
+    @required ~w(semantic block tag)
+
+    test "a list of allowed names is returned in order, trimmed, downcased, once each" do
+      put(" Semantic, block ,tag,KEYWORD_ANY,tag ")
+
+      assert Env.list_of(@var, @legs, required: @required) ==
+               {:ok, ~w(semantic block tag keyword_any)}
+    end
+
+    test "unset, blank and whitespace-only are :unset" do
+      for value <- [nil, "", " "] do
+        put(value)
+        assert Env.list_of(@var, @legs) == :unset
+      end
+    end
+
+    test "one unknown name, or a missing required one, refuses the whole value" do
+      for value <- ["semantic,block,tag,keyword", "semantic,block,tag,title", "block,tag", ","] do
+        put(value)
+
+        assert quietly(fn -> Env.list_of(@var, @legs, required: @required) end) == :unrecognized,
+               "#{inspect(value)} should be refused"
+      end
+    end
+
+    test "a refused value warns with the allowed and required names and is recorded" do
+      Env.take_collected()
+      put("semantic,keyword")
+
+      stderr =
+        capture_io(:stderr, fn ->
+          assert Env.list_of(@var, @legs, required: @required) == :unrecognized
+        end)
+
+      assert stderr =~ ~s("semantic,keyword")
+      assert stderr =~ "semantic, block, tag, keyword_any, fuzzy"
+      assert stderr =~ "every one of semantic, block, tag"
+      assert Env.collected() == [{@var, "semantic,keyword", {:list_of, @legs, @required}}]
+    end
+  end
+
   describe "record_unusable/3" do
     test "it warns, records the phrase, and returns :unrecognized" do
       Env.take_collected()
@@ -542,7 +651,7 @@ defmodule KilnCMS.Config.EnvTest do
     # A literal list, so `covers every collecting reader` below fails when the
     # module grows one that is not here — which is how `positive_integer/1` and
     # then `one_of/2` each arrived after the guard was written.
-    @collecting_readers ~w(flag fetch truthy? positive_integer one_of record_unusable)
+    @collecting_readers ~w(flag fetch truthy? positive_integer one_of float_in list_of record_unusable)
 
     test "the guard below covers every reader on the module" do
       exported =

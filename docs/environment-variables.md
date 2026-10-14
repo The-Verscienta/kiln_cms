@@ -10,7 +10,7 @@ genuinely large — but almost none of it is something you have to decide.
    production release refuses to start. There are three.
 2. **[Common (10)](#common-10)** — not required, but what a real deployment
    usually sets. A short list, with a one-line reason for each.
-3. **[Everything else](#everything-else)** — the other 137, grouped by the
+3. **[Everything else](#everything-else)** — the other 146, grouped by the
    feature they configure. Every one is optional and has a default, so you can
    skip a whole section by not using the feature it configures.
 
@@ -413,6 +413,21 @@ internal instance belongs here, where the operator sets it.
 | `MEILI_URL` | unset | Meilisearch server URL. Enables the backend when set. | [`config/runtime/prod/search.exs:13`](../config/runtime/prod/search.exs#L13) |
 | `MEILI_MASTER_KEY` | unset | Meilisearch API master key. | [`config/runtime/prod/search.exs:17`](../config/runtime/prod/search.exs#L17), [`lib/kiln_cms/search/meilisearch.ex:14`](../lib/kiln_cms/search/meilisearch.ex#L14) |
 | `MEILI_INDEX` | `kiln_content` | Index name. | [`config/runtime/prod/search.exs:18`](../config/runtime/prod/search.exs#L18) |
+
+### search relevance floor (#1936)
+
+Runtime overrides for hybrid search's relevance floor, which is otherwise
+compiled `config :kiln_cms, KilnCMS.Search` — so a retune, or a model-swap
+window, is a restart rather than a deploy each way. Unset leaves the compiled
+value (or a project overlay's) in force; an unusable value keeps it too, and
+warns. See [semantic-search-plan.md](semantic-search-plan.md#relevance-floor)
+for what the floor does and how to measure it.
+
+| Variable | Default | Purpose | Where it's read |
+|----------|---------|---------|-----------------|
+| `SEARCH_SEMANTIC_MAX_DISTANCE` | unset (compiled `semantic_max_distance`, `nil` = no floor) | The floor: the cosine distance in `[0, 2]` beyond which a hit only judged legs returned is dropped. `0.0` is legal and is the model-swap setting — it drops every judged hit with any distance, for the window in which stored vectors and query vectors come from different models (keep `keyword_any` out of `SEARCH_SEMANTIC_FLOOR_LEGS` meanwhile). `2.0` floors nothing, the runtime spelling of "off". See [`KilnCMS.Search.semantic_max_distance/0`](../lib/kiln_cms/search.ex). | [`config/runtime/prod/search.exs:37`](../config/runtime/prod/search.exs#L37) |
+| `SEARCH_SEMANTIC_FLOOR_LEGS` | unset (`semantic,block,tag`) | Which legs' hits the floor judges, comma-separated. Must include `semantic`, `block` and `tag`; may add `keyword_any` (the any-term relaxation, where junk on a long-prose corpus comes from) and `fuzzy`. `keyword`, `title` and `alias` vouch for a hit and are refused. Add `keyword_any` together with chunked document vectors (#1940), or accept that a match in a long document's late passage is judged by a vector that never saw it. See [`KilnCMS.Search.semantic_floor_legs/0`](../lib/kiln_cms/search.ex). | [`config/runtime/prod/search.exs:55`](../config/runtime/prod/search.exs#L55) |
+| `SEARCH_KEYWORD_ANY_IDF_COVERAGE` | unset (off) | The opt-in IDF-coverage variant, a share in `(0, 1]`: a `keyword_any` hit beyond the floor is kept when the query lexemes it matches carry at least this share of the query's IDF mass (per content type, over published documents). Acts only while `keyword_any` is in the floor legs. Shipped for measurement — the preregistered grid is `0.5`/`0.6`/`0.7`. See [`KilnCMS.Search.keyword_any_idf_coverage/0`](../lib/kiln_cms/search.ex). | [`config/runtime/prod/search.exs:67`](../config/runtime/prod/search.exs#L67) |
 
 ### vector search scan (measurement runs)
 
@@ -920,6 +935,23 @@ as `Env.positive_integer/1` (#1009). Before that each had hand-rolled its own
   parsers wrote to stderr and stopped there, so a mistyped count reached neither
   `Logger` nor Sentry. The replayed line names the shape it wanted — a count is
   told to write a positive integer, not offered the boolean spellings.
+
+### Fractional and list variables
+
+The relevance-floor variables (#1936) go through the same module, on the same
+terms: unset or blank means unset, anything refused keeps the default and warns
+through all three sinks, and the warning names the shape wanted.
+
+* **`Env.float_in/4`** reads a number within stated bounds —
+  `SEARCH_SEMANTIC_MAX_DISTANCE` in `[0, 2]`, `SEARCH_KEYWORD_ANY_IDF_COVERAGE`
+  in `(0, 1]`. Unlike a count, **zero is a value** where the bounds allow it:
+  a floor of `0.0` is the model-swap setting. Out-of-range values (`3.5` for
+  `0.35`) and partly-numeric ones (`0.35 cosine`) are refused, not clamped or
+  truncated.
+* **`Env.list_of/3`** reads a comma-separated list of known names —
+  `SEARCH_SEMANTIC_FLOOR_LEGS`. One unknown name refuses the whole value rather
+  than being dropped, as does a list missing a required name, so a typo can
+  never leave the floor judging less than the operator wrote.
 
 ## Compile-time application config (not environment variables)
 
