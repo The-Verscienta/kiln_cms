@@ -1,7 +1,8 @@
-# The code scripts/publish_docs.exs and scripts/publish_releases.exs share:
+# The code scripts/publish_docs.exs, publish_releases.exs and
+# publish_security.exs share:
 # Markdown → HTML and the JSON:API client that upserts content by slug.
 #
-# Loaded with `Code.require_file/1` by both scripts, after their `Mix.install`
+# Loaded with `Code.require_file/1` by each script, after their `Mix.install`
 # (earmark_parser, req, jason), and by test/scripts/ against the app's own
 # copies of those three deps. Nothing here may reach a `KilnCMS.*` module: CI
 # publishes without compiling the application.

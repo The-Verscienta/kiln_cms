@@ -1,5 +1,9 @@
 # Security Policy
 
+This policy is also published at
+[kilncms.dev/security](https://kilncms.dev/security), with every security
+notice issued for Kiln (see [Security notices](#security-notices)).
+
 ## Supported versions
 
 Kiln supports release lines by **minor** version: the newest one fully, the one
@@ -81,6 +85,24 @@ can discuss the issue, prepare a fix, and credit you when it's published.
   anonymous if you prefer.
 - We ask for coordinated disclosure: please give us 90 days before publishing,
   or less if we ship a fix sooner and agree on a date with you.
+
+## Security notices
+
+Every published advisory becomes a security notice at
+[kilncms.dev/security](https://kilncms.dev/security): what is affected, which
+versions are vulnerable, which patch releases fix it, and the advisory itself.
+To hear about the next one, follow the
+[notices feed](https://kilncms.dev/security-notices/feed.xml) (Atom; a
+[JSON Feed](https://kilncms.dev/security-notices/feed.json) too), or watch
+this repository's
+[advisories](https://github.com/The-Verscienta/kiln_cms/security/advisories)
+on GitHub. Each notice names the package it is about: `kiln_cms` for the
+core, a plugin's Hex name for a plugin.
+
+The site's
+[`/.well-known/security.txt`](https://kilncms.dev/.well-known/security.txt)
+(RFC 9116) names this policy and the reporting contact, for scanners and
+researchers who look there first.
 
 ## Scope
 
