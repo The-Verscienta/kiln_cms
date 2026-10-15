@@ -54,6 +54,19 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Added
+
+- **A release can adopt imported images: `bin/kiln_cms rpc
+  'KilnCMS.Release.adopt_image_backend()'`. System → Image backend labels it
+  and the Mix task, each with a dry run first.**
+  ([long form](docs/changelog/unreleased.md#release-adopt-image-backend))
+
+### Fixed
+
+- **A variant job no longer takes an image backend's failed or rate-limited
+  read for a deleted original.**
+  ([long form](docs/changelog/unreleased.md#variant-worker-backend-errors))
+
 ## [1.4.0] - 2026-10-14
 
 Long form: [docs/changelog/v1.4.0.md](docs/changelog/v1.4.0.md) —

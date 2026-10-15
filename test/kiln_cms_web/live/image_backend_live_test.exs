@@ -197,8 +197,19 @@ defmodule KilnCMSWeb.ImageBackendLiveTest do
       assert has_element?(lv, "#census-awaiting", "2")
       assert has_element?(lv, "#census-unrecognised", "1")
 
-      assert html =~
-               "mix kiln.media.adopt_image_backend --org #{KilnCMS.Accounts.default_org_id()}"
+      org_id = KilnCMS.Accounts.default_org_id()
+
+      # A release has no Mix, so it gets its own, labelled, commands; for the
+      # default site they name no org, so there are no inner quotes to lose.
+      assert has_element?(
+               lv,
+               "#adopt-release",
+               "bin/kiln_cms rpc 'KilnCMS.Release.adopt_image_backend(dry_run: true)'"
+             )
+
+      assert has_element?(lv, "#adopt-release", "KilnCMS.Release.adopt_image_backend()'")
+      assert has_element?(lv, "#adopt-mix", "--org #{org_id} --dry-run")
+      assert html =~ "mix kiln.media.adopt_image_backend --org #{org_id}"
     end
 
     test "with nothing to adopt, there's no command", %{conn: conn} do
@@ -208,6 +219,7 @@ defmodule KilnCMSWeb.ImageBackendLiveTest do
 
       assert has_element?(lv, "#census-awaiting", "0")
       refute html =~ "mix kiln.media.adopt_image_backend"
+      refute html =~ "adopt_image_backend("
     end
   end
 end

@@ -5,6 +5,12 @@ defmodule KilnCMS.Release do
   """
   @app :kiln_cms
 
+  @needs_running_node """
+  This needs the running application (its job queue, media fetching and
+  caches), and this node has not started it. Run it against the live node
+  with `bin/kiln_cms rpc '...'`, not `bin/kiln_cms eval`.
+  """
+
   def migrate do
     load_app()
 
@@ -259,6 +265,46 @@ defmodule KilnCMS.Release do
     run_import(&KilnCMS.Portability.Commands.import_content/3, path, opts)
   end
 
+  @doc """
+  `mix kiln.media.adopt_image_backend` for a release (#1955): hand the active
+  image backend the imported rows whose images it already holds, in the
+  **running** node.
+
+      bin/kiln_cms rpc 'KilnCMS.Release.adopt_image_backend(dry_run: true)'
+      bin/kiln_cms rpc 'KilnCMS.Release.adopt_image_backend()'
+
+  Options are the task's flags: `dry_run: true`, and `org: "<uuid>"` for a
+  site other than the default one. Prints the task's report and returns
+  `KilnCMS.Media.Adoption.run/2`'s result, or `{:error, message}`.
+
+  Like the importers it must run through `rpc`, not `eval`: each adopted row
+  enqueues a variant job, which needs the running application's queue.
+  """
+  @spec adopt_image_backend(keyword()) :: {:ok, map()} | {:error, String.t()}
+  def adopt_image_backend(opts \\ []), do: run_adoption(opts, serving?())
+
+  # `serving?` is an argument only so the test can take the `eval` branch.
+  @doc false
+  def run_adoption(opts, serving?) do
+    result = if serving?, do: adopt(opts), else: {:error, @needs_running_node}
+    with {:error, message} <- result, do: IO.puts(message)
+    result
+  end
+
+  defp adopt(opts) do
+    org_id = opts[:org] || KilnCMS.Accounts.default_org_id()
+    dry_run? = opts[:dry_run] == true
+
+    case KilnCMS.Media.Adoption.run(org_id, dry_run?: dry_run?) do
+      {:ok, report} = ok ->
+        IO.puts(KilnCMS.Media.Adoption.describe(report, org_id, dry_run?))
+        ok
+
+      {:error, :no_active_backend} ->
+        {:error, KilnCMS.Media.Adoption.no_active_backend_message()}
+    end
+  end
+
   # No `load_app`/`with_repo` here: unlike the tasks above, an import cannot
   # run on the bare repo `eval` gives, so it refuses rather than starting a
   # second copy of the application next to the serving one. `serving?` is an
@@ -269,12 +315,7 @@ defmodule KilnCMS.Release do
       if serving? do
         command.(path, opts, &IO.puts/1)
       else
-        {:error,
-         """
-         The import needs the running application (its job queue, media fetching
-         and caches), and this node has not started it. Run it against the live
-         node with `bin/kiln_cms rpc '...'`, not `bin/kiln_cms eval`.
-         """}
+        {:error, @needs_running_node}
       end
 
     with {:error, message} <- result, do: IO.puts(message)

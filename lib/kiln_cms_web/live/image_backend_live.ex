@@ -235,9 +235,18 @@ defmodule KilnCMSWeb.ImageBackendLive do
 
             <div :if={@census.awaiting > 0} class="mt-4 space-y-2">
               <p class="text-sm">
-                {gettext("To adopt them, run one of these on the server:")}
+                {gettext(
+                  "To adopt them, run these on the server. The first only counts what it would adopt; the second adopts."
+                )}
               </p>
-              <pre class="overflow-x-auto rounded-lg bg-base-200 p-3 text-xs"><code>{adopt_command(@current_org)}</code></pre>
+              <p class="text-xs font-semibold">
+                {gettext("From a release, such as Kiln's Docker image (in /app):")}
+              </p>
+              <pre class="overflow-x-auto rounded-lg bg-base-200 p-3 text-xs"><code id="adopt-release">{adopt_commands(:release, @current_org)}</code></pre>
+              <p class="text-xs font-semibold">
+                {gettext("From a source checkout, with Mix:")}
+              </p>
+              <pre class="overflow-x-auto rounded-lg bg-base-200 p-3 text-xs"><code id="adopt-mix">{adopt_commands(:mix, @current_org)}</code></pre>
               <p :if={@state != :active} class="text-xs text-warning-ink">
                 {gettext("Adopting needs the backend's settings in place first.")}
               </p>
@@ -292,12 +301,20 @@ defmodule KilnCMSWeb.ImageBackendLive do
     """
   end
 
-  # Two forms, since a release has no mix: the task, and the same call made
-  # into a running release.
-  defp adopt_command(org) do
-    """
-    mix kiln.media.adopt_image_backend --org #{org.id}
-    bin/kiln_cms rpc 'KilnCMS.Media.Adoption.run("#{org.id}")'\
-    """
+  # Each form a dry run, then the real one: a release has no Mix, so it calls
+  # `KilnCMS.Release` through `rpc`. The default site's release command names no
+  # org, so it carries no inner quotes for a `docker exec` or `ssh -C` wrapper
+  # to strip.
+  defp adopt_commands(:release, org) do
+    org_opts =
+      if org.id == KilnCMS.Accounts.default_org_id(), do: [], else: [~s(org: "#{org.id}")]
+
+    rpc = &"bin/kiln_cms rpc 'KilnCMS.Release.adopt_image_backend(#{Enum.join(&1, ", ")})'"
+    Enum.join([rpc.(org_opts ++ ["dry_run: true"]), rpc.(org_opts)], "\n")
+  end
+
+  defp adopt_commands(:mix, org) do
+    mix = "mix kiln.media.adopt_image_backend --org #{org.id}"
+    Enum.join([mix <> " --dry-run", mix], "\n")
   end
 end

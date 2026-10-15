@@ -6981,6 +6981,16 @@ msgstr "vie"
 msgid "From"
 msgstr "Origen"
 
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "From a release, such as Kiln's Docker image (in /app):"
+msgstr "Desde una release, como la imagen Docker de Kiln (en /app):"
+
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "From a source checkout, with Mix:"
+msgstr "Desde una copia del código fuente, con Mix:"
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -16381,8 +16391,8 @@ msgstr "Destino (actual)"
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
-msgid "To adopt them, run one of these on the server:"
-msgstr "Para adoptarlas, ejecuta uno de estos comandos en el servidor:"
+msgid "To adopt them, run these on the server. The first only counts what it would adopt; the second adopts."
+msgstr "Para adoptarlas, ejecuta estos comandos en el servidor. El primero solo cuenta lo que adoptaría; el segundo las adopta."
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
