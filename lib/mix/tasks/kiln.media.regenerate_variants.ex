@@ -40,13 +40,21 @@ defmodule Mix.Tasks.Kiln.Media.RegenerateVariants do
         "(formats: #{format_list(formats)}#{if opts[:all], do: ", all items", else: ", missing only"})"
     )
 
-    %{enqueued: enqueued, scanned: scanned} =
+    %{enqueued: enqueued, scanned: scanned, over_pixel_cap: over} =
       KilnCMS.Media.Regeneration.run(org_id, only_missing?: opts[:all] != true)
 
     Mix.shell().info(
       "Enqueued #{enqueued} of #{scanned} image(s). " <>
         "Watch the :media queue; originals are untouched."
     )
+
+    if over > 0 do
+      Mix.shell().info(
+        "Skipped #{over} image(s) over the pixel cap " <>
+          "(config :kiln_cms, :media, max_pixels: #{KilnCMS.ImageProcessor.max_pixels()}); " <>
+          "their variants can't be made."
+      )
+    end
   end
 
   defp format_list([]), do: "source format only"

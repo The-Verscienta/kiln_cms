@@ -198,6 +198,95 @@ defmodule KilnCMSWeb.DynamicEntryEditorTest do
     assert html =~ ~s(<option value="#{page.id}" selected)
   end
 
+  test "a gallery media field is filled, ordered and emptied from the library drawer", %{
+    conn: conn
+  } do
+    admin = authed_user(:admin)
+
+    definition =
+      CMS.create_type_definition!(
+        %{name: "gal#{System.unique_integer([:positive])}", label: "Gallery"},
+        actor: admin
+      )
+
+    CMS.create_field_definition!(
+      %{
+        type_definition_id: definition.id,
+        name: "shots",
+        label: "Shots",
+        field_type: :media,
+        multiple: true
+      },
+      actor: admin
+    )
+
+    [a, b] =
+      for n <- 1..2 do
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "shot-#{n}-#{System.unique_integer([:positive])}.png",
+          url: "/uploads/shot-#{n}.png",
+          alt: "shot #{n}"
+        })
+      end
+
+    entry =
+      ContentTypes.create!(
+        definition.name,
+        %{title: "Shots", slug: "gal-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+    {:ok, lv, html} =
+      conn |> log_in(admin) |> live(~p"/editor/content/#{definition.name}/#{entry.id}")
+
+    assert html =~ "No images yet."
+
+    # Pick both in the drawer, b first: click order is gallery order.
+    lv |> element("#custom-field-shots-add") |> render_click()
+    lv |> element("#image-picker-dialog button[phx-value-id='#{b.id}']") |> render_click()
+    lv |> element("#image-picker-dialog button[phx-value-id='#{a.id}']") |> render_click()
+    lv |> element("#image-picker-dialog button[phx-click='add_picked_images']") |> render_click()
+
+    refute has_element?(lv, "#image-picker-dialog")
+    assert tile_ids(lv) == [b.id, a.id]
+
+    # Reorder, then save: what's on screen is what's stored.
+    lv
+    |> element("#cf-gallery-shots-#{a.id} button[phx-value-dir='up']")
+    |> render_click()
+
+    assert tile_ids(lv) == [a.id, b.id]
+
+    lv |> form("##{definition.name}-editor") |> render_submit()
+
+    saved = ContentTypes.get_record!(definition.name, entry.id, actor: admin)
+    assert Enum.map(saved.custom_fields["shots"], & &1["id"]) == [a.id, b.id]
+
+    # Removing every image clears the field rather than keeping what was saved.
+    lv
+    |> element("#cf-gallery-shots-#{a.id} button[phx-click='field_gallery_remove']")
+    |> render_click()
+
+    lv
+    |> element("#cf-gallery-shots-#{b.id} button[phx-click='field_gallery_remove']")
+    |> render_click()
+
+    assert tile_ids(lv) == []
+
+    lv |> form("##{definition.name}-editor") |> render_submit()
+
+    saved = ContentTypes.get_record!(definition.name, entry.id, actor: admin)
+    refute Map.has_key?(saved.custom_fields, "shots")
+  end
+
+  defp tile_ids(lv) do
+    lv
+    |> render()
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query("#custom-field-shots-items input[type=hidden]")
+    |> LazyHTML.attribute("value")
+  end
+
   test "the editor search palette finds dynamic entries (entries-only results)", %{conn: conn} do
     admin = authed_user(:admin)
     definition = define_recipe_type!(admin)

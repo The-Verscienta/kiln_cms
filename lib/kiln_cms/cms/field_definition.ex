@@ -140,6 +140,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :required,
       :options,
       :target_type,
+      :multiple,
       :help_text,
       :position,
       :default,
@@ -211,6 +212,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # A formula belongs to a `:computed` field only — drop it on any other type
     # so switching an existing computed field away isn't a dead end (#429).
     change KilnCMS.CMS.Changes.ClearCompute
+
+    # Same for `multiple`: only a `:media` field can hold a gallery, so the flag
+    # drops on any other type rather than lingering on a field it means nothing to.
+    change KilnCMS.CMS.Changes.ClearMultiple
 
     # Whether a type is event-shaped (#480) is decided by whether it carries a
     # `datetime_range` field, so the cached answer has to drop on a field write,
@@ -316,6 +321,14 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # The content type a `:reference` field points at — a type name string
     # ("page", "recipe", …), compiled or dynamic (ignored otherwise).
     attribute :target_type, :string, public?: true
+
+    # Whether a `:media` field holds a **gallery** — an ordered list of media
+    # snapshots — rather than a single one. Off by default, so every existing
+    # media field keeps its single-snapshot shape. Ignored (and cleared, see
+    # `Changes.ClearMultiple`) on every other type. Flipping it on an existing
+    # field reshapes the stored values (`Changes.SyncFieldValues`): a single
+    # becomes a one-image gallery, and a gallery keeps only its first image.
+    attribute :multiple, :boolean, allow_nil?: false, default: false, public?: true
 
     # Optional helper text rendered under the input.
     attribute :help_text, :string,

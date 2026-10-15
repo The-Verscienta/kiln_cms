@@ -55,6 +55,25 @@ defmodule KilnCMS.Media.Adoption do
     end
   end
 
+  @doc """
+  The one-line report `mix kiln.media.adopt_image_backend` and
+  `KilnCMS.Release.adopt_image_backend/1` print for `run/2`'s result.
+  """
+  @spec describe(report(), Ash.UUID.t(), boolean()) :: String.t()
+  def describe(%{scanned: scanned, adopted: adopted, failed: failed}, org_id, dry_run?) do
+    verb = if dry_run?, do: "Would adopt", else: "Adopted"
+
+    "#{verb} #{adopted} of #{scanned} row(s) with no stored file in org #{org_id}" <>
+      if(failed > 0, do: "; #{failed} refused (see the log)", else: "") <> "."
+  end
+
+  @doc "What to tell an operator when `run/2` finds no active backend."
+  @spec no_active_backend_message() :: String.t()
+  def no_active_backend_message,
+    do:
+      "No image backend is active. Select one with `config :kiln_cms, :image_backend, " <>
+        "Module` and give it its settings; `mix kiln.plugins.doctor` checks the selection."
+
   @type census :: %{
           held: non_neg_integer(),
           awaiting: non_neg_integer(),

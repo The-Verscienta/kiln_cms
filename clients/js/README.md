@@ -82,7 +82,7 @@ const { items, total } = await kiln.list("entries", {
 const doc = await kiln.artifact("doc", "getting-started");
 const hits = await kiln.search("migrations");
 const { publishedEntries } = await kiln.graphql(
-  `{ publishedEntries(limit: 3, offset: 0) { count results { title slug } } }`,
+  `{ publishedEntries(limit: 3) { count results { title slug } } }`,
 );
 ```
 

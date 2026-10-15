@@ -147,6 +147,12 @@ defmodule KilnCMSWeb.ContentEditor.Localization do
 
   defp text(value) when is_binary(value), do: value
   defp text(nil), do: ""
+  # A media/reference snapshot (or a gallery of them) is a map, which
+  # `to_string/1` cannot render: label it by what an editor recognises.
+  defp text(%{} = snapshot) when not is_struct(snapshot),
+    do: to_string(snapshot["title"] || snapshot["alt"] || snapshot["url"] || "")
+
+  defp text(list) when is_list(list), do: Enum.map_join(list, ", ", &text/1)
   defp text(value), do: to_string(value)
 
   @doc """

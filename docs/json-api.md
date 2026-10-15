@@ -263,6 +263,9 @@ GET /api/json/posts?filter[locale]=en&custom_filter[price][lte]=20&custom_sort=-
   all.
 - `media`/`reference` fields match on their snapshot's stable `id`
   (`custom_filter[hero_image]=<media uuid>`) and support `eq`/`not_eq`/`in`/`null` only.
+  On a media **gallery** (`multiple: true`) they test membership: `eq` matches
+  a gallery holding that image, `not_eq` one that doesn't, `in` one holding any
+  of the listed images.
 - Records without the field are excluded by every comparison (they're SQL
   `NULL`), and a record whose stored value has another JSON type simply
   doesn't match — it can't error the query.

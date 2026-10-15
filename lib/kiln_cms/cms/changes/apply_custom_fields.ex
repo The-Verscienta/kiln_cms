@@ -90,6 +90,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   """
   use Ash.Resource.Change
 
+  require Ash.Query
   require Logger
 
   alias Ash.Error.Changes.InvalidAttribute
@@ -441,6 +442,15 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     if composite?(def), do: Enum.all?(Map.values(value), &blank?/1), else: false
   end
 
+  # A gallery (`multiple` media) is blank when every entry is: the editor
+  # always submits a leading `""` so that removing the last image still sends
+  # the key, and an emptied gallery must clear rather than keep what it held.
+  #
+  # The same holds for a single media field handed a list (a value stored while
+  # the field was a gallery — a working copy, a version, an API round-trip).
+  defp blank_for?(%{field_type: :media}, value) when is_list(value),
+    do: Enum.all?(value, &blank?/1)
+
   defp blank_for?(_def, value), do: blank?(value)
 
   defp composite?(%{field_type: type} = def) do
@@ -457,6 +467,15 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # Tenant-aware dispatch: only `:media`/`:reference` resolve records (and so need
   # the writing tenant and actor); every other field type coerces purely from its
   # value, so it delegates to the type-only `coerce/2` below.
+  defp coerce(value, %{field_type: :media, multiple: true}, read_opts),
+    do: coerce_gallery(value, read_opts)
+
+  # A single media field handed a gallery list keeps its first item — the same
+  # answer `SyncFieldValues` gives when a gallery is narrowed, so a working copy
+  # or a version saved before the flip still promotes and restores.
+  defp coerce(value, %{field_type: :media} = def, read_opts) when is_list(value),
+    do: value |> Enum.reject(&blank?/1) |> List.first() |> coerce_media(def, read_opts)
+
   defp coerce(value, %{field_type: :media} = def, read_opts),
     do: coerce_media(value, def, read_opts)
 
@@ -553,6 +572,92 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     else
       _ -> {:error, "must be an existing media item"}
     end
+  end
+
+  # A gallery media field (`multiple: true`): an ordered list of the same
+  # snapshots a single media field stores, one per picked item. Order is the
+  # editor's — it is the order the gallery renders in. Blanks (the editor's
+  # leading `""`) drop out, and an item picked twice is kept once, where it
+  # first appears. A lone id or snapshot is accepted as a one-item gallery, so a
+  # writer that predates the flag still lands a valid value. Any id that does
+  # not resolve fails the whole field rather than quietly shortening it.
+  defp coerce_gallery(value, read_opts) do
+    items = value |> List.wrap() |> Enum.reject(&blank?/1)
+
+    with {:ok, ids} <- gallery_ids(items),
+         {:ok, by_id} <- read_media(ids, read_opts),
+         :ok <- all_found(ids, by_id) do
+      {:ok,
+       ids
+       |> Enum.uniq()
+       |> Enum.map(&by_id[&1])
+       |> Enum.map(&%{"id" => &1.id, "url" => &1.url, "alt" => &1.alt})}
+    end
+  end
+
+  defp gallery_ids(items) do
+    items
+    |> Enum.with_index(1)
+    |> Enum.reduce_while({:ok, []}, fn {item, position}, {:ok, acc} ->
+      with {:ok, id} <- extract_id(item), {:ok, uuid} <- Ecto.UUID.cast(id) do
+        {:cont, {:ok, [uuid | acc]}}
+      else
+        _ -> {:halt, {:error, missing_message(position, item)}}
+      end
+    end)
+    |> case do
+      {:ok, ids} -> {:ok, Enum.reverse(ids)}
+      error -> error
+    end
+  end
+
+  # One read for the whole gallery, not one per image: this runs on every
+  # editor validate, i.e. per keystroke. Read as the caller, under the writing
+  # tenant, exactly as a single media field's `get_media_item` is.
+  defp read_media([], _read_opts), do: {:ok, %{}}
+
+  defp read_media(ids, read_opts) do
+    query = Ash.Query.filter(KilnCMS.CMS.MediaItem, id in ^ids)
+
+    case KilnCMS.CMS.list_media_items(Keyword.put(read_opts, :query, query)) do
+      {:ok, items} -> {:ok, Map.new(items, &{&1.id, &1})}
+      {:error, _error} -> {:error, "must only contain existing media items"}
+    end
+  end
+
+  # Name the image that failed — the editor still shows its tile from the
+  # stored snapshot, so "one of them" leaves the writer guessing which.
+  defp all_found(ids, by_id) do
+    case Enum.find_index(ids, &(not Map.has_key?(by_id, &1))) do
+      nil -> :ok
+      index -> {:error, missing_message(index + 1, Enum.at(ids, index))}
+    end
+  end
+
+  defp missing_message(position, item) do
+    id =
+      case extract_id(item) do
+        {:ok, id} -> " (#{id})"
+        :error -> ""
+      end
+
+    "image #{position}#{id} is not an existing media item — remove it from the gallery"
+  end
+
+  @doc """
+  The media ids a stored media value holds, in order: a gallery list or a
+  single snapshot, as snapshots or bare ids, blanks dropped. One rule for
+  every reader of the stored shape (the editor, the translation lock).
+  """
+  @spec media_ids(term()) :: [String.t()]
+  def media_ids(value) do
+    value
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      %{"id" => id} when is_binary(id) and id != "" -> [id]
+      id when is_binary(id) and id != "" -> [id]
+      _blank -> []
+    end)
   end
 
   # A content reference: resolves the target id against the field's declared

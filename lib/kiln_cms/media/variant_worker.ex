@@ -85,11 +85,26 @@ defmodule KilnCMS.Media.VariantWorker do
       {:error, {:image_backend, _reason}} = error ->
         error
 
-      # Original isn't readable (e.g. removed) — nothing to do; keep the original.
-      {:error, _} ->
-        :ok
+      # Whatever holds the original is rate-limited — an image backend's API
+      # budget, say. A snooze doesn't spend an attempt, so an adoption's
+      # hundreds of jobs pace themselves across windows instead of failing.
+      {:error, {:rate_limited, retry_after_ms}} ->
+        {:snooze, max(1, ceil(retry_after_ms / 1_000))}
+
+      {:error, reason} ->
+        unreadable(item, reason)
     end
   end
+
+  # An image backend is a remote service: unless it says the image is gone, a
+  # failed read (a timeout, a 5xx) is retried — "nothing to do" would leave an
+  # adopted row with no dimensions or variants, and nothing re-enqueues it.
+  defp unreadable(%{image_backend: backend}, reason)
+       when is_binary(backend) and reason not in [:not_found, :enoent],
+       do: {:error, reason}
+
+  # Original isn't readable (e.g. removed) — nothing to do; keep the original.
+  defp unreadable(_item, _reason), do: :ok
 
   defp generate(item, path, ext, tenant, site) do
     focal = %{x: item.focal_x || 0.5, y: item.focal_y || 0.5}

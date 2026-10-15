@@ -60,7 +60,11 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
       # reads; a draft catches up on its next save.
       Map.has_key?(record, :name) and
           (Map.has_key?(record, :content_type) or Map.has_key?(record, :type_definition_id)) ->
+        # `multiple` too: flipping it reshapes the stored values in SQL
+        # (`SyncFieldValues`), so published documents re-fire to pick up the
+        # new shape — their artifacts, media usage edges and cached responses.
         if Ash.Changeset.changing_attribute?(changeset, :name) or
+             Ash.Changeset.changing_attribute?(changeset, :multiple) or
              reindex_search?(changeset, record) do
           # Determine which type this field belongs to and sweep it
           type =

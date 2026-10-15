@@ -17,6 +17,7 @@ defmodule KilnCMSWeb.ContentEditor.MediaPickerComponents do
   # (browser opened from the chrome), an integer fills that existing block.
   defp pick_index(:new), do: "new"
   defp pick_index({:gallery, _id}), do: "gallery"
+  defp pick_index({:field_gallery, _name}), do: "field_gallery"
   defp pick_index(:featured), do: "featured"
   defp pick_index(:seo_image), do: "seo_image"
   defp pick_index({:block, _id}), do: "block"
@@ -27,6 +28,10 @@ defmodule KilnCMSWeb.ContentEditor.MediaPickerComponents do
   defp pick_block_id({:block, id}), do: id
   defp pick_block_id({:gallery, id}), do: id
   defp pick_block_id(_), do: nil
+
+  # The gallery custom field a multi-select fills; nil for every other target.
+  defp pick_field({:field_gallery, name}), do: name
+  defp pick_field(_), do: nil
   attr :index, :any, required: true
   attr :media, :list, required: true
   attr :results, :list, default: nil
@@ -61,7 +66,10 @@ defmodule KilnCMSWeb.ContentEditor.MediaPickerComponents do
     assigns =
       assigns
       |> assign(:visible, assigns.results || assigns.media)
-      |> assign(:multi?, match?({:gallery, _id}, assigns.index))
+      |> assign(
+        :multi?,
+        match?({kind, _id} when kind in [:gallery, :field_gallery], assigns.index)
+      )
 
     ~H"""
     <.modal id="image-picker-dialog" on_close="close_picker" variant={:drawer}>
@@ -262,6 +270,7 @@ defmodule KilnCMSWeb.ContentEditor.MediaPickerComponents do
           type="button"
           phx-click="add_picked_images"
           phx-value-bid={pick_block_id(@index)}
+          phx-value-field={pick_field(@index)}
           disabled={@picked == []}
           class="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-content disabled:opacity-40"
         >
@@ -472,7 +481,10 @@ defmodule KilnCMSWeb.ContentEditor.MediaPickerComponents do
 
   # Drawer heading, per open mode.
   defp picker_title(:new), do: gettext("Insert an image")
-  defp picker_title({:gallery, _id}), do: gettext("Add images to the gallery")
+
+  defp picker_title({kind, _id}) when kind in [:gallery, :field_gallery],
+    do: gettext("Add images to the gallery")
+
   defp picker_title(:featured), do: gettext("Featured image")
   defp picker_title(:seo_image), do: gettext("Choose a social image")
   defp picker_title(_), do: gettext("Choose an image")

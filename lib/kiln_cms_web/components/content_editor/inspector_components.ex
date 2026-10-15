@@ -24,7 +24,11 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   # record rather than kept as an assign, so it cannot go stale against a save —
   # the rail only ever needs to know *that* one is set, never what it is.
   def content_locked?(record), do: not is_nil(Map.get(record || %{}, :access_password_hash))
-  # Options for the pick-list custom fields; other field types need none.
+  # Options for the pick-list custom fields; other field types need none. A
+  # gallery takes the library rows themselves: it renders thumbnails, and a
+  # just-picked id whose snapshot hasn't resolved yet looks its url up here.
+  def custom_field_options(%{field_type: :media, multiple: true}, media, _refs), do: media
+
   def custom_field_options(%{field_type: :media}, media, _refs),
     do: Enum.map(media, &{&1.filename, &1.id})
 
@@ -433,6 +437,128 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   attr :errors, :list, default: []
   attr :options, :list, default: []
 
+  # A gallery media field (`multiple: true`): the picked images as an ordered
+  # strip of thumbnails, each carried by a hidden `name[]` input so the order on
+  # screen is the order submitted. Images are added through the library drawer's
+  # multi-select (`open_field_gallery_picker`), and moved or removed with the
+  # buttons on each tile — all server-side edits of the form params, so the
+  # strip never holds state the form doesn't.
+  #
+  # The leading blank `name[]` input is what makes an emptied gallery submit at
+  # all: with no tiles there'd be no input, the key would be absent, and an
+  # absent key keeps its stored value. `ApplyCustomFields` drops the blank.
+  def custom_field_input(%{definition: %{field_type: :media, multiple: true}} = assigns) do
+    items = gallery_items(assigns.value, assigns.options)
+
+    assigns =
+      assigns
+      |> assign(:items, items)
+      |> assign(:last, length(items) - 1)
+
+    ~H"""
+    <div
+      id={cf_id(@definition)}
+      role="group"
+      aria-labelledby={"#{cf_id(@definition)}-label"}
+      aria-describedby={@errors != [] && cf_errors_id(@definition)}
+    >
+      <div class="mb-1 flex items-baseline justify-between gap-2">
+        <span id={"#{cf_id(@definition)}-label"} class="text-sm font-medium">
+          {@definition.label}
+        </span>
+        <span :if={@items != []} class="text-xs text-base-content/60">
+          {ngettext("%{count} image", "%{count} images", length(@items))}
+        </span>
+      </div>
+      <input type="hidden" name={"#{@name}[]"} value="" />
+      <ol
+        :if={@items != []}
+        id={"#{cf_id(@definition)}-items"}
+        class="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6"
+      >
+        <li
+          :for={{item, index} <- Enum.with_index(@items)}
+          id={"cf-gallery-#{@definition.name}-#{item.id}"}
+          class="group relative aspect-square overflow-hidden rounded-md border border-base-content/10 bg-base-200"
+        >
+          <input type="hidden" name={"#{@name}[]"} value={item.id} />
+          <img
+            :if={item.url}
+            src={item.url}
+            alt={item.alt || ""}
+            loading="lazy"
+            class="size-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+          />
+          <span
+            :if={!item.url}
+            class="flex size-full items-center justify-center text-base-content/40"
+          >
+            <.icon name="hero-photo" class="size-6" />
+          </span>
+          <span class="absolute left-1 top-1 flex size-5 items-center justify-center rounded-full bg-base-100/90 text-[10px] font-semibold tabular-nums text-base-content shadow-sm">
+            {index + 1}
+          </span>
+          <div class="absolute inset-x-0 bottom-0 flex items-center justify-between gap-0.5 bg-gradient-to-t from-black/60 to-transparent p-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100">
+            <div class="flex gap-0.5">
+              <button
+                type="button"
+                phx-click="field_gallery_move"
+                phx-value-field={@definition.name}
+                phx-value-id={item.id}
+                phx-value-dir="up"
+                disabled={index == 0}
+                aria-label={gettext("Move image %{position} earlier", position: index + 1)}
+                class="rounded p-0.5 text-white hover:bg-white/20 disabled:opacity-30"
+              >
+                <.icon name="hero-chevron-left" class="size-4" />
+              </button>
+              <button
+                type="button"
+                phx-click="field_gallery_move"
+                phx-value-field={@definition.name}
+                phx-value-id={item.id}
+                phx-value-dir="down"
+                disabled={index == @last}
+                aria-label={gettext("Move image %{position} later", position: index + 1)}
+                class="rounded p-0.5 text-white hover:bg-white/20 disabled:opacity-30"
+              >
+                <.icon name="hero-chevron-right" class="size-4" />
+              </button>
+            </div>
+            <button
+              type="button"
+              phx-click="field_gallery_remove"
+              phx-value-field={@definition.name}
+              phx-value-id={item.id}
+              aria-label={gettext("Remove image %{position}", position: index + 1)}
+              class="rounded p-0.5 text-white hover:bg-error/80"
+            >
+              <.icon name="hero-x-mark" class="size-4" />
+            </button>
+          </div>
+        </li>
+      </ol>
+      <p :if={@items == []} class="text-sm text-base-content/60">
+        {gettext("No images yet.")}
+      </p>
+      <button
+        type="button"
+        id={"#{cf_id(@definition)}-add"}
+        phx-click="open_field_gallery_picker"
+        phx-value-field={@definition.name}
+        class="btn btn-sm btn-default mt-2"
+      >
+        <.icon name="hero-plus" class="size-4" />
+        {gettext("Add images")}
+      </button>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
+        {@definition.help_text}
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </div>
+    """
+  end
+
   # Media / reference pick-lists: the select posts the target id; the stored
   # value is the write-time snapshot map (see ApplyCustomFields), so the
   # current selection is its "id".
@@ -788,9 +914,34 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
 
   # The current selection for a pick-list field: the stored snapshot's id, or
   # the raw id while a change is mid-validate.
-  defp snapshot_id(%{"id" => id}), do: id
-  defp snapshot_id(id) when is_binary(id) and id != "", do: id
-  defp snapshot_id(_other), do: nil
+  # A gallery's entries, whichever shape the value is in: the stored snapshots
+  # (or the ones the last validate resolved), the raw ids a failed validate
+  # left in the params, or a lone snapshot from before the field became a
+  # gallery. A raw id borrows its url from the library window when it can.
+  defp gallery_items(value, media) do
+    by_id = Map.new(media, &{to_string(&1.id), &1})
+
+    value
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      %{"id" => id} = snapshot when is_binary(id) and id != "" ->
+        [%{id: id, url: snapshot["url"], alt: snapshot["alt"]}]
+
+      id when is_binary(id) and id != "" ->
+        row = Map.get(by_id, id, %{})
+        [%{id: id, url: Map.get(row, :url), alt: Map.get(row, :alt)}]
+
+      _blank ->
+        []
+    end)
+    |> Enum.uniq_by(& &1.id)
+  end
+
+  # The selected id of a single media/reference field. A list (a value stored
+  # while the field was a gallery) selects its first item — what saving it
+  # keeps — rather than reading as "None" and clearing it on the next save.
+  defp snapshot_id(value),
+    do: value |> KilnCMS.CMS.Changes.ApplyCustomFields.media_ids() |> List.first()
 
   defp custom_input_type(:integer), do: "number"
   defp custom_input_type(:float), do: "number"

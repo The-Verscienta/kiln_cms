@@ -2,7 +2,9 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   @moduledoc """
   Keeps the `custom_fields` keys stored on content in step with the
   `FieldDefinition` rows that govern them: **destroying** a definition purges
-  its key, **renaming** one moves the values to the new key.
+  its key, **renaming** one moves the values to the new key, and flipping a
+  media field's `multiple` flag **reshapes** its values between a single
+  snapshot and a gallery list.
 
   Both cases otherwise leave records holding a key no definition declares, and
   such a key is on borrowed time. `Changes.ApplyCustomFields` folds the stored
@@ -50,26 +52,44 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   end
 
   defp sync(changeset, {:ok, definition} = result) do
-    case operation(changeset, definition) do
-      nil -> result
-      op -> run(op, definition, result)
-    end
+    changeset
+    |> operations(definition)
+    |> Enum.reduce(result, &run(&1, definition, &2))
   end
 
   defp sync(_changeset, other), do: other
 
-  # A destroy purges; an update purges nothing unless `name` moved. Every other
-  # definition edit (label, help text, position, even the field *type*) leaves
-  # the key alone, so the stored values stay where they are.
-  defp operation(%{action_type: :destroy}, definition), do: {:purge, definition.name}
+  # A destroy purges; an update purges nothing. It moves the key if `name`
+  # moved, and reshapes the values (under the key they now live at) if a media
+  # field's `multiple` flipped. Every other definition edit (label, help text,
+  # position, even the field *type*) leaves the stored values where they are.
+  defp operations(%{action_type: :destroy}, definition), do: [{:purge, definition.name}]
 
-  defp operation(%{action_type: :update} = changeset, definition) do
-    previous = changeset.data.name
+  defp operations(%{action_type: :update} = changeset, definition) do
+    previous = changeset.data
 
-    if previous == definition.name, do: nil, else: {:rename, previous, definition.name}
+    rename =
+      if previous.name == definition.name,
+        do: [],
+        else: [{:rename, previous.name, definition.name}]
+
+    # A gallery is a media field with `multiple`; retyping one away from media
+    # narrows it too (ClearMultiple drops the flag), so it keeps its first item
+    # like any other narrowing rather than leaving lists under a non-media key.
+    was_gallery? = previous.field_type == :media and previous.multiple
+    gallery? = definition.field_type == :media and definition.multiple
+
+    reshape =
+      cond do
+        was_gallery? == gallery? -> []
+        gallery? -> [{:reshape, definition.name, :to_list}]
+        true -> [{:reshape, definition.name, :to_single}]
+      end
+
+    rename ++ reshape
   end
 
-  defp operation(_changeset, _definition), do: nil
+  defp operations(_changeset, _definition), do: []
 
   # An orphaned definition (#1770) governs no table: its content type is gone,
   # so there is no record of it left to purge, and nothing to warn about when
@@ -127,6 +147,35 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     |> query([from, to | params], "moved #{inspect(from)} to #{inspect(to)} on")
   end
 
+  # Single → gallery wraps each stored snapshot in a one-item list — lossless.
+  # Gallery → single keeps each list's first snapshot and clears an empty one;
+  # the rest of a gallery has nowhere to go, which the fields admin says before
+  # the admin saves. Only values already in the other shape are touched.
+  # sobelow_skip ["SQL.Query"]
+  defp execute({:reshape, name, :to_list}, table, filter, params) do
+    """
+    UPDATE #{table}
+       SET custom_fields = jsonb_set(custom_fields, ARRAY[$1::text],
+                                     jsonb_build_array(custom_fields -> $1::text))
+     WHERE jsonb_typeof(custom_fields -> $1::text) = 'object'#{filter.(1)}
+    """
+    |> query([name | params], "made #{inspect(name)} a gallery on")
+  end
+
+  # sobelow_skip ["SQL.Query"]
+  defp execute({:reshape, name, :to_single}, table, filter, params) do
+    """
+    UPDATE #{table}
+       SET custom_fields =
+             CASE WHEN jsonb_array_length(custom_fields -> $1::text) = 0
+                  THEN custom_fields - $1::text
+                  ELSE jsonb_set(custom_fields, ARRAY[$1::text], custom_fields -> $1::text -> 0)
+             END
+     WHERE jsonb_typeof(custom_fields -> $1::text) = 'array'#{filter.(1)}
+    """
+    |> query([name | params], "made #{inspect(name)} a single item on")
+  end
+
   # The field's reference edges (#1594) follow its values: a purge deletes
   # them, a rename moves them to the new key. Scoped by the same table, org
   # and type as the value statement, through the edge's source. Edges of any
@@ -154,6 +203,9 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
       "moved the #{inspect(from)} reference links to #{inspect(to)} on"
     )
   end
+
+  # A media field has no reference edges to reshape.
+  defp execute_links({:reshape, _name, _shape}, _table, _filter, _params), do: :ok
 
   # sobelow_skip ["SQL.Query"]
   defp query(sql, params, what) do

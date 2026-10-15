@@ -327,6 +327,14 @@ defmodule KilnCMS.SchemaExport do
   # publish anonymously.
   defp base_custom_field_schema(:select, _d), do: %{"type" => ["string", "null"]}
 
+  defp base_custom_field_schema(:media, %{multiple: true}) do
+    %{
+      "type" => ["array", "null"],
+      "items" => %{"type" => "object"},
+      "description" => "Write-time snapshots of the picked media items, in gallery order."
+    }
+  end
+
   defp base_custom_field_schema(:media, _d) do
     %{
       "type" => ["object", "null"],

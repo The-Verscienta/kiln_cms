@@ -143,6 +143,11 @@ mix kiln.media.regenerate_variants --all    # everything (a quality/width change
 
 Admins can do the same from **`/media` → Regenerate variants**.
 
+An image whose recorded size is over the pixel cap (`max_pixels`, 50 MP) is
+skipped and counted, not enqueued: its job would read the original only to
+refuse it, and for an image backend's item that read is an API download,
+repeated on every run.
+
 Both enqueue `KilnCMS.Media.VariantWorker` on the throttled `:media` Oban queue
 rather than processing inline, and at the **lowest Oban priority** — `:media`
 is a concurrency-3 queue shared with upload processing and video probes, and
@@ -369,7 +374,7 @@ never fires, so it is never a `from_type`.
 
 Three reference sites are tracked: image-shaped block fields (any field named
 `…media_id` or `…image_id`), a document's `featured_image_id`, and `:media`
-custom fields. Edges are rebuilt from scratch on every fire, so removing a
+custom fields (every image of a gallery field). Edges are rebuilt from scratch on every fire, so removing a
 reference removes the usage.
 
 > **Published references only.** Edges are written when a document **fires**,

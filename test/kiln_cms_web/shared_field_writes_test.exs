@@ -194,6 +194,44 @@ defmodule KilnCMSWeb.SharedFieldWritesTest do
       assert fr.custom_fields == %{"price" => "10", "note" => "Bonjour"}
     end
 
+    test "a shared gallery is the same value while its ids, in order, are", ctx do
+      CMS.create_field_definition!(
+        %{
+          content_type: :page,
+          name: "shots",
+          label: "Shots",
+          field_type: :media,
+          multiple: true,
+          localization: :shared
+        },
+        actor: ctx.actor
+      )
+
+      [a, b] =
+        for n <- 1..2 do
+          Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+            filename: "sfw-#{n}-#{System.unique_integer([:positive])}.png",
+            url: "/uploads/sfw-#{n}.png"
+          })
+        end
+
+      {_en, fr} = document(ctx.actor, %{custom_fields: %{"shots" => [a.id, b.id]}})
+
+      # Re-sending the stored gallery (as ids or snapshots) is no change.
+      assert {:ok, _} =
+               CMS.update_page(reload(fr), %{custom_fields: %{"shots" => [a.id, b.id]}},
+                 actor: ctx.actor
+               )
+
+      # Reordering it is one.
+      assert refused?(
+               CMS.update_page(reload(fr), %{custom_fields: %{"shots" => [b.id, a.id]}},
+                 actor: ctx.actor
+               ),
+               "shots"
+             )
+    end
+
     test "a shared block field is refused by block id; a localized one passes", ctx do
       fr_card = card_of(ctx.fr)
 

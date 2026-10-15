@@ -57,16 +57,7 @@ defmodule KilnCMS.MixProject do
       # Advisories `mix hex.audit` reports that have no fixed release yet, each
       # with what keeps it from mattering here. Remove an entry as soon as the
       # fix ships; an entry that no longer matches the lock warns.
-      hex: [
-        ignore_advisories: [
-          # bandit: HTTP/2 blocked-send deadlines reset on every WINDOW_UPDATE,
-          # so a trickling client pins stream processes. Affects >= 1.4.0, no
-          # fix as of 2026-10-14. Kiln serves HTTP/1.1 only — the endpoint
-          # turns Bandit's HTTP/2 stack off (`http_2_options` in
-          # config/config.exs), so the vulnerable path is unreachable.
-          "EEF-CVE-2026-105659"
-        ]
-      ],
+      hex: [ignore_advisories: []],
       # `mix.lock` unless the overlay ships `config/project_deps.exs` (#1967):
       # then `config/project.lock`, so the core's committed lock never changes.
       lockfile: KilnCMS.Config.ProjectDeps.lockfile(__DIR__),

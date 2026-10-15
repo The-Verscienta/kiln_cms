@@ -84,6 +84,10 @@ defmodule KilnCMS.Firing.References do
   defp custom_field_media_id(%{"id" => id, "url" => url}) when is_binary(id) and is_binary(url),
     do: [id]
 
+  # A gallery media field stores a list of those snapshots.
+  defp custom_field_media_id(list) when is_list(list),
+    do: Enum.flat_map(list, &custom_field_media_id/1)
+
   defp custom_field_media_id(_value), do: []
 
   @doc """

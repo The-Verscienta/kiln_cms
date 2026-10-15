@@ -368,6 +368,28 @@ defmodule KilnCMS.Media.ImageBackendTest do
       assert Fixture.stored?(thumb_key)
       assert thumb_url == Fixture.url(thumb_key)
     end
+
+    test "a rate-limited read snoozes until the window rolls over" do
+      item = backend_item(100, 100)
+      select_backend(fetch_error: {:rate_limited, 12_500})
+
+      assert {:snooze, 13} = perform_job(VariantWorker, job(item))
+    end
+
+    test "a backend that couldn't answer is retried, not taken for a deleted original" do
+      item = backend_item(100, 100)
+      select_backend(fetch_error: {:http_status, 503})
+
+      assert {:error, {:http_status, 503}} = perform_job(VariantWorker, job(item))
+      assert CMS.get_media_item!(item.id, authorize?: false).variants in [nil, %{}]
+    end
+
+    test "an original the backend no longer has is left alone" do
+      item = backend_item(100, 100)
+      select_backend(fetch_error: :not_found)
+
+      assert :ok = perform_job(VariantWorker, job(item))
+    end
   end
 
   describe "ImageProcessor.plan/4" do

@@ -3695,6 +3695,10 @@
                 "description": "Field included by default.",
                 "type": "string"
               },
+              "multiple": {
+                "description": "Field included by default.",
+                "type": "boolean"
+              },
               "name": {
                 "description": "Field included by default.",
                 "type": "string"
@@ -3754,6 +3758,7 @@
               "field_type",
               "required",
               "options",
+              "multiple",
               "position",
               "names_record",
               "searchable"
@@ -3838,6 +3843,9 @@
           },
           "label": {
             "$ref": "#/components/schemas/field_definition-filter-label"
+          },
+          "multiple": {
+            "$ref": "#/components/schemas/field_definition-filter-multiple"
           },
           "name": {
             "$ref": "#/components/schemas/field_definition-filter-name"
@@ -4214,6 +4222,45 @@
           },
           "string_starts_with": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "field_definition-filter-multiple": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "type": "boolean"
+          },
+          "greater_than": {
+            "type": "boolean"
+          },
+          "greater_than_or_equal": {
+            "type": "boolean"
+          },
+          "in": {
+            "items": {
+              "type": "boolean"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "boolean"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "boolean"
+          },
+          "less_than": {
+            "type": "boolean"
+          },
+          "less_than_or_equal": {
+            "type": "boolean"
+          },
+          "not_eq": {
+            "type": "boolean"
           }
         },
         "type": "object"

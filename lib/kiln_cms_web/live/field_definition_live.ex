@@ -517,6 +517,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # Whether the reference-target select applies to the form's current type.
   defp reference?(form), do: to_string(form[:field_type].value) == "reference"
 
+  # Whether the single-or-gallery toggle applies (a `:media` field).
+  defp media?(form), do: to_string(form[:field_type].value) == "media"
+
   # Whether the compute-formula textarea applies (a `:computed` field, #429).
   defp computed?(form), do: to_string(form[:field_type].value) == "computed"
 
@@ -590,7 +593,10 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       )
 
   defp core_type_description(:media),
-    do: gettext("An image or file from the media library. For a hero image, a logo or a PDF.")
+    do:
+      gettext(
+        "An image from the media library — one, or a whole gallery. For a hero image, a logo or a set of product shots."
+      )
 
   defp core_type_description(:reference),
     do:
@@ -665,6 +671,81 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           "Derived from the document on every save and every publish — editors can't type into it. Values: %{refs}, plus this type's other fields by name. Functions: %{functions}.",
           refs: Enum.join(Computed.document_refs(), ", "),
           functions: Enum.join(Computed.functions(), ", ")
+        )}
+      </p>
+    </div>
+    """
+  end
+
+  attr :form, :any, required: true
+  attr :id, :string, required: true
+  # The definition as stored, on the edit form: turning an existing gallery
+  # back into a single image is lossy, and the form says so before saving.
+  attr :stored, :any, default: nil
+
+  # Single image or gallery, for a `:media` field only.
+  defp multiple_field(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :narrowing?,
+        match?(%{field_type: :media, multiple: true}, assigns.stored) and
+          (not media?(assigns.form) or assigns.form[:multiple].value not in [true, "true"])
+      )
+
+    # The warning outlives the toggle: retyping a gallery away from media
+    # narrows it just the same (`SyncFieldValues`), so it shows then too.
+    ~H"""
+    <div :if={media?(@form) or @narrowing?} class="sm:col-span-2">
+      <fieldset :if={media?(@form)}>
+        <legend class="mb-1 block text-sm font-medium">{gettext("Holds")}</legend>
+        <div class="grid gap-2 sm:grid-cols-2">
+          <label
+            :for={
+              {value, title, hint, icon} <- [
+                {"false", gettext("A single item"),
+                 gettext("One image — a hero, a logo, a portrait."), "hero-photo"},
+                {"true", gettext("A gallery"),
+                 gettext("Several images, in the order the editor arranges them."),
+                 "hero-squares-2x2"}
+              ]
+            }
+            for={"#{@id}-#{value}"}
+            class={[
+              "flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors",
+              if(to_string(@form[:multiple].value in [true, "true"]) == value,
+                do: "border-primary bg-primary/5",
+                else: "border-base-content/15 hover:border-base-content/30"
+              )
+            ]}
+          >
+            <input
+              type="radio"
+              id={"#{@id}-#{value}"}
+              name={@form[:multiple].name}
+              value={value}
+              checked={to_string(@form[:multiple].value in [true, "true"]) == value}
+              class="mt-0.5 size-4 accent-primary"
+            />
+            <span class="min-w-0">
+              <span class="flex items-center gap-1.5 text-sm font-medium">
+                <.icon name={icon} class="size-4 text-base-content/60" />
+                {title}
+              </span>
+              <span class="mt-0.5 block text-xs text-base-content/60">{hint}</span>
+            </span>
+          </label>
+        </div>
+      </fieldset>
+      <p
+        :if={@narrowing?}
+        id={"#{@id}-narrowing"}
+        role="status"
+        class="mt-2 flex items-start gap-1.5 text-xs text-warning-ink"
+      >
+        <.icon name="hero-exclamation-triangle" class="mt-px size-3.5 shrink-0" />
+        {gettext(
+          "Saving keeps only the first image of each gallery already filled in. The others are removed from the content, not from the media library."
         )}
       </p>
     </div>
@@ -866,6 +947,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               prompt={gettext("— Pick a type —")}
             />
             <.compute_field form={@form} />
+            <.multiple_field form={@form} id="new-field-multiple" />
             <.input field={@form[:help_text]} label={gettext("Help text")} />
             <.localization_input field={@form[:localization]} />
             <.options_field form={@form} id="new-field-options" />
@@ -966,6 +1048,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                         {type_label(definition.field_type)}
                       </span>
                       <span
+                        :if={definition.field_type == :media and definition.multiple}
+                        class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
+                      >
+                        {gettext("gallery")}
+                      </span>
+                      <span
                         :if={definition.required}
                         class="rounded bg-warning/20 px-1.5 py-0.5 text-xs text-warning"
                       >
@@ -1056,6 +1144,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     prompt={gettext("— Pick a type —")}
                   />
                   <.compute_field form={@edit.form} />
+                  <.multiple_field
+                    form={@edit.form}
+                    id={"edit-field-multiple-#{@edit.id}"}
+                    stored={definition}
+                  />
                   <.input field={@edit.form[:help_text]} label={gettext("Help text")} />
                   <.localization_input field={@edit.form[:localization]} />
                   <.options_field form={@edit.form} id={"edit-field-options-#{@edit.id}"} />

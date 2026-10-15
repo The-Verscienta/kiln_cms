@@ -195,6 +195,13 @@ msgid_plural "%{count} hours left"
 msgstr[0] "Queda %{count} hora"
 msgstr[1] "Quedan %{count} horas"
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} image"
+msgid_plural "%{count} images"
+msgstr[0] "%{count} imagen"
+msgstr[1] "%{count} imágenes"
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} image selected"
@@ -1121,6 +1128,11 @@ msgstr "Se envía un formulario"
 msgid "A funnel is completed"
 msgstr "Se completa un embudo"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A gallery"
+msgstr "Una galería"
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "A higher role that expires on its own. The standing role above is untouched, so nothing has to run on time for the elevation to end."
@@ -1254,6 +1266,11 @@ msgstr "Un enlace compartible que muestra el sitio tal como quedaría con este l
 #, elixir-autogen, elixir-format
 msgid "A short summary shown in listings and used as a fallback for social shares."
 msgstr "Un breve resumen que se muestra en los listados y se usa como alternativa para las publicaciones en redes sociales."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A single item"
+msgstr "Un solo elemento"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -1722,6 +1739,7 @@ msgid "Add field"
 msgstr "Añadir campo"
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Add images"
 msgstr "Añadir imágenes"
@@ -2198,8 +2216,8 @@ msgstr "Una URL https:// a una clave pública, o una huella openpgp4fpr:."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
-msgid "An image or file from the media library. For a hero image, a logo or a PDF."
-msgstr "Una imagen o un archivo de la biblioteca de medios. Para una imagen principal, un logotipo o un PDF."
+msgid "An image from the media library — one, or a whole gallery. For a hero image, a logo or a set of product shots."
+msgstr "Una imagen de la biblioteca de medios: una sola o una galería entera. Para una imagen principal, un logotipo o un conjunto de fotos de producto."
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
@@ -6981,6 +6999,16 @@ msgstr "vie"
 msgid "From"
 msgstr "Origen"
 
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "From a release, such as Kiln's Docker image (in /app):"
+msgstr "Desde una release, como la imagen Docker de Kiln (en /app):"
+
+#: lib/kiln_cms_web/live/image_backend_live.ex
+#, elixir-autogen, elixir-format
+msgid "From a source checkout, with Mix:"
+msgstr "Desde una copia del código fuente, con Mix:"
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -7420,6 +7448,11 @@ msgstr "Testigo del historial"
 #, elixir-autogen, elixir-format
 msgid "Hits"
 msgstr "Peticiones"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Holds"
+msgstr "Contiene"
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -8927,6 +8960,16 @@ msgstr "Mover bloque hacia abajo"
 msgid "Move block up"
 msgstr "Mover bloque hacia arriba"
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Move image %{position} earlier"
+msgstr "Mover la imagen %{position} antes"
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Move image %{position} later"
+msgstr "Mover la imagen %{position} después"
+
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "Move image down"
@@ -9584,6 +9627,7 @@ msgid "No images yet — upload one in the"
 msgstr "Aún no hay imágenes: sube una en la"
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "No images yet."
 msgstr "Todavía no hay imágenes."
@@ -10347,6 +10391,11 @@ msgstr "Una opción de una lista fija, que usted escribe en Opciones más abajo.
 #, elixir-autogen, elixir-format
 msgid "One choice per line. Editors pick one of these."
 msgstr "Una opción por línea. Los editores eligen una de ellas."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "One image — a hero, a logo, a portrait."
+msgstr "Una imagen: una portada, un logotipo, un retrato."
 
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -12091,6 +12140,11 @@ msgstr "Quitar del lanzamiento"
 msgid "Remove image"
 msgstr "Quitar la imagen"
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Remove image %{position}"
+msgstr "Quitar la imagen %{position}"
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove passkey"
@@ -13040,6 +13094,11 @@ msgstr "Guardada. Déjala en blanco para conservarla."
 msgid "Saved. Readers see these changes once you publish them."
 msgstr "Guardado. Los lectores verán estos cambios cuando los publiques."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Saving keeps only the first image of each gallery already filled in. The others are removed from the content, not from the media library."
+msgstr "Al guardar, solo se conserva la primera imagen de cada galería ya rellenada. Las demás se quitan del contenido, no de la biblioteca de medios."
+
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saving this sends this site's content to the URL below."
@@ -13612,6 +13671,11 @@ msgstr "Clave de configuración"
 #, elixir-autogen, elixir-format
 msgid "Several images with captions, published with image-gallery structured data"
 msgstr "Varias imágenes con pies de foto, publicadas con datos estructurados de galería de imágenes"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Several images, in the order the editor arranges them."
+msgstr "Varias imágenes, en el orden en que las organice quien edita."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -16381,8 +16445,8 @@ msgstr "Destino (actual)"
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
-msgid "To adopt them, run one of these on the server:"
-msgstr "Para adoptarlas, ejecuta uno de estos comandos en el servidor:"
+msgid "To adopt them, run these on the server. The first only counts what it would adopt; the second adopts."
+msgstr "Para adoptarlas, ejecuta estos comandos en el servidor. El primero solo cuenta lo que adoptaría; el segundo las adopta."
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -18624,6 +18688,11 @@ msgstr "el archivo es demasiado grande para su tipo"
 #, elixir-autogen, elixir-format
 msgid "flag near-duplicates"
 msgstr "señalar casi duplicados"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "gallery"
+msgstr "galería"
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex

@@ -61,10 +61,40 @@ Every summary line below that was shortened links to its own entry there.
   `/security-notices/<ghsa-id>`, with a feed.**
   ([#1873](https://github.com/The-Verscienta/kiln_cms/issues/1873) · [long form](docs/changelog/unreleased.md#kilncmsdev-now-publishes-kilns-security-policy-at-security-and-a-security))
 
+- **A release can adopt imported images: `bin/kiln_cms rpc
+  'KilnCMS.Release.adopt_image_backend()'`. System → Image backend labels it
+  and the Mix task, each with a dry run first.**
+  ([long form](docs/changelog/unreleased.md#release-adopt-image-backend))
+
+- **A media custom field can hold a gallery: an ordered set of images rather
+  than one.** ([long form](docs/changelog/unreleased.md#media-field-gallery))
+
 - **Every publish and withdrawal is measured end to end: one propagation
   record per transition, `mix kiln.propagation` for p50/p95, and a telemetry
   event to graph it.**
   ([#1927](https://github.com/The-Verscienta/kiln_cms/issues/1927) · [long form](docs/changelog/unreleased.md#propagation-records))
+
+### Fixed
+
+- **A variant job no longer takes an image backend's failed or rate-limited
+  read for a deleted original.**
+  ([long form](docs/changelog/unreleased.md#variant-worker-backend-errors))
+
+- **Regenerating variants skips images over the pixel cap instead of
+  re-reading each original on every run.**
+  ([long form](docs/changelog/unreleased.md#regeneration-pixel-cap))
+
+- **GraphQL `published*` queries without `offset` return their page fields
+  (`hasNextPage`, `hasPreviousPage`, `pageNumber`, `lastPage`) again: an
+  omitted `offset` now means `0`.**
+  ([#1883](https://github.com/The-Verscienta/kiln_cms/issues/1883))
+
+### Security
+
+- **bandit 1.13.0 fixes EEF-CVE-2026-105660 (a client could choose
+  `conn.host`/`conn.port` via the HTTP/1 request target) and the HTTP/2 DoS
+  EEF-CVE-2026-105659, so the endpoint speaks HTTP/2 again.**
+  ([#1991](https://github.com/The-Verscienta/kiln_cms/pull/1991))
 
 ## [1.4.0] - 2026-10-14
 

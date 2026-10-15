@@ -76,6 +76,35 @@ defmodule KilnCMS.CMS.CustomFieldQueryTest do
              |> Enum.sort() == Enum.sort([red.id, blue.id])
     end
 
+    test "a media gallery matches by containment" do
+      admin = admin()
+      shots = field_name("shots")
+      define!(%{name: shots, field_type: :media, multiple: true}, admin)
+
+      [a, b, c] =
+        for n <- 1..3 do
+          Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+            filename: "cfq-#{n}-#{System.unique_integer([:positive])}.png",
+            url: "/uploads/cfq.png"
+          })
+        end
+
+      ab = page!(%{shots => [a.id, b.id]}, admin)
+      bc = page!(%{shots => [b.id, c.id]}, admin)
+
+      assert list_ids!(%{custom_filter: %{shots => a.id}}, admin) == [ab.id]
+
+      assert %{custom_filter: %{shots => b.id}} |> list_ids!(admin) |> Enum.sort() ==
+               Enum.sort([ab.id, bc.id])
+
+      assert %{custom_filter: %{shots => %{"in" => [a.id, c.id]}}}
+             |> list_ids!(admin)
+             |> Enum.sort() == Enum.sort([ab.id, bc.id])
+
+      assert %{custom_filter: %{shots => %{"not_eq" => c.id, "null" => false}}}
+             |> list_ids!(admin) == [ab.id]
+    end
+
     test "ilike matches text fields case-insensitively" do
       admin = admin()
       subtitle = field_name("subtitle")

@@ -53,7 +53,7 @@ curl 'https://kilncms.dev/api/sync?initial=true&limit=5'
 
 # A typed query (GraphQL)
 curl https://kilncms.dev/gql -H 'content-type: application/json' \
-  -d '{"query":"{ publishedEntries(limit: 3, offset: 0) { count results { title slug } } }"}'
+  -d '{"query":"{ publishedEntries(limit: 3) { count results { title slug } } }"}'
 ```
 
 It is a documentation site, so it has no categories, tags or menus, and few

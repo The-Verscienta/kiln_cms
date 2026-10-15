@@ -110,6 +110,50 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     assert by_name["blurb"].localization == :localized
   end
 
+  test "an admin makes a media field a gallery, and is warned before narrowing it back", %{
+    conn: conn
+  } do
+    admin = authed_user(:admin)
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+    gallery_radio = "#new-field-form input[name='field_definition[multiple]'][value=true]"
+
+    lv |> form("#new-field-form", field_definition: %{field_type: "string"}) |> render_change()
+    refute has_element?(lv, gallery_radio)
+
+    lv |> form("#new-field-form", field_definition: %{field_type: "media"}) |> render_change()
+    assert has_element?(lv, gallery_radio)
+
+    lv
+    |> form("#new-field-form",
+      field_definition: %{
+        scopes: ["page"],
+        name: "product_shots",
+        label: "Product shots",
+        field_type: "media",
+        multiple: "true"
+      }
+    )
+    |> render_submit()
+
+    field =
+      :page
+      |> CMS.field_definitions_for!(authorize?: false)
+      |> Enum.find(&(&1.name == "product_shots"))
+
+    assert field.multiple
+    assert lv |> element("#field-#{field.id}") |> render() =~ "gallery"
+
+    lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+    refute has_element?(lv, "#edit-field-multiple-#{field.id}-narrowing")
+
+    lv
+    |> form("#edit-field-#{field.id}", field_definition: %{multiple: "false"})
+    |> render_change()
+
+    assert has_element?(lv, "#edit-field-multiple-#{field.id}-narrowing")
+  end
+
   test "non-admins are redirected away", %{conn: conn} do
     editor = authed_user(:editor)
     assert {:error, {:redirect, %{to: "/"}}} = conn |> log_in(editor) |> live(~p"/editor/fields")

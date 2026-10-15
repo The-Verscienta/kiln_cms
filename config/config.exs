@@ -778,12 +778,6 @@ config :kiln_cms,
 config :kiln_cms, KilnCMSWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
-  # HTTP/1.1 only. Bandit's HTTP/2 stack (h2c on the app port, h2 over TLS)
-  # carries EEF-CVE-2026-105659, a flow-control DoS with no fixed release yet;
-  # see the `ignore_advisories` entry in mix.exs. Kiln runs behind a
-  # TLS-terminating proxy, which keeps HTTP/2 to browsers. Deep-merged with the
-  # per-env `http:` keys (port, ip). Re-enable once bandit ships the fix.
-  http: [http_2_options: [enabled: false]],
   # `root_layout` so error pages carry the same `<html>`/`<head>` shell —
   # app.css, brand tokens, favicon, title — as an ordinary page (#681). Without
   # it, a `NoRouteError` 404 or a 500 rendered by the endpoint's error renderer

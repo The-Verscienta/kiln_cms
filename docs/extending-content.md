@@ -17,12 +17,18 @@ UI" workflow, scoped to fields.
 
 - **Define**: `KilnCMS.CMS.FieldDefinition` rows describe each field
   (`content_type`, `name`, `label`, `field_type`, `required`, `options`,
-  `help_text`, `position`, `default`, `compute`). Field types: `:string`,
+  `multiple`, `help_text`, `position`, `default`, `compute`). Field types: `:string`,
   `:text`, `:integer`, `:float`, `:boolean`, `:date`, `:datetime`, `:url`,
   `:select`, `:media`, `:reference`, `:geolocation`, `:datetime_range`,
   `:recurrence`, `:computed` — plus
   anything a plugin registers (see
   [plugin-extensibility.md](plugin-extensibility.md)).
+- **Single image or gallery**: a `:media` field holds one image by default
+  (stored as an `%{"id", "url", "alt"}` snapshot). With `multiple: true` it
+  is a **gallery**: an ordered list of those snapshots, filled in the editor
+  from the library drawer's multi-select and reordered tile by tile. Flipping
+  the setting reshapes stored values: a single image becomes a one-image
+  gallery, and a gallery keeps only its first image.
 - **Several types at once**: tick more than one content type and the form
   creates one definition per type under the same machine name. They are
   separate rows: each is edited, renamed or deleted on its own. The machine

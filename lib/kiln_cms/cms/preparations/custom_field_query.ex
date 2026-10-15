@@ -194,6 +194,35 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   defp condition(%{field_type: :geolocation, name: name}, _op, _raw),
     do: {:error, "custom field #{inspect(name)} (geolocation) is not filterable"}
 
+  # A gallery (`multiple` media) holds a list of snapshots, so `eq` asks
+  # whether the gallery *contains* the id, `not_eq` whether it does not, and
+  # `in` whether it contains any of them — jsonb containment against a
+  # one-snapshot array. The probe is bound as text and cast in SQL: bound as
+  # `::jsonb` directly, Postgrex would encode the JSON string as a JSON string.
+  defp condition(%{field_type: :media, multiple: true, name: name}, op, raw) do
+    contains = fn id ->
+      probe = Jason.encode!([%{"id" => to_string(id)}])
+      expr(fragment("(? -> ?::text) @> ?::text::jsonb", ^ref(:custom_fields), ^name, ^probe))
+    end
+
+    case op do
+      "eq" ->
+        {:ok, contains.(raw)}
+
+      "not_eq" ->
+        {:ok, expr(not (^contains.(raw)))}
+
+      "in" ->
+        cast_list(raw, nil, name, fn
+          [] -> expr(false)
+          values -> values |> Enum.map(contains) |> Enum.reduce(&expr(^&2 or ^&1))
+        end)
+
+      _ ->
+        {:error, "custom field #{inspect(name)} (media gallery) only supports eq/not_eq/in/null"}
+    end
+  end
+
   # media/reference snapshots: match on the stable id inside the map.
   defp condition(%{field_type: type, name: name}, op, raw) when type in [:media, :reference] do
     field = expr(get_path(custom_fields, [^name, "id"]))
