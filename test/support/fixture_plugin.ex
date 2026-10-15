@@ -389,7 +389,9 @@ defmodule KilnCMS.FixturePlugin.ImageBackend do
     * `max_bytes: n` — declines an image larger than `n` bytes;
     * `renders?: false` — `render_url/2` answers `:unsupported`;
     * `check: answer` — what `check/0` returns, or a 0-arity function it
-      calls (to raise or exit); `{:ok, [{"Stored images", n}]}` by default.
+      calls (to raise or exit); `{:ok, [{"Stored images", n}]}` by default;
+    * `fetch_error: reason` — `fetch/1` answers `{:error, reason}`, as a
+      service that is rate-limited or down would.
   """
   use Kiln.ImageBackend
 
@@ -417,7 +419,12 @@ defmodule KilnCMS.FixturePlugin.ImageBackend do
   end
 
   @impl true
-  def fetch(key), do: File.read(file(key))
+  def fetch(key) do
+    case opt(:fetch_error, nil) do
+      nil -> File.read(file(key))
+      reason -> {:error, reason}
+    end
+  end
 
   @impl true
   def delete(key) do
