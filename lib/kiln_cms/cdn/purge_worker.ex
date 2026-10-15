@@ -9,6 +9,13 @@ defmodule KilnCMS.CDN.PurgeWorker do
   one outbound client in the app that pins the address it validated, and a
   purge endpoint is exactly the kind of URL that ends up pointing somewhere
   surprising after a DNS change.
+
+  Its outcome is recorded on the propagation records it covers (#1927,
+  `KilnCMS.Propagation.cdn_settled/3`): every record of the site still waiting
+  on a purge that was enqueued before this attempt started, so a burst of
+  publishes coalesced into one purge stamps each of them. `:acknowledged` on a
+  2xx; `:failed` when the last attempt fails, or when the purge URL was unset
+  before the job ran.
   """
   use Oban.Worker,
     queue: :webhooks,
@@ -21,12 +28,28 @@ defmodule KilnCMS.CDN.PurgeWorker do
   alias KilnCMS.SafeFetch
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"org_id" => org_id}}) do
+  def perform(%Oban.Job{args: %{"org_id" => org_id}} = job) do
+    started_at = job.attempted_at || DateTime.utc_now()
+
     case CDN.purge_url() do
       # Unset between enqueue and run — nothing to purge against.
-      nil -> :ok
-      url -> purge(url, org_id)
+      nil ->
+        KilnCMS.Propagation.cdn_settled(org_id, started_at, :failed)
+        :ok
+
+      url ->
+        result = purge(url, org_id)
+        record(result, job, org_id, started_at)
+        result
     end
+  end
+
+  defp record(:ok, _job, org_id, started_at),
+    do: KilnCMS.Propagation.cdn_settled(org_id, started_at, :acknowledged)
+
+  defp record({:error, _reason}, job, org_id, started_at) do
+    if job.attempt >= job.max_attempts,
+      do: KilnCMS.Propagation.cdn_settled(org_id, started_at, :failed)
   end
 
   defp purge(url, org_id) do

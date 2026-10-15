@@ -54,6 +54,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Added
+
+- **Every publish and withdrawal is measured end to end: one propagation
+  record per transition, `mix kiln.propagation` for p50/p95, and a telemetry
+  event to graph it.** ([long form](docs/changelog/unreleased.md#propagation-records))
+
 ## [1.4.0] - 2026-10-14
 
 Long form: [docs/changelog/v1.4.0.md](docs/changelog/v1.4.0.md) —

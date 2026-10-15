@@ -337,7 +337,16 @@ defmodule KilnCMS.Webhooks do
         )
     )
     |> Enum.filter(&CMS.WebhookEndpoint.receives?(&1, event, retraction?))
-    |> Enum.each(&enqueue(&1, event, payload, org, withdraws?))
+    |> then(fn endpoints ->
+      # A publish or withdrawal opens its propagation record (#1927) BEFORE
+      # any delivery is enqueued, with the count it must wait for: a job that
+      # ran before its siblings were created would otherwise find nothing
+      # pending and settle the record early.
+      propagation = KilnCMS.Propagation.open(event, payload, org, withdraws?, length(endpoints))
+      propagation_id = propagation && propagation.id
+
+      Enum.each(endpoints, &enqueue(&1, event, payload, org, withdraws?, propagation_id))
+    end)
   rescue
     error in Ash.Error.Forbidden ->
       Logger.error(
@@ -346,7 +355,7 @@ defmodule KilnCMS.Webhooks do
       )
   end
 
-  defp enqueue(endpoint, event, payload, org, withdraws?) do
+  defp enqueue(endpoint, event, payload, org, withdraws?, propagation_id \\ nil) do
     # The delivery lands in the endpoint's site, and its org rides into the job
     # args so the worker settles it under the same tenant (epic #336). Written
     # as `system/0` (#1659): `WebhookDelivery` admits it for `create`. A refused
@@ -359,7 +368,8 @@ defmodule KilnCMS.Webhooks do
           endpoint_url: endpoint.url,
           event: event,
           payload: payload,
-          withdraws: withdraws?
+          withdraws: withdraws?,
+          propagation_id: propagation_id
         },
         actor: system(),
         tenant: org

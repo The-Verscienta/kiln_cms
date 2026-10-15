@@ -169,6 +169,26 @@ defmodule KilnCMSWeb.Telemetry do
             "(1 = a lone change; consistently 1 under bursty writes = coalescing is broken)"
       ),
 
+      # Propagation (#1927): a publish or withdrawal reaching every webhook
+      # endpoint and the CDN, one event per transition once it settles. The
+      # number the path forward publishes is the `withdraw` endpoint latency's
+      # p95 (`mix kiln.propagation`). A latency absent from an event (no
+      # endpoints, one given up on, no purge) is left out, not reported as 0.
+      distribution("kiln_cms.propagation.complete.endpoint_latency_ms",
+        unit: :millisecond,
+        tags: [:kind],
+        description: "Transition to the last webhook endpoint's 2xx"
+      ),
+      distribution("kiln_cms.propagation.complete.cdn_latency_ms",
+        unit: :millisecond,
+        tags: [:kind],
+        description: "Transition to the CDN purge's acknowledgement"
+      ),
+      sum("kiln_cms.propagation.complete.endpoints_failed",
+        tags: [:kind],
+        description: "Webhook deliveries of a transition that were given up on"
+      ),
+
       # Delivery / cache / firing Metrics (#206)
       counter("kiln_cms.cache.content.count",
         tags: [:result],

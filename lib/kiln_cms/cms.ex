@@ -382,6 +382,18 @@ defmodule KilnCMS.CMS do
       define :record_webhook_failure, action: :record_delivery_failure
     end
 
+    # Propagation records (#1927) — opened by the webhook fan-out, settled by
+    # the delivery and CDN purge workers (`KilnCMS.Propagation`).
+    resource KilnCMS.CMS.Propagation do
+      define :open_propagation, action: :open
+      define :get_propagation, action: :read, get_by: [:id]
+      define :list_propagations, action: :read
+      define :settle_propagation_cdn, action: :settle_cdn
+      define :complete_propagation, action: :complete
+      define :completed_propagations_since, action: :completed_since, args: [:kind, :since]
+      define :open_propagations_since, action: :open_since, args: [:kind, :since]
+    end
+
     # The delivery ledger — written by the pipeline, read by /editor/webhooks.
     resource KilnCMS.CMS.WebhookDelivery do
       define :create_webhook_delivery, action: :create

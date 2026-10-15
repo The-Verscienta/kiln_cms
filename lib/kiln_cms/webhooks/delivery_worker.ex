@@ -177,6 +177,7 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
     end
 
     Webhooks.mark_recovered(delivery, DateTime.utc_now())
+    KilnCMS.Propagation.delivery_settled(delivery)
   end
 
   defp settle(delivery, job, {:error, reason}, final?) do
@@ -192,6 +193,9 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
       tenant: delivery.org_id
     )
     |> log_unrecorded(delivery, "attempt")
+
+    # A given-up delivery is terminal for its propagation record (#1927).
+    if final?, do: KilnCMS.Propagation.delivery_settled(delivery)
 
     cond do
       not final? ->

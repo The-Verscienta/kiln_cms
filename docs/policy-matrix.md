@@ -203,6 +203,7 @@ everyone, the anonymous visitor included (published `:public` content, a
 | `Social.Account` | `read`, `enabled_for_provider`, `record_post` **only** | `read`, `record_post`: `:social` · `enabled_for_provider`: `:automation` | The announcer lists a provider's enabled accounts for a publish, `Social.configured?/1` asks whether any is enabled, and the announcer stamps "last posted" (`record_post`, which accepts no attributes) on the account it posted as (#1659). Minting, editing or deleting the credentials for a site's public voice stays an admin act, narrowed the same way. |
 | `Social.Post` | `claim`, `succeed`, `fail`, `unresolved`, `skip` **only** | `claim`, `succeed`, `fail`, `unresolved`, `skip`: `:social` | The announce ledger (`Social.system/0`, #1659). The claim is written before the provider is called and its unique index is the "announce once" guarantee; a refused claim is a Forbidden that posts nothing, never "already announced". No read and no `destroy`: a deleted claim would free the dedupe key for a second post. |
 | `CMS.WebhookEndpoint` | `read`, `record_delivery_success`, `record_delivery_failure` **only** | `read`, `record_delivery_success`, `record_delivery_failure`: `:webhooks` | The dispatch scan and the delivery worker read endpoints (`Webhooks.system/0`, #1659), and the worker keeps the health counters behind auto-disable. Creating, editing or deleting an endpoint stays an admin act. Both reads pass `authorize_with: :error`: a refused scan would read as "no endpoint subscribed" and a refused lookup as "endpoint deleted", so a lost grant is logged (and, in the worker, retried) instead. |
+| `CMS.Propagation` | `read`, `completed_since`, `open_since`, `open`, `settle_cdn`, `complete` **only** | `read`, `settle_cdn`: `:webhooks`, `:cdn` · `completed_since`, `open_since`, `open`, `complete`: `:webhooks` | Propagation records (#1927): the fan-out opens one per publish or withdrawal, the delivery worker settles it, and the CDN purge worker records the purge half. Settling stays with `:webhooks` because it counts the record's deliveries, and a count under an actor the ledger refuses reads zero. Reads pass `authorize_with: :error`. `destroy` is not admitted; the prune trigger runs under its own `AshObanInteraction` bypass. |
 | `CMS.WebhookDelivery` | `read`, `create`, `record_attempt`, `mark_recovered` **only** | `read`, `create`, `record_attempt`, `mark_recovered`: `:webhooks` | The delivery ledger: dispatch writes the row, the worker re-reads it (failing closed: a refused read is retried, not taken for "pruned"), records each attempt, and stamps a lost retraction recovered once a later one reaches the endpoint (#1926). `destroy` is not admitted; the prune trigger runs under its own `AshObanInteraction` bypass. |
 | `Mail.Settings` | `read`, `init` **only** | `read`, `init`: `:mail` | The DKIM signer and DNS checks read the singleton with no actor of their own, and `ensure_settings!/0` inserts the empty row (`Mail.system/0`, #1659). The read fails closed: `nil` would read as "no DKIM key" and send unsigned. Changing the key or the server IP stays platform-admin. |
 | `Mail.SuppressedRecipient`, `Mail.SiteSuppressedRecipient` | `read`, `suppress` **only** | `read`, `suppress`: `:mail` | The pipeline looks every recipient up before queuing and records a hard bounce on the list of the relay that reported it (`Mail.system/0`, #1659). The lookup passes `authorize_with: :error`: a refused read would otherwise be "not suppressed" and resume mail to dead addresses, so `enqueue!/2` drops the recipient and logs, and the newsletter worker retries. Clearing a suppression (`destroy`) stays an admin act. |
@@ -998,6 +999,17 @@ Delivery history is admin-only. The delivery pipeline writes the row and its
 attempts as the system actor (never `destroy`), and the `prune_deliveries` and
 `scrub_retraction_payloads` AshOban triggers run under the
 `AshObanInteraction` bypass.
+
+## Propagation records — `Propagation`
+
+| Action | admin | editor | viewer | anonymous |
+|--------|:-----:|:------:|:------:|:---------:|
+| read (`read`, `completed_since`, `open_since`), `open`, `settle_cdn`, `complete`, `destroy` | ✅ | ❌ | ❌ | ❌ |
+
+Propagation records (#1927) are admin-only. The webhook pipeline opens and
+settles them and the CDN purge worker records the purge half, each as its
+system actor (never `destroy`); the `prune_propagations` AshOban trigger runs
+under the `AshObanInteraction` bypass.
 
 ## The API-key axis
 

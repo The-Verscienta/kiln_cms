@@ -56,6 +56,10 @@ defmodule KilnCMS.CMS.WebhookDelivery do
       # keeps, on the document's governance trail (#1926). Deleting the dead
       # endpoint must not erase the record that a consumer was never told.
       reference :endpoint, on_delete: :nilify
+
+      # Propagation records are pruned on their own schedule (#1927); a kept
+      # delivery (a failed retraction) outlives its record.
+      reference :propagation, on_delete: :nilify
     end
 
     custom_indexes do
@@ -120,7 +124,7 @@ defmodule KilnCMS.CMS.WebhookDelivery do
 
     create :create do
       primary? true
-      accept [:endpoint_id, :endpoint_url, :event, :payload]
+      accept [:endpoint_id, :endpoint_url, :event, :payload, :propagation_id]
       # Optional on the row (it nilifies when the endpoint is deleted), never
       # on a new delivery.
       require_attributes [:endpoint_id]
@@ -296,6 +300,13 @@ defmodule KilnCMS.CMS.WebhookDelivery do
       define_attribute? false
       attribute_writable? false
       public? false
+    end
+
+    # The publish or withdrawal this delivery carried (#1927): set by the
+    # fan-out, nil on a redelivery, a ping or any other event.
+    belongs_to :propagation, KilnCMS.CMS.Propagation do
+      allow_nil? true
+      public? true
     end
 
     # Nil once the endpoint has been deleted (the reference nilifies, #1926).

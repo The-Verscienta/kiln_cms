@@ -13,6 +13,78 @@ decision, not an automatic blocker: the maintainer decides.
 | [Headless API p95 under 50 ms](#headless-api-p95-under-50-ms) | **Partly met** (measured 2026-09-27). Delivery, JSON:API and GraphQL reads: p95 under 43 ms with 50 concurrent clients. Search, re-measured 2026-10-02 after #1725: 14–19 ms alone and 18–60 ms with 10 clients (a common word misses, a rare one meets), 197–231 ms with 50 ([search, after #1725](#search-after-1725)). The sync API initial page, which missed from 10, is under 15 ms p95 from 10 since #1713 (re-measured 2026-10-02) |
 | [Zero-downtime releases](#zero-downtime-releases) | **Not shown.** Migrations are now held to expand/contract in CI (#1716), but no swap has been run under traffic. The maintainer accepted shipping 1.0 without it (decision 2026-10-02) |
 
+## Live delivery: unpublish to last endpoint
+
+The path forward's first claim is that a correction reaches every page a site
+serves within N seconds ([path-forward.md](path-forward.md), release 1.5). This
+section is where N is published. The first number is **unpublish to last
+endpoint, p95**.
+
+| Measurement | Site and endpoints | Window | Withdrawals measured | p50 | p95 | Lost | Measured on |
+|---|---|---|---|---|---|---|---|
+| Unpublish to last webhook endpoint | Verscienta.com staging, its production endpoint set | *not yet run* | | | | | |
+
+### What is measured
+
+Every publish and withdrawal opens one propagation record (#1927,
+`KilnCMS.Propagation`):
+
+- **Start:** the transition's dispatch, just after its write commits.
+- **Endpoints:** each webhook delivery of the transition points back at the
+  record. A delivery is terminal once it gets a 2xx (`delivered_at`) or is
+  given up on.
+- **CDN:** when `KILN_CDN_PURGE_URL` is set, the record also waits for the
+  purge covering it to be acknowledged or to fail.
+
+The record settles once all of that is terminal. Then:
+
+- **Endpoint latency:** from the transition to the **last** endpoint's 2xx.
+  A transition where any endpoint was given up on has no latency and counts as
+  *lost*; for a withdrawal it is also on the document's governance trail as
+  "Retraction not delivered". A transition sent to no endpoint has no latency
+  either.
+- **CDN latency:** recorded beside it, but not part of this number.
+- **Percentiles:** nearest-rank over the settled transitions in the window
+  that reached every endpoint.
+- **Withdrawal:** an `unpublished`, or the trashing of a live document.
+  Archiving a live document counts once, through its `unpublished`.
+
+What this does **not** measure:
+
+- **Endpoint processing:** a webhook is delivered when the endpoint answers
+  2xx, not when the consumer has finished acting on it. A consumer that
+  accepts the request and then rebuilds asynchronously adds its own time on
+  top.
+- **Open pages:** the open-page leg arrives with the change feed in 2.x
+  ([path-forward.md](path-forward.md), release 2.5).
+
+### How to take it
+
+On the site being measured, with its real endpoint set subscribed:
+
+1. Run a batch of withdrawals: unpublish published documents, spread out over
+   the window so they don't share a CDN purge or a busy endpoint.
+2. Read the result:
+
+   ```bash
+   mix kiln.propagation --kind withdraw --days 1
+   ```
+
+   It prints `withdraw  n=…  p50=…  p95=…  max=…  lost=…  no-endpoints=…  open=…`.
+   In a release, call `KilnCMS.Propagation.percentiles/2` from a remote
+   console (`bin/kiln_cms remote`).
+3. Record the row above:
+   - the window and `n`;
+   - `lost`: a lost withdrawal is a failed measurement, not a slow one;
+   - the date, the Kiln version, and the endpoint set (count and receiver
+     hosting).
+
+Ongoing, an operator graphs the `[:kiln_cms, :propagation, :complete]`
+telemetry event. `KilnCMSWeb.Telemetry` reports it as
+`kiln_cms.propagation.complete.endpoint_latency_ms`, tagged by `kind`.
+Propagation records are kept for 90 days
+(`config :kiln_cms, :propagation, retention_days:`).
+
 ## Headless API p95 under 50 ms
 
 **Partly met.** Measured on 2026-09-27 against `main` at `1cc4d3c83`
