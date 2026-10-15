@@ -344,6 +344,23 @@ defmodule KilnCMS.Media.RegenerationTest do
 
     # After a quality or width change the variants are present but wrong, so
     # "missing" is the wrong question.
+    # The job would refuse it from the same header, and for an image backend's
+    # item reading the original is a download (#1955) — paid on every run.
+    test "an image over the pixel cap is counted, not enqueued" do
+      previous = Application.get_env(:kiln_cms, :media, [])
+      Application.put_env(:kiln_cms, :media, Keyword.put(previous, :max_pixels, 1_000_000))
+      on_exit(fn -> Application.put_env(:kiln_cms, :media, previous) end)
+
+      _over = media(%{width: 2000, height: 1000})
+      under = media(%{width: 1000, height: 1000})
+
+      assert %{enqueued: 1, scanned: 2, over_pixel_cap: 1} = Regeneration.run(org_id())
+      assert queued_ids() == [under.id]
+
+      # `only_missing?: false` can't make it either.
+      assert %{over_pixel_cap: 1} = Regeneration.run(org_id(), only_missing?: false)
+    end
+
     test "only_missing?: false enqueues everything" do
       media(%{
         variants: %{

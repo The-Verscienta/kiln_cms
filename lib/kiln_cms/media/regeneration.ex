@@ -57,7 +57,14 @@ defmodule KilnCMS.Media.Regeneration do
 
   @doc """
   Enqueue a variant regeneration for every image in `org_id`. Returns
-  `%{enqueued: n, scanned: n}`.
+  `%{enqueued: n, scanned: n, over_pixel_cap: n}`.
+
+  An image whose recorded dimensions are over the pixel cap
+  (`KilnCMS.ImageProcessor.max_pixels/0`) is counted in `over_pixel_cap` and
+  not enqueued: its job would read the original only to refuse it, as the
+  transform route refuses it from the same recorded dimensions. Reading the
+  original is a download for an image backend's item (#1955), and the
+  missing-only run would otherwise repeat it on every run.
 
   ## Options
 
@@ -67,20 +74,35 @@ defmodule KilnCMS.Media.Regeneration do
       converted. Pass `false` after a *quality* or *width* change, where the
       existing variants are present but wrong.
   """
-  @spec run(Ash.UUID.t(), keyword()) :: %{enqueued: non_neg_integer(), scanned: non_neg_integer()}
+  @spec run(Ash.UUID.t(), keyword()) :: %{
+          enqueued: non_neg_integer(),
+          scanned: non_neg_integer(),
+          over_pixel_cap: non_neg_integer()
+        }
   def run(org_id, opts \\ []) do
     only_missing? = Keyword.get(opts, :only_missing?, true)
+    max_pixels = KilnCMS.ImageProcessor.max_pixels()
 
     org_id
     |> stream_images()
-    |> Enum.reduce(%{enqueued: 0, scanned: 0}, fn item, acc ->
+    |> Enum.reduce(%{enqueued: 0, scanned: 0, over_pixel_cap: 0}, fn item, acc ->
       acc = %{acc | scanned: acc.scanned + 1}
 
-      if only_missing? and current?(item),
-        do: acc,
-        else: %{acc | enqueued: acc.enqueued + enqueue(item, org_id)}
+      cond do
+        only_missing? and current?(item) -> acc
+        over_pixel_cap?(item, max_pixels) -> %{acc | over_pixel_cap: acc.over_pixel_cap + 1}
+        true -> %{acc | enqueued: acc.enqueued + enqueue(item, org_id)}
+      end
     end)
   end
+
+  # From the recorded size, one frame: an animated source's frames only make
+  # it larger, so this never skips one the job would accept.
+  defp over_pixel_cap?(%{width: width, height: height}, max_pixels)
+       when is_integer(width) and is_integer(height),
+       do: width * height > max_pixels
+
+  defp over_pixel_cap?(_item, _max_pixels), do: false
 
   @doc """
   Whether `item` already carries every configured alternate format for each of
@@ -231,7 +253,7 @@ defmodule KilnCMS.Media.Regeneration do
     # does not fire, `Map.has_key?/2` answers false for every format, and every
     # recorded failure silently reads as "never recorded". That made the whole
     # of #1000 inert on this path, which is the only path `run/2` uses.
-    |> Ash.Query.select([:id, :variants, :variant_failures, :content_type, :width])
+    |> Ash.Query.select([:id, :variants, :variant_failures, :content_type, :width, :height])
     # As the media pipeline's system actor, `authorize_with: :error` (#1659): a
     # refused read would silently drop every row the grant alone admits (a
     # gated or quarantined one), and the run would report a library it never

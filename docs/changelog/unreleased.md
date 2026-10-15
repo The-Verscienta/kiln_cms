@@ -40,3 +40,16 @@ carries the reasoning.
   failed read of a backend-held original is retried, unless the backend says
   `:not_found`. Reads from Kiln's own storage are unchanged.
   ([#1955](https://github.com/The-Verscienta/kiln_cms/issues/1955))
+
+<a id="regeneration-pixel-cap"></a>
+
+- **Regenerating variants skips images over the pixel cap instead of
+  re-reading each original on every run.** An image recorded over
+  `max_pixels` (50 MP) can never be given variants: its job reads the
+  original and refuses it, as the transform route refuses it from the same
+  recorded size. The missing-only run still enqueued it every time, and for
+  an image backend's item each of those reads is an API download. A 52.9 MP
+  photo adopted from a Sanity import cost one on every run. `Regeneration.run/2`
+  now counts such images in `over_pixel_cap` without enqueuing them, and
+  `mix kiln.media.regenerate_variants` reports the count.
+  ([#1955](https://github.com/The-Verscienta/kiln_cms/issues/1955))

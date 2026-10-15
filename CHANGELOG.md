@@ -67,6 +67,10 @@ Every summary line below that was shortened links to its own entry there.
   read for a deleted original.**
   ([long form](docs/changelog/unreleased.md#variant-worker-backend-errors))
 
+- **Regenerating variants skips images over the pixel cap instead of
+  re-reading each original on every run.**
+  ([long form](docs/changelog/unreleased.md#regeneration-pixel-cap))
+
 ## [1.4.0] - 2026-10-14
 
 Long form: [docs/changelog/v1.4.0.md](docs/changelog/v1.4.0.md) —
