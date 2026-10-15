@@ -386,7 +386,11 @@ the front-end integration guide.
 through this repository's [Security tab](https://github.com/The-Verscienta/kiln_cms/security)
 → **Report a vulnerability**. The full policy — what is in scope, which
 release lines are supported, and what to expect after
-you report — is [`.github/SECURITY.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/.github/SECURITY.md).
+you report — is [`.github/SECURITY.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/.github/SECURITY.md),
+also published at [kilncms.dev/security](https://kilncms.dev/security) with
+every security notice issued for Kiln. Follow the
+[security notices feed](https://kilncms.dev/security-notices/feed.xml) to hear
+about the next one.
 
 <!-- That link is deliberately a full URL, not a relative path: `.github/` is
      outside ExDoc's `extras`, so `[...](.github/SECURITY.md)` fails the

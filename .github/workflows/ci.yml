@@ -743,6 +743,15 @@ jobs:
       - name: Check the release-notes publisher can still read the changelog
         run: elixir scripts/publish_releases.exs --all --dry-run --out "$RUNNER_TEMP/release-notes-html"
 
+      # And the security-page publisher (#1873): SECURITY.md rendered, and the
+      # repository's published advisories read from the GitHub API (the
+      # token only lifts the anonymous rate limit). Unit tested in
+      # test/scripts/publish_security_test.exs.
+      - name: Check the security-page publisher can still read SECURITY.md and the advisories
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: elixir scripts/publish_security.exs --dry-run --out "$RUNNER_TEMP/security-html"
+
   client:
     name: Elixir client (kiln_client)
     runs-on: ubuntu-24.04

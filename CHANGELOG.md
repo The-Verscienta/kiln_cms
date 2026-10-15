@@ -56,6 +56,11 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **kilncms.dev now publishes Kiln's security policy at `/security`, and a
+  security notice per published GitHub advisory at
+  `/security-notices/<ghsa-id>`, with a feed.**
+  ([#1873](https://github.com/The-Verscienta/kiln_cms/issues/1873) · [long form](docs/changelog/unreleased.md#kilncmsdev-now-publishes-kilns-security-policy-at-security-and-a-security))
+
 - **A release can adopt imported images: `bin/kiln_cms rpc
   'KilnCMS.Release.adopt_image_backend()'`. System → Image backend labels it
   and the Mix task, each with a dry run first.**

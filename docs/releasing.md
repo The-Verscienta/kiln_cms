@@ -453,6 +453,17 @@ for the previous minor, use a branch:
 8. **Delete the branches**, `release/v1.0.3` and the CI base
    `release/v1.0.x`. The tag keeps the history reachable.
 
+**A security fix's notice.** Fill in the private advisory's affected and
+patched versions per line (`>= 1.0.0, < 1.0.3` and `1.0.3`; `>= 1.1.0, <
+1.1.1` and `1.1.1`), and publish it before you publish the GitHub release.
+Publishing a release runs `.github/workflows/publish-security.yml`, which
+turns every published advisory into a notice at
+`kilncms.dev/security-notices/<ghsa-id>`, lists it on `/security`, and puts
+it in the notices feed (#1873). An advisory published after the release
+reaches the site on the workflow's daily run, or straight away from "Publish
+security page" in the Actions tab. The workflow never unpublishes a notice:
+withdraw a withdrawn advisory's notice in the editor too.
+
 **What `mix kiln.update` does with a patch tag.** A plain update targets the
 highest final release, not the newest tag and not the newest on the pin's own
 line. A project pinned at `v1.0.2` after `v1.1.1` and `v1.0.3` exist is
