@@ -6,12 +6,13 @@ defmodule KilnCMS.Firing.References do
   goes stale when its target re-fires. This module:
 
     * `extract/1` / `references/1` — pull reference edges out of a typed block tree
-    * `rebuild/3` — replace a document's outgoing edges (called on every fire)
+    * `rebuild/4` — replace a document's outgoing edges (called on every fire)
     * `invalidate/3` — enqueue cycle-safe re-fire jobs for a changed doc's referrers
 
-  References live either in a block's DSL `:reference` field(s) or, for legacy
-  content bridged to `Custom`, in `data["ref"]` / `data["refs"]`
-  (`%{"type" => "page"|"post", "id" => uuid}`).
+  References live in a block's DSL `:reference` field(s), for legacy content
+  bridged to `Custom` in `data["ref"]` / `data["refs"]`
+  (`%{"type" => "page"|"post", "id" => uuid}`), or in a `:reference` custom
+  field's stored snapshot (`%{"id", "type", "slug", "title"}`).
   """
   alias KilnCMS.Blocks.{Columns, Custom, Gallery}
   alias KilnCMS.CMS
@@ -53,7 +54,16 @@ defmodule KilnCMS.Firing.References do
   def document_refs(document) do
     blocks = document |> Map.get(:blocks) |> TypedBlocks.to_typed()
 
-    (extract(blocks) ++ media_refs(blocks) ++ document_media_refs(document))
+    targets(document, blocks)
+  end
+
+  # Everything a document points at, from its block tree and from itself. One
+  # list for both `document_refs/1` and `rebuild/4`, so the usage view and the
+  # re-fire graph cannot disagree about what a document references.
+  defp targets(document, typed_blocks) do
+    (extract(typed_blocks) ++
+       media_refs(typed_blocks) ++
+       document_media_refs(document) ++ document_content_refs(document))
     |> Enum.uniq()
   end
 
@@ -89,6 +99,43 @@ defmodule KilnCMS.Firing.References do
     do: Enum.flat_map(list, &custom_field_media_id/1)
 
   defp custom_field_media_id(_value), do: []
+
+  # Documents a document points at outside its blocks: its `:reference` custom
+  # fields. A reference renders the target's slug and title into the referrer's
+  # artifact, so it belongs in the re-fire graph exactly as a block reference
+  # does — without the edge, renaming a target left every referrer firing the
+  # old title (D13). The snapshot's `"type"` is the field's target type name
+  # (`"page"`, a compiled type, or a dynamic type's name), the same vocabulary
+  # block references use, so `type_atom/1` maps it to the storage-tier edge type.
+  defp document_content_refs(document) do
+    case Map.get(document, :custom_fields) do
+      map when is_map(map) -> map |> Map.values() |> Enum.flat_map(&custom_field_content_ref/1)
+      _other -> []
+    end
+  end
+
+  # The full four-key snapshot `ApplyCustomFields` writes, and only that: a
+  # `:json` custom field can hold any map, and `"type"` + `"id"` alone would
+  # read an arbitrary JSON value as a content reference. A media snapshot never
+  # matches (it has no `"type"`/`"slug"`/`"title"`, and carries a `"url"`).
+  defp custom_field_content_ref(
+         %{"id" => id, "type" => type, "slug" => _, "title" => _} = snapshot
+       )
+       when is_binary(id) and is_binary(type) do
+    with false <- Map.has_key?(snapshot, "url"),
+         true <- valid_uuid?(id),
+         atom when not is_nil(atom) <- type_atom(type) do
+      [{atom, id}]
+    else
+      _not_a_reference -> []
+    end
+  end
+
+  # A multi-valued reference stores a list of those snapshots.
+  defp custom_field_content_ref(list) when is_list(list),
+    do: Enum.flat_map(list, &custom_field_content_ref/1)
+
+  defp custom_field_content_ref(_value), do: []
 
   @doc """
   Media referenced from a typed block tree.
@@ -165,8 +212,9 @@ defmodule KilnCMS.Firing.References do
   Replace a document's outgoing edges to match its current references.
 
   Takes the `document` rather than its id because the edge set is no longer
-  derivable from the block tree alone — a featured image and a `:media` custom
-  field are references the document carries directly (#403).
+  derivable from the block tree alone — a featured image, a `:media` custom
+  field (#403) and a `:reference` custom field are references the document
+  carries directly.
   """
   @spec rebuild(Ash.UUID.t(), atom(), struct(), [struct()]) :: :ok
   def rebuild(org_id, from_type, document, typed_blocks) do
@@ -186,8 +234,8 @@ defmodule KilnCMS.Firing.References do
     |> Ash.Query.filter(from_type == ^from_type and from_id == ^from_id)
     |> Ash.bulk_destroy!(:destroy, %{}, actor: system_actor(), tenant: org_id)
 
-    (extract(typed_blocks) ++ media_refs(typed_blocks) ++ document_media_refs(document))
-    |> Enum.uniq()
+    document
+    |> targets(typed_blocks)
     |> Enum.map(fn {to_type, to_id} ->
       %{from_type: from_type, from_id: from_id, to_type: to_type, to_id: to_id}
     end)

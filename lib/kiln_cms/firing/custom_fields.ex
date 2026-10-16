@@ -12,6 +12,13 @@ defmodule KilnCMS.Firing.CustomFields do
       happens to be re-saved afterwards. Recomputing at fire time means a
       formula change reaches published output on the next fire, and no stale
       derived value rides out on an artifact.
+    * **reference labels are read fresh**. A `:reference` value stores a
+      `%{"id", "type", "slug", "title"}` snapshot taken when the referrer was
+      saved; the target can be renamed since. The fired copy carries the
+      target's *current* slug and title when the target is published, so the
+      re-fire a rename triggers (decision D13, `KilnCMS.Firing.References`)
+      actually changes the artifact. The stored snapshot is not rewritten, and
+      its shape is unchanged — only the two label values are refreshed.
     * **geolocation fields become structured data** (#428). A
       `%{"lat", "lng"}` value is a schema.org `Place` with `GeoCoordinates`,
       contributed to the document's `contentLocation` — a property
@@ -47,7 +54,13 @@ defmodule KilnCMS.Firing.CustomFields do
       # since been deleted or renamed — the row survives the destroy, and an
       # ordinary title-only edit never rewrites it.
       stored = Map.take(stored, Enum.map(definitions, & &1.name))
-      %{values: recompute(definitions, document, stored, body), definitions: definitions}
+
+      values =
+        definitions
+        |> recompute(document, stored, body)
+        |> refresh_references(definitions, Map.get(document, :org_id))
+
+      %{values: values, definitions: definitions}
     else
       # Point-in-time: the stored map is the historical truth. Neither the
       # formulas nor the field registry of today may edit it.
@@ -97,6 +110,70 @@ defmodule KilnCMS.Firing.CustomFields do
     case Computed.evaluate(definition.compute || "", context) do
       nil -> acc
       value -> Map.put(acc, definition.name, value)
+    end
+  end
+
+  # One read per distinct target type, ids only — not one per value.
+  defp refresh_references(values, definitions, org_id) do
+    names = for %{field_type: :reference, name: name} <- definitions, do: name
+
+    snapshots =
+      values
+      |> Map.take(names)
+      |> Map.values()
+      |> Enum.flat_map(&List.wrap/1)
+      |> Enum.filter(&snapshot?/1)
+
+    case snapshots do
+      [] ->
+        values
+
+      snapshots ->
+        current =
+          snapshots
+          |> Enum.group_by(& &1["type"], & &1["id"])
+          |> Enum.flat_map(fn {type, ids} -> published_labels(org_id, type, Enum.uniq(ids)) end)
+          |> Map.new()
+
+        relabelled =
+          values |> Map.take(names) |> Map.new(fn {name, v} -> {name, relabel(v, current)} end)
+
+        Map.merge(values, relabelled)
+    end
+  end
+
+  defp snapshot?(%{"id" => id, "type" => type}) when is_binary(id) and is_binary(type),
+    do: match?({:ok, _}, Ecto.UUID.cast(id))
+
+  defp snapshot?(_value), do: false
+
+  defp relabel(list, current) when is_list(list), do: Enum.map(list, &relabel(&1, current))
+
+  defp relabel(%{"id" => id} = snapshot, current) when is_map_key(current, id),
+    do: Map.merge(snapshot, Map.fetch!(current, id))
+
+  # Not published (a draft, trashed, purged) or not a snapshot at all: keep the
+  # stored value. A label is only refreshed from a row a reader may already
+  # see — firing never copies an unpublished title into a public artifact.
+  defp relabel(value, _current), do: value
+
+  # Through the type's own list interface, so a dynamic type's read is scoped
+  # to its definition. An unknown type (a target type deleted since the value
+  # was saved) contributes nothing, and its values keep their stored labels.
+  defp published_labels(org_id, type, ids) do
+    if KilnCMS.CMS.ContentTypes.get(type, org_id) do
+      type
+      |> KilnCMS.CMS.ContentTypes.list!(
+        # authorize?: false — firing has no actor (see `system_actor/0`); the
+        # read is tenant-scoped, published rows only, and only slug/title
+        # leave here — the same stance as `References.load_published/3`.
+        authorize?: false,
+        tenant: org_id,
+        query: [filter: [id: [in: ids], state: :published], select: [:id, :slug, :title]]
+      )
+      |> Enum.map(&{&1.id, %{"slug" => &1.slug, "title" => &1.title}})
+    else
+      []
     end
   end
 

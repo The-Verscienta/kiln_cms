@@ -89,16 +89,21 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#regeneration-pixel-cap))
 
 - **GraphQL `published*` queries without `offset` return their page fields
-  (`hasNextPage`, `hasPreviousPage`, `pageNumber`, `lastPage`) again: an
-  omitted `offset` now means `0`.**
+  (`hasNextPage`, `hasPreviousPage`, `pageNumber`, `lastPage`) again: an omitted
+  `offset` now means `0`.**
   ([#1883](https://github.com/The-Verscienta/kiln_cms/issues/1883))
+
+- **Renaming a document now re-fires the documents that point at it through a
+  `:reference` custom field, and their fired artifacts carry its new slug and
+  title.**
+  ([long form](docs/changelog/unreleased.md#renaming-a-document-now-re-fires-the-documents-that-point-at-it-through-a))
 
 ### Security
 
 - **bandit 1.13.0 fixes EEF-CVE-2026-105660 (a client could choose
   `conn.host`/`conn.port` via the HTTP/1 request target) and the HTTP/2 DoS
   EEF-CVE-2026-105659, so the endpoint speaks HTTP/2 again.**
-  ([#1991](https://github.com/The-Verscienta/kiln_cms/pull/1991))
+  ([#1991](https://github.com/The-Verscienta/kiln_cms/issues/1991))
 
 ## [1.4.0] - 2026-10-14
 

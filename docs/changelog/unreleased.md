@@ -142,3 +142,38 @@ carries the reasoning.
   now counts such images in `over_pixel_cap` without enqueuing them, and
   `mix kiln.media.regenerate_variants` reports the count.
   ([#1955](https://github.com/The-Verscienta/kiln_cms/issues/1955))
+
+<a id="graphql-published-queries-without-offset-return-their-page-fields-hasnextpage"></a>
+
+- **GraphQL `published*` queries without `offset` return their page fields
+  (`hasNextPage`, `hasPreviousPage`, `pageNumber`, `lastPage`) again: an
+  omitted `offset` now means `0`.**
+  ([#1883](https://github.com/The-Verscienta/kiln_cms/issues/1883))
+
+<a id="renaming-a-document-now-re-fires-the-documents-that-point-at-it-through-a"></a>
+
+- **Renaming a document now re-fires the documents that point at it through a
+  `:reference` custom field, and their fired artifacts carry its new slug and
+  title.** A `:reference` field's value was mirrored as a backlink (#1594) but
+  never became an edge in the re-fire graph (decision D13), which only read
+  block references, block media, the featured image and `:media` fields. So
+  publishing a rename re-fired nothing, and every referrer's `:json` artifact
+  kept the title and slug stored when the referrer was last saved. The edges
+  are now written on every fire, single and list values alike, with media
+  snapshots (which carry a `"url"`) still recorded as media. Firing also reads
+  the target's current slug and title for the fired copy of the value, when
+  the target is published; an unpublished target keeps the stored label, so no
+  draft title reaches a public artifact. The stored `custom_fields` value and
+  its `%{"id", "type", "slug", "title"}` shape are unchanged, and so is what
+  the delivery APIs return for it. Existing referrers get their edges the next
+  time they fire. No migration.
+
+## Security
+
+<a id="bandit-1130-fixes-eef-cve-2026-105660-a-client-could-choose-connhostconnport"></a>
+
+- **bandit 1.13.0 fixes EEF-CVE-2026-105660 (a client could choose
+  `conn.host`/`conn.port` via the HTTP/1 request target) and the HTTP/2 DoS
+  EEF-CVE-2026-105659, so the endpoint speaks HTTP/2 again.**
+  ([#1991](https://github.com/The-Verscienta/kiln_cms/pull/1991))
+

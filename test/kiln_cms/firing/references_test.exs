@@ -120,4 +120,184 @@ defmodule KilnCMS.Firing.ReferencesTest do
       assert %{success: 1, failure: 0} = drain()
     end
   end
+
+  # `:reference` custom fields are references the document carries itself, not
+  # in a block — they used to be mirrored as `ContentLink` backlinks (#1594) but
+  # never entered this graph, so renaming a target left its referrers' artifacts
+  # firing the old title.
+  describe "reference custom fields" do
+    setup do
+      actor = admin()
+
+      definition =
+        CMS.create_type_definition!(
+          %{name: "rf#{System.unique_integer([:positive])}", label: "Referrer"},
+          actor: actor
+        )
+
+      for {name, type, target} <- [{"related", :reference, "page"}, {"hero", :media, nil}] do
+        CMS.create_field_definition!(
+          %{
+            type_definition_id: definition.id,
+            name: name,
+            label: name,
+            field_type: type,
+            target_type: target
+          },
+          actor: actor
+        )
+      end
+
+      %{actor: actor, definition: definition, org: KilnCMS.Accounts.default_org_id()}
+    end
+
+    defp media! do
+      Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+        filename: "hero-#{System.unique_integer([:positive])}.png",
+        url: "/uploads/hero.png",
+        alt: "A hero image"
+      })
+    end
+
+    defp published_referrer!(definition, fields, actor) do
+      definition.name
+      |> CMS.ContentTypes.create!(%{title: "Referrer", slug: slug(), custom_fields: fields},
+        actor: actor
+      )
+      |> CMS.publish_entry!(%{}, actor: actor)
+    end
+
+    defp json_artifact(org, type, id) do
+      {:ok, artifact} = Firing.get_artifact(type, id, :json, authorize?: false, tenant: org)
+      artifact.body
+    end
+
+    test "a reference is a content edge and a media field stays a media edge", %{
+      actor: actor,
+      definition: definition
+    } do
+      target =
+        CMS.publish_page!(CMS.create_page!(%{title: "B", slug: slug()}, actor: actor),
+          actor: actor
+        )
+
+      media = media!()
+
+      referrer =
+        published_referrer!(definition, %{"related" => target.id, "hero" => media.id}, actor)
+
+      drain()
+
+      {:ok, edges} = Firing.edges_from(:entry, referrer.id, authorize?: false)
+      targets = edges |> Enum.map(&{&1.to_type, &1.to_id}) |> Enum.sort()
+
+      assert targets == Enum.sort([{:page, target.id}, {:media, media.id}])
+    end
+
+    test "renaming the target re-fires the referrer with the new title", %{
+      actor: actor,
+      definition: definition,
+      org: org
+    } do
+      target =
+        CMS.publish_page!(CMS.create_page!(%{title: "Old title", slug: slug()}, actor: actor),
+          actor: actor
+        )
+
+      referrer = published_referrer!(definition, %{"related" => target.id}, actor)
+      drain()
+
+      assert %{"title" => "Old title"} =
+               json_artifact(org, :entry, referrer.id)["custom_fields"]["related"]
+
+      renamed = CMS.update_page!(target, %{title: "New title"}, actor: actor)
+      assert %{failure: 0} = drain()
+
+      fired = json_artifact(org, :entry, referrer.id)["custom_fields"]["related"]
+
+      assert fired == %{
+               "id" => target.id,
+               "type" => "page",
+               "slug" => renamed.slug,
+               "title" => "New title"
+             }
+
+      # The stored snapshot keeps its 1.0 shape and is not rewritten by firing.
+      assert %{"title" => "Old title"} =
+               CMS.get_entry!(referrer.id, actor: actor).custom_fields["related"]
+    end
+
+    test "an unpublished target keeps the stored label", %{
+      actor: actor,
+      definition: definition,
+      org: org
+    } do
+      target = CMS.create_page!(%{title: "Draft title", slug: slug()}, actor: actor)
+      referrer = published_referrer!(definition, %{"related" => target.id}, actor)
+      CMS.update_page!(target, %{title: "Secret new title"}, actor: actor)
+      drain()
+
+      assert %{"title" => "Draft title"} =
+               json_artifact(org, :entry, referrer.id)["custom_fields"]["related"]
+    end
+
+    test "a cycle through a custom field and a block reference terminates", %{
+      actor: actor,
+      definition: definition,
+      org: org
+    } do
+      page = CMS.create_page!(%{title: "Old title", slug: slug()}, actor: actor)
+      entry = published_referrer!(definition, %{"related" => page.id}, actor)
+
+      block = %{
+        type: :custom,
+        content: "see also",
+        data: %{"ref" => %{"type" => definition.name, "id" => entry.id}},
+        order: 0
+      }
+
+      page =
+        page
+        |> CMS.update_page!(%{blocks: KilnCMS.TypedFixtures.typed_blocks([block])}, actor: actor)
+        |> CMS.publish_page!(actor: actor)
+
+      drain()
+
+      {:ok, [edge]} = Firing.edges_from(:page, page.id, authorize?: false)
+      assert {edge.to_type, edge.to_id} == {:entry, entry.id}
+
+      # page → entry → page: the wave fires the entry once and stops at the
+      # page, which is already in its visited set.
+      CMS.update_page!(page, %{title: "New title"}, actor: actor)
+      assert %{failure: 0} = drain()
+
+      assert %{"title" => "New title"} =
+               json_artifact(org, :entry, entry.id)["custom_fields"]["related"]
+    end
+  end
+
+  describe "document_refs/1 on custom fields" do
+    test "tells a reference snapshot from a media snapshot and from plain JSON" do
+      media = Ecto.UUID.generate()
+      page = Ecto.UUID.generate()
+      posts = [Ecto.UUID.generate(), Ecto.UUID.generate()]
+
+      document = %{
+        blocks: [],
+        featured_image_id: nil,
+        custom_fields: %{
+          "hero" => %{"id" => media, "url" => "/uploads/a.png", "alt" => "A"},
+          "related" => %{"id" => page, "type" => "page", "slug" => "p", "title" => "P"},
+          "more" =>
+            Enum.map(posts, &%{"id" => &1, "type" => "post", "slug" => "s", "title" => "T"}),
+          "raw" => %{"id" => Ecto.UUID.generate(), "type" => "page"}
+        }
+      }
+
+      refs = References.document_refs(document)
+
+      assert Enum.sort(refs) ==
+               Enum.sort([{:media, media}, {:page, page} | Enum.map(posts, &{:post, &1})])
+    end
+  end
 end
