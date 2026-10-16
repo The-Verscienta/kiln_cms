@@ -167,6 +167,7 @@ carries the reasoning.
   its `%{"id", "type", "slug", "title"}` shape are unchanged, and so is what
   the delivery APIs return for it. Existing referrers get their edges the next
   time they fire. No migration.
+  ([#1998](https://github.com/The-Verscienta/kiln_cms/pull/1998))
 
 ## Security
 

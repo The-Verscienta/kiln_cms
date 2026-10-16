@@ -96,7 +96,7 @@ Every summary line below that was shortened links to its own entry there.
 - **Renaming a document now re-fires the documents that point at it through a
   `:reference` custom field, and their fired artifacts carry its new slug and
   title.**
-  ([long form](docs/changelog/unreleased.md#renaming-a-document-now-re-fires-the-documents-that-point-at-it-through-a))
+  ([#1998](https://github.com/The-Verscienta/kiln_cms/pull/1998) · [long form](docs/changelog/unreleased.md#renaming-a-document-now-re-fires-the-documents-that-point-at-it-through-a))
 
 ### Security
 
