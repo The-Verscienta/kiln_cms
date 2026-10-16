@@ -1,6 +1,9 @@
 # Relationships — reaching Directus / Hygraph parity
 
-**Status:** proposed, 2026-10-16. Nothing here is built yet. Every workstream is
+**Status:** decided, 2026-10-16. D22 and D23 are adopted, and open questions
+1–3 are answered (§7). R0 shipped in
+[#1998](https://github.com/The-Verscienta/kiln_cms/pull/1998); the rest is not
+built yet. Every workstream is
 **additive** under the 1.0 overlay contract (`docs/overlay-contract.md`): new
 field options, new API fields, new operators, new screens. Nothing reshapes a
 covered surface, so the whole plan ships in **1.5**, a minor release. The one change
@@ -56,7 +59,7 @@ Two gaps found while reading, beyond the feature list:
 | Several target types in one field | M2A | union types | ❌ | ✅ R2 |
 | Data on the link | junction fields | ❌ (intermediate model) | untyped `metadata` | ✅ typed, R3 |
 | Reverse field on the other side | ✅ (O2M alias) | ✅ two-way refs | "Linked from" panel only | ✅ R4 |
-| Edit from the other side | ✅ | ✅ | ❌ | ⚠️ R4b (decision) |
+| Edit from the other side | ✅ | ✅ | ❌ | ✅ R4b (D23) |
 | On-delete rule per field | ✅ | partial | fixed | ✅ R5 |
 | Filter through a relation | `_some`/`_none` on deep filters | `_some`/`_every`/`_none` | `eq`/`in` on one reference id | ✅ R6 |
 | Nested reads through the link | `fields=tags.tags_id.*` | native GraphQL | one `include` level, edges by id | ✅ R7 |
@@ -69,9 +72,9 @@ Kiln already leads both on: link payloads (vs Hygraph), the both-ends read
 gate, re-fire on reference change (once R0 lands), and owning the database
 (vs Hygraph).
 
-## 3. Decisions this plan asks for
+## 3. Decisions
 
-> **Proposed D22. A relationship is a field; its storage is the shared edge
+> **D22 (adopted 2026-10-16). A relationship is a field; its storage is the shared edge
 > table.** A UI-defined relationship is a `:reference` `FieldDefinition`,
 > however many targets or types it allows. Its edges live in `content_links`;
 > no table is created per relationship. The snapshot in `custom_fields` stays
@@ -86,13 +89,25 @@ runtime, and migrations are generated, reviewed and expand/contract-checked
 indexed edge table with a typed payload schema gives the same editor and API
 capability; the generator gives the same SQL control when it is needed.
 
-> **Proposed D23. Editing a relationship from the target side writes the
-> source record.** If R4b is built, adding a link from the reverse side is an
-> edit of the *source* record — authorized, versioned and optimistic-locked as
-> that record's write, and held in its working copy when the source is
-> published. It is never a bare edge insert. (If that is too heavy, R4b is
-> dropped and the reverse side stays read-only — still Hygraph parity on
-> reads.)
+> **D23 (adopted 2026-10-16). Editing a relationship from the target side
+> writes the source record.** Adding, removing or reordering a link from the
+> reverse side is an edit of the *source* record — authorized, versioned and
+> optimistic-locked as that record's write, and held in its working copy when
+> the source is published, so it goes live with *Publish changes*. It is
+> never a bare edge insert.
+
+The alternatives were weighed and turned down:
+
+- **A bare edge insert** would be instant, but the source's snapshot, version
+  history and lock would no longer agree with its edges. That is the
+  stale-snapshot problem R0 just fixed, reopened from the other side.
+- **A read-only reverse side** (dropping R4b) would have been the simplest
+  path and still matched Hygraph on reads. It was rejected because 1.5 aims
+  at full parity, and editing from either side is part of what Directus and
+  Hygraph offer.
+
+The cost is accepted: a reverse edit on a published source is not live until
+that source's changes are published. The editor says so on the row (R4b).
 
 ## 4. Workstreams
 
@@ -146,7 +161,11 @@ Each is one issue and, unless noted, one PR. Order is §5.
   `ApplyCustomFields` coercion, same `required`/`default`/`select` rules.
 - Values are stored on the edge's `metadata` and mirrored into the snapshot as
   an added `"link"` key (`%{"id", "type", "slug", "title", "link" => %{...}}`),
-  an addition to the documented shape, not a change.
+  an addition to the documented shape, not a change (decided, §7 Q2). The
+  value is written to the snapshot by `ApplyCustomFields` and copied onto the
+  edge by `ContentLinks.reconcile/1`, in the same transaction, the same way
+  R0's edges follow the stored value. So the two copies cannot disagree, and
+  delivery still reads link data from `custom_fields` in one request.
 - `ContentLink.metadata` stays a free map for curated and code-created links
   with no declared fields, so nothing that writes it today breaks.
 - Filtering on link fields comes with R6 (`custom_filter` on
@@ -163,14 +182,20 @@ Each is one issue and, unless noted, one PR. Order is §5.
   GraphQL field. The both-ends read gate applies unchanged, so a reader never
   sees a draft source.
 
-### R4b — Reverse fields (write) — gated on D23
+### R4b — Reverse fields (write) — per D23
 
 - Add/remove/reorder from the target side issues `update` on each affected
   source record (array append/remove in its `custom_fields`), as the editor's
   actor, through the normal action — so policies, versioning, the lock and
   working copies all apply. A source the actor may not update is shown, not
   editable.
-- Separate PR; can be dropped without affecting anything else.
+- When the source is published, the change lands in its working copy. The row
+  shows it as pending ("goes live when *Source title* is published") and links
+  to the source, so an editor isn't surprised that the live site hasn't
+  changed.
+- A lock conflict on one source fails that row only, with the usual
+  stale-record message, and the other rows still save.
+- Separate PR.
 
 ### R5 — On-delete rule per field
 
@@ -209,7 +234,10 @@ Each is one issue and, unless noted, one PR. Order is §5.
   polymorphic `target` calculation on `ContentLink` that the serializer emits
   as a heterogeneous `included` member, or — if that fights AshJsonApi —
   answer it on the delivery API instead: `/api/content/:type/:slug?expand=field`.
-  Decide in the PR; both are additive.
+  Decided (§7 Q1): the R7 PR opens with a time-boxed spike of the `included`
+  route, and falls back to `?expand=` if AshJsonApi can't emit those members
+  without patching it. The PR records which route it took and why. Both are
+  additive.
 - Depth: one hop through a reference is a first-class shape; deeper nesting
   goes through the existing GraphQL depth/complexity limits, not new ones.
 
@@ -273,9 +301,9 @@ R9 grows with the release: its first PR is the multi-value picker on R1, and
 R2, R3 and R4 each add their part of the picker (type badges, link-field
 inputs, the reverse list) in their own PR.
 
-**What has to be decided before work starts, not during it:** D22 and D23
-(§3), and open questions 1 and 2 (§7). R4b depends on D23. Without D23 decided
-early, R4b is the item most likely to slip out of 1.5.
+**Decided before work starts:** D22 and D23 (§3) and open questions 1–3
+(§7), all on 2026-10-16. Nothing on the build path is waiting on a decision.
+The one question left, Q4, is answered by measurement inside R6.
 
 **Parallel tracks.** After R1 merges, three tracks can run at once on separate
 files: R6 (query preparation), R2 → R7 (field validation, GraphQL schema), and
@@ -300,15 +328,21 @@ to a real join table that neither of them has.
 - **The taxonomy collapse** (`Category` + `Tag` → `Term`, #1595) stays on 2.0.
   R6's `has` operators apply to whatever taxonomy relationship exists.
 
-## 7. Open questions
+## 7. Questions
 
-1. R7 JSON:API: heterogeneous `included` from a calculation, or `?expand=` on
-   the delivery API? Spike before committing.
-2. R3 storage: link values on the edge only (snapshot carries ids) or mirrored
-   into the snapshot as proposed? Mirroring keeps one-request delivery from
-   `custom_fields`; it costs a second copy to keep in step.
-3. R4b: is source-record write semantics (D23) acceptable in the editor when
-   a reverse add touches a published source and lands in its working copy
-   rather than going live?
-4. R6 cost: `count` over edges on large lists — measure at scale (see
+Answered on 2026-10-16:
+
+1. **R7 JSON:API: heterogeneous `included`, or `?expand=` on the delivery
+   API?** Spike the `included` route first and fall back to `?expand=` if it
+   fights AshJsonApi. The R7 PR decides, and records the outcome.
+2. **R3 storage: edge only, or mirrored into the snapshot?** Mirrored. The edge
+   is a copy of the stored value, reconciled in the same transaction, and
+   delivery keeps reading link data from `custom_fields` in one request.
+3. **R4b: is it acceptable that a reverse edit on a published source lands in
+   its working copy?** Yes, as part of D23. The editor shows the edit as
+   pending until that source's changes are published.
+
+Still open:
+
+4. **R6 cost:** `count` over edges on large lists. Measure at scale (see
    `docs/benchmarks.md`) before exposing it unpaginated.
