@@ -641,6 +641,16 @@ jobs:
       - name: Hex advisory audit
         run: mix hex.audit
 
+      # examples/phoenix_showcase is not in the release image, but it is
+      # offered as a template for decoupled frontends, so whoever copies it
+      # inherits its lock. Nothing else in CI builds it, and by 2026-10-16 it
+      # had gathered 23 advisories (phoenix, bandit, plug, mint, …) unseen.
+      - name: Hex advisory audit (examples/phoenix_showcase)
+        working-directory: examples/phoenix_showcase
+        run: |
+          mix deps.get
+          mix hex.audit
+
   # Also its own job, for the same reason `deps_audit` is (#53). `mix docs` is
   # the only thing in CI that checks documentation cross-references — a dead
   # link between guides, a renamed `docs/` file still listed in `extras`, a
