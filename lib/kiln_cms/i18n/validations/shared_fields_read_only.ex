@@ -182,9 +182,10 @@ defmodule KilnCMS.I18n.Validations.SharedFieldsReadOnly do
   # rest is a display label `ApplyCustomFields` re-reads on every write.
   defp comparable(type, {:ok, %{"id" => id}}) when type in [:media, :reference], do: {:ok, id}
 
-  # A gallery is the same value while its ids, in order, are.
-  defp comparable(:media, {:ok, list}) when is_list(list),
-    do: {:ok, KilnCMS.CMS.Changes.ApplyCustomFields.media_ids(list)}
+  # A gallery or a list of references is the same value while its ids, in
+  # order, are.
+  defp comparable(type, {:ok, list}) when type in [:media, :reference] and is_list(list),
+    do: {:ok, KilnCMS.CMS.Changes.ApplyCustomFields.snapshot_ids(list)}
 
   defp comparable(_type, fetched), do: fetched
 

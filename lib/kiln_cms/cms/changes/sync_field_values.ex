@@ -3,8 +3,8 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   Keeps the `custom_fields` keys stored on content in step with the
   `FieldDefinition` rows that govern them: **destroying** a definition purges
   its key, **renaming** one moves the values to the new key, and flipping a
-  media field's `multiple` flag **reshapes** its values between a single
-  snapshot and a gallery list.
+  media or reference field's `multiple` flag **reshapes** its values between a
+  single snapshot and a list (a gallery, a list of references).
 
   Both cases otherwise leave records holding a key no definition declares, and
   such a key is on borrowed time. `Changes.ApplyCustomFields` folds the stored
@@ -61,7 +61,7 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
 
   # A destroy purges; an update purges nothing. It moves the key if `name`
   # moved, and reshapes the values (under the key they now live at) if a media
-  # field's `multiple` flipped. Every other definition edit (label, help text,
+  # or reference field's `multiple` flipped. Every other definition edit (label, help text,
   # position, even the field *type*) leaves the stored values where they are.
   defp operations(%{action_type: :destroy}, definition), do: [{:purge, definition.name}]
 
@@ -73,16 +73,17 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
         do: [],
         else: [{:rename, previous.name, definition.name}]
 
-    # A gallery is a media field with `multiple`; retyping one away from media
-    # narrows it too (ClearMultiple drops the flag), so it keeps its first item
-    # like any other narrowing rather than leaving lists under a non-media key.
-    was_gallery? = previous.field_type == :media and previous.multiple
-    gallery? = definition.field_type == :media and definition.multiple
+    # A list field is a media or reference field with `multiple`; retyping
+    # one to another type narrows it too (ClearMultiple drops the flag), so it
+    # keeps its first item like any other narrowing rather than leaving lists
+    # under a key that cannot hold one.
+    was_list? = list?(previous)
+    list? = list?(definition)
 
     reshape =
       cond do
-        was_gallery? == gallery? -> []
-        gallery? -> [{:reshape, definition.name, :to_list}]
+        was_list? == list? -> []
+        list? -> [{:reshape, definition.name, :to_list}]
         true -> [{:reshape, definition.name, :to_single}]
       end
 
@@ -90,6 +91,9 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   end
 
   defp operations(_changeset, _definition), do: []
+
+  defp list?(%{field_type: type, multiple: multiple}),
+    do: multiple == true and type in KilnCMS.CMS.Changes.ClearMultiple.list_types()
 
   # An orphaned definition (#1770) governs no table: its content type is gone,
   # so there is no record of it left to purge, and nothing to warn about when
@@ -147,9 +151,9 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     |> query([from, to | params], "moved #{inspect(from)} to #{inspect(to)} on")
   end
 
-  # Single → gallery wraps each stored snapshot in a one-item list — lossless.
-  # Gallery → single keeps each list's first snapshot and clears an empty one;
-  # the rest of a gallery has nowhere to go, which the fields admin says before
+  # Single → list wraps each stored snapshot in a one-item list — lossless.
+  # List → single keeps each list's first snapshot and clears an empty one;
+  # the rest of a list has nowhere to go, which the fields admin says before
   # the admin saves. Only values already in the other shape are touched.
   # sobelow_skip ["SQL.Query"]
   defp execute({:reshape, name, :to_list}, table, filter, params) do
@@ -159,7 +163,7 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
                                      jsonb_build_array(custom_fields -> $1::text))
      WHERE jsonb_typeof(custom_fields -> $1::text) = 'object'#{filter.(1)}
     """
-    |> query([name | params], "made #{inspect(name)} a gallery on")
+    |> query([name | params], "made #{inspect(name)} a list on")
   end
 
   # sobelow_skip ["SQL.Query"]
@@ -204,8 +208,21 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     )
   end
 
-  # A media field has no reference edges to reshape.
-  defp execute_links({:reshape, _name, _shape}, _table, _filter, _params), do: :ok
+  # A list → single narrowing keeps each record's first reference, so its
+  # edge (position 0) stays and every later one goes with the value it
+  # mirrored. Single → list keeps the one edge at position 0 as it is. A media
+  # field has no reference edges, so this matches nothing for a gallery.
+  # sobelow_skip ["SQL.Query"]
+  defp execute_links({:reshape, name, :to_single}, table, filter, params) do
+    """
+    DELETE FROM content_links
+     WHERE kind = 'reference' AND field = $1 AND position > 0
+       AND source_id IN (SELECT id FROM #{table} WHERE TRUE#{filter.(1)})
+    """
+    |> query([name | params], "deleted the narrowed #{inspect(name)} reference links of")
+  end
+
+  defp execute_links({:reshape, _name, :to_list}, _table, _filter, _params), do: :ok
 
   # sobelow_skip ["SQL.Query"]
   defp query(sql, params, what) do

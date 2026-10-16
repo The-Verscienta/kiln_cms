@@ -28,7 +28,9 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   reject names whose type differs across owners rather than guess.
 
   `media`/`reference` fields filter by their snapshot's stable `id`
-  (equality-shaped operators only) and are not sortable. Definitions are read
+  (equality-shaped operators only) and are not sortable. On a `multiple` one
+  (a gallery, a list of references) `eq` means "contains this id", `not_eq`
+  "does not", and `in` "contains any of them". Definitions are read
   as the system (`KilnCMS.CMS.Housekeeping`, #1659): registry metadata, not
   user data, and the public API's anonymous callers filter too. The read fails
   closed — a refused registry read raises rather than resolving to "no
@@ -194,12 +196,14 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   defp condition(%{field_type: :geolocation, name: name}, _op, _raw),
     do: {:error, "custom field #{inspect(name)} (geolocation) is not filterable"}
 
-  # A gallery (`multiple` media) holds a list of snapshots, so `eq` asks
-  # whether the gallery *contains* the id, `not_eq` whether it does not, and
-  # `in` whether it contains any of them — jsonb containment against a
-  # one-snapshot array. The probe is bound as text and cast in SQL: bound as
-  # `::jsonb` directly, Postgrex would encode the JSON string as a JSON string.
-  defp condition(%{field_type: :media, multiple: true, name: name}, op, raw) do
+  # A gallery (`multiple` media) or a list of references (`multiple`
+  # reference) holds a list of snapshots, so `eq` asks whether the list
+  # *contains* the id, `not_eq` whether it does not, and `in` whether it
+  # contains any of them — jsonb containment against a one-snapshot array. The
+  # probe is bound as text and cast in SQL: bound as `::jsonb` directly,
+  # Postgrex would encode the JSON string as a JSON string.
+  defp condition(%{field_type: type, multiple: true, name: name}, op, raw)
+       when type in [:media, :reference] do
     contains = fn id ->
       probe = Jason.encode!([%{"id" => to_string(id)}])
       expr(fragment("(? -> ?::text) @> ?::text::jsonb", ^ref(:custom_fields), ^name, ^probe))
@@ -219,7 +223,8 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
         end)
 
       _ ->
-        {:error, "custom field #{inspect(name)} (media gallery) only supports eq/not_eq/in/null"}
+        {:error,
+         "custom field #{inspect(name)} (#{list_label(type)}) only supports eq/not_eq/in/null"}
     end
   end
 
@@ -404,4 +409,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       InvalidArgument.exception(field: argument, message: message)
     )
   end
+
+  defp list_label(:media), do: "media gallery"
+  defp list_label(:reference), do: "list of references"
 end

@@ -194,6 +194,50 @@ defmodule KilnCMS.Firing.ReferencesTest do
       assert targets == Enum.sort([{:page, target.id}, {:media, media.id}])
     end
 
+    test "every item of a list of references is an edge, and a rename re-fires the list", %{
+      actor: actor,
+      definition: definition,
+      org: org
+    } do
+      CMS.create_field_definition!(
+        %{
+          type_definition_id: definition.id,
+          name: "see_also",
+          label: "See also",
+          field_type: :reference,
+          target_type: "page",
+          multiple: true
+        },
+        actor: actor
+      )
+
+      [a, b] =
+        for title <- ["First", "Second"] do
+          CMS.publish_page!(CMS.create_page!(%{title: title, slug: slug()}, actor: actor),
+            actor: actor
+          )
+        end
+
+      referrer = published_referrer!(definition, %{"see_also" => [b.id, a.id]}, actor)
+      drain()
+
+      {:ok, edges} = Firing.edges_from(:entry, referrer.id, authorize?: false)
+
+      assert edges |> Enum.map(&{&1.to_type, &1.to_id}) |> Enum.sort() ==
+               Enum.sort([{:page, a.id}, {:page, b.id}])
+
+      CMS.update_page!(a, %{title: "First, renamed"}, actor: actor)
+      assert %{failure: 0} = drain()
+
+      fired = json_artifact(org, :entry, referrer.id)["custom_fields"]["see_also"]
+
+      # The list keeps its order and shape; only the renamed item's label moves.
+      assert Enum.map(fired, &{&1["id"], &1["title"]}) == [
+               {b.id, "Second"},
+               {a.id, "First, renamed"}
+             ]
+    end
+
     test "renaming the target re-fires the referrer with the new title", %{
       actor: actor,
       definition: definition,

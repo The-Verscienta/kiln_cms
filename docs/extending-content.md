@@ -17,7 +17,8 @@ UI" workflow, scoped to fields.
 
 - **Define**: `KilnCMS.CMS.FieldDefinition` rows describe each field
   (`content_type`, `name`, `label`, `field_type`, `required`, `options`,
-  `multiple`, `help_text`, `position`, `default`, `compute`). Field types: `:string`,
+  `multiple`, `min_items`, `max_items`, `help_text`, `position`, `default`,
+  `compute`). Field types: `:string`,
   `:text`, `:integer`, `:float`, `:boolean`, `:date`, `:datetime`, `:url`,
   `:select`, `:media`, `:reference`, `:geolocation`, `:datetime_range`,
   `:recurrence`, `:computed` — plus
@@ -29,6 +30,24 @@ UI" workflow, scoped to fields.
   from the library drawer's multi-select and reordered tile by tile. Flipping
   the setting reshapes stored values: a single image becomes a one-image
   gallery, and a gallery keeps only its first image.
+- **One reference or a list**: a `:reference` field holds one record by
+  default (an `%{"id", "type", "slug", "title"}` snapshot). With
+  `multiple: true` it holds a **list of references**: an ordered list of
+  those snapshots, in the order the editor arranges them — the gallery's
+  shape. A record may appear once (a repeat is refused, naming it), and every
+  id must resolve to a record of the target type the writer can read. Blank
+  items drop out; an emptied list clears the field. Flipping the setting
+  reshapes stored values like a gallery's (one → a one-item list; a list →
+  its first item, and the other items' edges go with them), and the fields
+  admin warns before a narrowing save. Single references keep their 1.0
+  shape. Many-to-many with typed link data, reverse fields and the
+  search-as-you-type picker follow in 1.5 — see
+  [relationships-plan.md](relationships-plan.md).
+- **Item bounds**: on either kind of list (`multiple: true`), optional
+  `min_items` / `max_items` bound how many items a value holds once it holds
+  any — an empty optional field is still allowed; `required` asks for at
+  least one. They are checked when a record's field is written, so tightening
+  one leaves stored values alone until then. Both clear when `multiple` does.
 - **Several types at once**: tick more than one content type and the form
   creates one definition per type under the same machine name. They are
   separate rows: each is edited, renamed or deleted on its own. The machine
@@ -54,7 +73,8 @@ UI" workflow, scoped to fields.
   just happens where the admin asked for it.)
 - **References are edges too**: a `:reference` value is stored as a snapshot
   (`%{"id", "type", "slug", "title"}`) *and* as a `ContentLink` edge
-  (`kind: :reference`, `field` the field's name) written with the live value
+  (`kind: :reference`, `field` the field's name; a list of references has one
+  edge per item, `position` its place in the list) written with the live value
   (#1594; D20 in [content-organization-plan.md](content-organization-plan.md),
   adopted additively — the snapshot stays the value, the edge is added beside
   it, rather than the edge becoming the source of truth as D20 proposed). The edge is

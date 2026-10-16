@@ -154,6 +154,70 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     assert has_element?(lv, "#edit-field-multiple-#{field.id}-narrowing")
   end
 
+  test "an admin makes a reference field a bounded list, and is warned before narrowing it", %{
+    conn: conn
+  } do
+    admin = authed_user(:admin)
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+    list_radio = "#new-field-form input[name='field_definition[multiple]'][value=true]"
+    bounds = "#new-field-multiple-bounds"
+
+    lv |> form("#new-field-form", field_definition: %{field_type: "reference"}) |> render_change()
+    assert has_element?(lv, list_radio)
+    refute has_element?(lv, bounds)
+
+    lv
+    |> form("#new-field-form", field_definition: %{field_type: "reference", multiple: "true"})
+    |> render_change()
+
+    assert has_element?(lv, bounds)
+
+    lv
+    |> form("#new-field-form",
+      field_definition: %{
+        scopes: ["page"],
+        name: "see_also",
+        label: "See also",
+        field_type: "reference",
+        target_type: "page",
+        multiple: "true",
+        min_items: "1",
+        max_items: "5"
+      }
+    )
+    |> render_submit()
+
+    field =
+      :page
+      |> CMS.field_definitions_for!(authorize?: false)
+      |> Enum.find(&(&1.name == "see_also"))
+
+    assert {field.multiple, field.min_items, field.max_items} == {true, 1, 5}
+    assert lv |> element("#field-#{field.id}") |> render() =~ "list"
+
+    lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+    refute has_element?(lv, "#edit-field-multiple-#{field.id}-narrowing")
+
+    # Blank bounds clear them.
+    lv
+    |> form("#edit-field-#{field.id}", field_definition: %{min_items: "", max_items: ""})
+    |> render_submit()
+
+    field = CMS.get_field_definition!(field.id, authorize?: false)
+    assert {field.min_items, field.max_items} == {nil, nil}
+
+    lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+
+    html =
+      lv
+      |> form("#edit-field-#{field.id}", field_definition: %{multiple: "false"})
+      |> render_change()
+
+    assert has_element?(lv, "#edit-field-multiple-#{field.id}-narrowing")
+    assert html =~ "Saving keeps only the first item of each list"
+  end
+
   test "non-admins are redirected away", %{conn: conn} do
     editor = authed_user(:editor)
     assert {:error, {:redirect, %{to: "/"}}} = conn |> log_in(editor) |> live(~p"/editor/fields")

@@ -7,6 +7,32 @@ carries the reasoning.
 
 ## Added
 
+<a id="a-reference-custom-field-can-hold-a-list-of-references-multiple-true-with"></a>
+
+- **A reference custom field can hold a list of references (`multiple: true`),
+  with optional `min_items` / `max_items`.** Workstream R1 of
+  [relationships-plan.md](../relationships-plan.md). The value is an ordered
+  list of the same `{"id", "type", "slug", "title"}` snapshots a single
+  reference stores, the shape a media gallery already has (#1992). Each item
+  must resolve to a record of the target type the writer can read, in one
+  read for the whole list. A record listed twice is refused, naming it. A
+  lone id is a one-item list, and blanks drop out, so an emptied list clears
+  the field. The bounds apply to a list that holds items; `required` still
+  asks for at least one. Flipping the flag reshapes stored values as it does
+  for a gallery: one becomes a one-item list, a list keeps its first item and
+  the other items' edges are deleted. The fields admin warns before a
+  narrowing save and edits the bounds. Each item has its own `ContentLink`
+  edge at its `position`, and reordering rewrites the positions. Each item is
+  also a re-fire edge (R0, #1998). `custom_filter` `eq` on a list means
+  "contains this id", `not_eq` "does not contain", and `in` "contains any". The
+  schema export types the field as an array of snapshots and reports the
+  bounds as `x-kiln-min-items` / `x-kiln-max-items`. They are not
+  `minItems` / `maxItems`, because a value stored before a bound was
+  tightened may fall outside it. The editor gets a small ordered list with
+  an add select, and the search picker follows in R9. Single references keep
+  their 1.0 shape.
+  ([#2000](https://github.com/The-Verscienta/kiln_cms/pull/2000))
+
 <a id="kilncmsdev-now-publishes-kilns-security-policy-at-security-and-a-security"></a>
 
 - **kilncms.dev now publishes Kiln's security policy at `/security`, and a

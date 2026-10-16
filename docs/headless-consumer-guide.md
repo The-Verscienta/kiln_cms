@@ -121,7 +121,9 @@ map on every surface — including the fired artifact's `json` surface — and a
 `custom_filter`/`custom_sort` (see
 [json-api.md](json-api.md) → "Custom fields"). Scalar fields are JSON-native values; `media` and
 `reference` fields are **write-time snapshots** — `{"id", "url", "alt"}` for
-media, `{"id", "type", "slug", "title"}` for references — so no extra
+media, `{"id", "type", "slug", "title"}` for references, and an ordered
+array of those for a media gallery or a list of references (a field defined
+with `multiple: true`; `/api/schema` types it as an array) — so no extra
 resolution is needed to render them (fetch fresh content by `id`/`type` when
 you need more than the label). A `geolocation` field is
 `{"lat", "lng"}` (plus optional `"zoom"`/`"label"`), and also appears on the

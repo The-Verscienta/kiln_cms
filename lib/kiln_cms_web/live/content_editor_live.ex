@@ -2762,7 +2762,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # as the gallery block; its confirm button names the field instead of a block.
   def handle_event("open_field_gallery_picker", %{"field" => name}, socket)
       when is_binary(name) do
-    if field_gallery_editable?(socket, name),
+    if field_gallery_editable?(socket, name) and field_list_of?(socket, name, :media),
       do: {:noreply, socket |> assign(:picking, {:field_gallery, name}) |> assign(:picked, [])},
       else: {:noreply, socket}
   end
@@ -2784,6 +2784,30 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # A list of references (`multiple` reference) adds from its own select,
+  # named outside the content form (see `custom_field_input/1`); `_target`
+  # says which field's select changed.
+  def handle_event(
+        "field_reference_add",
+        %{"_target" => ["_kiln_ref_add", name], "_kiln_ref_add" => adds},
+        socket
+      )
+      when is_binary(name) and is_map(adds) do
+    case Map.get(adds, name) do
+      id when is_binary(id) and id != "" ->
+        if field_list_of?(socket, name, :reference),
+          do: {:noreply, update_field_gallery(socket, name, &Enum.uniq(&1 ++ [id]))},
+          else: {:noreply, socket}
+
+      _blank ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("field_reference_add", _params, socket), do: {:noreply, socket}
+
+  # Remove and move serve every list field — a gallery and a list of
+  # references alike: both are an ordered list of snapshot ids.
   def handle_event("field_gallery_remove", %{"field" => name, "id" => id}, socket)
       when is_binary(name) and is_binary(id),
       do: {:noreply, update_field_gallery(socket, name, &List.delete(&1, id))}
@@ -3780,17 +3804,30 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # `multiple` set, and not a shared field locked on a translation (#1327) —
   # the disabled fieldset hides the controls, but a hidden control is not a
   # boundary.
+  #
+  # Any list field qualifies — a gallery or a list of references; the drawer
+  # opens only for a gallery (`field_list_of?/3`).
   defp field_gallery_editable?(socket, name) do
     socket.assigns.may_write? and
       Enum.any?(
         socket.assigns.field_definitions,
-        &match?(%{name: ^name, field_type: :media, multiple: true}, &1)
+        &match?(
+          %{name: ^name, field_type: type, multiple: true} when type in [:media, :reference],
+          &1
+        )
       ) and
       not (socket.assigns[:localization] &&
              KilnCMSWeb.ContentEditor.Localization.locked?(
                socket.assigns.localization,
                {:custom, name}
              ))
+  end
+
+  defp field_list_of?(socket, name, type) do
+    Enum.any?(
+      socket.assigns.field_definitions,
+      &match?(%{name: ^name, field_type: ^type, multiple: true}, &1)
+    )
   end
 
   # Rewrite a gallery custom field's ids through `fun` and re-validate — the
@@ -3802,7 +3839,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       ids =
         socket.assigns.form
         |> custom_field_value(name)
-        |> KilnCMS.CMS.Changes.ApplyCustomFields.media_ids()
+        |> KilnCMS.CMS.Changes.ApplyCustomFields.snapshot_ids()
 
       params = AshPhoenix.Form.params(socket.assigns.form)
 

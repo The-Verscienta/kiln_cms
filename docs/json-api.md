@@ -263,9 +263,9 @@ GET /api/json/posts?filter[locale]=en&custom_filter[price][lte]=20&custom_sort=-
   all.
 - `media`/`reference` fields match on their snapshot's stable `id`
   (`custom_filter[hero_image]=<media uuid>`) and support `eq`/`not_eq`/`in`/`null` only.
-  On a media **gallery** (`multiple: true`) they test membership: `eq` matches
-  a gallery holding that image, `not_eq` one that doesn't, `in` one holding any
-  of the listed images.
+  On a media **gallery** or a **list of references** (`multiple: true`) they
+  test membership: `eq` matches a list holding that id, `not_eq` one that
+  doesn't, `in` one holding any of the listed ids.
 - Records without the field are excluded by every comparison (they're SQL
   `NULL`), and a record whose stored value has another JSON type simply
   doesn't match — it can't error the query.
@@ -426,7 +426,9 @@ consumer can join outgoing/incoming relations (and e.g. per-link quantity
 metadata) without extra requests.
 
 Since 1.1 every `:reference` custom field value also has an edge (#1594):
-`kind: "reference"`, with `field` naming the custom field and `source_type` /
+`kind: "reference"`, with `field` naming the custom field (a list of
+references, `multiple: true`, has one edge per item, `position` its 0-based
+place in the list) and `source_type` /
 `target_type` naming both ends' content types (the same vocabulary as the
 snapshot's `"type"`). So `?include=incoming_links` on a record answers *what
 links here* — curated related content and references alike — and

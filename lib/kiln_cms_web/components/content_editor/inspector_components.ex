@@ -559,6 +559,123 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
+  # A list of references (`multiple` reference): the picked records as an
+  # ordered list, each carried by a hidden `name[]` input so the order on screen
+  # is the order submitted — the gallery's pattern, with the same leading blank
+  # so an emptied list still submits. Records are added from a select of the
+  # target type's records (`field_reference_add`) and moved or removed with the
+  # buttons on each row (`field_gallery_move` / `field_gallery_remove`), all
+  # server-side edits of the form params.
+  #
+  # The add-select is named outside the content form's params
+  # (`_kiln_ref_add[...]`), so a save or another field's validate never reads
+  # it, and its id carries the item count so every add renders a fresh,
+  # reset select. Deliberately small: the search-as-you-type picker is R9.
+  def custom_field_input(%{definition: %{field_type: :reference, multiple: true}} = assigns) do
+    items = reference_items(assigns.value, assigns.options)
+    picked = MapSet.new(items, & &1.id)
+    max = assigns.definition.max_items
+
+    assigns =
+      assigns
+      |> assign(:items, items)
+      |> assign(:last, length(items) - 1)
+      |> assign(:addable, Enum.reject(assigns.options, fn {_label, id} -> id in picked end))
+      |> assign(:full?, is_integer(max) and length(items) >= max)
+
+    ~H"""
+    <div
+      id={cf_id(@definition)}
+      role="group"
+      aria-labelledby={"#{cf_id(@definition)}-label"}
+      aria-describedby={@errors != [] && cf_errors_id(@definition)}
+    >
+      <div class="mb-1 flex items-baseline justify-between gap-2">
+        <span id={"#{cf_id(@definition)}-label"} class="text-sm font-medium">
+          {@definition.label}
+        </span>
+        <span :if={@items != []} class="text-xs tabular-nums text-base-content/60">
+          {item_count_label(length(@items), @definition.max_items)}
+        </span>
+      </div>
+      <input type="hidden" name={"#{@name}[]"} value="" />
+      <ol
+        :if={@items != []}
+        id={"#{cf_id(@definition)}-items"}
+        class="divide-y divide-base-content/10 overflow-hidden rounded-md border border-base-content/10"
+      >
+        <li
+          :for={{item, index} <- Enum.with_index(@items)}
+          id={"cf-ref-#{@definition.name}-#{item.id}"}
+          class="group flex items-center gap-2 bg-base-100 px-2 py-1.5 transition-colors hover:bg-base-200/60"
+        >
+          <input type="hidden" name={"#{@name}[]"} value={item.id} />
+          <span class="flex size-5 shrink-0 items-center justify-center rounded-full bg-base-200 text-[10px] font-semibold tabular-nums text-base-content/70">
+            {index + 1}
+          </span>
+          <span class="min-w-0 flex-1 truncate text-sm">
+            {item.title || gettext("Untitled")}
+          </span>
+          <div class="flex shrink-0 items-center gap-0.5">
+            <button
+              type="button"
+              phx-click="field_gallery_move"
+              phx-value-field={@definition.name}
+              phx-value-id={item.id}
+              phx-value-dir="up"
+              disabled={index == 0}
+              aria-label={gettext("Move item %{position} up", position: index + 1)}
+              class="rounded p-0.5 text-base-content/60 transition-colors hover:bg-base-content/10 hover:text-base-content disabled:opacity-30"
+            >
+              <.icon name="hero-chevron-up" class="size-4" />
+            </button>
+            <button
+              type="button"
+              phx-click="field_gallery_move"
+              phx-value-field={@definition.name}
+              phx-value-id={item.id}
+              phx-value-dir="down"
+              disabled={index == @last}
+              aria-label={gettext("Move item %{position} down", position: index + 1)}
+              class="rounded p-0.5 text-base-content/60 transition-colors hover:bg-base-content/10 hover:text-base-content disabled:opacity-30"
+            >
+              <.icon name="hero-chevron-down" class="size-4" />
+            </button>
+            <button
+              type="button"
+              phx-click="field_gallery_remove"
+              phx-value-field={@definition.name}
+              phx-value-id={item.id}
+              aria-label={gettext("Remove item %{position}", position: index + 1)}
+              class="rounded p-0.5 text-base-content/60 transition-colors hover:bg-error/10 hover:text-error"
+            >
+              <.icon name="hero-x-mark" class="size-4" />
+            </button>
+          </div>
+        </li>
+      </ol>
+      <p :if={@items == []} class="text-sm text-base-content/60">
+        {gettext("Nothing linked yet.")}
+      </p>
+      <select
+        :if={not @full?}
+        id={"#{cf_id(@definition)}-add-#{length(@items)}"}
+        name={"_kiln_ref_add[#{@definition.name}]"}
+        phx-change="field_reference_add"
+        aria-label={gettext("Add to %{field}", field: @definition.label)}
+        class="field-select mt-2"
+      >
+        <option value="">{gettext("+ Add…")}</option>
+        <option :for={{label, id} <- @addable} value={id}>{label}</option>
+      </select>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
+        {@definition.help_text}
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </div>
+    """
+  end
+
   # Media / reference pick-lists: the select posts the target id; the stored
   # value is the write-time snapshot map (see ApplyCustomFields), so the
   # current selection is its "id".
@@ -937,11 +1054,39 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     |> Enum.uniq_by(& &1.id)
   end
 
+  # A list of references' entries, whichever shape the value is in: the
+  # stored snapshots, the raw ids a failed validate left in the params, or a
+  # lone snapshot from before the field became a list. A raw id borrows its
+  # title from the field's options when it can.
+  defp reference_items(value, options) do
+    titles = Map.new(options, fn {label, id} -> {to_string(id), label} end)
+
+    value
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      %{"id" => id} = snapshot when is_binary(id) and id != "" ->
+        [%{id: id, title: snapshot["title"] || Map.get(titles, id)}]
+
+      id when is_binary(id) and id != "" ->
+        [%{id: id, title: Map.get(titles, id)}]
+
+      _blank ->
+        []
+    end)
+    |> Enum.uniq_by(& &1.id)
+  end
+
+  defp item_count_label(count, max) when is_integer(max),
+    do: gettext("%{count} of %{max}", count: count, max: max)
+
+  defp item_count_label(count, _max),
+    do: ngettext("%{count} item", "%{count} items", count)
+
   # The selected id of a single media/reference field. A list (a value stored
   # while the field was a gallery) selects its first item — what saving it
   # keeps — rather than reading as "None" and clearing it on the next save.
   defp snapshot_id(value),
-    do: value |> KilnCMS.CMS.Changes.ApplyCustomFields.media_ids() |> List.first()
+    do: value |> KilnCMS.CMS.Changes.ApplyCustomFields.snapshot_ids() |> List.first()
 
   defp custom_input_type(:integer), do: "number"
   defp custom_input_type(:float), do: "number"

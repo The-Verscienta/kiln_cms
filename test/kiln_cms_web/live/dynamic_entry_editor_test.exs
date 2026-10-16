@@ -279,6 +279,110 @@ defmodule KilnCMSWeb.DynamicEntryEditorTest do
     refute Map.has_key?(saved.custom_fields, "shots")
   end
 
+  test "a list of references is added to, ordered, bounded and emptied in the editor", %{
+    conn: conn
+  } do
+    admin = authed_user(:admin)
+
+    definition =
+      CMS.create_type_definition!(
+        %{name: "refs#{System.unique_integer([:positive])}", label: "Refs"},
+        actor: admin
+      )
+
+    CMS.create_field_definition!(
+      %{
+        type_definition_id: definition.id,
+        name: "see_also",
+        label: "See also",
+        field_type: :reference,
+        target_type: "page",
+        multiple: true,
+        max_items: 2
+      },
+      actor: admin
+    )
+
+    [a, b, c] =
+      for title <- ["Alpha", "Bravo", "Charlie"] do
+        CMS.create_page!(
+          %{
+            title: "#{title} #{System.unique_integer([:positive])}",
+            slug: "r-#{String.downcase(title)}-#{System.unique_integer([:positive])}"
+          },
+          actor: admin
+        )
+      end
+
+    entry =
+      ContentTypes.create!(
+        definition.name,
+        %{title: "Refs", slug: "refs-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+    {:ok, lv, html} =
+      conn |> log_in(admin) |> live(~p"/editor/content/#{definition.name}/#{entry.id}")
+
+    assert html =~ "Nothing linked yet."
+
+    add = fn id ->
+      lv
+      |> element("#custom-field-see_also select[phx-change='field_reference_add']")
+      |> render_change(%{
+        "_target" => ["_kiln_ref_add", "see_also"],
+        "_kiln_ref_add" => %{"see_also" => id}
+      })
+    end
+
+    add.(b.id)
+    add.(a.id)
+    assert reference_ids(lv) == [b.id, a.id]
+
+    # A picked record is not offered again, and a full list offers no add.
+    refute has_element?(lv, "#custom-field-see_also select option[value='#{b.id}']")
+    refute has_element?(lv, "#custom-field-see_also select[phx-change='field_reference_add']")
+    assert render(lv) =~ "2 of 2"
+
+    lv
+    |> element("#cf-ref-see_also-#{a.id} button[phx-value-dir='up']")
+    |> render_click()
+
+    assert reference_ids(lv) == [a.id, b.id]
+
+    lv |> form("##{definition.name}-editor") |> render_submit()
+
+    saved = ContentTypes.get_record!(definition.name, entry.id, actor: admin)
+    assert Enum.map(saved.custom_fields["see_also"], & &1["id"]) == [a.id, b.id]
+    assert Enum.map(saved.custom_fields["see_also"], & &1["title"]) == [a.title, b.title]
+
+    # Removing one frees a slot; removing every item clears the field.
+    lv
+    |> element("#cf-ref-see_also-#{a.id} button[phx-click='field_gallery_remove']")
+    |> render_click()
+
+    assert has_element?(lv, "#custom-field-see_also select option[value='#{c.id}']")
+
+    lv
+    |> element("#cf-ref-see_also-#{b.id} button[phx-click='field_gallery_remove']")
+    |> render_click()
+
+    assert reference_ids(lv) == []
+
+    lv |> form("##{definition.name}-editor") |> render_submit()
+
+    saved = ContentTypes.get_record!(definition.name, entry.id, actor: admin)
+    refute Map.has_key?(saved.custom_fields, "see_also")
+  end
+
+  defp reference_ids(lv) do
+    lv
+    |> render()
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query("#custom-field-see_also-items input[type=hidden]")
+    |> LazyHTML.attribute("value")
+  end
+
   defp tile_ids(lv) do
     lv
     |> render()
