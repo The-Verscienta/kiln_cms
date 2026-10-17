@@ -23,6 +23,29 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   read policies decide what can be found, so a search never surfaces a record
   the editor could not open.
 
+  ## Create and connect
+
+  Next to the search, the picker offers "Add new *Type*" for each target type
+  the editor may create (`ContentTypes.can_create?/4`, the type's generated
+  `can_create_*?` helper — the policy the create itself runs). It opens a
+  small form inline: the title and the type's required fields that have no
+  default, nothing else. The record is created as the editor, through the
+  type's own create action (`ContentTypes.create!/3`), so it starts as an
+  ordinary draft, and is then connected exactly as a pick is — the same
+  `:add`/`:put` message, so the editor's lock and working copy are untouched.
+  Abandoning the source's change leaves the new draft in the content list;
+  nothing deletes it.
+
+  The small form renders the plain field types only (text, numbers, a yes/no,
+  dates, a URL, a choice). A type with a required field it cannot render — a
+  media or reference field, a composite or plugin type — and no default is not
+  offered here: the create would be refused, and the menu never offers what
+  the server would refuse. Such a record is made in its own editor.
+
+  The form's inputs are named under `_kiln_ref_new`, outside the editor
+  form's own params (as the search's `_kiln_ref_q` is), and carry their own
+  `phx-change`, so typing into them never touches the document.
+
   ## Seams for later workstreams
 
     * `row/1` is public and takes `readonly`, so the reverse list (R4) can
@@ -38,10 +61,25 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
 
   import Ash.Expr, only: [expr: 1]
 
+  alias KilnCMS.CMS
   alias KilnCMS.CMS.Changes.ApplyCustomFields
   alias KilnCMS.CMS.ContentTypes
 
   @page_size 20
+
+  # The field types the "Add new" form can render. A required field of any
+  # other type (and no default) keeps its content type out of the menu.
+  @creatable_field_types [
+    :string,
+    :text,
+    :integer,
+    :float,
+    :boolean,
+    :date,
+    :datetime,
+    :url,
+    :select
+  ]
 
   # ── lifecycle ─────────────────────────────────────────────────────────────
 
@@ -54,7 +92,10 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
      |> assign(:more?, false)
      |> assign(:open?, false)
      |> assign(:known, %{})
-     |> assign(:ids, nil)}
+     |> assign(:ids, nil)
+     |> assign(:creatable, nil)
+     |> assign(:creating, nil)
+     |> assign(:announcement, "")}
   end
 
   @impl true
@@ -71,6 +112,11 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       if ids == socket.assigns.ids,
         do: socket,
         else: socket |> assign(:ids, ids) |> resolve(ids)
+
+    socket =
+      if socket.assigns.creatable == nil,
+        do: assign(socket, :creatable, creatable(socket.assigns)),
+        else: socket
 
     {:ok, socket |> assign(:items, items(socket.assigns)) |> assign_capacity()}
   end
@@ -89,7 +135,12 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     searchable? =
       not locked and if(definition.multiple == true, do: not full?, else: count == 0)
 
-    socket |> assign(:full?, full?) |> assign(:searchable?, searchable?)
+    socket
+    |> assign(:full?, full?)
+    |> assign(:searchable?, searchable?)
+    # A form left open when the field fills up (or locks) has nothing left to
+    # connect to.
+    |> update(:creating, &if(searchable?, do: &1))
   end
 
   # ── events ────────────────────────────────────────────────────────────────
@@ -158,7 +209,100 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     {:noreply, socket}
   end
 
+  # ── create and connect ──
+
+  # Offered only while the field can take another record — the same flag the
+  # search shows on — so a hand-sent event can't open it on a full list.
+  def handle_event("ref_new", %{"type" => type}, socket) when is_binary(type) do
+    case creatable_type(socket, type) do
+      nil ->
+        {:noreply, socket}
+
+      _entry when not socket.assigns.searchable? ->
+        {:noreply, socket}
+
+      _entry ->
+        {:noreply,
+         socket
+         |> assign(:creating, %{type: type, params: %{}, errors: []})
+         |> assign(:open?, false)}
+    end
+  end
+
+  def handle_event("ref_new_change", %{"_kiln_ref_new" => forms}, socket) when is_map(forms) do
+    case {socket.assigns.creating, Map.get(forms, socket.assigns.definition.name)} do
+      {%{} = creating, %{} = params} ->
+        {:noreply, assign(socket, :creating, %{creating | params: params})}
+
+      _other ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("ref_new_change", _params, socket), do: {:noreply, socket}
+
+  def handle_event("ref_new_cancel", _params, socket),
+    do: {:noreply, assign(socket, :creating, nil)}
+
+  def handle_event("ref_new_create", _params, socket) do
+    with %{type: type, params: params} <- socket.assigns.creating,
+         true <- socket.assigns.searchable?,
+         %{} = entry <- creatable_type(socket, type) do
+      {:noreply, create_and_connect(socket, entry, params)}
+    else
+      _nothing -> {:noreply, socket}
+    end
+  end
+
   def handle_event(_event, _params, socket), do: {:noreply, socket}
+
+  defp creatable_type(%{assigns: assigns}, type), do: creatable_type(assigns, type)
+  defp creatable_type(assigns, type), do: Enum.find(assigns.creatable || [], &(&1.key == type))
+
+  # Created as the editor through the type's own create action, then connected
+  # the way a pick is. A refusal or an invalid value stays in the form.
+  defp create_and_connect(socket, entry, params) do
+    %{actor: actor, tenant: tenant} = socket.assigns
+    title = params |> Map.get("title", "") |> to_string() |> String.trim()
+
+    if title == "" do
+      set_create_errors(socket, [gettext("Give it a title.")])
+    else
+      attrs = %{title: title, custom_fields: new_custom_fields(entry.fields, params)}
+
+      try do
+        record = ContentTypes.create!(entry.ct, attrs, actor: actor, tenant: tenant)
+        item = to_item(record, entry.ct)
+
+        notify(socket, if(multiple?(socket), do: :add, else: :put), record.id)
+
+        socket
+        |> update(:known, &Map.put(&1, record.id, item))
+        |> assign(:creating, nil)
+        |> assign(
+          :announcement,
+          gettext("Created “%{title}” as a draft and connected it.", title: title)
+        )
+      rescue
+        Ash.Error.Forbidden ->
+          set_create_errors(socket, [gettext("You can't create this here.")])
+
+        error in Ash.Error.Invalid ->
+          set_create_errors(socket, Enum.map(error.errors, &Exception.message/1))
+      end
+    end
+  end
+
+  defp set_create_errors(socket, errors),
+    do: update(socket, :creating, &%{&1 | errors: errors})
+
+  # Only the fields the form shows; everything else falls to its default.
+  defp new_custom_fields(fields, params) do
+    supplied = Map.get(params, "custom_fields", %{})
+    supplied = if is_map(supplied), do: supplied, else: %{}
+
+    Map.new(fields, &{&1.name, Map.get(supplied, &1.name, "")})
+  end
 
   defp notify(socket, op, arg),
     do: send(self(), {__MODULE__, {op, socket.assigns.definition.name, arg}})
@@ -175,6 +319,44 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       ct -> [ct]
     end
   end
+
+  # The target types the editor may create a record of here, each with the
+  # required fields the "Add new" form asks for. `nil` (not `[]`) until
+  # computed, so it is read once per picker. A locked field offers nothing
+  # anyway, so a locked picker skips the reads.
+  defp creatable(%{locked: true}), do: []
+
+  defp creatable(%{definition: definition, tenant: tenant, actor: actor}) do
+    definition
+    |> target_types(tenant)
+    |> Enum.flat_map(fn ct ->
+      with true <- ContentTypes.can_create?(ct, actor, %{}, tenant: tenant),
+           {:ok, fields} <- form_fields(ct, actor, tenant) do
+        [%{key: to_string(ct.type), ct: ct, label: ct.label, fields: fields}]
+      else
+        _not_here -> []
+      end
+    end)
+  end
+
+  # The required fields with no default — what a create would refuse without —
+  # or `:unsupported` when one of them is a type the small form can't render.
+  defp form_fields(ct, actor, tenant) do
+    needed =
+      ct
+      |> field_definitions(actor, tenant)
+      |> Enum.filter(&(&1.required and &1.default in [nil, ""]))
+
+    if Enum.all?(needed, &(&1.field_type in @creatable_field_types)),
+      do: {:ok, needed},
+      else: :unsupported
+  end
+
+  defp field_definitions(%{source: :dynamic, definition: definition}, actor, tenant),
+    do: CMS.field_definitions_for_definition!(definition.id, actor: actor, tenant: tenant)
+
+  defp field_definitions(ct, actor, tenant),
+    do: CMS.field_definitions_for!(ct.type, actor: actor, tenant: tenant)
 
   # One page of the target type, as the actor. A blank query lists the most
   # recently edited first — usually what an editor is about to link — and a
@@ -438,6 +620,35 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         </p>
       </div>
 
+      <div
+        :if={@searchable? and @creatable != [] and is_nil(@creating)}
+        id={"#{@root}-new"}
+        class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1"
+      >
+        <button
+          :for={entry <- @creatable}
+          type="button"
+          id={"#{@root}-new-#{entry.key}"}
+          phx-click="ref_new"
+          phx-value-type={entry.key}
+          phx-target={@myself}
+          class="inline-flex cursor-pointer items-center gap-1 rounded text-xs font-medium text-primary-ink transition-colors hover:underline"
+        >
+          <.icon name="hero-plus" class="size-3.5" />
+          {gettext("Add new %{type}", type: entry.label)}
+        </button>
+      </div>
+
+      <.new_record_form
+        :if={@creating}
+        root={@root}
+        field={@definition.name}
+        entry={creatable_type(assigns, @creating.type)}
+        creating={@creating}
+        target={@myself}
+      />
+      <p class="sr-only" aria-live="polite">{@announcement}</p>
+
       <p :if={@full?} class="mt-1 text-xs text-base-content/60">
         {gettext("The limit is reached. Remove one to connect another.")}
       </p>
@@ -452,6 +663,181 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     </div>
     """
   end
+
+  attr :root, :string, required: true
+  attr :field, :string, required: true
+  attr :entry, :map, required: true
+  attr :creating, :map, required: true
+  attr :target, :any, required: true
+
+  # The "Add new" form. Not a `<form>` — it renders inside the editor's own —
+  # so its inputs carry their own `phx-change` and the hook turns Enter into
+  # the create button and Escape into Cancel.
+  defp new_record_form(assigns) do
+    assigns =
+      assigns
+      |> assign(:prefix, "_kiln_ref_new[#{assigns.field}]")
+      |> assign(:form_id, "#{assigns.root}-new-form")
+
+    ~H"""
+    <div
+      id={@form_id}
+      role="group"
+      aria-labelledby={"#{@form_id}-heading"}
+      data-ref-new
+      class="mt-2 space-y-3 rounded-md border border-base-content/10 bg-base-200/40 p-3"
+    >
+      <div class="flex items-baseline justify-between gap-2">
+        <p id={"#{@form_id}-heading"} class="text-sm font-medium">
+          {gettext("New %{type}", type: @entry.label)}
+        </p>
+        <span class="text-xs text-base-content/60">
+          {gettext("Saved as a draft and connected here.")}
+        </span>
+      </div>
+      <div>
+        <label for={"#{@form_id}-title"} class="mb-1 block text-xs font-medium">
+          {gettext("Title")}
+        </label>
+        <input
+          type="text"
+          id={"#{@form_id}-title"}
+          name={"#{@prefix}[title]"}
+          value={@creating.params["title"]}
+          autocomplete="off"
+          phx-change="ref_new_change"
+          phx-target={@target}
+          phx-mounted={JS.focus()}
+          class="field-input"
+        />
+      </div>
+      <.new_field
+        :for={definition <- @entry.fields}
+        id={"#{@form_id}-cf-#{definition.name}"}
+        definition={definition}
+        name={"#{@prefix}[custom_fields][#{definition.name}]"}
+        value={get_in(@creating.params, ["custom_fields", definition.name])}
+        target={@target}
+      />
+      <ul :if={@creating.errors != []} id={"#{@form_id}-errors"} role="alert" class="space-y-0.5">
+        <li :for={message <- @creating.errors} class="flex items-center gap-1 text-xs text-error">
+          <.icon name="hero-exclamation-circle" class="size-4 shrink-0" /> {message}
+        </li>
+      </ul>
+      <div class="flex items-center justify-end gap-2">
+        <button
+          type="button"
+          phx-click="ref_new_cancel"
+          phx-target={@target}
+          data-ref-new-cancel
+          class="btn btn-ghost btn-sm"
+        >
+          {gettext("Cancel")}
+        </button>
+        <button
+          type="button"
+          id={"#{@form_id}-submit"}
+          phx-click="ref_new_create"
+          phx-target={@target}
+          phx-disable-with={gettext("Creating…")}
+          data-ref-new-submit
+          class="btn btn-primary btn-sm"
+        >
+          {gettext("Create and connect")}
+        </button>
+      </div>
+    </div>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :definition, :map, required: true
+  attr :name, :string, required: true
+  attr :value, :any, default: nil
+  attr :target, :any, required: true
+
+  defp new_field(%{definition: %{field_type: :boolean}} = assigns) do
+    ~H"""
+    <div class="flex items-center gap-2">
+      <input type="hidden" name={@name} value="false" />
+      <input
+        type="checkbox"
+        id={@id}
+        name={@name}
+        value="true"
+        checked={@value == "true"}
+        phx-change="ref_new_change"
+        phx-target={@target}
+        class="size-4 rounded border-base-content/30"
+      />
+      <label for={@id} class="text-xs font-medium">{@definition.label}</label>
+    </div>
+    """
+  end
+
+  defp new_field(%{definition: %{field_type: :select}} = assigns) do
+    ~H"""
+    <div>
+      <label for={@id} class="mb-1 block text-xs font-medium">{@definition.label}</label>
+      <select
+        id={@id}
+        name={@name}
+        phx-change="ref_new_change"
+        phx-target={@target}
+        class="field-select"
+      >
+        <option value="">{gettext("— None —")}</option>
+        <option :for={option <- @definition.options} value={option} selected={@value == option}>
+          {option}
+        </option>
+      </select>
+    </div>
+    """
+  end
+
+  defp new_field(%{definition: %{field_type: :text}} = assigns) do
+    ~H"""
+    <div>
+      <label for={@id} class="mb-1 block text-xs font-medium">{@definition.label}</label>
+      <textarea
+        id={@id}
+        name={@name}
+        rows="3"
+        phx-change="ref_new_change"
+        phx-target={@target}
+        class="field-input min-h-16"
+      >{@value}</textarea>
+    </div>
+    """
+  end
+
+  defp new_field(assigns) do
+    assigns = assign(assigns, :type, input_type(assigns.definition.field_type))
+
+    ~H"""
+    <div>
+      <label for={@id} class="mb-1 block text-xs font-medium">{@definition.label}</label>
+      <input
+        type={@type}
+        id={@id}
+        name={@name}
+        value={@value}
+        step={@definition.field_type == :float && "any"}
+        autocomplete="off"
+        phx-change="ref_new_change"
+        phx-target={@target}
+        class="field-input"
+      />
+    </div>
+    """
+  end
+
+  defp input_type(:integer), do: "number"
+  defp input_type(:float), do: "number"
+  defp input_type(:date), do: "date"
+  defp input_type(:datetime), do: "datetime-local"
+  defp input_type(:url), do: "url"
+  defp input_type(_string), do: "text"
 
   attr :id, :string, required: true
   attr :item, :map, required: true, doc: "`id`, `title`, `state`, `type_label`, `href`"

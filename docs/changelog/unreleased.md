@@ -56,6 +56,28 @@ carries the reasoning.
   add to the same picker later.
   ([#2002](https://github.com/The-Verscienta/kiln_cms/pull/2002))
 
+<a id="the-reference-picker-can-create-a-record-and-connect-it-in-one-step-add-new"></a>
+
+- **The reference picker can create a record and connect it in one step: "Add
+  new *Type*" next to the search.** Workstream R9 of
+  [relationships-plan.md](../relationships-plan.md), "Create and connect".
+  Each target type the editor may create gets an "Add new" action under the
+  search; it opens a small form inline with the title and the type's
+  required fields that have no default, nothing else. The record is created
+  as the editor through the type's own create action, so it is an ordinary
+  draft and the type's policies apply, and it is connected as if it had been
+  picked: added to the end of a list, or filling a single reference. The row
+  shows its Draft badge and a link to open it. The connection is part of the
+  document's unsaved change like any pick, so the working copy and the
+  stale-edit check are untouched; abandoning that change leaves the new
+  draft in the content list. The action is hidden when the type's
+  `can_create_*?` helper (new `ContentTypes.can_create?/4`) refuses, when
+  the field is full or locked, and for a type with a required media,
+  reference or plugin-typed field and no default, which the small form
+  can't fill. Enter in the form creates instead of saving the page, and
+  Escape closes it.
+  ([#PR](https://github.com/The-Verscienta/kiln_cms/pull/PR))
+
 <a id="kilncmsdev-now-publishes-kilns-security-policy-at-security-and-a-security"></a>
 
 - **kilncms.dev now publishes Kiln's security policy at `/security`, and a

@@ -8,6 +8,9 @@
 //     can't submit a save by accident;
 //   * focus after a pick or a removal, which would otherwise fall to <body>
 //     when the control that had it is re-rendered away;
+//   * the "Add new" form's keys — it renders inside the editor form, so Enter
+//     in one of its inputs would save the document; it presses "Create and
+//     connect" instead, and Escape presses Cancel;
 //   * drag-to-reorder of a list's rows (SortableJS, as the gallery block's
 //     `GallerySortable`). Dragging is an enhancement: every row also has
 //     move up/down buttons, so a pointer is never the only way to reorder.
@@ -62,6 +65,8 @@ export const ReferencePicker = {
   },
 
   key(e) {
+    if (e.target.closest("[data-ref-new]")) return this.newFormKey(e)
+
     const input = e.target.closest("[data-ref-search]")
     if (!input) return
 
@@ -93,6 +98,19 @@ export const ReferencePicker = {
       case "Tab":
         if (this.isOpen()) this.pushEventTo(this.el, "ref_close", {})
         break
+    }
+  },
+
+  newFormKey(e) {
+    const form = e.target.closest("[data-ref-new]")
+
+    if (e.key === "Enter" && e.target.matches("input")) {
+      e.preventDefault()
+      form.querySelector("[data-ref-new-submit]")?.click()
+    } else if (e.key === "Escape") {
+      e.preventDefault()
+      e.stopPropagation()
+      form.querySelector("[data-ref-new-cancel]")?.click()
     }
   },
 
@@ -132,6 +150,11 @@ export const ReferencePicker = {
       // The options change under a pick, so the highlight starts over.
       this.active = -1
       this.pending = {kind: "pick", count: rows.length}
+    } else if (target.closest("[data-ref-new-submit]")) {
+      // A created record lands as a row, like a pick.
+      this.pending = {kind: "pick", count: rows.length}
+    } else if (target.closest("[data-ref-new-cancel]")) {
+      this.pending = {kind: "cancel"}
     } else if (target.closest("[data-ref-remove]")) {
       const index = rows.indexOf(target.closest("li"))
       this.pending = {kind: "remove", count: rows.length, index}
@@ -146,6 +169,14 @@ export const ReferencePicker = {
   restoreFocus() {
     const pending = this.pending
     const rows = this.rows()
+
+    // Cancel closes the form without touching the rows: back to "Add new".
+    if (pending?.kind === "cancel") {
+      this.pending = null
+      ;(this.el.querySelector(`#${this.el.id}-new button`) || this.search())?.focus()
+      return
+    }
+
     if (!pending || rows.length === pending.count) return
     this.pending = null
 

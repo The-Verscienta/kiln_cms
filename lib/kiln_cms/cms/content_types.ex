@@ -674,6 +674,22 @@ defmodule KilnCMS.CMS.ContentTypes do
     end
   end
 
+  @doc """
+  Whether `actor` may create a record of `type` with `attrs` — the generated
+  `can_create_<type>?` helper behind `create!/3` (`can_create_entry?` scoped
+  to the definition for a dynamic type), so a control that offers a create
+  asks the policy the create itself will run. `opts` takes `:tenant`.
+  """
+  def can_create?(type, actor, attrs \\ %{}, opts \\ []) do
+    case get!(type, org_from(opts)) do
+      %{source: :dynamic, definition: definition} ->
+        CMS.can_create_entry?(actor, Map.put(attrs, :type_definition_id, definition.id), opts)
+
+      _compiled ->
+        call(type, "can_create_#{atom(type, opts)}?", [actor, attrs, opts], opts)
+    end
+  end
+
   @doc "Generic update through the type's own code interface (primary `:update`)."
   def update(type, record, attrs, opts \\ []),
     do: call(type, "update_#{atom(type, opts)}", [record, attrs, opts], opts)

@@ -7,6 +7,10 @@
 // proves what the server does with them and nothing about whether the keys
 // and the drag produce them: that half lives in assets/js/reference_picker.js
 // and can only fail in a browser.
+//
+// "Add new Page" (create and connect) renders its small form inside the
+// editor form, so Enter in it must create rather than save the document, and
+// Escape must close it — the hook again.
 const { test, expect, signInAsAdmin, newDraftContent, saveDraft, save } = require("./fixtures");
 
 test.describe("reference picker", () => {
@@ -53,13 +57,8 @@ test.describe("reference picker", () => {
     }
   });
 
-  test("pick from the keyboard, reorder by dragging, and it saves", async ({ page }) => {
-    for (const word of ["Alder", "Birch", "Cedar"]) {
-      pageIds.push(await newDraftContent(page, "page"));
-      await saveDraft(page, { title: `${word} ${stamp}`, slug: `${word.toLowerCase()}-${stamp}` });
-    }
-
-    // A type with a list-of-pages reference field.
+  /** A type with a list-of-pages reference field. @param {import("@playwright/test").Page} page */
+  async function createTypeWithReferences(page) {
     await page.goto("/editor/types");
     await page.fill('#new-type-form input[name="type_definition[label]"]', `E2E Refs ${stamp}`);
     await page.fill('#new-type-form input[name="type_definition[plural_label]"]', `E2E Refs ${stamp}s`);
@@ -74,7 +73,15 @@ test.describe("reference picker", () => {
     await page.locator("#new-field-multiple-true").check();
     await page.locator("#new-field-form button[type=submit]").click();
     await expect(page.locator(`code:text-is("${name}_see")`)).toBeVisible();
+  }
 
+  test("pick from the keyboard, reorder by dragging, and it saves", async ({ page }) => {
+    for (const word of ["Alder", "Birch", "Cedar"]) {
+      pageIds.push(await newDraftContent(page, "page"));
+      await saveDraft(page, { title: `${word} ${stamp}`, slug: `${word.toLowerCase()}-${stamp}` });
+    }
+
+    await createTypeWithReferences(page);
     await newDraftContent(page, name);
 
     const field = `${name}_see`;
@@ -118,5 +125,41 @@ test.describe("reference picker", () => {
     await expect.poll(titles).toEqual([`Alder ${stamp}`]);
     await expect(rows.nth(0).locator("[data-ref-remove]")).toBeFocused();
     await save(page);
+  });
+
+  test("add a new page from the picker and connect it, from the keyboard", async ({ page }) => {
+    await createTypeWithReferences(page);
+    await newDraftContent(page, name);
+    await saveDraft(page, { title: `Refs ${stamp}`, slug: `refs-${stamp}` });
+
+    const field = `${name}_see`;
+    const addNew = page.locator(`#custom-field-${field}-new-page`);
+    const form = page.locator(`#custom-field-${field}-new-form`);
+    const title = page.locator(`#custom-field-${field}-new-form-title`);
+    const rows = page.locator(`#custom-field-${field}-items > li`);
+    const titles = () => rows.locator("p.truncate").allTextContents();
+
+    // Escape closes the form and hands focus back to "Add new Page".
+    await expect(addNew).toHaveText(/Add new Page/);
+    await addNew.click();
+    await expect(title).toBeFocused();
+    await title.press("Escape");
+    await expect(form).toHaveCount(0);
+    await expect(addNew).toBeFocused();
+
+    // Enter creates and connects — it doesn't save the document.
+    await addNew.click();
+    await title.pressSequentially(`Fresh ${stamp}`);
+    await title.press("Enter");
+    await expect.poll(titles).toEqual([`Fresh ${stamp}`]);
+    await expect(rows.nth(0)).toContainText("Draft");
+    await expect(rows.nth(0).locator('a[href^="/editor/content/page/"]')).toHaveCount(1);
+    await expect(form).toHaveCount(0);
+    await expect(page.locator(`#custom-field-${field}-search`)).toBeFocused();
+
+    // The connection is part of the document's change, saved with it.
+    await save(page);
+    await page.reload();
+    await expect.poll(titles).toEqual([`Fresh ${stamp}`]);
   });
 });

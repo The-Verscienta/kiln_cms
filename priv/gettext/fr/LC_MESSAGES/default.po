@@ -1794,6 +1794,11 @@ msgstr "Ajouter l'élément"
 msgid "Add member"
 msgstr "Ajouter un membre"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Add new %{type}"
+msgstr "Ajouter : %{type}"
+
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "Add panel"
@@ -3095,6 +3100,7 @@ msgstr "Impossible de reprogrammer dans le passé."
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -4704,6 +4710,11 @@ msgstr "Créez un compte pour continuer."
 msgid "Create an account to join"
 msgstr "Créer un compte pour adhérer"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Create and connect"
+msgstr "Créer et connecter"
+
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Create content type"
@@ -4809,6 +4820,16 @@ msgstr "Créez votre compte administrateur"
 #, elixir-autogen, elixir-format
 msgid "Create your first page or post to get started."
 msgstr "Créez votre première page ou votre premier article pour commencer."
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Created “%{title}” as a draft and connected it."
+msgstr "« %{title} » a été créé en brouillon et connecté."
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Creating…"
+msgstr "Création…"
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
@@ -7201,6 +7222,11 @@ msgstr "Mettez votre site en ligne"
 msgid "Give every host that should reach a site to an organization, as a subdomain or a custom domain (the default organization can have one too), or redirect it to one at your proxy. The main host, the console host, the health checks and the payment webhook are never refused. Then remove TENANT_STRICT_HOST=false and restart."
 msgstr "Attribuez chaque hôte qui doit atteindre un site à une organisation, sous forme de sous-domaine ou de domaine personnalisé (l'organisation par défaut peut aussi en avoir un), ou redirigez-le vers l'un d'eux depuis votre proxy. L'hôte principal, l'hôte de la console, les contrôles de santé et le webhook de paiement ne sont jamais refusés. Supprimez ensuite TENANT_STRICT_HOST=false et redémarrez."
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Give it a title."
+msgstr "Donnez-lui un titre."
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Give the view a name, up to 255 characters."
@@ -9318,6 +9344,7 @@ msgstr "Nouveau"
 msgid "New %{kind} name"
 msgstr "Nom de la nouvelle %{kind}"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -13209,6 +13236,11 @@ msgstr "Enregistrez vos modifications avant de changer l'état de ce contenu."
 msgid "Saved"
 msgstr "Enregistré"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Saved as a draft and connected here."
+msgstr "Enregistré en brouillon et connecté ici."
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saved details."
@@ -16615,6 +16647,7 @@ msgid "TipTap rich text, drag-and-drop blocks, live preview, and version restore
 msgstr "Texte enrichi TipTap, blocs glisser-déposer, aperçu en direct et restauration de version — le tout en LiveView."
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #: lib/kiln_cms_web/live/content_editor/markdown_import.ex
@@ -18009,6 +18042,11 @@ msgstr "Vous ne pouvez pas créer de contenu %{type}."
 #, elixir-autogen, elixir-format
 msgid "You can't create this content."
 msgstr "Vous ne pouvez pas créer ce contenu."
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "You can't create this here."
+msgstr "Vous ne pouvez pas créer ceci ici."
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -19763,6 +19801,7 @@ msgid "— No parent (top level) —"
 msgstr "— Aucun élément parent (niveau principal) —"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
 msgid "— None —"
 msgstr "— Aucun —"
