@@ -4,16 +4,13 @@ defmodule KilnCMSWeb.ContentEditor.ReferenceValues do
   several target types (R2, `FieldDefinition.target_types`).
 
   Such a field's write must name each item's type (`%{"id", "type"}`), but a
-  `<select>` option or a hidden input posts one string. So the editor posts a
+  hidden input posts one string. So the reference picker
+  (`KilnCMSWeb.ContentEditor.ReferencePicker`) keys each row by a
   `"type:id"` token, the way the fragment picker does (#479), and
   `normalize/2` turns every token back into the map before the params reach
   the form. A field that allows one type keeps posting bare ids, exactly as
   before R2.
-
-  Deliberately small: the search-as-you-type picker with type badges is R9,
-  which replaces the inputs this serves.
   """
-
   alias KilnCMS.CMS.FieldDefinition
 
   @doc "Whether a definition is a reference field allowing more than one type."

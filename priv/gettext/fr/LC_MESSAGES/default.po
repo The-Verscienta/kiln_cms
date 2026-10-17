@@ -230,7 +230,7 @@ msgid_plural "%{count} aren't indexed yet, so they aren't grouped."
 msgstr[0] "%{count} n'est pas encore indexé, il n'est donc pas regroupé."
 msgstr[1] "%{count} ne sont pas encore indexés, ils ne sont donc pas regroupés."
 
-#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} item"
@@ -280,7 +280,7 @@ msgstr[1] "%{count} de plus le %{date} — afficher la semaine"
 msgid "%{count} of %{cap} slots used"
 msgstr "%{count} sur %{cap} emplacements utilisés"
 
-#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} of %{max}"
 msgstr "%{count} sur %{max}"
@@ -364,6 +364,20 @@ msgid "%{count} resolved comment"
 msgid_plural "%{count} resolved comments"
 msgstr[0] "%{count} commentaire résolu"
 msgstr[1] "%{count} commentaires résolus"
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} result"
+msgid_plural "%{count} results"
+msgstr[0] "%{count} résultat"
+msgstr[1] "%{count} résultats"
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} result, more available"
+msgid_plural "%{count} results, more available"
+msgstr[0] "%{count} résultat, d’autres disponibles"
+msgstr[1] "%{count} résultats, d’autres disponibles"
 
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
@@ -944,11 +958,6 @@ msgstr "(ne notifiera personne)"
 #, elixir-autogen, elixir-format
 msgid "+ Assign"
 msgstr "+ Assigner"
-
-#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
-#, elixir-autogen, elixir-format
-msgid "+ Connect an existing record…"
-msgstr "+ Associer un enregistrement existant…"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -1870,11 +1879,6 @@ msgstr "Ajoutez le premier lien ci-dessous."
 #, elixir-autogen, elixir-format
 msgid "Add the first one with the form above."
 msgstr "Ajoutez le premier avec le formulaire ci-dessus."
-
-#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
-#, elixir-autogen, elixir-format
-msgid "Add to %{field}"
-msgstr "Ajouter à %{field}"
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
@@ -3872,6 +3876,11 @@ msgstr "Connecter"
 msgid "Connect an account"
 msgstr "Connecter un compte"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Connect another…"
+msgstr "En connecter un autre…"
+
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Connect one with the form above to announce new posts."
@@ -3881,6 +3890,11 @@ msgstr "Connectez-en un avec le formulaire ci-dessus pour annoncer les nouvelles
 #, elixir-autogen, elixir-format
 msgid "Connected"
 msgstr "Connectés"
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Connected records"
+msgstr "Enregistrements connectés"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
@@ -5282,6 +5296,11 @@ msgstr "Les pages et articles supprimés attendent ici jusqu'à ce que vous les 
 msgid "Deleted the view “%{name}”."
 msgstr "Vue « %{name} » supprimée."
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Deleted, in the trash, or not visible to you"
+msgstr "Supprimé, dans la corbeille ou invisible pour vous"
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Deleted."
@@ -5670,6 +5689,7 @@ msgstr "Brouillons"
 msgid "Drafts that have never been published are not listed."
 msgstr "Les brouillons jamais publiés ne sont pas listés."
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
@@ -8814,6 +8834,11 @@ msgstr "Mastodon uniquement. Doit être en https et joignable depuis ce serveur.
 msgid "Matched as a substring, ignoring case and line wrapping, so it can sit inside a longer paragraph — but not reworded. Leave blank to inherit whatever the operator configured."
 msgstr "Recherché comme sous-chaîne, sans tenir compte de la casse ni des retours à la ligne : il peut donc se trouver au milieu d'un paragraphe, mais pas être reformulé. Laissez vide pour hériter de ce que l'opérateur a configuré."
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Matching records"
+msgstr "Enregistrements correspondants"
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Maximum"
@@ -9082,12 +9107,12 @@ msgstr "Monter l'image"
 msgid "Move into columns"
 msgstr "Déplacer dans des colonnes"
 
-#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
 msgid "Move item %{position} down"
 msgstr "Descendre l’élément %{position}"
 
-#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
 msgid "Move item %{position} up"
 msgstr "Monter l’élément %{position}"
@@ -9759,6 +9784,11 @@ msgstr "Sans limite"
 msgid "No longer available — it may have been deleted."
 msgstr "N'est plus disponible — il a peut-être été supprimé."
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "No matches for “%{query}”."
+msgstr "Aucun résultat pour « %{query} »."
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "No media matches the current filters."
@@ -10208,7 +10238,7 @@ msgstr "Rien n'a encore été annoncé."
 msgid "Nothing coming up."
 msgstr "Rien à venir."
 
-#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing connected yet."
 msgstr "Rien n’est encore associé."
@@ -10303,6 +10333,11 @@ msgstr "Rien de similaire n'a été trouvé."
 #, elixir-autogen, elixir-format
 msgid "Nothing to arrange yet."
 msgstr "Rien à organiser pour le moment."
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing to connect yet."
+msgstr "Rien à connecter pour l’instant."
 
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
@@ -10636,6 +10671,11 @@ msgstr "Ouvrir"
 msgid "Open %{title}"
 msgstr "Ouvrir %{title}"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Open %{title} in a new tab"
+msgstr "Ouvrir %{title} dans un nouvel onglet"
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Open %{type}"
@@ -10675,6 +10715,11 @@ msgstr "Ouvrir l'éditeur complet"
 #, elixir-autogen, elixir-format
 msgid "Open in"
 msgstr "Ouvrir dans"
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Open in a new tab"
+msgstr "Ouvrir dans un nouvel onglet"
 
 #: lib/kiln_cms_web/live/notification_bell.ex
 #, elixir-autogen, elixir-format
@@ -12240,6 +12285,11 @@ msgstr "Retirer %{email}"
 msgid "Remove %{path} from the 404 list"
 msgstr "Retirer %{path} de la liste des 404"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Remove %{title}"
+msgstr "Retirer %{title}"
+
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -12271,11 +12321,6 @@ msgstr "Supprimer l'image"
 #, elixir-autogen, elixir-format
 msgid "Remove image %{position}"
 msgstr "Retirer l’image %{position}"
-
-#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
-#, elixir-autogen, elixir-format
-msgid "Remove item %{position}"
-msgstr "Retirer l’élément %{position}"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -13431,6 +13476,11 @@ msgstr "Rechercher dans le contenu publié"
 msgid "Search published content…"
 msgstr "Rechercher dans le contenu publié…"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Search to connect a record…"
+msgstr "Rechercher un enregistrement à connecter…"
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Searchable (search indexes this value as text)"
@@ -13895,6 +13945,11 @@ msgstr "Afficher tous les outils"
 #, elixir-autogen, elixir-format
 msgid "Show essentials"
 msgstr "Afficher l'essentiel"
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Show more results"
+msgstr "Afficher plus de résultats"
 
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
@@ -15686,6 +15741,11 @@ msgstr "Le dernier enregistrement a eu lieu à %{time}."
 msgid "The light and dark variants, and the text colour on buttons, are derived from this so they always meet WCAG AA."
 msgstr "Les variantes claire et sombre, ainsi que la couleur du texte des boutons, en sont dérivées afin de toujours respecter WCAG AA."
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "The limit is reached. Remove one to connect another."
+msgstr "La limite est atteinte. Retirez-en un pour en connecter un autre."
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "The mail provider and From address this site sends from."
@@ -16923,6 +16983,11 @@ msgstr "Désarchiver %{count} élément(s) sélectionné(s) ? Ils repassent en b
 msgid "Unassigned"
 msgstr "Non attribuée"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Unavailable"
+msgstr "Indisponible"
+
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #, elixir-autogen, elixir-format
 msgid "Unavailable (%{value})"
@@ -17059,6 +17124,7 @@ msgid "Untagged only"
 msgstr "Sans étiquette uniquement"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
 msgid "Untitled"
 msgstr "Sans titre"

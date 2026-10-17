@@ -33,6 +33,7 @@ import {initRevealSection} from "./reveal_section"
 import {FlashAutoDismiss} from "./flash_auto_dismiss"
 import {SavedTicker} from "./saved_ticker"
 import {TabKeys} from "./tab_keys"
+import {ReferencePicker} from "./reference_picker"
 import {BodyImageUploader} from "./body_image_uploader"
 import {watchLiveness} from "./liveness"
 import {watchConnectionNotices} from "./connection_notice"
@@ -56,6 +57,9 @@ const Hooks = {
   SavedTicker,
   // Arrow/Home/End keys on a kit `.tabs` tablist — see assets/js/tab_keys.js.
   TabKeys,
+  // Combobox keys and drag-to-reorder for a reference custom field — see
+  // assets/js/reference_picker.js.
+  ReferencePicker,
   BodyImageUploader,
   FocusTrap,
   // Info flashes close themselves after a few seconds — see

@@ -64,6 +64,10 @@ Every summary line below that was shortened links to its own entry there.
   (`target_types`).**
   ([#2004](https://github.com/The-Verscienta/kiln_cms/pull/2004) · [long form](docs/changelog/unreleased.md#a-reference-custom-field-can-link-to-several-content-types-targettypes))
 
+- **The editor fills a reference custom field from a search picker instead of a
+  select of up to 500 records.**
+  ([#2002](https://github.com/The-Verscienta/kiln_cms/pull/2002) · [long form](docs/changelog/unreleased.md#the-editor-fills-a-reference-custom-field-from-a-search-picker-instead-of-a))
+
 - **kilncms.dev now publishes Kiln's security policy at `/security`, and a
   security notice per published GitHub advisory at
   `/security-notices/<ghsa-id>`, with a feed.**

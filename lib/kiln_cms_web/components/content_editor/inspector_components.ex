@@ -18,26 +18,22 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   import KilnCMSWeb.ContentEditor.Shared,
     only: [blank_to_nil: 1, selected_tag_ids: 2, user_label: 1, with_counts: 2]
 
-  alias KilnCMSWeb.ContentEditor.ReferenceValues
-
   require Logger
 
   # Whether this record currently carries a passphrase (#496). Derived from the
   # record rather than kept as an assign, so it cannot go stale against a save —
   # the rail only ever needs to know *that* one is set, never what it is.
   def content_locked?(record), do: not is_nil(Map.get(record || %{}, :access_password_hash))
-  # Options for the pick-list custom fields; other field types need none. A
-  # gallery takes the library rows themselves: it renders thumbnails, and a
-  # just-picked id whose snapshot hasn't resolved yet looks its url up here.
-  def custom_field_options(%{field_type: :media, multiple: true}, media, _refs), do: media
+  # Options for the media custom fields; other field types need none (a
+  # reference searches its target itself — `ReferencePicker`). A gallery takes
+  # the library rows themselves: it renders thumbnails, and a just-picked id
+  # whose snapshot hasn't resolved yet looks its url up here.
+  def custom_field_options(%{field_type: :media, multiple: true}, media), do: media
 
-  def custom_field_options(%{field_type: :media}, media, _refs),
+  def custom_field_options(%{field_type: :media}, media),
     do: Enum.map(media, &{&1.filename, &1.id})
 
-  def custom_field_options(%{field_type: :reference, name: name}, _media, refs),
-    do: Map.get(refs, name, [])
-
-  def custom_field_options(_definition, _media, _refs), do: []
+  def custom_field_options(_definition, _media), do: []
   # Why the intelligence panel came back empty.
   #
   # "Publish this page to index it" used to be one of the answers, and it is
@@ -561,150 +557,11 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
-  # A list of references (`multiple` reference): the picked records as an
-  # ordered list, each carried by a hidden `name[]` input so the order on screen
-  # is the order submitted — the gallery's pattern, with the same leading blank
-  # so an emptied list still submits. Records are added from a select of the
-  # target type's records (`field_reference_add`) and moved or removed with the
-  # buttons on each row (`field_gallery_move` / `field_gallery_remove`), all
-  # server-side edits of the form params.
-  #
-  # The add-select is named outside the content form's params
-  # (`_kiln_ref_add[...]`), so a save or another field's validate never reads
-  # it, and its id carries the item count so every add renders a fresh,
-  # reset select. Deliberately small: the search-as-you-type picker is R9.
-  def custom_field_input(%{definition: %{field_type: :reference, multiple: true}} = assigns) do
-    polymorphic? = ReferenceValues.polymorphic?(assigns.definition)
-    items = reference_items(assigns.value, assigns.options, polymorphic?)
-    picked = MapSet.new(items, & &1.id)
-    max = assigns.definition.max_items
-
-    assigns =
-      assigns
-      |> assign(:items, items)
-      |> assign(:last, length(items) - 1)
-      |> assign(:addable, reject_options(assigns.options, picked))
-      |> assign(:full?, is_integer(max) and length(items) >= max)
-
-    ~H"""
-    <div
-      id={cf_id(@definition)}
-      role="group"
-      aria-labelledby={"#{cf_id(@definition)}-label"}
-      aria-describedby={@errors != [] && cf_errors_id(@definition)}
-    >
-      <div class="mb-1 flex items-baseline justify-between gap-2">
-        <span id={"#{cf_id(@definition)}-label"} class="text-sm font-medium">
-          {@definition.label}
-        </span>
-        <span :if={@items != []} class="text-xs tabular-nums text-base-content/60">
-          {item_count_label(length(@items), @definition.max_items)}
-        </span>
-      </div>
-      <input type="hidden" name={"#{@name}[]"} value="" />
-      <ol
-        :if={@items != []}
-        id={"#{cf_id(@definition)}-items"}
-        class="divide-y divide-base-content/10 overflow-hidden rounded-md border border-base-content/10"
-      >
-        <li
-          :for={{item, index} <- Enum.with_index(@items)}
-          id={"cf-ref-#{@definition.name}-#{String.replace(item.id, ":", "-")}"}
-          class="group flex items-center gap-2 bg-base-100 px-2 py-1.5 transition-colors hover:bg-base-200/60"
-        >
-          <input type="hidden" name={"#{@name}[]"} value={item.id} />
-          <span class="flex size-5 shrink-0 items-center justify-center rounded-full bg-base-200 text-[10px] font-semibold tabular-nums text-base-content/70">
-            {index + 1}
-          </span>
-          <span class="min-w-0 flex-1 truncate text-sm">
-            {item.title || gettext("Untitled")}
-          </span>
-          <div class="flex shrink-0 items-center gap-0.5">
-            <button
-              type="button"
-              phx-click="field_gallery_move"
-              phx-value-field={@definition.name}
-              phx-value-id={item.id}
-              phx-value-dir="up"
-              disabled={index == 0}
-              aria-label={gettext("Move item %{position} up", position: index + 1)}
-              class="rounded p-0.5 text-base-content/60 transition-colors hover:bg-base-content/10 hover:text-base-content disabled:opacity-30"
-            >
-              <.icon name="hero-chevron-up" class="size-4" />
-            </button>
-            <button
-              type="button"
-              phx-click="field_gallery_move"
-              phx-value-field={@definition.name}
-              phx-value-id={item.id}
-              phx-value-dir="down"
-              disabled={index == @last}
-              aria-label={gettext("Move item %{position} down", position: index + 1)}
-              class="rounded p-0.5 text-base-content/60 transition-colors hover:bg-base-content/10 hover:text-base-content disabled:opacity-30"
-            >
-              <.icon name="hero-chevron-down" class="size-4" />
-            </button>
-            <button
-              type="button"
-              phx-click="field_gallery_remove"
-              phx-value-field={@definition.name}
-              phx-value-id={item.id}
-              aria-label={gettext("Remove item %{position}", position: index + 1)}
-              class="rounded p-0.5 text-base-content/60 transition-colors hover:bg-error/10 hover:text-error"
-            >
-              <.icon name="hero-x-mark" class="size-4" />
-            </button>
-          </div>
-        </li>
-      </ol>
-      <p :if={@items == []} class="text-sm text-base-content/60">
-        {gettext("Nothing connected yet.")}
-      </p>
-      <select
-        :if={not @full?}
-        id={"#{cf_id(@definition)}-add-#{length(@items)}"}
-        name={"_kiln_ref_add[#{@definition.name}]"}
-        phx-change="field_reference_add"
-        aria-label={gettext("Add to %{field}", field: @definition.label)}
-        class="field-select mt-2"
-      >
-        <option value="">{gettext("+ Connect an existing record…")}</option>
-        <%= for {group, entries} <- option_groups(@addable) do %>
-          <%= if group do %>
-            <optgroup label={group}>
-              <option :for={{label, value} <- entries} value={value}>
-                {label}
-              </option>
-            </optgroup>
-          <% else %>
-            <option :for={{label, value} <- entries} value={value}>
-              {label}
-            </option>
-          <% end %>
-        <% end %>
-      </select>
-      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
-        {@definition.help_text}
-      </p>
-      <.custom_field_errors_list definition={@definition} errors={@errors} />
-    </div>
-    """
-  end
-
-  # Media / reference pick-lists: the select posts the target id; the stored
+  # A single media pick-list: the select posts the target id; the stored
   # value is the write-time snapshot map (see ApplyCustomFields), so the
-  # current selection is its "id".
-  def custom_field_input(%{definition: %{field_type: type}} = assigns)
-      when type in [:media, :reference] do
-    assigns =
-      assign(
-        assigns,
-        :selected_id,
-        if(ReferenceValues.polymorphic?(assigns.definition),
-          do: assigns.value |> ReferenceValues.keys(true) |> List.first(),
-          else: snapshot_id(assigns.value)
-        )
-      )
+  # current selection is its "id". (A reference is `ReferencePicker`.)
+  def custom_field_input(%{definition: %{field_type: :media}} = assigns) do
+    assigns = assign(assigns, :selected_id, snapshot_id(assigns.value))
 
     ~H"""
     <div>
@@ -719,19 +576,9 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
         class="field-select"
       >
         <option value="">{gettext("— None —")}</option>
-        <%= for {group, entries} <- option_groups(@options) do %>
-          <%= if group do %>
-            <optgroup label={group}>
-              <option :for={{label, value} <- entries} value={value} selected={@selected_id == value}>
-                {label}
-              </option>
-            </optgroup>
-          <% else %>
-            <option :for={{label, value} <- entries} value={value} selected={@selected_id == value}>
-              {label}
-            </option>
-          <% end %>
-        <% end %>
+        <option :for={{label, id} <- @options} value={id} selected={@selected_id == id}>
+          {label}
+        </option>
       </select>
       <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
         {@definition.help_text}
@@ -1087,66 +934,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     |> Enum.uniq_by(& &1.id)
   end
 
-  # A pick-list as `{group label | nil, [{label, value}]}` runs: flat
-  # `{label, value}` pairs are one unlabelled run; a reference field that allows
-  # several types (R2) has one `{type label, pairs}` group per type, rendered
-  # as an `<optgroup>`.
-  defp option_groups(options) do
-    {groups, flat} =
-      Enum.split_with(options, &match?({_group, entries} when is_list(entries), &1))
-
-    if flat == [], do: groups, else: [{nil, flat} | groups]
-  end
-
-  # The flat `{label, value}` pairs of a pick-list, grouped or not.
-  defp flat_options(options) do
-    Enum.flat_map(options, fn
-      {_group, entries} when is_list(entries) -> entries
-      pair -> [pair]
-    end)
-  end
-
-  # A pick-list without the values in `picked`; a group left empty drops out.
-  defp reject_options(options, picked), do: Enum.flat_map(options, &reject_option(&1, picked))
-
-  defp reject_option({group, entries}, picked) when is_list(entries) do
-    case reject_options(entries, picked) do
-      [] -> []
-      left -> [{group, left}]
-    end
-  end
-
-  defp reject_option({_label, value} = pair, picked),
-    do: if(value in picked, do: [], else: [pair])
-
-  # A list of references' entries, whichever shape the value is in: the
-  # stored snapshots, the raw ids a failed validate left in the params, or a
-  # lone snapshot from before the field became a list. A raw id borrows its
-  # title from the field's options when it can. An entry's `id` is its key as
-  # the inputs post it — a `"type:id"` token on a field that allows several
-  # types (`ReferenceValues`).
-  defp reference_items(value, options, polymorphic?) do
-    titles = options |> flat_options() |> Map.new(fn {label, id} -> {to_string(id), label} end)
-
-    value
-    |> List.wrap()
-    |> Enum.flat_map(fn item ->
-      for key <- ReferenceValues.keys(item, polymorphic?),
-          do: %{id: key, title: snapshot_title(item) || Map.get(titles, key)}
-    end)
-    |> Enum.uniq_by(& &1.id)
-  end
-
-  defp snapshot_title(%{"title" => title}) when is_binary(title), do: title
-  defp snapshot_title(_item), do: nil
-
-  defp item_count_label(count, max) when is_integer(max),
-    do: gettext("%{count} of %{max}", count: count, max: max)
-
-  defp item_count_label(count, _max),
-    do: ngettext("%{count} item", "%{count} items", count)
-
-  # The selected id of a single media/reference field. A list (a value stored
+  # The selected id of a single media field. A list (a value stored
   # while the field was a gallery) selects its first item — what saving it
   # keeps — rather than reading as "None" and clearing it on the next save.
   defp snapshot_id(value),

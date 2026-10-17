@@ -55,8 +55,8 @@ UI" workflow, scoped to fields.
   which type to look in. A field with one type keeps accepting a bare id,
   and ignores a `"type"` it is handed, as before. In the fields admin,
   *Links to* is a set of checkboxes: one ticked type is saved as
-  `target_type`, several as `target_types`. The editor groups the choices by
-  type. Narrowing the list leaves stored values alone until that record's
+  `target_type`, several as `target_types`. The editor's reference picker
+  searches every allowed type and shows each result's type. Narrowing the list leaves stored values alone until that record's
   field is next written, when an item of a type no longer allowed is refused
   by name. The schema export reports the allowed types of every reference
   field as `x-kiln-target-types`.
