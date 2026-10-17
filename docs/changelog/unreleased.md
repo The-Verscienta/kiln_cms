@@ -76,7 +76,7 @@ carries the reasoning.
   reference or plugin-typed field and no default, which the small form
   can't fill. Enter in the form creates instead of saving the page, and
   Escape closes it.
-  ([#PR](https://github.com/The-Verscienta/kiln_cms/pull/PR))
+  ([#2005](https://github.com/The-Verscienta/kiln_cms/pull/2005))
 
 <a id="kilncmsdev-now-publishes-kilns-security-policy-at-security-and-a-security"></a>
 

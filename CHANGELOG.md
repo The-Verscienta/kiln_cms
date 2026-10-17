@@ -66,7 +66,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **The reference picker can create a record and connect it in one step: "Add
   new *Type*" next to the search.**
-  ([#PR](https://github.com/The-Verscienta/kiln_cms/pull/PR) · [long form](docs/changelog/unreleased.md#the-reference-picker-can-create-a-record-and-connect-it-in-one-step-add-new))
+  ([#2005](https://github.com/The-Verscienta/kiln_cms/pull/2005) · [long form](docs/changelog/unreleased.md#the-reference-picker-can-create-a-record-and-connect-it-in-one-step-add-new))
 
 - **kilncms.dev now publishes Kiln's security policy at `/security`, and a
   security notice per published GitHub advisory at
