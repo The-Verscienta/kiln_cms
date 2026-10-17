@@ -100,7 +100,7 @@ defmodule KilnCMS.SchemaExport.TypeScript do
       |> Enum.sort_by(fn {key, _} -> key end)
       |> Enum.map_join("\n", fn {key, value} ->
         optional = if MapSet.member?(required, key), do: "", else: "?"
-        "  #{property_key(key)}#{optional}: #{ts_type(value)};"
+        "  #{property_key(key)}#{optional}: #{annotation(value)}#{ts_type(value)};"
       end)
 
     doc = doc_comment(schema)
@@ -169,11 +169,21 @@ defmodule KilnCMS.SchemaExport.TypeScript do
       |> Enum.sort_by(fn {key, _} -> key end)
       |> Enum.map_join("; ", fn {key, value} ->
         optional = if MapSet.member?(required, key), do: "", else: "?"
-        "#{property_key(key)}#{optional}: #{ts_type(value)}"
+        "#{property_key(key)}#{optional}: #{annotation(value)}#{ts_type(value)}"
       end)
 
     "{ " <> body <> " }"
   end
+
+  # A `:reference` custom field's allowed target types (R2) ride along as an
+  # inline comment ahead of its type. Not a literal union on the snapshot's
+  # `type`: the JSON Schema states them as an annotation, not an `enum`, since
+  # a stored value may name a type the field has since stopped allowing.
+  defp annotation(%{"x-kiln-target-types" => [_ | _] = types}),
+    do:
+      "/* links to: #{types |> Enum.map_join(" | ", &literal/1) |> String.replace("*/", "*\\/")} */ "
+
+  defp annotation(_schema), do: ""
 
   defp literal(value) when is_binary(value), do: ~s(") <> escape(value) <> ~s(")
   defp literal(value), do: to_string(value)

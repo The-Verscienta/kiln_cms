@@ -802,6 +802,11 @@ msgstr ""
 msgid "%{title}, %{locale}:"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{types} or %{last}"
+msgstr ""
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{type} (unknown)"
@@ -5956,6 +5961,11 @@ msgstr ""
 msgid "Editorial — serif, narrower reading column"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editors can connect records of any ticked type. Each connection remembers which type it is."
+msgstr ""
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Editors can now publish their own work."
@@ -5963,7 +5973,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
-msgid "Editors choose records of this type when they fill the field in."
+msgid "Editors choose records of this type. Tick more than one to allow several types."
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -19699,11 +19709,6 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "— None —"
-msgstr ""
-
-#: lib/kiln_cms_web/live/field_definition_live.ex
-#, elixir-autogen, elixir-format
-msgid "— Pick a type —"
 msgstr ""
 
 #: lib/kiln_cms_web/live/taxonomy_live.ex

@@ -18,6 +18,8 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   import KilnCMSWeb.ContentEditor.Shared,
     only: [blank_to_nil: 1, selected_tag_ids: 2, user_label: 1, with_counts: 2]
 
+  alias KilnCMSWeb.ContentEditor.ReferenceValues
+
   require Logger
 
   # Whether this record currently carries a passphrase (#496). Derived from the
@@ -572,7 +574,8 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   # it, and its id carries the item count so every add renders a fresh,
   # reset select. Deliberately small: the search-as-you-type picker is R9.
   def custom_field_input(%{definition: %{field_type: :reference, multiple: true}} = assigns) do
-    items = reference_items(assigns.value, assigns.options)
+    polymorphic? = ReferenceValues.polymorphic?(assigns.definition)
+    items = reference_items(assigns.value, assigns.options, polymorphic?)
     picked = MapSet.new(items, & &1.id)
     max = assigns.definition.max_items
 
@@ -580,7 +583,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       assigns
       |> assign(:items, items)
       |> assign(:last, length(items) - 1)
-      |> assign(:addable, Enum.reject(assigns.options, fn {_label, id} -> id in picked end))
+      |> assign(:addable, reject_options(assigns.options, picked))
       |> assign(:full?, is_integer(max) and length(items) >= max)
 
     ~H"""
@@ -606,7 +609,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       >
         <li
           :for={{item, index} <- Enum.with_index(@items)}
-          id={"cf-ref-#{@definition.name}-#{item.id}"}
+          id={"cf-ref-#{@definition.name}-#{String.replace(item.id, ":", "-")}"}
           class="group flex items-center gap-2 bg-base-100 px-2 py-1.5 transition-colors hover:bg-base-200/60"
         >
           <input type="hidden" name={"#{@name}[]"} value={item.id} />
@@ -666,7 +669,19 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
         class="field-select mt-2"
       >
         <option value="">{gettext("+ Connect an existing record…")}</option>
-        <option :for={{label, id} <- @addable} value={id}>{label}</option>
+        <%= for {group, entries} <- option_groups(@addable) do %>
+          <%= if group do %>
+            <optgroup label={group}>
+              <option :for={{label, value} <- entries} value={value}>
+                {label}
+              </option>
+            </optgroup>
+          <% else %>
+            <option :for={{label, value} <- entries} value={value}>
+              {label}
+            </option>
+          <% end %>
+        <% end %>
       </select>
       <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
         {@definition.help_text}
@@ -681,7 +696,15 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   # current selection is its "id".
   def custom_field_input(%{definition: %{field_type: type}} = assigns)
       when type in [:media, :reference] do
-    assigns = assign(assigns, :selected_id, snapshot_id(assigns.value))
+    assigns =
+      assign(
+        assigns,
+        :selected_id,
+        if(ReferenceValues.polymorphic?(assigns.definition),
+          do: assigns.value |> ReferenceValues.keys(true) |> List.first(),
+          else: snapshot_id(assigns.value)
+        )
+      )
 
     ~H"""
     <div>
@@ -696,9 +719,19 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
         class="field-select"
       >
         <option value="">{gettext("— None —")}</option>
-        <option :for={{label, id} <- @options} value={id} selected={@selected_id == id}>
-          {label}
-        </option>
+        <%= for {group, entries} <- option_groups(@options) do %>
+          <%= if group do %>
+            <optgroup label={group}>
+              <option :for={{label, value} <- entries} value={value} selected={@selected_id == value}>
+                {label}
+              </option>
+            </optgroup>
+          <% else %>
+            <option :for={{label, value} <- entries} value={value} selected={@selected_id == value}>
+              {label}
+            </option>
+          <% end %>
+        <% end %>
       </select>
       <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
         {@definition.help_text}
@@ -1054,27 +1087,58 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     |> Enum.uniq_by(& &1.id)
   end
 
+  # A pick-list as `{group label | nil, [{label, value}]}` runs: flat
+  # `{label, value}` pairs are one unlabelled run; a reference field that allows
+  # several types (R2) has one `{type label, pairs}` group per type, rendered
+  # as an `<optgroup>`.
+  defp option_groups(options) do
+    {groups, flat} =
+      Enum.split_with(options, &match?({_group, entries} when is_list(entries), &1))
+
+    if flat == [], do: groups, else: [{nil, flat} | groups]
+  end
+
+  # The flat `{label, value}` pairs of a pick-list, grouped or not.
+  defp flat_options(options) do
+    Enum.flat_map(options, fn
+      {_group, entries} when is_list(entries) -> entries
+      pair -> [pair]
+    end)
+  end
+
+  # A pick-list without the values in `picked`; a group left empty drops out.
+  defp reject_options(options, picked), do: Enum.flat_map(options, &reject_option(&1, picked))
+
+  defp reject_option({group, entries}, picked) when is_list(entries) do
+    case reject_options(entries, picked) do
+      [] -> []
+      left -> [{group, left}]
+    end
+  end
+
+  defp reject_option({_label, value} = pair, picked),
+    do: if(value in picked, do: [], else: [pair])
+
   # A list of references' entries, whichever shape the value is in: the
   # stored snapshots, the raw ids a failed validate left in the params, or a
   # lone snapshot from before the field became a list. A raw id borrows its
-  # title from the field's options when it can.
-  defp reference_items(value, options) do
-    titles = Map.new(options, fn {label, id} -> {to_string(id), label} end)
+  # title from the field's options when it can. An entry's `id` is its key as
+  # the inputs post it — a `"type:id"` token on a field that allows several
+  # types (`ReferenceValues`).
+  defp reference_items(value, options, polymorphic?) do
+    titles = options |> flat_options() |> Map.new(fn {label, id} -> {to_string(id), label} end)
 
     value
     |> List.wrap()
-    |> Enum.flat_map(fn
-      %{"id" => id} = snapshot when is_binary(id) and id != "" ->
-        [%{id: id, title: snapshot["title"] || Map.get(titles, id)}]
-
-      id when is_binary(id) and id != "" ->
-        [%{id: id, title: Map.get(titles, id)}]
-
-      _blank ->
-        []
+    |> Enum.flat_map(fn item ->
+      for key <- ReferenceValues.keys(item, polymorphic?),
+          do: %{id: key, title: snapshot_title(item) || Map.get(titles, key)}
     end)
     |> Enum.uniq_by(& &1.id)
   end
+
+  defp snapshot_title(%{"title" => title}) when is_binary(title), do: title
+  defp snapshot_title(_item), do: nil
 
   defp item_count_label(count, max) when is_integer(max),
     do: gettext("%{count} of %{max}", count: count, max: max)

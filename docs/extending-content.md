@@ -17,8 +17,8 @@ UI" workflow, scoped to fields.
 
 - **Define**: `KilnCMS.CMS.FieldDefinition` rows describe each field
   (`content_type`, `name`, `label`, `field_type`, `required`, `options`,
-  `multiple`, `min_items`, `max_items`, `help_text`, `position`, `default`,
-  `compute`). Field types: `:string`,
+  `target_type`, `target_types`, `multiple`, `min_items`, `max_items`,
+  `help_text`, `position`, `default`, `compute`). Field types: `:string`,
   `:text`, `:integer`, `:float`, `:boolean`, `:date`, `:datetime`, `:url`,
   `:select`, `:media`, `:reference`, `:geolocation`, `:datetime_range`,
   `:recurrence`, `:computed` — plus
@@ -43,6 +43,23 @@ UI" workflow, scoped to fields.
   shape. Many-to-many with typed link data, reverse fields and the
   search-as-you-type picker follow in 1.5 — see
   [relationships-plan.md](relationships-plan.md).
+- **One target type or several**: a `:reference` field names the type it
+  links to in `target_type` ("page", "recipe", compiled or dynamic). To let
+  it link to records of **several** types, set `target_types` instead — a
+  list of type names (`["page", "post", "recipe"]`). Exactly one of the two
+  is set; every name must be a content type on the site, once. Each stored
+  snapshot names its own `"type"`, so a value is self-describing, and a list
+  of references may mix types. A write to a field with several types must
+  name each item's type, `%{"id" => uuid, "type" => "post"}` (a stored
+  snapshot already does); a bare id is refused, because ids alone don't say
+  which type to look in. A field with one type keeps accepting a bare id,
+  and ignores a `"type"` it is handed, as before. In the fields admin,
+  *Links to* is a set of checkboxes: one ticked type is saved as
+  `target_type`, several as `target_types`. The editor groups the choices by
+  type. Narrowing the list leaves stored values alone until that record's
+  field is next written, when an item of a type no longer allowed is refused
+  by name. The schema export reports the allowed types of every reference
+  field as `x-kiln-target-types`.
 - **Item bounds**: on either kind of list (`multiple: true`), optional
   `min_items` / `max_items` bound how many items a value holds once it holds
   any — an empty optional field is still allowed; `required` asks for at
@@ -74,7 +91,8 @@ UI" workflow, scoped to fields.
 - **References are edges too**: a `:reference` value is stored as a snapshot
   (`%{"id", "type", "slug", "title"}`) *and* as a `ContentLink` edge
   (`kind: :reference`, `field` the field's name; a list of references has one
-  edge per item, `position` its place in the list) written with the live value
+  edge per item, `position` its place in the list; `target_type` the item's
+  own type) written with the live value
   (#1594; D20 in [content-organization-plan.md](content-organization-plan.md),
   adopted additively — the snapshot stays the value, the edge is added beside
   it, rather than the edge becoming the source of truth as D20 proposed). The edge is

@@ -171,7 +171,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     html =
       lv
       |> form("#new-field-form",
-        field_definition: %{field_type: "reference", target_type: "page"}
+        field_definition: %{field_type: "reference", target_types: ["page"]}
       )
       |> render_change()
 
@@ -191,7 +191,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
         name: "see_also",
         label: "See also",
         field_type: "reference",
-        target_type: "page",
+        target_types: ["page"],
         multiple: "true",
         min_items: "1",
         max_items: "5"
@@ -231,6 +231,59 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
 
     assert has_element?(lv, "#edit-field-multiple-#{field.id}-narrowing")
     assert html =~ "Saving keeps only the first item of each list"
+  end
+
+  # R2: ticking several types stores `target_types`; ticking one keeps the
+  # documented single `target_type`.
+  test "an admin lets a reference field link to several types", %{conn: conn} do
+    admin = authed_user(:admin)
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+    lv |> form("#new-field-form", field_definition: %{field_type: "reference"}) |> render_change()
+
+    html =
+      lv
+      |> form("#new-field-form",
+        field_definition: %{field_type: "reference", target_types: ["page", "post"]}
+      )
+      |> render_change()
+
+    assert has_element?(lv, "#new-field-targets-page[checked]")
+    assert has_element?(lv, "#new-field-targets-post[checked]")
+    assert html =~ "One Page or Post"
+
+    lv
+    |> form("#new-field-form",
+      field_definition: %{
+        scopes: ["page"],
+        name: "mentions",
+        label: "Mentions",
+        field_type: "reference",
+        target_types: ["page", "post"],
+        multiple: "true"
+      }
+    )
+    |> render_submit()
+
+    field =
+      :page
+      |> CMS.field_definitions_for!(authorize?: false)
+      |> Enum.find(&(&1.name == "mentions"))
+
+    assert {field.target_type, field.target_types} == {nil, ["page", "post"]}
+
+    assert lv |> element("#field-#{field.id}-links") |> render() =~
+             "Connects several Page or Post records"
+
+    # Unticking down to one type stores it the single-type way.
+    lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+
+    lv
+    |> form("#edit-field-#{field.id}", field_definition: %{target_types: ["post"]})
+    |> render_submit()
+
+    field = CMS.get_field_definition!(field.id, authorize?: false)
+    assert {field.target_type, field.target_types} == {"post", []}
   end
 
   test "non-admins are redirected away", %{conn: conn} do

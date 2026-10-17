@@ -60,6 +60,10 @@ Every summary line below that was shortened links to its own entry there.
   with optional `min_items` / `max_items`.**
   ([#2000](https://github.com/The-Verscienta/kiln_cms/pull/2000) · [long form](docs/changelog/unreleased.md#a-reference-custom-field-can-hold-a-list-of-references-multiple-true-with))
 
+- **A reference custom field can link to several content types
+  (`target_types`).**
+  ([long form](docs/changelog/unreleased.md#a-reference-custom-field-can-link-to-several-content-types-targettypes))
+
 - **kilncms.dev now publishes Kiln's security policy at `/security`, and a
   security notice per published GitHub advisory at
   `/security-notices/<ghsa-id>`, with a feed.**

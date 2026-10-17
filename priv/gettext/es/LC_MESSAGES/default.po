@@ -802,6 +802,11 @@ msgstr "%{tasks} en este bloque"
 msgid "%{title}, %{locale}:"
 msgstr "%{title}, %{locale}:"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{types} or %{last}"
+msgstr "%{types} o %{last}"
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{type} (unknown)"
@@ -5956,6 +5961,11 @@ msgstr "Espacio de trabajo editorial"
 msgid "Editorial — serif, narrower reading column"
 msgstr "Editorial — serif, columna de lectura más estrecha"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editors can connect records of any ticked type. Each connection remembers which type it is."
+msgstr "Los editores pueden conectar registros de cualquier tipo marcado. Cada conexión recuerda de qué tipo es."
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Editors can now publish their own work."
@@ -5963,8 +5973,8 @@ msgstr "Los editores ahora pueden publicar su propio trabajo."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
-msgid "Editors choose records of this type when they fill the field in."
-msgstr "Los editores eligen registros de este tipo al rellenar el campo."
+msgid "Editors choose records of this type. Tick more than one to allow several types."
+msgstr "Los editores eligen registros de este tipo. Marca más de uno para permitir varios tipos."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -19700,11 +19710,6 @@ msgstr "— Sin elemento superior (nivel principal) —"
 #, elixir-autogen, elixir-format
 msgid "— None —"
 msgstr "— Ninguno —"
-
-#: lib/kiln_cms_web/live/field_definition_live.ex
-#, elixir-autogen, elixir-format
-msgid "— Pick a type —"
-msgstr "— Elija un tipo —"
 
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format

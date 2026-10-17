@@ -376,6 +376,102 @@ defmodule KilnCMSWeb.DynamicEntryEditorTest do
     refute Map.has_key?(saved.custom_fields, "see_also")
   end
 
+  # R2: a field that allows several types offers each type's records under its
+  # own heading, and posts `"type:id"`, which reaches the write as
+  # `%{"id", "type"}` — so the saved snapshot keeps the type it was picked as.
+  test "a reference field that links to several types picks and saves each by type", %{
+    conn: conn
+  } do
+    admin = authed_user(:admin)
+
+    definition =
+      CMS.create_type_definition!(
+        %{name: "poly#{System.unique_integer([:positive])}", label: "Poly"},
+        actor: admin
+      )
+
+    for {name, multiple} <- [{"featured", false}, {"see_also", true}] do
+      CMS.create_field_definition!(
+        %{
+          type_definition_id: definition.id,
+          name: name,
+          label: name,
+          field_type: :reference,
+          target_types: ["page", "post"],
+          multiple: multiple
+        },
+        actor: admin
+      )
+    end
+
+    n = System.unique_integer([:positive])
+    page = CMS.create_page!(%{title: "Page #{n}", slug: "pp-#{n}"}, actor: admin)
+    post = CMS.create_post!(%{title: "Post #{n}", slug: "pq-#{n}"}, actor: admin)
+
+    entry =
+      ContentTypes.create!(definition.name, %{title: "Poly", slug: "poly-#{n}"}, actor: admin)
+
+    {:ok, lv, _html} =
+      conn |> log_in(admin) |> live(~p"/editor/content/#{definition.name}/#{entry.id}")
+
+    page_token = "page:#{page.id}"
+    post_token = "post:#{post.id}"
+
+    # Grouped by type, each option naming its type.
+    assert has_element?(
+             lv,
+             "#custom-field-featured optgroup[label='Page'] option[value='#{page_token}']"
+           )
+
+    assert has_element?(
+             lv,
+             "#custom-field-featured optgroup[label='Post'] option[value='#{post_token}']"
+           )
+
+    lv
+    |> element("#custom-field-see_also select[phx-change='field_reference_add']")
+    |> render_change(%{
+      "_target" => ["_kiln_ref_add", "see_also"],
+      "_kiln_ref_add" => %{"see_also" => post_token}
+    })
+
+    lv
+    |> element("#custom-field-see_also select[phx-change='field_reference_add']")
+    |> render_change(%{
+      "_target" => ["_kiln_ref_add", "see_also"],
+      "_kiln_ref_add" => %{"see_also" => page_token}
+    })
+
+    assert reference_ids(lv) == [post_token, page_token]
+
+    # Moving keeps each item's type.
+    lv
+    |> element("#cf-ref-see_also-page-#{page.id} button[phx-value-dir='up']")
+    |> render_click()
+
+    assert reference_ids(lv) == [page_token, post_token]
+
+    lv
+    |> form("##{definition.name}-editor", form: %{custom_fields: %{featured: post_token}})
+    |> render_submit()
+
+    saved = ContentTypes.get_record!(definition.name, entry.id, actor: admin)
+    assert %{"id" => post_id, "type" => "post"} = saved.custom_fields["featured"]
+    assert post_id == post.id
+
+    assert Enum.map(saved.custom_fields["see_also"], &{&1["type"], &1["id"]}) == [
+             {"page", page.id},
+             {"post", post.id}
+           ]
+
+    # Reloaded, the stored snapshots select and list as tokens again.
+    {:ok, lv, _html} =
+      conn |> log_in(admin) |> live(~p"/editor/content/#{definition.name}/#{entry.id}")
+
+    assert has_element?(lv, "#custom-field-featured option[value='#{post_token}'][selected]")
+    assert reference_ids(lv) == [page_token, post_token]
+  end
+
   defp reference_ids(lv) do
     lv
     |> render()

@@ -495,8 +495,24 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     |> Map.delete("scopes")
     |> Map.put("options", options)
     |> Map.put("default", default)
+    |> unpack_targets()
     |> unpack_scope(scope)
   end
+
+  # The "Links to" checkboxes post one list (`target_types[]`, with a leading
+  # blank so unticking them all still posts). One ticked type is stored as the
+  # documented single `target_type`; several as `target_types` (R2). Exactly
+  # one of the two is ever set, which `Validations.ReferenceTarget` requires.
+  # Absent — the field is not a reference, so no checkboxes rendered — leaves
+  # both as they were.
+  defp unpack_targets(%{"target_types" => picked} = params) do
+    case picked |> List.wrap() |> Enum.reject(&(&1 in [nil, ""])) |> Enum.uniq() do
+      [only] -> params |> Map.put("target_type", only) |> Map.put("target_types", [])
+      types -> params |> Map.put("target_type", nil) |> Map.put("target_types", types)
+    end
+  end
+
+  defp unpack_targets(params), do: params
 
   defp parse_options(options) when is_binary(options) do
     options
@@ -652,6 +668,86 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   defp compute_placeholder, do: "{{ reading_time(body) }} min read"
 
   attr :form, :any, required: true
+  attr :id, :string, required: true
+  # `{label, name}` pairs: every content type on the site, compiled or dynamic.
+  attr :target_types, :list, default: []
+
+  # Which types a `:reference` field links to: one or several (R2). Ticking
+  # one is the plain case; ticking more lets an editor connect records of any
+  # of them, each remembering its own type.
+  defp target_types_field(assigns) do
+    picked = picked_targets(assigns.form)
+
+    errors =
+      if used_input?(assigns.form[:target_types]),
+        do: assigns.form[:target_type].errors ++ assigns.form[:target_types].errors,
+        else: []
+
+    assigns =
+      assigns
+      |> assign(:picked, picked)
+      |> assign(:errors, Enum.map(errors, &translate_error/1))
+
+    ~H"""
+    <fieldset
+      :if={reference?(@form)}
+      id={@id}
+      class="sm:col-span-2"
+      aria-describedby={"#{@id}-hint"}
+    >
+      <legend class="mb-1 block text-sm font-medium">{gettext("Links to")}</legend>
+      <input type="hidden" name={"#{@form[:target_types].name}[]"} value="" />
+      <div class="flex flex-wrap gap-2">
+        <label
+          :for={{label, name} <- @target_types}
+          for={"#{@id}-#{name}"}
+          class={[
+            "inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1 text-sm transition-colors",
+            if(name in @picked,
+              do: "border-primary bg-primary/5 text-base-content",
+              else: "border-base-content/15 text-base-content/80 hover:border-base-content/30"
+            )
+          ]}
+        >
+          <input
+            type="checkbox"
+            id={"#{@id}-#{name}"}
+            name={"#{@form[:target_types].name}[]"}
+            value={name}
+            checked={name in @picked}
+            class="size-3.5 rounded border border-base-content/30 accent-primary"
+          />
+          {label}
+        </label>
+      </div>
+      <p id={"#{@id}-hint"} class="mt-1 text-xs text-base-content/60">
+        {targets_hint(length(@picked))}
+      </p>
+      <p :for={error <- @errors} class="mt-1 flex items-center gap-1.5 text-sm text-error">
+        <.icon name="hero-exclamation-circle" class="size-4" />{error}
+      </p>
+    </fieldset>
+    """
+  end
+
+  defp targets_hint(count) when count > 1,
+    do:
+      gettext(
+        "Editors can connect records of any ticked type. Each connection remembers which type it is."
+      )
+
+  defp targets_hint(_count),
+    do: gettext("Editors choose records of this type. Tick more than one to allow several types.")
+
+  # The type names a form currently links to, from whichever option holds them.
+  defp picked_targets(form) do
+    FieldDefinition.reference_targets(%{
+      target_type: form[:target_type].value,
+      target_types: List.wrap(form[:target_types].value) |> Enum.reject(&(&1 in [nil, ""]))
+    })
+  end
+
+  attr :form, :any, required: true
 
   # The formula behind a `:computed` field (#429), shown only for that type —
   # the same conditional treatment `target_type` gets for `:reference`.
@@ -789,7 +885,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # One plain line under a reference field in the list: what it links to, and
   # how many — so an admin can scan the fields without opening each one.
   defp reference_summary(definition, target_types) do
-    target = type_label_for(target_types, definition.target_type)
+    target =
+      definition
+      |> FieldDefinition.reference_targets()
+      |> Enum.map(&type_label_for(target_types, &1))
+      |> types_phrase()
 
     if definition.multiple do
       gettext("Connects several %{type} records — %{count}",
@@ -821,12 +921,21 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   defp list_type(%{field_type: type, multiple: true}) when type in [:media, :reference], do: type
   defp list_type(_stored), do: nil
 
-  # The reference's target type as an admin reads it ("Page"), once picked.
+  # The reference's target types as an admin reads them ("Page", "Page or
+  # Post"), once picked.
   defp target_label(form, target_types) do
-    case form[:target_type] && to_string(form[:target_type].value) do
-      blank when blank in [nil, ""] -> nil
-      name -> type_label_for(target_types, name)
+    case picked_targets(form) do
+      [] -> nil
+      names -> names |> Enum.map(&type_label_for(target_types, &1)) |> types_phrase()
     end
+  end
+
+  defp types_phrase([]), do: nil
+  defp types_phrase([only]), do: only
+
+  defp types_phrase(labels) do
+    {init, [last]} = Enum.split(labels, -1)
+    gettext("%{types} or %{last}", types: Enum.join(init, ", "), last: last)
   end
 
   defp type_label_for(target_types, name) do
@@ -1071,15 +1180,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               options={Enum.map(@field_types, &{type_label(&1), &1})}
               hint={type_description(@form[:field_type].value, @field_types)}
             />
-            <.input
-              :if={reference?(@form)}
-              field={@form[:target_type]}
-              type="select"
-              label={gettext("Links to")}
-              options={@target_types}
-              prompt={gettext("— Pick a type —")}
-              hint={gettext("Editors choose records of this type when they fill the field in.")}
-            />
+            <.target_types_field form={@form} id="new-field-targets" target_types={@target_types} />
             <.compute_field form={@form} />
             <.multiple_field form={@form} id="new-field-multiple" target_types={@target_types} />
             <.input field={@form[:help_text]} label={gettext("Help text")} />
@@ -1282,14 +1383,10 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     hint={type_description(@edit.form[:field_type].value, @field_types)}
                   />
                   <.input field={@edit.form[:label]} label={gettext("Label")} />
-                  <.input
-                    :if={reference?(@edit.form)}
-                    field={@edit.form[:target_type]}
-                    type="select"
-                    label={gettext("Links to")}
-                    options={@target_types}
-                    prompt={gettext("— Pick a type —")}
-                    hint={gettext("Editors choose records of this type when they fill the field in.")}
+                  <.target_types_field
+                    form={@edit.form}
+                    id={"edit-field-targets-#{@edit.id}"}
+                    target_types={@target_types}
                   />
                   <.compute_field form={@edit.form} />
                   <.multiple_field

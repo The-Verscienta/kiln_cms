@@ -363,7 +363,7 @@ defmodule KilnCMS.CMS.MultipleReferencesTest do
       ts = SchemaExport.TypeScript.emit(SchemaExport.json_schema())
 
       assert ts =~
-               "#{name}?: Array<{ id: string; slug?: string | null; title?: string | null; type: string }> | null"
+               "#{name}?: /* links to: \"page\" */ Array<{ id: string; slug?: string | null; title?: string | null; type: string }> | null"
     end
   end
 end

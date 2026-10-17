@@ -51,6 +51,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMSWeb.ContentEditor.FieldEvents
   alias KilnCMSWeb.ContentEditor.InlineTerms
   alias KilnCMSWeb.ContentEditor.NewDraft
+  alias KilnCMSWeb.ContentEditor.ReferenceValues
   alias KilnCMSWeb.EditorTelemetry
   alias KilnCMSWeb.Presence
   alias KilnCMSWeb.VersionDiffComponents
@@ -1535,27 +1536,53 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Pick-lists for `:reference` custom fields: per definition, the target
   # type's records as `{title, id}` options — narrow select and the same window
   # cap as the media picker, so a large library can't blow up the mount.
+  #
+  # A field that allows several types (R2) gets the grouped form instead,
+  # `{type label, [{title, "type:id"}]}` per type, so the select shows which
+  # type each record is and posts a token naming it (`ReferenceValues`). The
+  # cap applies per type. R9's picker replaces this.
   defp reference_options(definitions, actor, org) do
     definitions
     |> Enum.filter(&(&1.field_type == :reference))
     |> Map.new(fn definition ->
       options =
-        case ContentTypes.get(definition.target_type, org) do
-          nil ->
-            []
-
-          ct ->
-            ct
-            |> ContentTypes.list!(
-              actor: actor,
-              tenant: org,
-              query: [select: [:id, :title], sort: [title: :asc], limit: @max_media]
-            )
-            |> Enum.map(&{&1.title, &1.id})
-        end
+        if ReferenceValues.polymorphic?(definition),
+          do: grouped_reference_options(definition, actor, org),
+          else: single_reference_options(definition, actor, org)
 
       {definition.name, options}
     end)
+  end
+
+  defp grouped_reference_options(definition, actor, org) do
+    for type <- KilnCMS.CMS.FieldDefinition.reference_targets(definition),
+        ct = ContentTypes.get(type, org),
+        not is_nil(ct) do
+      options =
+        Enum.map(
+          reference_records(ct, actor, org),
+          &{&1.title, ReferenceValues.token(type, &1.id)}
+        )
+
+      {ct.label, options}
+    end
+  end
+
+  defp single_reference_options(definition, actor, org) do
+    with [type] <- KilnCMS.CMS.FieldDefinition.reference_targets(definition),
+         ct when not is_nil(ct) <- ContentTypes.get(type, org) do
+      Enum.map(reference_records(ct, actor, org), &{&1.title, &1.id})
+    else
+      _none -> []
+    end
+  end
+
+  defp reference_records(ct, actor, org) do
+    ContentTypes.list!(ct,
+      actor: actor,
+      tenant: org,
+      query: [select: [:id, :title], sort: [title: :asc], limit: @max_media]
+    )
   end
 
   defp list_versions(kind, opts), do: ContentTypes.list_versions!(kind, opts)
@@ -1906,6 +1933,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> inject_rich_bodies(socket.assigns.rich_bodies)
       |> normalize_item_rows()
       |> merge_tag_params(socket)
+      |> ReferenceValues.normalize(socket.assigns.field_definitions)
 
     {params, socket} = sync_slug(params, event["_target"], socket)
     socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
@@ -3229,6 +3257,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> inject_rich_bodies(socket.assigns.rich_bodies)
       |> normalize_item_rows()
       |> merge_tag_params(socket)
+      |> ReferenceValues.normalize(socket.assigns.field_definitions)
 
     if socket.assigns.record.state == :published,
       do: save_live(socket, params),
@@ -3823,6 +3852,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
              ))
   end
 
+  defp polymorphic_field?(socket, name),
+    do:
+      Enum.any?(
+        socket.assigns.field_definitions,
+        &(&1.name == name and ReferenceValues.polymorphic?(&1))
+      )
+
   defp field_list_of?(socket, name, type) do
     Enum.any?(
       socket.assigns.field_definitions,
@@ -3836,10 +3872,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # gallery present in the params (see `custom_field_input/1`).
   defp update_field_gallery(socket, name, fun) do
     if field_gallery_editable?(socket, name) do
+      # Keys as the field's inputs post them: bare ids, or `"type:id"` tokens on
+      # a reference field that allows several types (R2), so an item keeps its
+      # type through a move or a remove.
       ids =
         socket.assigns.form
         |> custom_field_value(name)
-        |> KilnCMS.CMS.Changes.ApplyCustomFields.snapshot_ids()
+        |> ReferenceValues.keys(polymorphic_field?(socket, name))
 
       params = AshPhoenix.Form.params(socket.assigns.form)
 
@@ -3849,7 +3888,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
           _other -> %{}
         end
 
-      params = Map.put(params, "custom_fields", Map.put(custom, name, ["" | fun.(ids)]))
+      params =
+        params
+        |> Map.put("custom_fields", Map.put(custom, name, ["" | fun.(ids)]))
+        |> ReferenceValues.normalize(socket.assigns.field_definitions)
 
       socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
       broadcast_preview(socket)

@@ -33,6 +33,29 @@ carries the reasoning.
   their 1.0 shape.
   ([#2000](https://github.com/The-Verscienta/kiln_cms/pull/2000))
 
+<a id="a-reference-custom-field-can-link-to-several-content-types-targettypes"></a>
+
+- **A reference custom field can link to several content types
+  (`target_types`).** Workstream R2 of
+  [relationships-plan.md](../relationships-plan.md). A `:reference` field
+  names its one type in `target_type`, as before, or several in the new
+  `target_types` list; exactly one of the two is set, and every name must be
+  a compiled or dynamic type on the site, once. Each stored snapshot already
+  names its own `"type"`, so a value is self-describing, and a list of
+  references (R1) may mix types. A write to a field with several types must
+  name each item's type, `{"id", "type"}`; a bare id is refused, and so is a
+  type the field does not allow, naming the item. The id is looked up among
+  that type's records only. A field with one type keeps accepting a bare id.
+  The `ContentLink` edges and the re-fire edges (R0, #1998) take each item's
+  own type, and `custom_filter` keeps matching on the id. The schema export
+  reports every reference field's allowed types as `x-kiln-target-types`, an
+  annotation rather than an `enum`, and the TypeScript export comments them
+  on the field. In the fields admin, *Links to* becomes a set of checkboxes:
+  one ticked type is saved as `target_type`, several as `target_types`. The
+  editor groups a polymorphic field's choices by type; the picker with type
+  badges follows in R9. The typed GraphQL interface over the allowed types
+  is R7. No existing field changes.
+
 <a id="kilncmsdev-now-publishes-kilns-security-policy-at-security-and-a-security"></a>
 
 - **kilncms.dev now publishes Kiln's security policy at `/security`, and a
@@ -204,3 +227,4 @@ carries the reasoning.
   0.1.13; no `mix.exs` requirement changed. Nothing in CI built the example,
   which is how it went stale, so the Dependency audit job now runs
   `mix hex.audit` in `examples/phoenix_showcase` too.
+

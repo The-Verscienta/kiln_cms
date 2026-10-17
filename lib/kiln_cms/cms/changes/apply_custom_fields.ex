@@ -94,6 +94,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   require Logger
 
   alias Ash.Error.Changes.InvalidAttribute
+  alias KilnCMS.CMS.FieldDefinition
 
   @impl true
   def change(changeset, _opts, context) do
@@ -678,21 +679,56 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   end
 
   # A content reference: resolves the target id against the field's declared
-  # `target_type` (compiled or dynamic) and stores a snapshot
+  # target type (compiled or dynamic) and stores a snapshot
   # (`%{"id", "type", "slug", "title"}`) — id/type are the stable keys
   # consumers fetch fresh content with; slug/title are display labels that may
   # go stale until the next save. Scoped to the writing tenant so a reference
   # can't point across sites (epic #336).
-  defp coerce_reference(value, %{target_type: target}, read_opts) do
+  #
+  # A field that allows several types (`target_types`, R2) needs the input to
+  # say which one it names — `%{"id", "type"}`, which a stored snapshot already
+  # is. With one allowed type a bare id is enough, and a `"type"` the input
+  # carries is not consulted, exactly as before R2.
+  defp coerce_reference(value, def, read_opts) do
+    allowed = FieldDefinition.reference_targets(def)
+
     with {:ok, id} <- extract_id(value),
+         {:type, {:ok, target}} <- {:type, item_type(value, allowed)},
          ct when not is_nil(ct) <- KilnCMS.CMS.ContentTypes.get(target),
          {:ok, record} <- KilnCMS.CMS.ContentTypes.get_record(ct, id, read_opts) do
-      {:ok,
-       %{"id" => record.id, "type" => target, "slug" => record.slug, "title" => record.title}}
+      {:ok, reference_snapshot(record, target)}
     else
-      _ -> {:error, "must be an existing #{target || "content"} record"}
+      {:type, {:error, reason}} -> {:error, type_message(reason, allowed)}
+      _ -> {:error, "must be an existing #{types_label(allowed)} record"}
     end
   end
+
+  defp reference_snapshot(record, type),
+    do: %{"id" => record.id, "type" => type, "slug" => record.slug, "title" => record.title}
+
+  # Which allowed type an input item names. One allowed type is the answer
+  # whatever the item says; several need the item to name one of them.
+  defp item_type(_item, []), do: {:ok, nil}
+  defp item_type(_item, [only]), do: {:ok, only}
+
+  defp item_type(item, allowed) do
+    case given_type(item) do
+      nil -> {:error, :untyped}
+      type -> if type in allowed, do: {:ok, type}, else: {:error, {:not_allowed, type}}
+    end
+  end
+
+  defp given_type(%{"type" => type}) when is_binary(type) and type != "", do: type
+  defp given_type(_item), do: nil
+
+  defp type_message(:untyped, allowed),
+    do: "must say which type of content it links to (one of: #{Enum.join(allowed, ", ")})"
+
+  defp type_message({:not_allowed, type}, allowed),
+    do: "can't link to #{type} — this field links to #{Enum.join(allowed, ", ")}"
+
+  defp types_label([]), do: "content"
+  defp types_label(allowed), do: Enum.join(allowed, " or ")
 
   # A list of references (`multiple: true`): an ordered list of the same
   # snapshots a single reference stores. Order is the writer's. Unlike a
@@ -700,35 +736,44 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # a list of references is an editorial choice per item (and, from R3, carries
   # per-link data), so the writer is told which one repeats. A lone id or
   # snapshot is a one-item list; any id that does not resolve fails the field.
+  # On a field that allows several types every item names its own, and the
+  # list may mix them.
   #
   # The messages are for an editor, not a developer: an item is named by its
   # title wherever one is known (the record's, or the stale snapshot's), and by
   # its id only when there is nothing else to call it.
-  defp coerce_reference_list(value, %{target_type: target}, read_opts) do
+  defp coerce_reference_list(value, def, read_opts) do
+    allowed = FieldDefinition.reference_targets(def)
     items = value |> List.wrap() |> Enum.reject(&blank?/1)
 
-    with {:ok, picked} <- reference_ids(items),
-         ids = Enum.map(picked, &elem(&1, 0)),
-         {:ok, by_id} <- read_references(target, ids, read_opts),
+    with {:ok, picked} <- reference_ids(items, allowed),
+         {:ok, by_id} <- read_references(picked, read_opts),
          :ok <- no_repeats(picked, by_id),
          :ok <- all_resolved(picked, by_id) do
-      {:ok,
-       Enum.map(ids, fn id ->
-         record = by_id[id]
-         %{"id" => record.id, "type" => target, "slug" => record.slug, "title" => record.title}
-       end)}
+      {:ok, Enum.map(picked, fn {id, type, _title} -> reference_snapshot(by_id[id], type) end)}
     end
   end
 
-  # `{uuid, title}` per item — the title a snapshot carried, if it was one.
-  defp reference_ids(items) do
+  # `{uuid, type, title}` per item — the title a snapshot carried, if it was one.
+  defp reference_ids(items, allowed) do
     items
     |> Enum.with_index(1)
     |> Enum.reduce_while({:ok, []}, fn {item, position}, {:ok, acc} ->
-      with {:ok, id} <- extract_id(item), {:ok, uuid} <- Ecto.UUID.cast(id) do
-        {:cont, {:ok, [{uuid, snapshot_title(item)} | acc]}}
+      label = item_label(item, snapshot_title(item))
+
+      with {:ok, id} <- extract_id(item),
+           {:ok, uuid} <- Ecto.UUID.cast(id),
+           {:ok, type} <- item_type(item, allowed) do
+        {:cont, {:ok, [{uuid, type, snapshot_title(item)} | acc]}}
       else
-        _ -> {:halt, {:error, unresolved(position, item_label(item, snapshot_title(item)))}}
+        {:error, :untyped} ->
+          {:halt, {:error, untyped(position, label, allowed)}}
+
+        {:error, {:not_allowed, type}} ->
+          {:halt, {:error, not_allowed(position, label, type, allowed)}}
+
+        _ ->
+          {:halt, {:error, unresolved(position, label)}}
       end
     end)
     |> case do
@@ -745,7 +790,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
         :ok
 
       [id | _] ->
-        {_id, title} = Enum.find(picked, &(elem(&1, 0) == id))
+        {_id, _type, title} = Enum.find(picked, &(elem(&1, 0) == id))
         record_title = by_id |> Map.get(id, %{}) |> Map.get(:title)
 
         {:error,
@@ -754,30 +799,41 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   end
 
   defp all_resolved(picked, by_id) do
-    case Enum.find_index(picked, fn {id, _title} -> not Map.has_key?(by_id, id) end) do
+    case Enum.find_index(picked, fn {id, _type, _title} -> not Map.has_key?(by_id, id) end) do
       nil ->
         :ok
 
       index ->
-        {id, title} = Enum.at(picked, index)
+        {id, _type, title} = Enum.at(picked, index)
         {:error, unresolved(index + 1, item_label(id, title))}
     end
   end
 
-  # One read for the whole list (this runs on every editor validate), as the
-  # caller and under the writing tenant — the same reach a single reference's
-  # `get_record` has, so a list cannot name what a single field could not.
-  defp read_references(_target, [], _read_opts), do: {:ok, %{}}
+  # One read per target type (one in all for a single-type field — this runs on
+  # every editor validate), as the caller and under the writing tenant — the
+  # same reach a single reference's `get_record` has, so a list cannot name
+  # what a single field could not. An id is found only among the records of
+  # the type its item named.
+  defp read_references(picked, read_opts) do
+    picked
+    |> Enum.group_by(&elem(&1, 1), &elem(&1, 0))
+    |> Enum.reduce_while({:ok, %{}}, fn {type, ids}, {:ok, acc} ->
+      case read_references(type, ids, read_opts) do
+        {:ok, found} -> {:cont, {:ok, Map.merge(acc, found)}}
+        error -> {:halt, error}
+      end
+    end)
+  end
 
-  defp read_references(target, ids, read_opts) do
-    case KilnCMS.CMS.ContentTypes.get(target) do
+  defp read_references(type, ids, read_opts) do
+    case KilnCMS.CMS.ContentTypes.get(type) do
       nil ->
         {:error, "links to a content type that no longer exists"}
 
       _ct ->
         records =
           KilnCMS.CMS.ContentTypes.list!(
-            target,
+            type,
             Keyword.put(read_opts, :query,
               filter: [id: [in: ids]],
               select: [:id, :slug, :title]
@@ -802,6 +858,16 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
       :error -> nil
     end
   end
+
+  defp untyped(position, label, allowed),
+    do:
+      "item #{position}#{label && " " <> label} doesn't say which type of content it is " <>
+        "(one of: #{Enum.join(allowed, ", ")})"
+
+  defp not_allowed(position, label, type, allowed),
+    do:
+      "item #{position}#{label && " " <> label} is of type #{type}, which this field can't link to " <>
+        "— it links to #{Enum.join(allowed, ", ")}"
 
   defp unresolved(position, nil),
     do: "item #{position} no longer exists or can't be linked — remove it from the list"
