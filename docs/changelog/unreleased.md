@@ -54,6 +54,7 @@ carries the reasoning.
   copy and the stale-edit check behave as they do for any other field.
   Several target types (R2), per-link fields (R3) and the reverse list (R4)
   add to the same picker later.
+  ([#2002](https://github.com/The-Verscienta/kiln_cms/pull/2002))
 
 <a id="kilncmsdev-now-publishes-kilns-security-policy-at-security-and-a-security"></a>
 
