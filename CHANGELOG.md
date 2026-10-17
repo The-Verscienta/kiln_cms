@@ -62,7 +62,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A reference custom field can link to several content types
   (`target_types`).**
-  ([long form](docs/changelog/unreleased.md#a-reference-custom-field-can-link-to-several-content-types-targettypes))
+  ([#2004](https://github.com/The-Verscienta/kiln_cms/pull/2004) · [long form](docs/changelog/unreleased.md#a-reference-custom-field-can-link-to-several-content-types-targettypes))
 
 - **kilncms.dev now publishes Kiln's security policy at `/security`, and a
   security notice per published GitHub advisory at

@@ -55,6 +55,7 @@ carries the reasoning.
   editor groups a polymorphic field's choices by type; the picker with type
   badges follows in R9. The typed GraphQL interface over the allowed types
   is R7. No existing field changes.
+  ([#2004](https://github.com/The-Verscienta/kiln_cms/pull/2004))
 
 <a id="kilncmsdev-now-publishes-kilns-security-policy-at-security-and-a-security"></a>
 
