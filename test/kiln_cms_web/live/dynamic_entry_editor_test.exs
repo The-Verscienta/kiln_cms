@@ -169,16 +169,18 @@ defmodule KilnCMSWeb.DynamicEntryEditorTest do
     conn = log_in(conn, admin)
     {:ok, lv, html} = live(conn, ~p"/editor/content/#{definition.name}/#{entry.id}")
 
-    # Both pickers render with their choices.
+    # The media select renders its choices; the reference searches its type.
     assert html =~ ~s(<option value="#{media.id}")
-    assert html =~ ~s(<option value="#{page.id}")
+    assert has_element?(lv, "#custom-field-related_page-search[role=combobox]")
 
     lv
-    |> form("##{definition.name}-editor", %{
-      "form" => %{
-        "custom_fields" => %{"hero" => media.id, "related_page" => page.id}
-      }
-    })
+    |> element("#custom-field-related_page-search")
+    |> render_change(%{"_kiln_ref_q" => %{"related_page" => "Target page"}})
+
+    lv |> element("#custom-field-related_page-opt-#{page.id}") |> render_click()
+
+    lv
+    |> form("##{definition.name}-editor", %{"form" => %{"custom_fields" => %{"hero" => media.id}}})
     |> render_submit()
 
     saved = ContentTypes.get_record!(definition.name, entry.id, actor: admin)
@@ -195,7 +197,8 @@ defmodule KilnCMSWeb.DynamicEntryEditorTest do
     # The re-rendered pickers show the saved selections.
     html = render(lv)
     assert html =~ ~s(<option value="#{media.id}" selected)
-    assert html =~ ~s(<option value="#{page.id}" selected)
+    assert has_element?(lv, "#cf-ref-related_page-#{page.id}", "Target page")
+    refute has_element?(lv, "#custom-field-related_page-search")
   end
 
   test "a gallery media field is filled, ordered and emptied from the library drawer", %{
@@ -324,25 +327,23 @@ defmodule KilnCMSWeb.DynamicEntryEditorTest do
     {:ok, lv, html} =
       conn |> log_in(admin) |> live(~p"/editor/content/#{definition.name}/#{entry.id}")
 
-    assert html =~ "Nothing connected yet."
-    assert html =~ "Connect an existing record…"
+    assert html =~ "Search to connect a record…"
 
+    # The picker searches the target type; a pick appends to the list.
     add = fn id ->
       lv
-      |> element("#custom-field-see_also select[phx-change='field_reference_add']")
-      |> render_change(%{
-        "_target" => ["_kiln_ref_add", "see_also"],
-        "_kiln_ref_add" => %{"see_also" => id}
-      })
+      |> element("#custom-field-see_also-search")
+      |> render_change(%{"_kiln_ref_q" => %{"see_also" => ""}})
+
+      lv |> element("#custom-field-see_also-opt-#{id}") |> render_click()
     end
 
     add.(b.id)
     add.(a.id)
     assert reference_ids(lv) == [b.id, a.id]
 
-    # A picked record is not offered again, and a full list offers no add.
-    refute has_element?(lv, "#custom-field-see_also select option[value='#{b.id}']")
-    refute has_element?(lv, "#custom-field-see_also select[phx-change='field_reference_add']")
+    # A full list offers no more search.
+    refute has_element?(lv, "#custom-field-see_also-search")
     assert render(lv) =~ "2 of 2"
 
     lv
@@ -359,13 +360,18 @@ defmodule KilnCMSWeb.DynamicEntryEditorTest do
 
     # Removing one frees a slot; removing every item clears the field.
     lv
-    |> element("#cf-ref-see_also-#{a.id} button[phx-click='field_gallery_remove']")
+    |> element("#cf-ref-see_also-#{a.id} button[data-ref-remove]")
     |> render_click()
 
-    assert has_element?(lv, "#custom-field-see_also select option[value='#{c.id}']")
+    add.(c.id)
+    assert reference_ids(lv) == [b.id, c.id]
 
     lv
-    |> element("#cf-ref-see_also-#{b.id} button[phx-click='field_gallery_remove']")
+    |> element("#cf-ref-see_also-#{c.id} button[data-ref-remove]")
+    |> render_click()
+
+    lv
+    |> element("#cf-ref-see_also-#{b.id} button[data-ref-remove]")
     |> render_click()
 
     assert reference_ids(lv) == []

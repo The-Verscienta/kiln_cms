@@ -589,7 +589,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:tag_sections_seen, MapSet.new())
     |> assign(:audiences, audience_options())
     |> assign(:field_definitions, field_definitions)
-    |> assign(:reference_options, reference_options(field_definitions, actor, org))
     # CRDT collab prototype: when enabled, rich-text blocks sync live
     # between editors over the collab channel (see KilnCMS.Collab.Crdt).
     |> assign(:collab_token, collab_token(actor))
@@ -667,6 +666,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_info({:block_task_changed, _block_id}, socket),
     do: {:noreply, reload_tasks(socket)}
+
+  # A reference field's picker (R9) asks for a pick, a removal or a reorder;
+  # the value lives in the form, so the edit is made here, through the same
+  # params-then-validate path as every other list edit.
+  def handle_info({KilnCMSWeb.ContentEditor.ReferencePicker, {op, name, arg}}, socket)
+      when is_binary(name),
+      do: {:noreply, apply_reference_edit(socket, op, name, arg)}
 
   # Drafting results. Note the double wrap: `start_async` wraps the function's
   # own return, so a successful generation arrives as `{:ok, {_version, {:ok, _}}}`.
@@ -1530,32 +1536,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
       ct ->
         CMS.field_definitions_for!(ct.type, actor: actor, tenant: org)
     end
-  end
-
-  # Pick-lists for `:reference` custom fields: per definition, the target
-  # type's records as `{title, id}` options — narrow select and the same window
-  # cap as the media picker, so a large library can't blow up the mount.
-  defp reference_options(definitions, actor, org) do
-    definitions
-    |> Enum.filter(&(&1.field_type == :reference))
-    |> Map.new(fn definition ->
-      options =
-        case ContentTypes.get(definition.target_type, org) do
-          nil ->
-            []
-
-          ct ->
-            ct
-            |> ContentTypes.list!(
-              actor: actor,
-              tenant: org,
-              query: [select: [:id, :title], sort: [title: :asc], limit: @max_media]
-            )
-            |> Enum.map(&{&1.title, &1.id})
-        end
-
-      {definition.name, options}
-    end)
   end
 
   defp list_versions(kind, opts), do: ContentTypes.list_versions!(kind, opts)
@@ -2784,30 +2764,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  # A list of references (`multiple` reference) adds from its own select,
-  # named outside the content form (see `custom_field_input/1`); `_target`
-  # says which field's select changed.
-  def handle_event(
-        "field_reference_add",
-        %{"_target" => ["_kiln_ref_add", name], "_kiln_ref_add" => adds},
-        socket
-      )
-      when is_binary(name) and is_map(adds) do
-    case Map.get(adds, name) do
-      id when is_binary(id) and id != "" ->
-        if field_list_of?(socket, name, :reference),
-          do: {:noreply, update_field_gallery(socket, name, &Enum.uniq(&1 ++ [id]))},
-          else: {:noreply, socket}
-
-      _blank ->
-        {:noreply, socket}
-    end
-  end
-
-  def handle_event("field_reference_add", _params, socket), do: {:noreply, socket}
-
-  # Remove and move serve every list field — a gallery and a list of
-  # references alike: both are an ordered list of snapshot ids.
+  # Remove and move for a gallery field. (A list of references sends the same
+  # edits from its picker — the `ReferencePicker` `handle_info/2` clause.)
   def handle_event("field_gallery_remove", %{"field" => name, "id" => id}, socket)
       when is_binary(name) and is_binary(id),
       do: {:noreply, update_field_gallery(socket, name, &List.delete(&1, id))}
@@ -3808,14 +3766,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Any list field qualifies — a gallery or a list of references; the drawer
   # opens only for a gallery (`field_list_of?/3`).
   defp field_gallery_editable?(socket, name) do
+    custom_field_editable?(
+      socket,
+      name,
+      &match?(%{field_type: type, multiple: true} when type in [:media, :reference], &1)
+    )
+  end
+
+  # The same gate for any custom field whose definition passes `pred`.
+  defp custom_field_editable?(socket, name, pred) do
     socket.assigns.may_write? and
-      Enum.any?(
-        socket.assigns.field_definitions,
-        &match?(
-          %{name: ^name, field_type: type, multiple: true} when type in [:media, :reference],
-          &1
-        )
-      ) and
+      Enum.any?(socket.assigns.field_definitions, &(&1.name == name and pred.(&1))) and
       not (socket.assigns[:localization] &&
              KilnCMSWeb.ContentEditor.Localization.locked?(
                socket.assigns.localization,
@@ -3841,23 +3802,66 @@ defmodule KilnCMSWeb.ContentEditorLive do
         |> custom_field_value(name)
         |> KilnCMS.CMS.Changes.ApplyCustomFields.snapshot_ids()
 
-      params = AshPhoenix.Form.params(socket.assigns.form)
-
-      custom =
-        case params["custom_fields"] do
-          %{} = map -> map
-          _other -> %{}
-        end
-
-      params = Map.put(params, "custom_fields", Map.put(custom, name, ["" | fun.(ids)]))
-
-      socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
-      broadcast_preview(socket)
-      mark_dirty(socket, :settings)
+      put_custom_field_param(socket, name, ["" | fun.(ids)])
     else
       socket
     end
   end
+
+  defp put_custom_field_param(socket, name, value) do
+    params = AshPhoenix.Form.params(socket.assigns.form)
+
+    custom =
+      case params["custom_fields"] do
+        %{} = map -> map
+        _other -> %{}
+      end
+
+    params = Map.put(params, "custom_fields", Map.put(custom, name, value))
+
+    socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
+    broadcast_preview(socket)
+    mark_dirty(socket, :settings)
+  end
+
+  # A reference picker's edit (R9). A list of references is rewritten through
+  # `update_field_gallery/3`, keeping its order; a single reference is set to
+  # the picked id, or to `""` to clear it — which `ApplyCustomFields` stores as
+  # no reference, as the old select's "None" did.
+  defp apply_reference_edit(socket, op, name, arg) do
+    if field_list_of?(socket, name, :reference),
+      do: update_field_gallery(socket, name, &edit_reference_list(&1, op, arg)),
+      else: edit_single_reference(socket, op, name, arg)
+  end
+
+  defp edit_reference_list(ids, :add, id), do: Enum.uniq(ids ++ [id])
+  defp edit_reference_list(ids, :remove, id), do: List.delete(ids, id)
+  defp edit_reference_list(ids, :move, {id, dir}), do: move_id(ids, id, dir)
+
+  # A dragged order names the list's own ids; anything else in it is dropped,
+  # and an id it leaves out keeps its place at the end, so a stale or partial
+  # drag can reorder the list but never add to or shorten it.
+  defp edit_reference_list(ids, :reorder, order) do
+    kept = Enum.filter(Enum.uniq(order), &(&1 in ids))
+    kept ++ (ids -- kept)
+  end
+
+  defp edit_reference_list(ids, _op, _arg), do: ids
+
+  defp edit_single_reference(socket, op, name, arg) when op in [:put, :remove] do
+    editable? =
+      custom_field_editable?(
+        socket,
+        name,
+        &match?(%{field_type: :reference, multiple: multiple} when multiple != true, &1)
+      )
+
+    if editable?,
+      do: put_custom_field_param(socket, name, if(op == :put, do: arg, else: "")),
+      else: socket
+  end
+
+  defp edit_single_reference(socket, _op, _name, _arg), do: socket
 
   # Swap `id` with its neighbour; at either end it stays where it is.
   defp move_id(ids, id, dir) do
@@ -6993,7 +6997,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
               localization={@localization}
               kind={@kind}
               media={@media}
-              reference_options={@reference_options}
+              actor={@actor}
+              tenant={@current_org}
               broken_references={@broken_references}
             />
           </div>

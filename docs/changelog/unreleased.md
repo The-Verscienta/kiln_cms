@@ -33,6 +33,28 @@ carries the reasoning.
   their 1.0 shape.
   ([#2000](https://github.com/The-Verscienta/kiln_cms/pull/2000))
 
+<a id="the-editor-fills-a-reference-custom-field-from-a-search-picker-instead-of-a"></a>
+
+- **The editor fills a reference custom field from a search picker instead of
+  a select of up to 500 records.** Workstream R9 of
+  [relationships-plan.md](../relationships-plan.md), first part. Typing
+  searches the target type by title on the server, as the editor and in their
+  site, one page of 20 at a time with "Show more", so there is no cap and a
+  record the editor may not read is never offered. An empty search lists the
+  most recently edited records. Results and connected records show their
+  title, type and state, and each connected record links to its own editor in
+  a new tab. A list of references (R1) adds several in a row, reorders by
+  dragging a row's handle or with its up and down buttons, and removes rows; a
+  single reference holds one record and offers the search again once it is
+  removed. A full list stops offering more. A stored reference the editor
+  can no longer read stays in place, marked unavailable, rather than being
+  dropped on the next save. The search is a combobox: arrow keys move through
+  the results, Enter picks, Escape closes, and Enter never submits the page.
+  The value is still written into the content form, so saving, the working
+  copy and the stale-edit check behave as they do for any other field.
+  Several target types (R2), per-link fields (R3) and the reverse list (R4)
+  add to the same picker later.
+
 <a id="kilncmsdev-now-publishes-kilns-security-policy-at-security-and-a-security"></a>
 
 - **kilncms.dev now publishes Kiln's security policy at `/security`, and a
@@ -169,6 +191,13 @@ carries the reasoning.
   `mix kiln.media.regenerate_variants` reports the count.
   ([#1955](https://github.com/The-Verscienta/kiln_cms/issues/1955))
 
+<a id="graphql-published-queries-without-offset-return-their-page-fields-hasnextpage"></a>
+
+- **GraphQL `published*` queries without `offset` return their page fields
+  (`hasNextPage`, `hasPreviousPage`, `pageNumber`, `lastPage`) again: an
+  omitted `offset` now means `0`.**
+  ([#1883](https://github.com/The-Verscienta/kiln_cms/issues/1883))
+
 <a id="renaming-a-document-now-re-fires-the-documents-that-point-at-it-through-a"></a>
 
 - **Renaming a document now re-fires the documents that point at it through a
@@ -190,6 +219,13 @@ carries the reasoning.
 
 ## Security
 
+<a id="bandit-1130-fixes-eef-cve-2026-105660-a-client-could-choose-connhostconnport"></a>
+
+- **bandit 1.13.0 fixes EEF-CVE-2026-105660 (a client could choose
+  `conn.host`/`conn.port` via the HTTP/1 request target) and the HTTP/2 DoS
+  EEF-CVE-2026-105659, so the endpoint speaks HTTP/2 again.**
+  ([#1991](https://github.com/The-Verscienta/kiln_cms/pull/1991))
+
 <a id="phoenix-showcase-advisories"></a>
 
 - **The `examples/phoenix_showcase` template's lock clears 23 Hex advisories
@@ -204,3 +240,4 @@ carries the reasoning.
   0.1.13; no `mix.exs` requirement changed. Nothing in CI built the example,
   which is how it went stale, so the Dependency audit job now runs
   `mix hex.audit` in `examples/phoenix_showcase` too.
+

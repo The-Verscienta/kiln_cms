@@ -14,9 +14,8 @@ defmodule KilnCMSWeb.FunnelBuilderLive do
   alias KilnCMS.Analytics.Titles
   alias KilnCMS.CMS.ContentTypes
 
-  # Same window cap as the content editor's own reference-field picker
-  # (`ContentEditorLive.reference_options/3`) — a large library can't blow up
-  # the mount or the type-change reload.
+  # Same window cap as the content editor's media picker (`@max_media`) — a
+  # large library can't blow up the mount or the type-change reload.
   @max_content_options 500
 
   @impl true

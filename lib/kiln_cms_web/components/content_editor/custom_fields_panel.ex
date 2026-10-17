@@ -17,7 +17,7 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
   use KilnCMSWeb, :html
 
   import KilnCMSWeb.ContentEditor.InspectorComponents,
-    only: [custom_field_input: 1, custom_field_options: 3]
+    only: [custom_field_input: 1, custom_field_options: 2]
 
   import KilnCMSWeb.ContentEditor.Shared, only: [custom_field_errors: 2, custom_field_value: 2]
 
@@ -28,7 +28,8 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
   attr :localization, :map, required: true
   attr :kind, :atom, required: true
   attr :media, :list, required: true
-  attr :reference_options, :map, required: true
+  attr :actor, :any, required: true
+  attr :tenant, :any, required: true
   attr :broken_references, :list, required: true
 
   def custom_fields_panel(assigns) do
@@ -62,12 +63,28 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
           disabled={Localization.locked?(@localization, {:custom, definition.name})}
           class="contents"
         >
-          <.custom_field_input
+          <%!-- A reference searches its target type as the editor (R9), so
+                it is a component with its own search state; the value
+                still lives in this form. --%>
+          <.live_component
+            :if={definition.field_type == :reference}
+            module={KilnCMSWeb.ContentEditor.ReferencePicker}
+            id={"reference-picker-#{definition.name}"}
             definition={definition}
             name={"#{@form.name}[custom_fields][#{definition.name}]"}
             value={custom_field_value(@form, definition.name)}
             errors={custom_field_errors(@form, definition.name)}
-            options={custom_field_options(definition, @media, @reference_options)}
+            locked={Localization.locked?(@localization, {:custom, definition.name})}
+            actor={@actor}
+            tenant={@tenant}
+          />
+          <.custom_field_input
+            :if={definition.field_type != :reference}
+            definition={definition}
+            name={"#{@form.name}[custom_fields][#{definition.name}]"}
+            value={custom_field_value(@form, definition.name)}
+            errors={custom_field_errors(@form, definition.name)}
+            options={custom_field_options(definition, @media)}
           />
           <Localization.localization_note
             localization={@localization}
