@@ -7,6 +7,25 @@ carries the reasoning.
 
 ## Added
 
+<a id="api-clients-can-connect-disconnect-and-reorder-references-graphqls"></a>
+
+- **API clients can connect, disconnect and reorder references: GraphQL's
+  `add<Type>References`, `remove<Type>References` and `move<Type>Reference`, and
+  payload-link routes at `/api/json/content-links`.** Workstream R8 of
+  [relationships-plan.md](../relationships-plan.md). Each mutation is the
+  record's own update with one `:reference` field rewritten, so policies, the
+  `:read_write` key scope, `expectedLockVersion`, the lock, history, webhooks,
+  re-fire and the field's validation (bounds, target types, link fields) all
+  apply. `position` takes `start`, `end`, `before: id` or `after: id`, as in
+  Hygraph's `connect`; `targets` take `{id, type, link}`. Adding a record the
+  field already holds moves it, so a retry converges. On JSON:API a reference
+  field is written by `PATCH`ing its array (now documented with examples), and
+  a payload link — a `content_link` with no `field` — has `POST`, `PATCH` and
+  `DELETE` routes, each authorized as an update of the link's source record;
+  reference edges are refused there. Everything is additive: new mutations, new
+  input and result types, new routes.
+  ([#2014](https://github.com/The-Verscienta/kiln_cms/pull/2014))
+
 <a id="typed-nested-reads-through-references"></a>
 
 - **Reads follow reference fields to the records on the other end: GraphQL's

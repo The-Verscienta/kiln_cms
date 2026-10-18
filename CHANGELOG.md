@@ -56,6 +56,11 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **API clients can connect, disconnect and reorder references: GraphQL's
+  `add<Type>References`, `remove<Type>References` and `move<Type>Reference`, and
+  payload-link routes at `/api/json/content-links`.**
+  ([#2014](https://github.com/The-Verscienta/kiln_cms/pull/2014) · [long form](docs/changelog/unreleased.md#api-clients-can-connect-disconnect-and-reorder-references-graphqls))
+
 - **Reads follow reference fields to the records on the other end: GraphQL's
   typed `references` / `referencedBy`, and `?expand=` on `/api/content`.**
   ([#2010](https://github.com/The-Verscienta/kiln_cms/pull/2010) · [long form](docs/changelog/unreleased.md#typed-nested-reads-through-references))
@@ -158,7 +163,7 @@ Every summary line below that was shortened links to its own entry there.
 - **A reference custom field no longer reveals a draft target to a reader who
   cannot read it: the fired artifact, JSON:API and GraphQL leave that item out
   of `custom_fields`.**
-  ([long form](docs/changelog/unreleased.md#reference-snapshot-hides-unreadable-targets))
+  ([#2013](https://github.com/The-Verscienta/kiln_cms/issues/2013) · [long form](docs/changelog/unreleased.md#reference-snapshot-hides-unreadable-targets))
 
 ## [1.4.0] - 2026-10-14
 
