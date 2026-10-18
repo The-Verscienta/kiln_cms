@@ -271,7 +271,11 @@ defmodule KilnCMS.Firing.ReferencesTest do
                CMS.get_entry!(referrer.id, actor: actor).custom_fields["related"]
     end
 
-    test "an unpublished target keeps the stored label", %{
+    # The artifact is served to anyone, and the stored snapshot names the
+    # draft's id, slug and title: neither the stored label nor the draft's
+    # current one leaves (`KilnCMS.CMS.ReferenceSnapshots`). The stored value
+    # is kept.
+    test "an unpublished target is left out of the artifact", %{
       actor: actor,
       definition: definition,
       org: org
@@ -281,8 +285,12 @@ defmodule KilnCMS.Firing.ReferencesTest do
       CMS.update_page!(target, %{title: "Secret new title"}, actor: actor)
       drain()
 
+      custom = json_artifact(org, :entry, referrer.id)["custom_fields"]
+      assert Map.has_key?(custom, "related")
+      assert custom["related"] == nil
+
       assert %{"title" => "Draft title"} =
-               json_artifact(org, :entry, referrer.id)["custom_fields"]["related"]
+               CMS.get_entry!(referrer.id, actor: actor).custom_fields["related"]
     end
 
     test "a cycle through a custom field and a block reference terminates", %{

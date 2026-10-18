@@ -133,6 +133,18 @@ Each is one issue and, unless noted, one PR. Order is §5.
 - Re-fire resolves the snapshot's `slug`/`title` fresh at fire time, so the
   fired artifact is right even when the stored snapshot lags. The stored
   snapshot is left alone (covered shape).
+- *Follow-up, found while building R7:* the snapshot is taken whatever state
+  the target was in, and every read served it verbatim, so a published
+  record's artifact, JSON:API and GraphQL `custom_fields` named a draft
+  target's id, slug and title. **Decision:** mask on the way out, never in
+  the store. An item whose target the reader could not read directly is
+  dropped from a list, and a single-valued field reads as `null`, both shapes
+  a 1.x client already handles (an unset field, a shorter list). The artifact
+  is masked as an anonymous reader; API reads as the actor, skipping editors,
+  admins, system actors and `authorize?: false`, so a masked value never
+  feeds a write. Not considered: rewriting stored values on unpublish (loses
+  the reference) or replacing the item with a placeholder (a new shape).
+  `KilnCMS.CMS.ReferenceSnapshots`.
 - Tests: rename a target → the referrer re-fires and its JSON artifact shows
   the new title; a reference cycle terminates (existing `visited` set).
 

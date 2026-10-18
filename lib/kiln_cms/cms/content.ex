@@ -3348,6 +3348,12 @@ defmodule KilnCMS.CMS.Content do
       # primary one — see the preparation module.
       preparations do
         prepare KilnCMS.CMS.Preparations.RejectUnsortableCalculations
+
+        # A `:reference` snapshot names its target's id, slug and title as
+        # they were when this record was saved, a draft's included: leave out
+        # the ones the actor could not read directly. Read-side only; the
+        # stored value is untouched, and editors read it whole.
+        prepare KilnCMS.CMS.Preparations.MaskUnreadableReferences
       end
 
       # Invalidate the public delivery cache whenever published content changes

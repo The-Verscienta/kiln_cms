@@ -19,6 +19,16 @@ defmodule KilnCMS.Firing.CustomFields do
       re-fire a rename triggers (decision D13, `KilnCMS.Firing.References`)
       actually changes the artifact. The stored snapshot is not rewritten, and
       its shape is unchanged — only the two label values are refreshed.
+    * **unreadable reference targets are left out**. The stored snapshot was
+      taken whatever state the target was in, a draft included, and an
+      artifact is served to anyone at its URL. So the fired copy keeps only
+      the snapshots an *anonymous* reader could read directly (the target's
+      own read policy: published, public, not locked) — a list loses the
+      item, a single-valued field reads as `nil` — exactly what `?expand=`
+      and GraphQL `references` show (`KilnCMS.CMS.ReferenceSnapshots`). The
+      target's publish re-fires this document (D13), which brings it back.
+      A point-in-time read masks too: today's policy decides what may be
+      shown, even of what was stored then.
     * **geolocation fields become structured data** (#428). A
       `%{"lat", "lng"}` value is a schema.org `Place` with `GeoCoordinates`,
       contributed to the document's `contentLocation` — a property
@@ -30,7 +40,9 @@ defmodule KilnCMS.Firing.CustomFields do
   metadata for a document already resolved for delivery, and firing runs
   outside any actor's session.
   """
+  alias KilnCMS.CMS.Checks.LinkEndsReadable
   alias KilnCMS.CMS.Computed
+  alias KilnCMS.CMS.ReferenceSnapshots
 
   @typedoc "A document's custom fields, resolved for firing."
   @type t :: %{values: map(), definitions: [struct()]}
@@ -70,8 +82,10 @@ defmodule KilnCMS.Firing.CustomFields do
       %{values: values, definitions: definitions}
     else
       # Point-in-time: the stored map is the historical truth. Neither the
-      # formulas nor the field registry of today may edit it.
-      %{values: stored, definitions: definitions}
+      # formulas nor the field registry of today may edit it — but what an
+      # anonymous reader may see of it is today's question, so the unreadable
+      # references are left out all the same (labels are not refreshed).
+      %{values: mask_unreadable(stored, Map.get(document, :org_id)), definitions: definitions}
     end
   end
 
@@ -120,18 +134,13 @@ defmodule KilnCMS.Firing.CustomFields do
     end
   end
 
-  # One read per distinct target type, ids only — not one per value.
+  # One read per distinct target type, ids only — not one per value. The
+  # labels read are the anonymously readable targets', so the same read
+  # decides both what is relabelled and what is left out.
   defp refresh_references(values, definitions, org_id) do
     names = for %{field_type: :reference, name: name} <- definitions, do: name
 
-    snapshots =
-      values
-      |> Map.take(names)
-      |> Map.values()
-      |> Enum.flat_map(&List.wrap/1)
-      |> Enum.filter(&snapshot?/1)
-
-    case snapshots do
+    case ReferenceSnapshots.snapshots(values) do
       [] ->
         values
 
@@ -139,42 +148,52 @@ defmodule KilnCMS.Firing.CustomFields do
         current =
           snapshots
           |> Enum.group_by(& &1["type"], & &1["id"])
-          |> Enum.flat_map(fn {type, ids} -> published_labels(org_id, type, Enum.uniq(ids)) end)
+          |> Enum.flat_map(fn {type, ids} -> readable_labels(org_id, type, Enum.uniq(ids)) end)
           |> Map.new()
 
         relabelled =
           values |> Map.take(names) |> Map.new(fn {name, v} -> {name, relabel(v, current)} end)
 
-        Map.merge(values, relabelled)
+        values
+        |> Map.merge(relabelled)
+        |> ReferenceSnapshots.mask(current |> Map.keys() |> MapSet.new())
     end
   end
 
-  defp snapshot?(%{"id" => id, "type" => type}) when is_binary(id) and is_binary(type),
-    do: match?({:ok, _}, Ecto.UUID.cast(id))
-
-  defp snapshot?(_value), do: false
+  defp mask_unreadable(values, org_id) do
+    case ReferenceSnapshots.ids(values) do
+      [] -> values
+      ids -> ReferenceSnapshots.mask(values, LinkEndsReadable.readable_ids(nil, org_id, ids))
+    end
+  end
 
   defp relabel(list, current) when is_list(list), do: Enum.map(list, &relabel(&1, current))
 
   defp relabel(%{"id" => id} = snapshot, current) when is_map_key(current, id),
     do: Map.merge(snapshot, Map.fetch!(current, id))
 
-  # Not published (a draft, trashed, purged) or not a snapshot at all: keep the
-  # stored value. A label is only refreshed from a row a reader may already
-  # see — firing never copies an unpublished title into a public artifact.
+  # Not readable (a draft, gated, trashed, purged) or not a snapshot at all:
+  # keep the stored value here; `ReferenceSnapshots.mask/2` then drops the
+  # unreadable snapshots. A label is only refreshed from a row a reader may
+  # already see — firing never copies an unpublished title into a public
+  # artifact.
   defp relabel(value, _current), do: value
 
   # Through the type's own list interface, so a dynamic type's read is scoped
   # to its definition. An unknown type (a target type deleted since the value
-  # was saved) contributes nothing, and its values keep their stored labels.
-  defp published_labels(org_id, type, ids) do
+  # was saved) contributes nothing, and its values are left out.
+  defp readable_labels(org_id, type, ids) do
     if KilnCMS.CMS.ContentTypes.get(type, org_id) do
       type
       |> KilnCMS.CMS.ContentTypes.list!(
-        # authorize?: false — firing has no actor (see `system_actor/0`); the
-        # read is tenant-scoped, published rows only, and only slug/title
-        # leave here — the same stance as `References.load_published/3`.
-        authorize?: false,
+        # As an anonymous reader, through the target type's own read policy
+        # (published, public audience, not passphrase-locked): every artifact
+        # consumer serves the body to anyone at the URL, so a target appears
+        # in it only when anyone could read the target directly — the rule
+        # `?expand=` (`KilnCMSWeb.ReferenceExpansion`) applies. Only id, slug
+        # and title leave here.
+        actor: nil,
+        authorize?: true,
         tenant: org_id,
         query: [filter: [id: [in: ids], state: :published], select: [:id, :slug, :title]]
       )

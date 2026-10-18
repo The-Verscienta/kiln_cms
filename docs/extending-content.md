@@ -100,6 +100,14 @@ UI" workflow, scoped to fields.
   and the API serves it through `incoming_links`. A published record's
   working copy holds draft references without edges until they are published.
   See `KilnCMS.CMS.ContentLinks`.
+  **A reader only sees the references they could follow.** The snapshot is
+  taken whatever state the target was in, so every read leaves out an item
+  whose target the reader could not read directly (a draft, a gated or
+  passphrase-locked page): a list loses the item, a single-valued field reads
+  as `null`. The fired artifact is masked as an anonymous reader; JSON:API and
+  GraphQL as the caller, and editors and admins see the value whole. The
+  stored value is never changed, and the item reappears once the target is
+  readable. See `KilnCMS.CMS.ReferenceSnapshots`.
 - **Edit**: the content editor renders one input per definition automatically,
   in a *Custom fields* panel under the blocks.
 - **Deliver**: `custom_fields` is public, so headless clients get the values.

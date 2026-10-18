@@ -143,6 +143,11 @@ Every summary line below that was shortened links to its own entry there.
   now audits it.**
   ([#1996](https://github.com/The-Verscienta/kiln_cms/pull/1996) · [long form](docs/changelog/unreleased.md#phoenix-showcase-advisories))
 
+- **A reference custom field no longer reveals a draft target to a reader who
+  cannot read it: the fired artifact, JSON:API and GraphQL leave that item out
+  of `custom_fields`.**
+  ([long form](docs/changelog/unreleased.md#reference-snapshot-hides-unreadable-targets))
+
 ## [1.4.0] - 2026-10-14
 
 Long form: [docs/changelog/v1.4.0.md](docs/changelog/v1.4.0.md) —

@@ -384,3 +384,28 @@ carries the reasoning.
   which is how it went stale, so the Dependency audit job now runs
   `mix hex.audit` in `examples/phoenix_showcase` too.
 
+<a id="reference-snapshot-hides-unreadable-targets"></a>
+
+- **A reference custom field no longer reveals a draft target to a reader who
+  cannot read it: the fired artifact, JSON:API and GraphQL leave that item out
+  of `custom_fields`.** A `:reference` value stores `%{"id", "type", "slug",
+  "title"}` per target, taken when the referrer was saved, whatever state the
+  target was in. Every read surface served that map verbatim, so a published
+  post linking to a draft page told anonymous callers the draft's id, slug and
+  title: in its fired `json` artifact (`GET /api/content/:type/:slug`, and
+  everything served from it) and in `custom_fields` on JSON:API and GraphQL.
+  The edges (`content_links`, GraphQL `references`, `?expand=`) already
+  applied the both-ends rule; the snapshot now does too. The snapshot is a
+  covered 1.x shape, so the fix is read-side only and keeps it: an item whose
+  target the reader could not read directly, through the target type's own
+  read policy (published, audience, passphrase lock), is left out of a list,
+  and a single-valued field reads as `null`, exactly as if it were unset. The
+  stored value is never rewritten, and the item reappears once the target is
+  readable: publishing it re-fires the referrer (D13). The artifact is
+  masked as an anonymous reader, since it is served to anyone at its URL,
+  point-in-time reads (`?as_of=`) included. API reads are masked as the
+  actor; editors, admins, system actors and `authorize?: false` reads get the
+  value whole, so a masked value never reaches anyone who could save it
+  back. No migration; artifacts correct themselves on their next fire.
+  See docs/extending-content.md, "References are edges too".
+
