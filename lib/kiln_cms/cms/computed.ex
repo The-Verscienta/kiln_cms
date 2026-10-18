@@ -490,19 +490,18 @@ defmodule KilnCMS.CMS.Computed do
     |> Map.get(name, [])
     |> Enum.reduce_while({nil, seen}, fn next, {nil, seen} ->
       cond do
-        next == start ->
-          {:halt, {Enum.reverse([start | path]), seen}}
-
-        MapSet.member?(seen, next) ->
-          {:cont, {nil, seen}}
-
-        true ->
-          case search(graph, start, next, [next | path], MapSet.put(seen, next)) do
-            {nil, seen} -> {:cont, {nil, seen}}
-            found -> {:halt, found}
-          end
+        next == start -> {:halt, {Enum.reverse([start | path]), seen}}
+        MapSet.member?(seen, next) -> {:cont, {nil, seen}}
+        true -> descend(graph, start, next, path, seen)
       end
     end)
+  end
+
+  defp descend(graph, start, next, path, seen) do
+    case search(graph, start, next, [next | path], MapSet.put(seen, next)) do
+      {nil, seen} -> {:cont, {nil, seen}}
+      found -> {:halt, found}
+    end
   end
 
   @doc """

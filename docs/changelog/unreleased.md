@@ -156,6 +156,25 @@ carries the reasoning.
   fire. See docs/extending-content.md, "Computed fields".
   ([#2006](https://github.com/The-Verscienta/kiln_cms/pull/2006))
 
+<a id="a-computed-field-can-read-another-computed-field-sumsubtotal-shipping-over-a"></a>
+
+- **A computed field can read another computed field: `{{ sum(subtotal,
+  shipping) }}` over a computed `subtotal`.** Computed fields used to be
+  evaluated in one pass, so a formula naming another computed field always saw
+  it blank. They are now evaluated in dependency order — on write, on the
+  refresh after a document edit, on fire and in a slug or alias pattern's
+  `[field:…]` token, all through one `KilnCMS.CMS.Computed.derive/3` so the
+  stored and published values agree. A loop (a field reading itself, directly
+  or through others) is refused when the field is defined or edited, naming
+  the loop, including when the new field is the one that would close it. The
+  formula builder's value pickers and palette now offer the type's other
+  computed fields, less any that already read the one being edited, and the
+  preview derives them in the same order. Nothing is stored differently and
+  there is no migration; a formula that named a computed field starts seeing
+  its value on the next save or fire. See docs/extending-content.md, "Computed
+  fields".
+  ([#2008](https://github.com/The-Verscienta/kiln_cms/pull/2008))
+
 <a id="kilncmsdev-now-publishes-kilns-security-policy-at-security-and-a-security"></a>
 
 - **kilncms.dev now publishes Kiln's security policy at `/security`, and a
