@@ -474,6 +474,10 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     {socket, documents} = samples(socket, scope)
     sample = Enum.find(documents, &(&1.id == builder.sample)) || List.first(documents)
 
+    # The site's date, pinned as every other evaluation site pins one, so a
+    # `today()` formula previews what a save made right now would store.
+    today = Computed.Context.today()
+
     # Projected onto the type's current editable fields, as the write path
     # (`ApplyCustomFields`) and firing both do: a value left in the jsonb by a
     # field deleted since must not preview a result the save would never give.
@@ -485,16 +489,19 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             Map.take(
               sample.custom_fields || %{},
               editable_names(socket.assigns.definitions, scope)
-            )
+            ),
+            today
           ),
-        else: sample_context()
+        else: sample_context(today)
 
     {socket,
      %{
        values: value_options(socket.assigns.definitions, scopes, own_name),
        samples: Enum.map(documents, &{sample_label(&1), &1.id}),
        sample: sample && sample.id,
-       preview: ComputedBuilder.preview(compute, context)
+       preview: ComputedBuilder.preview(compute, context),
+       today: today,
+       time_dependent?: Computed.time_dependent?(compute)
      }}
   end
 
@@ -579,7 +586,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   # What the preview runs on for a type with no content yet: enough body text
   # that reading time and word count say something.
-  defp sample_context do
+  defp sample_context(today) do
     title = gettext("A sample title")
 
     %{
@@ -590,7 +597,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         "excerpt" => gettext("A short summary of the sample document."),
         "body" => String.duplicate(gettext("Sample body text for the preview. "), 80)
       },
-      fields: %{}
+      fields: %{},
+      today: today
     }
   end
 

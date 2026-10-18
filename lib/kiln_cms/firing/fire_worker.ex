@@ -102,10 +102,10 @@ defmodule KilnCMS.Firing.FireWorker do
   end
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"org_id" => org_id, "type" => type_str, "id" => id}}) do
+  def perform(%Oban.Job{args: %{"org_id" => org_id, "type" => type_str, "id" => id} = args}) do
     case References.type_atom(type_str) do
       nil -> {:cancel, "no content type answers to #{inspect(type_str)}"}
-      type -> fire(org_id, type, id)
+      type -> fire(org_id, type, id, fire_opts(args))
     end
   end
 
@@ -119,12 +119,12 @@ defmodule KilnCMS.Firing.FireWorker do
 
   # One clause per outcome of the load, because they are four different
   # situations and used to be one (#664).
-  defp fire(org_id, type, id) do
+  defp fire(org_id, type, id, opts) do
     case References.load_published(org_id, type, id) do
       {:ok, document} ->
         # `fire/2` reads the tenant off `document.org_id`; the wave + indexing carry
         # `org_id` explicitly so their reads/jobs stay scoped to this org.
-        Engine.fire(document)
+        Engine.fire(document, opts)
         References.invalidate(org_id, type, id, [References.key(type, id)])
         enqueue_indexing(org_id, type, id, document)
         :ok
@@ -152,6 +152,20 @@ defmodule KilnCMS.Firing.FireWorker do
       Logger.error("Firing failed for #{inspect(id)}: #{inspect(error)}")
       {:error, error}
   end
+
+  # The date the enqueuing write pinned for computed fields' `today()`
+  # (`Changes.FireArtifacts`), so the artifact derives what that write stored
+  # even when this job runs after midnight. A job without one (a publish from
+  # an older release, a backfill) fires on the site's current date; a value
+  # that isn't a date is ignored the same way rather than failing the fire.
+  defp fire_opts(%{"today" => iso}) when is_binary(iso) do
+    case Date.from_iso8601(iso) do
+      {:ok, date} -> [today: date]
+      {:error, _reason} -> []
+    end
+  end
+
+  defp fire_opts(_args), do: []
 
   # The document is settled-gone, so its artifacts are garbage: this is exactly
   # what `KilnCMS.CMS.Changes.DeleteArtifacts` intends on unpublish, and rows

@@ -225,16 +225,15 @@ CMS.create_field_definition!(%{
   `replace`, `concat`, `join`), numbers (`sum`, `subtract`, `product`,
   `divide`, `round`, `min`, `max`), conditions (`if`, `equals`,
   `greater_than`, `less_than`, `contains`, `is_empty`, `and`, `or`, `not`,
-  `default`) and dates (`days_between`, `year`, `format_date`). A condition
+  `default`) and dates (`days_between`, `years_between`, `today`, `year`,
+  `format_date`). A condition
   holds unless it is blank, `false`, `0`, the text `"false"`, or an empty list
   or map; a list or map value (a gallery, a reference) is empty only when it
   holds nothing. `sum`, `min` and `max` skip non-numbers, but `product` is
   blank unless every factor is a number, and a blank is neither more nor less
-  than anything. There is no
-  `today()`: the formula runs again on every fire, and a clock would make the
-  stored and fired values disagree. There is no `eval` either: the allowlist
-  *is* the sandbox, and an unknown function or wrong arity fails when the
-  **field is defined**, not silently per record.
+  than anything. There is no `eval`: the allowlist *is* the sandbox, and an
+  unknown function or wrong arity fails when the **field is defined**, not
+  silently per record.
 - **Read-only**: the write pass never consults the submitted payload, so a
   computed field cannot be set through the editor, JSON:API, GraphQL or MCP.
 - **Evaluated twice**: on write (so the value is stored and participates in
@@ -243,23 +242,61 @@ CMS.create_field_definition!(%{
   re-save sweep). A stale stored value therefore never reaches an artifact.
 - **One pass**: a computed field never feeds another computed field.
 
+**Date-relative values: `today()` and the daily refresh.** Ages, countdowns
+and "expired?" flags need the current date:
+
+```text
+{{ days_between(today(), event_on) }} days     → 3 days (negative once past)
+{{ years_between(born, today()) }}             → 36
+{{ if(less_than(expires_on, today()), "Expired", "Current") }}
+```
+
+A formula runs on write *and* again on fire, so a clock read inside the
+engine would let a record's stored value and its artifact disagree. Instead
+`today()` answers a date **pinned once per evaluation pass** and handed to
+the engine in its context (`KilnCMS.CMS.Computed.Context`):
+
+- "Today" is the **site's** date — the day in the deployment's timezone,
+  `config :kiln_cms, KilnCMS.Events, time_zone:` (UTC unless set), the zone
+  the events index already counts days in.
+- A write pins it on the changeset; the slug, the alias and every computed
+  field in that write read the same date, and the fire it enqueues carries it,
+  so the artifact matches what was stored even if the fire runs after
+  midnight. Publishing re-derives computed fields on the publish day.
+- A formula that calls `today()` anywhere is **time-dependent**
+  (`Computed.time_dependent?/1`). Once per site day — the first hourly tick
+  after the site's midnight — the `:refresh_time_dependent` scheduled action
+  on `FieldDefinition` (`KilnCMS.CMS.Computed.DailyRefresh`) re-derives the
+  **published** records of every type with such a field, as the
+  `:computed_fields` system actor, and re-fires the ones whose value moved.
+  The write is versioned (the sync API reports it) but sends no webhook,
+  keeps `updated_at`, and never bumps the lock an open editor holds; an
+  editor who saved meanwhile wins. Drafts move on their next save or publish.
+
+So a value is right **for the whole day**, not to the second, and moves
+overnight. To refresh by hand (after changing the timezone, say):
+`CMS.refresh_time_dependent_fields(Date.utc_today(), actor:
+KilnCMS.SystemActor.new(:computed_fields))`.
+
 **Building a formula without writing one.** Custom fields → Add a field →
 *Computed* opens the formula builder, in two views over the same `compute`
 formula:
 
 - **Recipe** — pick a common computation (reading time, word count, a value
   with a label, combine values, URL slug, shortened text, first non-empty
-  value, total, multiply, percentage, *if … then …*, days between dates) and
+  value, total, multiply, percentage, *if … then …*, days between dates, days
+  until a date, age in years) and
   fill its blanks from dropdowns of the document's values and the type's other
   fields. The page shows the formula the recipe writes
   (`KilnCMS.CMS.Computed.Recipes`).
 - **Formula** — write the template by hand, with buttons that insert a value
   or a function at the caret, and every function listed with its signature and
-  what it does.
+  what it does. `today()` sits under *Dates*, marked as refreshed daily.
 
 Both preview the result live against the type's most recently edited
 documents (or sample text when there are none), through the same evaluator
-the save and publish paths use. Nothing extra is stored: editing a field
+the save and publish paths use — on today's site date, with a note under the
+result when the formula is time-dependent. Nothing extra is stored: editing a field
 re-reads its formula, and opens it in the recipe view when it is exactly a
 recipe's output, in the formula view otherwise — so a formula changed by hand
 is never rewritten by a recipe.

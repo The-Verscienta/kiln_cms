@@ -2767,6 +2767,12 @@ defmodule KilnCMS.CMS.Content do
           # that cannot be found by its own published words is a poor answer.
           # After the checkpoint, because hooks run in registration order.
           change KilnCMS.CMS.Changes.SetSearchText
+          # Computed fields re-derive on the PUBLISH day, and the fire below
+          # carries that pinned date: a draft saved on Monday and published on
+          # Wednesday must not store Monday's `days_between(today(), …)` while
+          # its artifact says Wednesday's. Never touches an editable value —
+          # this is `ApplyCustomFields`' computed-only refresh path.
+          change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.RecordPublishedVersion
           change KilnCMS.CMS.Changes.FireArtifacts
@@ -2810,6 +2816,12 @@ defmodule KilnCMS.CMS.Content do
           # that cannot be found by its own published words is a poor answer.
           # After the checkpoint, because hooks run in registration order.
           change KilnCMS.CMS.Changes.SetSearchText
+          # Computed fields re-derive on the PUBLISH day, and the fire below
+          # carries that pinned date: a draft saved on Monday and published on
+          # Wednesday must not store Monday's `days_between(today(), …)` while
+          # its artifact says Wednesday's. Never touches an editable value —
+          # this is `ApplyCustomFields`' computed-only refresh path.
+          change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.RecordPublishedVersion
           change KilnCMS.CMS.Changes.FireArtifacts
@@ -3269,6 +3281,40 @@ defmodule KilnCMS.CMS.Content do
           change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "updated", only_when: :published}
         end
 
+        # Internal: re-derive the computed custom fields on a date the caller
+        # pins in the changeset context (`:computed_today`), written by
+        # `KilnCMS.CMS.Computed.DailyRefresh` as the `:computed_fields` system
+        # actor once per site day, for the published records of a type with a
+        # `today()` formula.
+        #
+        # Its own action for the reasons `:set_next_occurrence` is — it runs on
+        # a SCHEDULE over rows nobody touched — so no `lock_version` bump (an
+        # open editor's next save must not become a `StaleRecord` because the
+        # date changed), no `updated` webhook to every subscriber per record
+        # per day, and `updated_at` stays put (`Changes.KeepUpdatedAt`): a
+        # countdown moving is not someone editing the document.
+        #
+        # It IS versioned, unlike that one: the value it writes is delivered
+        # content (`custom_fields` on every API surface), and the sync delta API
+        # learns what changed from version rows — a versionless write would
+        # leave every mirror holding yesterday's countdown.
+        #
+        # Instead of the optimistic lock, a compare-and-swap on the
+        # `lock_version` the refresh READ: the map it writes is built from that
+        # read, so an editor's save landing in between must win, not be
+        # overwritten with the values it replaced. The editor's save derived
+        # today's value itself; the refresh just loses (`StaleRecord`).
+        update :refresh_computed do
+          require_atomic? false
+          accept []
+          change KilnCMS.CMS.Changes.UnchangedSinceRead
+          change KilnCMS.CMS.Changes.ApplyCustomFields
+          change KilnCMS.CMS.Changes.KeepUpdatedAt
+          # The fire carries the pinned date (`Changes.FireArtifacts`), so the
+          # artifact derives exactly what this write stored.
+          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
+        end
+
         # Internal: advance the materialized "what's on" sort key once an
         # occurrence has gone by (#766), written by `KilnCMS.Events.Sweep`.
         #
@@ -3491,6 +3537,8 @@ defmodule KilnCMS.CMS.Content do
           #     version its publish just wrote, or clears it on unpublish
           #     (`Changes.RecordPublishedVersion` / `ClearPublishedVersion`,
           #     as `KilnCMS.CMS.Bookkeeping.system/0`, #1659).
+          #   * `:refresh_computed` — re-derives computed custom fields on the
+          #     site's new day (`KilnCMS.CMS.Computed.DailyRefresh`).
           #   * `:sync_shared_fields` — copies the default-locale variant's
           #     `:shared` field values into this variant (#1327,
           #     `KilnCMS.I18n.SharedFields`). The one content write here, and
@@ -3501,11 +3549,15 @@ defmodule KilnCMS.CMS.Content do
           # the list that way: an action anyone else calls does not belong in
           # it. Each is admitted to the one subsystem that calls it (#1747).
           forbid_unless action([
+                          :refresh_computed,
                           :reindex_search_text,
                           :set_embedding,
                           :set_published_version_id,
                           :sync_shared_fields
                         ])
+
+          authorize_if {KilnCMS.Checks.SystemActor,
+                        subsystem: :computed_fields, action: :refresh_computed}
 
           authorize_if {KilnCMS.Checks.SystemActor,
                         subsystem: :firing, action: :reindex_search_text}

@@ -20,7 +20,7 @@ defmodule KilnCMS.CMS.ComputedTest do
         Map.get(overrides, :document, %{})
       )
 
-    %{document: document, fields: Map.get(overrides, :fields, %{})}
+    %{document: document, fields: Map.get(overrides, :fields, %{}), today: overrides[:today]}
   end
 
   defp eval(source, overrides \\ %{}), do: Computed.evaluate(source, context(overrides))
@@ -92,7 +92,7 @@ defmodule KilnCMS.CMS.ComputedTest do
       # runtime — swallowed by `evaluate/2`'s rescue into a silently blank field
       # on every record. Evaluate each one so the allowlist can't outrun the
       # implementation.
-      ctx = context(%{fields: %{"n" => 2, "d" => "2026-01-01"}})
+      ctx = context(%{fields: %{"n" => 2, "d" => "2026-01-01"}, today: ~D[2026-10-17]})
 
       for name <- Computed.functions() do
         # Both a text-shaped and a number-shaped call, since the allowlist mixes
@@ -106,14 +106,16 @@ defmodule KilnCMS.CMS.ComputedTest do
           "{{ #{name}(n, n, n) }}",
           # And date-shaped, for the date functions.
           "{{ #{name}(d) }}",
-          "{{ #{name}(d, d) }}"
+          "{{ #{name}(d, d) }}",
+          # And nullary, for `today()`.
+          "{{ #{name}() }}"
         ]
 
         assert Enum.any?(sources, fn source ->
                  match?({:ok, _}, Computed.parse(source)) and
                    Computed.evaluate(source, ctx) != nil
                end),
-               "#{name} did not both parse and evaluate at any arity from 1 to 3"
+               "#{name} did not both parse and evaluate at any arity from 0 to 3"
       end
     end
   end
@@ -294,6 +296,83 @@ defmodule KilnCMS.CMS.ComputedTest do
       assert eval(~s|{{ format_date(from, "%B %-d, %Y") }}|, ctx) == "February 27, 2026"
       assert eval(~s|{{ format_date(from, "") }}|, ctx) == "2026-02-27"
       assert eval(~s|{{ format_date(junk, "%Y") }}|, ctx) == nil
+    end
+  end
+
+  describe "today() and the dates it's compared with" do
+    test "today() is the context's pinned date, never a clock" do
+      assert eval("{{ today() }}", %{today: ~D[2026-10-17]}) == "2026-10-17"
+      assert eval("{{ today() }}", %{today: ~D[1999-12-31]}) == "1999-12-31"
+    end
+
+    test "without a pinned date, today() is blank rather than now" do
+      assert eval("{{ today() }}") == nil
+
+      assert eval("{{ days_between(today(), due) }} days", %{fields: %{"due" => "2026-10-20"}}) ==
+               nil
+    end
+
+    test "days until, days since and expired read the pinned date" do
+      ctx = %{today: ~D[2026-10-17], fields: %{"due" => "2026-10-20", "ends" => "2026-10-01"}}
+
+      assert eval("{{ days_between(today(), due) }}", ctx) == 3
+      assert eval("{{ days_between(today(), ends) }}", ctx) == -16
+      # ISO dates order as text, so "expired?" is a plain comparison.
+      assert eval("{{ less_than(ends, today()) }}", ctx) == true
+      assert eval("{{ less_than(due, today()) }}", ctx) == false
+    end
+
+    test "the same formula moves when — and only when — the pinned date does" do
+      formula = "{{ days_between(today(), due) }}"
+      fields = %{"due" => "2026-10-20"}
+
+      assert eval(formula, %{today: ~D[2026-10-17], fields: fields}) == 3
+      assert eval(formula, %{today: ~D[2026-10-17], fields: fields}) == 3
+      assert eval(formula, %{today: ~D[2026-10-18], fields: fields}) == 2
+    end
+
+    test "today() takes no arguments" do
+      assert {:error, message} = Computed.parse("{{ today(1) }}")
+      assert message =~ "today() takes 0 argument(s), got 1"
+    end
+
+    test "years_between counts whole years, completing on the anniversary" do
+      ctx = %{fields: %{"born" => "1990-10-17", "leap" => "2000-02-29"}}
+      years = &eval("{{ years_between(born, on) }}", %{fields: Map.put(ctx.fields, "on", &1)})
+
+      assert years.("2026-10-16") == 35
+      assert years.("2026-10-17") == 36
+      assert years.("2026-10-17T23:00:00Z") == 36
+      assert years.("1980-10-17") == -10
+      assert years.("soon") == nil
+
+      leap = &eval("{{ years_between(leap, on) }}", %{fields: Map.put(ctx.fields, "on", &1)})
+      assert leap.("2001-02-28") == 0
+      assert leap.("2001-03-01") == 1
+      assert leap.("2004-02-29") == 4
+    end
+  end
+
+  describe "time-dependent formulas" do
+    test "a formula that calls today() anywhere is time-dependent" do
+      assert Computed.time_dependent?("{{ today() }}")
+      assert Computed.time_dependent?("Due in {{ days_between(today(), due) }} days")
+      assert Computed.time_dependent?(~s|{{ if(less_than(ends, today()), "Expired", "") }}|)
+      assert {:ok, template} = Computed.parse("{{ years_between(born, today()) }}")
+      assert Computed.time_dependent?(template)
+    end
+
+    test "a field or literal merely named today is not" do
+      refute Computed.time_dependent?("{{ today }}")
+      refute Computed.time_dependent?("{{ field.today }}")
+      refute Computed.time_dependent?(~s|{{ concat("today()", title) }}|)
+      refute Computed.time_dependent?("today() {{ title }}")
+      refute Computed.time_dependent?("{{ days_between(start, finish) }}")
+    end
+
+    test "a formula that doesn't parse, or none at all, is not" do
+      refute Computed.time_dependent?("{{ today(")
+      refute Computed.time_dependent?(nil)
     end
   end
 

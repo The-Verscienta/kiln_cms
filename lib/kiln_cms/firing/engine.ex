@@ -52,7 +52,13 @@ defmodule KilnCMS.Firing.Engine do
   @future_log_key {__MODULE__, :last_future_artifact_ms}
   @log_every_ms :timer.minutes(1)
 
-  @doc "Fire a document. Returns `{:ok, %{surface => body}}`."
+  @doc """
+  Fire a document. Returns `{:ok, %{surface => body}}`.
+
+  `today:` pins the date computed fields' `today()` answers
+  (`KilnCMS.Firing.CustomFields.resolve/3`); without it, the site's current
+  date.
+  """
   @spec fire(struct(), keyword()) :: {:ok, %{atom() => map()}}
   def fire(document, opts \\ []) do
     mode = Keyword.get(opts, :mode, :persist)
@@ -119,8 +125,11 @@ defmodule KilnCMS.Firing.Engine do
     # from today's formulas and today's field registry would report values that
     # were never live at the requested instant.
     custom =
-      KilnCMS.Firing.CustomFields.resolve(document, body_text(expanded),
-        recompute?: Keyword.get(opts, :custom_fields, :recompute) == :recompute
+      KilnCMS.Firing.CustomFields.resolve(
+        document,
+        body_text(expanded),
+        [recompute?: Keyword.get(opts, :custom_fields, :recompute) == :recompute] ++
+          Keyword.take(opts, [:today])
       )
 
     artifacts =

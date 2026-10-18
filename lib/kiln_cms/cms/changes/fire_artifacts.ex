@@ -15,6 +15,11 @@ defmodule KilnCMS.CMS.Changes.FireArtifacts do
   artifact, while draft edits (state != :published) stay silent — firing on a
   draft would be wasted work and could publish an artifact for unpublished
   content.
+
+  The job carries the date the write pinned for computed fields' `today()`
+  (`KilnCMS.CMS.Computed.Context.pin_today/1`), when it pinned one, so the
+  fire derives the same values the write just stored — even when the queue
+  only reaches it after the site's midnight.
   """
   use Ash.Resource.Change
 
@@ -27,8 +32,10 @@ defmodule KilnCMS.CMS.Changes.FireArtifacts do
   end
 
   # Only enqueue on a committed success; pass any error result straight through.
-  defp enqueue_firing(_changeset, {:ok, record} = result, only_when) do
-    if fire?(only_when, record), do: enqueue(record)
+  defp enqueue_firing(changeset, {:ok, record} = result, only_when) do
+    if fire?(only_when, record),
+      do: enqueue(record, KilnCMS.CMS.Computed.Context.pinned(changeset))
+
     result
   end
 
@@ -38,11 +45,12 @@ defmodule KilnCMS.CMS.Changes.FireArtifacts do
   defp fire?(:published, %{state: :published}), do: true
   defp fire?(:published, _record), do: false
 
-  defp enqueue(record) do
+  defp enqueue(record, today) do
     type = KilnCMS.Firing.Engine.document_type(record)
 
     # Carry the record's tenant (epic #336) so the worker fires into the right org.
     case %{"org_id" => record.org_id, "type" => to_string(type), "id" => record.id}
+         |> put_today(today)
          |> KilnCMS.Firing.FireWorker.new()
          |> Oban.insert() do
       {:ok, _job} ->
@@ -52,4 +60,7 @@ defmodule KilnCMS.CMS.Changes.FireArtifacts do
         Logger.error("Enqueue firing failed for #{record.id}: #{inspect(reason)}")
     end
   end
+
+  defp put_today(args, nil), do: args
+  defp put_today(args, %Date{} = today), do: Map.put(args, "today", Date.to_iso8601(today))
 end

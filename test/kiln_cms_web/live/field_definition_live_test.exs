@@ -1304,6 +1304,38 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       assert has_element?(lv, "#new-field-preview", "calls unknown function upcse/1")
     end
 
+    test "today() is in the Dates palette, previews on today's date, and says it refreshes daily",
+         %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      computed_change(lv, %{"builder" => %{"mode" => "formula"}})
+
+      assert has_element?(
+               lv,
+               ~s|#new-field-formula button[data-insert-fn="today"]|,
+               "refreshed once a day"
+             )
+
+      refute has_element?(lv, "#new-field-daily")
+
+      html =
+        computed_change(lv, %{"builder" => %{"mode" => "formula"}, "compute" => "{{ today() }}"})
+
+      # The preview evaluates on the date the note names — the one a save made
+      # now would pin — rather than leaving `today()` blank.
+      [date] = Regex.run(~r/date \((\d{4}-\d{2}-\d{2})\)/, html, capture: :all_but_first)
+      assert has_element?(lv, "#new-field-preview output", date)
+      assert has_element?(lv, "#new-field-daily", "refreshed once a day")
+
+      computed_change(lv, %{
+        "builder" => %{"mode" => "recipe", "recipe" => "days_until"},
+        "compute" => "{{ today() }}"
+      })
+
+      assert has_element?(lv, "#new-field-recipe-days_until")
+      assert has_element?(lv, "#new-field-recipe-age")
+    end
+
     test "editing reopens a recipe's field in the recipe view, a hand formula in the formula view",
          %{conn: conn} do
       admin = authed_user(:admin)
