@@ -233,6 +233,22 @@ defmodule KilnCMSWeb.GraphqlReferenceWritesTest do
       assert error["message"] =~ "at most 2"
     end
 
+    test "max_sources (R1b) refuses a connection to a full target, and allows a move", ctx do
+      %{name: field} = field!(ctx.admin, %{max_sources: 1})
+      first = post!(ctx.admin)
+      second = post!(ctx.admin)
+
+      assert %{"errors" => []} = add(first, field, [ctx.a, ctx.b], ctx.admin)
+
+      assert %{"result" => nil, "errors" => [error]} = add(second, field, [ctx.a], ctx.admin)
+      assert error["message"] =~ "is full"
+      assert ids(reload(second, ctx.admin), field) == []
+
+      # Reordering a target the source already holds is never refused.
+      assert %{"errors" => []} = move(first, field, ctx.b.id, %{"start" => true}, ctx.admin)
+      assert ids(reload(first, ctx.admin), field) == [ctx.b.id, ctx.a.id]
+    end
+
     test "an unknown field, or one that isn't a reference, is refused", ctx do
       post = post!(ctx.admin)
 
