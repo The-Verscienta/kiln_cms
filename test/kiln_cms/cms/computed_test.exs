@@ -195,8 +195,8 @@ defmodule KilnCMS.CMS.ComputedTest do
     test "readers are the fields that read one, directly or through another" do
       defs = [computed("b", "{{ a }}"), computed("c", "{{ b }}"), computed("d", "{{ title }}")]
 
-      assert Computed.readers(defs, "a") == MapSet.new(["b", "c"])
-      assert Computed.readers(defs, "d") == MapSet.new()
+      assert Computed.readers(defs, "a") == ["b", "c"]
+      assert Computed.readers(defs, "d") == []
     end
 
     test "derive evaluates in dependency order, three deep" do

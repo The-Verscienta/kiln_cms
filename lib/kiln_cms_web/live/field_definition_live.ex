@@ -426,9 +426,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
     {computed, editable} = Enum.split_with(in_scope, &(&1.field_type == :computed))
 
-    loops = if own_name, do: Computed.readers(computed, own_name), else: MapSet.new()
+    loops = if own_name, do: Computed.readers(computed, own_name), else: []
 
-    computed = Enum.reject(computed, &MapSet.member?(loops, &1.name))
+    computed = Enum.reject(computed, &(&1.name in loops))
 
     document = Enum.map(Computed.document_refs(), &{document_ref_label(&1), &1})
 

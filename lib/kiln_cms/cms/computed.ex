@@ -432,30 +432,34 @@ defmodule KilnCMS.CMS.Computed do
   come last, in their given order (see "Computed fields feeding each other").
   """
   @spec order([definition]) :: [definition]
-  def order(definitions), do: settle(definitions, dependencies(definitions), MapSet.new(), [])
+  def order(definitions), do: settle(definitions, dependencies(definitions), %{}, [])
 
   # Take the first pending field whose dependencies are all settled, until none
   # is: what is left then is stuck on a cycle. Quadratic, over a type's handful
   # of computed fields.
+  #
+  # The sets threaded through these recursive helpers (`done` here, `seen` and
+  # `reached` below) are plain maps rather than MapSets: OTP 29's dialyzer
+  # loses MapSet's opacity through a recursive accumulator and flags
+  # `call_without_opaque`, and `:sets` v2 is this same shape underneath.
   defp settle(pending, deps, done, acc) do
-    case Enum.find(pending, &MapSet.subset?(Map.fetch!(deps, &1.name), done)) do
+    case Enum.find(pending, fn d -> Enum.all?(Map.fetch!(deps, d.name), &is_map_key(done, &1)) end) do
       nil ->
         Enum.reverse(acc) ++ pending
 
       next ->
-        settle(List.delete(pending, next), deps, MapSet.put(done, next.name), [next | acc])
+        settle(List.delete(pending, next), deps, Map.put(done, next.name, []), [next | acc])
     end
   end
 
   # name → the names of the *other* listed computed fields its formula reads.
   # A self-reference is not a dependency for ordering (there's nothing to wait
-  # for); `cycle/1` reports it.
+  # for); `cycle/2` reports it.
   defp dependencies(definitions) do
-    names = MapSet.new(definitions, & &1.name)
+    names = Enum.map(definitions, & &1.name)
 
     Map.new(definitions, fn d ->
-      reads = d.compute |> references() |> MapSet.new() |> MapSet.intersection(names)
-      {d.name, MapSet.delete(reads, d.name)}
+      {d.name, d.compute |> references() |> Enum.filter(&(&1 in names and &1 != d.name))}
     end)
   end
 
@@ -469,17 +473,17 @@ defmodule KilnCMS.CMS.Computed do
   """
   @spec cycle([definition], String.t() | nil) :: [String.t()] | nil
   def cycle(definitions, through \\ nil) do
-    names = MapSet.new(definitions, & &1.name)
+    names = Enum.map(definitions, & &1.name)
 
     graph =
       Map.new(definitions, fn d ->
-        {d.name, d.compute |> references() |> Enum.filter(&MapSet.member?(names, &1))}
+        {d.name, d.compute |> references() |> Enum.filter(&(&1 in names))}
       end)
 
     starts = if through, do: [through], else: Enum.map(definitions, & &1.name)
 
     Enum.find_value(starts, fn start ->
-      graph |> search(start, start, [start], MapSet.new([start])) |> elem(0)
+      graph |> search(start, start, [start], %{start => []}) |> elem(0)
     end)
   end
 
@@ -491,14 +495,14 @@ defmodule KilnCMS.CMS.Computed do
     |> Enum.reduce_while({nil, seen}, fn next, {nil, seen} ->
       cond do
         next == start -> {:halt, {Enum.reverse([start | path]), seen}}
-        MapSet.member?(seen, next) -> {:cont, {nil, seen}}
+        is_map_key(seen, next) -> {:cont, {nil, seen}}
         true -> descend(graph, start, next, path, seen)
       end
     end)
   end
 
   defp descend(graph, start, next, path, seen) do
-    case search(graph, start, next, [next | path], MapSet.put(seen, next)) do
+    case search(graph, start, next, [next | path], Map.put(seen, next, [])) do
       {nil, seen} -> {:cont, {nil, seen}}
       found -> {:halt, found}
     end
@@ -509,20 +513,25 @@ defmodule KilnCMS.CMS.Computed do
   through another — the fields `name`'s own formula can't reference without
   closing a cycle. The formula builder leaves them out of its value pickers.
   """
-  @spec readers([definition], String.t()) :: MapSet.t(String.t())
+  @spec readers([definition], String.t()) :: [String.t()]
   def readers(definitions, name) do
-    reads = Map.new(definitions, &{&1.name, MapSet.new(references(&1.compute))})
-    spread(reads, MapSet.new([name])) |> MapSet.delete(name)
+    reads = Map.new(definitions, &{&1.name, references(&1.compute)})
+
+    reads
+    |> spread(%{name => []})
+    |> Map.delete(name)
+    |> Map.keys()
+    |> Enum.sort()
   end
 
   defp spread(reads, reached) do
     grown =
       for {reader, names} <- reads,
-          not MapSet.disjoint?(names, reached),
+          Enum.any?(names, &is_map_key(reached, &1)),
           into: reached,
-          do: reader
+          do: {reader, []}
 
-    if MapSet.equal?(grown, reached), do: reached, else: spread(reads, grown)
+    if map_size(grown) == map_size(reached), do: reached, else: spread(reads, grown)
   end
 
   @doc """
