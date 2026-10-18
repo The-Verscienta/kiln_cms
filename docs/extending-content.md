@@ -18,7 +18,7 @@ UI" workflow, scoped to fields.
 - **Define**: `KilnCMS.CMS.FieldDefinition` rows describe each field
   (`content_type`, `name`, `label`, `field_type`, `required`, `options`,
   `target_type`, `target_types`, `multiple`, `min_items`, `max_items`,
-  `help_text`, `position`, `default`, `compute`). Field types: `:string`,
+  `max_sources`, `on_target_delete`, `help_text`, `position`, `default`, `compute`). Field types: `:string`,
   `:text`, `:integer`, `:float`, `:boolean`, `:date`, `:datetime`, `:url`,
   `:select`, `:media`, `:reference`, `:geolocation`, `:datetime_range`,
   `:recurrence`, `:computed` — plus
@@ -119,6 +119,46 @@ UI" workflow, scoped to fields.
   any — an empty optional field is still allowed; `required` asks for at
   least one. They are checked when a record's field is written, so tightening
   one leaves stored values alone until then. Both clear when `multiple` does.
+- **A limit on the other end (`max_sources`)**: `min_items` / `max_items`
+  bound how many records one *source* connects to. `max_sources` bounds the
+  other end: how many records may connect to any **one target** through the
+  field — "each Author is on at most 3 Books", a seat, a slot, a featured
+  place. Blank means no limit. It is checked inside the source record's own
+  write, where the connection's edge is written, so every path that connects
+  a record is held to it: the editor, an API write, a reverse edit, and
+  *Publish changes* on a working copy (an add staged while the target had
+  room is refused when it is published if the target filled up meanwhile).
+  Only a target the write **adds** is checked — removing or reordering is
+  never refused — and every connection counts whatever its source's state:
+  a draft or a trashed source holds its slot, because trash keeps the
+  connection for a restore. Concurrent writes are serialized per target by a
+  transaction-scoped advisory lock, so two records racing for the last slot
+  cannot both get it. The refusal names the target and the count ("“Jane
+  Doe” is full: it already has 3 of 3 connected"), never the records already
+  connected. Tightening the limit leaves existing connections alone; it
+  applies to the next add. In the editor's picker a full target is listed
+  but disabled, "Full — 3 of 3 connected"; on the target's own page its
+  reverse field shows "3 of 3" beside the heading and offers no add while
+  it is full. The schema export reports it as
+  `x-kiln-max-sources`.
+- **When a target is deleted for good (`on_target_delete`)**: what purging a
+  connected record does to this field's connections to it. `:keep` (the
+  default, and the behaviour before 1.5) leaves the connection as a broken
+  reference until someone edits the referrer. `:clear` removes the purged
+  record from every referrer's value — one write per referrer, made by the
+  CMS itself inside the purge's transaction, versioned like any edit; the
+  other items of a list keep their order and their link data, the edges
+  follow, a held working copy loses it too, and a published referrer is
+  re-fired, so nothing delivered still names the purged record. `:restrict`
+  refuses the purge while any record connects through the field; the trash
+  explains why and what to do. All three act on the **permanent** delete
+  only: moving a record to the trash keeps every connection, so restoring it
+  needs nothing. The nightly purge of old trash is refused the same way, so a
+  restricted record stays in the trash until it is unlinked. In the fields
+  admin the rule is asked as "When a linked *Type* is deleted for good…";
+  the schema export reports a non-default rule as
+  `x-kiln-on-target-delete`. Both options clear on any field type but
+  `:reference`.
 - **Several types at once**: tick more than one content type and the form
   creates one definition per type under the same machine name. They are
   separate rows: each is edited, renamed or deleted on its own. The machine

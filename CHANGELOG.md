@@ -61,6 +61,10 @@ Every summary line below that was shortened links to its own entry there.
   payload-link routes at `/api/json/content-links`.**
   ([#2014](https://github.com/The-Verscienta/kiln_cms/pull/2014) · [long form](docs/changelog/unreleased.md#api-clients-can-connect-disconnect-and-reorder-references-graphqls))
 
+- **Reference fields gain `max_sources`, a limit per target, and
+  `on_target_delete`: keep, clear or restrict on a permanent delete.**
+  ([#2017](https://github.com/The-Verscienta/kiln_cms/pull/2017) · [long form](docs/changelog/unreleased.md#reference-target-limit-and-delete-rule))
+
 - **`mix kiln.gen.join <type>.<field>` graduates a reference field to a typed
   Ash join resource, copies its connections, and retires the field.**
   ([#2016](https://github.com/The-Verscienta/kiln_cms/pull/2016) · [long form](docs/changelog/unreleased.md#graduate-a-reference-field-to-a-join-resource))

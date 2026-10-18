@@ -17,7 +17,10 @@ defmodule KilnCMS.CMS.Changes.SyncReferenceLinks do
   `CMS.Bookkeeping.system/0` — they are the write's consequence, not the
   caller's own act (a scheduled publish has no caller at all). A failure fails
   the write: an edge table that silently disagrees with the field it mirrors
-  is the stale snapshot problem over again.
+  is the stale snapshot problem over again. A write that would connect a
+  target a field's `max_sources` says is full (R1b) is refused here with a
+  `custom_fields` error, because this is the one place every write that adds
+  an edge passes through.
 
   Destroy: the soft delete (trash) keeps the edges — a restore brings the
   record back with its references. `:purge` removes them.
@@ -40,8 +43,12 @@ defmodule KilnCMS.CMS.Changes.SyncReferenceLinks do
 
   def change(changeset, _opts, _context) do
     Ash.Changeset.after_action(changeset, fn changeset, record ->
-      if changed?(changeset, record), do: :ok = ContentLinks.reconcile(record)
-      {:ok, record}
+      with true <- changed?(changeset, record),
+           {:error, error} <- ContentLinks.reconcile(record) do
+        {:error, error}
+      else
+        _unchanged_or_ok -> {:ok, record}
+      end
     end)
   end
 

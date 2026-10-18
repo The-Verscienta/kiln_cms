@@ -41,7 +41,7 @@ defmodule KilnCMS.SystemActorScopeTest do
   # Reads whose policy is `access_type :runtime`: decided against a row below.
   @data_probed %{
     Firing.PublishedArtifact => [:read, :for_document, :get_surface],
-    KilnCMS.CMS.ContentLink => [:read, :backlinks, :references_from]
+    KilnCMS.CMS.ContentLink => [:read, :backlinks, :references_from, :references_to]
   }
 
   defp expected(resource, action),
@@ -223,7 +223,8 @@ defmodule KilnCMS.SystemActorScopeTest do
       reads = %{
         read: &KilnCMS.CMS.list_content_links(Keyword.put(&1, :query, filter: [id: ctx.link.id])),
         backlinks: &KilnCMS.CMS.list_backlinks(ctx.target.id, &1),
-        references_from: &KilnCMS.CMS.list_reference_links(ctx.source.id, &1)
+        references_from: &KilnCMS.CMS.list_reference_links(ctx.source.id, &1),
+        references_to: &KilnCMS.CMS.list_references_to(ctx.target.id, %{}, &1)
       }
 
       assert Map.keys(reads) |> Enum.sort() ==

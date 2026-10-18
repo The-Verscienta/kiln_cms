@@ -227,6 +227,8 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :multiple,
       :min_items,
       :max_items,
+      :max_sources,
+      :on_target_delete,
       :help_text,
       :position,
       :default,
@@ -353,6 +355,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # that act on a record-level field — search indexing, naming the record,
     # per-locale behaviour — drop rather than claim something nothing honours.
     change KilnCMS.CMS.Changes.ClearLinkFieldOptions
+
+    # `max_sources` and `on_target_delete` speak about a reference's targets,
+    # so they drop on any other type — a link field included.
+    change KilnCMS.CMS.Changes.ClearReferenceOptions
 
     # The other side's name (R4) belongs to a top-level `:reference` field,
     # and a label alone suggests its machine name, as a field's label does.
@@ -501,6 +507,31 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # stored values alone until that record's field is next written.
     attribute :min_items, :integer, public?: true, constraints: [min: 0]
     attribute :max_items, :integer, public?: true, constraints: [min: 1]
+
+    # The other end's bound (R1b): how many source records may connect to any
+    # one target through this `:reference` field ("each Author is on at most 3
+    # Books"). `nil` means no limit. Single and `multiple` fields alike. It is
+    # checked where the edge is written — inside the source's own write, under
+    # a per-target advisory lock (`KilnCMS.CMS.ContentLinks`) — and only for a
+    # target the write adds: removing or reordering is never refused, and
+    # tightening it leaves existing connections alone. Cleared on every other
+    # type (`Changes.ClearReferenceOptions`).
+    attribute :max_sources, :integer, public?: true, constraints: [min: 1]
+
+    # What purging a target does to this field's connections to it (R5):
+    # `:keep` (the default, and what every field did before) leaves them as
+    # broken references; `:clear` removes the target from every referrer's
+    # value, as one system write per referrer; `:restrict` refuses the purge
+    # while any connection through this field points at it. Purge only —
+    # trash keeps edges, so a restore needs nothing
+    # (`Changes.ApplyTargetDeleteRules`). Always `:keep` on any type but
+    # `:reference`.
+    attribute :on_target_delete, :atom do
+      allow_nil? false
+      default :keep
+      constraints one_of: [:keep, :clear, :restrict]
+      public? true
+    end
 
     # What the **other side** calls this relationship (R4): the reverse field
     # every target record shows in its editor, listing the records that

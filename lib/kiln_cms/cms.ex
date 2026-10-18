@@ -886,6 +886,8 @@ defmodule KilnCMS.CMS do
       # "What links here" and a record's own `:reference` edges (#1594).
       define :list_backlinks, action: :backlinks, args: [:target_id]
       define :list_reference_links, action: :references_from, args: [:source_id]
+      # The edges pointing at a target through `:reference` fields (R1b, R5).
+      define :list_references_to, action: :references_to, args: [:target_id]
     end
 
     # Admin-UI-defined custom fields: the runtime field registry that backs the

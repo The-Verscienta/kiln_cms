@@ -3744,6 +3744,18 @@
                 ],
                 "description": "Field included by default."
               },
+              "max_sources": {
+                "anyOf": [
+                  {
+                    "nullable": true,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
               "min_items": {
                 "anyOf": [
                   {
@@ -3767,6 +3779,15 @@
               "names_record": {
                 "description": "Field included by default.",
                 "type": "boolean"
+              },
+              "on_target_delete": {
+                "description": "Field included by default.",
+                "enum": [
+                  "keep",
+                  "clear",
+                  "restrict"
+                ],
+                "type": "string"
               },
               "options": {
                 "description": "Field included by default.",
@@ -3828,6 +3849,7 @@
               "options",
               "target_types",
               "multiple",
+              "on_target_delete",
               "position",
               "names_record",
               "searchable"
@@ -3987,6 +4009,9 @@
           "max_items": {
             "$ref": "#/components/schemas/field_definition-filter-max_items"
           },
+          "max_sources": {
+            "$ref": "#/components/schemas/field_definition-filter-max_sources"
+          },
           "min_items": {
             "$ref": "#/components/schemas/field_definition-filter-min_items"
           },
@@ -4001,6 +4026,9 @@
           },
           "not": {
             "$ref": "#/components/schemas/field_definition-filter"
+          },
+          "on_target_delete": {
+            "$ref": "#/components/schemas/field_definition-filter-on_target_delete"
           },
           "or": {
             "items": {
@@ -4567,6 +4595,45 @@
         },
         "type": "object"
       },
+      "field_definition-filter-max_sources": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "type": "integer"
+          },
+          "greater_than": {
+            "type": "integer"
+          },
+          "greater_than_or_equal": {
+            "type": "integer"
+          },
+          "in": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "integer"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "integer"
+          },
+          "less_than": {
+            "type": "integer"
+          },
+          "less_than_or_equal": {
+            "type": "integer"
+          },
+          "not_eq": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "field_definition-filter-min_items": {
         "additionalProperties": false,
         "properties": {
@@ -4734,6 +4801,75 @@
           },
           "not_eq": {
             "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "field_definition-filter-on_target_delete": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "enum": [
+              "keep",
+              "clear",
+              "restrict"
+            ],
+            "type": "string"
+          },
+          "greater_than": {
+            "enum": [
+              "keep",
+              "clear",
+              "restrict"
+            ],
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "enum": [
+              "keep",
+              "clear",
+              "restrict"
+            ],
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "string"
+          },
+          "less_than": {
+            "enum": [
+              "keep",
+              "clear",
+              "restrict"
+            ],
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "enum": [
+              "keep",
+              "clear",
+              "restrict"
+            ],
+            "type": "string"
+          },
+          "not_eq": {
+            "enum": [
+              "keep",
+              "clear",
+              "restrict"
+            ],
+            "type": "string"
           }
         },
         "type": "object"

@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.TrashLive do
   import Ash.Expr, only: [expr: 1]
 
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.Errors.TargetStillConnected
 
   @retention_days Application.compile_env(:kiln_cms, [:trash, :retention_days], 30)
 
@@ -141,6 +142,9 @@ defmodule KilnCMSWeb.TrashLive do
             {:noreply,
              socket |> load_items() |> put_flash(:info, gettext("Permanently deleted."))}
 
+          {:error, error} ->
+            {:noreply, put_flash(socket, :error, purge_error(error, record))}
+
           _ ->
             {:noreply, put_flash(socket, :error, gettext("Couldn't delete that item."))}
         end
@@ -164,16 +168,27 @@ defmodule KilnCMSWeb.TrashLive do
     # bounded batches so a huge trash never materializes in memory at once.
     # Scoped to the editor's current site (epic #336) so emptying one site's
     # trash never purges another's.
-    {ok, skipped} =
-      Enum.reduce(editable_types(org.id), {0, 0}, fn ct, acc ->
+    {ok, skipped, held} =
+      Enum.reduce(editable_types(org.id), {0, 0, 0}, fn ct, acc ->
         purge_all(ct, actor, org, acc, nil)
       end)
 
     flash =
-      if skipped > 0,
-        do:
-          gettext("Permanently deleted %{count}, %{skipped} skipped", count: ok, skipped: skipped),
-        else: gettext("Permanently deleted %{count}", count: ok)
+      cond do
+        held > 0 ->
+          gettext(
+            "Permanently deleted %{count}, %{skipped} skipped. %{held} are still linked from other content through a field that doesn't allow deleting them — they stay in the trash.",
+            count: ok,
+            skipped: skipped + held,
+            held: held
+          )
+
+        skipped > 0 ->
+          gettext("Permanently deleted %{count}, %{skipped} skipped", count: ok, skipped: skipped)
+
+        true ->
+          gettext("Permanently deleted %{count}", count: ok)
+      end
 
     {:noreply,
      socket
@@ -204,7 +219,7 @@ defmodule KilnCMSWeb.TrashLive do
   # an archived_at cursor so rows whose purge failed are never refetched (and
   # never loop). Totals are {purged, skipped}. Every read/purge is scoped to
   # `org` (epic #336).
-  defp purge_all(ct, actor, org, {ok, skipped}, cursor) do
+  defp purge_all(ct, actor, org, {ok, skipped, held}, cursor) do
     query =
       if(cursor, do: [{:filter, expr(archived_at > ^cursor)}], else: []) ++
         [select: @list_fields, sort: [archived_at: :asc], limit: @page_size]
@@ -212,11 +227,8 @@ defmodule KilnCMSWeb.TrashLive do
     batch = ContentTypes.list_trashed!(ct, actor: actor, tenant: org, query: query)
 
     totals =
-      Enum.reduce(batch, {ok, skipped}, fn record, {o, s} ->
-        case ContentTypes.purge(ct, record, actor: actor, tenant: org) do
-          :ok -> {o + 1, s}
-          _ -> {o, s + 1}
-        end
+      Enum.reduce(batch, {ok, skipped, held}, fn record, acc ->
+        ct |> ContentTypes.purge(record, actor: actor, tenant: org) |> tally(acc)
       end)
 
     case batch do
@@ -225,6 +237,41 @@ defmodule KilnCMSWeb.TrashLive do
       _ -> purge_all(ct, actor, org, totals, List.last(batch).archived_at)
     end
   end
+
+  # {purged, skipped, held}: held are the records a reference field's delete
+  # rule kept (R5), counted apart so the flash can say why.
+  defp tally(:ok, {ok, skipped, held}), do: {ok + 1, skipped, held}
+
+  defp tally({:error, error}, {ok, skipped, held}) do
+    if still_connected(error), do: {ok, skipped, held + 1}, else: {ok, skipped + 1, held}
+  end
+
+  defp tally(_other, {ok, skipped, held}), do: {ok, skipped + 1, held}
+
+  # A field set to "Don't allow it" (`on_target_delete: :restrict`, R5) still
+  # links records to this one: say so, and what to do, in the editor's words.
+  defp purge_error(error, record) do
+    case still_connected(error) do
+      %TargetStillConnected{field_label: field, count: count} ->
+        ngettext(
+          "“%{title}” can't be deleted for good: 1 record still links to it through “%{field}”, which doesn't allow that. Remove the link first, or change the field's setting under Fields.",
+          "“%{title}” can't be deleted for good: %{count} records still link to it through “%{field}”, which doesn't allow that. Remove the links first, or change the field's setting under Fields.",
+          count,
+          title: record.title || gettext("Untitled"),
+          field: field
+        )
+
+      nil ->
+        gettext("Couldn't delete that item.")
+    end
+  end
+
+  defp still_connected(%TargetStillConnected{} = error), do: error
+
+  defp still_connected(%{errors: errors}) when is_list(errors),
+    do: Enum.find_value(errors, &still_connected/1)
+
+  defp still_connected(_error), do: nil
 
   defp find_item(items, kind, id) do
     Enum.find_value(items, fn {k, r} ->

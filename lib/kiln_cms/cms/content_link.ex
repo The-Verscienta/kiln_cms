@@ -146,6 +146,24 @@ defmodule KilnCMS.CMS.ContentLink do
       filter expr(source_id == ^arg(:source_id) and kind == :reference)
       prepare build(sort: [field: :asc, position: :asc])
     end
+
+    # The `:reference` edges pointing at `target_id`, optionally through one
+    # field of one source type: what a field's `max_sources` counts (R1b) and
+    # what purging a target applies its fields' `on_target_delete` rule to
+    # (R5).
+    read :references_to do
+      argument :target_id, :uuid, allow_nil?: false
+      argument :field, :string
+      argument :source_type, :string
+
+      filter expr(
+               target_id == ^arg(:target_id) and kind == :reference and
+                 (is_nil(^arg(:field)) or field == ^arg(:field)) and
+                 (is_nil(^arg(:source_type)) or source_type == ^arg(:source_type))
+             )
+
+      prepare build(sort: [source_type: :asc, field: :asc, source_id: :asc])
+    end
   end
 
   policies do

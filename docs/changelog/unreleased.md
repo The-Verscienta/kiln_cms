@@ -26,6 +26,30 @@ carries the reasoning.
   input and result types, new routes.
   ([#2014](https://github.com/The-Verscienta/kiln_cms/pull/2014))
 
+<a id="reference-target-limit-and-delete-rule"></a>
+
+- **Reference fields gain `max_sources`, a limit per target, and
+  `on_target_delete`: keep, clear or restrict on a permanent delete.** Workstreams R1b and R5 of
+  [relationships-plan.md](../relationships-plan.md). `max_sources` bounds the
+  other end of a relationship ("each Author is on at most 3 Books"): checked
+  inside the source record's own write, where its edges are written, so the
+  editor, API writes and *Publish changes* on a working copy are all held to
+  it. Only a target the write adds is checked; every connection counts,
+  drafts and trashed records included; a per-target advisory lock keeps two
+  records racing for the last slot from both getting it; and the refusal
+  names the count, never the other records. Tightening it leaves existing
+  connections alone. The picker lists a full target disabled, "Full — 3 of 3
+  connected". `on_target_delete` acts on the permanent delete only: `:keep`
+  (the default, today's behaviour) leaves a broken reference, `:clear` takes
+  the record out of every referrer's value as a versioned system write that
+  re-fires published referrers and keeps link data and edges in step, and
+  `:restrict` refuses the purge while anything connects, which the trash
+  explains in plain words. The fields admin asks both from the other side, in
+  the relationship's own words. The schema export reports
+  `x-kiln-max-sources` and a non-default `x-kiln-on-target-delete`. Additive:
+  two new options with defaults that keep every field as it was.
+  ([#2017](https://github.com/The-Verscienta/kiln_cms/pull/2017))
+
 <a id="graduate-a-reference-field-to-a-join-resource"></a>
 
 - **`mix kiln.gen.join <type>.<field>` graduates a reference field to a typed

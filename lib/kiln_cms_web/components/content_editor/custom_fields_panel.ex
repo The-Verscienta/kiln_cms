@@ -80,6 +80,7 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
             locked={Localization.locked?(@localization, {:custom, definition.name})}
             actor={@actor}
             tenant={@tenant}
+            source={%{id: @record && @record.id, type: to_string(@kind)}}
           />
           <.custom_field_input
             :if={definition.field_type != :reference}

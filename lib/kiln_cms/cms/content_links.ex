@@ -141,17 +141,53 @@ defmodule KilnCMS.CMS.ContentLinks do
   `custom_fields`: create the missing ones, delete the ones no value implies
   any more, and replace any whose target type, position or link values
   (`metadata`, R3) moved. Idempotent.
+
+  Refuses with a `custom_fields` error — writing nothing — when the write
+  *adds* a connection to a target that a field's `max_sources` (R1b) says is
+  full. See "Limits on the target side" below.
+
+  ## Limits on the target side
+
+  `max_sources` bounds how many records may connect to one target through a
+  field. It is checked here because this is where the edge is written, inside
+  the source's own write — so every path that connects a record (the editor,
+  a reverse edit, an API write, *Publish changes* folding a working copy) is
+  held to it, and none can skip it.
+
+    * Only a target the write **adds** is checked: one this record did not
+      already connect to through the field. Removing or reordering is never
+      refused, and a record already connected keeps its place when the cap
+      is tightened below the count.
+    * Every edge counts, whatever its source's state: a draft or a trashed
+      source holds its slot, because trash keeps edges and a restore must not
+      overfill the target.
+    * Race-safe: before counting, the write takes a transaction-scoped
+      advisory lock per `(org, source type, field, target)` — in sorted
+      order, so two writes never wait on each other in a cycle — the pattern
+      `KilnCMS.Notifications` uses for its once-only inserts. A second writer
+      to the same target through the same field waits for the first to commit
+      or roll back, then counts its edge.
+    * The refusal names the count, never the other sources.
   """
-  @spec reconcile(struct()) :: :ok
+  @spec reconcile(struct()) :: :ok | {:error, Exception.t()}
   def reconcile(record) do
+    definitions = reference_definitions(record)
+
     wanted =
       record
       |> Map.get(:custom_fields)
-      |> desired(reference_definitions(record))
+      |> desired(definitions)
       |> Map.new(&{{&1.field, &1.target_id}, &1})
 
     existing = existing(record)
+    source_type = ContentTypes.type_name_for(record)
 
+    with :ok <- check_capacity(record, source_type, definitions, wanted, existing) do
+      write(record, source_type, wanted, existing)
+    end
+  end
+
+  defp write(record, source_type, wanted, existing) do
     stale =
       Enum.reject(existing, fn link ->
         case Map.get(wanted, {link.field, link.target_id}) do
@@ -169,8 +205,6 @@ defmodule KilnCMS.CMS.ContentLinks do
 
     Enum.each(stale, &CMS.destroy_content_link!(&1, opts))
 
-    source_type = ContentTypes.type_name_for(record)
-
     for {key, want} <- wanted, not MapSet.member?(kept, key) do
       want
       |> Map.merge(%{source_id: record.id, source_type: source_type, kind: :reference})
@@ -178,6 +212,85 @@ defmodule KilnCMS.CMS.ContentLinks do
     end
 
     :ok
+  end
+
+  # The targets this write adds through a capped field, locked in sorted
+  # order, then counted one by one; the first full one refuses the write.
+  defp check_capacity(record, source_type, definitions, wanted, existing) do
+    caps =
+      for %{max_sources: max} = definition <- definitions,
+          is_integer(max),
+          into: %{},
+          do: {definition.name, definition}
+
+    linked = MapSet.new(existing, &{&1.field, &1.target_id})
+
+    additions =
+      wanted
+      |> Map.keys()
+      |> Enum.filter(fn {field, _target} = key ->
+        Map.has_key?(caps, field) and not MapSet.member?(linked, key)
+      end)
+      |> Enum.sort_by(fn {field, target} -> {target, field} end)
+
+    Enum.each(additions, fn {field, target} ->
+      lock_target(record.org_id, source_type, field, target)
+    end)
+
+    Enum.find_value(additions, :ok, fn {field, target} ->
+      definition = Map.fetch!(caps, field)
+      count = connected_count(record, source_type, field, target)
+
+      if count >= definition.max_sources,
+        do: {:error, full_error(definition, record, target, count)}
+    end)
+  end
+
+  defp lock_target(org_id, source_type, field, target_id) do
+    KilnCMS.Repo.query!("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+      "kiln:reference_cap:#{org_id}:#{source_type}:#{field}:#{target_id}"
+    ])
+  end
+
+  # How many OTHER records connect to `target_id` through this field. Read as
+  # the cms bookkeeping with `authorize_with: :error`: a refused read must
+  # fail the write, not pass the cap as "nobody connects to it yet". Not
+  # capped at `max`: after a cap is tightened the count may be above it, and
+  # the message says so.
+  defp connected_count(record, source_type, field, target_id) do
+    target_id
+    |> CMS.list_references_to!(%{field: field, source_type: source_type},
+      actor: Bookkeeping.system(),
+      authorize_with: :error,
+      tenant: record.org_id,
+      query: [select: [:id, :source_id]]
+    )
+    |> Enum.count(&(&1.source_id != record.id))
+  end
+
+  # Names the count and the target the writer chose — its title, from the
+  # snapshot the writer just stored — and never the records already
+  # connected, which the writer may not be able to read.
+  defp full_error(definition, record, target_id, count) do
+    title =
+      record
+      |> Map.get(:custom_fields, %{})
+      |> Map.get(definition.name)
+      |> List.wrap()
+      |> Enum.find_value(fn
+        %{"id" => ^target_id, "title" => title} when is_binary(title) and title != "" -> title
+        _other -> nil
+      end)
+
+    target = if title, do: "“#{title}”", else: "the chosen record"
+
+    Ash.Error.Changes.InvalidAttribute.exception(
+      field: :custom_fields,
+      message:
+        "#{definition.label} (#{definition.name}) — #{target} is full: it already has " <>
+          "#{count} of #{definition.max_sources} connected through this field",
+      value: definition.name
+    )
   end
 
   @doc "Delete every outgoing reference edge of `record` (its hard delete)."
