@@ -99,6 +99,55 @@ consumers never need the plain, credential-widened list.
 > "<id>"]}, related_posts: {has_none: ["<id>"]}}`. A target the caller may not
 > read (a draft, for an anonymous caller) neither matches nor counts.
 
+### Relationships: references and referencedBy
+
+Every content type (`Page`, `Post`, a project type, `Entry`) has two fields
+that follow `:reference` custom fields to the records on the other end, typed:
+
+| Field | Arguments | Returns |
+|-------|-----------|---------|
+| `references` | `field: String!`, `limit`, `offset` | `[ContentReference!]!` — the targets of that field, in its order |
+| `referencedBy` | `field`, `sourceType`, `limit`, `offset` | `[ContentReferrer!]!` — the records linking here, optionally only through `field` and only from `sourceType` |
+
+`ContentReference` is `{ position, link, target }` and `ContentReferrer` is
+`{ field, position, link, source }`. `target` and `source` are a
+`ContentRecord`: an **interface** that every content object implements, with
+`id`, `title`, `slug`, `locale`, `state`, `published`, `publishedAt`,
+`insertedAt`, `updatedAt`, `customFields`, and `references` / `referencedBy`
+themselves. Narrow with a fragment for a type's own fields. Dynamic types all
+share the `Entry` object (D17), so they are told apart by `typeName`:
+
+```graphql
+query {
+  postBySlug(slug: "pancakes", locale: "en") {
+    title
+    references(field: "ingredients") {
+      position
+      link
+      target {
+        __typename
+        title
+        slug
+        ... on Post { excerpt }
+        ... on Entry { typeName }
+      }
+    }
+  }
+}
+```
+
+- A target or source is listed only when you could read it directly: an
+  anonymous caller never sees a draft on either end, an editor sees them.
+  `limit` and `offset` count only what you can see. `limit` defaults to, and
+  is capped at, 100.
+- `link` is the data stored on the connection (a relationship's link fields),
+  passed through as JSON; `{}` when the field has none.
+- A list of records resolves its references in a fixed number of reads: one
+  for the edges and one per target type, however many records the list holds.
+- Nesting is allowed (`target { references(field: …) { … } }`) and is bounded
+  by the usual limits below: both fields are priced like any to-many
+  relationship.
+
 ### Taxonomy — categories, tags & tag groups
 
 Taxonomy is world-readable and exposed as plain (unpaginated) lists plus a
@@ -394,7 +443,8 @@ A list costs its row count times the cost of one row:
 - **A paginated query** (`publishedPosts`) counts `limit` rows. With no `limit`
   it counts its default page, 25.
 - **A to-many relationship** (`tags`, `relatedPosts`, a media item's
-  `featuredPosts`) counts `limit` rows if you pass one. Without `limit` it
+  `featuredPosts`, and `references` / `referencedBy`) counts `limit` rows if
+  you pass one. Without `limit` it
   counts five, however many it returns. That makes a list nested inside itself
   (`relatedPosts { relatedPosts { … } }`) expensive quickly.
 
@@ -406,6 +456,10 @@ A list costs its row count times the cost of one row:
 | `publishedPosts { results { title tags { name } relatedPosts { title } } }` | 25 × 12 = 300, **refused** |
 | the same with `limit: 15` | 15 × 12 = 180 |
 | the same with `tags(limit: 3)` and `relatedPosts(limit: 3)` | 25 × 8 = 200 |
+| `postBySlug { title references(field: "ingredients") { position target { title slug } } }` | 2 + 5 × 4 = 22 |
+| the same with `references(…, limit: 20)` | 2 + 20 × 4 = 82 |
+| `publishedPosts(limit: 10) { results { title references(field: "ingredients") { target { title } } } }` | 10 × 12 = 120 |
+| `references { target { references { target { references { target { … } } } } } }`, unlimited | over 200, **refused** |
 
 If a listing page goes over, ask for a smaller page, pass `limit` on its
 relationships, or fetch the per-item detail separately.

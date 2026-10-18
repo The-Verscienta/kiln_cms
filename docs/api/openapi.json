@@ -14567,11 +14567,23 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Comma-separated `:reference` custom fields (at most 10) whose targets to add under `expanded`, each with its own `json` artifact. Only targets an anonymous reader may read; `surface=json` only.",
+            "in": "query",
+            "name": "expand",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "The fired artifact for the requested surface"
+          },
+          "400": {
+            "description": "`invalid_expand`: a malformed `expand`, or one on another surface"
           },
           "404": {
             "description": "Unknown type/slug or unpublished content"

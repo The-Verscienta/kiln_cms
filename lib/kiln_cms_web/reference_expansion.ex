@@ -119,14 +119,14 @@ defmodule KilnCMSWeb.ReferenceExpansion do
       if Delivery.db_unavailable?(error), do: :unavailable, else: reraise(error, __STACKTRACE__)
   end
 
-  # The source has already passed the delivery read, so its edges are read
-  # without a second authorization. Their targets are gated below.
   defp edges(record, fields, org_id) do
     CMS.list_content_links!(
       query: [
         filter: [source_id: record.id, kind: :reference, field: [in: fields]],
         sort: [field: :asc, position: :asc, id: :asc]
       ],
+      # authorize?: false — the source already passed the delivery read, and
+      # every target is gated by its own read policy in `read_targets/3`.
       authorize?: false,
       tenant: org_id
     )

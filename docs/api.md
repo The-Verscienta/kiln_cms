@@ -349,6 +349,54 @@ curl -s 'http://localhost:4000/api/json/posts?filter[state]=draft' \
   -H 'authorization: Bearer <token>'
 ```
 
+## Expanding references
+
+`GET /api/content/:type/:slug?expand=<field>[,<field>…]` adds the targets of
+those `:reference` custom fields to the `json` artifact, each with its own
+fired `json` artifact, so a front end renders a recipe and its ingredients
+from one request:
+
+```bash
+curl -s 'http://localhost:4000/api/content/recipe/pancakes?expand=ingredients'
+```
+
+```json
+{
+  "type": "recipe",
+  "title": "Pancakes",
+  "custom_fields": {"ingredients": [{"id": "…", "type": "ingredient", "slug": "flour", "title": "Flour"}]},
+  "expanded": {
+    "ingredients": [
+      {"position": 0, "link": {}, "id": "…", "type": "ingredient", "slug": "flour",
+       "target": {"type": "ingredient", "title": "Flour", "blocks": ["…"], "custom_fields": {}}}
+    ]
+  }
+}
+```
+
+- Every requested field is a key of `expanded`; a field with no targets, or
+  one the type does not have, is `[]`. Items keep the field's order;
+  `position` is the item's place in the stored list.
+- Only targets an **anonymous** reader could fetch are expanded: published,
+  public, not passphrase-locked. A draft target is left out as if it were not
+  linked, even when the request unlocks the source. The response is the same
+  for every caller, so it keeps `public` cache headers. Its `ETag` also covers
+  the expanded targets, so republishing a target invalidates it.
+- `link` is the data stored on the connection (a relationship's link fields),
+  passed through as stored; `{}` when the field has none.
+- `target` is `null` for a target that is published but not fired yet; a
+  firing job is queued for it, as a direct read of that target would.
+- At most 10 fields and 100 targets per field. `expand` needs
+  `surface=json` and cannot be combined with `as_of`; both are a `400
+  invalid_expand`.
+
+An expanded response reads the source's edges and its targets from the
+database, so it does not have the plain artifact read's cache-only path
+through a database outage (it answers `503` then). JSON:API's
+`?include=content_links` still carries the edges by id; GraphQL's typed
+`references(field:)` is the other way to read targets in one request
+([headless-graphql-api.md](headless-graphql-api.md#relationships-references-and-referencedby)).
+
 ## Uploading media
 
 Files enter the media library over REST. Every route below runs the **same

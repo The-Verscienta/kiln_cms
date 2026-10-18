@@ -335,11 +335,20 @@ defmodule KilnCMSWeb.OpenApi do
             path_param(:type, "Content type (e.g. `page`, `post`)"),
             path_param(:slug, "Content slug"),
             query_param(:surface, "Artifact surface", enum: ["json", "json_ld", "web", "llm"]),
-            query_param(:locale, "Locale code (defaults to the site default)")
+            query_param(:locale, "Locale code (defaults to the site default)"),
+            query_param(
+              :expand,
+              "Comma-separated `:reference` custom fields (at most 10) whose targets " <>
+                "to add under `expanded`, each with its own `json` artifact. " <>
+                "Only targets an anonymous reader may read; `surface=json` only."
+            )
           ],
           responses: %{
             200 => %OpenApiSpex.Response{
               description: "The fired artifact for the requested surface"
+            },
+            400 => %OpenApiSpex.Response{
+              description: "`invalid_expand`: a malformed `expand`, or one on another surface"
             },
             404 => %OpenApiSpex.Response{description: "Unknown type/slug or unpublished content"},
             503 => %OpenApiSpex.Response{

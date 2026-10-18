@@ -484,6 +484,15 @@ until the referrer is next saved. The snapshot in `custom_fields` is
 unchanged. `field`, `source_type` and `target_type` are `null` on curated and
 payload links, and on links written before 1.1.
 
+**The targets themselves, in one request.** `?include=content_links.target` is
+not available: a reference can point at several content types, and a JSON:API
+include follows a relationship to exactly one (relationships plan, §7 Q1).
+Ask the delivery API instead —
+`GET /api/content/:type/:slug?expand=<field>` returns each target's fired
+`json` artifact under `"expanded"` ([api.md → Expanding references](api.md#expanding-references))
+— or GraphQL's typed `references(field:)`
+([headless-graphql-api.md → Relationships](headless-graphql-api.md#relationships-references-and-referencedby)).
+
 **Writing a reference.** A `:reference` value is read back as the snapshot
 `{"id", "type", "slug", "title"}` (a list of them when the field is
 `multiple`), and a write accepts the same shape. What a write must carry

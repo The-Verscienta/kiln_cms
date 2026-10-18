@@ -168,6 +168,79 @@ input CategorySortInput {
   field: CategorySortField!
 }
 
+"""
+A content record of any type: a compiled type (`Page`, `Post`, …) or an
+`Entry` of an admin-defined type. Narrow with `... on Post { … }`.
+"""
+interface ContentRecord {
+  id: ID!
+
+  title: String!
+
+  slug: String!
+
+  locale: String
+
+  state: String!
+
+  published: Boolean
+
+  publishedAt: DateTime
+
+  insertedAt: DateTime!
+
+  updatedAt: DateTime!
+
+  customFields: JsonString!
+
+  """
+  The records this one links to through the `:reference` custom field
+  `field`, in the field's order. Only targets the reader may read are
+  listed, so a draft target is invisible to an anonymous reader.
+  `limit` defaults to, and is capped at, 100.
+  """
+  references(field: String!, limit: Int, offset: Int): [ContentReference!]!
+
+  """
+  The records that link to this one through a `:reference` custom field,
+  optionally only through `field` and only from `sourceType` (a content
+  type name, e.g. `post` or a dynamic type's name). Only sources the
+  reader may read are listed. `limit` defaults to, and is capped at, 100.
+  """
+  referencedBy(field: String, sourceType: String, limit: Int, offset: Int): [ContentReferrer!]!
+}
+
+"""
+One target of a `:reference` field, in the field's order. `target` is null
+only when the edge points at a record the reader may not read in full.
+"""
+type ContentReference {
+  "The target's place in the field's list, from 0."
+  position: Int!
+
+  """
+  Data stored on the connection itself (the field's link fields), passed
+  through as stored. An empty object when the field has none.
+  """
+  link: Json
+
+  target: ContentRecord
+}
+
+"One record that links to this one through a `:reference` field."
+type ContentReferrer {
+  "The source's custom field the link was written from."
+  field: String!
+
+  "This record's place in the source field's list, from 0."
+  position: Int!
+
+  "Data stored on the connection itself, passed through as stored."
+  link: Json
+
+  source: ContentRecord
+}
+
 input CreateEntryInput {
   title: String!
   slug: String!
@@ -383,36 +456,65 @@ type DeletePostResult {
   errors: [MutationError!]!
 }
 
-type Entry {
+type Entry implements ContentRecord {
   id: ID!
+
   title: String!
+
   slug: String!
+
   excerpt: String
+
   seoTitle: String
+
   seoDescription: String
+
   seoKeywords: String
+
   pathAlias: String
+
   seoImage: String
+
   canonicalUrl: String
+
   locale: String
+
   audience: String!
+
   customFields: JsonString!
+
   publishedAt: DateTime
+
   scheduledAt: DateTime
+
   unpublishAt: DateTime
+
   expiryAction: String!
+
   reviewAfterDays: Int
+
   lastReviewedAt: DateTime
+
   lockVersion: Int!
+
   insertedAt: DateTime!
+
   updatedAt: DateTime!
+
   state: String!
+
   typeDefinitionId: ID!
+
   authorId: ID
+
   categoryId: ID
+
   featuredImageId: ID
+
   category: Category
+
   featuredImage: MediaItem
+
   tags(
     "How to sort the records in the response"
     sort: [TagSortInput]
@@ -426,6 +528,7 @@ type Entry {
     "The number of records to skip."
     offset: Int
   ): [Tag!]!
+
   relatedEntrys(
     "How to sort the records in the response"
     sort: [EntrySortInput]
@@ -443,20 +546,50 @@ type Entry {
     "The number of records to skip."
     offset: Int
   ): [Entry!]!
+
   typeName: String
+
   published: Boolean
+
   effectiveReviewAfterDays: Int
+
   dueAt: DateTime
+
   health: String
+
   wordCount: Int
+
   readingTimeMinutes: Int
+
   path: String
+
   effectiveSeoTitle: String
+
   effectiveSeoDescription: String
+
   relatedLinks: [JsonString!]
+
   inheritedFields: JsonString
+
   blockIds: [JsonString!]
+
   highlight(locale: String!, query: String!): String
+
+  """
+  The records that link to this one through a `:reference` custom field,
+  optionally only through `field` and only from `sourceType` (a content
+  type name, e.g. `post` or a dynamic type's name). Only sources the
+  reader may read are listed. `limit` defaults to, and is capped at, 100.
+  """
+  referencedBy(field: String, sourceType: String, limit: Int, offset: Int): [ContentReferrer!]!
+
+  """
+  The records this one links to through the `:reference` custom field
+  `field`, in the field's order. Only targets the reader may read are
+  listed, so a draft target is invisible to an anonymous reader.
+  `limit` defaults to, and is capped at, 100.
+  """
+  references(field: String!, limit: Int, offset: Int): [ContentReference!]!
 }
 
 input EntryFilterAudience {
@@ -1481,34 +1614,61 @@ type MutationError {
   path: [String!]
 }
 
-type Page {
+type Page implements ContentRecord {
   id: ID!
+
   title: String!
+
   slug: String!
+
   seoTitle: String
+
   seoDescription: String
+
   seoKeywords: String
+
   pathAlias: String
+
   seoImage: String
+
   canonicalUrl: String
+
   locale: String
+
   audience: String!
+
   customFields: JsonString!
+
   publishedAt: DateTime
+
   scheduledAt: DateTime
+
   unpublishAt: DateTime
+
   expiryAction: String!
+
   reviewAfterDays: Int
+
   lastReviewedAt: DateTime
+
   lockVersion: Int!
+
   insertedAt: DateTime!
+
   updatedAt: DateTime!
+
   state: String!
+
   authorId: ID
+
   categoryId: ID
+
   featuredImageId: ID
+
   category: Category
+
   featuredImage: MediaItem
+
   tags(
     "How to sort the records in the response"
     sort: [TagSortInput]
@@ -1522,6 +1682,7 @@ type Page {
     "The number of records to skip."
     offset: Int
   ): [Tag!]!
+
   relatedPages(
     "How to sort the records in the response"
     sort: [PageSortInput]
@@ -1539,19 +1700,48 @@ type Page {
     "The number of records to skip."
     offset: Int
   ): [Page!]!
+
   published: Boolean
+
   effectiveReviewAfterDays: Int
+
   dueAt: DateTime
+
   health: String
+
   wordCount: Int
+
   readingTimeMinutes: Int
+
   path: String
+
   effectiveSeoTitle: String
+
   effectiveSeoDescription: String
+
   relatedLinks: [JsonString!]
+
   inheritedFields: JsonString
+
   blockIds: [JsonString!]
+
   highlight(locale: String!, query: String!): String
+
+  """
+  The records that link to this one through a `:reference` custom field,
+  optionally only through `field` and only from `sourceType` (a content
+  type name, e.g. `post` or a dynamic type's name). Only sources the
+  reader may read are listed. `limit` defaults to, and is capped at, 100.
+  """
+  referencedBy(field: String, sourceType: String, limit: Int, offset: Int): [ContentReferrer!]!
+
+  """
+  The records this one links to through the `:reference` custom field
+  `field`, in the field's order. Only targets the reader may read are
+  listed, so a draft target is invisible to an anonymous reader.
+  `limit` defaults to, and is capped at, 100.
+  """
+  references(field: String!, limit: Int, offset: Int): [ContentReference!]!
 }
 
 input PageFilterAudience {
@@ -2158,35 +2348,63 @@ type PointInTimeEntry {
   publishedAt: DateTime!
 }
 
-type Post {
+type Post implements ContentRecord {
   id: ID!
+
   title: String!
+
   slug: String!
+
   excerpt: String
+
   seoTitle: String
+
   seoDescription: String
+
   seoKeywords: String
+
   pathAlias: String
+
   seoImage: String
+
   canonicalUrl: String
+
   locale: String
+
   audience: String!
+
   customFields: JsonString!
+
   publishedAt: DateTime
+
   scheduledAt: DateTime
+
   unpublishAt: DateTime
+
   expiryAction: String!
+
   reviewAfterDays: Int
+
   lastReviewedAt: DateTime
+
   lockVersion: Int!
+
   insertedAt: DateTime!
+
   updatedAt: DateTime!
+
   state: String!
+
   authorId: ID
+
   categoryId: ID
+
   featuredImageId: ID
+
   category: Category
+
   featuredImage: MediaItem
+
   tags(
     "How to sort the records in the response"
     sort: [TagSortInput]
@@ -2200,6 +2418,7 @@ type Post {
     "The number of records to skip."
     offset: Int
   ): [Tag!]!
+
   relatedPosts(
     "How to sort the records in the response"
     sort: [PostSortInput]
@@ -2217,19 +2436,48 @@ type Post {
     "The number of records to skip."
     offset: Int
   ): [Post!]!
+
   published: Boolean
+
   effectiveReviewAfterDays: Int
+
   dueAt: DateTime
+
   health: String
+
   wordCount: Int
+
   readingTimeMinutes: Int
+
   path: String
+
   effectiveSeoTitle: String
+
   effectiveSeoDescription: String
+
   relatedLinks: [JsonString!]
+
   inheritedFields: JsonString
+
   blockIds: [JsonString!]
+
   highlight(locale: String!, query: String!): String
+
+  """
+  The records that link to this one through a `:reference` custom field,
+  optionally only through `field` and only from `sourceType` (a content
+  type name, e.g. `post` or a dynamic type's name). Only sources the
+  reader may read are listed. `limit` defaults to, and is capped at, 100.
+  """
+  referencedBy(field: String, sourceType: String, limit: Int, offset: Int): [ContentReferrer!]!
+
+  """
+  The records this one links to through the `:reference` custom field
+  `field`, in the field's order. Only targets the reader may read are
+  listed, so a draft target is invisible to an anonymous reader.
+  `limit` defaults to, and is capped at, 100.
+  """
+  references(field: String!, limit: Int, offset: Int): [ContentReference!]!
 }
 
 input PostFilterAudience {

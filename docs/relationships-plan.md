@@ -4,8 +4,8 @@
 1–3 are answered (§7). On 2026-10-17 the plan took in what Toolset's
 relationship admin does that it lacked: R1b, "Add new" in the picker, and a
 relationship-first fields admin (R9). R0 shipped in
-[#1998](https://github.com/The-Verscienta/kiln_cms/pull/1998); the rest is not
-built yet. Every workstream is
+[#1998](https://github.com/The-Verscienta/kiln_cms/pull/1998); R1, R2, R6, R7
+and R9's first parts are built too (their sections say where). Every workstream is
 **additive** under the 1.0 overlay contract (`docs/overlay-contract.md`): new
 field options, new API fields, new operators, new screens. Nothing reshapes a
 covered surface, so the whole plan ships in **1.5**, a minor release. The one change
@@ -326,6 +326,9 @@ Anonymous and editor readers are within noise of each other.
 
 ### R7 — Typed nested reads
 
+**Built** in the R7 PR. GraphQL as below. JSON:API took the `?expand=`
+fallback; the spike's outcome is under the JSON:API bullet and in §7 Q1.
+
 - **GraphQL.** Every content type gets `references(field: String!, limit,
   offset)` returning `[ContentReference!]` — `{ position, link: JSON, target:
   ContentRecord }` — and `referencedBy(field:, sourceType:, limit, offset)`.
@@ -342,6 +345,35 @@ Anonymous and editor readers are within noise of each other.
   route, and falls back to `?expand=` if AshJsonApi can't emit those members
   without patching it. The PR records which route it took and why. Both are
   additive.
+
+  **Outcome: `?expand=`.** The spike stopped at AshJsonApi's include parser.
+  `AshJsonApi.Includes.Parser` accepts an include path only when each segment
+  is a public relationship (`Ash.Resource.Info.public_relationship/2`), and an
+  Ash relationship has one destination resource, so a `target` calculation is
+  refused as an invalid include before the serializer is reached. Emitting
+  `included` members for it means patching the parser and the serializer. The
+  one unpatched shape that works, a relationship per target resource
+  (`content_links.target_page`, `.target_post`, `.target_entry`, …), is a
+  different URL from the one asked for, and `ContentLink` would have to name
+  every content type, a project overlay's too, at compile time. So
+  `GET /api/content/:type/:slug?expand=<field>[,…]` answers it on the
+  delivery API (`KilnCMSWeb.ReferenceExpansion`): an added `"expanded"` key
+  holding, per field, `{position, link, id, type, slug, target}` with the
+  target's own fired `json` artifact. Delivery is actorless, so a target is
+  expanded only when an anonymous reader could read it; the ETag covers the
+  targets; at most 10 fields and 100 targets per field.
+- **As built (GraphQL).** `ContentRecord` declares the fields every content
+  object has (`id`, `title`, `slug`, `locale`, `state`, `published`,
+  `publishedAt`, `insertedAt`, `updatedAt`, `customFields`) plus `references`
+  and `referencedBy`, so a client can traverse without a fragment. The
+  objects AshGraphql generates gain the interface through Absinthe type
+  extensions (`KilnCMSWeb.Graphql.ContentRecord.Notation`), built from the
+  schema's `:content_domains`, so an overlay's types join with no core edit.
+  `referencedBy` returns `ContentReferrer { field, position, link, source }`.
+  Both fields default to, and cap at, 100 rows. Edges are read as the reader
+  through `ContentLink`'s read policy (both ends readable), and targets are
+  read as the reader too, one read per type with the selected fields loaded.
+  `link` is the edge's `metadata`, passed through for R3 to fill.
 - Depth: one hop through a reference is a first-class shape; deeper nesting
   goes through the existing GraphQL depth/complexity limits, not new ones.
 
@@ -475,6 +507,9 @@ Answered on 2026-10-16:
 1. **R7 JSON:API: heterogeneous `included`, or `?expand=` on the delivery
    API?** Spike the `included` route first and fall back to `?expand=` if it
    fights AshJsonApi. The R7 PR decides, and records the outcome.
+   **Outcome (R7, 2026-10-17): `?expand=`.** AshJsonApi accepts only public
+   relationships as include paths, and a relationship has one destination,
+   so a polymorphic `target` cannot be included without patching it (§4, R7).
 2. **R3 storage: edge only, or mirrored into the snapshot?** Mirrored. The edge
    is a copy of the stored value, reconciled in the same transaction, and
    delivery keeps reading link data from `custom_fields` in one request.
