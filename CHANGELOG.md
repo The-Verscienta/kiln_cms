@@ -61,6 +61,14 @@ Every summary line below that was shortened links to its own entry there.
   payload-link routes at `/api/json/content-links`.**
   ([#2014](https://github.com/The-Verscienta/kiln_cms/pull/2014) · [long form](docs/changelog/unreleased.md#api-clients-can-connect-disconnect-and-reorder-references-graphqls))
 
+- **Connections can be added, removed and reordered from the record they point
+  at, and each change is saved as an edit of the record that holds it.**
+  ([#2018](https://github.com/The-Verscienta/kiln_cms/pull/2018) · [long form](docs/changelog/unreleased.md#connections-can-be-added-removed-and-reordered-from-the-record-they-point-at))
+
+- **A reference field can name its other side, and every record it connects
+  shows the records connecting to it: "Recipes using this ingredient".**
+  ([#2015](https://github.com/The-Verscienta/kiln_cms/pull/2015) · [long form](docs/changelog/unreleased.md#a-reference-field-can-name-its-other-side-and-every-record-it-connects-shows))
+
 - **Reads follow reference fields to the records on the other end: GraphQL's
   typed `references` / `referencedBy`, and `?expand=` on `/api/content`.**
   ([#2010](https://github.com/The-Verscienta/kiln_cms/pull/2010) · [long form](docs/changelog/unreleased.md#typed-nested-reads-through-references))
@@ -129,6 +137,11 @@ Every summary line below that was shortened links to its own entry there.
 - **An automation rule for "any content type" no longer fires when a content
   release is published; a rule scoped to `release` still does.**
   ([#1995](https://github.com/The-Verscienta/kiln_cms/issues/1995) · [long form](docs/changelog/unreleased.md#automation-any-type-rules-ignore-release-published))
+
+- **Publishing or withdrawing an entry of an archived dynamic type now opens
+  a propagation record, and domain events no longer enqueue a federation job
+  that only skips.**
+  ([#2012](https://github.com/The-Verscienta/kiln_cms/pull/2012) · [long form](docs/changelog/unreleased.md#propagation-archived-types-federation-domain-events))
 
 - **A variant job no longer takes an image backend's failed or rate-limited
   read for a deleted original.**

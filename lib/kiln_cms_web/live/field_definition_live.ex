@@ -899,8 +899,16 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     |> Map.put("options", options)
     |> Map.put("default", default)
     |> unpack_targets()
+    |> unpack_inverse()
     |> unpack_scope(scope)
   end
+
+  # Emptying the other side's name removes the reverse list (R4), so its
+  # machine name goes with it rather than standing alone.
+  defp unpack_inverse(%{"inverse_label" => label} = params) when label in [nil, ""],
+    do: Map.put(params, "inverse_name", nil)
+
+  defp unpack_inverse(params), do: params
 
   # The "Links to" checkboxes post one list (`target_types[]`, with a leading
   # blank so unticking them all still posts). One ticked type is stored as the
@@ -1267,14 +1275,75 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       |> Enum.map(&type_label_for(target_types, &1))
       |> types_phrase()
 
-    if definition.multiple do
-      gettext("Connects several %{type} records — %{count}",
-        type: target,
-        count: item_bounds_label(definition.min_items, definition.max_items)
-      )
-    else
-      gettext("Connects one %{type}", type: target)
+    connects =
+      if definition.multiple do
+        gettext("Connects several %{type} records — %{count}",
+          type: target,
+          count: item_bounds_label(definition.min_items, definition.max_items)
+        )
+      else
+        gettext("Connects one %{type}", type: target)
+      end
+
+    case definition.inverse_label do
+      label when is_binary(label) and label != "" ->
+        gettext("%{connects}. Each %{type} lists them as “%{label}”.",
+          connects: connects,
+          type: target,
+          label: label
+        )
+
+      _none ->
+        connects
     end
+  end
+
+  attr :form, :any, required: true
+  attr :id, :string, required: true
+  attr :target_types, :list, default: []
+
+  # The other side of a reference (R4), in the voice of the rest of the
+  # form: what the linked-to record calls the records that link to it. Its
+  # machine name fills in from the label unless an admin changes it.
+  defp inverse_field(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :target,
+        target_label(assigns.form, assigns.target_types) || gettext("the linked record")
+      )
+
+    ~H"""
+    <fieldset
+      :if={reference?(@form)}
+      id={@id}
+      class="rounded-lg border border-base-content/10 bg-base-200/40 p-3 sm:col-span-2"
+    >
+      <legend class="px-1 text-sm font-medium">
+        {gettext("What %{type} calls this", type: @target)}
+        <span class="font-normal text-base-content/60">{gettext("(optional)")}</span>
+      </legend>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <.input
+          field={@form[:inverse_label]}
+          label={gettext("Name on the other side")}
+          placeholder={gettext("Recipes using this ingredient")}
+        />
+        <.input
+          field={@form[:inverse_name]}
+          label={gettext("Machine name")}
+          placeholder="used_in_recipes"
+          hint={gettext("Filled in from the name if left empty. The API uses it.")}
+        />
+      </div>
+      <p class="mt-2 text-xs text-base-content/60">
+        {gettext(
+          "Give it a name and every %{type} shows a list of the records that connect to it through this field. Leave it empty for no list.",
+          type: @target
+        )}
+      </p>
+    </fieldset>
+    """
   end
 
   defp item_bounds_label(nil, nil), do: gettext("any number")
@@ -1567,6 +1636,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               id="new-field"
             />
             <.multiple_field form={@form} id="new-field-multiple" target_types={@target_types} />
+            <.inverse_field form={@form} id="new-field-inverse" target_types={@target_types} />
             <.input field={@form[:help_text]} label={gettext("Help text")} />
             <.localization_input field={@form[:localization]} />
             <.options_field form={@form} id="new-field-options" />
@@ -1792,6 +1862,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     form={@edit.form}
                     id={"edit-field-multiple-#{@edit.id}"}
                     stored={definition}
+                    target_types={@target_types}
+                  />
+                  <.inverse_field
+                    form={@edit.form}
+                    id={"edit-field-inverse-#{@edit.id}"}
                     target_types={@target_types}
                   />
                   <.input field={@edit.form[:help_text]} label={gettext("Help text")} />

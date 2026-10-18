@@ -233,7 +233,9 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :compute,
       :names_record,
       :searchable,
-      :localization
+      :localization,
+      :inverse_label,
+      :inverse_name
     ]
 
     create :create, primary?: true
@@ -275,6 +277,22 @@ defmodule KilnCMS.CMS.FieldDefinition do
     read :for_definition do
       argument :type_definition_id, :uuid, allow_nil?: false
       filter expr(type_definition_id == ^arg(:type_definition_id))
+      prepare build(sort: [position: :asc, name: :asc], load: [:link_fields])
+    end
+
+    # The reverse fields a content type shows (R4): every top-level
+    # `:reference` definition that may point at `target_type` (as its one
+    # `target_type` or among its `target_types`) and names its other side
+    # (`inverse_name`). Read by `KilnCMS.CMS.ReverseFields`.
+    read :inverse_of do
+      argument :target_type, :string, allow_nil?: false
+
+      filter expr(
+               field_type == :reference and is_nil(link_of_id) and not is_nil(inverse_name) and
+                 (target_type == ^arg(:target_type) or
+                    fragment("? = ANY(?)", ^arg(:target_type), target_types))
+             )
+
       prepare build(sort: [position: :asc, name: :asc], load: [:link_fields])
     end
   end
@@ -336,6 +354,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # per-locale behaviour — drop rather than claim something nothing honours.
     change KilnCMS.CMS.Changes.ClearLinkFieldOptions
 
+    # The other side's name (R4) belongs to a top-level `:reference` field,
+    # and a label alone suggests its machine name, as a field's label does.
+    change KilnCMS.CMS.Changes.ClearInverse
+
     # Whether a type is event-shaped (#480) is decided by whether it carries a
     # `datetime_range` field, so the cached answer has to drop on a field write,
     # not only on a type write.
@@ -378,6 +400,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # A :reference field must target known content types (compiled or
     # dynamic): one through `target_type`, or several through `target_types`.
     validate KilnCMS.CMS.Validations.ReferenceTarget
+
+    # A reverse field's machine name is a safe identifier, unique among the
+    # reverse fields of every type the reference may point at (R4).
+    validate KilnCMS.CMS.Validations.InverseName
 
     # `min_items` may not exceed `max_items` on a list field.
     validate KilnCMS.CMS.Validations.ItemBounds
@@ -475,6 +501,22 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # stored values alone until that record's field is next written.
     attribute :min_items, :integer, public?: true, constraints: [min: 0]
     attribute :max_items, :integer, public?: true, constraints: [min: 1]
+
+    # What the **other side** calls this relationship (R4): the reverse field
+    # every target record shows in its editor, listing the records that
+    # connect to it through this field — "Recipes using this ingredient" on an
+    # Ingredient, for a Recipe's `ingredients`. `inverse_label` is what an
+    # editor reads; `inverse_name` the machine name GraphQL's
+    # `referencedBy(inverse:)` and `KilnCMS.SchemaExport` use, suggested from
+    # the label when left blank (`Changes.ClearInverse`). Both nil — no reverse
+    # field — by default, and on anything but a top-level `:reference`.
+    attribute :inverse_label, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
+
+    attribute :inverse_name, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # Optional helper text rendered under the input.
     attribute :help_text, :string,

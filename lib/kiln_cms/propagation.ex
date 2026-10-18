@@ -15,10 +15,14 @@ defmodule KilnCMS.Propagation do
       Not `archived`: archiving a live document fires `unpublished` as well,
       and that is the one measured.
 
-  The event's namespace must be a content type of the site: a domain event
-  that happens to share a verb (`release.published`) is about a release, not
-  a document. Updates to live content, drafts' tombstones and every other
-  event are not transitions and open no record.
+  A domain event that happens to share a verb (`release.published`, any
+  `KilnCMS.CMS.WebhookEndpoint.domain_events/0`) is about a release, not a
+  document, and is not a transition. Everything else with a transition verb
+  is a document's, including an entry of a dynamic type that has since been
+  archived: its entries keep firing `<name>.*` (`KilnCMS.Firing.Engine.public_type/1`,
+  #938), webhooks still deliver those, and the delivery is measured like any
+  other. Updates to live content, drafts' tombstones and every other event
+  are not transitions and open no record.
 
   ## What is measured
 
@@ -72,8 +76,8 @@ defmodule KilnCMS.Propagation do
   @doc """
   The kind of transition `event`'s verb makes it, or `nil` when it is not
   one. `withdraws?` is whether the document was published before the action
-  (`KilnCMS.Webhooks.dispatch/4`'s `:withdraws`). The namespace is checked by
-  `open/5`, which knows the site.
+  (`KilnCMS.Webhooks.dispatch/4`'s `:withdraws`). Domain events are ruled out
+  by `open/5`.
   """
   @spec kind(String.t(), boolean()) :: :publish | :withdraw | nil
   def kind(event, withdraws?) do
@@ -93,9 +97,13 @@ defmodule KilnCMS.Propagation do
   @spec open(String.t(), map(), Ash.ToTenant.t(), boolean(), non_neg_integer()) ::
           struct() | nil
   def open(event, payload, org, withdraws?, endpoints) do
-    with kind when not is_nil(kind) <- kind(event, withdraws?),
+    # The exact domain events, not a registry lookup: the registry
+    # (`ContentTypes.get/2`) leaves archived dynamic types out, whose entries
+    # still fire and deliver `<name>.*`. Until reserved names land (#1994), a
+    # dynamic type named `release` is the one type this misses.
+    with false <- event in WebhookEndpoint.domain_events(),
+         kind when not is_nil(kind) <- kind(event, withdraws?),
          {type, _verb} <- WebhookEndpoint.event_parts(event),
-         %{} <- KilnCMS.CMS.ContentTypes.get(type, KilnCMS.Accounts.org_id(org)),
          document_id when is_binary(document_id) <- CMS.WebhookDelivery.document_id(payload) do
       now = DateTime.utc_now()
       purging? = KilnCMS.CDN.enabled?() and KilnCMS.CDN.purges?(event)

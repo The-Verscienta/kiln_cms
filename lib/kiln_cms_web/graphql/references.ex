@@ -30,6 +30,7 @@ defmodule KilnCMSWeb.Graphql.References do
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.ReverseFields
 
   # The most rows one `references`/`referencedBy` field returns. Also the
   # default: an omitted `limit` is priced at 5 rows (`GraphqlLimits`), but
@@ -49,7 +50,19 @@ defmodule KilnCMSWeb.Graphql.References do
     batch({__MODULE__, :load_edges, key}, id, &{:ok, Map.get(&1, id, [])})
   end
 
-  @doc "Resolver for `referencedBy(field:, sourceType:, limit:, offset:)`."
+  @doc "Resolver for `referencedBy(field:, sourceType:, inverse:, limit:, offset:)`."
+  def referenced_by(%{id: id} = parent, %{inverse: inverse} = args, resolution)
+      when is_binary(inverse) do
+    if args[:field] || args[:source_type] do
+      {:error, "pass either inverse, or field and sourceType, not both"}
+    else
+      key = {:inverse, inverse, window(args), actor(resolution), tenant(resolution)}
+      item = {id, ContentTypes.type_name_for(parent)}
+
+      batch({__MODULE__, :load_inverse_edges, key}, item, &{:ok, Map.get(&1, id, [])})
+    end
+  end
+
   def referenced_by(%{id: id}, args, resolution) do
     window = window(args)
 
@@ -58,6 +71,27 @@ defmodule KilnCMSWeb.Graphql.References do
        tenant(resolution)}
 
     batch({__MODULE__, :load_edges, key}, id, &{:ok, Map.get(&1, id, [])})
+  end
+
+  @doc false
+  # Absinthe batch function for `referencedBy(inverse:)` (R4). The name is a
+  # reverse field of each parent's own type, which stands for one reference
+  # field on one source type, so the parents are grouped by type and each
+  # group reads its edges as `field:` + `sourceType:` would. A type with no
+  # reverse field of that name lists nothing, as an unknown `field:` does.
+  def load_inverse_edges({:inverse, name, window, actor, tenant}, items) do
+    items
+    |> Enum.group_by(&elem(&1, 1), &elem(&1, 0))
+    |> Enum.reduce(%{}, fn {type, ids}, acc ->
+      case ReverseFields.find(type, name, tenant) do
+        nil ->
+          acc
+
+        reverse ->
+          scope = {reverse.field, reverse.source_type}
+          Map.merge(acc, load_edges({:referenced_by, scope, window, actor, tenant}, ids))
+      end
+    end)
   end
 
   @doc false

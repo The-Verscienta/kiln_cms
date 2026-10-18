@@ -690,6 +690,21 @@ defmodule KilnCMS.CMS.ContentTypes do
     end
   end
 
+  @doc """
+  Whether `actor` may write `record`'s content the way the editor's Save
+  does: its working copy when it is published (`save_<type>_working_copy`),
+  the row itself otherwise (`update_<type>`) — the generated `can_*?` helper
+  of the action that write would run. `opts` takes `:tenant`.
+  """
+  def can_write?(type, record, actor, opts \\ []) do
+    fun =
+      if record.state == :published,
+        do: "can_save_#{atom(type, opts)}_working_copy?",
+        else: "can_update_#{atom(type, opts)}?"
+
+    call(type, fun, [actor, record, %{}, opts], opts)
+  end
+
   @doc "Generic update through the type's own code interface (primary `:update`)."
   def update(type, record, attrs, opts \\ []),
     do: call(type, "update_#{atom(type, opts)}", [record, attrs, opts], opts)

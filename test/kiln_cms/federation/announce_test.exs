@@ -11,6 +11,7 @@ defmodule KilnCMS.Federation.AnnounceTest do
   use Oban.Testing, repo: KilnCMS.Repo
 
   alias KilnCMS.CMS
+  alias KilnCMS.Federation.Announcer
   alias KilnCMS.Federation.AnnounceWorker
   alias KilnCMS.Federation.Delivery
   alias KilnCMS.Federation.Follower
@@ -234,6 +235,21 @@ defmodule KilnCMS.Federation.AnnounceTest do
         worker: AnnounceWorker,
         args: %{"org_id" => org_id, "document_id" => post.id, "verb" => "Create"}
       )
+    end
+
+    # A release is not a document: its `release.published` shares a verb with
+    # a publish, but no `release` type syndicates, so the worker would only
+    # skip the job. The release's documents announce themselves.
+    test "a domain event enqueues nothing", %{org_id: org_id} do
+      for event <- ~w(release.published release.rolled_back form.submitted) do
+        assert :ok = Announcer.announce(event, %{"id" => Ecto.UUID.generate()}, org_id)
+      end
+
+      refute_enqueued(worker: AnnounceWorker)
+
+      # The same call with a document's event does enqueue.
+      assert :ok = Announcer.announce("post.published", %{"id" => Ecto.UUID.generate()}, org_id)
+      assert_enqueued(worker: AnnounceWorker, args: %{"verb" => "Create", "type" => "post"})
     end
 
     # Workflow states are not publication events; a follower has no business

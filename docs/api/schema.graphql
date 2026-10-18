@@ -204,10 +204,14 @@ interface ContentRecord {
   """
   The records that link to this one through a `:reference` custom field,
   optionally only through `field` and only from `sourceType` (a content
-  type name, e.g. `post` or a dynamic type's name). Only sources the
-  reader may read are listed. `limit` defaults to, and is capped at, 100.
+  type name, e.g. `post` or a dynamic type's name). `inverse` names a
+  reverse field instead, by the `inverse_name` a reference field gives
+  its other side (e.g. `used_in_recipes`): it stands for that field and
+  source type together, so it is not combined with `field` or
+  `sourceType`. Only sources the reader may read are listed. `limit`
+  defaults to, and is capped at, 100.
   """
-  referencedBy(field: String, sourceType: String, limit: Int, offset: Int): [ContentReferrer!]!
+  referencedBy(field: String, sourceType: String, inverse: String, limit: Int, offset: Int): [ContentReferrer!]!
 }
 
 """
@@ -578,10 +582,14 @@ type Entry implements ContentRecord {
   """
   The records that link to this one through a `:reference` custom field,
   optionally only through `field` and only from `sourceType` (a content
-  type name, e.g. `post` or a dynamic type's name). Only sources the
-  reader may read are listed. `limit` defaults to, and is capped at, 100.
+  type name, e.g. `post` or a dynamic type's name). `inverse` names a
+  reverse field instead, by the `inverse_name` a reference field gives
+  its other side (e.g. `used_in_recipes`): it stands for that field and
+  source type together, so it is not combined with `field` or
+  `sourceType`. Only sources the reader may read are listed. `limit`
+  defaults to, and is capped at, 100.
   """
-  referencedBy(field: String, sourceType: String, limit: Int, offset: Int): [ContentReferrer!]!
+  referencedBy(field: String, sourceType: String, inverse: String, limit: Int, offset: Int): [ContentReferrer!]!
 
   """
   The records this one links to through the `:reference` custom field
@@ -1739,10 +1747,14 @@ type Page implements ContentRecord {
   """
   The records that link to this one through a `:reference` custom field,
   optionally only through `field` and only from `sourceType` (a content
-  type name, e.g. `post` or a dynamic type's name). Only sources the
-  reader may read are listed. `limit` defaults to, and is capped at, 100.
+  type name, e.g. `post` or a dynamic type's name). `inverse` names a
+  reverse field instead, by the `inverse_name` a reference field gives
+  its other side (e.g. `used_in_recipes`): it stands for that field and
+  source type together, so it is not combined with `field` or
+  `sourceType`. Only sources the reader may read are listed. `limit`
+  defaults to, and is capped at, 100.
   """
-  referencedBy(field: String, sourceType: String, limit: Int, offset: Int): [ContentReferrer!]!
+  referencedBy(field: String, sourceType: String, inverse: String, limit: Int, offset: Int): [ContentReferrer!]!
 
   """
   The records this one links to through the `:reference` custom field
@@ -2484,10 +2496,14 @@ type Post implements ContentRecord {
   """
   The records that link to this one through a `:reference` custom field,
   optionally only through `field` and only from `sourceType` (a content
-  type name, e.g. `post` or a dynamic type's name). Only sources the
-  reader may read are listed. `limit` defaults to, and is capped at, 100.
+  type name, e.g. `post` or a dynamic type's name). `inverse` names a
+  reverse field instead, by the `inverse_name` a reference field gives
+  its other side (e.g. `used_in_recipes`): it stands for that field and
+  source type together, so it is not combined with `field` or
+  `sourceType`. Only sources the reader may read are listed. `limit`
+  defaults to, and is capped at, 100.
   """
-  referencedBy(field: String, sourceType: String, limit: Int, offset: Int): [ContentReferrer!]!
+  referencedBy(field: String, sourceType: String, inverse: String, limit: Int, offset: Int): [ContentReferrer!]!
 
   """
   The records this one links to through the `:reference` custom field

@@ -902,6 +902,7 @@ defmodule KilnCMS.CMS do
         action: :for_definition,
         args: [:type_definition_id]
 
+      define :reverse_field_definitions_for, action: :inverse_of, args: [:target_type]
       define :create_field_definition, action: :create
       define :update_field_definition, action: :update
       define :destroy_field_definition, action: :destroy

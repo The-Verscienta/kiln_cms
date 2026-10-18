@@ -41,12 +41,17 @@ defmodule KilnCMSWeb.Graphql.ContentRecord.Notation do
       @desc """
       The records that link to this one through a `:reference` custom field,
       optionally only through `field` and only from `sourceType` (a content
-      type name, e.g. `post` or a dynamic type's name). Only sources the
-      reader may read are listed. `limit` defaults to, and is capped at, 100.
+      type name, e.g. `post` or a dynamic type's name). `inverse` names a
+      reverse field instead, by the `inverse_name` a reference field gives
+      its other side (e.g. `used_in_recipes`): it stands for that field and
+      source type together, so it is not combined with `field` or
+      `sourceType`. Only sources the reader may read are listed. `limit`
+      defaults to, and is capped at, 100.
       """
       field :referenced_by, non_null(list_of(non_null(:content_referrer))) do
         arg :field, :string
         arg :source_type, :string
+        arg :inverse, :string
         arg :limit, :integer
         arg :offset, :integer
         complexity &KilnCMSWeb.GraphqlLimits.list_complexity/3
