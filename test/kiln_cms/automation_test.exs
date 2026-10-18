@@ -253,4 +253,129 @@ defmodule KilnCMS.AutomationTest do
       assert_receive {:automation_event, "page.returned_to_draft", %{"title" => "Review"}}, 2_000
     end
   end
+
+  # #1995: automation used to match an event on its verb alone, so a domain
+  # event whose verb is also a trigger (`release.published`) counted as a
+  # `:published` event for "type" `release` — and every "any content type, on
+  # published" rule fired for it, with a release where a document should be.
+  describe "non-content events (#1995)" do
+    defp admin do
+      Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+        email: "auto-#{System.unique_integer([:positive])}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: :admin
+      })
+    end
+
+    test "release.published matches no \"any type, on published\" rule in dispatch" do
+      any_type = rule(%{trigger_event: :published, action: :broadcast})
+
+      assert :ok = Automation.dispatch("release.published", payload())
+      refute_enqueued(worker: RuleWorker, args: %{"rule_id" => any_type.id})
+
+      # Positive control: the same rule does match a content event.
+      Automation.dispatch("post.published", payload())
+      assert_enqueued(worker: RuleWorker, args: %{"rule_id" => any_type.id})
+    end
+
+    # docs/content-releases.md: "an automation rule scoped to content type
+    # `release` with trigger `published` fires on them too".
+    test "a rule scoped to \"release\" still fires on release.published" do
+      scoped = rule(%{trigger_event: :published, action: :broadcast, content_type: "release"})
+      any_type = rule(%{trigger_event: :published, action: :broadcast})
+
+      # Enqueued on the publish path, since a scoped rule may want it.
+      assert :ok = Automation.handle_event("release.published", payload())
+      assert_enqueued(worker: DispatchWorker, args: %{"event" => "release.published"})
+
+      assert :ok = Automation.dispatch("release.published", payload())
+      assert_enqueued(worker: RuleWorker, args: %{"rule_id" => scoped.id})
+      refute_enqueued(worker: RuleWorker, args: %{"rule_id" => any_type.id})
+    end
+
+    test "a rule scoped to \"release\" does not fire on a document's publish" do
+      scoped = rule(%{trigger_event: :published, action: :broadcast, content_type: "release"})
+      Automation.dispatch("post.published", payload())
+      refute_enqueued(worker: RuleWorker, args: %{"rule_id" => scoped.id})
+    end
+
+    test "trigger/1 classifies content, task, health and domain events" do
+      assert {:ok, "post", :published, :any} = Automation.trigger("post.published")
+      assert {:ok, "page", :health_overdue, :any} = Automation.trigger("page.health_overdue")
+      assert {:ok, "task", :assigned, :any} = Automation.trigger("task.assigned")
+      assert {:ok, "task", :overdue, :any} = Automation.trigger("task.overdue")
+      assert {:ok, "release", :published, :scoped} = Automation.trigger("release.published")
+      assert {:ok, "tag", :updated, :scoped} = Automation.trigger("tag.updated")
+
+      # Exact events, not namespaces: a dynamic type that shares a domain
+      # namespace (nothing reserves the names yet, #1994) keeps its content
+      # events.
+      assert {:ok, "experiment", :published, :any} = Automation.trigger("experiment.published")
+      assert {:ok, "form", :updated, :any} = Automation.trigger("form.updated")
+
+      for event <- ~w(experiment.concluded form.submitted membership.activated
+                      membership.canceled release.failed release.rolled_back ping) do
+        assert Automation.trigger(event) == :error, event
+      end
+    end
+
+    # The guard for the next event family: one added to `WebhookEndpoint.events/1`
+    # with a trigger verb fails here until it joins `domain_events/0`.
+    test "no subscribable domain event matches an \"any type\" rule" do
+      org_id = KilnCMS.Accounts.default_org_id()
+
+      admin = admin()
+
+      dynamic = "gadget#{System.unique_integer([:positive])}"
+
+      CMS.create_type_definition!(%{name: dynamic, label: "Gadget"},
+        actor: admin,
+        tenant: org_id
+      )
+
+      types = Enum.map(CMS.ContentTypes.all_for_org(org_id), &to_string(&1.type))
+      assert dynamic in types
+
+      content_events =
+        for type <- types, verb <- CMS.WebhookEndpoint.verbs(), do: "#{type}.#{verb}"
+
+      task_events = ~w(task.assigned task.overdue)
+
+      for event <- CMS.WebhookEndpoint.events(org_id),
+          event not in content_events and event not in task_events do
+        refute match?({:ok, _type, _trigger, :any}, Automation.trigger(event)), event
+      end
+
+      triggers = Enum.map(Rule.triggers(), &to_string/1)
+
+      for type <- types, verb <- triggers do
+        assert {:ok, ^type, _trigger, :any} = Automation.trigger("#{type}.#{verb}")
+      end
+    end
+
+    test "publishing a release fires the rule for its documents, never for the release" do
+      topic = "e2e-release-#{System.unique_integer([:positive])}"
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, "automation:#{topic}")
+      rule(%{trigger_event: :published, action: :broadcast, config: %{"topic" => topic}})
+
+      admin = admin()
+
+      n = System.unique_integer([:positive])
+      page = CMS.create_page!(%{title: "In release", slug: "in-release-#{n}"}, actor: admin)
+      release = CMS.create_release!(%{name: "Launch #{n}"}, actor: admin)
+
+      CMS.add_release_item!(
+        %{release_id: release.id, content_type: "page", content_id: page.id, action: :publish},
+        actor: admin
+      )
+
+      CMS.start_release!(release, %{}, actor: admin)
+      drain_oban()
+
+      assert CMS.get_release!(release.id, actor: admin).state == :published
+      assert_receive {:automation_event, "page.published", %{"title" => "In release"}}, 2_000
+      refute_received {:automation_event, "release.published", _payload}
+    end
+  end
 end

@@ -24,10 +24,12 @@ defmodule KilnCMS.Automation.Rule do
   # `:assigned` / `:overdue` (#501) are task-domain, not content-type-domain —
   # `KilnCMS.Notifications.Tasks` dispatches them as `"task.assigned"` /
   # `"task.overdue"` through the same `KilnCMS.Webhooks.dispatch/3` funnel.
-  # `Automation.handle_event/3` only ever splits the event string on its first
-  # "." and matches the verb against this list, so a literal `"task"` type
-  # works with no executor changes — a rule scoped to `content_type: "task"`
-  # matches exactly like one scoped to `content_type: "page"`.
+  # `KilnCMS.Automation.trigger/1` splits the event string on its first "."
+  # and matches the verb against this list, so a literal `"task"` type works
+  # with no executor changes — a rule scoped to `content_type: "task"` matches
+  # exactly like one scoped to `content_type: "page"`. The exception is a
+  # domain event whose verb is also a trigger (`release.published`, #1995):
+  # only a rule scoped to its namespace matches it, never an "any type" rule.
   # `:health_overdue` / `:health_expired` are the lifecycle axis
   # (docs/content-lifecycles.md), dispatched by `KilnCMS.CMS.HealthSweep` rather
   # than by a write. They are the reason that sweep exists: freshness lapses

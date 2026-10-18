@@ -31,7 +31,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
     domain: KilnCMS.CMS,
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer],
-    extensions: [AshAdmin.Resource, AshJsonApi.Resource]
+    extensions: [AshAdmin.Resource, AshJsonApi.Resource, AshOban]
 
   # A JSON:API type only — no routes. It exists so
   # `/api/json/type-definitions?include=field_definitions` can serialize a
@@ -146,6 +146,19 @@ defmodule KilnCMS.CMS.FieldDefinition do
     repo KilnCMS.Repo
   end
 
+  oban do
+    scheduled_actions do
+      # Hourly, but it does the work once a day: on the first tick after the
+      # SITE's midnight (`Computed.DailyRefresh.due?/1`). A daily cron would be
+      # a UTC midnight, a day late for half the world's mornings.
+      schedule :refresh_time_dependent, "7 * * * *" do
+        action :refresh_time_dependent
+        queue :default
+        worker_module_name KilnCMS.CMS.FieldDefinition.Workers.RefreshTimeDependent
+      end
+    end
+  end
+
   actions do
     defaults [:read]
 
@@ -187,6 +200,19 @@ defmodule KilnCMS.CMS.FieldDefinition do
       require_atomic? false
     end
 
+    # Moves computed fields whose formula calls `today()` to the site's new
+    # day: re-derives and re-fires the published records of every type with
+    # one (`KilnCMS.CMS.Computed.DailyRefresh`). Run by the scheduled action
+    # above; `today` forces a refresh against that date instead of waiting for
+    # the day to change. Returns how many records were written.
+    action :refresh_time_dependent, :integer do
+      argument :today, :date, allow_nil?: true
+
+      run fn input, _context ->
+        {:ok, KilnCMS.CMS.Computed.DailyRefresh.tick(today: input.arguments[:today])}
+      end
+    end
+
     # All custom-field definitions for one content type, in editor display order.
     # Used by the editor (to render inputs) and the content write change (to
     # coerce/validate values) — both call it with `authorize?: false`.
@@ -206,6 +232,14 @@ defmodule KilnCMS.CMS.FieldDefinition do
   end
 
   policies do
+    # The daily computed-field refresh walks EVERY org, so it is not an admin
+    # verb: first, so the admin bypass below can't admit one. The scheduler
+    # runs it; so may the `:computed_fields` system actor (an operator's rpc).
+    policy action(:refresh_time_dependent) do
+      authorize_if AshOban.Checks.AshObanInteraction
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :computed_fields}
+    end
+
     # Admins own the schema (defining/removing fields is an admin concern).
     bypass KilnCMS.CMS.Checks.OrgAdmin do
       authorize_if always()
@@ -222,6 +256,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
                     subsystem: [
                       :cms_bookkeeping,
                       :cms_registry,
+                      :computed_fields,
                       :events,
                       :firing,
                       :localization,

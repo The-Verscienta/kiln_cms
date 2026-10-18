@@ -17,6 +17,9 @@ defmodule KilnCMS.CMS.Changes.DeriveAlias do
 
   @impl true
   def change(changeset, _opts, _context) do
+    # As in `DeriveSlug`: one pinned date for every formula the write evaluates.
+    changeset = KilnCMS.CMS.Computed.Context.pin_today(changeset)
+
     with blank when blank in [nil, ""] <- Ash.Changeset.get_attribute(changeset, :path_alias),
          pattern when is_binary(pattern) <- Slugs.pattern_for(changeset, :alias),
          alias_path when is_binary(alias_path) <-

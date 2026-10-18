@@ -33,6 +33,28 @@ carries the reasoning.
   parameter and response key.
   ([#2010](https://github.com/The-Verscienta/kiln_cms/pull/2010))
 
+<a id="computed-fields-can-use-todays-date-today-yearsbetween-and-days-until-a-date"></a>
+
+- **Computed fields can use today's date: `today()`, `years_between`, and "Days
+  until a date" and "Age in years" recipes, refreshed once a day.** A formula
+  runs on write and again on fire, so a clock inside the engine would let a
+  record and its artifact disagree; instead `today()` answers a date pinned
+  once per evaluation pass — the site's day, in the events timezone
+  (`config :kiln_cms, KilnCMS.Events, time_zone:`). A write pins it for its
+  slug, alias and every computed field, and the fire it enqueues carries it,
+  so the artifact matches what was stored even after midnight; publishing now
+  re-derives computed fields on the publish day. A formula that calls
+  `today()` is time-dependent, and a new hourly AshOban scheduled action on
+  `FieldDefinition` (`:refresh_time_dependent`) re-derives and re-fires, on the
+  first tick after the site's midnight, the published records of every type
+  with one, as the `:computed_fields` system actor — writing only the records
+  whose value moved, versioned for the sync API, with no webhook, no
+  `updated_at` change and no lock bump for an open editor. The builder lists
+  `today()` under *Dates*, previews on today's date, and notes that the value
+  refreshes daily. No migration. See docs/extending-content.md, "Computed
+  fields".
+  ([#2009](https://github.com/The-Verscienta/kiln_cms/pull/2009))
+
 <a id="custom-filter-relationship-operators-has-has-all-has-none-count"></a>
 
 - **`custom_filter` filters through relationships: `has`, `has_all`, `has_none`
@@ -289,6 +311,26 @@ carries the reasoning.
   ([#1927](https://github.com/The-Verscienta/kiln_cms/issues/1927))
 
 ## Fixed
+
+<a id="automation-any-type-rules-ignore-release-published"></a>
+
+- **An automation rule for "any content type" no longer fires when a content
+  release is published; a rule scoped to `release` still does.** Automation
+  matched an event on its verb alone, so `release.published` counted as a
+  publish of a document of type `release`. Every "any content type, on
+  published" rule ran its reaction with a release where a document belonged:
+  an email or broadcast about a release, and reactions that look the document
+  up quietly did nothing. The documents in the release fire their own
+  `<type>.published` as before. `KilnCMS.Automation.trigger/1` now classifies
+  the event: a domain event (`WebhookEndpoint.domain_events/0`: releases,
+  experiments, forms, memberships, taxonomy) with a trigger verb matches only
+  rules scoped to its own namespace, as docs/content-releases.md promises.
+  The list holds exact event names, not namespaces, so a dynamic type named
+  `experiment` keeps all its rules. Until reserved names land (#1994), a
+  dynamic type named `release` is the one exception: its `release.published`
+  no longer reaches "any content type" rules. Tasks, the health sweep and
+  archived dynamic types are unchanged.
+  ([#1995](https://github.com/The-Verscienta/kiln_cms/issues/1995))
 
 <a id="variant-worker-backend-errors"></a>
 

@@ -58,6 +58,8 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   # Content experiments (#499). One event, on conclusion — an experiment that is
   # merely running has nothing a subscriber could act on.
   @experiment_events ~w(experiment.concluded)
+  # Admin-defined public forms (`KilnCMS.Forms`): a submission, not a document.
+  @form_events ~w(form.submitted)
   # Taxonomy (#1965): `<tag|tag_group|category>.<verb>`. The namespaces are
   # discovered (`KilnCMS.CMS.Taxonomy.event_types/0`), the verbs are these.
   # Opt-in like the domain events above: not in `default_events/1`.
@@ -100,6 +102,24 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   @spec taxonomy_events() :: [String.t()]
   def taxonomy_events do
     for type <- KilnCMS.CMS.Taxonomy.event_types(), verb <- @taxonomy_verbs, do: "#{type}.#{verb}"
+  end
+
+  @doc """
+  The events that are about something other than a document and are not
+  tasks: content releases, experiments, form submissions, memberships and
+  taxonomy. Exact names, not namespaces. Nothing yet stops a site from defining
+  a dynamic type called `experiment` (#1994), and that type's
+  `experiment.published` is a content event.
+
+  Automation reads this (#1995): `release.published` has a content verb, so
+  matched on its verb alone it counted as a publish of a document of "type"
+  `release`, and every "any content type" rule fired for it.
+  """
+  @spec domain_events() :: [String.t()]
+  def domain_events do
+    @release_events ++
+      @experiment_events ++
+      @form_events ++ KilnCMS.Billing.MembershipWebhooks.events() ++ taxonomy_events()
   end
 
   @doc """
@@ -176,7 +196,7 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
     content = for ct <- types, verb <- @verbs, do: "#{ct.type}.#{verb}"
 
     content ++
-      ["form.submitted"] ++
+      @form_events ++
       @task_events ++
       @release_events ++
       @experiment_events ++ KilnCMS.Billing.MembershipWebhooks.events() ++ taxonomy_events()
@@ -200,7 +220,7 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   def default_events(org \\ nil) do
     types = KilnCMS.CMS.ContentTypes.all_for_org(org)
     content = for ct <- types, verb <- @default_verbs, do: "#{ct.type}.#{verb}"
-    content ++ ["form.submitted"]
+    content ++ @form_events
   end
 
   # AshAdmin: keep system config out of the content groups (issue #25). The
