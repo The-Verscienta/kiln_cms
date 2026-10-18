@@ -31,7 +31,7 @@ carries the reasoning.
   on each connection". The schema export types the `"link"` object and lists
   the names as `x-kiln-link-fields`. A curated link's `metadata` stays a
   free map.
-  ([#PR](https://github.com/The-Verscienta/kiln_cms/pull/PR))
+  ([#2011](https://github.com/The-Verscienta/kiln_cms/pull/2011))
 
 <a id="custom-filter-relationship-operators-has-has-all-has-none-count"></a>
 
