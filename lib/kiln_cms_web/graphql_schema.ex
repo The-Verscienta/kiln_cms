@@ -14,6 +14,8 @@ defmodule KilnCMSWeb.GraphqlSchema do
     domains: Application.compile_env(:kiln_cms, :content_domains, [KilnCMS.CMS]),
     action_middleware: [KilnCMSWeb.GraphqlDefaultOffset]
 
+  require KilnCMSWeb.Graphql.ContentRecord.Notation
+
   # Query cost is bounded by the document pipeline both transports build
   # (`KilnCMSWeb.GraphqlLimits`: complexity, depth, token count), which also
   # refuses introspection in production. Relationship lists are priced by
@@ -21,6 +23,15 @@ defmodule KilnCMSWeb.GraphqlSchema do
   # block).
 
   import_types Absinthe.Plug.Types
+
+  # Typed nested reads through `:reference` fields (relationships plan, R7):
+  # every content object implements `ContentRecord` and gains `references` /
+  # `referencedBy`. See `KilnCMSWeb.Graphql.ContentRecord`.
+  import_types KilnCMSWeb.Graphql.ContentRecord
+
+  KilnCMSWeb.Graphql.ContentRecord.Notation.implement_content_record(
+    Application.compile_env(:kiln_cms, :content_domains, [KilnCMS.CMS])
+  )
 
   @desc "An index entry of the historical collection view (#338)."
   object :point_in_time_entry do
