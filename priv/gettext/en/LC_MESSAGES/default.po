@@ -1078,6 +1078,11 @@ msgstr ""
 msgid "A %{kind} you authored was returned to draft."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A %{type} can't be deleted for good while anything links to it."
+msgstr ""
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "A backup can't run on this deployment."
@@ -2642,6 +2647,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "At least 8 characters."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "At most"
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex
@@ -5448,6 +5458,11 @@ msgstr ""
 msgid "Deleted."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Deleting a %{type} for good removes it from the records linking to it."
+msgstr ""
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
@@ -5742,6 +5757,11 @@ msgstr ""
 msgid "Domains"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Don't allow it"
+msgstr ""
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Done selecting"
@@ -5934,6 +5954,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "EMBED_ORIGINS_LOCKED=true is set. Add the sites to EMBED_ORIGINS, or remove them from those lists, to make this go away."
 msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Each %{type} can be linked from at most 1 record."
+msgid_plural "Each %{type} can be linked from at most %{count} records."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
@@ -7329,6 +7356,11 @@ msgstr ""
 msgid "Full editor"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Full — %{count} of %{max} connected"
+msgstr ""
+
 #: lib/kiln_cms_web/live/funnel_live.ex
 #, elixir-autogen, elixir-format
 msgid "Funnel created — add its steps."
@@ -7814,6 +7846,16 @@ msgstr ""
 msgid "How many items"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "How many records can link to the same %{type}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "How many records can link to the same record"
+msgstr ""
+
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "How many words a text has."
@@ -8259,6 +8301,11 @@ msgstr ""
 msgid "It answers 404 until a contact is set below. Add at least one contact and an expiry date to publish it."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "It can go to the trash, but can't be deleted for good while anything still links to it."
+msgstr ""
+
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
 msgid "It is selected but reports its settings missing, so new uploads go to this server's storage. Images it already holds are still served from it. Its plugin's README lists the settings it needs."
@@ -8267,6 +8314,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format
 msgid "It is still served, but researchers are told to treat an expired file as stale. Set a new date and save."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "It is taken out of every record that links to it, and published ones are updated."
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex
@@ -8683,6 +8735,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "Leave it open"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Leave the link"
 msgstr ""
 
 #: lib/kiln_cms/blocks/newsletter_signup.ex
@@ -9442,6 +9499,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Moving a document saves straight away, without waiting for Save."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Moving a record to the trash never changes anything here — restoring it brings everything back. These only apply when it is deleted for good."
 msgstr ""
 
 #: lib/kiln_cms/cms/computed/recipes.ex
@@ -11504,6 +11566,11 @@ msgstr ""
 msgid "Permanently deleted %{count}, %{skipped} skipped"
 msgstr ""
 
+#: lib/kiln_cms_web/live/trash_live.ex
+#, elixir-autogen, elixir-format
+msgid "Permanently deleted %{count}, %{skipped} skipped. %{held} are still linked from other content through a field that doesn't allow deleting them — they stay in the trash."
+msgstr ""
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Permanently deleted %{name}."
@@ -12357,6 +12424,11 @@ msgstr ""
 msgid "Record consent"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Records keep pointing at it and show it as missing until someone edits them."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
 #, elixir-autogen, elixir-format
 msgid "Recovery code"
@@ -12683,6 +12755,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Remove image %{position}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove it from them"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -17753,6 +17830,7 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
+#: lib/kiln_cms_web/live/trash_live.ex
 #, elixir-autogen, elixir-format
 msgid "Untitled"
 msgstr ""
@@ -18022,6 +18100,11 @@ msgstr ""
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "Use this value"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Use this when what you link to is scarce — a seat, a slot, a featured place. Once a record is full, editors see it as full in the picker. Lowering the number later never removes links that already exist."
 msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex
@@ -18425,6 +18508,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
 msgid "When %{subject} %{event}, %{reaction}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "When a linked %{type} is deleted for good…"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "When a linked record is deleted for good…"
 msgstr ""
 
 #: lib/kiln_cms_web/live/locale_settings_live.ex
@@ -20614,6 +20707,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "“%{name}” is used by %{count} item(s). Delete it anyway? The links will be removed."
 msgstr ""
+
+#: lib/kiln_cms_web/live/trash_live.ex
+#, elixir-autogen, elixir-format
+msgid "“%{title}” can't be deleted for good: 1 record still links to it through “%{field}”, which doesn't allow that. Remove the link first, or change the field's setting under Fields."
+msgid_plural "“%{title}” can't be deleted for good: %{count} records still link to it through “%{field}”, which doesn't allow that. Remove the links first, or change the field's setting under Fields."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format

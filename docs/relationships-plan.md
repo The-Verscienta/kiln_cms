@@ -166,6 +166,25 @@ Each is one issue and, unless noted, one PR. Order is §5.
 
 ### R1b — Limits on the target side
 
+**Built** in the R1b/R5 PR. What it settled beyond the bullets below:
+
+- **The count is read under the lock, from the edges.** `ContentLinks.reconcile/1`
+  works out the targets the write adds, takes `pg_advisory_xact_lock` on
+  `kiln:reference_cap:<org>:<source type>:<field>:<target>` for each, sorted
+  by target id, then reads the other sources' edges through the new
+  `ContentLink` `:references_to` read (`authorize_with: :error`, so a refused
+  read fails the write instead of passing the cap). A field is identified by
+  its source type as well as its name, since two types may each have a field
+  called `authors`.
+- **The message counts what is there**, which after a tightened cap may be
+  above the cap ("4 of 3").
+- **The picker counts as the editor**, in one read for the page of results,
+  and leaves the record being edited out, so a record that already holds a
+  slot does not see its own target as full.
+- **The race test runs outside the sandbox** (`ReferenceCapRaceTest`): in the
+  sandbox every test shares one connection, where an advisory lock never
+  waits.
+
 R1's `min_items` / `max_items` bound how many records one *source* connects
 to. Toolset also bounds the other end of a many-to-many ("a Book has up to 5
 Authors; an Author is on at most 3 Books"), and editors ask for it when a
@@ -290,6 +309,32 @@ target is a scarce thing — a slot, a seat, a featured position.
 - Separate PR.
 
 ### R5 — On-delete rule per field
+
+**Built** in the R1b/R5 PR. What it settled beyond the bullets below:
+
+- **A change on `:purge`** (`Changes.ApplyTargetDeleteRules`): the
+  `:restrict` check runs before the delete, as a
+  `KilnCMS.CMS.Errors.TargetStillConnected` naming the field's label and how
+  many records connect (not which); the `:clear` writes run after it, in the
+  same transaction, so a referrer that cannot be cleared fails the purge.
+  Each field's rule is looked up from the edge's `source_type` and `field`; a
+  type deleted since keeps the default.
+- **The write per referrer is an internal action**, `:clear_reference_target`
+  on every content resource, admitted to the `:cms_bookkeeping` system actor
+  by name. The target rides in the changeset context, as
+  `:sync_shared_fields`'s values do, so no API can reach it. It is versioned,
+  takes the optimistic lock, re-fires and announces a published referrer, and
+  goes through `SyncReferenceLinks` like any write, so the edges, their link
+  data and the re-fire edges follow the value. Referrers are read with
+  `authorize?: false` (the purge is already authorized; the system actor would
+  read only published content), trashed ones included.
+- **A held working copy loses the target too**, and its recorded base moves
+  with the live value, so *Publish changes* neither brings it back nor reports
+  a conflict.
+- **A reference only in a working copy has no edge** and is not found; its
+  *Publish changes* is then refused by the usual "not found" check.
+- The trash names the field and the count when a purge is refused, and
+  "Empty trash" reports the records it kept.
 
 - New option `on_target_delete`: `:keep` (today's behaviour, default),
   `:clear` (purging a target removes it from every referrer's value, as a

@@ -127,6 +127,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       |> assign(assigns)
       |> assign_new(:locked, fn -> false end)
       |> assign_new(:row_extra, fn -> [] end)
+      |> assign_new(:source, fn -> nil end)
       |> assign_new(:link_name, fn -> link_name(assigns.name) end)
       |> assign(:link_fields, FieldDefinition.link_fields(assigns.definition))
       |> assign(:links, ReferenceValues.links(assigns.value, assigns.definition))
@@ -206,6 +207,11 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         {:noreply, socket}
 
       _offered when not socket.assigns.searchable? ->
+        {:noreply, socket}
+
+      # A target the field's `max_sources` says is full (R1b) is listed, not
+      # pickable: the save would be refused.
+      %{full?: true} ->
         {:noreply, socket}
 
       result ->
@@ -404,7 +410,12 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       cts ->
         rows = search_rows(socket, cts, query, exclude, offset)
         {page, rest} = Enum.split(rows, @page_size)
-        page = Enum.map(page, fn {record, ct} -> to_item(record, ct, definition) end)
+
+        page =
+          page
+          |> Enum.map(fn {record, ct} -> to_item(record, ct, definition) end)
+          |> with_capacity(socket)
+
         results = if offset == 0, do: page, else: socket.assigns.results ++ page
 
         socket
@@ -544,12 +555,50 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
           do: ReferenceValues.token(type, record.id),
           else: record.id
         ),
+      record_id: record.id,
       title: record.title,
       state: record.state,
       type: ct.type,
       type_label: ct.label,
       href: ~p"/editor/content/#{type}/#{record.id}"
     }
+  end
+
+  # Each result's connection count through this field when it has a
+  # `max_sources` (R1b), so a full target is listed but disabled — "Full —
+  # 3 of 3 connected" — instead of missing or refused on save. The record
+  # being edited is left out of the count: connecting it to a target it
+  # already holds is not an add. Counted from the edges, in one read, as the
+  # editor (who sees every edge of the site).
+  defp with_capacity(items, socket) do
+    %{definition: definition, source: source, actor: actor, tenant: tenant} = socket.assigns
+
+    case definition do
+      %{max_sources: max} when is_integer(max) and items != [] ->
+        counts = connection_counts(items, definition, source, actor, tenant)
+
+        Enum.map(items, fn item ->
+          count = Map.get(counts, item.record_id, 0)
+          Map.merge(item, %{connected: count, full?: count >= max})
+        end)
+
+      _uncapped ->
+        items
+    end
+  end
+
+  defp connection_counts(items, definition, source, actor, tenant) do
+    ids = Enum.map(items, & &1.record_id)
+    {source_id, source_type} = if source, do: {source.id, source.type}, else: {nil, nil}
+
+    filter =
+      [kind: :reference, field: definition.name, target_id: [in: ids]] ++
+        if(source_type, do: [source_type: source_type], else: [])
+
+    [actor: actor, tenant: tenant, query: [filter: filter, select: [:id, :source_id, :target_id]]]
+    |> CMS.list_content_links!()
+    |> Enum.reject(&(&1.source_id == source_id))
+    |> Enum.frequencies_by(& &1.target_id)
   end
 
   defp items(%{ids: ids, known: known, value: value, definition: definition}) do
@@ -706,13 +755,30 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
             id={"#{@root}-opt-#{String.replace(result.id, ":", "-")}"}
             role="option"
             aria-selected="false"
+            aria-disabled={to_string(Map.get(result, :full?, false))}
             data-ref-option
-            phx-click="ref_pick"
+            phx-click={!Map.get(result, :full?) && "ref_pick"}
             phx-value-id={result.id}
             phx-target={@myself}
-            class="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-base-200 aria-selected:bg-primary/10"
+            class={[
+              "flex items-center gap-2 px-3 py-1.5 text-sm transition-colors",
+              if(Map.get(result, :full?),
+                do: "cursor-not-allowed text-base-content/50",
+                else: "cursor-pointer hover:bg-base-200 aria-selected:bg-primary/10"
+              )
+            ]}
           >
             <span class="min-w-0 flex-1 truncate">{result.title || gettext("Untitled")}</span>
+            <span
+              :if={Map.get(result, :full?)}
+              id={"#{@root}-opt-#{String.replace(result.id, ":", "-")}-full"}
+              class="shrink-0 rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
+            >
+              {gettext("Full — %{count} of %{max} connected",
+                count: result.connected,
+                max: @definition.max_sources
+              )}
+            </span>
             <span class="shrink-0 text-xs text-base-content/60">{result.type_label}</span>
             <.state_badge state={result.state} class="shrink-0" />
           </li>

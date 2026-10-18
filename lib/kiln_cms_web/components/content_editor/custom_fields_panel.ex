@@ -31,6 +31,9 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
   attr :actor, :any, required: true
   attr :tenant, :any, required: true
   attr :broken_references, :list, required: true
+  # The record being edited, so a reference's picker can leave its own
+  # connections out of a target's `max_sources` count (R1b).
+  attr :record_id, :string, default: nil
 
   def custom_fields_panel(assigns) do
     ~H"""
@@ -78,6 +81,7 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
             locked={Localization.locked?(@localization, {:custom, definition.name})}
             actor={@actor}
             tenant={@tenant}
+            source={%{id: @record_id, type: to_string(@kind)}}
           />
           <.custom_field_input
             :if={definition.field_type != :reference}

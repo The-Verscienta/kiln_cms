@@ -1258,6 +1258,150 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     """
   end
 
+  attr :form, :any, required: true
+  attr :id, :string, required: true
+  # `{label, name}` pairs, to name a reference's target type in the wording.
+  attr :target_types, :list, default: []
+
+  # A reference's two rules about its *targets* (R1b, R5), asked from the
+  # other side in plain words: how many records may connect to one target,
+  # and what deleting a target for good does to the records connected to it.
+  defp target_rules_field(assigns) do
+    assigns =
+      assigns
+      |> assign(:reference?, list_type(assigns.form) == :reference)
+      |> assign(:target, target_label(assigns.form, assigns.target_types))
+      |> assign(:rule, to_string(assigns.form[:on_target_delete].value || "keep"))
+
+    ~H"""
+    <div :if={@reference?} id={@id} class="space-y-3 sm:col-span-2">
+      <fieldset class="rounded-lg border border-base-content/10 bg-base-200/40 p-3">
+        <legend class="px-1 text-sm font-medium">
+          {sources_legend(@target)}
+          <span class="font-normal text-base-content/60">{gettext("(optional)")}</span>
+        </legend>
+        <div class="max-w-xs">
+          <.input
+            field={@form[:max_sources]}
+            type="number"
+            min="1"
+            step="1"
+            inputmode="numeric"
+            label={gettext("At most")}
+            placeholder={gettext("No limit")}
+          />
+        </div>
+        <p class="mt-2 text-xs text-base-content/60">
+          {gettext(
+            "Use this when what you link to is scarce — a seat, a slot, a featured place. Once a record is full, editors see it as full in the picker. Lowering the number later never removes links that already exist."
+          )}
+        </p>
+      </fieldset>
+      <fieldset>
+        <legend class="mb-1 block text-sm font-medium">{delete_legend(@target)}</legend>
+        <div class="grid gap-2 sm:grid-cols-3">
+          <label
+            :for={{value, title, hint, icon} <- delete_choices()}
+            for={"#{@id}-delete-#{value}"}
+            class={[
+              "flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors",
+              if(@rule == value,
+                do: "border-primary bg-primary/5",
+                else: "border-base-content/15 hover:border-base-content/30"
+              )
+            ]}
+          >
+            <input
+              type="radio"
+              id={"#{@id}-delete-#{value}"}
+              name={@form[:on_target_delete].name}
+              value={value}
+              checked={@rule == value}
+              class="mt-0.5 size-4 accent-primary"
+            />
+            <span class="min-w-0">
+              <span class="flex items-center gap-1.5 text-sm font-medium">
+                <.icon name={icon} class="size-4 text-base-content/60" />
+                {title}
+              </span>
+              <span class="mt-0.5 block text-xs text-base-content/60">{hint}</span>
+            </span>
+          </label>
+        </div>
+        <p class="mt-1 text-xs text-base-content/60">
+          {gettext(
+            "Moving a record to the trash never changes anything here — restoring it brings everything back. These only apply when it is deleted for good."
+          )}
+        </p>
+      </fieldset>
+    </div>
+    """
+  end
+
+  defp sources_legend(target) when is_binary(target),
+    do: gettext("How many records can link to the same %{type}", type: target)
+
+  defp sources_legend(_target), do: gettext("How many records can link to the same record")
+
+  defp delete_legend(target) when is_binary(target),
+    do: gettext("When a linked %{type} is deleted for good…", type: target)
+
+  defp delete_legend(_target), do: gettext("When a linked record is deleted for good…")
+
+  defp delete_choices do
+    [
+      {"keep", gettext("Leave the link"),
+       gettext("Records keep pointing at it and show it as missing until someone edits them."),
+       "hero-link"},
+      {"clear", gettext("Remove it from them"),
+       gettext(
+         "It is taken out of every record that links to it, and published ones are updated."
+       ), "hero-scissors"},
+      {"restrict", gettext("Don't allow it"),
+       gettext(
+         "It can go to the trash, but can't be deleted for good while anything still links to it."
+       ), "hero-lock-closed"}
+    ]
+  end
+
+  # The target-side rules in the list, after the summary: a cap and a
+  # non-default delete rule, in the same voice.
+  defp target_rules_summary(definition, target_types) do
+    target =
+      definition
+      |> FieldDefinition.reference_targets()
+      |> Enum.map(&type_label_for(target_types, &1))
+      |> types_phrase() || gettext("record")
+
+    cap =
+      if is_integer(definition.max_sources),
+        do:
+          ngettext(
+            "Each %{type} can be linked from at most 1 record.",
+            "Each %{type} can be linked from at most %{count} records.",
+            definition.max_sources,
+            type: target
+          )
+
+    rule =
+      case definition.on_target_delete do
+        :clear ->
+          gettext("Deleting a %{type} for good removes it from the records linking to it.",
+            type: target
+          )
+
+        :restrict ->
+          gettext("A %{type} can't be deleted for good while anything links to it.",
+            type: target
+          )
+
+        _keep ->
+          nil
+      end
+
+    [cap, rule] |> Enum.reject(&is_nil/1) |> Enum.join(" ")
+  end
+
   # One plain line under a reference field in the list: what it links to, and
   # how many — so an admin can scan the fields without opening each one.
   defp reference_summary(definition, target_types) do
@@ -1567,6 +1711,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               id="new-field"
             />
             <.multiple_field form={@form} id="new-field-multiple" target_types={@target_types} />
+            <.target_rules_field form={@form} id="new-field-rules" target_types={@target_types} />
             <.input field={@form[:help_text]} label={gettext("Help text")} />
             <.localization_input field={@form[:localization]} />
             <.options_field form={@form} id="new-field-options" />
@@ -1701,6 +1846,16 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     >
                       {reference_summary(definition, @target_types)}
                     </p>
+                    <p
+                      :if={
+                        definition.field_type == :reference and
+                          target_rules_summary(definition, @target_types) != ""
+                      }
+                      id={"field-#{definition.id}-rules"}
+                      class="text-xs text-base-content/60"
+                    >
+                      {target_rules_summary(definition, @target_types)}
+                    </p>
                     <p :if={definition.compute} class="text-xs text-base-content/60">
                       {gettext("Formula")}: <code>{definition.compute}</code>
                     </p>
@@ -1792,6 +1947,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     form={@edit.form}
                     id={"edit-field-multiple-#{@edit.id}"}
                     stored={definition}
+                    target_types={@target_types}
+                  />
+                  <.target_rules_field
+                    form={@edit.form}
+                    id={"edit-field-rules-#{@edit.id}"}
                     target_types={@target_types}
                   />
                   <.input field={@edit.form[:help_text]} label={gettext("Help text")} />

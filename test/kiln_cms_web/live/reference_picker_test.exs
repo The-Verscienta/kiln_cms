@@ -665,4 +665,50 @@ defmodule KilnCMSWeb.ReferencePickerTest do
       assert has_element?(lv, "#cf-ref-mixed-post-#{ctx.other_post.id}", "Post")
     end
   end
+
+  # R1b: a target whose field caps how many records may link to it is listed
+  # but disabled once full, so the editor sees why it can't be picked.
+  test "a full target is listed as full and can't be picked", %{
+    conn: conn,
+    admin: admin,
+    word: word
+  } do
+    CMS.create_field_definition!(
+      %{
+        content_type: :post,
+        name: "seat",
+        label: "Seat",
+        field_type: :reference,
+        target_type: "page",
+        max_sources: 1
+      },
+      actor: admin
+    )
+
+    full = page!("#{word} Delta", admin, publish: true)
+    free = page!("#{word} Echo", admin, publish: true)
+
+    holder =
+      CMS.create_post!(
+        %{title: "Holder", slug: "rp-#{uniq()}", custom_fields: %{"seat" => full.id}},
+        actor: admin
+      )
+
+    post = CMS.create_post!(%{title: "Seeker", slug: "rp-#{uniq()}"}, actor: admin)
+    lv = open_editor(conn, admin, post)
+
+    html = search(lv, "seat", word)
+    assert html =~ "Full — 1 of 1 connected"
+    assert has_element?(lv, "#custom-field-seat-opt-#{full.id}[aria-disabled=true]")
+    assert has_element?(lv, "#custom-field-seat-opt-#{free.id}[aria-disabled=false]")
+
+    # A hand-sent pick of the full one changes nothing.
+    lv |> with_target("#custom-field-seat") |> render_click("ref_pick", %{"id" => full.id})
+    refute has_element?(lv, "#custom-field-seat input[type=hidden][value='#{full.id}']")
+
+    # The record that holds the slot doesn't see its own target as full.
+    lv = open_editor(conn, admin, holder)
+    lv |> element("#custom-field-seat button[phx-click=ref_remove]") |> render_click()
+    refute search(lv, "seat", word) =~ "Full — 1 of 1 connected"
+  end
 end

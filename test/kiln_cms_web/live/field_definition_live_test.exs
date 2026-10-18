@@ -233,6 +233,73 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     assert html =~ "Saving keeps only the first item of each list"
   end
 
+  # R1b and R5: a reference's rules about its targets, asked from the other
+  # side in plain words.
+  test "an admin caps how many records may link to one target, and picks a delete rule", %{
+    conn: conn
+  } do
+    admin = authed_user(:admin)
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+    refute has_element?(lv, "#new-field-rules")
+    lv |> form("#new-field-form", field_definition: %{field_type: "reference"}) |> render_change()
+
+    html =
+      lv
+      |> form("#new-field-form",
+        field_definition: %{field_type: "reference", target_types: ["page"]}
+      )
+      |> render_change()
+
+    assert has_element?(lv, "#new-field-rules")
+    assert html =~ "How many records can link to the same Page"
+    assert html =~ "When a linked Page is deleted for good…"
+    assert has_element?(lv, "#new-field-rules-delete-keep[checked]")
+
+    name = "seat_#{System.unique_integer([:positive])}"
+
+    lv
+    |> form("#new-field-form",
+      field_definition: %{
+        scopes: ["post"],
+        name: name,
+        label: "Seat",
+        field_type: "reference",
+        target_types: ["page"],
+        max_sources: "3",
+        on_target_delete: "restrict"
+      }
+    )
+    |> render_submit()
+
+    field =
+      :post
+      |> CMS.field_definitions_for!(authorize?: false)
+      |> Enum.find(&(&1.name == name))
+
+    assert {field.max_sources, field.on_target_delete} == {3, :restrict}
+
+    summary = lv |> element("#field-#{field.id}-rules") |> render()
+    assert summary =~ "Each Page can be linked from at most 3 records."
+    assert summary =~ "A Page can&#39;t be deleted for good while anything links to it."
+
+    # A blank cap clears it; the rule changes to clear.
+    lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+    assert has_element?(lv, "#edit-field-rules-#{field.id}-delete-restrict[checked]")
+
+    lv
+    |> form("#edit-field-#{field.id}",
+      field_definition: %{max_sources: "", on_target_delete: "clear"}
+    )
+    |> render_submit()
+
+    field = CMS.get_field_definition!(field.id, authorize?: false)
+    assert {field.max_sources, field.on_target_delete} == {nil, :clear}
+
+    assert lv |> element("#field-#{field.id}-rules") |> render() =~
+             "Deleting a Page for good removes it from the records linking to it."
+  end
+
   # R2: ticking several types stores `target_types`; ticking one keeps the
   # documented single `target_type`.
   test "an admin lets a reference field link to several types", %{conn: conn} do

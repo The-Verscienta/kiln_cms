@@ -82,4 +82,52 @@ defmodule KilnCMSWeb.TrashLiveTest do
 
     refute artifacts == [], "restored from the trash UI with no artifacts"
   end
+
+  # R5: a field set to "Don't allow it" keeps a linked record from being
+  # deleted for good, and the trash says why in plain words.
+  test "a purge refused by a reference field's delete rule is explained", %{conn: conn} do
+    actor = authed_admin()
+    name = "lead_#{System.unique_integer([:positive])}"
+
+    CMS.create_field_definition!(
+      %{
+        content_type: :post,
+        name: name,
+        label: "Lead story",
+        field_type: :reference,
+        target_type: "page",
+        on_target_delete: :restrict
+      },
+      actor: actor
+    )
+
+    page =
+      CMS.create_page!(
+        %{title: "Linked page", slug: "trash-#{System.unique_integer([:positive])}"},
+        actor: actor
+      )
+
+    CMS.create_post!(
+      %{
+        title: "Referrer",
+        slug: "trash-#{System.unique_integer([:positive])}",
+        custom_fields: %{name => page.id}
+      },
+      actor: actor
+    )
+
+    CMS.destroy_page!(page, actor: actor)
+
+    {:ok, lv, _html} = conn |> log_in(actor) |> live(~p"/editor/trash")
+
+    html =
+      lv
+      |> element(~s(button[phx-click="purge"][phx-value-id="#{page.id}"]))
+      |> render_click()
+
+    assert html =~
+             "“Linked page” can&#39;t be deleted for good: 1 record still links to it through “Lead story”"
+
+    assert CMS.list_trashed_pages!(actor: actor) |> Enum.any?(&(&1.id == page.id))
+  end
 end

@@ -86,23 +86,29 @@ defmodule KilnCMS.CMS.ContentLinks.TargetDelete do
   @spec drop_target(map() | nil, [String.t()], Ash.UUID.t()) :: map() | nil
   def drop_target(custom_fields, fields, target_id) when is_map(custom_fields) do
     Enum.reduce(fields, custom_fields, fn field, acc ->
-      case Map.fetch(acc, field) do
-        {:ok, %{"id" => ^target_id}} ->
-          Map.delete(acc, field)
-
-        {:ok, items} when is_list(items) ->
-          case Enum.reject(items, &match?(%{"id" => ^target_id}, &1)) do
-            [] -> Map.delete(acc, field)
-            kept -> Map.put(acc, field, kept)
-          end
-
-        _absent_or_other ->
-          acc
+      case without(Map.get(acc, field), target_id) do
+        :unchanged -> acc
+        nil -> Map.delete(acc, field)
+        kept -> Map.put(acc, field, kept)
       end
     end)
   end
 
   def drop_target(custom_fields, _fields, _target_id), do: custom_fields
+
+  # A value without the target: `nil` once nothing is left, `:unchanged`
+  # when it never held it.
+  defp without(%{"id" => target_id}, target_id), do: nil
+
+  defp without(items, target_id) when is_list(items) do
+    case Enum.reject(items, &match?(%{"id" => ^target_id}, &1)) do
+      ^items -> :unchanged
+      [] -> nil
+      kept -> kept
+    end
+  end
+
+  defp without(_absent_or_other, _target_id), do: :unchanged
 
   # Inbound reference edges (other records' only — a self-reference goes with
   # the record's own outgoing edges), grouped by the field they come through,
@@ -152,10 +158,8 @@ defmodule KilnCMS.CMS.ContentLinks.TargetDelete do
 
   defp definitions_for(_untyped, _org_id), do: []
 
-  # The referrer is read with `authorize?: false`, live or trashed: the purge
-  # it follows from is already authorized, and the system actor reads content
-  # only as an anonymous visitor would — a draft referrer would look absent
-  # and keep pointing at the purged record. The write is the bookkeeping's.
+  # The referrer is read live or trashed (see `referrer/3`); the write is the
+  # bookkeeping's.
   defp clear_one(source_type, source_id, fields, target) do
     case referrer(source_type, source_id, target.org_id) do
       nil ->
@@ -177,6 +181,9 @@ defmodule KilnCMS.CMS.ContentLinks.TargetDelete do
   end
 
   defp referrer(source_type, source_id, org_id) do
+    # authorize?: false — the purge this follows is already authorized, and
+    # the system actor reads only published content, so a draft referrer
+    # would look absent and keep pointing at the purged record.
     opts = [authorize?: false, tenant: org_id]
 
     case ContentTypes.get_record(source_type, source_id, opts) do

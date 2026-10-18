@@ -7031,6 +7031,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               actor={@actor}
               tenant={@current_org}
               broken_references={@broken_references}
+              record_id={@record.id}
             />
           </div>
 
