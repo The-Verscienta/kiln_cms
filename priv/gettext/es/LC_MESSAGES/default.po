@@ -1685,6 +1685,11 @@ msgstr "Añadir un bloque (cuando no estás escribiendo en un campo)"
 msgid "Add a block here"
 msgstr "Añadir un bloque aquí"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add a detail"
+msgstr "Añadir un detalle"
+
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add a domain"
@@ -4579,6 +4584,11 @@ msgstr "No se pudo guardar ese elemento."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
+msgid "Couldn't save the new order of details."
+msgstr "No se pudo guardar el nuevo orden de los detalles."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
 msgid "Couldn't save the new order of fields."
 msgstr "No se pudo guardar el nuevo orden de los campos."
 
@@ -5195,6 +5205,11 @@ msgstr "¿Eliminar %{name}? La usan %{count} documento(s) publicado(s)."
 msgid "Delete account…"
 msgstr "Eliminar la cuenta…"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Delete detail %{label}"
+msgstr "Eliminar el detalle %{label}"
+
 #: lib/kiln_cms_web/live/trash_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delete everything"
@@ -5275,6 +5290,11 @@ msgstr "¿Eliminar la vista «%{name}»? El contenido que muestra no se toca."
 #, elixir-autogen, elixir-format
 msgid "Delete this block? This can't be undone."
 msgstr "¿Eliminar este bloque? Esta acción no se puede deshacer."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Delete this detail? Its value is removed from every connection."
+msgstr "¿Eliminar este detalle? Su valor se quita de cada conexión."
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
@@ -5495,6 +5515,16 @@ msgstr "Descripción"
 #, elixir-autogen, elixir-format
 msgid "Detached items"
 msgstr "Elementos desconectados"
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Details for %{title}"
+msgstr "Detalles de %{title}"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Details on each connection"
+msgstr "Detalles de cada conexión"
 
 #: lib/kiln_cms_web/controllers/page_controller.ex
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
@@ -8417,6 +8447,11 @@ msgid "Kind"
 msgstr "Tipo"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Kind of value"
+msgstr "Tipo de valor"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
@@ -9891,6 +9926,11 @@ msgstr "Aún no hay entregas."
 #, elixir-autogen, elixir-format
 msgid "No description — search engines will write their own."
 msgstr "Sin descripción — los buscadores escribirán la suya."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "No details yet."
+msgstr "Todavía no hay detalles."
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
@@ -12086,6 +12126,11 @@ msgstr "Añade un seguimiento a la lista de tareas del autor."
 msgid "Q&A list, published with question-and-answer structured data"
 msgstr "Lista de preguntas y respuestas, publicada con datos estructurados de preguntas frecuentes"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Quantity"
+msgstr "Cantidad"
+
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "Question"
@@ -12945,6 +12990,11 @@ msgstr "Obligatorio"
 msgid "Required disclaimer"
 msgstr "Aviso legal obligatorio"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Required on every connection"
+msgstr "Obligatorio en cada conexión"
+
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format
 msgid "Required with a contact. Researchers treat the file as stale after this date; the RFC recommends less than a year ahead."
@@ -13455,6 +13505,11 @@ msgstr "Guardar las audiencias"
 #, elixir-autogen, elixir-format
 msgid "Save branding"
 msgstr "Guardar personalización de marca"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Save detail"
+msgstr "Guardar detalle"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -18277,6 +18332,11 @@ msgstr "A qué recurre una traducción que falta."
 msgid "What a reader gets when the translation they asked for has not been published — on this site's pages, its API and its menus."
 msgstr "Lo que recibe un lector cuando la traducción que pidió no se ha publicado — en las páginas de este sitio, su API y sus menús."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "What an editor fills in for every %{type} this field connects — a quantity, a role, a note. It belongs to the connection, not to either record."
+msgstr "Lo que un editor rellena para cada %{type} que conecta este campo: una cantidad, un rol, una nota. Pertenece a la conexión, no a ninguno de los dos registros."
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "What it adds"
@@ -20025,6 +20085,11 @@ msgstr "legible"
 #, elixir-autogen, elixir-format
 msgid "rebuild the page and its search entry"
 msgstr "reconstruir la página y su entrada de búsqueda"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "record"
+msgstr "registro"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format

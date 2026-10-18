@@ -212,6 +212,27 @@ target is a scarce thing — a slot, a seat, a featured position.
 
 ### R3 — Typed link data ("link fields")
 
+**Built** in the R3 PR. What it settled beyond the bullets below:
+
+- **Plain types only.** A link field is one of `:string`, `:text`,
+  `:integer`, `:float`, `:boolean`, `:date`, `:datetime`, `:url`, `:select`
+  (`FieldDefinition.link_field_types/0`). They render as one input on a
+  connection's row and filter as one jsonb value on the edge. A media
+  snapshot, a formula over the document, a composite plugin type — and a
+  reference, which would nest link data in link data — have neither.
+- **Merges per connection.** An item that leaves out a link value keeps the
+  one its connection stored, as a top-level key does on a record; a new
+  connection falls to the defaults. A bare id for a record already in the
+  list keeps its link values.
+- **No empty map.** A connection with no link value stores no `"link"` key
+  (its edge's `metadata` is `%{}`), so a field without link fields stores
+  exactly the R1/R2 shape.
+- **The editor posts link values beside the ids**, as
+  `_kiln_ref_link[<field>][<row key>][<link field>]`, and
+  `ReferenceValues.normalize/2` folds them into the items before the form
+  sees them. The record-level options (`searchable`, `names_record`,
+  `localization`) clear on a link field.
+
 - A `:reference` definition may declare **link fields**: `FieldDefinition` rows
   whose owner is the relationship (new nullable `link_of_id` → the parent
   definition) instead of a content type. Same field types, same
@@ -225,8 +246,10 @@ target is a scarce thing — a slot, a seat, a featured position.
   delivery still reads link data from `custom_fields` in one request.
 - `ContentLink.metadata` stays a free map for curated and code-created links
   with no declared fields, so nothing that writes it today breaks.
-- Filtering on link fields comes with R6 (`custom_filter` on
+- Filtering on link fields joins R6's operators (`custom_filter` on
   `field.link.quantity`), backed by the edge table, not the jsonb snapshot.
+  A record matches when some connection's value matches, under R6's
+  both-ends read gate.
 
 ### R4 — Reverse fields (read)
 
@@ -265,7 +288,7 @@ target is a scarce thing — a slot, a seat, a featured position.
 
 ### R6 — Filter through relationships
 
-**Built** in [#2003](https://github.com/The-Verscienta/kiln_cms/pull/2003), except link-field filters, which wait for R3.
+**Built** in [#2003](https://github.com/The-Verscienta/kiln_cms/pull/2003); link-field filters came with R3.
 
 - `custom_filter` on a reference field gains `has` (any of), `has_all`,
   `has_none`, and `count` (with `eq`/`gt`/`gte`/`lt`/`lte`), compiled to
@@ -281,7 +304,7 @@ target is a scarce thing — a slot, a seat, a featured position.
   the reference operators. A custom field that is itself named `tags` keeps
   the name. The derived `filter[tags][id][in]` (any of) still works.
 - Link-field filters from R3: `custom_filter[ingredients.link.role]=main`.
-  Not built; they come with R3.
+  Built with R3.
 - Read-side authz: every edge condition carries `exists(<target resource>,
   id == parent(target_id) and <reader's read filter>)`, the filter being the
   one `Ash.can/3` derives from the target's own read policy for that actor.

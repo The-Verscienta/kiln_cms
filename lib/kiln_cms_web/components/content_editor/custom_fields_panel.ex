@@ -72,6 +72,7 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
             id={"reference-picker-#{definition.name}"}
             definition={definition}
             name={"#{@form.name}[custom_fields][#{definition.name}]"}
+            link_name={"#{@form.name}[_kiln_ref_link][#{definition.name}]"}
             value={custom_field_value(@form, definition.name)}
             errors={custom_field_errors(@form, definition.name)}
             locked={Localization.locked?(@localization, {:custom, definition.name})}

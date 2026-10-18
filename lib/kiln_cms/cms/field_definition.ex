@@ -12,12 +12,22 @@ defmodule KilnCMS.CMS.FieldDefinition do
   content editor renders an input per definition, so editors add structured
   fields without a code change or migration.
 
-  A definition is scoped to **exactly one** of two owners (D17):
+  A definition is scoped to **exactly one** of three owners (D17, R3):
 
     * `content_type` — a compiled content type's atom (`:page`), the original
-      D4 scope; or
+      D4 scope;
     * `type_definition_id` — an admin-defined dynamic type
-      (`KilnCMS.CMS.TypeDefinition`), whose entire schema is these rows.
+      (`KilnCMS.CMS.TypeDefinition`), whose entire schema is these rows; or
+    * `link_of_id` — a `:reference` definition, which makes the row a **link
+      field**: data about each connection the reference makes ("Quantity" on
+      the link from a recipe to an ingredient), stored in the snapshot's
+      `"link"` map and on the edge's `metadata` (R3 in
+      `docs/relationships-plan.md`). A link field is coerced by the same
+      `ApplyCustomFields` rules as any other field, but only the plain types
+      in `link_field_types/0`, and it cannot own link fields itself — nesting
+      stops at one level. It is never a field of a content type: `for_type`
+      and `for_definition` do not list it, they load it into its parent's
+      `link_fields`.
 
   This deliberately does *not* replace hand-declared attributes: core, queryable,
   or strongly-typed fields still belong in the resource. It covers the long tail
@@ -47,6 +57,32 @@ defmodule KilnCMS.CMS.FieldDefinition do
   """
   @spec field_types() :: [atom()]
   def field_types, do: KilnCMS.CMS.FieldTypes.names()
+
+  @link_field_types [:string, :text, :integer, :float, :boolean, :date, :datetime, :url, :select]
+
+  @doc """
+  The field types a link field (`link_of_id`, R3) may have: the plain, scalar
+  ones. They render as one input on a connection's row in the editor and
+  filter as one jsonb value on the edge (`custom_filter[field.link.name]`).
+  A media snapshot, a reference (which would nest link data in link data), a
+  formula over the document or a composite plugin type has neither.
+  """
+  @spec link_field_types() :: [atom()]
+  def link_field_types, do: @link_field_types
+
+  @doc """
+  The link fields a definition declares (R3): its loaded `link_fields`, or
+  `[]` for a definition that is not a `:reference`. `for_type` and
+  `for_definition` load them; reading them off a definition that was read
+  another way raises rather than answering "none", because "none" would
+  silently drop every link value a write carries.
+  """
+  @spec link_fields(t() | map()) :: [t()]
+  def link_fields(%{field_type: :reference, link_fields: %Ash.NotLoaded{}} = definition),
+    do: raise(ArgumentError, "link_fields not loaded on field #{inspect(definition.name)}")
+
+  def link_fields(%{field_type: :reference, link_fields: fields}) when is_list(fields), do: fields
+  def link_fields(_definition), do: []
 
   @doc """
   The machine name a field's label suggests: lowercase ASCII letters, digits
@@ -144,6 +180,13 @@ defmodule KilnCMS.CMS.FieldDefinition do
   postgres do
     table "field_definitions"
     repo KilnCMS.Repo
+
+    references do
+      # Deleting a reference field deletes its link fields; their values went
+      # with the parent's key (`Changes.SyncFieldValues`).
+      # No index of its own: `unique_link_field` leads with (org_id, link_of_id).
+      reference :link_of, on_delete: :delete
+    end
   end
 
   actions do
@@ -160,6 +203,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
     default_accept [
       :content_type,
       :type_definition_id,
+      :link_of_id,
       :name,
       :label,
       :field_type,
@@ -190,10 +234,14 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # All custom-field definitions for one content type, in editor display order.
     # Used by the editor (to render inputs) and the content write change (to
     # coerce/validate values) — both call it with `authorize?: false`.
+    #
+    # Each `:reference` definition comes with its link fields (R3) loaded, so
+    # every reader of a type's schema — coercion, edges, filters, the editor,
+    # the schema export — sees the connection data it declares.
     read :for_type do
       argument :content_type, :atom, allow_nil?: false
       filter expr(content_type == ^arg(:content_type))
-      prepare build(sort: [position: :asc, name: :asc])
+      prepare build(sort: [position: :asc, name: :asc], load: [:link_fields])
     end
 
     # The dynamic-type equivalent of `for_type`: all field definitions owned by
@@ -201,7 +249,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
     read :for_definition do
       argument :type_definition_id, :uuid, allow_nil?: false
       filter expr(type_definition_id == ^arg(:type_definition_id))
-      prepare build(sort: [position: :asc, name: :asc])
+      prepare build(sort: [position: :asc, name: :asc], load: [:link_fields])
     end
   end
 
@@ -248,6 +296,11 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # rather than lingering on a field they mean nothing to.
     change KilnCMS.CMS.Changes.ClearMultiple
 
+    # A link field (R3) lives inside its connection's value, so the options
+    # that act on a record-level field — search indexing, naming the record,
+    # per-locale behaviour — drop rather than claim something nothing honours.
+    change KilnCMS.CMS.Changes.ClearLinkFieldOptions
+
     # Whether a type is event-shaped (#480) is decided by whether it carries a
     # `datetime_range` field, so the cached answer has to drop on a field write,
     # not only on a type write.
@@ -263,8 +316,13 @@ defmodule KilnCMS.CMS.FieldDefinition do
   end
 
   validations do
-    # A field belongs to exactly one owner: a compiled type XOR a dynamic one.
+    # A field belongs to exactly one owner: a compiled type, a dynamic one, or
+    # a reference field (a link field, R3).
     validate KilnCMS.CMS.Validations.OneFieldScope
+
+    # A link field's parent is a top-level `:reference` field of the same
+    # site, and the link field is one of the plain types.
+    validate KilnCMS.CMS.Validations.LinkField
 
     # When compiled-scoped, the content type must be a real, registered
     # KilnCMS content type (no-op when `content_type` is nil).
@@ -460,6 +518,21 @@ defmodule KilnCMS.CMS.FieldDefinition do
       allow_nil? true
       public? true
     end
+
+    # The `:reference` field owning this link field (R3) — nil for every
+    # field of a content type.
+    belongs_to :link_of, __MODULE__ do
+      allow_nil? true
+      public? true
+    end
+
+    # A `:reference` field's link fields — data on each connection it makes —
+    # in editor order.
+    has_many :link_fields, __MODULE__ do
+      destination_attribute :link_of_id
+      sort position: :asc, name: :asc
+      public? true
+    end
   end
 
   identities do
@@ -468,5 +541,6 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # as a partial unique index over the rows where its scope column is set.
     identity :unique_field, [:content_type, :name]
     identity :unique_definition_field, [:type_definition_id, :name]
+    identity :unique_link_field, [:link_of_id, :name]
   end
 end

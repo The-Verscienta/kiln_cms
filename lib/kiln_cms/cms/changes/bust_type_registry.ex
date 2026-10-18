@@ -89,6 +89,11 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
               content_type = Map.get(record, :content_type) ->
                 to_string(content_type)
 
+              # A link field (R3) re-fires its reference field's type: its
+              # values were moved or purged inside that type's documents.
+              parent_id = Map.get(record, :link_of_id) ->
+                link_parent_type(parent_id, record.org_id)
+
               true ->
                 nil
             end
@@ -109,6 +114,30 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
   end
 
   defp enqueue_seo_refire(_changeset, other, _context), do: other
+
+  defp link_parent_type(parent_id, org_id) do
+    case KilnCMS.CMS.get_field_definition(parent_id,
+           actor: KilnCMS.CMS.Housekeeping.system(:cms_registry),
+           authorize_with: :error,
+           tenant: org_id
+         ) do
+      {:ok, %{type_definition_id: id}} when not is_nil(id) ->
+        case KilnCMS.CMS.get_type_definition(id,
+               actor: KilnCMS.CMS.Housekeeping.system(:cms_registry),
+               authorize_with: :error,
+               tenant: org_id
+             ) do
+          {:ok, type_def} -> type_def.name
+          _ -> nil
+        end
+
+      {:ok, %{content_type: type}} when is_atom(type) and not is_nil(type) ->
+        to_string(type)
+
+      _ ->
+        nil
+    end
+  end
 
   defp reindex_search?(changeset, record) do
     Ash.Changeset.changing_attribute?(changeset, :searchable) or

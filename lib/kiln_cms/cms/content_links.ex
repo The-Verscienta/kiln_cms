@@ -13,7 +13,11 @@ defmodule KilnCMS.CMS.ContentLinks do
     * `kind: :reference`, `field` the custom field's name, `position` its place
       in the field (always 0 for a single reference);
     * `source_type` / `target_type` the content type names of both ends, in the
-      same vocabulary as the snapshot's `"type"`.
+      same vocabulary as the snapshot's `"type"`;
+    * `metadata` the connection's link values — the snapshot's `"link"` map
+      (R3), `%{}` when it has none — so a filter on link data
+      (`custom_filter[field.link.name]`) reads the indexed edge table, never
+      the jsonb snapshot.
 
   ## When edges are written
 
@@ -50,7 +54,8 @@ defmodule KilnCMS.CMS.ContentLinks do
           field: String.t(),
           target_id: Ash.UUID.t(),
           target_type: String.t() | nil,
-          position: non_neg_integer()
+          position: non_neg_integer(),
+          metadata: map()
         }
 
   @doc """
@@ -78,7 +83,8 @@ defmodule KilnCMS.CMS.ContentLinks do
           field: definition.name,
           target_id: id,
           target_type: string_or(value["type"], only_target(definition)),
-          position: position
+          position: position,
+          metadata: link_values(value)
         }
       ]
     else
@@ -87,6 +93,9 @@ defmodule KilnCMS.CMS.ContentLinks do
   end
 
   defp edge(_value, _definition), do: []
+
+  defp link_values(%{"link" => %{} = link}), do: link
+  defp link_values(_value), do: %{}
 
   # A snapshot names its own type (and every value R2's polymorphic fields
   # store does); a bare legacy value falls back to the field's type only when
@@ -130,7 +139,8 @@ defmodule KilnCMS.CMS.ContentLinks do
   @doc """
   Bring `record`'s outgoing reference edges in line with its live
   `custom_fields`: create the missing ones, delete the ones no value implies
-  any more, and replace any whose target type or position moved. Idempotent.
+  any more, and replace any whose target type, position or link values
+  (`metadata`, R3) moved. Idempotent.
   """
   @spec reconcile(struct()) :: :ok
   def reconcile(record) do
@@ -145,8 +155,12 @@ defmodule KilnCMS.CMS.ContentLinks do
     stale =
       Enum.reject(existing, fn link ->
         case Map.get(wanted, {link.field, link.target_id}) do
-          nil -> false
-          want -> link.target_type == want.target_type and link.position == want.position
+          nil ->
+            false
+
+          want ->
+            link.target_type == want.target_type and link.position == want.position and
+              link.metadata == want.metadata
         end
       end)
 

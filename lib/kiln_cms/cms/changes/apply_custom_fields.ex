@@ -81,6 +81,27 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   the next write as it always was, now with a warning naming it, so the scrub
   is at least visible once.
 
+  ## Link fields: data on each connection
+
+  A `:reference` definition may declare link fields (`FieldDefinition`
+  rows with `link_of_id`, R3) — "Quantity" and "Role" on each ingredient a
+  recipe connects. Their values ride on the snapshot as an added `"link"`
+  map, `%{"id", "type", "slug", "title", "link" => %{"quantity" => 2}}`,
+  and are coerced exactly as a top-level field is: the same types, the same
+  `required`, `default` and `:select` rules. A snapshot whose connection
+  carries no link value has no `"link"` key, so a field without link fields
+  stores what it always did.
+
+  An input item names its link values under `"link"`. Each link field merges
+  the way a top-level key does, per connection: a supplied value is coerced,
+  one the item leaves out keeps what the same connection stored before, and
+  a connection new to the field falls to the defaults. A link key no link
+  field declares is refused (or dropped, in `:drop` mode), as an undefined
+  top-level key is.
+
+  `KilnCMS.CMS.ContentLinks` copies each connection's `"link"` map onto its
+  edge's `metadata` in the same transaction.
+
   ## Computed fields are outside all of that
 
   A `:computed` definition (#429) has no editor-supplied value at all. Those
@@ -177,7 +198,11 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     {computed, editable} = Enum.split_with(defs, &(&1.field_type == :computed))
 
     {cleaned, errors} =
-      Enum.reduce(editable, {%{}, []}, &accumulate(&1, supplied, existing, read_opts, &2))
+      Enum.reduce(
+        editable,
+        {%{}, []},
+        &accumulate(&1, supplied, existing, {read_opts, mode}, &2)
+      )
 
     {cleaned, errors} = apply_computed(computed, changeset, cleaned, errors)
 
@@ -394,10 +419,18 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # Three-way per key: a field the caller *supplied* is coerced/cleared; a field
   # they omitted keeps its `existing` stored value (the merge); a field with
   # neither falls to its default (fresh field / create).
-  defp accumulate(def, supplied, existing, read_opts, {cleaned, errors}) do
+  defp accumulate(def, supplied, existing, {read_opts, mode}, {cleaned, errors}) do
     cond do
       Map.has_key?(supplied, def.name) ->
-        fold(resolve(def, Map.get(supplied, def.name), read_opts), def, cleaned, errors)
+        def
+        |> resolve(Map.get(supplied, def.name), read_opts)
+        |> with_links(
+          def,
+          Map.get(supplied, def.name),
+          Map.get(existing, def.name),
+          {read_opts, mode}
+        )
+        |> fold(def, cleaned, errors)
 
       Map.has_key?(existing, def.name) ->
         # Untouched by this write: keep the stored (already-coerced) value as-is.
@@ -407,8 +440,121 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
         {Map.put(cleaned, def.name, Map.get(existing, def.name)), errors}
 
       true ->
-        fold(resolve(def, nil, read_opts), def, cleaned, errors)
+        def
+        |> resolve(nil, read_opts)
+        |> with_links(def, def.default, nil, {read_opts, mode})
+        |> fold(def, cleaned, errors)
     end
+  end
+
+  # --- link fields (R3) ----------------------------------------------------------
+
+  # Attach each connection's link values to a coerced reference value: one
+  # snapshot or a list of them. `raw` is what the caller supplied for the
+  # field; `stored` the field's value before this write, whose connections
+  # keep the link values an item leaves out.
+  defp with_links({:ok, value}, %{field_type: :reference} = def, raw, stored, ctx) do
+    case FieldDefinition.link_fields(def) do
+      [] -> {:ok, value}
+      links -> attach_links(value, links, inputs(raw, def), stored_links(stored), ctx)
+    end
+  end
+
+  defp with_links(result, _def, _raw, _stored, _ctx), do: result
+
+  # The non-blank input items, in order — the same items the coercion kept,
+  # since a list of references refuses repeats rather than dropping them. A
+  # blank input was coerced from the field's default, which names no link
+  # values.
+  defp inputs(raw, def) do
+    case raw |> List.wrap() |> Enum.reject(&blank?/1) do
+      [] -> def.default |> List.wrap() |> Enum.reject(&blank?/1)
+      items -> items
+    end
+  end
+
+  defp stored_links(stored) do
+    stored
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      %{"id" => id, "link" => %{} = link} -> [{id, link}]
+      _other -> []
+    end)
+    |> Map.new()
+  end
+
+  defp attach_links(items, links, inputs, stored, ctx) when is_list(items) do
+    items
+    |> Enum.with_index(1)
+    |> Enum.reduce_while({:ok, []}, fn {item, position}, {:ok, acc} ->
+      case link_item(item, Enum.at(inputs, position - 1), links, stored, ctx) do
+        {:ok, item} -> {:cont, {:ok, [item | acc]}}
+        {:error, message} -> {:halt, {:error, "— item #{position} #{message}"}}
+      end
+    end)
+    |> case do
+      {:ok, items} -> {:ok, Enum.reverse(items)}
+      error -> error
+    end
+  end
+
+  defp attach_links(item, links, inputs, stored, ctx) do
+    case link_item(item, List.first(inputs), links, stored, ctx) do
+      {:ok, item} -> {:ok, item}
+      {:error, message} -> {:error, "— #{message}"}
+    end
+  end
+
+  # One connection's link values: per link field, the supplied value
+  # (coerced), else the one this connection stored, else the default.
+  defp link_item(item, input, links, stored, {read_opts, mode}) do
+    given = link_input(input)
+    kept = Map.get(stored, item["id"], %{})
+
+    {cleaned, problems} =
+      Enum.reduce(links, {%{}, []}, fn link, {cleaned, problems} ->
+        case link_value(link, given, kept, read_opts) do
+          :skip -> {cleaned, problems}
+          {:ok, value} -> {Map.put(cleaned, link.name, value), problems}
+          {:error, message} -> {cleaned, ["#{link.label} #{message}" | problems]}
+        end
+      end)
+
+    problems = Enum.reverse(problems) ++ undefined_links(given, links, kept, mode)
+
+    case problems do
+      [] when cleaned == %{} -> {:ok, Map.delete(item, "link")}
+      [] -> {:ok, Map.put(item, "link", cleaned)}
+      _ -> {:error, "#{item_label(item, item["title"])}: #{Enum.join(problems, "; ")}"}
+    end
+  end
+
+  defp link_value(link, given, kept, read_opts) do
+    cond do
+      Map.has_key?(given, link.name) -> resolve(link, Map.get(given, link.name), read_opts)
+      Map.has_key?(kept, link.name) -> {:ok, Map.get(kept, link.name)}
+      true -> resolve(link, nil, read_opts)
+    end
+  end
+
+  defp link_input(%{"link" => %{} = link}), do: stringify_keys(link)
+  defp link_input(%{link: %{} = link}), do: stringify_keys(link)
+  defp link_input(_input), do: %{}
+
+  # A link key no link field declares, the way `undefined/4` treats a
+  # top-level one: refused unless it is blank or re-states the stored value.
+  defp undefined_links(_given, _links, _kept, :drop), do: []
+
+  defp undefined_links(given, links, kept, :strict) do
+    names = Enum.map(links, & &1.name)
+
+    given
+    |> Enum.reject(fn {key, value} ->
+      key in names or blank?(value) or Map.get(kept, key) == value
+    end)
+    |> Enum.map(fn {key, _value} ->
+      "\"#{key}\" is not a detail of this connection (details: #{Enum.join(Enum.sort(names), ", ")})"
+    end)
   end
 
   defp fold(:skip, _def, cleaned, errors), do: {cleaned, errors}
