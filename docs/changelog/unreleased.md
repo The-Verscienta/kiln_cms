@@ -7,6 +7,26 @@ carries the reasoning.
 
 ## Added
 
+<a id="graduate-a-reference-field-to-a-join-resource"></a>
+
+- **`mix kiln.gen.join <type>.<field>` graduates a reference field to a typed
+  Ash join resource, copies its connections, and retires the field.**
+  Workstream R10 of [relationships-plan.md](../relationships-plan.md), the
+  graduation path D22 promises. The first run writes the resource and its
+  code interfaces: two `belongs_to`s, `position`, one typed attribute per link
+  field, a `unique_connection` identity, an index on `target_id`, and the
+  content read rule as policies. `mix ash.codegen` then makes its table. A
+  second run, `--data-migration`, writes a migration that copies the field's
+  `content_links` edges into the table in plain SQL. `mix kiln.join.retire`
+  (or `KilnCMS.Release.retire_join_field/2`) then deletes the field
+  definition, its stored values and its edges. It refuses while any
+  connection is missing from the join table, or while a working copy holds
+  an unpublished change. A field that links to several types is refused:
+  split it first. Retiring removes the field from `custom_fields`, so move
+  readers to the join resource before that step. See
+  [extending-content.md](../extending-content.md).
+  ([#2016](https://github.com/The-Verscienta/kiln_cms/pull/2016))
+
 <a id="typed-nested-reads-through-references"></a>
 
 - **Reads follow reference fields to the records on the other end: GraphQL's

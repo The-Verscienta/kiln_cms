@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **`mix kiln.gen.join <type>.<field>` graduates a reference field to a typed
+  Ash join resource, copies its connections, and retires the field.**
+  ([#2016](https://github.com/The-Verscienta/kiln_cms/pull/2016) · [long form](docs/changelog/unreleased.md#graduate-a-reference-field-to-a-join-resource))
+
 - **Reads follow reference fields to the records on the other end: GraphQL's
   typed `references` / `referencedBy`, and `?expand=` on `/api/content`.**
   ([#2010](https://github.com/The-Verscienta/kiln_cms/pull/2010) · [long form](docs/changelog/unreleased.md#typed-nested-reads-through-references))
