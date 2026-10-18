@@ -24,6 +24,13 @@ defmodule KilnCMSWeb.ArtifactController do
   is on the response as `x-kiln-locale` and `Content-Language`, and in the ETag.
   A locale the site does not run is `400 unsupported_locale` — see
   `KilnCMSWeb.DeliveryLocale`.
+
+  ## Expanding references
+
+  `?expand=<field>[,<field>…]` (`surface=json` only) adds the targets of those
+  `:reference` custom fields under `"expanded"`, each with its own `json`
+  artifact — see `KilnCMSWeb.ReferenceExpansion` for the shape, who sees which
+  targets, and why this lives here rather than in JSON:API `included`.
   """
   use KilnCMSWeb, :controller
 
@@ -36,6 +43,7 @@ defmodule KilnCMSWeb.ArtifactController do
   alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.DeliveryLocale
   alias KilnCMSWeb.Params
+  alias KilnCMSWeb.ReferenceExpansion
   alias KilnCMSWeb.ViewTracking
 
   @surfaces KilnCMS.Firing.Surfaces.name_map()
@@ -66,9 +74,11 @@ defmodule KilnCMSWeb.ArtifactController do
     # all, so delivery keeps answering through a Postgres outage (#341).
     with ct when not is_nil(ct) <- ContentTypes.get(type),
          surface when not is_nil(surface) <- Map.get(@surfaces, params["surface"] || "json"),
+         {:ok, expand} <- parse_expand(params, surface),
          {:ok, record} <-
            Delivery.published(org_id, ct.type, slug, locale, grants(conn, params), mode),
-         {:ok, body} <- artifact(record, surface) do
+         {:ok, body} <- artifact(record, surface),
+         {:ok, body, expansion_tag} <- expand(body, record, expand) do
       surface_name = params["surface"] || "json"
 
       # Count the fetch, so a headless front end's traffic reaches
@@ -105,9 +115,13 @@ defmodule KilnCMSWeb.ArtifactController do
         record,
         surface_name,
         Experiments.Assignment.apply_to_artifact(body, variant),
-        variant
+        variant,
+        expansion_tag
       )
     else
+      {:invalid_expand, message} ->
+        ApiError.send(conn, :bad_request, "invalid_expand", message)
+
       :backfilling ->
         backfilling(conn)
 
@@ -165,6 +179,27 @@ defmodule KilnCMSWeb.ArtifactController do
           "invalid_passphrase",
           "That passphrase is not valid for this content."
         )
+    end
+  end
+
+  # `?expand=` is parsed before the document is resolved, so a malformed one is
+  # a 400 whatever the slug. It joins only the `json` surface: the other
+  # surfaces are pre-rendered (`web`, `llm`) or a canonical graph (`json_ld`).
+  defp parse_expand(params, surface) do
+    case ReferenceExpansion.parse(params) do
+      {:ok, nil} -> {:ok, nil}
+      {:ok, _fields} when surface != :json -> {:invalid_expand, "`expand` needs `surface=json`."}
+      {:ok, fields} -> {:ok, fields}
+      {:error, message} -> {:invalid_expand, message}
+    end
+  end
+
+  defp expand(body, _record, nil), do: {:ok, body, nil}
+
+  defp expand(body, record, fields) do
+    case ReferenceExpansion.expand(record, fields, record.org_id) do
+      {:ok, expanded, tag} -> {:ok, Map.put(body, "expanded", expanded), tag}
+      :unavailable -> :unavailable
     end
   end
 
@@ -301,6 +336,15 @@ defmodule KilnCMSWeb.ArtifactController do
 
   # The content must still be resolvable now (lookup is by the current record's
   # id); see the module for scope.
+  defp show_point_in_time(conn, %{"expand" => _}) do
+    ApiError.send(
+      conn,
+      :bad_request,
+      "invalid_expand",
+      "`expand` reads the live targets, so it cannot be combined with `as_of`."
+    )
+  end
+
   defp show_point_in_time(conn, %{"type" => type, "slug" => slug} = params) do
     case DeliveryLocale.parse(params) do
       {:ok, request} -> show_as_of(conn, type, slug, request, params)
@@ -415,8 +459,8 @@ defmodule KilnCMSWeb.ArtifactController do
 
   # Serve a fired artifact with CDN/static-build cache headers (#188). Honour a
   # matching `If-None-Match` with a 304 so revalidation skips the body.
-  defp serve(conn, record, surface, body, variant) do
-    etag = etag(record, surface, variant)
+  defp serve(conn, record, surface, body, variant, expansion_tag) do
+    etag = etag(record, surface, variant, expansion_tag)
     locked? = not is_nil(Map.get(record, :access_password_hash))
 
     conn =
@@ -480,8 +524,13 @@ defmodule KilnCMSWeb.ArtifactController do
   # locale is named too: the record id already differs per locale variant, but
   # a validator that says which translation it validates is one a front end can
   # reason about when a chain change moves a URL from one to another.
-  defp etag(record, surface, variant) do
+  #
+  # An `?expand=` response also depends on its targets, which can change while
+  # the source does not, so their fingerprint is named as well
+  # (`ReferenceExpansion.expand/3`).
+  defp etag(record, surface, variant, expansion_tag) do
     suffix = if variant, do: "-#{variant.id}", else: ""
+    suffix = if expansion_tag, do: "#{suffix}-x#{expansion_tag}", else: suffix
     ~s("#{record.id}-#{record.locale}-#{surface}-#{DateTime.to_unix(record.updated_at)}#{suffix}")
   end
 
