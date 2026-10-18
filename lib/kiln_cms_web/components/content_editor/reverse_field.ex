@@ -38,6 +38,7 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
 
   use KilnCMSWeb, :live_component
 
+  alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.ReverseFields
@@ -55,7 +56,8 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
      socket
      |> assign(:offset, 0)
      |> assign(:errors, %{})
-     |> assign(:notice, nil)}
+     |> assign(:notice, nil)
+     |> assign(:capacity, nil)}
   end
 
   # A pick (or an "Add new" record) from the add control, sent here by the
@@ -223,8 +225,33 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
       |> assign(:total, page.total)
       |> assign(:ids, page.ids)
       |> assign(:link_fields, FieldDefinition.link_fields(reverse.definition))
+      |> assign(:capacity, capacity(record, reverse, actor, tenant))
     end
   end
+
+  # `{connected, max}` when the field caps how many records may connect to
+  # this one (`max_sources`, R1b), else nil. Counted from the edges — every
+  # source, drafts and trashed ones included, as the cap itself counts — not
+  # from the rows, which leave out what the editor may not open.
+  defp capacity(record, %{definition: %{max_sources: max}} = reverse, actor, tenant)
+       when is_integer(max) do
+    connected =
+      record.id
+      |> CMS.list_references_to!(%{field: reverse.field, source_type: reverse.source_type},
+        actor: actor,
+        tenant: tenant,
+        query: [select: [:id, :source_id]]
+      )
+      |> Enum.uniq_by(& &1.source_id)
+      |> length()
+
+    {connected, max}
+  end
+
+  defp capacity(_record, _reverse, _actor, _tenant), do: nil
+
+  defp full?({connected, max}), do: connected >= max
+  defp full?(nil), do: false
 
   defp last_offset(total), do: div(total - 1, @page_size) * @page_size
 
@@ -250,7 +277,17 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
           <.icon name="hero-arrow-uturn-left" class="size-3.5 text-base-content/40" />
           {@reverse.label}
         </span>
-        <span :if={@total > 0} class="text-xs tabular-nums text-base-content/60">
+        <span
+          :if={@capacity}
+          id={"#{@root}-capacity"}
+          class={[
+            "text-xs tabular-nums",
+            if(full?(@capacity), do: "text-warning-ink", else: "text-base-content/60")
+          ]}
+        >
+          {gettext("%{count} of %{max}", count: elem(@capacity, 0), max: elem(@capacity, 1))}
+        </span>
+        <span :if={!@capacity and @total > 0} class="text-xs tabular-nums text-base-content/60">
           {ngettext("%{count} connected", "%{count} connected", @total)}
         </span>
       </div>
@@ -316,7 +353,19 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
         {gettext("Nothing connects to this record yet.")}
       </p>
 
-      <div :if={@actor} class="mt-2">
+      <p
+        :if={@actor && full?(@capacity)}
+        id={"#{@root}-full"}
+        class="mt-2 flex items-center gap-1.5 text-xs text-base-content/60"
+      >
+        <.icon name="hero-no-symbol" class="size-3.5 shrink-0" />
+        {gettext("Full — %{count} of %{max} connected. Remove one to connect another.",
+          count: elem(@capacity, 0),
+          max: elem(@capacity, 1)
+        )}
+      </p>
+
+      <div :if={@actor && not full?(@capacity)} class="mt-2">
         <.live_component
           module={ReferencePicker}
           id={"#{@root}-add"}

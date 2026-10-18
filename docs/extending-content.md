@@ -137,7 +137,9 @@ UI" workflow, scoped to fields.
   Doe” is full: it already has 3 of 3 connected"), never the records already
   connected. Tightening the limit leaves existing connections alone; it
   applies to the next add. In the editor's picker a full target is listed
-  but disabled, "Full — 3 of 3 connected". The schema export reports it as
+  but disabled, "Full — 3 of 3 connected"; on the target's own page its
+  reverse field shows "3 of 3" beside the heading and offers no add while
+  it is full. The schema export reports it as
   `x-kiln-max-sources`.
 - **When a target is deleted for good (`on_target_delete`)**: what purging a
   connected record does to this field's connections to it. `:keep` (the

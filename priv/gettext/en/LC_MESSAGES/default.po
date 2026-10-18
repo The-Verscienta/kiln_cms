@@ -293,6 +293,7 @@ msgid "%{count} of %{cap} slots used"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} of %{max}"
 msgstr ""
@@ -7426,6 +7427,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
 msgid "Full — %{count} of %{max} connected"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Full — %{count} of %{max} connected. Remove one to connect another."
 msgstr ""
 
 #: lib/kiln_cms_web/live/funnel_live.ex

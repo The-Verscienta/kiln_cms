@@ -194,4 +194,34 @@ defmodule KilnCMSWeb.ReverseWritesLiveTest do
     lv |> element("#{row(ctx, stale)} [data-ref-remove]") |> render_click()
     assert ids(stale, ctx.field) == []
   end
+
+  # R1b: a field capping how many records may connect to one target shows the
+  # count beside the reverse field's heading, and hides the add control while
+  # the target is full.
+  test "a capped reverse field shows its count and stops offering adds when full", ctx do
+    field = CMS.get_field_definition!(ctx.field |> field_id(), authorize?: false)
+    CMS.update_field_definition!(field, %{max_sources: 2}, actor: ctx.admin)
+
+    post!(ctx.admin, "One", %{ctx.field => [ctx.target.id]})
+    lv = open(ctx.admin, ctx.target)
+
+    assert has_element?(lv, "#{root(ctx)}-capacity", "1 of 2")
+    assert has_element?(lv, "#{picker(ctx)}-search")
+    refute has_element?(lv, "#{root(ctx)}-full")
+
+    # A draft holds its slot like any other source.
+    post!(ctx.admin, "Two", %{ctx.field => [ctx.target.id]})
+    lv = open(ctx.admin, ctx.target)
+
+    assert has_element?(lv, "#{root(ctx)}-capacity", "2 of 2")
+    assert has_element?(lv, "#{root(ctx)}-full", "Full — 2 of 2 connected")
+    refute has_element?(lv, "#{picker(ctx)}-search")
+  end
+
+  defp field_id(name) do
+    :post
+    |> CMS.field_definitions_for!(authorize?: false)
+    |> Enum.find(&(&1.name == name))
+    |> Map.fetch!(:id)
+  end
 end
