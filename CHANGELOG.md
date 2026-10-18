@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Reads follow reference fields to the records on the other end: GraphQL's
+  typed `references` / `referencedBy`, and `?expand=` on `/api/content`.**
+  ([#2010](https://github.com/The-Verscienta/kiln_cms/pull/2010) · [long form](docs/changelog/unreleased.md#typed-nested-reads-through-references))
+
 - **`custom_filter` filters through relationships: `has`, `has_all`, `has_none`
   and `count` on a reference field, and `has`/`has_all`/`has_none` on `tags`.**
   ([#2003](https://github.com/The-Verscienta/kiln_cms/pull/2003) · [long form](docs/changelog/unreleased.md#custom-filter-relationship-operators-has-has-all-has-none-count))

@@ -7,6 +7,32 @@ carries the reasoning.
 
 ## Added
 
+<a id="typed-nested-reads-through-references"></a>
+
+- **Reads follow reference fields to the records on the other end: GraphQL's
+  typed `references(field:)` / `referencedBy` on every content type, and
+  `?expand=<field>` on `GET /api/content/:type/:slug`.** Workstream R7 of
+  [relationships-plan.md](../relationships-plan.md). In GraphQL every content
+  object (`Page`, `Post`, a project type, `Entry`) now implements a
+  `ContentRecord` interface, and `references(field: "ingredients")` returns
+  `{ position, link, target: ContentRecord }` in the field's order;
+  `referencedBy(field:, sourceType:)` returns `{ field, position, link,
+  source }`. An interface rather than a union, because every dynamic type
+  shares the one `Entry` object (D17). Everything is read as the caller, so a
+  draft on either end is invisible to an anonymous caller and visible to an
+  editor, and a list of records costs one edge read plus one read per target
+  type. Both fields are priced like any to-many relationship (5 rows without
+  `limit`) and cap at 100 rows. On the JSON side the plan asked for a spike of
+  `?include=content_links.target` first; AshJsonApi accepts only public
+  relationships as include paths, and a relationship has one destination, so
+  the delivery API answers it instead: `?expand=` adds each target's fired
+  `json` artifact under `"expanded"`, for targets an anonymous reader may read,
+  with an ETag that changes when a target does. `link` is the connection's
+  stored data, passed through for link fields (R3) to fill. Nothing existing
+  changes shape: new fields, a new interface on existing objects, a new query
+  parameter and response key.
+  ([#2010](https://github.com/The-Verscienta/kiln_cms/pull/2010))
+
 <a id="custom-filter-relationship-operators-has-has-all-has-none-count"></a>
 
 - **`custom_filter` filters through relationships: `has`, `has_all`, `has_none`
