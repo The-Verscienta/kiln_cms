@@ -285,7 +285,7 @@ identical; the dynamic tier shares one generic `*_entry` set):
 | `publishPost(id:)` | `:publish` | `:read_write` key, **admin** | Publishes and fires artifacts |
 | `unpublishPost(id:)` | `:unpublish` | `:read_write` key, **admin** | Takes content down, purges artifacts |
 | `deletePost(id:)` | `:destroy` | `:read_write` key, **admin** | **Reversible** soft-delete (AshArchival) |
-| `addPostReferences(id:, field:, targets:, position:)` | `:update` | `:read_write` key, editor+ | Connects records through a `:reference` field ([below](#writing-relationships--addreferences-removereferences-movereference)) |
+| `addPostReferences(id:, field:, targets:, position:)` | `:update` | `:read_write` key, editor+ | Connects records through a `:reference` field ([below](#writing-relationships)) |
 | `removePostReferences(id:, field:, targets:)` | `:update` | `:read_write` key, editor+ | Disconnects records from a `:reference` field |
 | `movePostReference(id:, field:, target:, position:)` | `:update` | `:read_write` key, editor+ | Reorders one connected record |
 
@@ -355,7 +355,7 @@ and takes `tagIds` alone. The related-content arrays carry the same verbs
 `addRelatedPageIds` / `removeRelatedPageIds` (and `…RelatedEntryIds` on the
 dynamic tier).
 
-### Writing relationships — `add…References`, `remove…References`, `move…Reference`
+### Writing relationships
 
 A `:reference` custom field ([relationships-plan.md](relationships-plan.md))
 can be written whole through `updatePost(input: { customFields: … })`, but a

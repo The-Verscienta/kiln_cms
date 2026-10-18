@@ -820,7 +820,7 @@ id, a target that doesn't exist, a type the field doesn't allow, a link value
 of the wrong type, or a list outside `min_items` / `max_items` fails the
 `PATCH` with a 400 naming the item. GraphQL has the same edit as
 connect / disconnect / reorder mutations that build the list server-side
-([headless-graphql-api.md](headless-graphql-api.md#writing-relationships--addreferences-removereferences-movereference)).
+([headless-graphql-api.md](headless-graphql-api.md#writing-relationships)).
 
 **A payload link is not part of either record.** It is a `content_link` with
 no `field`: a curated link with a `kind` (default `related`), `position`,
