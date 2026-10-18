@@ -541,6 +541,50 @@ fallback; the spike's outcome is under the JSON:API bullet and in §7 Q1.
 
 ### R10 — Graduation generator
 
+**Built** in the R10 PR. How to use it is in
+[extending-content.md](extending-content.md), "When to use a dedicated join
+resource". What the PR settled beyond the bullets below:
+
+- **Three steps, three runs.** `mix kiln.gen.join <type>.<field>` writes the
+  resource and its code interfaces, and `mix ash.codegen` makes its table.
+  `mix kiln.gen.join <type>.<field> --data-migration` writes the copy. Last,
+  `mix kiln.join.retire <type>.<field>` retires the field. The copy is a
+  second run because its migration has to sort after the table's, and that
+  migration does not exist until codegen runs. Retirement is its own task
+  because it deletes data, and Igniter's dry run only covers file changes.
+- **The copy is plain SQL in the migration**, not a call into Kiln code,
+  so a later release cannot change what an old migration does. Each link
+  value is cast to its column, guarded by its JSON type: a stray value
+  becomes `NULL` (or the default) rather than failing a deploy. Connections
+  to purged records are not copied, because a foreign key cannot point at
+  nothing. `ON CONFLICT DO NOTHING` makes it safe to re-run.
+- **Retirement checks before it deletes.** It refuses while any connection
+  is not in the join table with the same ends, position and link values,
+  while any value has no edge, or while a working copy holds an unpublished
+  change to the field. The check and the delete share one transaction that
+  holds `content_links` in `SHARE` mode, so a connection made meanwhile
+  waits instead of being lost. `KilnCMS.Release.retire_join_field/2` runs it
+  on a release.
+- **One target type only (R2).** A field that links to several types is
+  refused, with a message saying why. A typed join table has one foreign key
+  per end. One resource per target type would split one field's connections
+  across tables, and retiring the field would then have to wait for all of
+  them. Split the field first, then graduate each part.
+- **Project-wide.** The schema comes from one organization's definition
+  (`--org`). The copy and the retirement cover the field in every
+  organization that defines it, and the check runs per organization against
+  that organization's link fields.
+- **Policies** follow the content read rule, as `content_links` does. Admins
+  bypass, editors read and write, and anyone else reads a connection only
+  when both of its records are readable (`Checks.LinkEndsReadable`). A
+  read-only API key cannot write. Deleting a connection is an edit of its
+  source, not a hard delete of content, so editors may do it, as with
+  `Tagging`. Purging a record deletes its connections through the foreign
+  keys.
+- Support module: `KilnCMS.CMS.JoinGraduation`.
+
+The plan as first written:
+
 - `mix kiln.gen.join <field>`: generates a typed Ash join resource with two
   `belongs_to`s, the link fields as attributes, identities and indexes, a
   data migration copying the field's edges into it, and policies matching

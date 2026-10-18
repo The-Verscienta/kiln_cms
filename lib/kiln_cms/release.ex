@@ -136,6 +136,27 @@ defmodule KilnCMS.Release do
   end
 
   @doc """
+  `mix kiln.join.retire` for a release (R10): once a graduated `:reference`
+  field's connections are in its join resource, delete the field definition
+  and its stored values in every organization that defines it.
+
+      bin/kiln_cms rpc 'KilnCMS.Release.retire_join_field("recipe.ingredients", dry_run: true)'
+      bin/kiln_cms rpc 'KilnCMS.Release.retire_join_field("recipe.ingredients")'
+
+  Against the running node (`rpc`, not `eval`): it writes through the field
+  definition's actions, which bust the running node's caches. Takes the
+  options `KilnCMS.CMS.JoinGraduation.resolve/2` and `retire/2` take
+  (`:module`, `:org_id`, `:dry_run`), and refuses while any connection is not
+  in the join table. See `Mix.Tasks.Kiln.Join.Retire`.
+  """
+  @spec retire_join_field(String.t(), keyword()) :: term()
+  def retire_join_field(field, opts \\ []) do
+    with {:ok, spec} <- KilnCMS.CMS.JoinGraduation.resolve(field, opts) do
+      KilnCMS.CMS.JoinGraduation.retire(spec, opts)
+    end
+  end
+
+  @doc """
   `mix kiln.deprecations` for a release (#1538, #1543): report the accounts and
   queued jobs still holding data only a removed surface read, and optionally
   move the accounts onto a membership first.
