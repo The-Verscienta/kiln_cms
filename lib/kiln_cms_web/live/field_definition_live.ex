@@ -341,7 +341,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     %{form: form, scopes: scopes, builder: builder} = socket.assigns
 
     if computed?(form) do
-      {socket, ctx} = builder_ctx(socket, scopes, form[:compute].value, builder, nil)
+      {socket, ctx} =
+        builder_ctx(socket, scopes, form[:compute].value, builder, own_name(form))
+
       assign(socket, :builder_ctx, ctx)
     else
       assign(socket, :builder_ctx, nil)
@@ -367,6 +369,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     end
   end
 
+  # The name being typed on the add form, so the pickers can leave out a
+  # computed field that already reads it.
+  defp own_name(form) do
+    case form[:name].value do
+      name when is_binary(name) and name != "" -> name
+      _blank -> nil
+    end
+  end
+
   defp builder_ctx(socket, scopes, compute, builder, own_name) do
     scope = List.first(scopes)
     {socket, documents} = samples(socket, scope)
@@ -387,6 +398,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           ),
         else: sample_context()
 
+    # The type's other computed fields, derived fresh in dependency order as
+    # the save would — so a formula over one previews that field's value, not
+    # whatever the sample stored last.
+    others = other_computed(socket.assigns.definitions, scope, own_name)
+    context = %{context | fields: Computed.derive(others, context, context.fields)}
+
     {socket,
      %{
        values: value_options(socket.assigns.definitions, scopes, own_name),
@@ -396,24 +413,39 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
      }}
   end
 
-  # The values a formula may reference: the document's own, then this type's
-  # other editable fields. A computed field never feeds another (one pass), so
-  # none is offered; a field sharing a document value's name is reached as
-  # `field.<name>`.
+  # The values a formula may reference: the document's own, this type's other
+  # editable fields, then its other computed fields — less any that already
+  # read this one, directly or through another, since referencing it would
+  # close a loop the save refuses. A field sharing a document value's name is
+  # reached as `field.<name>`.
   defp value_options(definitions, scopes, own_name) do
-    fields =
+    in_scope =
       definitions
-      |> Enum.filter(
-        &(scope_param(&1) in scopes and &1.field_type != :computed and &1.name != own_name)
-      )
+      |> Enum.filter(&(scope_param(&1) in scopes and &1.name != own_name))
       |> Enum.uniq_by(& &1.name)
-      |> Enum.map(&{&1.label, field_ref(&1.name)})
+
+    {computed, editable} = Enum.split_with(in_scope, &(&1.field_type == :computed))
+
+    loops = if own_name, do: Computed.readers(computed, own_name), else: MapSet.new()
+
+    computed = Enum.reject(computed, &MapSet.member?(loops, &1.name))
 
     document = Enum.map(Computed.document_refs(), &{document_ref_label(&1), &1})
 
     Enum.reject(
-      [{gettext("This document"), document}, {gettext("Custom fields"), fields}],
+      [
+        {gettext("This document"), document},
+        {gettext("Custom fields"), Enum.map(editable, &{&1.label, field_ref(&1.name)})},
+        {gettext("Computed fields"), Enum.map(computed, &{&1.label, field_ref(&1.name)})}
+      ],
       &match?({_group, []}, &1)
+    )
+  end
+
+  defp other_computed(definitions, scope, own_name) do
+    Enum.filter(
+      definitions,
+      &(&1.field_type == :computed and scope_param(&1) == scope and &1.name != own_name)
     )
   end
 
@@ -430,8 +462,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   defp document_ref_label("seo_keywords"), do: gettext("SEO keywords")
   defp document_ref_label(ref), do: ref
 
-  # A computed field never feeds another (one pass), so its stored value is
-  # left out along with any key no definition declares.
+  # A computed field's stored value is left out, along with any key no
+  # definition declares: the preview derives the computed ones fresh.
   defp editable_names(definitions, scope) do
     for definition <- definitions,
         definition.field_type != :computed,

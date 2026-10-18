@@ -45,6 +45,24 @@ defmodule KilnCMS.CMS.Computed do
   arities *are* checked, at parse time, so a typo in `slugfy(title)` is caught
   when the field is defined rather than silently blanking every record.
 
+  ## Computed fields feeding each other
+
+  A formula may reference another **computed** field, and sees the value that
+  field derives on this same write: `{{ product(subtotal, 1.2) }}` over a
+  computed `subtotal`. `derive/3` evaluates a type's computed fields in
+  dependency order (`order/1`, by the names `references/1` finds in each
+  formula), so each one sees the values of the fields it reads. Every
+  evaluation site — the write, the computed-only refresh, the fire, the slug
+  pattern's `[field:…]` token — goes through `derive/3`, so the four can't
+  order them differently.
+
+  A cycle (`a` reads `b`, `b` reads `a`, or `a` reads itself) has no value, so
+  `cycle/1` finds one and `Validations.ComputeExpression` refuses the
+  definition that would close it. Should one exist anyway (a row written
+  before the check, a race between two admins), `order/1` puts the fields on
+  it last, in their given order, and each sees nothing for a field not yet
+  evaluated — deterministic, so the stored and fired values still agree.
+
   ## Functions
 
   | Function | Result |
@@ -372,6 +390,158 @@ defmodule KilnCMS.CMS.Computed do
     end
   rescue
     error -> {:error, {:raised, Exception.message(error)}}
+  end
+
+  @doc """
+  The custom-field names a template reads, in first-mention order: every
+  `field.<name>`, and every bare name that isn't a document scalar. A template
+  that doesn't parse reads nothing.
+  """
+  @spec references(template() | String.t() | nil) :: [String.t()]
+  def references(source) do
+    case template(source) do
+      {:ok, template} ->
+        template
+        |> Enum.flat_map(fn
+          {:expr, ast} -> refs(ast)
+          {:text, _text} -> []
+        end)
+        |> Enum.uniq()
+
+      {:error, _message} ->
+        []
+    end
+  end
+
+  defp refs({:ref, "field." <> name}), do: [name]
+  defp refs({:ref, name}) when name in @document_refs, do: []
+  defp refs({:ref, name}), do: [name]
+  defp refs({:call, _name, args}), do: Enum.flat_map(args, &refs/1)
+  defp refs({:lit, _value}), do: []
+
+  @typedoc "A computed field definition, as far as ordering is concerned."
+  @type definition :: %{
+          required(:name) => String.t(),
+          required(:compute) => String.t() | template() | nil
+        }
+
+  @doc """
+  Computed `definitions` in dependency order: a field comes after every other
+  field in the list its formula references. Fields that don't depend on each
+  other keep their given order. Fields on a cycle — and any that read one —
+  come last, in their given order (see "Computed fields feeding each other").
+  """
+  @spec order([definition]) :: [definition]
+  def order(definitions), do: settle(definitions, dependencies(definitions), MapSet.new(), [])
+
+  # Take the first pending field whose dependencies are all settled, until none
+  # is: what is left then is stuck on a cycle. Quadratic, over a type's handful
+  # of computed fields.
+  defp settle(pending, deps, done, acc) do
+    case Enum.find(pending, &MapSet.subset?(Map.fetch!(deps, &1.name), done)) do
+      nil ->
+        Enum.reverse(acc) ++ pending
+
+      next ->
+        settle(List.delete(pending, next), deps, MapSet.put(done, next.name), [next | acc])
+    end
+  end
+
+  # name → the names of the *other* listed computed fields its formula reads.
+  # A self-reference is not a dependency for ordering (there's nothing to wait
+  # for); `cycle/1` reports it.
+  defp dependencies(definitions) do
+    names = MapSet.new(definitions, & &1.name)
+
+    Map.new(definitions, fn d ->
+      reads = d.compute |> references() |> MapSet.new() |> MapSet.intersection(names)
+      {d.name, MapSet.delete(reads, d.name)}
+    end)
+  end
+
+  @doc """
+  A cycle among computed `definitions`, as the names along it with the first
+  repeated at the end (`["a", "b", "a"]`, or `["a", "a"]` for a formula that
+  reads itself) — or `nil` when there is none.
+
+  With `through`, only a cycle passing through that field counts: defining one
+  field must not be refused over a cycle elsewhere that it takes no part in.
+  """
+  @spec cycle([definition], String.t() | nil) :: [String.t()] | nil
+  def cycle(definitions, through \\ nil) do
+    names = MapSet.new(definitions, & &1.name)
+
+    graph =
+      Map.new(definitions, fn d ->
+        {d.name, d.compute |> references() |> Enum.filter(&MapSet.member?(names, &1))}
+      end)
+
+    starts = if through, do: [through], else: Enum.map(definitions, & &1.name)
+
+    Enum.find_value(starts, fn start ->
+      graph |> search(start, start, [start], MapSet.new([start])) |> elem(0)
+    end)
+  end
+
+  # Depth-first for a way back to `start`, `path` newest first. `seen` keeps a
+  # cycle *elsewhere* from looping the search: each name is entered once.
+  defp search(graph, start, name, path, seen) do
+    graph
+    |> Map.get(name, [])
+    |> Enum.reduce_while({nil, seen}, fn next, {nil, seen} ->
+      cond do
+        next == start ->
+          {:halt, {Enum.reverse([start | path]), seen}}
+
+        MapSet.member?(seen, next) ->
+          {:cont, {nil, seen}}
+
+        true ->
+          case search(graph, start, next, [next | path], MapSet.put(seen, next)) do
+            {nil, seen} -> {:cont, {nil, seen}}
+            found -> {:halt, found}
+          end
+      end
+    end)
+  end
+
+  @doc """
+  The names of the computed `definitions` that read `name`, directly or
+  through another — the fields `name`'s own formula can't reference without
+  closing a cycle. The formula builder leaves them out of its value pickers.
+  """
+  @spec readers([definition], String.t()) :: MapSet.t(String.t())
+  def readers(definitions, name) do
+    reads = Map.new(definitions, &{&1.name, MapSet.new(references(&1.compute))})
+    spread(reads, MapSet.new([name])) |> MapSet.delete(name)
+  end
+
+  defp spread(reads, reached) do
+    grown =
+      for {reader, names} <- reads,
+          not MapSet.disjoint?(names, reached),
+          into: reached,
+          do: reader
+
+    if MapSet.equal?(grown, reached), do: reached, else: spread(reads, grown)
+  end
+
+  @doc """
+  Evaluate computed `definitions` in `order/1` into `fields`, each against
+  `context` with the values derived so far — so a field reading another
+  computed field sees its value from this same pass. A blank result leaves the
+  key out. The one derivation loop every evaluation site shares.
+  """
+  @spec derive([definition], map(), map()) :: map()
+  def derive(definitions, context, fields) do
+    definitions
+    |> order()
+    |> Enum.reduce(fields, fn definition, acc ->
+      case evaluate(definition.compute || "", Map.put(context, :fields, acc)) do
+        nil -> acc
+        value -> Map.put(acc, definition.name, value)
+      end
+    end)
   end
 
   defp template(source) when is_list(source), do: {:ok, source}

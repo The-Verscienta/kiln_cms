@@ -476,8 +476,10 @@ defmodule KilnCMS.CMS.Slugs do
   # straight off the changeset. A `:computed` field (#601) has none — the write
   # pass derives it in `Changes.ApplyCustomFields`, which runs AFTER slug/alias
   # derivation, so the token would otherwise read an empty value on create and a
-  # one-save-stale value on update (#616). Derive any computed field the pattern
-  # references here, fresh, through the same evaluator the write pass uses.
+  # one-save-stale value on update (#616). Derive the computed fields here,
+  # fresh, through the same `Computed.derive/3` the write pass uses — every
+  # one, in the same dependency order, since a referenced formula may read
+  # another computed field.
   #
   # Value parity with the write pass holds for a formula over the document (the
   # common `{{ slugify(title) }}` case); a formula referencing a *sibling*
@@ -495,20 +497,22 @@ defmodule KilnCMS.CMS.Slugs do
 
     case KilnCMS.Slug.Pattern.field_names(pattern) do
       [] -> raw
-      referenced -> merge_computed_fields(changeset, referenced, raw)
+      _referenced -> merge_computed_fields(changeset, raw)
     end
   end
 
-  defp merge_computed_fields(changeset, referenced, raw) do
+  defp merge_computed_fields(changeset, raw) do
     # String keys, matching what the write pass evaluates against and what the
     # `[field:<name>]` token itself looks up — an atom-keyed payload from an
     # Elixir/MCP caller would otherwise miss its own sibling fields.
     base = stringify_keys(raw)
 
+    # Every computed field, not only the referenced ones: a referenced formula
+    # may read another computed field, which must be derived first.
     computed =
       changeset
       |> field_definitions()
-      |> Enum.filter(&(&1.field_type == :computed and &1.name in referenced))
+      |> Enum.filter(&(&1.field_type == :computed))
 
     case computed do
       [] ->
@@ -521,17 +525,8 @@ defmodule KilnCMS.CMS.Slugs do
         # pass builds its map from scratch and so never leaks a stale value.
         cleared = Map.drop(base, Enum.map(defs, & &1.name))
         context = KilnCMS.CMS.Computed.Context.from_changeset(changeset, cleared)
-        derive_into(defs, context, cleared)
+        KilnCMS.CMS.Computed.derive(defs, context, cleared)
     end
-  end
-
-  defp derive_into(defs, context, fields) do
-    Enum.reduce(defs, fields, fn definition, acc ->
-      case KilnCMS.CMS.Computed.evaluate(definition.compute || "", context) do
-        blank when blank in [nil, ""] -> acc
-        value -> Map.put(acc, definition.name, value)
-      end
-    end)
   end
 
   defp stringify_keys(map) when is_map(map),

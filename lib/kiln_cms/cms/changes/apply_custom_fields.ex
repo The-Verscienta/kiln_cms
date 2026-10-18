@@ -173,7 +173,8 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
     # Computed fields (#429) are resolved in a second pass, after the editable
     # ones: their formulas reference sibling values, so they must see the
-    # already-coerced results rather than raw params.
+    # already-coerced results rather than raw params — and each other's, in
+    # dependency order.
     {computed, editable} = Enum.split_with(defs, &(&1.field_type == :computed))
 
     {cleaned, errors} =
@@ -304,16 +305,13 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # up front so the option can't be set in the first place.
   defp apply_computed([], _changeset, cleaned, errors), do: {cleaned, errors}
 
+  #
+  # In dependency order (`Computed.derive/3`), so a formula over another
+  # computed field sees the value it derives on this same write.
   defp apply_computed(defs, changeset, cleaned, errors) do
     context = KilnCMS.CMS.Computed.Context.from_changeset(changeset, cleaned)
 
-    {Enum.reduce(defs, cleaned, &put_computed(&1, context, &2)), errors}
-  end
-
-  defp put_computed(def, context, cleaned) do
-    value = KilnCMS.CMS.Computed.evaluate(def.compute || "", context)
-
-    if blank?(value), do: cleaned, else: Map.put(cleaned, def.name, value)
+    {KilnCMS.CMS.Computed.derive(defs, context, cleaned), errors}
   end
 
   # The definitions in scope: a compiled content type's (by its type atom) or,

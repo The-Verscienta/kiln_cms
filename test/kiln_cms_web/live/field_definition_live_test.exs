@@ -1304,6 +1304,86 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       assert has_element?(lv, "#new-field-preview", "calls unknown function upcse/1")
     end
 
+    test "other computed fields are offered and previewed in dependency order, less loops",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+
+      define = fn name, label, compute ->
+        CMS.create_field_definition!(
+          %{
+            content_type: :page,
+            name: name,
+            label: label,
+            field_type: :computed,
+            compute: compute
+          },
+          actor: admin
+        )
+      end
+
+      # Created before either field, so it stores neither value: the preview
+      # must derive the chain, not read the sample's jsonb.
+      CMS.create_page!(
+        %{title: "Preview me", slug: "fd-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+      base = define.("url_base", "URL base", "{{ slugify(title) }}")
+      define.("url_loud", "URL loud", "{{ upcase(url_base) }}")
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      # The recipe pickers offer them, and so does the formula palette.
+      computed_change(lv, %{"builder" => %{"mode" => "recipe", "recipe" => "conditional"}})
+      assert has_element?(lv, ~s|#new-field-slot-value option[value="url_base"]|, "URL base")
+
+      computed_change(lv, %{"builder" => %{"mode" => "formula"}})
+
+      assert has_element?(
+               lv,
+               ~s|#new-field-formula button[data-insert-ref="url_loud"]|,
+               "URL loud"
+             )
+
+      computed_change(lv, %{
+        "builder" => %{"mode" => "formula"},
+        "compute" => "{{ concat(url_loud, '!') }}"
+      })
+
+      assert has_element?(lv, "#new-field-preview output", "PREVIEW-ME!")
+
+      # Editing `url_base`: `url_loud` reads it, so offering it would offer a loop.
+      lv |> element("#field-#{base.id} button[phx-click=edit]") |> render_click()
+
+      lv
+      |> element("#edit-field-#{base.id}")
+      |> render_change(%{
+        "field_definition" => %{
+          "field_type" => "computed",
+          "compute" => "{{ slugify(title) }}",
+          "builder" => %{"mode" => "formula"}
+        }
+      })
+
+      refute has_element?(
+               lv,
+               ~s|#edit-field-#{base.id}-formula button[data-insert-ref="url_loud"]|
+             )
+
+      # And a formula typed by hand into a loop says so.
+      lv
+      |> element("#edit-field-#{base.id}")
+      |> render_change(%{
+        "field_definition" => %{
+          "field_type" => "computed",
+          "compute" => "{{ url_loud }}",
+          "builder" => %{"mode" => "formula"}
+        }
+      })
+
+      assert render(lv) =~ "makes a loop: url_base → url_loud → url_base"
+    end
+
     test "editing reopens a recipe's field in the recipe view, a hand formula in the formula view",
          %{conn: conn} do
       admin = authed_user(:admin)

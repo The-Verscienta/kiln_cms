@@ -284,6 +284,40 @@ defmodule KilnCMSWeb.PathAliasTest do
       assert updated.path_alias == "/library/second-title"
     end
 
+    test "a token over a computed field that reads another computed field sees the chain" do
+      actor = admin()
+
+      type =
+        CMS.create_type_definition!(
+          %{name: "chained#{uniq()}", label: "Chained", alias_pattern: "/shelf/[field:url_key]"},
+          actor: actor
+        )
+
+      # `url_key` reads `base`, defined after it: the token must derive `base`
+      # first, exactly as the write pass does.
+      for {name, compute} <- [
+            {"url_key", "{{ concat(base, '-edition') }}"},
+            {"base", "{{ slugify(title) }}"}
+          ] do
+        CMS.create_field_definition!(
+          %{
+            type_definition_id: type.id,
+            name: name,
+            label: name,
+            field_type: :computed,
+            compute: compute
+          },
+          actor: actor
+        )
+      end
+
+      entry =
+        KilnCMS.CMS.ContentTypes.create!(type.name, %{title: "Folio"}, actor: actor)
+
+      assert entry.custom_fields["url_key"] == "folio-edition"
+      assert entry.path_alias == "/shelf/folio-edition"
+    end
+
     test "a computed field that turns blank on update reads absent, not the stale value" do
       actor = admin()
 

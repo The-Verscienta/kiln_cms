@@ -249,7 +249,7 @@ defmodule KilnCMS.CMS.ComputedFieldTest do
       assert page.custom_fields[padded.name] === 3
     end
 
-    test "a computed field never feeds another computed field" do
+    test "a computed field feeds another computed field" do
       actor = admin()
       first = define!(actor, "{{ slugify(title) }}")
       second = define!(actor, "prefix-{{ #{first.name} }}")
@@ -257,9 +257,140 @@ defmodule KilnCMS.CMS.ComputedFieldTest do
       page = CMS.create_page!(%{title: "Chained", slug: slug()}, actor: actor)
 
       assert page.custom_fields[first.name] == "chained"
-      # Deliberate: one pass, so the second sees nothing for the first — and
-      # a template whose only expression is blank is blank itself.
-      refute Map.has_key?(page.custom_fields, second.name)
+      assert page.custom_fields[second.name] == "prefix-chained"
+    end
+
+    test "a three-deep chain derives in dependency order, whatever order it was defined in" do
+      actor = admin()
+      # Defined last-first: each formula names a field that doesn't exist yet,
+      # which is allowed (a reference resolves at write time).
+      top = "top_#{System.unique_integer([:positive])}"
+      middle = "middle_#{System.unique_integer([:positive])}"
+      bottom = "bottom_#{System.unique_integer([:positive])}"
+
+      define!(actor, "{{ upcase(#{middle}) }}!", %{name: top})
+      define!(actor, "{{ #{bottom} }} ({{ word_count(body) }})", %{name: middle})
+      define!(actor, "{{ slugify(title) }}", %{name: bottom})
+
+      page =
+        CMS.create_page!(
+          %{title: "Deep Chain", slug: slug(), blocks: blocks("one two three")},
+          actor: actor
+        )
+
+      assert page.custom_fields[bottom] == "deep-chain"
+      assert page.custom_fields[middle] == "deep-chain (3)"
+      assert page.custom_fields[top] == "DEEP-CHAIN (3)!"
+
+      # The computed-only refresh (a title edit, no custom_fields sent) re-derives
+      # the whole chain in the same order.
+      {:ok, page} = CMS.update_page(page, %{title: "Moved On"}, actor: actor)
+      assert page.custom_fields[top] == "MOVED-ON (3)!"
+    end
+
+    test "the stored and fired values of a chain agree" do
+      actor = admin()
+      price = "price_#{System.unique_integer([:positive])}"
+      subtotal = define!(actor, "{{ product(#{price}, 2) }}")
+      total = define!(actor, "{{ sum(#{subtotal.name}, 5) }}")
+
+      CMS.create_field_definition!(
+        %{content_type: :page, name: price, label: "Price", field_type: :integer},
+        actor: actor
+      )
+
+      page =
+        CMS.create_page!(%{title: "Priced", slug: slug(), custom_fields: %{price => 10}},
+          actor: actor
+        )
+
+      assert page.custom_fields[subtotal.name] == 20
+      assert page.custom_fields[total.name] == 25
+
+      {:ok, %{json: json}} = Firing.Engine.fire(page, mode: :preview)
+      assert json["custom_fields"][subtotal.name] == 20
+      assert json["custom_fields"][total.name] == 25
+
+      # A changed upstream formula reaches the downstream value on fire, with
+      # no re-save — the fire re-derives the chain, never reading stored values.
+      {:ok, _} =
+        CMS.update_field_definition(subtotal, %{compute: "{{ product(#{price}, 3) }}"},
+          actor: actor
+        )
+
+      {:ok, %{json: json}} =
+        page.id |> CMS.get_page!(actor: actor) |> Firing.Engine.fire(mode: :preview)
+
+      assert json["custom_fields"][total.name] == 35
+    end
+  end
+
+  describe "cycles" do
+    test "a formula that reads itself is refused, naming the loop" do
+      actor = admin()
+      name = "selfish_#{System.unique_integer([:positive])}"
+
+      assert {:error, error} =
+               CMS.create_field_definition(
+                 %{
+                   content_type: :page,
+                   name: name,
+                   label: "Selfish",
+                   field_type: :computed,
+                   compute: "{{ upcase(#{name}) }}"
+                 },
+                 actor: actor
+               )
+
+      assert Exception.message(error) =~ "makes a loop: #{name} → #{name}"
+    end
+
+    test "defining the field that would close a loop is refused" do
+      actor = admin()
+      a = "loop_a_#{System.unique_integer([:positive])}"
+      b = "loop_b_#{System.unique_integer([:positive])}"
+
+      # `a` reads `b` before `b` exists — fine on its own.
+      define!(actor, "{{ #{b} }}", %{name: a})
+
+      assert {:error, error} =
+               CMS.create_field_definition(
+                 %{
+                   content_type: :page,
+                   name: b,
+                   label: "B",
+                   field_type: :computed,
+                   compute: "{{ concat(#{a}, '!') }}"
+                 },
+                 actor: actor
+               )
+
+      assert Exception.message(error) =~ "makes a loop: #{b} → #{a} → #{b}"
+    end
+
+    test "editing a formula into a loop is refused; a loop elsewhere doesn't block others" do
+      actor = admin()
+      a = define!(actor, "{{ slugify(title) }}")
+      b = define!(actor, "{{ #{a.name} }}")
+
+      assert {:error, error} =
+               CMS.update_field_definition(a, %{compute: "{{ #{b.name} }}"}, actor: actor)
+
+      assert Exception.message(error) =~ "makes a loop: #{a.name} → #{b.name} → #{a.name}"
+
+      # A field outside the loop that merely reads into it is not on it.
+      assert {:ok, _} =
+               CMS.update_field_definition(b, %{compute: "{{ upcase(#{a.name}) }}"}, actor: actor)
+    end
+
+    test "fields on another content type don't count toward a loop" do
+      actor = admin()
+      a = "cross_a_#{System.unique_integer([:positive])}"
+      b = "cross_b_#{System.unique_integer([:positive])}"
+
+      # `a` reads `b` on posts; `b` reading `a` on pages closes nothing.
+      define!(actor, "{{ #{b} }}", %{name: a, content_type: :post})
+      assert %FieldDefinition{} = define!(actor, "{{ #{a} }}", %{name: b})
     end
   end
 

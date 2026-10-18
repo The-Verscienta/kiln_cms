@@ -97,20 +97,14 @@ defmodule KilnCMS.Firing.CustomFields do
   end
 
   defp derive(computed, document, stored, body) do
-    # Computed fields never feed another computed field (one pass, exactly as on
-    # the write path), so the context carries the editable values only —
-    # dropping any stored computed value before it can be read.
+    # Every stored computed value is dropped before anything can read it: a
+    # formula over another computed field sees that field derived fresh, in
+    # the same dependency order as the write path (`Computed.derive/3`), never
+    # the value stored by the last save.
     editable = Map.drop(stored, Enum.map(computed, & &1.name))
     context = Computed.Context.from_document(document, editable, body)
 
-    Enum.reduce(computed, editable, &put_computed(&1, context, &2))
-  end
-
-  defp put_computed(definition, context, acc) do
-    case Computed.evaluate(definition.compute || "", context) do
-      nil -> acc
-      value -> Map.put(acc, definition.name, value)
-    end
+    Computed.derive(computed, context, editable)
   end
 
   # One read per distinct target type, ids only — not one per value.

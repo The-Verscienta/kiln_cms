@@ -8,6 +8,12 @@ defmodule KilnCMS.CMS.Validations.ComputeExpression do
   record silently computing blank. Only syntax, function names and arities are
   checked here — references resolve at write time, since the fields a formula
   mentions may be defined after it.
+
+  The one reference check is for a **cycle**: a computed field may read
+  another computed field (`KilnCMS.CMS.Computed.derive/3` evaluates them in
+  dependency order), but not itself, directly or through others. The formula
+  is checked against the type's other computed fields as stored, so defining
+  the field that would close a loop is refused too, naming the loop.
   """
   use Ash.Resource.Validation
 
@@ -30,15 +36,61 @@ defmodule KilnCMS.CMS.Validations.ComputeExpression do
       field_type != :computed -> :ok
       blank?(compute) -> error("a computed field needs a formula, e.g. {{ reading_time(body) }}")
       Ash.Changeset.get_attribute(changeset, :required) -> error_required()
-      true -> validate_formula(compute)
+      true -> validate_formula(changeset, compute)
     end
   end
 
-  defp validate_formula(compute) do
+  defp validate_formula(changeset, compute) do
     case Computed.parse(compute) do
-      {:ok, _template} -> :ok
+      {:ok, template} -> validate_acyclic(changeset, template)
       {:error, message} -> error("the formula #{message}")
     end
+  end
+
+  # Only a formula that reads some custom field can close a loop, so one over
+  # the document alone (`{{ reading_time(body) }}`) skips the read.
+  defp validate_acyclic(changeset, template) do
+    name = Ash.Changeset.get_attribute(changeset, :name)
+
+    if is_binary(name) and Computed.references(template) != [] do
+      own = %{name: name, compute: template}
+
+      case Computed.cycle([own | siblings(changeset)], name) do
+        nil ->
+          :ok
+
+        loop ->
+          error(
+            "the formula makes a loop: #{Enum.join(loop, " → ")} — a computed field " <>
+              "can't depend on its own value"
+          )
+      end
+    else
+      :ok
+    end
+  end
+
+  # The type's other computed fields, as stored. Read as the system actor and
+  # fail closed, like the write path's own definitions read: a refused read
+  # must not pass a loop off as "no siblings".
+  defp siblings(changeset) do
+    opts = [
+      actor: KilnCMS.CMS.Bookkeeping.system(),
+      authorize_with: :error,
+      tenant: changeset.to_tenant
+    ]
+
+    content_type = Ash.Changeset.get_attribute(changeset, :content_type)
+    definition_id = Ash.Changeset.get_attribute(changeset, :type_definition_id)
+
+    definitions =
+      cond do
+        definition_id -> KilnCMS.CMS.field_definitions_for_definition!(definition_id, opts)
+        content_type -> KilnCMS.CMS.field_definitions_for!(content_type, opts)
+        true -> []
+      end
+
+    Enum.filter(definitions, &(&1.field_type == :computed and &1.id != changeset.data.id))
   end
 
   # A computed field has no editor to require anything of — its input is

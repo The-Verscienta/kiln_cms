@@ -208,7 +208,16 @@ CMS.create_field_definition!(%{
   search, embeddings and `custom_filter`/`custom_sort`) and again on fire (so
   **editing a formula reaches published content on the next fire**, with no
   re-save sweep). A stale stored value therefore never reaches an artifact.
-- **One pass**: a computed field never feeds another computed field.
+- **Chaining**: a formula may reference another computed field of the type
+  (`{{ sum(subtotal, shipping) }}` over a computed `subtotal`). The computed
+  fields are evaluated in dependency order, so each sees the values of the
+  ones it reads — on write, on the computed-only refresh after a document
+  edit, on fire and in a slug or alias pattern's `[field:…]` token alike
+  (`KilnCMS.CMS.Computed.derive/3`). A **loop** — a field reading itself,
+  directly or through others — has no value, so it is refused when the field
+  is defined or edited, naming the loop (`the formula makes a loop: total →
+  subtotal → total`). That includes defining the field that would close a
+  loop with existing ones.
 
 **Building a formula without writing one.** Custom fields → Add a field →
 *Computed* opens the formula builder, in two views over the same `compute`
@@ -218,7 +227,7 @@ formula:
   with a label, combine values, URL slug, shortened text, first non-empty
   value, total, multiply, percentage, *if … then …*, days between dates) and
   fill its blanks from dropdowns of the document's values and the type's other
-  fields. The page shows the formula the recipe writes
+  fields, computed ones included (less any that already read this one). The page shows the formula the recipe writes
   (`KilnCMS.CMS.Computed.Recipes`).
 - **Formula** — write the template by hand, with buttons that insert a value
   or a function at the caret, and every function listed with its signature and

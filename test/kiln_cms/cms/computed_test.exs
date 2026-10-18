@@ -142,6 +142,89 @@ defmodule KilnCMS.CMS.ComputedTest do
     end
   end
 
+  describe "computed fields feeding each other" do
+    defp computed(name, compute), do: %{name: name, compute: compute}
+
+    test "references lists the custom fields a formula reads, not document scalars" do
+      assert Computed.references("{{ concat(title, price, field.slug, price) }} {{ tax }}") ==
+               ["price", "slug", "tax"]
+
+      assert Computed.references("{{ reading_time(body) }}") == []
+      assert Computed.references("{{ broken(") == []
+    end
+
+    test "order puts a field after the fields it reads, else keeps the given order" do
+      defs = [
+        computed("total", "{{ sum(subtotal, tax) }}"),
+        computed("tax", "{{ product(subtotal, 0.2) }}"),
+        computed("subtotal", "{{ price }}"),
+        computed("words", "{{ word_count(body) }}")
+      ]
+
+      assert defs |> Computed.order() |> Enum.map(& &1.name) ==
+               ["subtotal", "tax", "total", "words"]
+    end
+
+    test "fields on a cycle, and any reading one, go last in their given order" do
+      defs = [
+        computed("a", "{{ b }}"),
+        computed("reads_a", "{{ a }}"),
+        computed("b", "{{ a }}"),
+        computed("free", "{{ title }}")
+      ]
+
+      assert defs |> Computed.order() |> Enum.map(& &1.name) == ["free", "a", "reads_a", "b"]
+    end
+
+    test "cycle names the loop, including a field that reads itself" do
+      assert Computed.cycle([computed("a", "{{ b }}"), computed("b", "{{ a }}")]) == [
+               "a",
+               "b",
+               "a"
+             ]
+
+      assert Computed.cycle([computed("a", "{{ upcase(a) }}")]) == ["a", "a"]
+      assert Computed.cycle([computed("a", "{{ b }}"), computed("b", "{{ title }}")]) == nil
+
+      # Only a loop through the named field counts.
+      defs = [computed("x", "{{ y }}"), computed("y", "{{ x }}"), computed("z", "{{ x }}")]
+      assert Computed.cycle(defs, "z") == nil
+      assert Computed.cycle(defs, "y") == ["y", "x", "y"]
+    end
+
+    test "readers are the fields that read one, directly or through another" do
+      defs = [computed("b", "{{ a }}"), computed("c", "{{ b }}"), computed("d", "{{ title }}")]
+
+      assert Computed.readers(defs, "a") == MapSet.new(["b", "c"])
+      assert Computed.readers(defs, "d") == MapSet.new()
+    end
+
+    test "derive evaluates in dependency order, three deep" do
+      defs = [
+        computed("shout", "{{ upcase(label) }}!"),
+        computed("label", "{{ slug_part }} ({{ word_count(body) }})"),
+        computed("slug_part", "{{ slugify(title) }}")
+      ]
+
+      assert Computed.derive(defs, context(), %{}) == %{
+               "slug_part" => "hello-world",
+               "label" => "hello-world (5)",
+               "shout" => "HELLO-WORLD (5)!"
+             }
+    end
+
+    test "derive leaves a blank result out, and a cycle derives without raising" do
+      assert Computed.derive([computed("gone", "{{ nothing }}")], context(), %{}) == %{}
+
+      assert Computed.derive(
+               [computed("a", "{{ concat('x', b) }}"), computed("b", "{{ concat('y', a) }}")],
+               context(),
+               %{}
+             ) ==
+               %{"a" => "x", "b" => "yx"}
+    end
+  end
+
   describe "evaluation" do
     test "a lone expression keeps its native type; interpolation stringifies" do
       assert eval("{{ word_count(body) }}") == 5

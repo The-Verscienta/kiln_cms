@@ -81,6 +81,22 @@ Every summary line below that was shortened links to its own entry there.
   result live on your own content.**
   ([#2006](https://github.com/The-Verscienta/kiln_cms/pull/2006) · [long form](docs/changelog/unreleased.md#computed-field-builder))
 
+- **A computed field can read another computed field: `{{ sum(subtotal,
+  shipping) }}` over a computed `subtotal`.** Computed fields used to be
+  evaluated in one pass, so a formula naming another computed field always saw
+  it blank. They are now evaluated in dependency order — on write, on the
+  refresh after a document edit, on fire and in a slug or alias pattern's
+  `[field:…]` token, all through one `KilnCMS.CMS.Computed.derive/3` so the
+  stored and published values agree. A loop (a field reading itself, directly
+  or through others) is refused when the field is defined or edited, naming
+  the loop, including when the new field is the one that would close it. The
+  formula builder's value pickers and palette now offer the type's other
+  computed fields, less any that already read the one being edited, and the
+  preview derives them in the same order. Nothing is stored differently and
+  there is no migration; a formula that named a computed field starts seeing
+  its value on the next save or fire. See docs/extending-content.md, "Computed
+  fields".
+
 - **kilncms.dev now publishes Kiln's security policy at `/security`, and a
   security notice per published GitHub advisory at
   `/security-notices/<ghsa-id>`, with a feed.**

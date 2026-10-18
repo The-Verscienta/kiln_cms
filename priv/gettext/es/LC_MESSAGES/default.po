@@ -3853,6 +3853,11 @@ msgstr "Informes de cumplimiento"
 msgid "Complimentary"
 msgstr "De cortesía"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Computed fields"
+msgstr "Campos calculados"
+
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "Conclude"
