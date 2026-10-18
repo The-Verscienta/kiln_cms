@@ -444,11 +444,95 @@ Payload shape on the wire (JSON:API `?include=content_links`, an
 }
 ```
 
-**When to use a dedicated join resource instead.** ContentLink covers the common
-case with one table. If the link attributes are numerous, strongly typed, or
-queried independently, write a typed Ash join resource (a normal resource with
-two `belongs_to`s plus its own attributes) — the same way the codebase models any
-first-class entity.
+### When to use a dedicated join resource
+
+ContentLink covers the common case with one table. When one relationship needs
+a table of its own, **graduate** it to a typed Ash join resource. That is the
+case when its link data is numerous or queried on its own, when it needs
+indexes of its own, or when SQL should join it directly (decision D22 in
+[relationships-plan.md](relationships-plan.md), R10).
+`mix kiln.gen.join` turns a `:reference` field into that resource, the same
+way `mix kiln.gen.content --from` promotes a dynamic type (§4).
+
+It takes three steps, in this order. Each is its own command, because each
+needs the one before it to have run:
+
+```bash
+# 1. The resource and its code interfaces, then its table.
+mix kiln.gen.join recipe.ingredients
+mix ash.codegen graduate_recipe_ingredients && mix ash.migrate
+
+# 2. The copy: a migration moving the field's connections into the table.
+#    A second run, so its migration sorts after step 1's.
+mix kiln.gen.join recipe.ingredients --data-migration
+mix ash.migrate
+
+# 3. After the copy is deployed and checked: delete the field, its stored
+#    values and its edges, so there is one source of truth.
+mix kiln.join.retire recipe.ingredients --dry-run
+mix kiln.join.retire recipe.ingredients
+```
+
+Steps 1 and 2 write code only. Like any Igniter task, they show the diff and
+apply it when you confirm (`--dry-run` only shows it, `--yes` skips the
+prompt). The resource, `KilnCMS.CMS.RecipeIngredientsLink` unless
+`--module` names another, has:
+
+- `belongs_to :source` and `belongs_to :target`, to the two content resources
+  (`KilnCMS.CMS.Entry` for an admin-defined type), with foreign keys that
+  delete a connection when either record is purged;
+- `position`, plus one typed attribute per link field. `:string`, `:text`,
+  `:url` and `:select` become `:string`; the others become `:integer`,
+  `:float`, `:boolean`, `:date` or `:naive_datetime`. Each is required and
+  defaulted as its link field is, and a select keeps its choices as a
+  `one_of` validation;
+- a `unique_connection` identity on `[:source_id, :target_id]` and an index
+  on `target_id`;
+- the content read rule as policies. Admins bypass. Editors read and write.
+  Anyone else reads a connection only when they may read both records
+  (`Checks.LinkEndsReadable`, the rule `content_links` has), and a read-only
+  API key cannot write. Removing a connection is an edit of its source, not
+  a hard delete of content, so editors may do it;
+- code interfaces `list_/get_/create_/update_/destroy_recipe_ingredients_link`,
+  plus the ordered `list_recipe_ingredients_links_from` (by source) and
+  `list_recipe_ingredients_links_to` (by target).
+
+The copy carries every connection whose two records still exist: its org,
+both ends, its position and its link values. A value of the wrong JSON type
+becomes `NULL`, or the link field's default. A connection to a purged record
+is a broken reference, and a foreign key cannot point at nothing, so it is not
+copied. The migration is safe to run twice.
+
+`mix kiln.join.retire` checks before it deletes anything, in every
+organization that defines the field, and refuses unless:
+
+- every connection is in the join table with the same ends, position and link
+  values. A connection made after the copy ran is missing; re-run the copy's
+  SQL, or make it again in the new table;
+- no record holds a value for the field without an edge
+  (`mix kiln.links.backfill` writes the edges);
+- no working copy holds an unpublished change to the field. Publish or
+  discard it first.
+
+The check and the delete run in one transaction that holds `content_links`
+still, so a connection made in between waits rather than being lost. On a
+release, run it against the live node:
+`bin/kiln_cms rpc 'KilnCMS.Release.retire_join_field("recipe.ingredients")'`.
+
+Before you start, know what graduation changes:
+
+- **Readers move too.** Retiring deletes the field's value from
+  `custom_fields`, the shape delivery, JSON:API, GraphQL and the fired
+  artifacts serve. Point every consumer at the join resource before step 3.
+- **It is project-wide.** The link fields are read from one organization's
+  definition (`--org`, default the default org), and the copy and the
+  retirement cover the field in every organization that defines it.
+- **One target type only.** A field that links to several types (R2) is
+  refused: a join table has one foreign key per end. Split it into one field
+  per target type, then graduate each.
+- **Promote types first.** Promoting a dynamic type (§4) moves its entries out
+  of the `entries` table, and a join row's foreign key to them would go with
+  them. Promote both ends before graduating the relationship.
 
 ## 3. Consumer-facing access tiers (audiences)
 

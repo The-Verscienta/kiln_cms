@@ -60,6 +60,10 @@ Every summary line below that was shortened links to its own entry there.
   `on_target_delete`: keep, clear or restrict on a permanent delete.**
   ([#2017](https://github.com/The-Verscienta/kiln_cms/pull/2017) · [long form](docs/changelog/unreleased.md#reference-target-limit-and-delete-rule))
 
+- **`mix kiln.gen.join <type>.<field>` graduates a reference field to a typed
+  Ash join resource, copies its connections, and retires the field.**
+  ([#2016](https://github.com/The-Verscienta/kiln_cms/pull/2016) · [long form](docs/changelog/unreleased.md#graduate-a-reference-field-to-a-join-resource))
+
 - **Connections can be added, removed and reordered from the record they point
   at, and each change is saved as an edit of the record that holds it.**
   ([#2018](https://github.com/The-Verscienta/kiln_cms/pull/2018) · [long form](docs/changelog/unreleased.md#connections-can-be-added-removed-and-reordered-from-the-record-they-point-at))
