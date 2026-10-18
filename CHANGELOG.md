@@ -58,7 +58,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A reference custom field can carry link fields: typed details on each
   connection, such as the quantity of each ingredient a recipe connects.**
-  ([#2011](https://github.com/The-Verscienta/kiln_cms/pull/PR) · [long form](docs/changelog/unreleased.md#a-reference-custom-field-can-carry-link-fields-details-on-each-connection))
+  ([#2011](https://github.com/The-Verscienta/kiln_cms/pull/2011) · [long form](docs/changelog/unreleased.md#a-reference-custom-field-can-carry-link-fields-details-on-each-connection))
 
 - **`custom_filter` filters through relationships: `has`, `has_all`, `has_none`
   and `count` on a reference field, and `has`/`has_all`/`has_none` on `tags`.**
