@@ -347,7 +347,7 @@ fallback; the spike's outcome is under the JSON:API bullet and in §7 Q1.
   additive.
 
   **Outcome: `?expand=`.** The spike stopped at AshJsonApi's include parser.
-  `AshJsonApi.Includes.Parser` accepts an include path only when each segment
+  AshJsonApi's include parser accepts an include path only when each segment
   is a public relationship (`Ash.Resource.Info.public_relationship/2`), and an
   Ash relationship has one destination resource, so a `target` calculation is
   refused as an invalid include before the serializer is reached. Emitting

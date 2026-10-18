@@ -2,7 +2,7 @@ defmodule KilnCMSWeb.Graphql.ContentRecord.Notation do
   @moduledoc """
   Schema macros for `KilnCMSWeb.Graphql.ContentRecord`.
 
-  `implement_content_record/1` runs in `KilnCMSWeb.GraphqlSchema` and emits
+  `implement_content_record/1` runs in the GraphQL schema module and emits
   one `extend object` per content type on the GraphQL surface, adding the
   `ContentRecord` interface and its `references` / `referencedBy` fields to
   the object AshGraphql generated. AshGraphql adds its objects in a phase that

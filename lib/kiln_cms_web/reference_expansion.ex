@@ -21,9 +21,8 @@ defmodule KilnCMSWeb.ReferenceExpansion do
 
   §7 Q1 asked for a spike of `?include=content_links.target` first: a
   polymorphic `target` on `ContentLink`, emitted as heterogeneous `included`
-  members. AshJsonApi cannot do that without patching it.
-  `AshJsonApi.Includes.Parser` accepts an include path only when every
-  segment is a *public relationship* (`Ash.Resource.Info.public_relationship/2`),
+  members. AshJsonApi cannot do that without patching it. Its include parser
+  accepts an include path only when every segment is a *public relationship* (`Ash.Resource.Info.public_relationship/2`),
   and an Ash relationship has exactly one destination resource, so a
   calculation named `target` is refused as an invalid include. The nearest
   thing that does work, one relationship per target resource
