@@ -3762,6 +3762,13 @@
                 ],
                 "description": "Field included by default."
               },
+              "target_types": {
+                "description": "Field included by default.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
               "type_definition_id": {
                 "anyOf": [
                   {
@@ -3782,6 +3789,7 @@
               "field_type",
               "required",
               "options",
+              "target_types",
               "multiple",
               "position",
               "names_record",

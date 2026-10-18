@@ -52,9 +52,17 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       render the same row without the controls.
     * The `:row_extra` slot renders inside each row, after the title, with the
       row's item — where per-link inputs (R3) go.
-    * Results and rows already name their type; `target_types/1` is the one
-      place that turns a definition into the types to search, so references to
-      several types (R2) only widen it.
+    * Results and rows name their type, and `target_types/2` is the one
+      place that turns a definition into the types to search.
+
+  ## Several target types (R2)
+
+  A field that allows several types (`FieldDefinition.target_types`) keys
+  every result and row by a `"type:id"` token instead of a bare id
+  (`KilnCMSWeb.ContentEditor.ReferenceValues`), so the hidden inputs and the
+  edit messages say which type each record is, and the editor turns the
+  tokens into the `%{"id", "type"}` a write needs. The search reads every
+  allowed type and merges them into one list in the same order.
   """
 
   use KilnCMSWeb, :live_component
@@ -62,8 +70,9 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   import Ash.Expr, only: [expr: 1]
 
   alias KilnCMS.CMS
-  alias KilnCMS.CMS.Changes.ApplyCustomFields
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.FieldDefinition
+  alias KilnCMSWeb.ContentEditor.ReferenceValues
 
   @page_size 20
 
@@ -106,7 +115,10 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       |> assign_new(:locked, fn -> false end)
       |> assign_new(:row_extra, fn -> [] end)
 
-    ids = ApplyCustomFields.snapshot_ids(assigns.value) |> Enum.uniq()
+    ids =
+      assigns.value
+      |> ReferenceValues.keys(ReferenceValues.polymorphic?(assigns.definition))
+      |> Enum.uniq()
 
     socket =
       if ids == socket.assigns.ids,
@@ -272,12 +284,14 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
 
       try do
         record = ContentTypes.create!(entry.ct, attrs, actor: actor, tenant: tenant)
-        item = to_item(record, entry.ct)
+        # Keyed as a pick is: the id, or its `"type:id"` token on a field
+        # that allows several types.
+        item = to_item(record, entry.ct, socket.assigns.definition)
 
-        notify(socket, if(multiple?(socket), do: :add, else: :put), record.id)
+        notify(socket, if(multiple?(socket), do: :add, else: :put), item.id)
 
         socket
-        |> update(:known, &Map.put(&1, record.id, item))
+        |> update(:known, &Map.put(&1, item.id, item))
         |> assign(:creating, nil)
         |> assign(
           :announcement,
@@ -310,14 +324,15 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   # ── reads ─────────────────────────────────────────────────────────────────
 
   @doc """
-  The content types a reference definition may point at, resolved in `org`.
-  One today (`target_type`); references to several types (R2) widen this.
+  The content types a reference definition may point at, resolved in `org`:
+  its one `target_type`, or every type in `target_types` (R2). A name that no
+  longer resolves is left out.
   """
   def target_types(definition, org) do
-    case ContentTypes.get(definition.target_type, org) do
-      nil -> []
-      ct -> [ct]
-    end
+    for name <- FieldDefinition.reference_targets(definition),
+        ct = ContentTypes.get(name, org),
+        not is_nil(ct),
+        do: ct
   end
 
   # The target types the editor may create a record of here, each with the
@@ -363,36 +378,90 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   # typed one lists matches by title. Records already picked are left out of
   # a list's results, in the query, so pages stay full.
   defp search(socket, offset) do
-    %{definition: definition, tenant: tenant, actor: actor} = socket.assigns
+    %{definition: definition, tenant: tenant, query: query} = socket.assigns
+    exclude = if multiple?(socket), do: socket.assigns.ids, else: []
 
     case target_types(definition, tenant) do
-      [ct | _] ->
-        exclude = if multiple?(socket), do: socket.assigns.ids, else: []
+      [] ->
+        socket |> assign(:results, []) |> assign(:more?, false)
 
-        rows =
-          ContentTypes.list!(ct,
-            actor: actor,
-            tenant: tenant,
-            query:
-              search_filters(socket.assigns.query, exclude) ++
-                [
-                  select: [:id, :title, :state, :slug],
-                  sort: search_sort(socket.assigns.query),
-                  limit: @page_size + 1,
-                  offset: offset
-                ]
-          )
-
+      cts ->
+        rows = search_rows(socket, cts, query, exclude, offset)
         {page, rest} = Enum.split(rows, @page_size)
-        page = Enum.map(page, &to_item(&1, ct))
+        page = Enum.map(page, fn {record, ct} -> to_item(record, ct, definition) end)
         results = if offset == 0, do: page, else: socket.assigns.results ++ page
 
         socket
         |> assign(:results, results)
         |> assign(:more?, rest != [])
+    end
+  end
 
-      [] ->
-        socket |> assign(:results, []) |> assign(:more?, false)
+  # One type reads its page directly. Several (R2) each read everything up to
+  # the end of the page, and the merge, sorted the way one read would be,
+  # drops what earlier pages showed — so paging stays exact across types.
+  defp search_rows(socket, [ct], query, exclude, offset),
+    do: socket |> read_type(ct, query, exclude, @page_size + 1, offset) |> Enum.map(&{&1, ct})
+
+  defp search_rows(socket, cts, query, exclude, offset) do
+    cts
+    |> Enum.flat_map(fn ct ->
+      socket
+      |> read_type(ct, query, exclude, offset + @page_size + 1, 0)
+      |> Enum.map(&{&1, ct})
+    end)
+    |> sort_merged(query)
+    |> Enum.drop(offset)
+    |> Enum.take(@page_size + 1)
+  end
+
+  defp read_type(socket, ct, query, exclude, limit, offset) do
+    %{definition: definition, tenant: tenant, actor: actor} = socket.assigns
+
+    ContentTypes.list!(ct,
+      actor: actor,
+      tenant: tenant,
+      query:
+        search_filters(query, excluded_ids(exclude, ct, definition)) ++
+          [
+            select: [:id, :title, :state, :slug, :updated_at],
+            sort: search_sort(query),
+            limit: limit,
+            offset: offset
+          ]
+    )
+  end
+
+  defp sort_merged(rows, query) do
+    if String.trim(query) == "",
+      do: Enum.sort(rows, &newer_first?/2),
+      else: Enum.sort_by(rows, fn {record, _ct} -> {record.title || "", record.id} end)
+  end
+
+  defp newer_first?({a, _}, {b, _}) do
+    case DateTime.compare(a.updated_at, b.updated_at) do
+      :gt -> true
+      :lt -> false
+      :eq -> a.id <= b.id
+    end
+  end
+
+  # The picked keys' record ids that belong to `ct`.
+  defp excluded_ids(keys, ct, definition) do
+    for key <- keys,
+        {type, id} = split_key(key, definition),
+        type == to_string(ct.type),
+        do: id
+  end
+
+  # A row key as `{type name, record id}`: a `"type:id"` token on a field that
+  # allows several types, else a bare id of the field's one type.
+  defp split_key(key, definition) do
+    with true <- ReferenceValues.polymorphic?(definition),
+         [type, id] <- String.split(key, ":", parts: 2) do
+      {type, id}
+    else
+      _bare -> {definition |> FieldDefinition.reference_targets() |> List.first(), key}
     end
   end
 
@@ -422,46 +491,63 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   # the next save.
   defp resolve(socket, ids) do
     %{definition: definition, tenant: tenant, actor: actor, known: known} = socket.assigns
-
-    missing =
-      Enum.filter(ids, &(not Map.has_key?(known, &1) and match?({:ok, _}, Ecto.UUID.cast(&1))))
+    cts = Map.new(target_types(definition, tenant), &{to_string(&1.type), &1})
 
     found =
-      case {missing, target_types(definition, tenant)} do
-        {[_ | _], [ct | _]} ->
-          ct
-          |> ContentTypes.list!(
-            actor: actor,
-            tenant: tenant,
-            query: [filter: [id: [in: missing]], select: [:id, :title, :state, :slug]]
-          )
-          |> Map.new(&{&1.id, to_item(&1, ct)})
+      ids
+      |> Enum.reject(&Map.has_key?(known, &1))
+      |> Enum.map(&split_key(&1, definition))
+      |> Enum.filter(fn {type, id} -> Map.has_key?(cts, type) and uuid?(id) end)
+      |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+      |> Enum.flat_map(fn {type, missing} ->
+        ct = cts[type]
 
-        _nothing ->
-          %{}
-      end
+        ct
+        |> ContentTypes.list!(
+          actor: actor,
+          tenant: tenant,
+          query: [filter: [id: [in: missing]], select: [:id, :title, :state, :slug]]
+        )
+        |> Enum.map(&to_item(&1, ct, definition))
+      end)
+      |> Map.new(&{&1.id, &1})
 
     assign(socket, :known, Map.merge(known, found))
   end
 
-  defp to_item(record, ct) do
+  defp uuid?(id), do: match?({:ok, _}, Ecto.UUID.cast(id))
+
+  # `id` is the row's key: the record id, or its `"type:id"` token on a field
+  # that allows several types.
+  defp to_item(record, ct, definition) do
+    type = to_string(ct.type)
+
     %{
-      id: record.id,
+      id:
+        if(ReferenceValues.polymorphic?(definition),
+          do: ReferenceValues.token(type, record.id),
+          else: record.id
+        ),
       title: record.title,
       state: record.state,
       type: ct.type,
       type_label: ct.label,
-      href: ~p"/editor/content/#{to_string(ct.type)}/#{record.id}"
+      href: ~p"/editor/content/#{type}/#{record.id}"
     }
   end
 
   defp items(%{ids: ids, known: known, value: value, definition: definition}) do
+    polymorphic? = ReferenceValues.polymorphic?(definition)
+
     snapshots =
       value
       |> List.wrap()
       |> Enum.flat_map(fn
-        %{"id" => id} = snapshot -> [{id, snapshot}]
-        _other -> []
+        %{"id" => _} = snapshot ->
+          Enum.map(ReferenceValues.keys(snapshot, polymorphic?), &{&1, snapshot})
+
+        _other ->
+          []
       end)
       |> Map.new()
 
@@ -473,7 +559,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
           id: id,
           title: snapshot["title"],
           state: nil,
-          type: snapshot["type"] || definition.target_type,
+          type: snapshot["type"] || elem(split_key(id, definition), 0),
           type_label: nil,
           href: nil
         }
@@ -527,7 +613,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       >
         <.row
           :for={{item, index} <- Enum.with_index(@items)}
-          id={"cf-ref-#{@definition.name}-#{item.id}"}
+          id={"cf-ref-#{@definition.name}-#{String.replace(item.id, ":", "-")}"}
           item={item}
           index={index}
           last={@last}
@@ -586,7 +672,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         >
           <li
             :for={result <- @results}
-            id={"#{@root}-opt-#{result.id}"}
+            id={"#{@root}-opt-#{String.replace(result.id, ":", "-")}"}
             role="option"
             aria-selected="false"
             data-ref-option

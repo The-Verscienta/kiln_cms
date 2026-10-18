@@ -51,6 +51,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMSWeb.ContentEditor.FieldEvents
   alias KilnCMSWeb.ContentEditor.InlineTerms
   alias KilnCMSWeb.ContentEditor.NewDraft
+  alias KilnCMSWeb.ContentEditor.ReferenceValues
   alias KilnCMSWeb.EditorTelemetry
   alias KilnCMSWeb.Presence
   alias KilnCMSWeb.VersionDiffComponents
@@ -1886,6 +1887,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> inject_rich_bodies(socket.assigns.rich_bodies)
       |> normalize_item_rows()
       |> merge_tag_params(socket)
+      |> ReferenceValues.normalize(socket.assigns.field_definitions)
 
     {params, socket} = sync_slug(params, event["_target"], socket)
     socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
@@ -3187,6 +3189,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> inject_rich_bodies(socket.assigns.rich_bodies)
       |> normalize_item_rows()
       |> merge_tag_params(socket)
+      |> ReferenceValues.normalize(socket.assigns.field_definitions)
 
     if socket.assigns.record.state == :published,
       do: save_live(socket, params),
@@ -3784,6 +3787,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
              ))
   end
 
+  defp polymorphic_field?(socket, name),
+    do:
+      Enum.any?(
+        socket.assigns.field_definitions,
+        &(&1.name == name and ReferenceValues.polymorphic?(&1))
+      )
+
   defp field_list_of?(socket, name, type) do
     Enum.any?(
       socket.assigns.field_definitions,
@@ -3797,10 +3807,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # gallery present in the params (see `custom_field_input/1`).
   defp update_field_gallery(socket, name, fun) do
     if field_gallery_editable?(socket, name) do
+      # Keys as the field's inputs post them: bare ids, or `"type:id"` tokens on
+      # a reference field that allows several types (R2), so an item keeps its
+      # type through a move or a remove.
       ids =
         socket.assigns.form
         |> custom_field_value(name)
-        |> KilnCMS.CMS.Changes.ApplyCustomFields.snapshot_ids()
+        |> ReferenceValues.keys(polymorphic_field?(socket, name))
 
       put_custom_field_param(socket, name, ["" | fun.(ids)])
     else
@@ -3817,7 +3830,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
         _other -> %{}
       end
 
-    params = Map.put(params, "custom_fields", Map.put(custom, name, value))
+    # A reference field allowing several types (R2) posts `"type:id"` keys;
+    # the form gets them as the `%{"id", "type"}` a write needs.
+    params =
+      params
+      |> Map.put("custom_fields", Map.put(custom, name, value))
+      |> ReferenceValues.normalize(socket.assigns.field_definitions)
 
     socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
     broadcast_preview(socket)

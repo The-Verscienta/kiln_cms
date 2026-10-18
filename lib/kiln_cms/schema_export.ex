@@ -41,6 +41,7 @@ defmodule KilnCMS.SchemaExport do
   alias Kiln.Block.JsonSchema
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldTypes
 
   @dialect "https://json-schema.org/draft/2020-12/schema"
@@ -295,8 +296,24 @@ defmodule KilnCMS.SchemaExport do
   defp custom_field_schema(definition) do
     definition.field_type
     |> base_custom_field_schema(definition)
+    |> put_target_types(definition)
     |> put_localization(Map.get(definition, :localization))
   end
+
+  # The content types a `:reference` field may point at (R2), whichever option
+  # names them — one `target_type` or several `target_types` — so a consumer
+  # reads one key either way and can tell which types a value's `"type"` may
+  # name. An annotation, not an `enum` on that `"type"`, for the reason
+  # `:select` exports none: narrowing the list leaves stored values naming a
+  # type it no longer holds.
+  defp put_target_types(schema, %{field_type: :reference} = definition) do
+    case FieldDefinition.reference_targets(definition) do
+      [] -> schema
+      types -> Map.put(schema, "x-kiln-target-types", types)
+    end
+  end
+
+  defp put_target_types(schema, _definition), do: schema
 
   # Field-level localization (#1327), as `Kiln.Block.JsonSchema` annotates a
   # block field: absent for the default, `:localized`.

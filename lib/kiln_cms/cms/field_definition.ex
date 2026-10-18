@@ -108,6 +108,32 @@ defmodule KilnCMS.CMS.FieldDefinition do
 
   def orphaned?(_definition), do: false
 
+  @doc """
+  The content type names a `:reference` definition may point at: its
+  `target_types` when it lists any (a polymorphic field, R2), else its single
+  `target_type`, else none. Every reader of "which types does this field
+  allow" goes through here, so the two options can't be read differently.
+
+      iex> KilnCMS.CMS.FieldDefinition.reference_targets(%{target_type: "page", target_types: []})
+      ["page"]
+
+      iex> KilnCMS.CMS.FieldDefinition.reference_targets(%{target_type: nil, target_types: ["page", "post"]})
+      ["page", "post"]
+  """
+  @spec reference_targets(t() | map()) :: [String.t()]
+  def reference_targets(definition) do
+    case Map.get(definition, :target_types) do
+      [_ | _] = types ->
+        types
+
+      _none ->
+        case Map.get(definition, :target_type) do
+          type when is_binary(type) and type != "" -> [type]
+          _none -> []
+        end
+    end
+  end
+
   admin do
     resource_group :content
     table_columns [:content_type, :name, :label, :field_type, :required, :position]
@@ -140,6 +166,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :required,
       :options,
       :target_type,
+      :target_types,
       :multiple,
       :min_items,
       :max_items,
@@ -255,7 +282,8 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # A :select field is meaningless without choices.
     validate KilnCMS.CMS.Validations.SelectOptions
 
-    # A :reference field must target a known content type (compiled or dynamic).
+    # A :reference field must target known content types (compiled or
+    # dynamic): one through `target_type`, or several through `target_types`.
     validate KilnCMS.CMS.Validations.ReferenceTarget
 
     # `min_items` may not exceed `max_items` on a list field.
@@ -328,6 +356,14 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # The content type a `:reference` field points at — a type name string
     # ("page", "recipe", …), compiled or dynamic (ignored otherwise).
     attribute :target_type, :string, public?: true
+
+    # The content types a **polymorphic** `:reference` field may point at
+    # (R2) — several type names, set *instead of* `target_type` (exactly one
+    # of the two is set, `Validations.ReferenceTarget`). Each stored snapshot
+    # names its own `"type"`, so a value is self-describing; a write must name
+    # the type of every item when more than one is allowed. Empty for a
+    # single-type field, which keeps the documented `target_type`.
+    attribute :target_types, {:array, :string}, allow_nil?: false, default: [], public?: true
 
     # Whether a `:media` field holds a **gallery** — an ordered list of media
     # snapshots — or a `:reference` field a **list of references** (ordered

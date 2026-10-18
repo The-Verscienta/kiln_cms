@@ -555,4 +555,114 @@ defmodule KilnCMSWeb.ReferencePickerTest do
       assert length(list_ids(lv, "see_also")) == 3
     end
   end
+
+  # R2: a field that allows several types searches all of them, shows each
+  # result's type, and keys every row by `"type:id"`, which reaches the write
+  # as `%{"id", "type"}` — so the saved snapshot keeps the type it was picked as.
+  describe "several target types" do
+    setup %{admin: admin, word: word} do
+      for {name, extra} <- [{"mixed", %{multiple: true}}, {"lead", %{}}] do
+        CMS.create_field_definition!(
+          Map.merge(
+            %{
+              content_type: :post,
+              name: name,
+              label: name,
+              field_type: :reference,
+              target_types: ["page", "post"]
+            },
+            extra
+          ),
+          actor: admin
+        )
+      end
+
+      other_post =
+        CMS.create_post!(%{title: "#{word} Delta", slug: "rp-#{uniq()}"}, actor: admin)
+
+      %{other_post: other_post}
+    end
+
+    test "offers Add new for each allowed type, and connects what it creates by its type", ctx do
+      lv = open_editor(ctx.conn, ctx.admin, ctx.post)
+
+      assert has_element?(lv, new_button("mixed", "page"), "Add new Page")
+      assert has_element?(lv, new_button("mixed", "post"), "Add new Post")
+
+      lv |> element(new_button("mixed", "post")) |> render_click()
+      assert has_element?(lv, new_form("mixed"), "New Post")
+      fill_new(lv, "mixed", %{"title" => "#{ctx.word} Echo"})
+      create(lv, "mixed")
+
+      [created] = CMS.list_posts!(actor: ctx.admin, query: [filter: [title: "#{ctx.word} Echo"]])
+      assert created.state == :draft
+      assert list_ids(lv, "mixed") == ["post:#{created.id}"]
+      assert has_element?(lv, "#cf-ref-mixed-post-#{created.id}", "Draft")
+
+      save(lv)
+      assert [%{"type" => "post", "id" => id}] = stored(ctx.post, ctx.admin)["mixed"]
+      assert id == created.id
+    end
+
+    test "search spans every allowed type; picks keep their type through a save", ctx do
+      lv = open_editor(ctx.conn, ctx.admin, ctx.post)
+      page_key = "page:#{ctx.published.id}"
+      post_key = "post:#{ctx.other_post.id}"
+
+      search(lv, "mixed", ctx.word)
+      options = option_ids(lv, "mixed")
+      assert page_key in options
+      assert post_key in options
+      assert "page:#{ctx.draft.id}" in options
+
+      # Merged in title order across the two types.
+      assert Enum.take(options, 4) == [
+               page_key,
+               "page:#{ctx.draft.id}",
+               "page:#{ctx.other.id}",
+               post_key
+             ]
+
+      assert lv |> element("#custom-field-mixed-opt-post-#{ctx.other_post.id}") |> render() =~
+               "Post"
+
+      pick(lv, "mixed", "post-#{ctx.other_post.id}")
+      pick(lv, "mixed", "page-#{ctx.published.id}")
+      assert list_ids(lv, "mixed") == [post_key, page_key]
+
+      # A picked record leaves the results, by its own type.
+      search(lv, "mixed", ctx.word)
+      refute post_key in option_ids(lv, "mixed")
+      refute page_key in option_ids(lv, "mixed")
+
+      # Reordering keeps each item's type.
+      lv
+      |> element("#cf-ref-mixed-page-#{ctx.published.id} button[phx-value-dir=up]")
+      |> render_click()
+
+      assert list_ids(lv, "mixed") == [page_key, post_key]
+
+      search(lv, "lead", ctx.word)
+      pick(lv, "lead", "post-#{ctx.other_post.id}")
+      assert single_value(lv, "lead") == [post_key]
+
+      save(lv)
+
+      fields = stored(ctx.post, ctx.admin)
+
+      assert Enum.map(fields["mixed"], &{&1["type"], &1["id"]}) == [
+               {"page", ctx.published.id},
+               {"post", ctx.other_post.id}
+             ]
+
+      assert %{"type" => "post", "id" => id} = fields["lead"]
+      assert id == ctx.other_post.id
+
+      # Reopened, the stored snapshots render as typed rows again.
+      lv = open_editor(ctx.conn, ctx.admin, ctx.post)
+      assert list_ids(lv, "mixed") == [page_key, post_key]
+      assert single_value(lv, "lead") == [post_key]
+      assert has_element?(lv, "#cf-ref-mixed-post-#{ctx.other_post.id}", "Post")
+    end
+  end
 end

@@ -77,7 +77,7 @@ defmodule KilnCMS.CMS.ContentLinks do
         %{
           field: definition.name,
           target_id: id,
-          target_type: string_or(value["type"], definition.target_type),
+          target_type: string_or(value["type"], only_target(definition)),
           position: position
         }
       ]
@@ -87,6 +87,16 @@ defmodule KilnCMS.CMS.ContentLinks do
   end
 
   defp edge(_value, _definition), do: []
+
+  # A snapshot names its own type (and every value R2's polymorphic fields
+  # store does); a bare legacy value falls back to the field's type only when
+  # the field allows just one.
+  defp only_target(definition) do
+    case KilnCMS.CMS.FieldDefinition.reference_targets(definition) do
+      [only] -> only
+      _none_or_several -> nil
+    end
+  end
 
   defp string_or(value, _fallback) when is_binary(value) and value != "", do: value
   defp string_or(_value, fallback), do: fallback

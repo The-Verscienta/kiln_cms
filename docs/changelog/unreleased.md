@@ -33,6 +33,31 @@ carries the reasoning.
   their 1.0 shape.
   ([#2000](https://github.com/The-Verscienta/kiln_cms/pull/2000))
 
+<a id="a-reference-custom-field-can-link-to-several-content-types-targettypes"></a>
+
+- **A reference custom field can link to several content types
+  (`target_types`).** Workstream R2 of
+  [relationships-plan.md](../relationships-plan.md). A `:reference` field
+  names its one type in `target_type`, as before, or several in the new
+  `target_types` list; exactly one of the two is set, and every name must be
+  a compiled or dynamic type on the site, once. Each stored snapshot already
+  names its own `"type"`, so a value is self-describing, and a list of
+  references (R1) may mix types. A write to a field with several types must
+  name each item's type, `{"id", "type"}`; a bare id is refused, and so is a
+  type the field does not allow, naming the item. The id is looked up among
+  that type's records only. A field with one type keeps accepting a bare id.
+  The `ContentLink` edges and the re-fire edges (R0, #1998) take each item's
+  own type, and `custom_filter` keeps matching on the id. The schema export
+  reports every reference field's allowed types as `x-kiln-target-types`, an
+  annotation rather than an `enum`, and the TypeScript export comments them
+  on the field. In the fields admin, *Links to* becomes a set of checkboxes:
+  one ticked type is saved as `target_type`, several as `target_types`. The
+  editor's reference picker (R9) searches every allowed type, shows each
+  result's type, and keeps each pick's type through reorders and saves. The
+  typed GraphQL interface over the allowed types is R7. No existing field
+  changes.
+  ([#2004](https://github.com/The-Verscienta/kiln_cms/pull/2004))
+
 <a id="the-editor-fills-a-reference-custom-field-from-a-search-picker-instead-of-a"></a>
 
 - **The editor fills a reference custom field from a search picker instead of
