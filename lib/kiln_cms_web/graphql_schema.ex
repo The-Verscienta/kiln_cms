@@ -15,6 +15,7 @@ defmodule KilnCMSWeb.GraphqlSchema do
     action_middleware: [KilnCMSWeb.GraphqlDefaultOffset]
 
   require KilnCMSWeb.Graphql.ContentRecord.Notation
+  require KilnCMSWeb.Graphql.ReferenceWrites.Notation
 
   # Query cost is bounded by the document pipeline both transports build
   # (`KilnCMSWeb.GraphqlLimits`: complexity, depth, token count), which also
@@ -30,6 +31,15 @@ defmodule KilnCMSWeb.GraphqlSchema do
   import_types KilnCMSWeb.Graphql.ContentRecord
 
   KilnCMSWeb.Graphql.ContentRecord.Notation.implement_content_record(
+    Application.compile_env(:kiln_cms, :content_domains, [KilnCMS.CMS])
+  )
+
+  # Connect / disconnect / reorder through `:reference` fields (R8):
+  # `add<Type>References`, `remove<Type>References`, `move<Type>Reference`,
+  # each an update of the record. See `KilnCMSWeb.Graphql.ReferenceWrites`.
+  import_types KilnCMSWeb.Graphql.ReferenceWrites
+
+  KilnCMSWeb.Graphql.ReferenceWrites.Notation.reference_result_objects(
     Application.compile_env(:kiln_cms, :content_domains, [KilnCMS.CMS])
   )
 
@@ -166,7 +176,9 @@ defmodule KilnCMSWeb.GraphqlSchema do
   end
 
   mutation do
-    # Custom Absinthe mutations can be placed here
+    KilnCMSWeb.Graphql.ReferenceWrites.Notation.reference_mutations(
+      Application.compile_env(:kiln_cms, :content_domains, [KilnCMS.CMS])
+    )
   end
 
   subscription do

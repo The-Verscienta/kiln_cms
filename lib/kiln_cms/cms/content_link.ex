@@ -26,9 +26,11 @@ defmodule KilnCMS.CMS.ContentLink do
   case without that ceremony.)
 
   Managed through `manage_relationship` on the parent content resource (which
-  defaults new rows to `kind: :related`), or directly via the `create_content_link`
-  interface for payload-carrying links. Not exposed via the auto API surface,
-  but reachable through the content resources' link relationships.
+  defaults new rows to `kind: :related`), directly via the `create_content_link`
+  interface for payload-carrying links, or over JSON:API at
+  `/api/json/content-links` (R8, `KilnCMS.CMS.PayloadLinks`): `:create_link`,
+  `:update_link` and `:destroy_link`, each authorized as an update of the
+  link's **source** record (`Checks.SourceUpdatable`).
 
   ## Reference edges (#1594, D20)
 
@@ -60,12 +62,22 @@ defmodule KilnCMS.CMS.ContentLink do
     authorizers: [Ash.Policy.Authorizer],
     extensions: [AshJsonApi.Resource]
 
-  # No routes of its own — link edges travel as compound-document `included`
-  # members when a content record is fetched with `?include=content_links` /
-  # `incoming_links`. The declaration exists so those members carry a proper
-  # JSON:API `type` (instead of the spec-violating `"type": null`).
+  # Link edges travel as compound-document `included` members when a content
+  # record is fetched with `?include=content_links` / `incoming_links`, typed
+  # `content_link`. Since R8 payload links (no `field`) also have routes of
+  # their own; reference edges are written through their custom field and
+  # these routes refuse them (`Validations.PayloadLink`).
   json_api do
     type "content_link"
+
+    routes do
+      base "/content-links"
+
+      get :read
+      post :create_link
+      patch :update_link
+      delete :destroy_link
+    end
   end
 
   postgres do
@@ -97,6 +109,27 @@ defmodule KilnCMS.CMS.ContentLink do
       :source_type,
       :target_type
     ]
+
+    # Payload links over the API (R8, `KilnCMS.CMS.PayloadLinks`). `field` is
+    # never accepted, so these only ever write links that no custom field
+    # owns; `source_type` / `target_type` are set from the records.
+    create :create_link do
+      accept [:source_id, :target_id, :kind, :position, :label, :metadata]
+      change KilnCMS.CMS.Changes.PayloadLinkEnds
+      validate KilnCMS.CMS.Validations.PayloadLink
+    end
+
+    # The ends are fixed: a link to somewhere else is a different link.
+    update :update_link do
+      require_atomic? false
+      accept [:position, :label, :metadata]
+      validate KilnCMS.CMS.Validations.PayloadLink
+    end
+
+    destroy :destroy_link do
+      require_atomic? false
+      validate KilnCMS.CMS.Validations.PayloadLink
+    end
 
     # "What links here" (#1594): every edge pointing at `target_id`, of every
     # kind — curated related links and `:reference` custom fields alike.
@@ -153,6 +186,14 @@ defmodule KilnCMS.CMS.ContentLink do
                     subsystem: :cms_bookkeeping, action: [:create, :destroy]}
 
       authorize_if KilnCMS.CMS.Checks.OrgEditor
+    end
+
+    # Payload links over the API (R8) are an edit of their source: on top of
+    # the editor grant above, the actor must be allowed to update the source
+    # record itself, so a scoped editor can't hang links off a type they may
+    # not edit.
+    policy action([:create_link, :update_link, :destroy_link]) do
+      authorize_if KilnCMS.CMS.Checks.SourceUpdatable
     end
   end
 

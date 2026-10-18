@@ -277,6 +277,9 @@ identical; the dynamic tier shares one generic `*_entry` set):
 | `publishPost(id:)` | `:publish` | `:read_write` key, **admin** | Publishes and fires artifacts |
 | `unpublishPost(id:)` | `:unpublish` | `:read_write` key, **admin** | Takes content down, purges artifacts |
 | `deletePost(id:)` | `:destroy` | `:read_write` key, **admin** | **Reversible** soft-delete (AshArchival) |
+| `addPostReferences(id:, field:, targets:, position:)` | `:update` | `:read_write` key, editor+ | Connects records through a `:reference` field ([below](#writing-relationships--addreferences-removereferences-movereference)) |
+| `removePostReferences(id:, field:, targets:)` | `:update` | `:read_write` key, editor+ | Disconnects records from a `:reference` field |
+| `movePostReference(id:, field:, target:, position:)` | `:update` | `:read_write` key, editor+ | Reorders one connected record |
 
 Authorization mirrors `/mcp` exactly: a **read-only key** can run none of these;
 a **`:read_write` key on a `:viewer`** account can run none (the role has no
@@ -343,6 +346,70 @@ and takes `tagIds` alone. The related-content arrays carry the same verbs
 `removeRelatedPostIds`, with the same rules, and the sibling
 `addRelatedPageIds` / `removeRelatedPageIds` (and `…RelatedEntryIds` on the
 dynamic tier).
+
+### Writing relationships — `add…References`, `remove…References`, `move…Reference`
+
+A `:reference` custom field ([relationships-plan.md](relationships-plan.md))
+can be written whole through `updatePost(input: { customFields: … })`, but a
+client that only wants to connect one more record would have to read the list,
+edit it and send it back. Three mutations per type (and `addEntryReferences`
+and its siblings on the dynamic tier) do that edit server-side, matching
+Hygraph's `connect` / `disconnect`:
+
+| Mutation | Does |
+|---|---|
+| `addPostReferences(id:, field:, targets:, position:)` | Connects each target, as one block at `position` (default: the end), in the order given |
+| `removePostReferences(id:, field:, targets:)` | Disconnects the given ids; an id the field doesn't hold is ignored |
+| `movePostReference(id:, field:, target:, position:)` | Moves one connected record |
+
+Each is **the record's own `:update`** with that one field rewritten (D23), so
+everything `updatePost` does applies: the same policies (an editor scoped away
+from the type is refused) and `:read_write` key scope, `expectedLockVersion`
+(here a top-level argument, as there is no `input`), the optimistic lock,
+version history, the `post.updated` webhook and the re-fire on a published
+record, the field's own validation (`min_items` / `max_items`, the allowed
+target types, link fields) and the reconciled edges. A refused write returns
+`result: null` and the reasons in `errors`, exactly as `updatePost` does.
+
+`targets` are `{ id, type, link }`. `type` (`page`, `post`, a dynamic type's
+name) is needed only when the field links to more than one type. `link` sets
+the connection's link fields (R3) as a JSON-encoded object, like
+`customFields`; it is validated as the field's other values are, and a key it
+leaves out keeps what the connection stored.
+
+`position` is one of `{ start: true }`, `{ end: true }`, `{ before: "<id>" }`
+or `{ after: "<id>" }`, where the id is a record already connected through
+the field. Giving none or more than one is an error.
+
+Adding a record the field **already holds** moves it to `position` (merging any
+`link` values given) instead of failing as a duplicate, so a retried
+`add…References` converges on the same list. On a single-valued field
+`add…References` sets the one target (`position` is not consulted),
+`remove…References` clears it, and `move…Reference` is refused.
+
+```graphql
+mutation ($id: ID!) {
+  addPostReferences(
+    id: $id
+    field: "ingredients"
+    targets: [{ id: "<page-uuid>", link: "{\"quantity\": 2}" }]
+    position: { after: "<other-page-uuid>" }
+    expectedLockVersion: 4
+  ) {
+    result { id lockVersion references(field: "ingredients") { position link target { title } } }
+    errors { code message fields }
+  }
+}
+```
+
+```graphql
+mutation ($id: ID!) {
+  movePostReference(id: $id, field: "ingredients", target: "<page-uuid>", position: { start: true }) {
+    result { id }
+    errors { message }
+  }
+}
+```
 
 ### Writing body content — the `blockTree` argument
 

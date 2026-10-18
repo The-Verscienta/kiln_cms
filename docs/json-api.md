@@ -69,6 +69,7 @@ Authorization: Bearer <token>
 | TypeDefinition | `GET /api/json/type-definitions` | `GET /api/json/type-definitions/:id` | `/type-definitions/by-name/:name` — **editor-or-above** credential; see [Discovering dynamic types](#discovering-dynamic-types) |
 | ContentRelease | `GET /api/json/releases` | `GET /api/json/releases/:id` | `?include=items` — **editor-or-above** credential, read-only; see [Content releases](#content-releases-read-only) |
 | ReleaseItem | `GET /api/json/release-items` | `GET /api/json/release-items/:id` | `?filter[release_id]=` — same |
+| ContentLink | — | `GET /api/json/content-links/:id` | `POST`, `PATCH /:id`, `DELETE /:id` write **payload links** — see [Writing relationships](#writing-relationships) |
 
 `GET /api/json/<plural>/by-slug/:slug?locale=fr-CA` is the single published
 document for a slug, resolved through the site's **locale fallback chain** —
@@ -766,6 +767,98 @@ identical rules (an explicit `null` in the complete-set argument counts as
 replacing; the same id may not appear in both verbs). The sibling arrays follow
 the same naming — `add_related_page_ids` / `remove_related_page_ids`, and
 `add_related_entry_ids` / `remove_related_entry_ids` on the dynamic tier.
+
+### Writing relationships
+
+Kiln has two kinds of relationship a client writes, and they go through
+different doors.
+
+**A `:reference` custom field is part of the record.** Write it with
+`PATCH /api/json/<plural>/:id`, sending the field's whole new value under
+`custom_fields` (other custom fields are left alone; see *Partial updates
+merge* in `KilnCMS.CMS.Changes.ApplyCustomFields`). It is the record's normal
+update, so policies, `If-Match`, versioning, the webhook and the re-fire all
+apply, and the edges in `content_links` are rewritten to match in the same
+transaction. The list's order is the order you send.
+
+A field that connects several records (`multiple: true`), one type:
+
+```json
+{
+  "data": {
+    "type": "post",
+    "id": "<post-uuid>",
+    "attributes": {
+      "custom_fields": { "ingredients": ["<page-uuid-1>", "<page-uuid-2>"] }
+    }
+  }
+}
+```
+
+Several allowed types (`target_types`): every item names its type.
+
+```json
+{ "custom_fields": { "see_also": [
+  { "id": "<page-uuid>", "type": "page" },
+  { "id": "<entry-uuid>", "type": "recipe" }
+] } }
+```
+
+Link fields (R3) ride on each item as `"link"`. A link value left out keeps
+what that connection stored, so a reorder that re-sends bare ids keeps every
+connection's data:
+
+```json
+{ "custom_fields": { "ingredients": [
+  { "id": "<page-uuid-1>", "link": { "quantity": 2, "role": "main" } },
+  { "id": "<page-uuid-2>", "link": { "quantity": 1 } }
+] } }
+```
+
+To clear the field send `[]` (or `null` for a single-valued one). A repeated
+id, a target that doesn't exist, a type the field doesn't allow, a link value
+of the wrong type, or a list outside `min_items` / `max_items` fails the
+`PATCH` with a 400 naming the item. GraphQL has the same edit as
+connect / disconnect / reorder mutations that build the list server-side
+([headless-graphql-api.md](headless-graphql-api.md#writing-relationships--addreferences-removereferences-movereference)).
+
+**A payload link is not part of either record.** It is a `content_link` with
+no `field`: a curated link with a `kind` (default `related`), `position`,
+`label` and free `metadata`. It has routes of its own:
+
+| Route | Action | Who | Effect |
+|-------|--------|-----|--------|
+| `POST /api/json/content-links` | `:create_link` | may update the **source** record | Links `source_id` → `target_id` |
+| `PATCH /api/json/content-links/:id` | `:update_link` | may update the source | Changes `position`, `label`, `metadata` |
+| `DELETE /api/json/content-links/:id` | `:destroy_link` | may update the source | Removes the link |
+| `GET /api/json/content-links/:id` | `:read` | may read both ends | One link |
+
+```bash
+curl -s -X POST http://localhost:4000/api/json/content-links \
+  -H 'accept: application/vnd.api+json' -H 'content-type: application/vnd.api+json' \
+  -H "authorization: Bearer $KILN_API_KEY" \
+  -d '{"data":{"type":"content_link","attributes":{
+        "source_id":"<page-uuid>","target_id":"<post-uuid>",
+        "label":"Further reading","metadata":{"order":"2"}}}}'
+```
+
+A link belongs to its source: every write is authorized as an **update of the
+source record**, by that record's own policy — a read-only key, a viewer, or
+an editor whose `editable_types` leave out the source's type gets a 403. The
+target must be a record the writer can read on the same site, and a record
+can't link to itself. `source_type` and `target_type` are set from the
+records. The ends are fixed: to point somewhere else, delete the link and
+create another. A link is not part of its source's document, so it does not
+bump the source's `lock_version`, write a version or send a webhook.
+
+`kind` takes a name the server already knows (`related` and the kinds Kiln
+uses); an unknown name is refused rather than created. `reference` is refused
+on create, and `PATCH` / `DELETE` refuse a reference edge (one with a `field`):
+those are a copy of a custom field's value, and change only when the field
+does. A payload link to a record of the source's own type also shows in the
+source's `related_<type>s`, beside the related content the editor curates.
+
+`Idempotency-Key` works on `POST` and `PATCH` here as on every other write.
 
 ### Writing body content — the `block_tree` attribute
 

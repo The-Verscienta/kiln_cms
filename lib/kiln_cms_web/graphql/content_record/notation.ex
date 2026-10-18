@@ -88,7 +88,11 @@ defmodule KilnCMSWeb.Graphql.ContentRecord.Notation do
     |> Enum.uniq()
   end
 
-  defp content_resource?(resource) do
+  @doc false
+  # Whether `resource` is a content resource: a compiled type or the `Entry`
+  # tier. Shared with `KilnCMSWeb.Graphql.ReferenceWrites.Notation`.
+  @spec content_resource?(module()) :: boolean()
+  def content_resource?(resource) do
     Code.ensure_compiled!(resource)
 
     function_exported?(resource, :__kiln_content_type__, 0) or

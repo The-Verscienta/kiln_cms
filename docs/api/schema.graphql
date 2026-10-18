@@ -1130,6 +1130,15 @@ input EntryHighlightFieldInput {
   query: String!
 }
 
+"The result of a reference write on Entry: the updated record, or the errors that refused the write."
+type EntryReferencesResult {
+  "The record after the write; null when it was refused."
+  result: Entry
+
+  "Why the write was refused; empty on success."
+  errors: [MutationError!]!
+}
+
 enum EntrySortField {
   ID
   TITLE
@@ -2302,6 +2311,15 @@ type PageOfPost {
   results: [Post!]
 }
 
+"The result of a reference write on Page: the updated record, or the errors that refused the write."
+type PageReferencesResult {
+  "The record after the write; null when it was refused."
+  result: Page
+
+  "Why the write was refused; empty on success."
+  errors: [MutationError!]!
+}
+
 enum PageSortField {
   ID
   TITLE
@@ -2985,6 +3003,15 @@ input PostHighlightFieldInput {
   query: String!
 }
 
+"The result of a reference write on Post: the updated record, or the errors that refused the write."
+type PostReferencesResult {
+  "The record after the write; null when it was refused."
+  result: Post
+
+  "Why the write was refused; empty on success."
+  errors: [MutationError!]!
+}
+
 enum PostSortField {
   ID
   TITLE
@@ -3064,6 +3091,38 @@ type PublishPostResult {
   errors: [MutationError!]!
 }
 
+"""
+Where connected records go, as in Hygraph's `connect`: give exactly one of
+`start`, `end`, `before` or `after`. `before` / `after` name a record already
+connected through the field. Omitted, records go at the end.
+"""
+input ReferencePositionInput {
+  start: Boolean
+  end: Boolean
+  before: ID
+  after: ID
+}
+
+"A record to connect through a `:reference` field."
+input ReferenceTargetInput {
+  "The target record's id."
+  id: ID!
+
+  """
+  The target's content type (`page`, `post`, a dynamic type's name). Needed
+  only when the field links to more than one type.
+  """
+  type: String
+
+  """
+  Values for the field's link fields on this connection, as a JSON object
+  keyed by link field name (a JSON-encoded string, like `customFields` on
+  `update<Type>`). Validated like the field's other values; a key left out
+  keeps what the connection stored.
+  """
+  link: JsonString
+}
+
 input ReturnEntryToDraftInput {
   expectedLockVersion: Int
 }
@@ -3104,27 +3163,114 @@ type ReturnPostToDraftResult {
 }
 
 type RootMutationType {
+  """
+  Connect records through the `:reference` custom field `field`: an
+  update of the record, so its policies, `expectedLockVersion`, history
+  and webhooks apply as for `update<Type>`. A record already connected moves to
+  `position` and keeps its link values unless new ones are given.
+  """
+  addPageReferences(
+    id: ID!, field: String!, targets: [ReferenceTargetInput!]!, position: ReferencePositionInput, expectedLockVersion: Int
+  ): PageReferencesResult!
+
+  """
+  Disconnect records from the `:reference` custom field `field`. An id
+  the field does not hold is ignored.
+  """
+  removePageReferences(id: ID!, field: String!, targets: [ID!]!, expectedLockVersion: Int): PageReferencesResult!
+
+  """
+  Move one connected record to `position` in the `:reference` custom
+  field `field`.
+  """
+  movePageReference(id: ID!, field: String!, target: ID!, position: ReferencePositionInput!, expectedLockVersion: Int): PageReferencesResult!
+
+  """
+  Connect records through the `:reference` custom field `field`: an
+  update of the record, so its policies, `expectedLockVersion`, history
+  and webhooks apply as for `update<Type>`. A record already connected moves to
+  `position` and keeps its link values unless new ones are given.
+  """
+  addPostReferences(
+    id: ID!, field: String!, targets: [ReferenceTargetInput!]!, position: ReferencePositionInput, expectedLockVersion: Int
+  ): PostReferencesResult!
+
+  """
+  Disconnect records from the `:reference` custom field `field`. An id
+  the field does not hold is ignored.
+  """
+  removePostReferences(id: ID!, field: String!, targets: [ID!]!, expectedLockVersion: Int): PostReferencesResult!
+
+  """
+  Move one connected record to `position` in the `:reference` custom
+  field `field`.
+  """
+  movePostReference(id: ID!, field: String!, target: ID!, position: ReferencePositionInput!, expectedLockVersion: Int): PostReferencesResult!
+
+  """
+  Connect records through the `:reference` custom field `field`: an
+  update of the record, so its policies, `expectedLockVersion`, history
+  and webhooks apply as for `update<Type>`. A record already connected moves to
+  `position` and keeps its link values unless new ones are given.
+  """
+  addEntryReferences(
+    id: ID!, field: String!, targets: [ReferenceTargetInput!]!, position: ReferencePositionInput, expectedLockVersion: Int
+  ): EntryReferencesResult!
+
+  """
+  Disconnect records from the `:reference` custom field `field`. An id
+  the field does not hold is ignored.
+  """
+  removeEntryReferences(id: ID!, field: String!, targets: [ID!]!, expectedLockVersion: Int): EntryReferencesResult!
+
+  """
+  Move one connected record to `position` in the `:reference` custom
+  field `field`.
+  """
+  moveEntryReference(id: ID!, field: String!, target: ID!, position: ReferencePositionInput!, expectedLockVersion: Int): EntryReferencesResult!
+
   createPage(input: CreatePageInput!): CreatePageResult!
+
   updatePage(id: ID!, customFilter: JsonString, customSort: String, input: UpdatePageInput): UpdatePageResult!
+
   submitPageForReview(id: ID!, customFilter: JsonString, customSort: String, input: SubmitPageForReviewInput): SubmitPageForReviewResult!
+
   returnPageToDraft(id: ID!, customFilter: JsonString, customSort: String, input: ReturnPageToDraftInput): ReturnPageToDraftResult!
+
   publishPage(id: ID!, customFilter: JsonString, customSort: String, input: PublishPageInput): PublishPageResult!
+
   unpublishPage(id: ID!, customFilter: JsonString, customSort: String, input: UnpublishPageInput): UnpublishPageResult!
+
   deletePage(id: ID!, customFilter: JsonString, customSort: String, input: DeletePageInput!): DeletePageResult!
+
   createPost(input: CreatePostInput!): CreatePostResult!
+
   updatePost(id: ID!, customFilter: JsonString, customSort: String, input: UpdatePostInput): UpdatePostResult!
+
   submitPostForReview(id: ID!, customFilter: JsonString, customSort: String, input: SubmitPostForReviewInput): SubmitPostForReviewResult!
+
   returnPostToDraft(id: ID!, customFilter: JsonString, customSort: String, input: ReturnPostToDraftInput): ReturnPostToDraftResult!
+
   publishPost(id: ID!, customFilter: JsonString, customSort: String, input: PublishPostInput): PublishPostResult!
+
   unpublishPost(id: ID!, customFilter: JsonString, customSort: String, input: UnpublishPostInput): UnpublishPostResult!
+
   deletePost(id: ID!, customFilter: JsonString, customSort: String, input: DeletePostInput!): DeletePostResult!
+
   createEntry(input: CreateEntryInput!): CreateEntryResult!
+
   updateEntry(id: ID!, customFilter: JsonString, customSort: String, input: UpdateEntryInput): UpdateEntryResult!
+
   submitEntryForReview(id: ID!, customFilter: JsonString, customSort: String, input: SubmitEntryForReviewInput): SubmitEntryForReviewResult!
+
   returnEntryToDraft(id: ID!, customFilter: JsonString, customSort: String, input: ReturnEntryToDraftInput): ReturnEntryToDraftResult!
+
   publishEntry(id: ID!, customFilter: JsonString, customSort: String, input: PublishEntryInput): PublishEntryResult!
+
   unpublishEntry(id: ID!, customFilter: JsonString, customSort: String, input: UnpublishEntryInput): UnpublishEntryResult!
+
   deleteEntry(id: ID!, customFilter: JsonString, customSort: String, input: DeleteEntryInput!): DeleteEntryResult!
+
   updateMediaItem(id: ID!, input: UpdateMediaItemInput): UpdateMediaItemResult!
 }
 

@@ -879,6 +879,10 @@ defmodule KilnCMS.CMS do
       define :list_content_links, action: :read
       define :create_content_link, action: :create
       define :destroy_content_link, action: :destroy
+      # Payload links, as `/api/json/content-links` writes them (R8).
+      define :create_payload_link, action: :create_link
+      define :update_payload_link, action: :update_link
+      define :destroy_payload_link, action: :destroy_link
       # "What links here" and a record's own `:reference` edges (#1594).
       define :list_backlinks, action: :backlinks, args: [:target_id]
       define :list_reference_links, action: :references_from, args: [:source_id]

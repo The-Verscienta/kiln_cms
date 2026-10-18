@@ -414,6 +414,33 @@ fallback; the spike's outcome is under the JSON:API bullet and in §7 Q1.
 
 ### R8 — Relationship writes
 
+**Built** in the R8 PR. What it settled beyond the bullets below:
+
+- **Per-type names.** The mutations follow AshGraphql's naming, as
+  `updatePost` does: `addPostReferences`, `removePostReferences`,
+  `movePostReference`, and `addEntryReferences` and its siblings on the
+  dynamic tier. Each returns `<Type>ReferencesResult { result, errors }`,
+  `update<Type>`'s shape. `expectedLockVersion` is a top-level argument.
+- **Each is `update_<type>`** with one key of `custom_fields` rewritten
+  (`KilnCMS.CMS.ReferenceEdits`), so R1b's `max_sources` check and anything
+  else the update path gains covers them with no change here.
+- **Adding a connected record moves it** (merging any link values given)
+  instead of failing as a duplicate, so a retry converges. Removing an id the
+  field doesn't hold is a no-op. On a single-valued field `add` sets, `remove`
+  clears and `move` is refused.
+- **`link` is a JSON string**, like `customFields`: AshGraphql's `Json` and
+  `JsonString` scalars both parse only strings.
+- **Payload links** are `ContentLink`'s `:create_link` / `:update_link` /
+  `:destroy_link` at `/api/json/content-links`, authorized by
+  `Checks.SourceUpdatable` (`Ash.can?` on the source's `:update`) on top of
+  the editor grant. They refuse reference edges, take only kinds the server
+  knows (no atom is created from input), and fix both ends. A payload link
+  is not in the source's document, so it does not bump the source's
+  `lock_version`, version it, or send its webhook; fired artifacts do not
+  read links.
+- **JSON:API reference writes** are a documented `PATCH` of the array
+  (docs/json-api.md, "Writing relationships"), not a relationship endpoint.
+
 - GraphQL: `addReferences(id:, field:, targets:, position:)`,
   `removeReferences`, `moveReference` on every content type — sugar over the
   record's update, so versioning and the lock apply. Position takes
