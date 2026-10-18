@@ -166,7 +166,7 @@ Each is one issue and, unless noted, one PR. Order is §5.
 
 ### R1b — Limits on the target side
 
-**Built** in the R1b/R5 PR. What it settled beyond the bullets below:
+**Built** in [#2017](https://github.com/The-Verscienta/kiln_cms/pull/2017). What it settled beyond the bullets below:
 
 - **The count is read under the lock, from the edges.** `ContentLinks.reconcile/1`
   works out the targets the write adds, takes `pg_advisory_xact_lock` on
@@ -310,7 +310,7 @@ target is a scarce thing — a slot, a seat, a featured position.
 
 ### R5 — On-delete rule per field
 
-**Built** in the R1b/R5 PR. What it settled beyond the bullets below:
+**Built** in [#2017](https://github.com/The-Verscienta/kiln_cms/pull/2017). What it settled beyond the bullets below:
 
 - **A change on `:purge`** (`Changes.ApplyTargetDeleteRules`): the
   `:restrict` check runs before the delete, as a

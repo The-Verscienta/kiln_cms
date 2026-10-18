@@ -29,7 +29,7 @@ carries the reasoning.
   the relationship's own words. The schema export reports
   `x-kiln-max-sources` and a non-default `x-kiln-on-target-delete`. Additive:
   two new options with defaults that keep every field as it was.
-  ([#PR](https://github.com/The-Verscienta/kiln_cms/pull/PR))
+  ([#2017](https://github.com/The-Verscienta/kiln_cms/pull/2017))
 
 <a id="typed-nested-reads-through-references"></a>
 

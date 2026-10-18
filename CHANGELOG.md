@@ -58,7 +58,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Reference fields gain `max_sources`, a limit per target, and
   `on_target_delete`: keep, clear or restrict on a permanent delete.**
-  ([#PR](https://github.com/The-Verscienta/kiln_cms/pull/PR) · [long form](docs/changelog/unreleased.md#reference-target-limit-and-delete-rule))
+  ([#2017](https://github.com/The-Verscienta/kiln_cms/pull/2017) · [long form](docs/changelog/unreleased.md#reference-target-limit-and-delete-rule))
 
 - **Reads follow reference fields to the records on the other end: GraphQL's
   typed `references` / `referencedBy`, and `?expand=` on `/api/content`.**
