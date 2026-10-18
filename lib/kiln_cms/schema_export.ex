@@ -43,6 +43,7 @@ defmodule KilnCMS.SchemaExport do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldTypes
+  alias KilnCMS.CMS.ReverseFields
 
   @dialect "https://json-schema.org/draft/2020-12/schema"
 
@@ -204,8 +205,8 @@ defmodule KilnCMS.SchemaExport do
   # refused read would filter to `[]` and publish a schema with every custom
   # field missing, which a typed client would then build against.
   defp describe(%{source: :dynamic, definition: definition} = ct, org_id) do
-    Map.put(
-      ct,
+    ct
+    |> Map.put(
       :field_definitions,
       CMS.field_definitions_for_definition!(definition.id,
         actor: system(),
@@ -213,20 +214,49 @@ defmodule KilnCMS.SchemaExport do
         tenant: org_id
       )
     )
+    |> put_reverse(org_id)
   end
 
   defp describe(%{type: type} = ct, org_id) do
-    Map.put(
-      ct,
+    ct
+    |> Map.put(
       :field_definitions,
       CMS.field_definitions_for!(type, actor: system(), authorize_with: :error, tenant: org_id)
     )
+    |> put_reverse(org_id)
   end
+
+  # The reverse fields records of this type show (R4): the other side of
+  # every reference that may point here and names it.
+  defp put_reverse(ct, org_id),
+    do: Map.put(ct, :reverse_fields, ReverseFields.for_type(ct.type, org_id))
 
   defp content_schema(ct) do
     ct
     |> base_content_schema()
     |> put_inherited_fields(ct)
+    |> put_reverse_fields(Map.get(ct, :reverse_fields, []))
+  end
+
+  # Reverse fields (R4) are not part of the fired document — the connection
+  # is the source's value — so they are an annotation, not a property: what a
+  # consumer can ask `referencedBy(inverse:)` (GraphQL) for, and which
+  # reference field on which source type each one mirrors.
+  defp put_reverse_fields(schema, []), do: schema
+
+  defp put_reverse_fields(schema, reverse_fields) do
+    Map.put(
+      schema,
+      "x-kiln-reverse-fields",
+      Enum.map(reverse_fields, fn reverse ->
+        %{
+          "name" => reverse.name,
+          "label" => reverse.label,
+          "field" => reverse.field,
+          "source_type" => reverse.source_type
+        }
+      end)
+    )
   end
 
   # Field-level localization (#1327): a type that can inherit a value along
@@ -298,6 +328,7 @@ defmodule KilnCMS.SchemaExport do
     |> base_custom_field_schema(definition)
     |> put_target_types(definition)
     |> put_target_rules(definition)
+    |> put_inverse(definition)
     |> put_link_fields(definition)
     |> put_localization(Map.get(definition, :localization))
   end
@@ -369,6 +400,15 @@ defmodule KilnCMS.SchemaExport do
 
   defp delete_rule(rule) when rule in [:clear, :restrict], do: to_string(rule)
   defp delete_rule(_keep), do: nil
+
+  # What a reference's targets call it (R4): the reverse field each target
+  # shows, by the name `referencedBy(inverse:)` takes.
+  defp put_inverse(schema, %{field_type: :reference, inverse_name: name} = definition)
+       when is_binary(name),
+       do:
+         Map.put(schema, "x-kiln-inverse", %{"name" => name, "label" => definition.inverse_label})
+
+  defp put_inverse(schema, _definition), do: schema
 
   # Field-level localization (#1327), as `Kiln.Block.JsonSchema` annotates a
   # block field: absent for the default, `:localized`.

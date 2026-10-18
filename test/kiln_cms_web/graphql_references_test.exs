@@ -288,6 +288,76 @@ defmodule KilnCMSWeb.GraphqlReferencesTest do
     end
   end
 
+  describe "referencedBy(inverse:)" do
+    setup ctx do
+      name = "used_in_#{System.unique_integer([:positive])}"
+
+      CMS.create_field_definition!(
+        %{
+          content_type: :post,
+          name: name,
+          label: "Ingredients",
+          field_type: :reference,
+          target_type: "page",
+          multiple: true,
+          inverse_label: "Posts using this page",
+          inverse_name: name <> "_by"
+        },
+        actor: ctx.admin
+      )
+
+      source =
+        ctx.admin
+        |> referrer!(name, [ref(ctx.live_page, "page")])
+        |> publish_post!(ctx.admin)
+
+      %{inverse: name <> "_by", inverse_field: name, inverse_source: source}
+    end
+
+    @by_inverse """
+    query ($slug: String!, $inverse: String!, $field: String) {
+      pageBySlug(slug: $slug, locale: "en") {
+        referencedBy(inverse: $inverse, field: $field) { field source { id } }
+      }
+    }
+    """
+
+    test "names the reference field and source type in one argument", ctx do
+      assert {:ok, %{data: %{"pageBySlug" => %{"referencedBy" => rows}}}} =
+               run(@by_inverse, %{"slug" => ctx.live_page.slug, "inverse" => ctx.inverse})
+
+      field = ctx.inverse_field
+      assert [%{"field" => ^field, "source" => %{"id" => id}}] = rows
+      assert id == ctx.inverse_source.id
+    end
+
+    test "a name the type has no reverse field for lists nothing", ctx do
+      assert {:ok, %{data: %{"pageBySlug" => %{"referencedBy" => []}}}} =
+               run(@by_inverse, %{"slug" => ctx.live_page.slug, "inverse" => "nope"})
+
+      # The reverse field belongs to the page side, not to posts.
+      query = """
+      query ($slug: String!, $inverse: String!) {
+        postBySlug(slug: $slug, locale: "en") { referencedBy(inverse: $inverse) { field } }
+      }
+      """
+
+      assert {:ok, %{data: %{"postBySlug" => %{"referencedBy" => []}}}} =
+               run(query, %{"slug" => ctx.live_post.slug, "inverse" => ctx.inverse})
+    end
+
+    test "is not combined with field or sourceType", ctx do
+      assert {:ok, %{errors: [%{message: message}]}} =
+               run(@by_inverse, %{
+                 "slug" => ctx.live_page.slug,
+                 "inverse" => ctx.inverse,
+                 "field" => ctx.inverse_field
+               })
+
+      assert message =~ "not both"
+    end
+  end
+
   describe "link" do
     test "passes a link field's stored value through as JSON", ctx do
       name = "recipe_#{System.unique_integer([:positive])}"

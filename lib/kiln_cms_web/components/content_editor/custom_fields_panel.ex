@@ -31,14 +31,13 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
   attr :actor, :any, required: true
   attr :tenant, :any, required: true
   attr :broken_references, :list, required: true
-  # The record being edited, so a reference's picker can leave its own
-  # connections out of a target's `max_sources` count (R1b).
-  attr :record_id, :string, default: nil
+  attr :record, :any, default: nil
+  attr :reverse_fields, :list, default: []
 
   def custom_fields_panel(assigns) do
     ~H"""
     <section
-      :if={@field_definitions != []}
+      :if={@field_definitions != [] or show_reverse?(@record, @reverse_fields)}
       id="custom-fields"
       aria-labelledby="custom-fields-heading"
       class="rounded-lg border border-base-content/10 bg-base-100"
@@ -81,7 +80,7 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
             locked={Localization.locked?(@localization, {:custom, definition.name})}
             actor={@actor}
             tenant={@tenant}
-            source={%{id: @record_id, type: to_string(@kind)}}
+            source={%{id: @record && @record.id, type: to_string(@kind)}}
           />
           <.custom_field_input
             :if={definition.field_type != :reference}
@@ -98,11 +97,28 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
             inherited={Localization.inherited(@localization, {:custom, definition.name})}
           />
         </fieldset>
+        <%!-- The other side of references pointing here (R4): the records
+              that connect to this one, read-only — each is changed from
+              its own editor. --%>
+        <.live_component
+          :for={reverse <- @reverse_fields}
+          :if={show_reverse?(@record, @reverse_fields)}
+          module={KilnCMSWeb.ContentEditor.ReverseField}
+          id={"reverse-field-#{reverse.source_type}-#{reverse.field}"}
+          reverse={reverse}
+          record={@record}
+          actor={@actor}
+          tenant={@tenant}
+        />
         <.broken_references references={@broken_references} definitions={@field_definitions} />
       </div>
     </section>
     """
   end
+
+  # An unsaved draft has no id yet, so nothing can connect to it.
+  defp show_reverse?(record, reverse_fields),
+    do: reverse_fields != [] and is_map(record) and not is_nil(Map.get(record, :id))
 
   defp any_errors?(form, definitions),
     do: Enum.any?(definitions, &(custom_field_errors(form, &1.name) != []))

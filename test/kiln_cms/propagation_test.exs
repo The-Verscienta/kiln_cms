@@ -108,6 +108,48 @@ defmodule KilnCMS.PropagationTest do
     end
   end
 
+  # Archiving a dynamic type keeps its entries firing `<name>.*` (#938), and
+  # webhooks deliver those; the registry lookup `open/5` used to gate on
+  # leaves archived types out, so their transitions went unmeasured.
+  test "an entry of an archived dynamic type is still measured" do
+    admin = admin()
+    stub(fn _host -> 200 end)
+
+    definition =
+      CMS.create_type_definition!(
+        %{name: "remedy#{System.unique_integer([:positive])}", label: "Remedy"},
+        actor: admin
+      )
+
+    entry =
+      CMS.ContentTypes.create!(
+        definition.name,
+        %{title: "Ginger", slug: "ginger-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+    CMS.create_webhook_endpoint!(
+      %{url: "https://example.test/hook", events: ["#{definition.name}.unpublished"]},
+      actor: admin
+    )
+
+    {:ok, entry} = CMS.ContentTypes.transition(definition.name, "publish", entry, actor: admin)
+    drain()
+
+    CMS.destroy_type_definition!(definition, actor: admin)
+    assert CMS.ContentTypes.get(definition.name, org()) == nil
+
+    CMS.unpublish_entry!(entry, %{}, actor: admin)
+    drain()
+
+    assert [withdrawal] = records(:withdraw)
+    assert withdrawal.event == "#{definition.name}.unpublished"
+    assert withdrawal.document_type == definition.name
+    assert withdrawal.document_id == entry.id
+    assert withdrawal.endpoints_expected == 1
+    assert %DateTime{} = withdrawal.completed_at
+  end
+
   test "an unpublish reaching two endpoints settles once, with the last endpoint's time" do
     admin = admin()
     endpoint!("https://one.test/hook")

@@ -107,7 +107,15 @@ that follow `:reference` custom fields to the records on the other end, typed:
 | Field | Arguments | Returns |
 |-------|-----------|---------|
 | `references` | `field: String!`, `limit`, `offset` | `[ContentReference!]!` — the targets of that field, in its order |
-| `referencedBy` | `field`, `sourceType`, `limit`, `offset` | `[ContentReferrer!]!` — the records linking here, optionally only through `field` and only from `sourceType` |
+| `referencedBy` | `field`, `sourceType`, `inverse`, `limit`, `offset` | `[ContentReferrer!]!` — the records linking here, optionally only through `field` and only from `sourceType`, or through the reverse field named `inverse` |
+
+A reference field that names its other side (`inverse_name`, see
+[extending-content.md](extending-content.md)) can be asked for by that name:
+`referencedBy(inverse: "used_in_recipes")` on an Ingredient stands for the
+Recipe type's `ingredients` field, so a client needs neither name. It is not
+combined with `field` or `sourceType`, and a name the record's type has no
+reverse field for lists nothing. The schema export lists each type's reverse
+fields as `x-kiln-reverse-fields`.
 
 `ContentReference` is `{ position, link, target }` and `ContentReferrer` is
 `{ field, position, link, source }`. `target` and `source` are a

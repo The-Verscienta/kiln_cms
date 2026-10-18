@@ -62,7 +62,12 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   ## Seams for later workstreams
 
     * `row/1` is public and takes `readonly`, so the reverse list (R4) can
-      render the same row without the controls.
+      render the same row without the controls, and an `:actions` slot for
+      controls of its own (R4b).
+    * `notify: {module, id}` sends picks to that component instead of the
+      editor, and `rows: false` renders the search alone: the reverse field's
+      add control (R4b), whose connections are other records' values, not
+      this form's.
     * The `:row_extra` slot renders inside each row, after the title (and the
       link inputs), with the row's item.
     * Results and rows name their type, and `target_types/2` is the one
@@ -128,6 +133,9 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       |> assign_new(:locked, fn -> false end)
       |> assign_new(:row_extra, fn -> [] end)
       |> assign_new(:source, fn -> nil end)
+      |> assign_new(:notify, fn -> nil end)
+      |> assign_new(:rows, fn -> true end)
+      |> assign_new(:placeholder, fn -> nil end)
       |> assign_new(:link_name, fn -> link_name(assigns.name) end)
       |> assign(:link_fields, FieldDefinition.link_fields(assigns.definition))
       |> assign(:links, ReferenceValues.links(assigns.value, assigns.definition))
@@ -137,10 +145,14 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       |> ReferenceValues.keys(ReferenceValues.polymorphic?(assigns.definition))
       |> Enum.uniq()
 
+    # Without rows (the reverse field's add control, R4b) the ids only keep
+    # records already connected out of the results; nothing shows them.
     socket =
-      if ids == socket.assigns.ids,
-        do: socket,
-        else: socket |> assign(:ids, ids) |> resolve(ids)
+      cond do
+        ids == socket.assigns.ids -> socket
+        not socket.assigns.rows -> assign(socket, :ids, ids)
+        true -> socket |> assign(:ids, ids) |> resolve(ids)
+      end
 
     socket =
       if socket.assigns.creatable == nil,
@@ -339,6 +351,12 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
 
     Map.new(fields, &{&1.name, Map.get(supplied, &1.name, "")})
   end
+
+  # To the editor LiveView, which owns the form — or, with `notify:
+  # {module, id}`, to the component that owns the connection (the reverse
+  # field, R4b), as an update carrying `picked: {op, arg}`.
+  defp notify(%{assigns: %{notify: {module, id}}}, op, arg),
+    do: send_update(module, id: id, picked: {op, arg})
 
   defp notify(socket, op, arg),
     do: send(self(), {__MODULE__, {op, socket.assigns.definition.name, arg}})
@@ -659,23 +677,26 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       aria-describedby={@errors != [] && "#{@root}-errors"}
       data-reference-picker={@definition.name}
     >
-      <div class="mb-1 flex items-baseline justify-between gap-2">
+      <div class={["mb-1 flex items-baseline justify-between gap-2", !@rows && "sr-only"]}>
         <span id={"#{@root}-label"} class="text-sm font-medium">{@definition.label}</span>
-        <span :if={@multiple? and @items != []} class="text-xs tabular-nums text-base-content/60">
+        <span
+          :if={@rows and @multiple? and @items != []}
+          class="text-xs tabular-nums text-base-content/60"
+        >
           {count_label(length(@items), @definition.max_items)}
         </span>
       </div>
 
-      <input :if={@multiple?} type="hidden" name={"#{@name}[]"} value="" />
+      <input :if={@rows and @multiple?} type="hidden" name={"#{@name}[]"} value="" />
       <input
-        :if={not @multiple?}
+        :if={@rows and not @multiple?}
         type="hidden"
         name={@name}
         value={List.first(@ids) || ""}
       />
 
       <ol
-        :if={@items != []}
+        :if={@rows and @items != []}
         id={"#{@root}-items"}
         data-ref-items
         aria-label={gettext("Connected records")}
@@ -706,13 +727,13 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         </.row>
       </ol>
 
-      <p :if={@items == [] and not @searchable?} class="text-sm text-base-content/60">
+      <p :if={@rows and @items == [] and not @searchable?} class="text-sm text-base-content/60">
         {gettext("Nothing connected yet.")}
       </p>
 
       <div
         :if={@searchable?}
-        class={["relative", @items != [] && "mt-2"]}
+        class={["relative", (@rows and @items != []) && "mt-2"]}
         phx-click-away={@open? && JS.push("ref_close", target: @myself)}
       >
         <div class="relative">
@@ -734,7 +755,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
             aria-labelledby={"#{@root}-label"}
             aria-describedby={"#{@root}-status"}
             aria-invalid={@errors != [] && "true"}
-            placeholder={search_placeholder(@multiple?, @items)}
+            placeholder={@placeholder || search_placeholder(@multiple?, @items)}
             phx-change="ref_search"
             phx-focus="ref_open"
             phx-debounce="200"
@@ -1131,6 +1152,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   attr :readonly, :boolean, default: false
   attr :target, :any, default: nil
   slot :extra, doc: "rendered after the title — per-link inputs (R3)"
+  slot :actions, doc: "controls of the caller's own, before the row's own (R4b)"
 
   @doc """
   One connected record: title, type and state, with "open" and — unless
@@ -1176,6 +1198,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         {render_slot(@extra)}
       </div>
       <div class="flex shrink-0 items-center gap-0.5">
+        {render_slot(@actions)}
         <.link
           :if={@item.href}
           href={@item.href}

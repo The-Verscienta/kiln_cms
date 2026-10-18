@@ -38,6 +38,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.Mentions
   alias KilnCMS.CMS.PreviewToken
+  alias KilnCMS.CMS.ReverseFields
   alias KilnCMS.CMS.VersionDiff
   alias KilnCMS.CMS.VersionSnapshot
   alias KilnCMS.CMS.WorkingCopy
@@ -177,6 +178,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     socket
     |> assign(:kind, content_type.type)
     |> assign(:content_type, content_type)
+    |> assign(:reverse_fields, [])
     |> assign(:actor, socket.assigns.current_user)
     |> assign(:record, nil)
     |> assign(:page_title, gettext("New %{type}", type: String.downcase(content_type.label)))
@@ -271,6 +273,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
     socket
     |> assign(:kind, kind)
     |> assign(:content_type, content_type)
+    # The other side of every reference that may point at this type and names
+    # it (R4): read-only lists of the records connecting here.
+    |> assign(:reverse_fields, ReverseFields.for_type(content_type.type, org))
     |> assign(:slug_targets, slug_targets(content_type))
     # The type's own field-type tokens (#804), off the definitions this
     # mount already loaded — so the live preview derives through exactly
@@ -7031,7 +7036,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
               actor={@actor}
               tenant={@current_org}
               broken_references={@broken_references}
-              record_id={@record.id}
+              record={@record}
+              reverse_fields={@reverse_fields}
             />
           </div>
 

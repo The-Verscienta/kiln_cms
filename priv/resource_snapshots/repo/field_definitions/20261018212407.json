@@ -216,6 +216,30 @@
       "references": null,
       "scale": null,
       "size": null,
+      "source": "inverse_label",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "inverse_name",
+      "type": "text"
+    },
+    {
+      "allow_nil?": true,
+      "default": "nil",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
       "source": "help_text",
       "type": "text"
     },
@@ -388,7 +412,7 @@
   "custom_indexes": [],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "86D87A7A477C56B5168D3186FC18509C2F252CD87EFE3D2C72E9C8D6EDE72F0A",
+  "hash": "49410A7EB1FA6EF4CFDFCFEF1BD638876DE8BCFED087B8FA3032552855DDC3DC",
   "identities": [
     {
       "all_tenants?": false,
