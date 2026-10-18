@@ -98,6 +98,10 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   @impl true
   def change(changeset, _opts, context) do
+    # One date for every formula this write evaluates, and for the fire it
+    # enqueues (`Computed.Context`, "Pinning today").
+    changeset = KilnCMS.CMS.Computed.Context.pin_today(changeset)
+
     if changeset.action_type == :create or
          Ash.Changeset.changing_attribute?(changeset, :custom_fields) do
       apply_definitions(changeset, merge_base(changeset), mode(changeset), context)

@@ -86,7 +86,14 @@ defmodule KilnCMSWeb.ComputedBuilderComponents do
         categories={@categories}
         id={@id}
       />
-      <.preview samples={@ctx.samples} sample={@ctx.sample} result={@ctx.preview} id={@id} />
+      <.preview
+        samples={@ctx.samples}
+        sample={@ctx.sample}
+        result={@ctx.preview}
+        today={@ctx.today}
+        time_dependent={@ctx.time_dependent?}
+        id={@id}
+      />
     </section>
     """
   end
@@ -473,6 +480,8 @@ defmodule KilnCMSWeb.ComputedBuilderComponents do
   attr :samples, :list, required: true
   attr :sample, :string, default: nil
   attr :result, :any, required: true
+  attr :today, Date, required: true
+  attr :time_dependent, :boolean, default: false
   attr :id, :string, required: true
 
   defp preview(assigns) do
@@ -504,6 +513,19 @@ defmodule KilnCMSWeb.ComputedBuilderComponents do
       <div id={"#{@id}-preview"} aria-live="polite" class="text-sm">
         <.preview_result result={@result} />
       </div>
+      <p
+        :if={@time_dependent}
+        id={"#{@id}-daily"}
+        class="flex items-start gap-1.5 text-xs text-base-content/60"
+      >
+        <.icon name="hero-arrow-path" class="mt-px size-3.5 shrink-0" />
+        <span>
+          {gettext(
+            "Uses today's date (%{date}). Saved values are refreshed once a day, so published content moves to the new date overnight.",
+            date: Date.to_iso8601(@today)
+          )}
+        </span>
+      </p>
     </div>
     """
   end

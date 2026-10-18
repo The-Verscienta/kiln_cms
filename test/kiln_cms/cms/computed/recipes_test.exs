@@ -21,6 +21,7 @@ defmodule KilnCMS.CMS.Computed.RecipesTest do
     "whole" => "price",
     "start" => "starts_on",
     "finish" => "ends_on",
+    "date" => "ends_on",
     "compare" => "40",
     "then" => "Large"
   }
@@ -79,6 +80,31 @@ defmodule KilnCMS.CMS.Computed.RecipesTest do
              "Large"
 
     assert eval.(build!("days_between")) == "16 days"
+  end
+
+  test "the date recipes read the pinned date, and say they do" do
+    context = %{
+      fields: %{"ends_on" => "2026-10-20", "born" => "1990-10-18"},
+      today: ~D[2026-10-17]
+    }
+
+    eval = &Computed.evaluate(&1, context)
+
+    assert build!("days_until") == "{{ days_between(today(), ends_on) }} days"
+    assert eval.(build!("days_until")) == "3 days"
+    assert eval.(build!("days_until", %{"suffix" => ""})) == 3
+
+    assert build!("age", %{"date" => "born"}) == "{{ years_between(born, today()) }}"
+    assert eval.(build!("age", %{"date" => "born"})) == 35
+    # The birthday: the same formula, a day later.
+    assert Computed.evaluate(build!("age", %{"date" => "born"}), %{
+             context
+             | today: ~D[2026-10-18]
+           }) ==
+             36
+
+    for id <- ~w(days_until age), do: assert(Computed.time_dependent?(build!(id)))
+    refute Computed.time_dependent?(build!("days_between"))
   end
 
   test "on a document that hasn't filled the values in, every recipe is blank" do

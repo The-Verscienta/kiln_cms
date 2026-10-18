@@ -41,6 +41,11 @@ defmodule KilnCMS.Firing.CustomFields do
 
   `body` is the document's plain text when the caller already has it (firing
   does), sparing a second walk of the block tree.
+
+  `today:` is the date `today()` answers (`KilnCMS.CMS.Computed.Context`,
+  "Pinning today"): the one the write that enqueued this fire pinned, when it
+  did, so the artifact agrees with the value that write stored. Without one,
+  the site's current date.
   """
   @spec resolve(struct(), String.t() | nil, keyword()) :: t()
   def resolve(document, body \\ nil, opts \\ []) do
@@ -55,9 +60,11 @@ defmodule KilnCMS.Firing.CustomFields do
       # ordinary title-only edit never rewrites it.
       stored = Map.take(stored, Enum.map(definitions, & &1.name))
 
+      today = Keyword.get_lazy(opts, :today, &Computed.Context.today/0)
+
       values =
         definitions
-        |> recompute(document, stored, body)
+        |> recompute(document, stored, body, today)
         |> refresh_references(definitions, Map.get(document, :org_id))
 
       %{values: values, definitions: definitions}
@@ -89,20 +96,20 @@ defmodule KilnCMS.Firing.CustomFields do
     end
   end
 
-  defp recompute(definitions, document, stored, body) do
+  defp recompute(definitions, document, stored, body, today) do
     case Enum.filter(definitions, &(&1.field_type == :computed)) do
       [] -> stored
-      computed -> derive(computed, document, stored, body)
+      computed -> derive(computed, document, stored, body, today)
     end
   end
 
-  defp derive(computed, document, stored, body) do
+  defp derive(computed, document, stored, body, today) do
     # Every stored computed value is dropped before anything can read it: a
     # formula over another computed field sees that field derived fresh, in
     # the same dependency order as the write path (`Computed.derive/3`), never
     # the value stored by the last save.
     editable = Map.drop(stored, Enum.map(computed, & &1.name))
-    context = Computed.Context.from_document(document, editable, body)
+    context = Computed.Context.from_document(document, editable, today, body)
 
     Computed.derive(computed, context, editable)
   end

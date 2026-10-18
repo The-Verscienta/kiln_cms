@@ -901,6 +901,10 @@ defmodule KilnCMS.CMS do
       define :create_field_definition, action: :create
       define :update_field_definition, action: :update
       define :destroy_field_definition, action: :destroy
+
+      define :refresh_time_dependent_fields,
+        action: :refresh_time_dependent,
+        args: [{:optional, :today}]
     end
 
     # Admin-defined (dynamic) content types — rows, not modules (decision D17,

@@ -2061,6 +2061,11 @@ msgstr "Avisos"
 msgid "After changing slug conventions, every existing slug looks hand-picked — check the box to migrate them all."
 msgstr "Tras cambiar las convenciones de slug, todos los slugs existentes parecen definidos manualmente: marque la casilla para migrarlos todos."
 
+#: lib/kiln_cms/cms/computed/recipes.ex
+#, elixir-autogen, elixir-format
+msgid "Age in years"
+msgstr "Edad en años"
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/inbox_live.ex
@@ -5067,6 +5072,7 @@ msgstr "Modo oscuro"
 msgid "Database (encrypted)"
 msgstr "Base de datos (cifrada)"
 
+#: lib/kiln_cms/cms/computed/recipes.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Date"
@@ -5091,6 +5097,11 @@ msgstr "Días entre fechas"
 #, elixir-autogen, elixir-format
 msgid "Days from the start date to the end date."
 msgstr "Días desde la fecha de inicio hasta la fecha de fin."
+
+#: lib/kiln_cms/cms/computed/recipes.ex
+#, elixir-autogen, elixir-format
+msgid "Days until a date"
+msgstr "Días hasta una fecha"
 
 #: lib/kiln_cms_web/controllers/content_html.ex
 #, elixir-autogen, elixir-format
@@ -7752,6 +7763,11 @@ msgstr "Cuántos registros de %{type} se pueden conectar"
 #, elixir-autogen, elixir-format
 msgid "How many characters the text has."
 msgstr "Cuántos caracteres tiene el texto."
+
+#: lib/kiln_cms/cms/computed/recipes.ex
+#, elixir-autogen, elixir-format
+msgid "How many days are left until a date — negative once it has passed. Refreshed daily."
+msgstr "Cuántos días faltan para una fecha; negativo cuando ya ha pasado. Se actualiza a diario."
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
@@ -14529,6 +14545,11 @@ msgstr "Contenido similar"
 msgid "Since"
 msgstr "Desde"
 
+#: lib/kiln_cms/cms/computed/recipes.ex
+#, elixir-autogen, elixir-format
+msgid "Since date"
+msgstr "Desde la fecha"
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Single line text"
@@ -17195,6 +17216,11 @@ msgstr "Para publicar los puntos de control fuera de la base de datos, define es
 msgid "Today"
 msgstr "Hoy"
 
+#: lib/kiln_cms/cms/computed.ex
+#, elixir-autogen, elixir-format
+msgid "Today's date. Values that use it are refreshed once a day."
+msgstr "La fecha de hoy. Los valores que la usan se actualizan una vez al día."
+
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Tokens: %{tokens}, [field:<name>]. Composes the last URL segment; blank = derive from the SEO keyphrase or title."
@@ -17984,6 +18010,11 @@ msgstr "Usuario"
 msgid "Username"
 msgstr "Nombre de usuario"
 
+#: lib/kiln_cms_web/components/computed_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "Uses today's date (%{date}). Saved values are refreshed once a day, so published content moves to the new date overnight."
+msgstr "Usa la fecha de hoy (%{date}). Los valores guardados se actualizan una vez al día, así que el contenido publicado pasa a la nueva fecha durante la noche."
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Valid for one hour."
@@ -18490,6 +18521,16 @@ msgstr "Quien te haya compartido esta página puede darte la frase de contraseñ
 #, elixir-autogen, elixir-format
 msgid "Whole minutes it takes to read the text."
 msgstr "Minutos enteros que se tarda en leer el texto."
+
+#: lib/kiln_cms/cms/computed.ex
+#, elixir-autogen, elixir-format
+msgid "Whole years from the start date to the end date, like an age."
+msgstr "Años completos desde la fecha de inicio hasta la de fin, como una edad."
+
+#: lib/kiln_cms/cms/computed/recipes.ex
+#, elixir-autogen, elixir-format
+msgid "Whole years since a date, like a person's age. Refreshed daily."
+msgstr "Años completos desde una fecha, como la edad de una persona. Se actualiza a diario."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format

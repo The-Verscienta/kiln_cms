@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Computed fields can use today's date: `today()`, `years_between`, and "Days
+  until a date" and "Age in years" recipes, refreshed once a day.**
+  ([#2009](https://github.com/The-Verscienta/kiln_cms/pull/2009) · [long form](docs/changelog/unreleased.md#computed-fields-can-use-todays-date-today-yearsbetween-and-days-until-a-date))
+
 - **`custom_filter` filters through relationships: `has`, `has_all`, `has_none`
   and `count` on a reference field, and `has`/`has_all`/`has_none` on `tags`.**
   ([#2003](https://github.com/The-Verscienta/kiln_cms/pull/2003) · [long form](docs/changelog/unreleased.md#custom-filter-relationship-operators-has-has-all-has-none-count))
@@ -109,6 +113,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **An automation rule for "any content type" no longer fires when a content
+  release is published; a rule scoped to `release` still does.**
+  ([#1995](https://github.com/The-Verscienta/kiln_cms/issues/1995) · [long form](docs/changelog/unreleased.md#automation-any-type-rules-ignore-release-published))
+
 - **A variant job no longer takes an image backend's failed or rate-limited
   read for a deleted original.**
   ([long form](docs/changelog/unreleased.md#variant-worker-backend-errors))
@@ -118,8 +126,8 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#regeneration-pixel-cap))
 
 - **GraphQL `published*` queries without `offset` return their page fields
-  (`hasNextPage`, `hasPreviousPage`, `pageNumber`, `lastPage`) again: an
-  omitted `offset` now means `0`.**
+  (`hasNextPage`, `hasPreviousPage`, `pageNumber`, `lastPage`) again: an omitted
+  `offset` now means `0`.**
   ([#1883](https://github.com/The-Verscienta/kiln_cms/issues/1883))
 
 - **Renaming a document now re-fires the documents that point at it through a
@@ -132,7 +140,7 @@ Every summary line below that was shortened links to its own entry there.
 - **bandit 1.13.0 fixes EEF-CVE-2026-105660 (a client could choose
   `conn.host`/`conn.port` via the HTTP/1 request target) and the HTTP/2 DoS
   EEF-CVE-2026-105659, so the endpoint speaks HTTP/2 again.**
-  ([#1991](https://github.com/The-Verscienta/kiln_cms/pull/1991))
+  ([#1991](https://github.com/The-Verscienta/kiln_cms/issues/1991))
 
 - **The `examples/phoenix_showcase` template's lock clears 23 Hex advisories
   (phoenix, phoenix_live_view, bandit, plug, mint, hpax, lazy_html), and CI

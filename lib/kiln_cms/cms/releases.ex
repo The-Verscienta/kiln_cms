@@ -321,7 +321,8 @@ defmodule KilnCMS.CMS.Releases do
     # Inside the transaction on purpose: the delivery ledger rows and Oban jobs
     # this creates must vanish with everything else if a later step aborts, and
     # nothing after this point can abort. Automation is dispatched off the same
-    # funnel (`Webhooks.dispatch/3`), so a `release.published` rule fires here too.
+    # funnel (`Webhooks.dispatch/3`), so a rule scoped to `release` on
+    # `published` fires here too; an "any content type" rule does not (#1995).
     Webhooks.dispatch("release.published", event_payload(published, items), published.org_id)
 
     {published, release_notes ++ item_notes}

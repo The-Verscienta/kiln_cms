@@ -17,6 +17,10 @@ defmodule KilnCMS.CMS.Changes.DeriveSlug do
 
   @impl true
   def change(changeset, _opts, _context) do
+    # A `[field:…]` token can expand a computed field, so the slug pins the
+    # write's date before deriving — the same one `ApplyCustomFields` will use.
+    changeset = KilnCMS.CMS.Computed.Context.pin_today(changeset)
+
     with blank when blank in [nil, ""] <- Ash.Changeset.get_attribute(changeset, :slug),
          base when base != "" <- derived_base(changeset) do
       slug = Slugs.ensure_unique(base, scope(changeset))

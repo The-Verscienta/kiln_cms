@@ -160,6 +160,26 @@ defmodule KilnCMS.CMS.Computed.Recipes do
           value("finish", gettext("To date"), ""),
           text("suffix", gettext("Shown after the number"), gettext("days"))
         ]
+      ),
+      recipe(
+        "days_until",
+        gettext("Days until a date"),
+        gettext(
+          "How many days are left until a date — negative once it has passed. Refreshed daily."
+        ),
+        [
+          value("date", gettext("Date"), ""),
+          text("suffix", gettext("Shown after the number"), gettext("days"))
+        ]
+      ),
+      recipe(
+        "age",
+        gettext("Age in years"),
+        gettext("Whole years since a date, like a person's age. Refreshed daily."),
+        [
+          value("date", gettext("Since date"), ""),
+          text("suffix", gettext("Shown after the number"), "")
+        ]
       )
     ]
   end
@@ -300,6 +320,12 @@ defmodule KilnCMS.CMS.Computed.Recipes do
   defp formula("days_between", p),
     do: {:ok, call_with_suffix("days_between", [ref(p["start"]), ref(p["finish"])], p["suffix"])}
 
+  defp formula("days_until", p),
+    do: {:ok, call_with_suffix("days_between", ["today()", ref(p["date"])], p["suffix"])}
+
+  defp formula("age", p),
+    do: {:ok, call_with_suffix("years_between", [ref(p["date"]), "today()"], p["suffix"])}
+
   defp formula("label", p) do
     {:ok,
      [segment(p["prefix"]), "{{ #{ref(p["value"])} }}", segment(p["suffix"])]
@@ -416,6 +442,16 @@ defmodule KilnCMS.CMS.Computed.Recipes do
        when name in ["reading_time", "word_count"] do
     with {:ok, suffix} <- suffix(suffix),
          do: {:ok, name, %{"source" => source, "suffix" => suffix}}
+  end
+
+  defp match([{:expr, {:call, "days_between", [{:call, "today", []}, {:ref, date}]}} | suffix]) do
+    with {:ok, suffix} <- suffix(suffix),
+         do: {:ok, "days_until", %{"date" => date, "suffix" => suffix}}
+  end
+
+  defp match([{:expr, {:call, "years_between", [{:ref, date}, {:call, "today", []}]}} | suffix]) do
+    with {:ok, suffix} <- suffix(suffix),
+         do: {:ok, "age", %{"date" => date, "suffix" => suffix}}
   end
 
   defp match([{:expr, {:call, "days_between", [{:ref, start}, {:ref, finish}]}} | suffix]) do

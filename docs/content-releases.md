@@ -273,7 +273,10 @@ Three events dispatch through the standard [webhook](webhooks.md) and
 All three carry the release's id, name and item list, and are subscribable on any
 webhook endpoint exactly like `page.published`. Because they go through the same
 funnel, an automation rule scoped to content type `release` with trigger
-`published` fires on them too.
+`published` fires on them too. A rule for *any* content type does not: a
+release is not a document, so "any content type, on published" means the
+documents a release publishes (each fires its own `<type>.published`), not the
+release itself.
 
 `release.published` and `release.rolled_back` are dispatched **inside** their
 transaction, so a release that aborts never emits one.

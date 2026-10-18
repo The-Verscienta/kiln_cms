@@ -87,6 +87,8 @@ defmodule KilnCMS.CMS.Computed do
   | `and/or(a, b, …)` | a boolean over the arguments' truthiness |
   | `default(a, b)` | `a` unless blank, else `b` |
   | `days_between(start, end)` | whole days from `start` to `end` (ISO dates or datetimes) |
+  | `years_between(start, end)` | whole years from `start` to `end` — an age |
+  | `today()` | the evaluation's date, as ISO 8601 (see below) |
   | `year(date)` | the date's year |
   | `format_date(date, pattern)` | the date through `Calendar.strftime/2` |
 
@@ -99,9 +101,26 @@ defmodule KilnCMS.CMS.Computed do
   itself: `{{ size }} EU` on a record without a size has no value, rather than
   the value "EU".
 
-  There is deliberately no `today()`: a formula is evaluated on write *and*
-  re-evaluated on fire, and a clock would make the stored value and the fired
-  one disagree on any day but the one the record was saved.
+  ## `today()` and the daily refresh
+
+  A formula is evaluated on write *and* re-evaluated on fire, so a clock read
+  in here would make the stored value and the fired one disagree on any day
+  but the one the record was saved. The engine therefore never reads a clock:
+  `today()` answers the `:today` date **in the evaluation context**, which
+  each call site pins once per evaluation pass
+  (`KilnCMS.CMS.Computed.Context.today/1`, the site's day in
+  `KilnCMS.Events.default_time_zone/0`). A context without one makes `today()`
+  blank, never "now".
+
+  A write pins the date on its changeset (`Context.pin_today/1`) and the fire
+  it enqueues carries that same date, so a record and its artifact agree even
+  when the fire runs after midnight. A formula that calls `today()` is
+  **time-dependent** (`time_dependent?/1`): its value moves without the record
+  being written, so `KilnCMS.CMS.Computed.DailyRefresh` recomputes and
+  re-fires the published records of every type with such a field once per
+  site day. Values are therefore as fresh as the last refresh, not live to the
+  second — "days until" is right for the whole of a day, and moves at the
+  next one.
 
   Evaluation is **total**: every function returns a value or `nil`, and
   `evaluate/2` never raises — a computed field can't make a document
@@ -158,6 +177,8 @@ defmodule KilnCMS.CMS.Computed do
     "not" => [1],
     "default" => [2],
     "days_between" => [2],
+    "years_between" => [2],
+    "today" => [0],
     "year" => [1],
     "format_date" => [2]
   }
@@ -304,6 +325,18 @@ defmodule KilnCMS.CMS.Computed do
         "days_between(start, end)",
         gettext("Days from the start date to the end date.")
       ),
+      entry(
+        "years_between",
+        :dates,
+        "years_between(start, end)",
+        gettext("Whole years from the start date to the end date, like an age.")
+      ),
+      entry(
+        "today",
+        :dates,
+        "today()",
+        gettext("Today's date. Values that use it are refreshed once a day.")
+      ),
       entry("year", :dates, "year(date)", gettext("The year of a date.")),
       entry(
         "format_date",
@@ -322,6 +355,33 @@ defmodule KilnCMS.CMS.Computed do
       signature: signature,
       summary: summary
     }
+
+  @doc """
+  Whether a template calls `today()` anywhere — so its value moves with the
+  date rather than only when the record is written. Takes a parsed template or
+  its source; a source that doesn't parse is not time-dependent (it has no
+  value at all).
+  """
+  @spec time_dependent?(template() | String.t() | nil) :: boolean()
+  def time_dependent?(template) when is_list(template) do
+    Enum.any?(template, fn
+      {:expr, ast} -> calls_today?(ast)
+      {:text, _text} -> false
+    end)
+  end
+
+  def time_dependent?(source) when is_binary(source) do
+    case parse(source) do
+      {:ok, template} -> time_dependent?(template)
+      {:error, _message} -> false
+    end
+  end
+
+  def time_dependent?(_source), do: false
+
+  defp calls_today?({:call, "today", []}), do: true
+  defp calls_today?({:call, _name, args}), do: Enum.any?(args, &calls_today?/1)
+  defp calls_today?(_ast), do: false
 
   @doc "The document scalars a template may reference by bare name."
   @spec document_refs() :: [String.t()]
@@ -351,7 +411,8 @@ defmodule KilnCMS.CMS.Computed do
   Evaluate a template (parsed or raw) against a context.
 
   The context is a map with `:document` (string-keyed scalars, including
-  `"body"`) and `:fields` (the record's other custom-field values, string-keyed).
+  `"body"`), `:fields` (the record's other custom-field values, string-keyed)
+  and `:today` (the `Date` that `today()` answers — absent, it is blank).
   Returns a JSON-native value, or `nil` when the result is blank.
   """
   @spec evaluate(template() | String.t(), map()) :: term()
@@ -792,6 +853,16 @@ defmodule KilnCMS.CMS.Computed do
 
   defp eval({:ref, name}, context), do: field(context, name)
 
+  # The one function that reads the context rather than its arguments — and
+  # the context, not a clock, so every site that evaluates a formula on the
+  # same pinned date gets the same answer.
+  defp eval({:call, "today", []}, context) do
+    case Map.get(context, :today) do
+      %Date{} = date -> Date.to_iso8601(date)
+      _none -> nil
+    end
+  end
+
   defp eval({:call, name, args}, context) do
     call(name, Enum.map(args, &eval(&1, context)))
   end
@@ -942,6 +1013,20 @@ defmodule KilnCMS.CMS.Computed do
          else: (_ -> nil)
   end
 
+  # Whole years, counted the way an age is: the year isn't complete until the
+  # anniversary. A 29 February start completes its year on 1 March in a common
+  # year (`Date.shift/2` would say 28 February; an age that turns a day early
+  # is the wrong way round to be wrong).
+  defp call("years_between", [start, finish]) do
+    with {:ok, from} <- date(start), {:ok, to} <- date(finish) do
+      if Date.compare(to, from) == :lt,
+        do: -whole_years(to, from),
+        else: whole_years(from, to)
+    else
+      _ -> nil
+    end
+  end
+
   defp call("year", [value]) do
     case date(value) do
       {:ok, date} -> date.year
@@ -955,6 +1040,11 @@ defmodule KilnCMS.CMS.Computed do
       {{:ok, date}, format} -> Calendar.strftime(date, format)
       {:error, _format} -> nil
     end
+  end
+
+  defp whole_years(from, to) do
+    years = to.year - from.year
+    if {to.month, to.day} < {from.month, from.day}, do: years - 1, else: years
   end
 
   # Spreadsheet truthiness: a blank, `false`, zero or the text "false" doesn't

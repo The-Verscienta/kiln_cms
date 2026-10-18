@@ -19,6 +19,8 @@ defmodule KilnCMS.Automation do
 
   require Logger
 
+  alias KilnCMS.CMS.WebhookEndpoint
+
   resources do
     resource KilnCMS.Automation.Rule do
       define :list_rules, action: :read
@@ -32,16 +34,15 @@ defmodule KilnCMS.Automation do
 
   @doc """
   Queue automation evaluation for an editorial `event` (e.g. `"post.published"`).
-  Called on the publish path: a cheap string filter (no DB), then an `Oban.insert`
-  of a `DispatchWorker` for events that are a supported lifecycle trigger. A
-  no-op for other events (`ping`, `form.submitted`, …). Never raises.
+  Called on the publish path: a cheap string filter (`trigger/1`, no DB), then an
+  `Oban.insert` of a `DispatchWorker` for events that are a supported lifecycle
+  trigger. A no-op for other events (`ping`, `form.submitted`, …). Never raises.
   """
   @spec handle_event(String.t(), map(), Ash.UUID.t()) :: :ok
   def handle_event(event, payload, org_id \\ KilnCMS.Accounts.default_org_id())
 
   def handle_event(event, payload, org_id) when is_binary(event) do
-    with [_type, verb] <- String.split(event, ".", parts: 2),
-         {:ok, _trigger} <- parse_trigger(verb) do
+    with {:ok, _type, _trigger, _scope} <- trigger(event) do
       # `org_id` rides into the dispatch worker so rules only fire for their own
       # site (epic #336).
       %{"event" => event, "payload" => payload, "org_id" => org_id}
@@ -110,18 +111,50 @@ defmodule KilnCMS.Automation do
   def dispatch(event, payload, org_id \\ KilnCMS.Accounts.default_org_id())
 
   def dispatch(event, payload, org_id) when is_binary(event) do
-    with [type, verb] <- String.split(event, ".", parts: 2),
-         {:ok, trigger} <- parse_trigger(verb) do
-      match_rules(trigger, type, event, payload, org_id)
-    else
-      _not_a_lifecycle_trigger -> :ok
+    # Classified again here, not only in `handle_event/3`: a job queued before
+    # a classification changed (#1995) drains through this.
+    case trigger(event) do
+      {:ok, type, trigger, scope} -> match_rules(trigger, type, scope, event, payload, org_id)
+      :error -> :ok
     end
   end
 
-  defp match_rules(trigger, type, event, payload, org_id) do
+  @doc """
+  How automation reads `event`: `{:ok, type, trigger, scope}` for an event a
+  rule can trigger on, `:error` for one it cannot (no `.`, or a verb that is
+  not one of `KilnCMS.Automation.Rule.triggers/0`). Pure, so the publish path
+  can call it.
+
+  `scope` says which rules may match:
+
+    * `:any` — rules for any content type and rules scoped to `type`. Content
+      events (including `<type>.health_*` from `KilnCMS.CMS.HealthSweep`, and
+      a dynamic type that has been archived), and `task.assigned` /
+      `task.overdue`, which only tasks emit;
+    * `:scoped` — only rules scoped to `type` itself. A domain event
+      (`KilnCMS.CMS.WebhookEndpoint.domain_events/0`) whose verb is also a
+      trigger, which today is `release.published` (#1995). It is about a
+      release, not a document, so an "any content type, on published" rule
+      must not fire for it. A rule scoped to `release` is documented to fire
+      (docs/content-releases.md), and still does.
+  """
+  @spec trigger(String.t()) :: {:ok, String.t(), atom(), :any | :scoped} | :error
+  def trigger(event) when is_binary(event) do
+    with {type, verb} <- WebhookEndpoint.event_parts(event),
+         {:ok, trigger} <- parse_trigger(verb) do
+      scope = if event in WebhookEndpoint.domain_events(), do: :scoped, else: :any
+      {:ok, type, trigger, scope}
+    else
+      _not_a_lifecycle_trigger -> :error
+    end
+  end
+
+  defp match_rules(trigger, type, scope, event, payload, org_id) do
     case rules_for(trigger, type, actor: system(), authorize_with: :error, tenant: org_id) do
       {:ok, rules} ->
-        Enum.each(rules, &enqueue(&1, event, payload, org_id))
+        rules
+        |> Enum.filter(&(scope == :any or &1.content_type == type))
+        |> Enum.each(&enqueue(&1, event, payload, org_id))
 
       {:error, reason} ->
         Logger.error(
