@@ -297,6 +297,7 @@ defmodule KilnCMS.SchemaExport do
     definition.field_type
     |> base_custom_field_schema(definition)
     |> put_target_types(definition)
+    |> put_target_rules(definition)
     |> put_link_fields(definition)
     |> put_localization(Map.get(definition, :localization))
   end
@@ -352,6 +353,22 @@ defmodule KilnCMS.SchemaExport do
   end
 
   defp put_target_types(schema, _definition), do: schema
+
+  # A reference's target-side options: `max_sources` (R1b), how many records
+  # may connect to one target through the field, and a non-default
+  # `on_target_delete` (R5), what purging a target does to its connections.
+  # Annotations for the reason the item bounds are: they govern writes and
+  # purges, and tightening the cap leaves stored connections alone.
+  defp put_target_rules(schema, %{field_type: :reference} = definition) do
+    schema
+    |> put_bound("x-kiln-max-sources", Map.get(definition, :max_sources))
+    |> put_bound("x-kiln-on-target-delete", delete_rule(Map.get(definition, :on_target_delete)))
+  end
+
+  defp put_target_rules(schema, _definition), do: schema
+
+  defp delete_rule(rule) when rule in [:clear, :restrict], do: to_string(rule)
+  defp delete_rule(_keep), do: nil
 
   # Field-level localization (#1327), as `Kiln.Block.JsonSchema` annotates a
   # block field: absent for the default, `:localized`.

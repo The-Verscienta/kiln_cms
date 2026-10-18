@@ -3106,6 +3106,33 @@ defmodule KilnCMS.CMS.Content do
           require_atomic? false
           # No FK can reach the chunk table from every content table (#1940).
           change KilnCMS.CMS.Changes.DeleteChunkEmbeddings
+          # Each connecting `:reference` field's `on_target_delete` rule (R5):
+          # `:restrict` refuses the purge, `:clear` takes this record out of
+          # every referrer's value. `:keep` leaves the broken reference.
+          change KilnCMS.CMS.Changes.ApplyTargetDeleteRules
+        end
+
+        # Internal (R5): takes a purged record out of this record's
+        # `:reference` fields whose `on_target_delete` is `:clear`, written by
+        # `ContentLinks.TargetDelete` as `CMS.Bookkeeping.system/0` from inside
+        # the purge's transaction. The target rides in the changeset context
+        # (`Changes.ClearReferenceTarget`), so no API surface can reach it, and
+        # nothing routes it. An ordinary content write otherwise: versioned,
+        # optimistic-locked, its edges rewritten from the new value
+        # (`Changes.SyncReferenceLinks`), and a published record re-fired and
+        # announced, so nothing delivered still names the purged record.
+        update :clear_reference_target do
+          require_atomic? false
+          accept []
+          # Always runs inside the purge's transaction, by design. Its
+          # `after_transaction` hooks (the fire, the webhook) only insert Oban
+          # jobs, which then commit or roll back with the purge.
+          change set_context(%{warn_on_transaction_hooks?: false})
+          change optimistic_lock(:lock_version)
+          change KilnCMS.CMS.Changes.ClearReferenceTarget
+          change KilnCMS.CMS.Changes.SetSearchText
+          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
+          change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "updated", only_when: :published}
         end
 
         # Background-maintained semantic embedding, written by
@@ -3550,11 +3577,16 @@ defmodule KilnCMS.CMS.Content do
           #     `KilnCMS.I18n.SharedFields`). The one content write here, and
           #     versioned like one: the values it writes are ones a person
           #     already published on the source variant.
+          #   * `:clear_reference_target` — takes a purged record out of the
+          #     `:reference` fields set to clear on delete (R5,
+          #     `ContentLinks.TargetDelete`), as `CMS.Bookkeeping.system/0`.
+          #     A content write, versioned and locked like the one above.
           #
           # None accepts input, and none has a caller that is a person. Keep
           # the list that way: an action anyone else calls does not belong in
           # it. Each is admitted to the one subsystem that calls it (#1747).
           forbid_unless action([
+                          :clear_reference_target,
                           :refresh_computed,
                           :reindex_search_text,
                           :set_embedding,
@@ -3575,6 +3607,9 @@ defmodule KilnCMS.CMS.Content do
 
           authorize_if {KilnCMS.Checks.SystemActor,
                         subsystem: :localization, action: :sync_shared_fields}
+
+          authorize_if {KilnCMS.Checks.SystemActor,
+                        subsystem: :cms_bookkeeping, action: :clear_reference_target}
         end
 
         # Publishing is an admin approval step — editors submit for review
