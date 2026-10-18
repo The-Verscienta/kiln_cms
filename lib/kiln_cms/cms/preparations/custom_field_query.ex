@@ -34,7 +34,12 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   relationship operators `has` / `has_all` / `has_none` / `count`, which
   read its `content_links` edges rather than the snapshot, and so do the
   built-in `tags` and `related_<type>s` (the set operators only) — see
-  `KilnCMS.CMS.Preparations.CustomFieldQuery.Relations`. Definitions are read
+  `KilnCMS.CMS.Preparations.CustomFieldQuery.Relations`. A reference's link
+  fields (R3) filter under `<field>.link.<name>` —
+  `custom_filter[ingredients.link.role]=main` — with the scalar operators:
+  a record matches when **some** connection of that field carries a
+  matching value, read from the edges' `metadata` under the same both-ends
+  gate as the relationship operators. Definitions are read
   as the system (`KilnCMS.CMS.Housekeeping`, #1659): registry metadata, not
   user data, and the public API's anonymous callers filter too. The read fails
   closed — a refused registry read raises rather than resolving to "no
@@ -176,6 +181,49 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # site's existing `custom_filter[tags]` keeps its meaning; otherwise
   # `tags` and `related_<type>s` take the relationship operators (R6).
   defp resolve_target(defs, name, ctx) do
+    case Regex.run(~r/\A(.+)\.link\.([^.]+)\z/, name) do
+      [_, parent, link] -> resolve_link(defs, parent, link, ctx)
+      nil -> resolve_field(defs, name, ctx)
+    end
+  end
+
+  # `<reference field>.link.<link field>` (R3).
+  defp resolve_link(defs, parent_name, link_name, ctx) do
+    with {:ok, parent} <- resolve(defs, parent_name),
+         :ok <- reference_parent(parent) do
+      links = link_fields(parent, ctx)
+
+      case Enum.find(links, &(&1.name == link_name)) do
+        nil ->
+          names = links |> Enum.map(& &1.name) |> Enum.sort()
+
+          {:error,
+           "custom field #{inspect(parent_name)} has no link field #{inspect(link_name)}" <>
+             if(names == [], do: "", else: " (link fields: #{Enum.join(names, ", ")})")}
+
+        link ->
+          {:ok, {:link, parent, link}}
+      end
+    end
+  end
+
+  defp reference_parent(%{field_type: :reference}), do: :ok
+
+  defp reference_parent(%{name: name, field_type: type}),
+    do:
+      {:error,
+       "custom field #{inspect(name)} (#{type}) is not a reference, so it has no link fields"}
+
+  # `for_type`/`for_definition` load them; the unscoped entry read does not.
+  defp link_fields(%{link_fields: %Ash.NotLoaded{}} = parent, ctx) do
+    parent
+    |> Ash.load!(:link_fields, registry_opts(ctx.tenant))
+    |> KilnCMS.CMS.FieldDefinition.link_fields()
+  end
+
+  defp link_fields(parent, _ctx), do: KilnCMS.CMS.FieldDefinition.link_fields(parent)
+
+  defp resolve_field(defs, name, ctx) do
     case {resolve(defs, name), Relations.builtin(ctx.resource, name)} do
       {{:error, "unknown" <> _}, {_, _} = builtin} -> {:ok, {:builtin, builtin}}
       {result, _builtin} -> result
@@ -199,6 +247,12 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   defp relation_or_condition({:builtin, builtin}, op, raw, ctx),
     do: Relations.builtin_condition(builtin, op, raw, ctx)
 
+  defp relation_or_condition({:link, parent, link}, op, raw, ctx) do
+    with {:ok, condition} <- link_condition(link, op, raw, "#{parent.name}.link.#{link.name}") do
+      {:ok, Relations.link(parent, condition, ctx)}
+    end
+  end
+
   # The relationship operators run over the reference's `content_links`
   # edges, single or `multiple` alike (R6).
   defp relation_or_condition(%{field_type: :reference} = definition, op, raw, ctx)
@@ -213,6 +267,49 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   end
 
   defp relation_or_condition(definition, op, raw, _ctx), do: condition(definition, op, raw)
+
+  # One link field's value on an edge's `metadata` (R3) — the condition
+  # `Relations.link/3` wraps in the edge `exists`. Link fields are scalar
+  # (`FieldDefinition.link_field_types/0`), so these are the scalar rules of
+  # `condition/3` on another jsonb column.
+  defp link_condition(_link, op, _raw, label) when op not in @operators,
+    do: {:error, "unknown operator #{inspect(op)} for link field #{inspect(label)}"}
+
+  defp link_condition(%{name: name}, "null", raw, label) do
+    path = expr(get_path(metadata, [^name]))
+
+    case raw do
+      t when t in [true, "true", "1"] -> {:ok, expr(is_nil(^path))}
+      f when f in [false, "false", "0"] -> {:ok, expr(not is_nil(^path))}
+      _ -> {:error, "null for link field #{inspect(label)} must be true or false"}
+    end
+  end
+
+  defp link_condition(%{name: name} = link, "in", raw, label) do
+    cast_list(raw, ash_type(link), label, fn
+      [] ->
+        expr(false)
+
+      values ->
+        values
+        |> Enum.map(&jsonb_condition(:metadata, "eq", name, &1))
+        |> Enum.reduce(&expr(^&2 or ^&1))
+    end)
+  end
+
+  defp link_condition(%{name: name} = link, "ilike", raw, label) do
+    if ash_type(link) do
+      {:error, "ilike is only supported on text-like link fields (#{inspect(label)})"}
+    else
+      {:ok, expr(ilike(get_path(metadata, [^name]), ^to_string(raw)))}
+    end
+  end
+
+  defp link_condition(%{name: name} = link, op, raw, label) do
+    with {:ok, value} <- cast_value(raw, ash_type(link), label) do
+      {:ok, jsonb_condition(:metadata, op, name, value)}
+    end
+  end
 
   defp condition(%{name: name}, op, _raw) when op not in @operators do
     {:error, "unknown operator #{inspect(op)} for custom field #{inspect(name)}"}
@@ -289,7 +386,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
       values ->
         values
-        |> Enum.map(&jsonb_condition("eq", name, &1))
+        |> Enum.map(&jsonb_condition(:custom_fields, "eq", name, &1))
         |> Enum.reduce(&expr(^&2 or ^&1))
     end)
   end
@@ -304,7 +401,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
   defp condition(%{name: name} = definition, op, raw) do
     with {:ok, value} <- cast_value(raw, ash_type(definition), name) do
-      {:ok, jsonb_condition(op, name, value)}
+      {:ok, jsonb_condition(:custom_fields, op, name, value)}
     end
   end
 
@@ -316,8 +413,11 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # written). The input value goes through `Ash.Type.cast_input` and is bound
   # against a `::jsonb` param — the cast makes Postgrex JSON-encode the cast
   # Elixir term, so `10` compares as a JSON number, `true` as a boolean, etc.
-  defp jsonb_condition(op, name, raw_value) do
-    field = expr(fragment("(? -> ?::text)", ^ref(:custom_fields), ^name))
+  #
+  # `column` is `:custom_fields` for a field on the record, `:metadata` for a
+  # link field on an edge (R3).
+  defp jsonb_condition(column, op, name, raw_value) do
+    field = expr(fragment("(? -> ?::text)", ^ref(column), ^name))
     value = expr(fragment("?::jsonb", ^raw_value))
 
     case op do

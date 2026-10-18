@@ -21,6 +21,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   The machine name follows the label as it is typed until the admin edits the
   name themselves, and a name already defined on a ticked type is refused before
   anything is written — for every ticked type, not only the first.
+
+  A reference field carries its **link fields** (R3) under it, as "Details on
+  each connection": the quantity of each ingredient a recipe connects, the
+  role of each author. They are added, edited, ordered and deleted in place,
+  one small form at a time, and offer only the plain field types
+  (`FieldDefinition.link_field_types/0`).
   """
   use KilnCMSWeb, :live_view
 
@@ -53,6 +59,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
        |> assign(:field_types, FieldDefinition.field_types())
        |> assign(:target_types, ContentTypes.options(org))
        |> assign(:edit, nil)
+       |> assign(:link_form, nil)
        |> assign(:default_scopes, [])
        |> assign(:samples, %{})
        # The builder's static lists, built once: each is a page of gettext
@@ -221,6 +228,99 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     {:noreply, assign(socket, :edit, nil)}
   end
 
+  # --- link fields (R3) -----------------------------------------------------
+
+  # "Add a detail" under a reference field: a small create form scoped to it.
+  def handle_event("link_new", %{"parent" => parent_id}, socket) when is_binary(parent_id) do
+    if Enum.any?(
+         socket.assigns.definitions,
+         &(&1.id == parent_id and &1.field_type == :reference)
+       ) do
+      form = link_create_form(socket.assigns.actor, socket.assigns.current_org, parent_id)
+
+      {:noreply,
+       assign(socket, :link_form, %{parent: parent_id, id: nil, form: form, name_edited?: false})}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("link_edit", %{"id" => id}, socket) when is_binary(id) do
+    case find_link(socket, id) do
+      nil ->
+        {:noreply, socket}
+
+      link ->
+        form = link_edit_form(link, socket.assigns.actor, socket.assigns.current_org)
+
+        {:noreply,
+         assign(socket, :link_form, %{
+           parent: link.link_of_id,
+           id: id,
+           form: form,
+           name_edited?: true
+         })}
+    end
+  end
+
+  def handle_event("link_cancel", _params, socket),
+    do: {:noreply, assign(socket, :link_form, nil)}
+
+  def handle_event(
+        "link_validate",
+        %{"link_field" => params} = event,
+        %{assigns: %{link_form: %{} = lf}} = socket
+      )
+      when is_map(params) do
+    name_edited? =
+      lf.id != nil or name_edited?(event["_target"], params, lf.name_edited?, "link_field")
+
+    params = if name_edited?, do: params, else: suggest_name(params)
+    params = drop_default_on_type_change(params, lf.form)
+    form = AshPhoenix.Form.validate(lf.form, link_params(params, lf))
+
+    {:noreply, assign(socket, :link_form, %{lf | form: form, name_edited?: name_edited?})}
+  end
+
+  def handle_event(
+        "link_save",
+        %{"link_field" => params},
+        %{assigns: %{link_form: %{} = lf}} = socket
+      )
+      when is_map(params) do
+    params = if lf.id == nil and blank?(params["name"]), do: suggest_name(params), else: params
+
+    case AshPhoenix.Form.submit(lf.form, params: link_params(params, lf, socket.assigns)) do
+      {:ok, _link} ->
+        {:noreply,
+         socket
+         |> assign(:link_form, nil)
+         |> load_definitions()
+         |> put_flash(:info, gettext("Saved."))}
+
+      {:error, form} ->
+        {:noreply, assign(socket, :link_form, %{lf | form: form})}
+    end
+  end
+
+  # A change or submit from a form no longer open (cancelled in another tab).
+  def handle_event(event, _params, socket) when event in ["link_validate", "link_save"],
+    do: {:noreply, socket}
+
+  def handle_event("link_move", %{"id" => id, "dir" => dir}, socket)
+      when is_binary(id) and dir in ["up", "down"] do
+    with %{link_of_id: parent_id} <- find_link(socket, id),
+         ids = socket.assigns.link_fields |> Map.get(parent_id, []) |> Enum.map(& &1.id),
+         index when is_integer(index) <- Enum.find_index(ids, &(&1 == id)),
+         target = if(dir == "up", do: index - 1, else: index + 1),
+         true <- target >= 0 and target < length(ids) do
+      moved = ids |> List.delete_at(index) |> List.insert_at(target, id)
+      {:noreply, reorder_links(socket, parent_id, moved)}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
   # --- order (#1818) ---------------------------------------------------------
 
   # Pushed by the `Sortable` hook with one type's list in its new order.
@@ -304,10 +404,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   # The machine name tracks the label until the admin types into the name
   # input; clearing that input hands it back to the label.
-  defp name_edited?(["field_definition", "name"], params, _edited?),
+  defp name_edited?(target, params, edited?, as \\ "field_definition")
+
+  defp name_edited?([as, "name"], params, _edited?, as),
     do: not blank?(params["name"])
 
-  defp name_edited?(_target, _params, edited?), do: edited?
+  defp name_edited?(_target, _params, edited?, _as), do: edited?
 
   defp suggest_name(params),
     do: Map.put(params, "name", FieldDefinition.name_from_label(params["label"]))
@@ -500,6 +602,75 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     }
   end
 
+  # --- link-field helpers (R3) ---------------------------------------------
+
+  defp find_link(socket, id) do
+    socket.assigns.link_fields |> Map.values() |> List.flatten() |> Enum.find(&(&1.id == id))
+  end
+
+  defp link_create_form(actor, org, parent_id) do
+    FieldDefinition
+    |> AshPhoenix.Form.for_create(:create,
+      actor: actor,
+      tenant: org,
+      as: "link_field",
+      id: "link_field_new_#{parent_id}",
+      params: %{"field_type" => "string"}
+    )
+    |> to_form()
+  end
+
+  defp link_edit_form(link, actor, org) do
+    link
+    |> AshPhoenix.Form.for_update(:update,
+      actor: actor,
+      tenant: org,
+      as: "link_field",
+      id: "link_field_#{link.id}"
+    )
+    |> to_form()
+  end
+
+  # The same option/default clean-up as a field's own form. A new link field
+  # is pinned to the reference it was opened under and goes to the end of its
+  # list; an edit never moves it.
+  defp link_params(params, link_form, assigns \\ nil)
+
+  defp link_params(params, %{id: nil, parent: parent_id}, assigns) do
+    params = params |> normalize() |> Map.put("link_of_id", parent_id)
+
+    case assigns do
+      nil -> params
+      assigns -> Map.put(params, "position", length(Map.get(assigns.link_fields, parent_id, [])))
+    end
+  end
+
+  defp link_params(params, _link_form, _assigns),
+    do: params |> normalize() |> Map.delete("link_of_id")
+
+  defp reorder_links(socket, parent_id, order) do
+    by_id = socket.assigns.link_fields |> Map.get(parent_id, []) |> Map.new(&{&1.id, &1})
+    opts = [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
+
+    failed =
+      order
+      |> Enum.with_index()
+      |> Enum.filter(fn {id, index} ->
+        by_id[id].position != index and
+          not match?({:ok, _}, CMS.update_field_definition(by_id[id], %{position: index}, opts))
+      end)
+
+    socket = load_definitions(socket)
+
+    if failed == [],
+      do: socket,
+      else: put_flash(socket, :error, gettext("Couldn't save the new order of details."))
+  end
+
+  defp link_type_options do
+    Enum.map(FieldDefinition.link_field_types(), &{type_label(&1), &1})
+  end
+
   # --- order helpers ---------------------------------------------------------
 
   # Positions are rewritten as 0, 1, 2… down one type's list, so the editor
@@ -588,12 +759,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # --- data ------------------------------------------------------------------
 
   defp load_definitions(socket) do
-    definitions =
+    {links, definitions} =
       CMS.list_field_definitions!(
         actor: socket.assigns.actor,
         tenant: socket.assigns.current_org,
         query: [sort: [position: :asc, name: :asc]]
       )
+      # Link fields (R3) are listed under their reference field, not as fields
+      # of a type.
+      |> Enum.split_with(&(not is_nil(&1.link_of_id)))
 
     # A definition whose content type no longer exists (#1770) is listed on
     # its own, with only a delete: nothing renders, validates or delivers it,
@@ -609,6 +783,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
     socket
     |> assign(:definitions, definitions)
+    |> assign(:link_fields, Enum.group_by(links, & &1.link_of_id))
     |> assign(:grouped, grouped)
     |> assign(:orphaned, Enum.sort_by(orphaned, &{to_string(&1.content_type), &1.name}))
   end
@@ -1175,7 +1350,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       </label>
       <textarea
         id={@id}
-        name="field_definition[options]"
+        name={@form[:options].name}
         rows="3"
         class="field-input"
       >{options_text(@form)}</textarea>
@@ -1497,6 +1672,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     <p :if={definition.compute} class="text-xs text-base-content/60">
                       {gettext("Formula")}: <code>{definition.compute}</code>
                     </p>
+                    <.link_fields_panel
+                      :if={definition.field_type == :reference}
+                      definition={definition}
+                      links={Map.get(@link_fields, definition.id, [])}
+                      link_form={@link_form}
+                      target_types={@target_types}
+                    />
                   </div>
                   <div class="flex shrink-0 items-center gap-1">
                     <button
@@ -1662,6 +1844,195 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         </section>
       </div>
     </Layouts.console>
+    """
+  end
+
+  attr :definition, :map, required: true
+  attr :links, :list, required: true
+  attr :link_form, :any, required: true
+  attr :target_types, :list, required: true
+
+  # A reference field's link fields (R3), worded for someone setting up a
+  # relationship rather than a schema: "Details on each connection".
+  defp link_fields_panel(assigns) do
+    assigns =
+      assigns
+      |> assign(:root, "field-#{assigns.definition.id}-details")
+      |> assign(
+        :target,
+        assigns.definition
+        |> FieldDefinition.reference_targets()
+        |> Enum.map(&type_label_for(assigns.target_types, &1))
+        |> types_phrase()
+      )
+      |> assign(
+        :open,
+        assigns.link_form && assigns.link_form.parent == assigns.definition.id &&
+          assigns.link_form
+      )
+
+    ~H"""
+    <div
+      id={@root}
+      role="group"
+      aria-labelledby={"#{@root}-heading"}
+      class="mt-3 rounded-md border border-base-content/10 bg-base-200/30 p-3"
+    >
+      <div class="flex flex-wrap items-baseline justify-between gap-2">
+        <h4 id={"#{@root}-heading"} class="text-sm font-medium">
+          {gettext("Details on each connection")}
+        </h4>
+        <button
+          :if={!(@open && is_nil(@open.id))}
+          type="button"
+          id={"#{@root}-add"}
+          phx-click="link_new"
+          phx-value-parent={@definition.id}
+          class="inline-flex cursor-pointer items-center gap-1 rounded text-xs font-medium text-primary-ink transition-colors hover:underline"
+        >
+          <.icon name="hero-plus" class="size-3.5" />
+          {gettext("Add a detail")}
+        </button>
+      </div>
+      <p class="mt-0.5 text-xs text-base-content/60">
+        {gettext(
+          "What an editor fills in for every %{type} this field connects — a quantity, a role, a note. It belongs to the connection, not to either record.",
+          type: @target || gettext("record")
+        )}
+      </p>
+
+      <ol :if={@links != []} id={"#{@root}-list"} class="mt-2 divide-y divide-base-content/10">
+        <li :for={{link, index} <- Enum.with_index(@links)} id={"link-field-#{link.id}"} class="py-2">
+          <div :if={!(@open && @open.id == link.id)} class="flex items-center justify-between gap-3">
+            <div class="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+              <span class="font-medium">{link.label}</span>
+              <code class="text-xs text-base-content/60">{link.name}</code>
+              <span class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70">
+                {type_label(link.field_type)}
+              </span>
+              <span
+                :if={link.required}
+                class="rounded bg-warning/20 px-1.5 py-0.5 text-xs text-warning"
+              >
+                {gettext("required")}
+              </span>
+              <span
+                :if={link.field_type == :select and link.options != []}
+                class="text-xs text-base-content/60"
+              >
+                {Enum.join(link.options, ", ")}
+              </span>
+            </div>
+            <div class="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                phx-click="link_move"
+                phx-value-id={link.id}
+                phx-value-dir="up"
+                disabled={index == 0}
+                aria-label={gettext("Move %{label} up", label: link.label)}
+                class="btn btn-sm btn-ghost px-1.5"
+              >
+                <.icon name="hero-chevron-up" class="size-4" />
+              </button>
+              <button
+                type="button"
+                phx-click="link_move"
+                phx-value-id={link.id}
+                phx-value-dir="down"
+                disabled={index == length(@links) - 1}
+                aria-label={gettext("Move %{label} down", label: link.label)}
+                class="btn btn-sm btn-ghost px-1.5"
+              >
+                <.icon name="hero-chevron-down" class="size-4" />
+              </button>
+              <button
+                type="button"
+                phx-click="link_edit"
+                phx-value-id={link.id}
+                class="btn btn-sm btn-default"
+              >
+                {gettext("Edit")}
+              </button>
+              <button
+                type="button"
+                phx-click="delete"
+                phx-value-id={link.id}
+                data-confirm={
+                  gettext("Delete this detail? Its value is removed from every connection.")
+                }
+                aria-label={gettext("Delete detail %{label}", label: link.label)}
+                class="rounded px-2 py-1 text-xs text-base-content/60 hover:bg-base-200 hover:text-error"
+              >
+                <.icon name="hero-trash" class="size-4" />
+              </button>
+            </div>
+          </div>
+          <.link_field_form
+            :if={@open && @open.id == link.id}
+            form={@open.form}
+            id={"link-field-form-#{link.id}"}
+          />
+        </li>
+      </ol>
+      <p :if={@links == [] and !@open} class="mt-2 text-xs text-base-content/50">
+        {gettext("No details yet.")}
+      </p>
+      <.link_field_form
+        :if={@open && is_nil(@open.id)}
+        form={@open.form}
+        id={"link-field-form-new-#{@definition.id}"}
+      />
+    </div>
+    """
+  end
+
+  attr :form, :any, required: true
+  attr :id, :string, required: true
+
+  defp link_field_form(assigns) do
+    ~H"""
+    <.form
+      for={@form}
+      id={@id}
+      phx-change="link_validate"
+      phx-submit="link_save"
+      class="mt-2 grid gap-3 rounded-md border border-base-content/10 bg-base-100 p-3 sm:grid-cols-2"
+    >
+      <.input field={@form[:label]} label={gettext("Label")} placeholder={gettext("Quantity")} />
+      <.input
+        field={@form[:name]}
+        label={gettext("Machine name")}
+        placeholder="quantity"
+        hint={gettext("Filled in from the label until you change it.")}
+      />
+      <.input
+        field={@form[:field_type]}
+        type="select"
+        label={gettext("Kind of value")}
+        options={link_type_options()}
+      />
+      <.input field={@form[:help_text]} label={gettext("Help text")} />
+      <.options_field form={@form} id={"#{@id}-options"} />
+      <.default_field form={@form} />
+      <label class="flex items-center gap-2 self-end text-sm">
+        <input type="hidden" name={@form[:required].name} value="false" />
+        <input
+          type="checkbox"
+          name={@form[:required].name}
+          value="true"
+          checked={@form[:required].value in [true, "true"]}
+          class="size-4 rounded border border-base-content/30 accent-primary"
+        />
+        {gettext("Required on every connection")}
+      </label>
+      <div class="flex gap-2 sm:col-span-2">
+        <.button type="submit" variant="primary">{gettext("Save detail")}</.button>
+        <button type="button" phx-click="link_cancel" class="btn btn-sm btn-default">
+          {gettext("Cancel")}
+        </button>
+      </div>
+    </.form>
     """
   end
 

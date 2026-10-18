@@ -3810,12 +3810,25 @@ defmodule KilnCMSWeb.ContentEditorLive do
       # Keys as the field's inputs post them: bare ids, or `"type:id"` tokens on
       # a reference field that allows several types (R2), so an item keeps its
       # type through a move or a remove.
-      ids =
+      entries =
         socket.assigns.form
         |> custom_field_value(name)
-        |> ReferenceValues.keys(polymorphic_field?(socket, name))
+        |> ReferenceValues.entries(polymorphic_field?(socket, name))
 
-      put_custom_field_param(socket, name, ["" | fun.(ids)])
+      ids = Enum.map(entries, &elem(&1, 0))
+
+      # A list of references keeps each kept item whole, so its link values
+      # (R3) move and stay with it; a new key is the bare id it was picked as.
+      # A gallery posts ids only, as it always has.
+      items =
+        if field_list_of?(socket, name, :reference) do
+          by_key = Map.new(entries)
+          Enum.map(fun.(ids), &Map.get(by_key, &1, &1))
+        else
+          fun.(ids)
+        end
+
+      put_custom_field_param(socket, name, ["" | items])
     else
       socket
     end

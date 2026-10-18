@@ -33,6 +33,32 @@ carries the reasoning.
   parameter and response key.
   ([#2010](https://github.com/The-Verscienta/kiln_cms/pull/2010))
 
+<a id="a-reference-custom-field-can-carry-link-fields-details-on-each-connection"></a>
+
+- **A reference custom field can carry link fields: typed details on each
+  connection, such as the quantity of each ingredient a recipe connects.**
+  Workstream R3 of [relationships-plan.md](../relationships-plan.md). A link
+  field is a `FieldDefinition` owned by the reference field (new nullable
+  `link_of_id`) instead of a content type, coerced by the same rules as any
+  custom field (`required`, `default`, `:select`), and limited to the plain
+  types. Each snapshot gains an added `"link"` map
+  (`{"id", "type", "slug", "title", "link": {"quantity": 500}}`), and the
+  connection's `ContentLink` edge carries the same map as its `metadata`,
+  written in the same transaction, so the two copies cannot disagree. A
+  connection with no link value has no `"link"` key, so a reference without
+  link fields stores exactly what it did. Link values merge per connection:
+  an item that leaves one out keeps what that connection stored. Renaming a
+  link field moves its values in both copies, deleting one removes them.
+  `custom_filter[ingredients.link.role]=main` (and GraphQL `customFilter`)
+  matches a record when some connection's value matches, read from the
+  edges under R6's both-ends read rule, so a link value cannot reveal a
+  draft target. The editor shows one input per link field on each connected
+  record's row; the fields admin adds them under the reference as "Details
+  on each connection". The schema export types the `"link"` object and lists
+  the names as `x-kiln-link-fields`. A curated link's `metadata` stays a
+  free map.
+  ([#2011](https://github.com/The-Verscienta/kiln_cms/pull/2011))
+
 <a id="computed-fields-can-use-todays-date-today-yearsbetween-and-days-until-a-date"></a>
 
 - **Computed fields can use today's date: `today()`, `years_between`, and "Days

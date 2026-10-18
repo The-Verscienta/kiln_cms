@@ -80,7 +80,7 @@ defmodule KilnCMS.CMS.ContentLinks.Backfill do
     INSERT INTO content_links
       (id, org_id, source_id, target_id, kind, position, metadata, field, source_type, target_type)
     SELECT gen_random_uuid(), c.org_id, c.id, (c.custom_fields -> fd.name ->> 'id')::uuid,
-           'reference', 0, '{}'::jsonb, fd.name, $1,
+           'reference', 0, COALESCE(c.custom_fields -> fd.name -> 'link', '{}'::jsonb), fd.name, $1,
            COALESCE(NULLIF(c.custom_fields -> fd.name ->> 'type', ''), fd.target_type)
       FROM #{table} c
       JOIN field_definitions fd
@@ -101,7 +101,7 @@ defmodule KilnCMS.CMS.ContentLinks.Backfill do
     INSERT INTO content_links
       (id, org_id, source_id, target_id, kind, position, metadata, field, source_type, target_type)
     SELECT gen_random_uuid(), c.org_id, c.id, (c.custom_fields -> fd.name ->> 'id')::uuid,
-           'reference', 0, '{}'::jsonb, fd.name, td.name,
+           'reference', 0, COALESCE(c.custom_fields -> fd.name -> 'link', '{}'::jsonb), fd.name, td.name,
            COALESCE(NULLIF(c.custom_fields -> fd.name ->> 'type', ''), fd.target_type)
       FROM #{table} c
       JOIN type_definitions td ON td.id = c.type_definition_id

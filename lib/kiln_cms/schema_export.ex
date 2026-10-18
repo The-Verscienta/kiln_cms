@@ -297,7 +297,45 @@ defmodule KilnCMS.SchemaExport do
     definition.field_type
     |> base_custom_field_schema(definition)
     |> put_target_types(definition)
+    |> put_link_fields(definition)
     |> put_localization(Map.get(definition, :localization))
+  end
+
+  # A reference's link fields (R3): each connection's snapshot carries their
+  # values under `"link"`, typed like any custom field and open like the
+  # snapshot itself. `x-kiln-link-fields` names them in editor order. A
+  # connection that holds no link value has no `"link"` key, so it is never
+  # required.
+  defp put_link_fields(schema, %{field_type: :reference} = definition) do
+    case FieldDefinition.link_fields(definition) do
+      [] ->
+        schema
+
+      links ->
+        link = %{
+          "type" => "object",
+          "description" => "Data on this connection (the reference field's link fields).",
+          "properties" => Map.new(links, &{&1.name, custom_field_schema(&1)}),
+          "additionalProperties" => true
+        }
+
+        schema
+        |> put_snapshot_link(link)
+        |> Map.put("x-kiln-link-fields", Enum.map(links, & &1.name))
+    end
+  end
+
+  defp put_link_fields(schema, _definition), do: schema
+
+  defp put_snapshot_link(%{"items" => item} = schema, link),
+    do: Map.put(schema, "items", put_in(item, ["properties", "link"], link))
+
+  # A single reference's snapshot is spelled out once it carries link data,
+  # so a consumer typing `link` keeps `id` and `type` too.
+  defp put_snapshot_link(schema, link) do
+    schema
+    |> Map.merge(Map.delete(reference_item_schema(), "type"))
+    |> put_in(["properties", "link"], link)
   end
 
   # The content types a `:reference` field may point at (R2), whichever option
@@ -366,17 +404,7 @@ defmodule KilnCMS.SchemaExport do
   defp base_custom_field_schema(:reference, %{multiple: true} = d) do
     %{
       "type" => ["array", "null"],
-      "items" => %{
-        "type" => "object",
-        "properties" => %{
-          "id" => %{"type" => "string", "format" => "uuid"},
-          "type" => %{"type" => "string"},
-          "slug" => %{"type" => ["string", "null"]},
-          "title" => %{"type" => ["string", "null"]}
-        },
-        "required" => ["id", "type"],
-        "additionalProperties" => true
-      },
+      "items" => reference_item_schema(),
       "description" =>
         "Write-time snapshots of the referenced records, in the order the editor arranged them."
     }
@@ -401,6 +429,20 @@ defmodule KilnCMS.SchemaExport do
       nil -> %{}
       module -> field_type_schema(module, definition)
     end
+  end
+
+  defp reference_item_schema do
+    %{
+      "type" => "object",
+      "properties" => %{
+        "id" => %{"type" => "string", "format" => "uuid"},
+        "type" => %{"type" => "string"},
+        "slug" => %{"type" => ["string", "null"]},
+        "title" => %{"type" => ["string", "null"]}
+      },
+      "required" => ["id", "type"],
+      "additionalProperties" => true
+    }
   end
 
   # `min_items` / `max_items` (a list field's bounds) as annotations, not as

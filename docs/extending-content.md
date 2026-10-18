@@ -40,9 +40,8 @@ UI" workflow, scoped to fields.
   reshapes stored values like a gallery's (one → a one-item list; a list →
   its first item, and the other items' edges go with them), and the fields
   admin warns before a narrowing save. Single references keep their 1.0
-  shape. Many-to-many with typed link data, reverse fields and the
-  search-as-you-type picker follow in 1.5 — see
-  [relationships-plan.md](relationships-plan.md).
+  shape. Reverse fields and the rest of the many-to-many work follow in 1.5
+  — see [relationships-plan.md](relationships-plan.md).
 - **One target type or several**: a `:reference` field names the type it
   links to in `target_type` ("page", "recipe", compiled or dynamic). To let
   it link to records of **several** types, set `target_types` instead — a
@@ -60,6 +59,40 @@ UI" workflow, scoped to fields.
   field is next written, when an item of a type no longer allowed is refused
   by name. The schema export reports the allowed types of every reference
   field as `x-kiln-target-types`.
+- **Details on each connection (link fields)**: a `:reference` field may
+  declare **link fields** — data that belongs to the connection rather than
+  to either record: the quantity of each ingredient a recipe connects, the
+  role of each author on a book. A link field is a `FieldDefinition` whose
+  owner is the reference field (`link_of_id`) instead of a content type, and
+  it uses the same coercion and the same `required` / `default` / `:select`
+  rules as any field. Only the plain types are offered (`:string`, `:text`,
+  `:integer`, `:float`, `:boolean`, `:date`, `:datetime`, `:url`, `:select` —
+  `FieldDefinition.link_field_types/0`), and a link field cannot have link
+  fields of its own. The values ride on each snapshot as an added `"link"`
+  map, and on the connection's edge as its `metadata`:
+
+  ```elixir
+  %{"ingredients" => [
+    %{"id" => "…", "type" => "page", "slug" => "flour", "title" => "Flour",
+      "link" => %{"quantity" => 500, "role" => "main"}}
+  ]}
+  ```
+
+  A write names an item's link values under `"link"`
+  (`%{"id" => uuid, "link" => %{"quantity" => "500"}}`). They merge per
+  connection the way top-level keys merge per record: a supplied value is
+  coerced, one the item leaves out keeps what that connection stored, and a
+  new connection falls to the defaults — so a bare id for a record already
+  in the list keeps its link values. A link key no link field declares is
+  refused. A connection with no link value has no `"link"` key, and a
+  reference without link fields stores exactly what it did before. Renaming
+  a link field moves its values in both copies; deleting one removes them;
+  deleting the reference field deletes its link fields. In the fields admin
+  they are added under the reference as *Details on each connection*; in the
+  editor each connected record's row shows one input per link field. Filter
+  on them with `custom_filter[ingredients.link.role]=main` (see
+  [json-api.md](json-api.md)). The schema export types the `"link"` object
+  and lists the names as `x-kiln-link-fields`.
 - **Item bounds**: on either kind of list (`multiple: true`), optional
   `min_items` / `max_items` bound how many items a value holds once it holds
   any — an empty optional field is still allowed; `required` asks for at
@@ -92,7 +125,7 @@ UI" workflow, scoped to fields.
   (`%{"id", "type", "slug", "title"}`) *and* as a `ContentLink` edge
   (`kind: :reference`, `field` the field's name; a list of references has one
   edge per item, `position` its place in the list; `target_type` the item's
-  own type) written with the live value
+  own type, `metadata` the item's `"link"` map) written with the live value
   (#1594; D20 in [content-organization-plan.md](content-organization-plan.md),
   adopted additively — the snapshot stays the value, the edge is added beside
   it, rather than the edge becoming the source of truth as D20 proposed). The edge is
@@ -281,6 +314,18 @@ queryable via `custom_filter`/`custom_sort`, but never index-backed.
 optional `label` — so a relation can describe *itself* (a quantity and role on a
 recipe→ingredient link, substitution notes, an ordered "step N").
 
+There are two ways to fill that payload:
+
+- **Typed, from the admin UI** — a `:reference` custom field with link fields
+  (§1, *Details on each connection*). Its edges (`kind: :reference`) carry
+  each connection's link values in `metadata`, coerced against the link
+  fields and copied from the snapshot's `"link"` map in the same transaction
+  as the write, so the two copies cannot disagree. Don't write those edges
+  yourself: they are rebuilt from the field's value on every save.
+- **Free-form, in code** — a curated link (any other `kind`) created with
+  `CMS.create_content_link!/2`. Its `metadata` is whatever map you give it;
+  nothing declares or checks its keys.
+
 ```elixir
 CMS.create_content_link!(%{
   source_id: recipe.id, target_id: ingredient.id,
@@ -303,6 +348,23 @@ reference it; `CMS.list_backlinks/2` reads them directly. They are kept out of
 `related_<type>s`, which stays editor-curated related content only. A link is
 readable only by someone who may read both of its ends (editors and admins see
 all of their site's).
+
+Payload shape on the wire (JSON:API `?include=content_links`, an
+`included` member of type `content_link`):
+
+```json
+{
+  "type": "content_link",
+  "id": "…",
+  "attributes": {
+    "source_id": "…", "target_id": "…",
+    "kind": "reference", "field": "ingredients", "position": 0,
+    "source_type": "post", "target_type": "page",
+    "label": null,
+    "metadata": {"quantity": 500, "role": "main"}
+  }
+}
+```
 
 **When to use a dedicated join resource instead.** ContentLink covers the common
 case with one table. If the link attributes are numerous, strongly typed, or

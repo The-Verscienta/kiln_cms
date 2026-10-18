@@ -315,6 +315,33 @@ GET /api/json/posts?custom_filter[related_posts][has_none]=<post id>
   type. The numbers are in [relationships-plan.md](relationships-plan.md),
   workstream R6.
 
+**Link fields** — a reference field's link fields (data on each
+connection, R3; see [extending-content.md](extending-content.md) §1) filter
+under `<field>.link.<name>`, with the scalar operators (`eq`, `not_eq`,
+`gt`, `gte`, `lt`, `lte`, `in`, `ilike`, `null`), cast to the link field's
+type:
+
+```
+GET /api/json/posts?custom_filter[ingredients.link.role]=main
+GET /api/json/posts?custom_filter[ingredients.link.quantity][gte]=100
+```
+
+- A record matches when **some** connection of that field carries a
+  matching value. Two operators on the same link field are separate
+  conditions and may be met by different connections.
+- They read the edges' `metadata` (the copy of each snapshot's `"link"`
+  map), under the same read rule as the relationship operators: a
+  connection to a target you may not read is not there, so a link value
+  cannot be used to learn that a draft target exists.
+- An unknown link field, or a field that is not a reference, is a **400**.
+  `customFilter` in GraphQL takes the same key: `{"ingredients.link.role":
+  "main"}`.
+
+In the response a reference's snapshot carries its link values as an added
+`"link"` map — `{"id", "type", "slug", "title", "link": {"role": "main"}}`
+— and `?include=content_links` serves the same map as each edge's
+`metadata`. A connection with no link value has no `"link"` key.
+
 **Sorting** — `custom_sort=<name>` (ascending) or `custom_sort=-<name>`,
 comma-separated for multi-key. Records lacking the field always sort last.
 `custom_sort` composes with `sort=`: explicit `sort` keys take precedence, but

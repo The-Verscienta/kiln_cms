@@ -46,12 +46,25 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   form's own params (as the search's `_kiln_ref_q` is), and carry their own
   `phx-change`, so typing into them never touches the document.
 
+  ## Details on each connection (R3)
+
+  A field that declares link fields (`FieldDefinition.link_fields/1`) renders
+  one input per link field on every row, under the record's title: the
+  quantity of each ingredient, the role of each author. They are plain form
+  inputs of the editor form, named `<form>[_kiln_ref_link][<field>][<row
+  key>][<link field>]` beside the row's hidden id, so typing into one is an
+  ordinary change event. `ReferenceValues.normalize/2` folds them into the
+  field's value as each item's `"link"` map before the params reach the form,
+  and `ApplyCustomFields` coerces them like any other field. A row's key is
+  its id (or `"type:id"` token), so moving or removing a row carries its
+  values with it.
+
   ## Seams for later workstreams
 
     * `row/1` is public and takes `readonly`, so the reverse list (R4) can
       render the same row without the controls.
-    * The `:row_extra` slot renders inside each row, after the title, with the
-      row's item — where per-link inputs (R3) go.
+    * The `:row_extra` slot renders inside each row, after the title (and the
+      link inputs), with the row's item.
     * Results and rows name their type, and `target_types/2` is the one
       place that turns a definition into the types to search.
 
@@ -114,6 +127,9 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       |> assign(assigns)
       |> assign_new(:locked, fn -> false end)
       |> assign_new(:row_extra, fn -> [] end)
+      |> assign_new(:link_name, fn -> link_name(assigns.name) end)
+      |> assign(:link_fields, FieldDefinition.link_fields(assigns.definition))
+      |> assign(:links, ReferenceValues.links(assigns.value, assigns.definition))
 
     ids =
       assigns.value
@@ -569,6 +585,11 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
 
   defp multiple?(socket), do: socket.assigns.definition.multiple == true
 
+  # `form[custom_fields][field]` → `form[_kiln_ref_link][field]`, the param
+  # `ReferenceValues.normalize/2` folds back in.
+  defp link_name(name),
+    do: String.replace(name, "[custom_fields][", "[_kiln_ref_link][", global: false)
+
   # ── rendering ─────────────────────────────────────────────────────────────
 
   @impl true
@@ -622,6 +643,16 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
           readonly={@locked}
           target={@myself}
         >
+          <:extra :if={@link_fields != []}>
+            <.link_inputs
+              id={"cf-ref-#{@definition.name}-#{String.replace(item.id, ":", "-")}-link"}
+              fields={@link_fields}
+              name={"#{@link_name}[#{item.id}]"}
+              values={Map.get(@links, item.id, %{})}
+              title={item.title}
+              readonly={@locked}
+            />
+          </:extra>
           <:extra :for={extra <- @row_extra}>{render_slot(extra, item)}</:extra>
         </.row>
       </ol>
@@ -924,6 +955,106 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   defp input_type(:datetime), do: "datetime-local"
   defp input_type(:url), do: "url"
   defp input_type(_string), do: "text"
+
+  attr :id, :string, required: true
+  attr :fields, :list, required: true
+  attr :name, :string, required: true
+  attr :values, :map, required: true
+  attr :title, :string, default: nil
+  attr :readonly, :boolean, default: false
+
+  # One connection's link-field inputs (R3): a compact grid under the row's
+  # title. Plain inputs of the editor form — no `phx-change` of their own, so
+  # an edit validates like any field. Each is labelled with the record, since
+  # every row repeats the same labels.
+  defp link_inputs(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      role="group"
+      aria-label={gettext("Details for %{title}", title: @title || gettext("Untitled"))}
+      class="mt-1.5 grid gap-x-3 gap-y-1.5 sm:grid-cols-2"
+      data-ref-link
+    >
+      <.link_input
+        :for={field <- @fields}
+        id={"#{@id}-#{field.name}"}
+        field={field}
+        name={"#{@name}[#{field.name}]"}
+        value={Map.get(@values, field.name)}
+        readonly={@readonly}
+      />
+    </div>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :field, :map, required: true
+  attr :name, :string, required: true
+  attr :value, :any, default: nil
+  attr :readonly, :boolean, default: false
+
+  defp link_input(%{field: %{field_type: :boolean}} = assigns) do
+    ~H"""
+    <div class="flex items-center gap-2 self-end">
+      <input type="hidden" name={@name} value="false" disabled={@readonly} />
+      <input
+        type="checkbox"
+        id={@id}
+        name={@name}
+        value="true"
+        checked={@value in [true, "true"]}
+        disabled={@readonly}
+        class="size-4 rounded border-base-content/30 accent-primary"
+      />
+      <label for={@id} class="text-xs text-base-content/70">{@field.label}</label>
+    </div>
+    """
+  end
+
+  defp link_input(%{field: %{field_type: :select}} = assigns) do
+    ~H"""
+    <div>
+      <label for={@id} class="mb-0.5 block text-[11px] font-medium text-base-content/60">
+        {@field.label}<span :if={@field.required} class="text-error"> *</span>
+      </label>
+      <select id={@id} name={@name} disabled={@readonly} class="field-select py-1 text-sm">
+        <option value="">{gettext("— None —")}</option>
+        <option
+          :for={option <- @field.options}
+          value={option}
+          selected={to_string(@value || @field.default) == option}
+        >
+          {option}
+        </option>
+      </select>
+    </div>
+    """
+  end
+
+  defp link_input(assigns) do
+    assigns = assign(assigns, :type, input_type(assigns.field.field_type))
+
+    ~H"""
+    <div>
+      <label for={@id} class="mb-0.5 block text-[11px] font-medium text-base-content/60">
+        {@field.label}<span :if={@field.required} class="text-error"> *</span>
+      </label>
+      <input
+        type={@type}
+        id={@id}
+        name={@name}
+        value={@value}
+        placeholder={@field.default}
+        step={@field.field_type == :float && "any"}
+        title={@field.help_text}
+        autocomplete="off"
+        disabled={@readonly}
+        class="field-input py-1 text-sm"
+      />
+    </div>
+    """
+  end
 
   attr :id, :string, required: true
   attr :item, :map, required: true, doc: "`id`, `title`, `state`, `type_label`, `href`"

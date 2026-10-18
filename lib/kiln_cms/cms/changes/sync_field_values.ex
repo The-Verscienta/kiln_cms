@@ -37,6 +37,15 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   the current definitions (`KilnCMS.Firing.CustomFields.resolve/2`), so no live
   surface was serving a retired key by the time this runs.
 
+  ## Link fields
+
+  A link field (`link_of_id`, R3) has no key of its own: its values live in
+  the `"link"` map of each connection its reference field holds, and on each
+  of that field's edges as `metadata`. Destroying one removes its key from
+  both copies, renaming one moves it, in the parent field's table — the same
+  two statements, one level down. A connection whose `"link"` map empties
+  loses the key, as a write that sets no link value stores none.
+
   It runs `after_transaction` on success only — a write that rolls back syncs
   nothing — and a failure is logged rather than raised: the definition write
   itself has committed, and `ApplyCustomFields` still drops a stray key (with a
@@ -49,6 +58,21 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   @impl true
   def change(changeset, _opts, _context) do
     Ash.Changeset.after_transaction(changeset, &sync(&1, &2))
+  end
+
+  defp sync(changeset, {:ok, %{link_of_id: parent_id} = definition} = result)
+       when not is_nil(parent_id) do
+    case parent(parent_id, definition.org_id) do
+      nil ->
+        # The parent went first (its destroy cascades to this row) and took
+        # every value with it.
+        result
+
+      parent ->
+        changeset
+        |> link_operations(parent, definition)
+        |> Enum.reduce(result, &run(&1, parent, &2))
+    end
   end
 
   defp sync(changeset, {:ok, definition} = result) do
@@ -91,6 +115,27 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   end
 
   defp operations(_changeset, _definition), do: []
+
+  defp link_operations(%{action_type: :destroy}, parent, definition),
+    do: [{:purge_link, parent.name, definition.name}]
+
+  defp link_operations(%{action_type: :update} = changeset, parent, definition) do
+    if changeset.data.name == definition.name,
+      do: [],
+      else: [{:rename_link, parent.name, changeset.data.name, definition.name}]
+  end
+
+  defp link_operations(_changeset, _parent, _definition), do: []
+
+  defp parent(id, org_id) do
+    case KilnCMS.CMS.get_field_definition(id,
+           actor: KilnCMS.CMS.Housekeeping.system(:cms_registry),
+           tenant: org_id
+         ) do
+      {:ok, parent} -> parent
+      _missing -> nil
+    end
+  end
 
   defp list?(%{field_type: type, multiple: multiple}),
     do: multiple == true and type in KilnCMS.CMS.Changes.ClearMultiple.list_types()
@@ -180,6 +225,63 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     |> query([name | params], "made #{inspect(name)} a single item on")
   end
 
+  # A link field's key, removed from (or moved within) the `"link"` map of
+  # every connection the parent field holds — one snapshot or a list of them.
+  # `$1` is the parent field, `$2` the link key, `$3` its new name (rename).
+  # Only rows where some connection carries the key are touched: the
+  # jsonpath's lax mode looks into a list's items and a lone snapshot alike.
+  # sobelow_skip ["SQL.Query"]
+  defp execute({:purge_link, field, name}, table, filter, params) do
+    item = """
+    CASE WHEN jsonb_typeof(e -> 'link') = 'object' AND (e -> 'link') ? $2::text
+         THEN CASE WHEN ((e -> 'link') - $2::text) = '{}'::jsonb THEN e - 'link'
+                   ELSE jsonb_set(e, '{link}', (e -> 'link') - $2::text) END
+         ELSE e END
+    """
+
+    field
+    |> link_statement(item, table, filter.(2))
+    |> query(
+      [field, name | params],
+      "purged link value #{inspect(name)} of #{inspect(field)} from"
+    )
+  end
+
+  # sobelow_skip ["SQL.Query"]
+  defp execute({:rename_link, field, from, to}, table, filter, params) do
+    item = """
+    CASE WHEN jsonb_typeof(e -> 'link') = 'object' AND (e -> 'link') ? $2::text
+         THEN jsonb_set(e, '{link}',
+                        ((e -> 'link') - $2::text) || jsonb_build_object($3::text, (e -> 'link') -> $2::text))
+         ELSE e END
+    """
+
+    field
+    |> link_statement(item, table, filter.(3))
+    |> query(
+      [field, from, to | params],
+      "moved link value #{inspect(from)} of #{inspect(field)} to #{inspect(to)} on"
+    )
+  end
+
+  # `item` rewrites one connection `e`; a list is rebuilt item by item, in
+  # its order.
+  defp link_statement(_field, item, table, filter_sql) do
+    """
+    UPDATE #{table}
+       SET custom_fields = jsonb_set(custom_fields, ARRAY[$1::text],
+             CASE jsonb_typeof(custom_fields -> $1::text)
+               WHEN 'array' THEN
+                 (SELECT COALESCE(jsonb_agg((#{item}) ORDER BY ord), '[]'::jsonb)
+                    FROM jsonb_array_elements(custom_fields -> $1::text) WITH ORDINALITY AS x(e, ord))
+               ELSE (SELECT (#{item}) FROM (SELECT custom_fields -> $1::text AS e) AS one)
+             END)
+     WHERE jsonb_path_exists(custom_fields -> $1::text,
+                             'lax $.link.keyvalue() ? (@.key == $k)',
+                             jsonb_build_object('k', $2::text))#{filter_sql}
+    """
+  end
+
   # The field's reference edges (#1594) follow its values: a purge deletes
   # them, a rename moves them to the new key. Scoped by the same table, org
   # and type as the value statement, through the edge's source. Edges of any
@@ -223,6 +325,33 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   end
 
   defp execute_links({:reshape, _name, :to_list}, _table, _filter, _params), do: :ok
+
+  # A link field's copy on the parent field's edges (R3): the edge's
+  # `metadata` is the connection's `"link"` map.
+  # sobelow_skip ["SQL.Query"]
+  defp execute_links({:purge_link, field, name}, table, filter, params) do
+    """
+    UPDATE content_links
+       SET metadata = metadata - $2::text
+     WHERE kind = 'reference' AND field = $1 AND metadata ? $2::text
+       AND source_id IN (SELECT id FROM #{table} WHERE TRUE#{filter.(2)})
+    """
+    |> query([field, name | params], "purged link value #{inspect(name)} from the links of")
+  end
+
+  # sobelow_skip ["SQL.Query"]
+  defp execute_links({:rename_link, field, from, to}, table, filter, params) do
+    """
+    UPDATE content_links
+       SET metadata = (metadata - $2::text) || jsonb_build_object($3::text, metadata -> $2::text)
+     WHERE kind = 'reference' AND field = $1 AND metadata ? $2::text
+       AND source_id IN (SELECT id FROM #{table} WHERE TRUE#{filter.(3)})
+    """
+    |> query(
+      [field, from, to | params],
+      "moved link value #{inspect(from)} to #{inspect(to)} on the links of"
+    )
+  end
 
   # sobelow_skip ["SQL.Query"]
   defp query(sql, params, what) do

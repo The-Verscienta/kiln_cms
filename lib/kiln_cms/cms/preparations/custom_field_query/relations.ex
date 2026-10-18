@@ -88,6 +88,21 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Relations do
   end
 
   @doc """
+  The expression for a link-field filter (R3): the record has **some**
+  `:reference` edge of `definition`'s field whose target the reader may read
+  and whose `metadata` satisfies `condition` (built over the edge by
+  `CustomFieldQuery`). The same edge and the same gate as `has`.
+  """
+  @spec link(map(), term(), map()) :: term()
+  def link(%{name: name} = definition, condition, ctx) do
+    readable = readable_target(target_resources(definition, ctx), ctx)
+
+    expr(
+      exists(content_links, kind == :reference and field == ^name and ^readable and ^condition)
+    )
+  end
+
+  @doc """
   The expression for one relationship operator on a built-in relationship
   (`builtin/2`'s result), or `{:error, message}`.
   """
