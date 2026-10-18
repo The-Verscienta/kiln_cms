@@ -27,6 +27,36 @@ carries the reasoning.
   [extending-content.md](../extending-content.md).
   ([#2016](https://github.com/The-Verscienta/kiln_cms/pull/2016))
 
+<a id="connections-can-be-added-removed-and-reordered-from-the-record-they-point-at"></a>
+
+- **Connections can be added, removed and reordered from the record they
+  point at, and each change is saved as an edit of the record that holds it.**
+  Workstream R4b of [relationships-plan.md](../relationships-plan.md)
+  (decision D23). The reverse field gains a picker and per-row remove and
+  move. Each change runs the source's own update as the editor, so its
+  permissions, validations, history and lock apply. A published source's
+  change waits in its working copy, and the row says "goes live when
+  *Source* is published" with a link. A source the editor may not change
+  shows a lock. A lock conflict fails only its row. Nothing reshapes: no
+  schema change.
+  ([#2018](https://github.com/The-Verscienta/kiln_cms/pull/2018))
+
+<a id="a-reference-field-can-name-its-other-side-and-every-record-it-connects-shows"></a>
+
+- **A reference field can name its other side, and every record it connects
+  shows the records connecting to it: "Recipes using this ingredient".**
+  Workstream R4 of [relationships-plan.md](../relationships-plan.md). New
+  optional `inverse_label` / `inverse_name` on a `:reference` field definition
+  (the name is suggested from the label, and unique among the reverse fields
+  of each target type). The target's editor shows a read-only reverse field:
+  the sources, with each connection's link values, ordered by title and ten
+  to a page, read as the editor so a source they could not open is neither
+  listed nor counted. The fields admin asks "What *Ingredient* calls this".
+  GraphQL `referencedBy` gains `inverse:`, and the schema export reports
+  `x-kiln-inverse` and `x-kiln-reverse-fields`. Additive: two nullable
+  columns, a new argument, new annotations.
+  ([#2015](https://github.com/The-Verscienta/kiln_cms/pull/2015))
+
 <a id="typed-nested-reads-through-references"></a>
 
 - **Reads follow reference fields to the records on the other end: GraphQL's
@@ -396,6 +426,21 @@ carries the reasoning.
   no longer reaches "any content type" rules. Tasks, the health sweep and
   archived dynamic types are unchanged.
   ([#1995](https://github.com/The-Verscienta/kiln_cms/issues/1995))
+
+<a id="propagation-archived-types-federation-domain-events"></a>
+
+- **Publishing or withdrawing an entry of an archived dynamic type now opens
+  a propagation record, and domain events no longer enqueue a federation job
+  that only skips.** `KilnCMS.Propagation.open/5` checked an event's namespace
+  against the content-type registry, which leaves archived dynamic types out.
+  Their entries still fire `<name>.*` (#938) and webhooks still deliver them,
+  so those transitions were delivered but never measured. It now rules out
+  the exact domain events (`WebhookEndpoint.domain_events/0`) instead, and
+  `release.published` stays excluded. The ActivityPub announcer enqueued an
+  `AnnounceWorker` job for `release.published`, which the worker then skipped
+  because no `release` type syndicates; it now skips domain events before
+  enqueueing. Follows #1995.
+  ([#2012](https://github.com/The-Verscienta/kiln_cms/pull/2012))
 
 <a id="variant-worker-backend-errors"></a>
 

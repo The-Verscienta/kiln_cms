@@ -71,6 +71,11 @@ msgstr "%{comments} et %{tasks} sur ce bloc"
 msgid "%{comments} on this block"
 msgstr "%{comments} sur ce bloc"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{connects}. Each %{type} lists them as “%{label}”."
+msgstr "%{connects}. Chaque %{type} les liste comme « %{label} »."
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} a11y issue"
@@ -112,6 +117,13 @@ msgid "%{count} comment · Resolved"
 msgid_plural "%{count} comments · Resolved"
 msgstr[0] "%{count} commentaire · Résolu"
 msgstr[1] "%{count} commentaires · Résolu"
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} connected"
+msgid_plural "%{count} connected"
+msgstr[0] "%{count} relié"
+msgstr[1] "%{count} reliés"
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/analytics_live.ex
@@ -561,6 +573,11 @@ msgstr "%{email} (%{role}) — vous"
 msgid "%{failed} failed in 24h · %{disabled} auto-disabled"
 msgstr "%{failed} en échec en 24 h · %{disabled} désactivés automatiquement"
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} pages"
+msgstr "Pages de %{field}"
+
 #: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
 #, elixir-autogen, elixir-format
 msgid "%{field} points at a record that was deleted or moved to the trash."
@@ -570,6 +587,11 @@ msgstr "%{field} pointe vers un élément supprimé ou placé dans la corbeille.
 #, elixir-autogen, elixir-format
 msgid "%{finding}, %{delivery}"
 msgstr "%{finding}, %{delivery}"
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "%{first}–%{last} of %{total}"
+msgstr "%{first}–%{last} sur %{total}"
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -830,6 +852,11 @@ msgstr "%{type} (inconnu)"
 #, elixir-autogen, elixir-format
 msgid "%{type} content"
 msgstr "un contenu de type %{type}"
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "%{type} records that connect to this one through their %{field} field."
+msgstr "Les enregistrements %{type} reliés à celui-ci par leur champ %{field}."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -3957,6 +3984,16 @@ msgstr "Confirmé"
 msgid "Connect"
 msgstr "Connecter"
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Connect a %{type}"
+msgstr "Relier un %{type}"
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Connect a %{type}…"
+msgstr "Relier un %{type}…"
+
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Connect an account"
@@ -3987,6 +4024,11 @@ msgstr "Enregistrements connectés"
 msgid "Connected to the payment provider."
 msgstr "Connecté au prestataire de paiement."
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Connected “%{title}”."
+msgstr "« %{title} » est relié."
+
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
 msgid "Connection"
@@ -3996,6 +4038,11 @@ msgstr "Connexion"
 #, elixir-autogen, elixir-format
 msgid "Connection failed: %{reason}"
 msgstr "Échec de la connexion : %{reason}"
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Connection pending"
+msgstr "Liaison en attente"
 
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
@@ -4627,6 +4674,11 @@ msgstr "Impossible d'enregistrer vos derniers changements — corrigez les erreu
 #, elixir-autogen, elixir-format
 msgid "Couldn't save your preferences."
 msgstr "Enregistrement de vos préférences impossible."
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save “%{title}”."
+msgstr "Impossible d’enregistrer « %{title} »."
 
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
@@ -5652,10 +5704,20 @@ msgstr "URL de la politique de divulgation"
 msgid "Disconnect"
 msgstr "Déconnecter"
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Disconnect %{title}"
+msgstr "Délier %{title}"
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "Disconnect the payment provider? No new memberships can be sold until you reconnect."
 msgstr "Déconnecter le prestataire de paiement ? Aucun nouvel abonnement ne pourra être vendu avant une reconnexion."
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Disconnected “%{title}”."
+msgstr "« %{title} » est délié."
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
@@ -6969,6 +7031,11 @@ msgstr "Rempli à partir du libellé tant que vous ne le modifiez pas."
 msgid "Filled in from the machine name until you change it."
 msgstr "Rempli à partir du nom machine tant que vous ne le modifiez pas."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Filled in from the name if left empty. The API uses it."
+msgstr "Déduit du nom si laissé vide. Utilisé par l’API."
+
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "Filter blocks…"
@@ -7403,6 +7470,11 @@ msgstr "Mettez votre site en ligne"
 #, elixir-autogen, elixir-format
 msgid "Give every host that should reach a site to an organization, as a subdomain or a custom domain (the default organization can have one too), or redirect it to one at your proxy. The main host, the console host, the health checks and the payment webhook are never refused. Then remove TENANT_STRICT_HOST=false and restart."
 msgstr "Attribuez chaque hôte qui doit atteindre un site à une organisation, sous forme de sous-domaine ou de domaine personnalisé (l'organisation par défaut peut aussi en avoir un), ou redirigez-le vers l'un d'eux depuis votre proxy. L'hôte principal, l'hôte de la console, les contrôles de santé et le webhook de paiement ne sont jamais refusés. Supprimez ensuite TENANT_STRICT_HOST=false et redémarrez."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Give it a name and every %{type} shows a list of the records that connect to it through this field. Leave it empty for no list."
+msgstr "Donnez-lui un nom et chaque %{type} affiche la liste des enregistrements qui y sont reliés par ce champ. Laissez vide pour ne pas afficher de liste."
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
@@ -9346,6 +9418,11 @@ msgstr "Descendre le bloc"
 msgid "Move block up"
 msgstr "Monter le bloc"
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Move down in %{title}"
+msgstr "Descendre dans %{title}"
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Move image %{position} earlier"
@@ -9391,6 +9468,11 @@ msgstr "Déplacer vers le canevas"
 msgid "Move to top level"
 msgstr "Remonter au premier niveau"
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Move up in %{title}"
+msgstr "Monter dans %{title}"
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Moved %{count} item to trash."
@@ -9428,6 +9510,11 @@ msgstr "%{ok} déplacés vers la corbeille ; %{failed} n'ont pas pu être suppri
 #, elixir-autogen, elixir-format
 msgid "Moved block to position %{pos} of %{count}"
 msgstr "Bloc déplacé à la position %{pos} sur %{count}"
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Moved this record in “%{title}”."
+msgstr "Cet enregistrement a été déplacé dans « %{title} »."
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -9495,6 +9582,11 @@ msgstr "Nom (facultatif)"
 #, elixir-autogen, elixir-format
 msgid "Name it"
 msgstr "Nommez-la"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Name on the other side"
+msgstr "Nom de l’autre côté"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -9664,6 +9756,11 @@ msgstr "Nouveau le %{date}"
 msgid "New password"
 msgstr "Nouveau mot de passe"
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "New position pending"
+msgstr "Nouvelle position en attente"
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "New recovery codes generated — the old ones no longer work."
@@ -9726,6 +9823,7 @@ msgstr "Lettres d'information"
 msgid "Newsletters follow the default-language version, and this is a translation."
 msgstr "Les newsletters suivent la version dans la langue par défaut, et ceci est une traduction."
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Next"
@@ -9742,6 +9840,7 @@ msgid "Next week"
 msgstr "Semaine suivante"
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "No"
@@ -10392,6 +10491,11 @@ msgstr "Aucun webhook pour le moment"
 msgid "No zero-result searches recorded"
 msgstr "Aucune recherche sans résultat enregistrée"
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "No. %{position} in its list"
+msgstr "N° %{position} dans sa liste"
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nobody follows this site yet."
@@ -10528,6 +10632,11 @@ msgstr "Rien à venir."
 #, elixir-autogen, elixir-format
 msgid "Nothing connected yet."
 msgstr "Rien n’est encore associé."
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing connects to this record yet."
+msgstr "Rien n’est encore relié à cet enregistrement."
 
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
@@ -11032,6 +11141,11 @@ msgstr "Ouvrir dans un nouvel onglet"
 #, elixir-autogen, elixir-format
 msgid "Open inbox"
 msgstr "Ouvrir la boîte de réception"
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Open it"
+msgstr "L’ouvrir"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
@@ -11805,6 +11919,7 @@ msgstr "Aperçu : %{title}"
 msgid "Previewing unpublished changes — readers still get the published text"
 msgstr "Aperçu des modifications non publiées — les lecteurs voient toujours le texte publié"
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Previous"
@@ -12142,6 +12257,11 @@ msgstr "Les notifications push sont désactivées sur ce site : il n'a pas encor
 msgid "Put a follow-up in the author's task list."
 msgstr "Ajoute un suivi à la liste de tâches de l’auteur."
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Put back"
+msgstr "Remettre"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Q&A list, published with question-and-answer structured data"
@@ -12326,6 +12446,11 @@ msgstr "Échecs permanents récents et adresses auxquelles KilnCMS a cessé d'en
 #, elixir-autogen, elixir-format
 msgid "Recipe"
 msgstr "Recette"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Recipes using this ingredient"
+msgstr "Recettes utilisant cet ingrédient"
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -12613,6 +12738,11 @@ msgstr "Rechargez pour résoudre le conflit d'édition avant d'appliquer des sug
 #, elixir-autogen, elixir-format
 msgid "Reloaded the latest version."
 msgstr "Dernière version rechargée."
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Removal pending"
+msgstr "Retrait en attente"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/branding_live.ex
@@ -13619,6 +13749,11 @@ msgstr "Vue « %{name} » enregistrée."
 #, elixir-autogen, elixir-format
 msgid "Saved to the working copy"
 msgstr "Enregistré dans la copie de travail"
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Saved to the working copy of “%{title}”. It goes live when “%{title}” is published."
+msgstr "Enregistré dans la copie de travail de « %{title} ». Ce sera en ligne quand « %{title} » sera publié."
 
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
@@ -16915,6 +17050,11 @@ msgstr "Ce plugin ne se décrit pas. Son auteur peut ajouter une ligne %{callbac
 msgid "This preview link has expired"
 msgstr "Ce lien d'aperçu a expiré"
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "This record was updated by someone else. Please reload and try again."
+msgstr "Cet enregistrement a été modifié par quelqu’un d’autre. Rechargez et réessayez."
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "This release did not ship. Nothing went live."
@@ -17752,6 +17892,7 @@ msgstr "Sans étiquette uniquement"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Untitled"
@@ -18348,6 +18489,11 @@ msgstr "Poids"
 msgid "Went live"
 msgstr "Mis en ligne"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "What %{type} calls this"
+msgstr "Comment %{type} l’appelle"
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "What a document on this site is checked against right now — the deployment's rules, unless you turned them off above, plus this site's own phrases."
@@ -18693,6 +18839,7 @@ msgid "XLIFF file to import"
 msgstr "Fichier XLIFF à importer"
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
 msgid "Yes"
 msgstr "Oui"
@@ -18738,6 +18885,16 @@ msgstr "Vous pouvez consulter ce contenu, mais pas le modifier."
 #, elixir-autogen, elixir-format
 msgid "You can't change that view. Only an admin can share or edit a shared view."
 msgstr "Vous ne pouvez pas modifier cette vue. Seul un administrateur peut partager ou modifier une vue partagée."
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "You can't change this record, so its connection is read-only here."
+msgstr "Vous ne pouvez pas modifier cet enregistrement : sa liaison est en lecture seule ici."
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "You can't change “%{title}”."
+msgstr "Vous ne pouvez pas modifier « %{title} »."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -19682,6 +19839,11 @@ msgstr "galerie"
 msgid "gave up"
 msgstr "abandonné"
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "goes live when “%{title}” is published"
+msgstr "en ligne quand « %{title} » sera publié"
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -20378,6 +20540,11 @@ msgstr "le fichier n'indique aucune locale cible"
 msgid "the id of the page reaching which converts"
 msgstr "l'identifiant de la page dont l'atteinte convertit"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "the linked record"
+msgstr "l’enregistrement relié"
+
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "the rendered artifact: full block body, pre-compiled and CDN-cacheable."
@@ -20614,6 +20781,11 @@ msgstr "« %{name} » contient %{count} étiquette(s). Supprimer le groupe quand
 #, elixir-autogen, elixir-format
 msgid "“%{name}” is used by %{count} item(s). Delete it anyway? The links will be removed."
 msgstr "« %{name} » est utilisé par %{count} élément(s). Le supprimer quand même ? Les liens seront retirés."
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "“%{title}” already connects another record through %{field}. Change it from its own page."
+msgstr "« %{title} » relie déjà un autre enregistrement par %{field}. Modifiez-le depuis sa propre page."
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format

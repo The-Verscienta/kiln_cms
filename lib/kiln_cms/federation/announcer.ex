@@ -20,8 +20,14 @@ defmodule KilnCMS.Federation.Announcer do
   `in_review` and `returned_to_draft` are workflow states, not publication
   events, and federate nothing — a follower has no business learning that a
   draft moved between editorial columns.
+
+  Domain events (`KilnCMS.CMS.WebhookEndpoint.domain_events/0`) federate
+  nothing either: `release.published` shares a verb with a document's publish,
+  but no type named `release` syndicates, so its job would only be skipped by
+  the worker. The documents in the release announce themselves.
   """
 
+  alias KilnCMS.CMS.WebhookEndpoint
   alias KilnCMS.Federation.AnnounceWorker
 
   @verbs %{
@@ -38,7 +44,8 @@ defmodule KilnCMS.Federation.Announcer do
   """
   @spec announce(String.t(), map(), Ash.ToTenant.t() | nil) :: :ok
   def announce(event, payload, org) do
-    with {:ok, type, verb} <- parse(event),
+    with false <- event in WebhookEndpoint.domain_events(),
+         {:ok, type, verb} <- parse(event),
          id when is_binary(id) <- payload["id"] || payload[:id] do
       %{
         "org_id" => org_id(org),
