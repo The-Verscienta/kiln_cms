@@ -288,6 +288,48 @@ defmodule KilnCMSWeb.GraphqlReferencesTest do
     end
   end
 
+  describe "link" do
+    test "passes a link field's stored value through as JSON", ctx do
+      name = "recipe_#{System.unique_integer([:positive])}"
+
+      field =
+        CMS.create_field_definition!(
+          %{
+            content_type: :post,
+            name: name,
+            label: "Recipe",
+            field_type: :reference,
+            target_type: "page",
+            multiple: true
+          },
+          actor: ctx.admin
+        )
+
+      CMS.create_field_definition!(
+        %{link_of_id: field.id, name: "quantity", label: "Quantity", field_type: :integer},
+        actor: ctx.admin
+      )
+
+      source =
+        CMS.create_post!(
+          %{
+            title: "Linked recipe",
+            slug: slug(),
+            custom_fields: %{
+              name => [%{"id" => ctx.live_page.id, "link" => %{"quantity" => "500"}}]
+            }
+          },
+          actor: ctx.admin
+        )
+        |> publish_post!(ctx.admin)
+
+      assert [%{"link" => %{"quantity" => 500}, "target" => %{"id" => id}}] =
+               references(source, name, nil)
+
+      assert id == ctx.live_page.id
+    end
+  end
+
   describe "batching" do
     test "a list of records reads its edges once and each target type once", ctx do
       for _ <- 1..2 do

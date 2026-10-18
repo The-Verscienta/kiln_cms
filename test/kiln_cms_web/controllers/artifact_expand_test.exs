@@ -127,6 +127,47 @@ defmodule KilnCMSWeb.ArtifactExpandTest do
     assert body["expanded"]["nothing_here"] == []
   end
 
+  test "an item's link field value is passed through as `link`", ctx do
+    name = "recipe_#{System.unique_integer([:positive])}"
+
+    field =
+      CMS.create_field_definition!(
+        %{
+          content_type: :post,
+          name: name,
+          label: "Recipe",
+          field_type: :reference,
+          target_type: "page",
+          multiple: true
+        },
+        actor: ctx.admin
+      )
+
+    CMS.create_field_definition!(
+      %{link_of_id: field.id, name: "quantity", label: "Quantity", field_type: :integer},
+      actor: ctx.admin
+    )
+
+    source =
+      CMS.create_post!(
+        %{
+          title: "Linked recipe",
+          slug: slug(),
+          custom_fields: %{
+            name => [%{"id" => ctx.live_page.id, "link" => %{"quantity" => "500"}}]
+          }
+        },
+        actor: ctx.admin
+      )
+      |> CMS.publish_post!(actor: ctx.admin)
+
+    KilnCMS.DataCase.drain_oban()
+
+    body = ctx.conn |> expand(source, name) |> json_response(200)
+    assert [%{"link" => %{"quantity" => 500}, "id" => id}] = body["expanded"][name]
+    assert id == ctx.live_page.id
+  end
+
   test "without expand the response has no expanded key", ctx do
     body = ctx.conn |> get("/api/content/post/#{ctx.source.slug}") |> json_response(200)
     refute Map.has_key?(body, "expanded")
