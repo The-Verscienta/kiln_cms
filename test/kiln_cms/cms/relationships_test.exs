@@ -444,6 +444,100 @@ defmodule KilnCMS.CMS.RelationshipsTest do
     end
   end
 
+  # The related list is ordered (#2025): the editor's picker reorders it, and
+  # the order lives in each `kind: :related` link's `position`.
+  describe "the related list's order (#2025)" do
+    setup do
+      editor = user(:editor)
+
+      [post, a, b, c] =
+        for t <- ~w(Src A B C), do: CMS.create_post!(%{title: t, slug: slug()}, actor: editor)
+
+      %{editor: editor, post: post, a: a, b: b, c: c}
+    end
+
+    defp positions(post) do
+      [
+        actor: KilnCMS.CMS.Bookkeeping.system(),
+        tenant: post.org_id,
+        query: [filter: [source_id: post.id, kind: :related]]
+      ]
+      |> CMS.list_content_links!()
+      |> Enum.sort_by(& &1.position)
+      |> Enum.map(&{&1.target_id, &1.position})
+    end
+
+    test "the complete set numbers its links in the order given", ctx do
+      post =
+        CMS.update_post!(ctx.post, %{related_post_ids: [ctx.b.id, ctx.a.id]}, actor: ctx.editor)
+
+      assert positions(post) == [{ctx.b.id, 0}, {ctx.a.id, 1}]
+      assert KilnCMS.CMS.ContentLinks.related_order(post) == [ctx.b.id, ctx.a.id]
+    end
+
+    test "the same set in another order moves the existing links", ctx do
+      post =
+        CMS.update_post!(ctx.post, %{related_post_ids: [ctx.a.id, ctx.b.id, ctx.c.id]},
+          actor: ctx.editor
+        )
+
+      post =
+        CMS.update_post!(post, %{related_post_ids: [ctx.c.id, ctx.a.id, ctx.b.id]},
+          actor: ctx.editor
+        )
+
+      assert positions(post) == [{ctx.c.id, 0}, {ctx.a.id, 1}, {ctx.b.id, 2}]
+    end
+
+    test "a create numbers its links too", ctx do
+      post =
+        CMS.create_post!(
+          %{title: "New", slug: slug(), related_post_ids: [ctx.c.id, ctx.a.id]},
+          actor: ctx.editor
+        )
+
+      assert positions(post) == [{ctx.c.id, 0}, {ctx.a.id, 1}]
+    end
+
+    test "add_related_*_ids appends after the links already there", ctx do
+      post =
+        CMS.update_post!(ctx.post, %{related_post_ids: [ctx.b.id, ctx.a.id]}, actor: ctx.editor)
+
+      post = CMS.update_post!(post, %{add_related_post_ids: [ctx.c.id]}, actor: ctx.editor)
+
+      assert positions(post) == [{ctx.b.id, 0}, {ctx.a.id, 1}, {ctx.c.id, 2}]
+
+      # Removing one leaves the rest where they are.
+      post = CMS.update_post!(post, %{remove_related_post_ids: [ctx.a.id]}, actor: ctx.editor)
+      assert positions(post) == [{ctx.b.id, 0}, {ctx.c.id, 2}]
+      assert KilnCMS.CMS.ContentLinks.related_order(post) == [ctx.b.id, ctx.c.id]
+    end
+
+    test "a published record's held order lands when the copy is published", ctx do
+      admin = user(:admin)
+
+      post =
+        CMS.update_post!(ctx.post, %{related_post_ids: [ctx.a.id, ctx.b.id]}, actor: admin)
+
+      post = CMS.publish_post!(post, %{}, actor: admin)
+
+      {:ok, post} =
+        KilnCMS.CMS.ContentTypes.save_working_copy(
+          "post",
+          post,
+          %{fields: %{"related_post_ids" => [ctx.b.id, ctx.a.id]}},
+          actor: admin,
+          tenant: post.org_id
+        )
+
+      # Held, not live: readers keep the published order.
+      assert positions(post) == [{ctx.a.id, 0}, {ctx.b.id, 1}]
+
+      post = CMS.publish_post_changes!(post, %{}, actor: admin)
+      assert positions(post) == [{ctx.b.id, 0}, {ctx.a.id, 1}]
+    end
+  end
+
   describe "featured image (many-to-one to MediaItem)" do
     test "a post references a featured image, and the media item knows its posts" do
       editor = user(:editor)

@@ -314,12 +314,21 @@ defmodule KilnCMS.CMS.WorkingCopy do
 
   @doc """
   The held fields stored on `record`, as stored: attribute names (strings) to
-  JSON-native values, and each held relationship's argument name to a sorted
-  list of id strings. Empty when nothing beyond the text is pending.
+  JSON-native values, and each held relationship's argument name to a list of
+  id strings — sorted for the tags, in the editor's order for the related
+  list (`ordered_key?/1`). Empty when nothing beyond the text is pending.
   """
   @spec held_fields(content()) :: map()
   def held_fields(%{working_fields: %{} = fields}), do: fields
   def held_fields(_record), do: %{}
+
+  @doc """
+  Whether a held relationship key's order is part of its value: the curated
+  related list is ordered (#2025, kept in its links' `position`); the tags
+  are a set.
+  """
+  @spec ordered_key?(key()) :: boolean()
+  def ordered_key?(key), do: String.starts_with?(key, "related_")
 
   @doc """
   The ids the copy holds for one relationship argument (`:tag_ids`, …), or
@@ -464,12 +473,38 @@ defmodule KilnCMS.CMS.WorkingCopy do
 
   defp verdict(_record, _key, nil), do: :promote
 
+  # A fingerprint is order-blind (it sorts link ids, and stored bases depend
+  # on that), so a related list the copy only reordered matches its base. It
+  # promotes when the live set has not moved either; when it has, the live
+  # links stand, as for any key the copy did not change.
   defp verdict(record, key, base) do
+    held = held_fingerprint(record, key)
+
     cond do
-      held_fingerprint(record, key) == base -> :keep_live
-      live_fingerprint(record, key) == base -> :promote
-      true -> :conflicts
+      held == base and reordered?(record, key) and live_fingerprint(record, key) == base ->
+        :promote
+
+      held == base ->
+        :keep_live
+
+      live_fingerprint(record, key) == base ->
+        :promote
+
+      true ->
+        :conflicts
     end
+  end
+
+  defp reordered?(record, key) do
+    case Map.get(held_fields(record), key) do
+      held when is_list(held) -> ordered_key?(key) and held != ordered_live_ids(record, key)
+      _not_held -> false
+    end
+  end
+
+  defp ordered_live_ids(record, key) do
+    ids = live_value(record, key)
+    record |> KilnCMS.CMS.ContentLinks.in_related_order(ids) |> Enum.map(&to_string/1)
   end
 
   @doc "The recorded base fingerprints, by held key."

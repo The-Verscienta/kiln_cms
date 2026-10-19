@@ -395,6 +395,18 @@ defmodule KilnCMS.CMS.Content do
       end
     end
 
+    # The related list's order, kept in its links' `position` (#2025): after
+    # the `manage_relationship` changes, which relate the ids as a set. Tags
+    # have no order. A create has no `add_` verb to place.
+    order_related_change = fn verbs? ->
+      add = if verbs?, do: elem(merge_verbs.(related_arg), 0)
+
+      quote do
+        change {KilnCMS.CMS.Changes.OrderRelatedLinks,
+                complete: unquote(related_arg), add: unquote(add)}
+      end
+    end
+
     merge_changes = fn ->
       for {complete, relationship} <- mergeable do
         {add, remove} = merge_verbs.(complete)
@@ -416,7 +428,7 @@ defmodule KilnCMS.CMS.Content do
                    on_missing: :ignore
                  )
         end
-      end
+      end ++ [order_related_change.(true)]
     end
 
     # `:create`'s half of the same list: the complete-set argument and its
@@ -443,7 +455,7 @@ defmodule KilnCMS.CMS.Content do
                    type: :append_and_remove
                  )
         end
-      end
+      end ++ [order_related_change.(false)]
     end
 
     normalize_create_merge_arguments =

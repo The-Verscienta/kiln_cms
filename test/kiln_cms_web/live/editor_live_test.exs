@@ -3009,14 +3009,14 @@ defmodule KilnCMSWeb.EditorLiveTest do
       post = draft_post(%{title: "Main"})
       other = draft_post(%{title: "SiblingPost"})
 
-      {:ok, lv, html} =
+      # Picked through the related-content picker since #2025
+      # (`RelatedContentPickerTest`); its hidden inputs post the same param.
+      {:ok, lv, _html} =
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/post/#{post.id}")
 
-      assert html =~ "SiblingPost"
-
       lv
-      |> form("#post-editor", form: %{related_post_ids: [other.id]})
-      |> render_submit()
+      |> form("#post-editor")
+      |> render_submit(%{form: %{related_post_ids: [other.id]}})
 
       saved = CMS.get_post!(post.id, authorize?: false, load: [:related_posts])
       assert [%{id: rel_id}] = saved.related_posts

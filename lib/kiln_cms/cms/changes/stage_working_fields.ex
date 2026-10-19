@@ -27,6 +27,7 @@ defmodule KilnCMS.CMS.Changes.StageWorkingFields do
 
   require Ash.Query
 
+  alias KilnCMS.CMS.ContentLinks
   alias KilnCMS.CMS.WorkingCopy
 
   @impl true
@@ -158,11 +159,16 @@ defmodule KilnCMS.CMS.Changes.StageWorkingFields do
     |> Enum.filter(fn {argument, _} -> supplied?(params, argument) end)
     |> Enum.reduce(held, fn {argument, relationship}, acc ->
       key = to_string(argument)
-      live_ids = live_ids(live, relationship)
+      ordered? = WorkingCopy.ordered_key?(key)
+      live_ids = live_ids(live, relationship, ordered?)
       base = WorkingCopy.held_ids(live, argument) || live_ids
-      ids = resulting_ids(probe, argument, base)
+      ids = resulting_ids(probe, argument, base, ordered?)
 
-      if MapSet.new(ids) == MapSet.new(live_ids),
+      # Tags are a set; the related list is ordered (#2025), so holding it in
+      # another order is a change too.
+      same? = if ordered?, do: ids == live_ids, else: MapSet.new(ids) == MapSet.new(live_ids)
+
+      if same?,
         do: Map.delete(acc, key),
         else: Map.put(acc, key, ids)
     end)
@@ -176,15 +182,15 @@ defmodule KilnCMS.CMS.Changes.StageWorkingFields do
   # The complete set wins when it was sent (`nil` there means "clear", as on
   # `:update`); otherwise the merge verbs apply to what the copy holds now.
   # `MergeArguments` on the probe has already refused a payload mixing both.
-  defp resulting_ids(probe, argument, base) do
+  defp resulting_ids(probe, argument, base, ordered?) do
     case Ash.Changeset.fetch_argument(probe, argument) do
       {:ok, ids} ->
-        ids |> List.wrap() |> normalize()
+        ids |> List.wrap() |> normalize(ordered?)
 
       :error ->
         name = to_string(argument)
-        added = probe |> verb_ids("add_" <> name) |> normalize()
-        removed = probe |> verb_ids("remove_" <> name) |> normalize() |> MapSet.new()
+        added = probe |> verb_ids("add_" <> name) |> normalize(ordered?)
+        removed = probe |> verb_ids("remove_" <> name) |> normalize(ordered?) |> MapSet.new()
 
         (base ++ added) |> Enum.uniq() |> Enum.reject(&MapSet.member?(removed, &1))
     end
@@ -199,17 +205,25 @@ defmodule KilnCMS.CMS.Changes.StageWorkingFields do
     end)
   end
 
-  defp normalize(ids), do: ids |> Enum.map(&to_string/1) |> Enum.uniq() |> Enum.sort()
+  # A set is held sorted; an ordered list in its own order.
+  defp normalize(ids, ordered?) do
+    ids = ids |> Enum.map(&to_string/1) |> Enum.uniq()
+    if ordered?, do: ids, else: Enum.sort(ids)
+  end
 
-  defp live_ids(live, relationship) do
-    live
-    # authorize?: false — ids only, of the record this write is already
-    # authorized to change, and nothing read leaves the changeset (the same
-    # argument `FoldWorkingCopy` makes for its row read).
-    |> Ash.load!(relationship, authorize?: false, tenant: live.org_id, lazy?: false)
-    |> Map.fetch!(relationship)
-    |> Enum.map(&to_string(&1.id))
-    |> Enum.sort()
+  defp live_ids(live, relationship, ordered?) do
+    ids =
+      live
+      # authorize?: false — ids only, of the record this write is already
+      # authorized to change, and nothing read leaves the changeset (the same
+      # argument `FoldWorkingCopy` makes for its row read).
+      |> Ash.load!(relationship, authorize?: false, tenant: live.org_id, lazy?: false)
+      |> Map.fetch!(relationship)
+      |> Enum.map(&to_string(&1.id))
+
+    if ordered?,
+      do: live |> ContentLinks.in_related_order(ids) |> Enum.map(&to_string/1),
+      else: Enum.sort(ids)
   end
 
   defp stringify(map), do: Map.new(map, fn {key, value} -> {to_string(key), value} end)

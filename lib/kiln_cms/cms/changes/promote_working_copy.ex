@@ -130,8 +130,17 @@ defmodule KilnCMS.CMS.Changes.PromoteWorkingCopy do
   @doc false
   def promote_relationships(changeset, relationships) do
     Enum.reduce(relationships, changeset, fn {relationship, ids}, acc ->
-      Ash.Changeset.manage_relationship(acc, relationship, ids, type: :append_and_remove)
+      acc
+      |> Ash.Changeset.manage_relationship(relationship, ids, type: :append_and_remove)
+      |> order_related(relationship, ids)
     end)
+  end
+
+  # The held related list lands in its held order (#2025); tags have none.
+  defp order_related(changeset, relationship, ids) do
+    if String.starts_with?(to_string(relationship), "related_"),
+      do: KilnCMS.CMS.Changes.OrderRelatedLinks.after_write(changeset, ids),
+      else: changeset
   end
 
   @doc false

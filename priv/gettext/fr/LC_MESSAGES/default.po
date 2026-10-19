@@ -12686,7 +12686,7 @@ msgstr "Réindexer maintenant"
 msgid "Reindexing this site."
 msgstr "Réindexation de ce site en cours."
 
-#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Related %{kind}s"
 msgstr "Contenu lié (%{kind}s)"
@@ -14429,6 +14429,11 @@ msgstr "Configurez-la"
 #, elixir-autogen, elixir-format
 msgid "Set name"
 msgstr "Définir le nom"
+
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Set one up in Fields"
+msgstr "En configurer un dans Champs"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -17483,6 +17488,11 @@ msgstr "Pour les adopter, exécutez ces commandes sur le serveur. La première c
 #, elixir-autogen, elixir-format
 msgid "To date"
 msgstr "Date de fin"
+
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "To link content of other types, use a reference field that links to several types."
+msgstr "Pour lier du contenu d’autres types, utilisez un champ de référence qui pointe vers plusieurs types."
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format

@@ -293,6 +293,131 @@ defmodule KilnCMS.CMS.ContentLinks do
     )
   end
 
+  @doc """
+  Numbers `record`'s curated related links (`kind: :related`, #2025) in the
+  order of `ids`: the first named target gets position 0, the next 1. A link
+  `ids` does not name keeps its position. Only rows whose position moves are
+  written.
+
+  Called after a content write that set the related list as a whole — the
+  editor's `related_<type>_ids`, or a working copy's held list as it is
+  published — once `manage_relationship` has created and removed the rows,
+  so the list relates exactly these targets by then. Written as the cms
+  bookkeeping (`:set_position`), like the reference edges.
+  """
+  @spec order_related(struct(), [Ash.UUID.t()]) :: :ok
+  def order_related(record, ids) do
+    index = ids |> Enum.map(&to_string/1) |> Enum.uniq() |> Enum.with_index() |> Map.new()
+
+    record
+    |> related_links()
+    |> Enum.each(fn link ->
+      case Map.fetch(index, to_string(link.target_id)) do
+        {:ok, position} when position != link.position -> set_position!(record, link, position)
+        _unchanged_or_unnamed -> :ok
+      end
+    end)
+  end
+
+  @doc """
+  Places the targets `ids` names that `before` did not hold at the end of
+  `record`'s related list, in `ids` order (#2025): `add_related_<type>_ids`
+  appends, so its links go after the ones already there rather than at the
+  default position 0, ahead of them.
+  """
+  @spec append_related(struct(), [Ash.UUID.t()], [Ash.UUID.t()]) :: :ok
+  def append_related(record, before, ids) do
+    links = related_links(record)
+    held = MapSet.new(before, &to_string/1)
+    by_target = Map.new(links, &{to_string(&1.target_id), &1})
+
+    {added, kept} = Enum.split_with(links, &(to_string(&1.target_id) not in held))
+    start = kept |> Enum.map(& &1.position) |> Enum.max(fn -> -1 end)
+    added_targets = MapSet.new(added, &to_string(&1.target_id))
+
+    ids
+    |> Enum.map(&to_string/1)
+    |> Enum.uniq()
+    |> Enum.filter(&MapSet.member?(added_targets, &1))
+    |> Enum.with_index(start + 1)
+    |> Enum.each(fn {target_id, position} ->
+      link = Map.fetch!(by_target, target_id)
+      if link.position != position, do: set_position!(record, link, position)
+    end)
+  end
+
+  @doc """
+  The target ids of `record`'s curated related links, in their order:
+  position, then id, so links from before positions were kept (all 0) still
+  come back the same way every time.
+  """
+  @spec related_order(struct()) :: [Ash.UUID.t()]
+  def related_order(record) do
+    record
+    |> related_links()
+    |> Enum.sort_by(&{&1.position, &1.target_id})
+    |> Enum.map(& &1.target_id)
+  end
+
+  @doc """
+  `ids` — targets `record` relates as curated related content — in the order
+  of their links' positions (`related_order/1`). An id with no related link
+  goes last, in the order given.
+  """
+  @spec in_related_order(struct(), [Ash.UUID.t()]) :: [Ash.UUID.t()]
+  def in_related_order(_record, []), do: []
+
+  def in_related_order(record, ids) do
+    rank =
+      record
+      |> related_order()
+      |> Enum.with_index()
+      |> Map.new(fn {id, i} -> {to_string(id), i} end)
+
+    last = map_size(rank)
+
+    ids
+    |> Enum.with_index()
+    |> Enum.sort_by(fn {id, i} -> {Map.get(rank, to_string(id), last), i} end)
+    |> Enum.map(&elem(&1, 0))
+  end
+
+  @doc """
+  `record` with its loaded related-content relationship (`related_<type>s`)
+  in its links' order. A load of the many-to-many does not follow `position`,
+  so a caller that shows the list in order — the editor — sorts it here.
+  Unloaded, or fewer than two, it is left as it is.
+  """
+  @spec sort_related(struct(), atom()) :: struct()
+  def sort_related(record, relationship) do
+    case Map.get(record, relationship) do
+      [_, _ | _] = loaded ->
+        by_id = Map.new(loaded, &{&1.id, &1})
+        ordered = in_related_order(record, Enum.map(loaded, & &1.id))
+        Map.put(record, relationship, Enum.map(ordered, &Map.fetch!(by_id, &1)))
+
+      _unloaded_or_short ->
+        record
+    end
+  end
+
+  # Read as the cms bookkeeping and failing closed, like `existing/1`: a
+  # refused read must fail the write, not number nothing.
+  defp related_links(record) do
+    CMS.list_content_links!(
+      actor: Bookkeeping.system(),
+      authorize_with: :error,
+      tenant: record.org_id,
+      query: [
+        filter: [source_id: record.id, kind: :related],
+        select: [:id, :target_id, :position]
+      ]
+    )
+  end
+
+  defp set_position!(record, link, position),
+    do: CMS.set_content_link_position!(link, %{position: position}, write_opts(record))
+
   @doc "Delete every outgoing reference edge of `record` (its hard delete)."
   @spec clear(struct()) :: :ok
   def clear(record) do

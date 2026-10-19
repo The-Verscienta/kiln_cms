@@ -70,6 +70,10 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       this form's.
     * The `:row_extra` slot renders inside each row, after the title (and the
       link inputs), with the row's item.
+    * `exclude` names record ids the search never offers, beside the ones
+      already picked: the record being edited, for the related-content list
+      (#2025), which runs this picker over its own type with a definition
+      the editor builds rather than a stored field.
     * Results and rows name their type, and `target_types/2` is the one
       place that turns a definition into the types to search.
 
@@ -136,6 +140,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       |> assign_new(:notify, fn -> nil end)
       |> assign_new(:rows, fn -> true end)
       |> assign_new(:placeholder, fn -> nil end)
+      |> assign_new(:exclude, fn -> [] end)
       |> assign_new(:link_name, fn -> link_name(assigns.name) end)
       |> assign(:link_fields, FieldDefinition.link_fields(assigns.definition))
       |> assign(:links, ReferenceValues.links(assigns.value, assigns.definition))
@@ -419,7 +424,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   # a list's results, in the query, so pages stay full.
   defp search(socket, offset) do
     %{definition: definition, tenant: tenant, query: query} = socket.assigns
-    exclude = if multiple?(socket), do: socket.assigns.ids, else: []
+    picked = if multiple?(socket), do: socket.assigns.ids, else: []
+    exclude = picked ++ socket.assigns.exclude
 
     case target_types(definition, tenant) do
       [] ->

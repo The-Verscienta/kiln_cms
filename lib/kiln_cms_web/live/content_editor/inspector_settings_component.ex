@@ -263,14 +263,41 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
           kind={@kind}
         />
 
-        <.input
-          field={@form[@related_field]}
-          type="select"
-          multiple
-          label={gettext("Related %{kind}s", kind: @kind)}
-          value={selected_ids(@form, @related_field, current_ids(@related_current))}
-          options={Enum.map(@siblings, &{&1.title, &1.id})}
-        />
+        <%!-- Related content (#2025): the reference picker (R9) over this
+              record's own type — search, reorder, open, remove — posting
+              `related_<type>_ids` in the editor's order. Picks reach the
+              editor LiveView like a reference field's; the record itself
+              is never offered. --%>
+        <div id="related-content">
+          <.live_component
+            module={KilnCMSWeb.ContentEditor.ReferencePicker}
+            id="related-content-picker"
+            definition={@related_definition}
+            name={@form[@related_field].name}
+            value={
+              @form
+              |> selected_ids(@related_field, current_ids(@related_current))
+              |> Enum.reject(&(&1 in [nil, ""]))
+              |> Enum.map(&to_string/1)
+            }
+            errors={Enum.map(@form[@related_field].errors, &translate_error/1)}
+            locked={!@may_write?}
+            exclude={[@record.id]}
+            actor={@actor}
+            tenant={@tenant}
+          />
+          <%!-- Related content is one type only. A link to another type
+                is a reference field's job (R2), so say where that is set
+                up rather than offer a second, cross-type list here. --%>
+          <p id="related-content-hint" class="mt-1.5 text-xs text-base-content/60">
+            {gettext(
+              "To link content of other types, use a reference field that links to several types."
+            )}
+            <.link :if={@related_fields_href} navigate={@related_fields_href} class="link">
+              {gettext("Set one up in Fields")}
+            </.link>
+          </p>
+        </div>
 
         <.backlinks backlinks={@backlinks} count={@backlink_count} />
       </.inspector_section>

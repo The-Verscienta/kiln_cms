@@ -603,7 +603,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # URL would otherwise name the same document under a different key
     # (#655).
     |> assign(:collab_topic, "collab:#{kind}:#{record.id}")
-    |> assign(:siblings, siblings(kind, id, actor, org))
     # Editorial tasks (#501): open tasks on this record (usually zero or
     # one), plus the org members eligible to be assigned one. Reloaded
     # after assign/complete; the assignee list is loaded once (an org's
@@ -1462,26 +1461,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
       # (docs/content-lifecycles.md).
       load: [:category, :featured_image, :tags, :health, :due_at, related_name(kind)]
     )
+    # In the editor's order (#2025): the links' positions, which a load of
+    # the many-to-many does not follow.
+    |> ContentLinks.sort_related(related_name(kind))
     # The pickers show the working copy's tags and related content (#1815);
     # the attributes stay the row's, which every save is judged against.
     |> WorkingCopy.with_held_relationships(actor: actor, tenant: org)
-  end
-
-  # Other content of the same kind, for the "related content" picker. Bounded to
-  # the same window as the media picker so a large library can't blow up the mount.
-  # Only id + title — these fill a <select>; without the select, 500 siblings
-  # would each carry their full blocks JSONB tree in this editor's heap.
-  defp siblings(kind, id, actor, org) do
-    kind
-    |> ContentTypes.list!(
-      actor: actor,
-      tenant: org,
-      query: [select: [:id, :title], sort: [updated_at: :desc], limit: @max_media]
-    )
-    |> Enum.reject(&(&1.id == id))
-    # Recency picks *which* records make the capped window; title orders what
-    # the editor then has to scan through.
-    |> Enum.sort_by(& &1.title)
   end
 
   # `<select>` options for the consumer-facing audience (KilnCMS.CMS.Audiences):
@@ -1501,6 +1486,87 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp related_name(kind), do: String.to_existing_atom("related_#{interface_kind(kind)}s")
   defp related_field(kind), do: String.to_existing_atom("related_#{interface_kind(kind)}_ids")
   defp related_current(kind, record), do: Map.get(record, related_name(kind))
+
+  # The related-content picker (#2025) is the reference picker (R9) over this
+  # record's own type, writing `related_<type>_ids` instead of a custom field.
+  # It is handed a field definition built here, never stored: its name can't
+  # be a custom field's (those start with a letter), so the picker's edits and
+  # search inputs never collide with a field's.
+  @related_picker "_related"
+
+  defp related_definition(kind) do
+    %KilnCMS.CMS.FieldDefinition{
+      name: @related_picker,
+      label: gettext("Related %{kind}s", kind: kind),
+      field_type: :reference,
+      multiple: true,
+      target_type: to_string(kind),
+      target_types: [],
+      link_fields: [],
+      required: false,
+      help_text: nil,
+      max_items: nil,
+      max_sources: nil
+    }
+  end
+
+  # Where an admin sets up a reference field on this type: the fields admin,
+  # with this type ticked (`FieldDefinitionLive` reads `?type=`).
+  defp related_fields_href(kind, :admin) do
+    scope =
+      case ContentTypes.get!(kind) do
+        %{source: :dynamic, definition: definition} -> "def:#{definition.id}"
+        ct -> to_string(ct.type)
+      end
+
+    ~p"/editor/fields?#{[type: scope]}"
+  end
+
+  defp related_fields_href(_kind, _tier), do: nil
+
+  # The related ids the editor holds now, in order: the form's once touched,
+  # else the record's. The picker's hidden inputs post a leading `""` so an
+  # emptied list still arrives; it is never an id.
+  defp related_ids(socket) do
+    %{form: form, kind: kind, record: record} = socket.assigns
+
+    form
+    |> selected_ids(related_field(kind), current_ids(related_current(kind, record)))
+    |> Enum.map(&to_string/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  # A pick, removal or reorder from the related-content picker, through the
+  # same params-then-validate path as a reference field's: the complete
+  # `related_<type>_ids` list goes into the form params, so a save writes it
+  # (or holds it in a published record's working copy) exactly as the old
+  # multi-select's did, and the order rides along.
+  defp edit_related(socket, op, arg) do
+    if socket.assigns.may_write? do
+      ids = edit_reference_list(related_ids(socket), op, arg)
+
+      params =
+        socket.assigns.form
+        |> AshPhoenix.Form.params()
+        |> Map.put(to_string(related_field(socket.assigns.kind)), ids)
+
+      socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
+      broadcast_preview(socket)
+      mark_dirty(socket, :settings)
+    else
+      socket
+    end
+  end
+
+  # The picker's leading `""` is not an id (see `related_ids/1`).
+  defp drop_blank_related(params, socket) do
+    key = to_string(related_field(socket.assigns.kind))
+
+    case params do
+      %{^key => ids} when is_list(ids) -> Map.put(params, key, Enum.reject(ids, &(&1 == "")))
+      _other -> params
+    end
+  end
 
   defp interface_kind(kind) do
     case ContentTypes.get!(kind) do
@@ -1892,6 +1958,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> inject_rich_bodies(socket.assigns.rich_bodies)
       |> normalize_item_rows()
       |> merge_tag_params(socket)
+      |> drop_blank_related(socket)
       |> ReferenceValues.normalize(socket.assigns.field_definitions)
 
     {params, socket} = sync_slug(params, event["_target"], socket)
@@ -3194,6 +3261,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> inject_rich_bodies(socket.assigns.rich_bodies)
       |> normalize_item_rows()
       |> merge_tag_params(socket)
+      |> drop_blank_related(socket)
       |> ReferenceValues.normalize(socket.assigns.field_definitions)
 
     if socket.assigns.record.state == :published,
@@ -3864,6 +3932,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # `update_field_gallery/3`, keeping its order; a single reference is set to
   # the picked id, or to `""` to clear it — which `ApplyCustomFields` stores as
   # no reference, as the old select's "None" did.
+  defp apply_reference_edit(socket, op, @related_picker, arg), do: edit_related(socket, op, arg)
+
   defp apply_reference_edit(socket, op, name, arg) do
     if field_list_of?(socket, name, :reference),
       do: update_field_gallery(socket, name, &edit_reference_list(&1, op, arg)),
@@ -6186,6 +6256,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> assign(:locked_fields, locked_fields(assigns.field_locks, self()))
       |> assign(:related_field, related_field(assigns.kind))
       |> assign(:related_current, related_current(assigns.kind, assigns.record))
+      |> assign(:related_definition, related_definition(assigns.kind))
+      |> assign(:related_fields_href, related_fields_href(assigns.kind, assigns.tier))
       # Once per render, not once per block card: the "Move into columns"
       # button on every nestable block reads it.
       |> assign(
@@ -7103,7 +7175,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
               media={@media}
               related_field={@related_field}
               related_current={@related_current}
-              siblings={@siblings}
+              related_definition={@related_definition}
+              related_fields_href={@related_fields_href}
+              actor={@actor}
+              tenant={@current_org}
               localization={@localization}
               a11y_report={@a11y_report}
               compliance_report={@compliance_report}

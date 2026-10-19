@@ -12686,7 +12686,7 @@ msgstr ""
 msgid "Reindexing this site."
 msgstr ""
 
-#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Related %{kind}s"
 msgstr ""
@@ -14428,6 +14428,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/token_preview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set name"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "Set one up in Fields"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -17482,6 +17487,11 @@ msgstr ""
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "To date"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#, elixir-autogen, elixir-format
+msgid "To link content of other types, use a reference field that links to several types."
 msgstr ""
 
 #: lib/kiln_cms_web/live/governance_live.ex

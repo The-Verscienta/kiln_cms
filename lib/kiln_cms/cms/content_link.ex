@@ -131,6 +131,14 @@ defmodule KilnCMS.CMS.ContentLink do
       validate KilnCMS.CMS.Validations.PayloadLink
     end
 
+    # A curated related link's place in its source's list (#2025): the
+    # editor's order, written by `ContentLinks.order_related/2` after the
+    # content write that relates them. Position only — nothing else of a link
+    # moves this way.
+    update :set_position do
+      accept [:position]
+    end
+
     # "What links here" (#1594): every edge pointing at `target_id`, of every
     # kind — curated related links and `:reference` custom fields alike.
     read :backlinks do
@@ -198,10 +206,12 @@ defmodule KilnCMS.CMS.ContentLink do
     # Reference edges are the consequence of a content write, not the writer's
     # own act: a scheduled publish of a working copy, or an unpublish folding
     # one, has no person behind it. `Changes.SyncReferenceLinks` writes them as
-    # `CMS.Bookkeeping.system/0`.
+    # `CMS.Bookkeeping.system/0`. So is the order of curated related links
+    # (`:set_position`, #2025), which a scheduled publish of a working copy
+    # lands with nobody behind it either.
     policy action_type([:create, :update, :destroy]) do
       authorize_if {KilnCMS.Checks.SystemActor,
-                    subsystem: :cms_bookkeeping, action: [:create, :destroy]}
+                    subsystem: :cms_bookkeeping, action: [:create, :destroy, :set_position]}
 
       authorize_if KilnCMS.CMS.Checks.OrgEditor
     end

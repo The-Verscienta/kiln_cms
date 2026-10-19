@@ -879,6 +879,8 @@ defmodule KilnCMS.CMS do
       define :list_content_links, action: :read
       define :create_content_link, action: :create
       define :destroy_content_link, action: :destroy
+      # A curated related link's position (#2025) — `ContentLinks.order_related/2`.
+      define :set_content_link_position, action: :set_position
       # Payload links, as `/api/json/content-links` writes them (R8).
       define :create_payload_link, action: :create_link
       define :update_payload_link, action: :update_link

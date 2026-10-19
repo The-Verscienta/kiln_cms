@@ -7,6 +7,28 @@ carries the reasoning.
 
 ## Added
 
+<a id="related-content-uses-the-reference-picker"></a>
+
+- **Related content uses the reference picker: search, reorder, remove and
+  open, over the record's own type, with the order kept.** Part of R9 in
+  [relationships-plan.md](../relationships-plan.md). The editor's "Related
+  *type*s" multi-select, which listed the 500 most recently edited records of
+  the type, is now the picker reference fields use: search as you type,
+  drag or move with the keyboard to reorder, remove, open the target in a new
+  tab, and "Add new". The record being edited is never offered, and a search
+  is a read as the editor, so it finds only what they may open. Related
+  content stays the same type only; for links to other types the panel points
+  to a reference field that allows several types, with a link to the fields
+  admin for admins. The picker still writes `related_<type>_ids`, so the
+  links, the optimistic lock and a published record's working copy behave as
+  before. The order is now kept in each `kind: :related` link's `position`:
+  the complete list numbers them, `add_related_<type>_ids` appends after the
+  ones already there, and a working copy holds the list in its order (it was
+  sorted), so publishing a reorder lands it. Nothing is removed: the
+  arguments, relationship and API are unchanged, and links saved before keep
+  position 0 until their list is next saved.
+  ([#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025))
+
 <a id="api-clients-can-connect-disconnect-and-reorder-references-graphqls"></a>
 
 - **API clients can connect, disconnect and reorder references: GraphQL's

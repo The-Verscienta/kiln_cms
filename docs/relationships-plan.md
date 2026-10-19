@@ -590,7 +590,8 @@ open in [#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025):
   then asks how many on each. In 1.5 each option is worded in plain language
   inside the ordinary field form, and the field list sums the field up in a
   sentence;
-- related content (`related_<type>s`) through the same picker.
+- related content (`related_<type>s`) through the same picker — since
+  built, see "Related content" below.
 
 - Replace the reference `<select>` with a picker component: search-as-you-type
   across the allowed target types (server-side, no 500 cap), type badges,
@@ -611,9 +612,26 @@ open in [#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025):
   out of public reads until then. It is an ordinary draft — if the editor
   abandons the source's change, the new record stays in the content list as a
   draft and is not deleted behind their back.
-- Related content: the same picker, so `related_<type>s` can finally choose
-  across types (new `related_any` many-to-many would be a covered addition —
-  or reuse a multi-type reference field; decide in the PR).
+- Related content: the same picker for `related_<type>s` (#2025).
+  **Decided (2026-10-18): no `related_any`.** Related content stays the same
+  type only. A new covered `related_any` many-to-many would put a new
+  surface under the 1.0 overlay contract for something a multi-type
+  `:reference` field (R2) already does, so cross-type links are a reference
+  field's job. The related-content panel says so in a line, with a link to
+  the fields admin for admins.
+  What changed is the editor and the order. The panel's multi-select over
+  the 500 most recently edited records of the type is now the R9 picker over
+  the same type: search as you type, reorder, remove, open the target, and
+  "Add new". The record being edited is never offered (the picker's
+  `exclude`). It still writes the complete `related_<type>_ids` list, so the
+  managed relationship, its `kind: :related` rows, the optimistic lock and a
+  published record's working copy behave as before. The list's order is now
+  kept: `Changes.OrderRelatedLinks` numbers the rows' `position` after the
+  write (`add_related_<type>_ids` appends after the rows already there), a
+  working copy holds the related list in its order rather than sorted, and
+  publishing a copy that only reordered the list promotes it. The editor
+  reads the list in that order (`ContentLinks.sort_related/2`); a load of
+  the many-to-many itself still does not sort by `position`.
 - Reverse fields (R4) render as a read-only list with the same row component.
 - **Fields admin: a relationship, not a data type.** A non-developer sets up
   a relationship the way Toolset's wizard asks for one, not by picking a type
