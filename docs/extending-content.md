@@ -489,7 +489,8 @@ prompt). The resource, `KilnCMS.CMS.RecipeIngredientsLink` unless
 
 - `belongs_to :source` and `belongs_to :target`, to the two content resources
   (`KilnCMS.CMS.Entry` for an admin-defined type), with foreign keys that
-  delete a connection when either record is purged;
+  delete a connection when either record is purged, unless the field refused
+  its target's purge (below);
 - `position`, plus one typed attribute per link field. `:string`, `:text`,
   `:url` and `:select` become `:string`; the others become `:integer`,
   `:float`, `:boolean`, `:date` or `:naive_datetime`. Each is required and
@@ -505,6 +506,22 @@ prompt). The resource, `KilnCMS.CMS.RecipeIngredientsLink` unless
 - code interfaces `list_/get_/create_/update_/destroy_recipe_ingredients_link`,
   plus the ordered `list_recipe_ingredients_links_from` (by source) and
   `list_recipe_ingredients_links_to` (by target).
+
+The field's rules about its targets come with it. Step 1 prints which ones it
+carried over, and how, next to the diff (`--dry-run` prints it too):
+
+| The field had | The join resource has |
+|---|---|
+| `on_target_delete: :restrict` | `on_delete: :restrict` on the target's foreign key. Purging a record that something still connects to is refused first, with the field's own "can't be deleted permanently" error, and the nightly purge of old trash leaves it out, as before. |
+| `on_target_delete: :clear` | `on_delete: :delete`. The connections go with the purged record, as clearing it out of each referrer did. |
+| `on_target_delete: :keep` (the default) | `on_delete: :delete` as well. **This is a change.** A foreign key cannot point at nothing, so a purge deletes the connections instead of leaving broken references. Set the field to `:restrict` before graduating if purges should stay refused. |
+| `max_sources: n` | `change {KilnCMS.CMS.JoinGraduation.SourceCap, max_sources: n}` on the create. It counts the target's other connections under the same advisory lock the field used, in the create's transaction, so two writers cannot both take the last slot. The refusal names the count, never the other records. |
+
+The rules are read from the same organization's definition as the link
+fields. Rows of one `bulk_create` are checked against what was committed
+before it, not against each other, so connect one at a time where the cap is
+tight. The copy in step 2 is not held to the cap: the edges it copies already
+were.
 
 The copy carries every connection whose two records still exist: its org,
 both ends, its position and its link values. A value of the wrong JSON type

@@ -453,6 +453,26 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="gen-join-keeps-target-rules"></a>
+
+- **`mix kiln.gen.join` keeps a reference field's target rules: a graduated
+  `on_target_delete: :restrict` still refuses the purge, and `max_sources`
+  still caps connections.**
+  Found in the relationships close-out: R1b/R5 and R10 were built in
+  parallel, so the generator always wrote `on_delete: :delete` on the target
+  and dropped the cap. Graduating a `:restrict` field quietly turned "this
+  record can't be deleted while something connects to it" into a cascading
+  delete. Now `:restrict` becomes `on_delete: :restrict`, and the purge is
+  refused first with the same error the field gave, while the nightly trash
+  purge skips such records as before. `:clear` and `:keep` become
+  `on_delete: :delete`, and for `:keep` the generator says that is a change.
+  `max_sources` becomes a check on the join resource's create
+  (`KilnCMS.CMS.JoinGraduation.SourceCap`) under the field's own advisory
+  lock, race-safe. The task prints the rules it carried over, dry run
+  included. See [extending-content.md](../extending-content.md), "When to
+  use a dedicated join resource".
+  ([#2024](https://github.com/The-Verscienta/kiln_cms/issues/2024))
+
 <a id="graphql-referenced-by-inverse-on-entries"></a>
 
 - **GraphQL's `referencedBy(inverse:)` now lists the connecting records on an

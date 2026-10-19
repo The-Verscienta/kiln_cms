@@ -674,7 +674,24 @@ resource". What the PR settled beyond the bullets below:
   read-only API key cannot write. Deleting a connection is an edit of its
   source, not a hard delete of content, so editors may do it, as with
   `Tagging`. Purging a record deletes its connections through the foreign
-  keys.
+  keys, except where the field restricted it (next bullet).
+- **The target rules graduate too** ([#2024](https://github.com/The-Verscienta/kiln_cms/issues/2024)).
+  R1b and R5 were built beside R10, so the first generator dropped them: a
+  `:restrict` field became a cascading delete, and `max_sources` was lost.
+  Now `:restrict` becomes `on_delete: :restrict` on the target, and
+  `JoinGraduation.check_restrict/1` (called from
+  `ContentLinks.TargetDelete.check_restrict/1`) refuses the purge first with
+  `Errors.TargetStillConnected`, as the field did. `SkipRestrictedTargets`
+  keeps such targets out of the nightly purge. `:clear` becomes
+  `on_delete: :delete`, which has the same effect. `:keep` also becomes
+  `on_delete: :delete`, since a foreign key cannot keep a broken reference,
+  and the generator says it is a change. `max_sources` becomes
+  `JoinGraduation.SourceCap` on the create, which takes the field's own
+  advisory lock key (`ContentLinks.lock_target/4`), so the field and its
+  join table cannot overfill a target between steps 2 and 3. The generator
+  prints the carried rules as an Igniter warning, so a dry run shows them.
+  A generated resource carries `__kiln_join__/0`, and that is how
+  `JoinGraduation.join_resources/0` finds it.
 - Support module: `KilnCMS.CMS.JoinGraduation`.
 
 The plan as first written:

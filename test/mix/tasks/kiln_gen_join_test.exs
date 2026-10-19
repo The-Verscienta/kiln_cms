@@ -206,6 +206,134 @@ defmodule Mix.Tasks.Kiln.Gen.JoinTest do
     end
   end
 
+  describe "target rules (#2024)" do
+    defp rules_field!(ctx, rules) do
+      name = "seats#{System.unique_integer([:positive])}"
+
+      CMS.create_field_definition!(
+        Map.merge(
+          %{
+            content_type: :post,
+            name: name,
+            label: "Seats",
+            field_type: :reference,
+            target_type: "page"
+          },
+          rules
+        ),
+        actor: ctx.admin
+      )
+
+      name
+    end
+
+    defp graduate(ctx, name),
+      do: Igniter.compose_task(ctx.igniter, "kiln.gen.join", ["post.#{name}"])
+
+    test "on_target_delete :restrict keeps the target's purge refused", ctx do
+      name = rules_field!(ctx, %{on_target_delete: :restrict})
+      igniter = graduate(ctx, name)
+      body = content(igniter, module_path(name))
+
+      assert body =~ "reference(:source, on_delete: :delete)"
+      assert body =~ "reference(:target, on_delete: :restrict)"
+      refute body =~ "reference(:target, on_delete: :delete)"
+      assert body =~ ~r/Purging a\s+`page` is refused while anything connects to it/
+
+      assert_has_warning(igniter, fn warning ->
+        warning =~ "Target rules of post.#{name}, as graduated" and
+          warning =~ "on_target_delete: :restrict → on_delete: :restrict on the target" and
+          warning =~ "still refused, with the same error"
+      end)
+    end
+
+    test "on_target_delete :clear deletes the connections with the target", ctx do
+      name = rules_field!(ctx, %{on_target_delete: :clear})
+      igniter = graduate(ctx, name)
+
+      assert content(igniter, module_path(name)) =~ "reference(:target, on_delete: :delete)"
+
+      assert_has_warning(igniter, fn warning ->
+        warning =~ "on_target_delete: :clear → on_delete: :delete" and
+          warning =~ "as before"
+      end)
+    end
+
+    test "on_target_delete :keep becomes a delete, and the summary says it changes", ctx do
+      name = rules_field!(ctx, %{on_target_delete: :keep})
+      igniter = graduate(ctx, name)
+
+      assert content(igniter, module_path(name)) =~ "reference(:target, on_delete: :delete)"
+
+      assert_has_warning(igniter, fn warning ->
+        warning =~ "on_target_delete: :keep → on_delete: :delete" and
+          warning =~ "CHANGES what a purge does" and
+          warning =~ "a foreign key cannot point at nothing"
+      end)
+    end
+
+    test "max_sources becomes the source cap on create", ctx do
+      name = rules_field!(ctx, %{max_sources: 3})
+      igniter = graduate(ctx, name)
+      body = content(igniter, module_path(name))
+
+      assert body =~ ~r/create :create do\s+primary\?\(true\)/
+      assert body =~ "change({KilnCMS.CMS.JoinGraduation.SourceCap, max_sources: 3})"
+
+      assert_has_warning(igniter, fn warning ->
+        warning =~ "max_sources: 3 → JoinGraduation.SourceCap on create" and
+          warning =~ "Still at most 3 per target"
+      end)
+    end
+
+    test "no max_sources: no cap, and the summary says there was none", ctx do
+      name = rules_field!(ctx, %{})
+      igniter = graduate(ctx, name)
+
+      refute content(igniter, module_path(name)) =~ "SourceCap"
+      assert_has_warning(igniter, &(&1 =~ "max_sources: none (no limit), as before."))
+    end
+
+    test "the resource says what it graduated from", ctx do
+      name = rules_field!(ctx, %{on_target_delete: :restrict, max_sources: 2})
+      body = content(graduate(ctx, name), module_path(name))
+
+      assert body =~ "def __kiln_join__ do"
+      assert body =~ ~s(field: "#{name}")
+      assert body =~ ~s(label: "Seats")
+      assert body =~ ~s(source_type: "post")
+      assert body =~ ~s(target_type: "page")
+    end
+
+    test "compiles with both rules, as Ash and AshPostgres read them", ctx do
+      name = rules_field!(ctx, %{on_target_delete: :restrict, max_sources: 2})
+      {:ok, spec} = KilnCMS.CMS.JoinGraduation.resolve("post.#{name}")
+      assert %{on_target_delete: :restrict, max_sources: 2} = spec
+
+      module =
+        Module.concat(KilnCMS.CMS, "GenJoinRulesProbe#{System.unique_integer([:positive])}")
+
+      source = "defmodule #{inspect(module)} do\n#{Join.resource_body(spec)}\nend\n"
+      ExUnit.CaptureIO.with_io(:stderr, fn -> Code.compile_string(source) end)
+
+      assert AshPostgres.DataLayer.Info.reference(module, :target).on_delete == :restrict
+      assert AshPostgres.DataLayer.Info.reference(module, :source).on_delete == :delete
+
+      assert [{KilnCMS.CMS.JoinGraduation.SourceCap, [max_sources: 2]}] =
+               module
+               |> Ash.Resource.Info.action(:create)
+               |> Map.fetch!(:changes)
+               |> Enum.map(& &1.change)
+
+      assert module.__kiln_join__() == %{
+               field: name,
+               label: "Seats",
+               source_type: "post",
+               target_type: "page"
+             }
+    end
+  end
+
   describe "--data-migration" do
     test "is refused until the resource exists", ctx do
       ctx.igniter

@@ -142,10 +142,14 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **`mix kiln.gen.join` keeps a reference field's target rules: a graduated
+  `on_target_delete: :restrict` still refuses the purge, and `max_sources` still
+  caps connections.**
+  ([#2024](https://github.com/The-Verscienta/kiln_cms/issues/2024) · [long form](docs/changelog/unreleased.md#gen-join-keeps-target-rules))
+
 - **GraphQL's `referencedBy(inverse:)` lists the connecting records on entries
   of admin-defined types too; it returned an empty list there.**
   ([#2026](https://github.com/The-Verscienta/kiln_cms/pull/2026) · [long form](docs/changelog/unreleased.md#graphql-referenced-by-inverse-on-entries))
-
 
 - **An automation rule for "any content type" no longer fires when a content
   release is published; a rule scoped to `release` still does.**
