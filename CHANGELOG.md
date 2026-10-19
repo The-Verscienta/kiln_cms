@@ -56,6 +56,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **The fields admin asks for a relationship as one: "A relationship", then both sides ("Recipe links to Ingredient"), then how many on each side; the field list reads it back from both sides in one sentence.**
+  ([#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025))
+
 - **API clients can connect, disconnect and reorder references: GraphQL's
   `add<Type>References`, `remove<Type>References` and `move<Type>Reference`, and
   payload-link routes at `/api/json/content-links`.**

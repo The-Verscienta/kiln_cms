@@ -1,9 +1,9 @@
 # Relationships — reaching Directus / Hygraph parity
 
 **Status: built for 1.5** (2026-10-18). Every workstream R0–R10 is merged to
-`main` and checked end to end (§8). One part of R9 is still open: the
-relationship-first fields admin flow and related content through the picker,
-[#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025). D22 and D23
+`main` and checked end to end (§8). One part of R9 is still open: related
+content through the picker, [#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025) (its relationship-first fields
+admin flow is built). D22 and D23
 were adopted on 2026-10-16, and open questions 1–4 are answered (§7). On
 2026-10-17 the plan took in what Toolset's relationship admin does that it
 lacked: R1b, "Add new" in the picker, and a relationship-first fields admin
@@ -92,7 +92,7 @@ column is what shipped in 1.5, with the workstream that built it.
 | Connect / disconnect / reorder writes | ✅ | ✅ with position | tags, related ids only | ✅ GraphQL `add…References` / `remove…References` / `move…Reference` with Hygraph's positions; JSON:API `PATCH` of the list; payload-link routes (R8) |
 | Limit on the target side ("each Author on at most 3 Books") † | — | — | ❌ | ✅ `max_sources`, checked under a lock; the picker shows a full target as full (R1b) |
 | Create a new target from the picker and connect it | ✅ | ✅ | ❌ | ✅ "Add new *Type*" (R9) |
-| Fields admin speaks in relationships, not data types † | partial (relational wizard) | ✅ | type + options, plain wording since R1 | partial: every option in plain words, with a summary sentence; the relationship-first flow is [#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025) |
+| Fields admin speaks in relationships, not data types † | partial (relational wizard) | ✅ | type + options, plain wording since R1 | ✅ "A relationship" first, then both sides, then how many on each, read back in one sentence (R9, [#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025)) |
 | Editor UI for all of the above | ✅ | ✅ | `<select>` | ✅ search picker, type badges, drag to reorder, link inputs per row, reverse list (R9 and each workstream) |
 | A real junction table when you need one | auto-created | ❌ | hand-written resource | ✅ `mix kiln.gen.join` and `mix kiln.join.retire`, one target type per field (R10) |
 | Remote / federated sources | ❌ | Remote Sources | ❌ | out of scope, §6 |
@@ -583,14 +583,14 @@ fallback; the spike's outcome is under the JSON:API bullet and in §7 Q1.
 **Built in part.** The picker is [#2002](https://github.com/The-Verscienta/kiln_cms/pull/2002) and create-and-connect is
 [#2005](https://github.com/The-Verscienta/kiln_cms/pull/2005). Each of R1b, R2, R3, R4, R4b and R5 added its own piece of
 the picker and the fields admin: the "Full" state, type badges, link inputs,
-the reverse list, and the options' wording. Two parts were not built and are
-open in [#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025):
-
-- the relationship-first fields admin flow, which names both sides first and
-  then asks how many on each. In 1.5 each option is worded in plain language
-  inside the ordinary field form, and the field list sums the field up in a
-  sentence;
-- related content (`related_<type>s`) through the same picker.
+the reverse list, and the options' wording. The relationship-first fields
+admin came last, in part 1 of [#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025): the add and edit forms ask
+"A value" or "A relationship" first, and a relationship is then set up in
+four steps — which records connect, how many on each side (`max_sources` as
+any number, only one, or a typed limit), what each side calls it, and the
+delete rule — with the sentence the field list will show under it. One part
+is still open in #2025: related content (`related_<type>s`) through the same
+picker.
 
 - Replace the reference `<select>` with a picker component: search-as-you-type
   across the allowed target types (server-side, no 500 cap), type badges,
