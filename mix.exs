@@ -11,7 +11,7 @@ Code.require_file(Path.expand("config/project_deps_hook.exs", __DIR__))
 defmodule KilnCMS.MixProject do
   use Mix.Project
 
-  @version "1.4.0"
+  @version "1.5.0"
   @source_url "https://github.com/The-Verscienta/kiln_cms"
 
   def project do

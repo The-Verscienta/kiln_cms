@@ -54,133 +54,150 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+## [1.5.0] - 2026-10-18
+
+Long form: [docs/changelog/v1.5.0.md](docs/changelog/v1.5.0.md) —
+the 1.5.0 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
+### Upgrade notes
+
+- **After deploying, run a firing sweep once (`mix kiln.refire_all`, or
+  `KilnCMS.Firing.Sweep.run()` over `bin/kiln_cms rpc`), so artifacts fired
+  before 1.5 stop naming draft reference targets and join the re-fire graph.**
+  ([long form](docs/changelog/v1.5.0.md#refire-after-1-5))
+
 ### Added
 
 - **Related content uses the reference picker: search, reorder, remove and
   open, over the record's own type, with the order kept.**
-  ([#2030](https://github.com/The-Verscienta/kiln_cms/pull/2030) · [long form](docs/changelog/unreleased.md#related-content-uses-the-reference-picker))
+  ([#2030](https://github.com/The-Verscienta/kiln_cms/pull/2030) · [long form](docs/changelog/v1.5.0.md#related-content-uses-the-reference-picker))
 
-- **The fields admin asks for a relationship as one: "A relationship", then both sides ("Recipe links to Ingredient"), then how many on each side; the field list reads it back from both sides in one sentence.**
+- **The fields admin asks for a relationship as one: "A relationship", then both
+  sides ("Recipe links to Ingredient"), then how many on each side; the field
+  list reads it back from both sides in one sentence.**
   ([#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025))
 
 - **API clients can connect, disconnect and reorder references: GraphQL's
   `add<Type>References`, `remove<Type>References` and `move<Type>Reference`, and
   payload-link routes at `/api/json/content-links`.**
-  ([#2014](https://github.com/The-Verscienta/kiln_cms/pull/2014) · [long form](docs/changelog/unreleased.md#api-clients-can-connect-disconnect-and-reorder-references-graphqls))
+  ([#2014](https://github.com/The-Verscienta/kiln_cms/pull/2014) · [long form](docs/changelog/v1.5.0.md#api-clients-can-connect-disconnect-and-reorder-references-graphqls))
 
 - **Reference fields gain `max_sources`, a limit per target, and
   `on_target_delete`: keep, clear or restrict on a permanent delete.**
-  ([#2017](https://github.com/The-Verscienta/kiln_cms/pull/2017) · [long form](docs/changelog/unreleased.md#reference-target-limit-and-delete-rule))
+  ([#2017](https://github.com/The-Verscienta/kiln_cms/pull/2017) · [long form](docs/changelog/v1.5.0.md#reference-target-limit-and-delete-rule))
 
 - **`mix kiln.gen.join <type>.<field>` graduates a reference field to a typed
   Ash join resource, copies its connections, and retires the field.**
-  ([#2016](https://github.com/The-Verscienta/kiln_cms/pull/2016) · [long form](docs/changelog/unreleased.md#graduate-a-reference-field-to-a-join-resource))
+  ([#2016](https://github.com/The-Verscienta/kiln_cms/pull/2016) · [long form](docs/changelog/v1.5.0.md#graduate-a-reference-field-to-a-join-resource))
 
 - **Connections can be added, removed and reordered from the record they point
   at, and each change is saved as an edit of the record that holds it.**
-  ([#2018](https://github.com/The-Verscienta/kiln_cms/pull/2018) · [long form](docs/changelog/unreleased.md#connections-can-be-added-removed-and-reordered-from-the-record-they-point-at))
+  ([#2018](https://github.com/The-Verscienta/kiln_cms/pull/2018) · [long form](docs/changelog/v1.5.0.md#connections-can-be-added-removed-and-reordered-from-the-record-they-point-at))
 
 - **A reference field can name its other side, and every record it connects
   shows the records connecting to it: "Recipes using this ingredient".**
-  ([#2015](https://github.com/The-Verscienta/kiln_cms/pull/2015) · [long form](docs/changelog/unreleased.md#a-reference-field-can-name-its-other-side-and-every-record-it-connects-shows))
+  ([#2015](https://github.com/The-Verscienta/kiln_cms/pull/2015) · [long form](docs/changelog/v1.5.0.md#a-reference-field-can-name-its-other-side-and-every-record-it-connects-shows))
 
 - **Reads follow reference fields to the records on the other end: GraphQL's
   typed `references` / `referencedBy`, and `?expand=` on `/api/content`.**
-  ([#2010](https://github.com/The-Verscienta/kiln_cms/pull/2010) · [long form](docs/changelog/unreleased.md#typed-nested-reads-through-references))
+  ([#2010](https://github.com/The-Verscienta/kiln_cms/pull/2010) · [long form](docs/changelog/v1.5.0.md#typed-nested-reads-through-references))
 
 - **A reference custom field can carry link fields: typed details on each
   connection, such as the quantity of each ingredient a recipe connects.**
-  ([#2011](https://github.com/The-Verscienta/kiln_cms/pull/2011) · [long form](docs/changelog/unreleased.md#a-reference-custom-field-can-carry-link-fields-details-on-each-connection))
+  ([#2011](https://github.com/The-Verscienta/kiln_cms/pull/2011) · [long form](docs/changelog/v1.5.0.md#a-reference-custom-field-can-carry-link-fields-details-on-each-connection))
 
 - **Computed fields can use today's date: `today()`, `years_between`, and "Days
   until a date" and "Age in years" recipes, refreshed once a day.**
-  ([#2009](https://github.com/The-Verscienta/kiln_cms/pull/2009) · [long form](docs/changelog/unreleased.md#computed-fields-can-use-todays-date-today-yearsbetween-and-days-until-a-date))
+  ([#2009](https://github.com/The-Verscienta/kiln_cms/pull/2009) · [long form](docs/changelog/v1.5.0.md#computed-fields-can-use-todays-date-today-yearsbetween-and-days-until-a-date))
 
 - **`custom_filter` filters through relationships: `has`, `has_all`, `has_none`
   and `count` on a reference field, and `has`/`has_all`/`has_none` on `tags`.**
-  ([#2003](https://github.com/The-Verscienta/kiln_cms/pull/2003) · [long form](docs/changelog/unreleased.md#custom-filter-relationship-operators-has-has-all-has-none-count))
+  ([#2003](https://github.com/The-Verscienta/kiln_cms/pull/2003) · [long form](docs/changelog/v1.5.0.md#custom-filter-relationship-operators-has-has-all-has-none-count))
 
 - **A reference custom field can hold a list of references (`multiple: true`),
   with optional `min_items` / `max_items`.**
-  ([#2000](https://github.com/The-Verscienta/kiln_cms/pull/2000) · [long form](docs/changelog/unreleased.md#a-reference-custom-field-can-hold-a-list-of-references-multiple-true-with))
+  ([#2000](https://github.com/The-Verscienta/kiln_cms/pull/2000) · [long form](docs/changelog/v1.5.0.md#a-reference-custom-field-can-hold-a-list-of-references-multiple-true-with))
 
 - **A reference custom field can link to several content types
   (`target_types`).**
-  ([#2004](https://github.com/The-Verscienta/kiln_cms/pull/2004) · [long form](docs/changelog/unreleased.md#a-reference-custom-field-can-link-to-several-content-types-targettypes))
+  ([#2004](https://github.com/The-Verscienta/kiln_cms/pull/2004) · [long form](docs/changelog/v1.5.0.md#a-reference-custom-field-can-link-to-several-content-types-targettypes))
 
 - **The editor fills a reference custom field from a search picker instead of a
   select of up to 500 records.**
-  ([#2002](https://github.com/The-Verscienta/kiln_cms/pull/2002) · [long form](docs/changelog/unreleased.md#the-editor-fills-a-reference-custom-field-from-a-search-picker-instead-of-a))
+  ([#2002](https://github.com/The-Verscienta/kiln_cms/pull/2002) · [long form](docs/changelog/v1.5.0.md#the-editor-fills-a-reference-custom-field-from-a-search-picker-instead-of-a))
 
 - **The reference picker can create a record and connect it in one step: "Add
   new *Type*" next to the search.**
-  ([#2005](https://github.com/The-Verscienta/kiln_cms/pull/2005) · [long form](docs/changelog/unreleased.md#the-reference-picker-can-create-a-record-and-connect-it-in-one-step-add-new))
+  ([#2005](https://github.com/The-Verscienta/kiln_cms/pull/2005) · [long form](docs/changelog/v1.5.0.md#the-reference-picker-can-create-a-record-and-connect-it-in-one-step-add-new))
 
 - **Computed fields have a formula builder: pick a recipe and fill in the
   blanks, or write the formula with value and function palettes, and see the
   result live on your own content.**
-  ([#2006](https://github.com/The-Verscienta/kiln_cms/pull/2006) · [long form](docs/changelog/unreleased.md#computed-field-builder))
+  ([#2006](https://github.com/The-Verscienta/kiln_cms/pull/2006) · [long form](docs/changelog/v1.5.0.md#computed-field-builder))
 
 - **A computed field can read another computed field: `{{ sum(subtotal,
   shipping) }}` over a computed `subtotal`.**
-  ([#2008](https://github.com/The-Verscienta/kiln_cms/pull/2008) · [long form](docs/changelog/unreleased.md#a-computed-field-can-read-another-computed-field-sumsubtotal-shipping-over-a))
+  ([#2008](https://github.com/The-Verscienta/kiln_cms/pull/2008) · [long form](docs/changelog/v1.5.0.md#a-computed-field-can-read-another-computed-field-sumsubtotal-shipping-over-a))
 
 - **kilncms.dev now publishes Kiln's security policy at `/security`, and a
   security notice per published GitHub advisory at
   `/security-notices/<ghsa-id>`, with a feed.**
-  ([#1873](https://github.com/The-Verscienta/kiln_cms/issues/1873) · [long form](docs/changelog/unreleased.md#kilncmsdev-now-publishes-kilns-security-policy-at-security-and-a-security))
+  ([#1873](https://github.com/The-Verscienta/kiln_cms/issues/1873) · [long form](docs/changelog/v1.5.0.md#kilncmsdev-now-publishes-kilns-security-policy-at-security-and-a-security))
 
 - **Tags, tag groups and categories send webhooks: `tag.created`, `tag.updated`,
   `tag.deleted`, and the same for `tag_group` and `category`.**
-  ([#1965](https://github.com/The-Verscienta/kiln_cms/issues/1965) · [long form](docs/changelog/unreleased.md#tags-tag-groups-and-categories-send-webhooks-tagcreated-tagupdated-tagdeleted))
+  ([#1965](https://github.com/The-Verscienta/kiln_cms/issues/1965) · [long form](docs/changelog/v1.5.0.md#tags-tag-groups-and-categories-send-webhooks-tagcreated-tagupdated-tagdeleted))
 
 - **A release can adopt imported images: `bin/kiln_cms rpc
   'KilnCMS.Release.adopt_image_backend()'`. System → Image backend labels it
   and the Mix task, each with a dry run first.**
-  ([long form](docs/changelog/unreleased.md#release-adopt-image-backend))
+  ([#1988](https://github.com/The-Verscienta/kiln_cms/pull/1988) · [long form](docs/changelog/v1.5.0.md#release-adopt-image-backend))
 
 - **A media custom field can hold a gallery: an ordered set of images rather
-  than one.** ([long form](docs/changelog/unreleased.md#media-field-gallery))
+  than one.**
+  ([#1992](https://github.com/The-Verscienta/kiln_cms/pull/1992) · [long form](docs/changelog/v1.5.0.md#media-field-gallery))
 
 - **Every publish and withdrawal is measured end to end: one propagation
   record per transition, `mix kiln.propagation` for p50/p95, and a telemetry
   event to graph it.**
-  ([#1927](https://github.com/The-Verscienta/kiln_cms/issues/1927) · [long form](docs/changelog/unreleased.md#propagation-records))
+  ([#1927](https://github.com/The-Verscienta/kiln_cms/issues/1927) · [long form](docs/changelog/v1.5.0.md#propagation-records))
 
 ### Fixed
 
 - **`mix kiln.gen.join` keeps a reference field's target rules: a graduated
   `on_target_delete: :restrict` still refuses the purge, and `max_sources` still
   caps connections.**
-  ([#2024](https://github.com/The-Verscienta/kiln_cms/issues/2024) · [long form](docs/changelog/unreleased.md#gen-join-keeps-target-rules))
+  ([#2024](https://github.com/The-Verscienta/kiln_cms/issues/2024) · [long form](docs/changelog/v1.5.0.md#gen-join-keeps-target-rules))
 
-- **Messages that name a content type no longer put "a" in front of it ("A Ingredient can't be deleted…", "Connect a Article…").**
+- **Messages that name a content type no longer put "a" in front of it ("A
+  Ingredient can't be deleted…", "Connect a Article…").**
   ([#2023](https://github.com/The-Verscienta/kiln_cms/issues/2023))
 
 - **GraphQL's `referencedBy(inverse:)` lists the connecting records on entries
   of admin-defined types too; it returned an empty list there.**
-  ([#2026](https://github.com/The-Verscienta/kiln_cms/pull/2026) · [long form](docs/changelog/unreleased.md#graphql-referenced-by-inverse-on-entries))
+  ([#2026](https://github.com/The-Verscienta/kiln_cms/pull/2026) · [long form](docs/changelog/v1.5.0.md#graphql-referenced-by-inverse-on-entries))
 
 - **An automation rule for "any content type" no longer fires when a content
   release is published; a rule scoped to `release` still does.**
-  ([#1995](https://github.com/The-Verscienta/kiln_cms/issues/1995) · [long form](docs/changelog/unreleased.md#automation-any-type-rules-ignore-release-published))
+  ([#1995](https://github.com/The-Verscienta/kiln_cms/issues/1995) · [long form](docs/changelog/v1.5.0.md#automation-any-type-rules-ignore-release-published))
 
 - **Publishing or withdrawing an entry of an archived dynamic type now opens
   a propagation record, and domain events no longer enqueue a federation job
   that only skips.**
-  ([#2012](https://github.com/The-Verscienta/kiln_cms/pull/2012) · [long form](docs/changelog/unreleased.md#propagation-archived-types-federation-domain-events))
+  ([#2012](https://github.com/The-Verscienta/kiln_cms/pull/2012) · [long form](docs/changelog/v1.5.0.md#propagation-archived-types-federation-domain-events))
 
 - **A new content type can no longer be named after a built-in webhook event
   namespace (`release`, `task`, `form`, `experiment`, `membership`).**
-  ([#1994](https://github.com/The-Verscienta/kiln_cms/issues/1994) · [long form](docs/changelog/unreleased.md#reserved-event-namespaces))
+  ([#1994](https://github.com/The-Verscienta/kiln_cms/issues/1994) · [long form](docs/changelog/v1.5.0.md#reserved-event-namespaces))
 
 - **A variant job no longer takes an image backend's failed or rate-limited
   read for a deleted original.**
-  ([long form](docs/changelog/unreleased.md#variant-worker-backend-errors))
+  ([#1988](https://github.com/The-Verscienta/kiln_cms/pull/1988) · [long form](docs/changelog/v1.5.0.md#variant-worker-backend-errors))
 
 - **Regenerating variants skips images over the pixel cap instead of
   re-reading each original on every run.**
-  ([long form](docs/changelog/unreleased.md#regeneration-pixel-cap))
+  ([#1988](https://github.com/The-Verscienta/kiln_cms/pull/1988) · [long form](docs/changelog/v1.5.0.md#regeneration-pixel-cap))
 
 - **GraphQL `published*` queries without `offset` return their page fields
   (`hasNextPage`, `hasPreviousPage`, `pageNumber`, `lastPage`) again: an omitted
@@ -190,7 +207,7 @@ Every summary line below that was shortened links to its own entry there.
 - **Renaming a document now re-fires the documents that point at it through a
   `:reference` custom field, and their fired artifacts carry its new slug and
   title.**
-  ([#1998](https://github.com/The-Verscienta/kiln_cms/pull/1998) · [long form](docs/changelog/unreleased.md#renaming-a-document-now-re-fires-the-documents-that-point-at-it-through-a))
+  ([#1998](https://github.com/The-Verscienta/kiln_cms/pull/1998) · [long form](docs/changelog/v1.5.0.md#renaming-a-document-now-re-fires-the-documents-that-point-at-it-through-a))
 
 ### Security
 
@@ -202,12 +219,12 @@ Every summary line below that was shortened links to its own entry there.
 - **The `examples/phoenix_showcase` template's lock clears 23 Hex advisories
   (phoenix, phoenix_live_view, bandit, plug, mint, hpax, lazy_html), and CI
   now audits it.**
-  ([#1996](https://github.com/The-Verscienta/kiln_cms/pull/1996) · [long form](docs/changelog/unreleased.md#phoenix-showcase-advisories))
+  ([#1996](https://github.com/The-Verscienta/kiln_cms/pull/1996) · [long form](docs/changelog/v1.5.0.md#phoenix-showcase-advisories))
 
 - **A reference custom field no longer reveals a draft target to a reader who
   cannot read it: the fired artifact, JSON:API and GraphQL leave that item out
   of `custom_fields`.**
-  ([#2013](https://github.com/The-Verscienta/kiln_cms/issues/2013) · [long form](docs/changelog/unreleased.md#reference-snapshot-hides-unreadable-targets))
+  ([#2013](https://github.com/The-Verscienta/kiln_cms/issues/2013) · [long form](docs/changelog/v1.5.0.md#reference-snapshot-hides-unreadable-targets))
 
 ## [1.4.0] - 2026-10-14
 
@@ -2779,7 +2796,8 @@ that `mix kiln.update` compares against.
   one that can't be described by a changelog diff.
   ([long form](docs/changelog/v0.1.0.md#if-your-project-pins-a-sha-from-before-this-tag-your-first-update-is-the-only))
 
-[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/The-Verscienta/kiln_cms/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/The-Verscienta/kiln_cms/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/The-Verscienta/kiln_cms/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/The-Verscienta/kiln_cms/compare/v1.2.0...v1.2.1
