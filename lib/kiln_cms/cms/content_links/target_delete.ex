@@ -33,11 +33,13 @@ defmodule KilnCMS.CMS.ContentLinks.TargetDelete do
   alias KilnCMS.CMS.Bookkeeping
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.Errors.TargetStillConnected
+  alias KilnCMS.CMS.JoinGraduation
 
   @doc """
   `:ok`, or the error refusing the purge of `record` because a `:restrict`
   field still connects records to it — the first such field, by source type
-  and name.
+  and name. A field graduated to a join resource with that rule
+  (`KilnCMS.CMS.JoinGraduation.check_restrict/1`) refuses it the same way.
   """
   @spec check_restrict(struct()) :: :ok | {:error, Exception.t()}
   def check_restrict(record) do
@@ -48,7 +50,7 @@ defmodule KilnCMS.CMS.ContentLinks.TargetDelete do
     end)
     |> case do
       [] ->
-        :ok
+        JoinGraduation.check_restrict(record)
 
       [{_key, {definition, links}} | _rest] ->
         count = links |> Enum.map(& &1.source_id) |> Enum.uniq() |> length()

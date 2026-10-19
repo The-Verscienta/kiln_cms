@@ -38,7 +38,8 @@ if Code.ensure_loaded?(Igniter) do
 
     * `belongs_to :source` and `belongs_to :target`, to the two content
       resources (`KilnCMS.CMS.Entry` for an admin-defined type), with foreign
-      keys that delete a connection when either record is purged;
+      keys that delete a connection when either record is purged, unless the
+      field refused the target's purge (see "Target rules" below);
     * `position`, and one typed attribute per link field (R3) — `:string`,
       `:integer`, `:float`, `:boolean`, `:date` or `:naive_datetime`, required
       and defaulted as the link field is, a select's choices as a `one_of`
@@ -52,6 +53,26 @@ if Code.ensure_loaded?(Igniter) do
     * code interfaces `list_/get_/create_/update_/destroy_<type>_<field>_link`
       and the ordered `list_<...>_links_from` (by source) and
       `list_<...>_links_to` (by target).
+
+    ## Target rules
+
+    The field's rules about its targets (R1b, R5) come with it, and the task
+    prints which, and how, with the diff (dry run included):
+
+    * `on_target_delete: :restrict` — the target's foreign key is
+      `on_delete: :restrict`, and purging a record something still connects
+      to is refused first with the field's own error
+      (`KilnCMS.CMS.JoinGraduation.check_restrict/1`).
+    * `:clear` — `on_delete: :delete`: the connections go with the purged
+      record, as clearing it out of each referrer did.
+    * `:keep` — `on_delete: :delete` as well, which is a change: a foreign
+      key cannot point at nothing, so a purge no longer leaves a broken
+      reference behind.
+    * `max_sources` — `change {KilnCMS.CMS.JoinGraduation.SourceCap,
+      max_sources: n}` on the create: the same count under the same advisory
+      lock as the field (`KilnCMS.CMS.ContentLinks.reconcile/1`).
+
+    Like the schema, the rules are read from the `--org` definition.
 
     A field that links to **several target types** (R2) is refused: a typed
     join table has one foreign key per end. Split it into one field per
@@ -139,6 +160,7 @@ if Code.ensure_loaded?(Igniter) do
       |> Igniter.Project.Module.create_module(spec.module, resource_body(spec))
       |> Ash.Domain.Igniter.add_resource_reference(@domain, spec.module)
       |> add_interfaces(spec.module, interfaces(spec.base))
+      |> Igniter.add_warning(rules_summary(spec))
       |> Igniter.add_notice(resource_notice(spec))
     end
 
@@ -198,8 +220,8 @@ if Code.ensure_loaded?(Igniter) do
       `docs/relationships-plan.md`).
 
       Each row connects one `#{spec.source.type}` to one `#{spec.target.type}`, in `position`
-      order, with the field's link data as typed columns. Purging either record
-      deletes its connections.
+      order, with the field's link data as typed columns.
+      #{purge_sentence(spec)}
 
       Who may do what: admins anything; editors read and write; anyone else
       reads a connection only when they may read **both** records, so a draft
@@ -217,7 +239,7 @@ if Code.ensure_loaded?(Igniter) do
 
         references do
           reference :source, on_delete: :delete
-          reference :target, on_delete: :delete
+          #{target_reference(spec)}
         end
 
         custom_indexes do
@@ -232,7 +254,7 @@ if Code.ensure_loaded?(Igniter) do
 
         default_accept #{inspect([:source_id, :target_id, :position | link_names])}
 
-        create :create, primary?: true
+        #{create_action(spec)}
 
         update :update do
           primary? true
@@ -331,8 +353,85 @@ if Code.ensure_loaded?(Igniter) do
         # One connection per pair, as the field refused duplicates.
         identity :unique_connection, [:source_id, :target_id]
       end
+
+      @doc false
+      # What this resource graduated from (#2024): `KilnCMS.CMS.JoinGraduation`
+      # finds join resources by it, and names the field in their errors.
+      def __kiln_join__ do
+        #{inspect(%{field: spec.field, label: spec.label, source_type: spec.source.type, target_type: spec.target.type})}
+      end
       """
     end
+
+    # The rest of the moduledoc's paragraph: what a purge does.
+    defp purge_sentence(%{on_target_delete: :restrict} = spec) do
+      "Purging a `#{spec.source.type}` deletes its connections. Purging a\n" <>
+        "`#{spec.target.type}` is refused while anything connects to it, as the\n" <>
+        "field's `on_target_delete: :restrict` refused it."
+    end
+
+    defp purge_sentence(_spec), do: "Purging either record deletes its connections."
+
+    # `:restrict` keeps it; `:clear` and `:keep` delete the connection, the
+    # only thing a foreign key can do with a row that points at nothing.
+    defp target_reference(%{on_target_delete: :restrict}) do
+      """
+      # on_target_delete: :restrict, graduated. `JoinGraduation.check_restrict/1`
+          # refuses the purge first, with the field's own error.
+          reference :target, on_delete: :restrict\
+      """
+    end
+
+    defp target_reference(_spec), do: "reference :target, on_delete: :delete"
+
+    defp create_action(%{max_sources: max} = spec) when is_integer(max) do
+      """
+      create :create do
+            primary? true
+            # max_sources: #{max}, graduated: at most #{max} #{spec.source.type} records per
+            # #{spec.target.type}, counted under the field's own advisory lock.
+            change {KilnCMS.CMS.JoinGraduation.SourceCap, max_sources: #{max}}
+          end\
+      """
+    end
+
+    defp create_action(_spec), do: "create :create, primary?: true"
+
+    @doc false
+    # Which of the field's target rules the resource carries, and how. A
+    # warning, not a notice, so that a dry run prints it too. Public for unit
+    # testing.
+    def rules_summary(spec) do
+      field = "#{spec.source.type}.#{spec.field}"
+
+      """
+      Target rules of #{field}, as graduated:
+        * on_target_delete: #{inspect(spec.on_target_delete)} → #{delete_rule(spec.on_target_delete)}
+        * max_sources: #{max_rule(spec.max_sources)}
+      """
+    end
+
+    defp delete_rule(:restrict),
+      do:
+        "on_delete: :restrict on the target. Purging a connected record is still refused, " <>
+          "with the same error."
+
+    defp delete_rule(:clear),
+      do: "on_delete: :delete. The connections go with the purged record, as before."
+
+    defp delete_rule(:keep),
+      do:
+        "on_delete: :delete. This CHANGES what a purge does: a foreign key cannot point " <>
+          "at nothing, so the connections are deleted with the purged record instead of " <>
+          "staying as broken references. Set the field to :restrict first to keep " <>
+          "purges refused instead."
+
+    defp max_rule(nil), do: "none (no limit), as before."
+
+    defp max_rule(max),
+      do:
+        "#{max} → JoinGraduation.SourceCap on create, under the field's own advisory lock. " <>
+          "Still at most #{max} per target."
 
     defp attribute(column) do
       options =

@@ -246,10 +246,19 @@ defmodule KilnCMS.CMS.ContentLinks do
     end)
   end
 
-  defp lock_target(org_id, source_type, field, target_id) do
+  @doc """
+  Take the transaction-scoped advisory lock that serializes writers adding a
+  connection to `target_id` through one field (`max_sources`, R1b). Shared
+  with a graduated field's join resource (`KilnCMS.CMS.JoinGraduation.SourceCap`),
+  so the field and its join table never count past each other.
+  """
+  @spec lock_target(Ash.UUID.t(), String.t(), String.t(), Ash.UUID.t()) :: :ok
+  def lock_target(org_id, source_type, field, target_id) do
     KilnCMS.Repo.query!("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
       "kiln:reference_cap:#{org_id}:#{source_type}:#{field}:#{target_id}"
     ])
+
+    :ok
   end
 
   # How many OTHER records connect to `target_id` through this field. Read as

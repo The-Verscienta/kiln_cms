@@ -1,9 +1,9 @@
 # Relationships — reaching Directus / Hygraph parity
 
 **Status: built for 1.5** (2026-10-18). Every workstream R0–R10 is merged to
-`main` and checked end to end (§8). One part of R9 is still open: the
-relationship-first fields admin flow and related content through the picker,
-[#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025). D22 and D23
+`main` and checked end to end (§8). R9's last two parts — the
+relationship-first fields admin flow and related content through the
+picker — came in [#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025). D22 and D23
 were adopted on 2026-10-16, and open questions 1–4 are answered (§7). On
 2026-10-17 the plan took in what Toolset's relationship admin does that it
 lacked: R1b, "Add new" in the picker, and a relationship-first fields admin
@@ -22,7 +22,7 @@ lacked: R1b, "Add new" in the picker, and a relationship-first fields admin
 | R6 relationship filters | [#2003](https://github.com/The-Verscienta/kiln_cms/pull/2003) |
 | R7 typed nested reads | [#2010](https://github.com/The-Verscienta/kiln_cms/pull/2010) |
 | R8 relationship writes | [#2014](https://github.com/The-Verscienta/kiln_cms/pull/2014) |
-| R9 editor UI | picker [#2002](https://github.com/The-Verscienta/kiln_cms/pull/2002), create and connect [#2005](https://github.com/The-Verscienta/kiln_cms/pull/2005); the admin and picker parts of R1b–R5 came in their own PRs; open: [#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025) |
+| R9 editor UI | picker [#2002](https://github.com/The-Verscienta/kiln_cms/pull/2002), create and connect [#2005](https://github.com/The-Verscienta/kiln_cms/pull/2005); the admin and picker parts of R1b–R5 came in their own PRs; the relationship-first admin [#2029](https://github.com/The-Verscienta/kiln_cms/pull/2029) and related content through the picker [#2030](https://github.com/The-Verscienta/kiln_cms/pull/2030), for [#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025) |
 | R10 graduation generator | [#2016](https://github.com/The-Verscienta/kiln_cms/pull/2016) |
 | The plan itself | [#1997](https://github.com/The-Verscienta/kiln_cms/pull/1997), [#2001](https://github.com/The-Verscienta/kiln_cms/pull/2001) |
 
@@ -92,7 +92,7 @@ column is what shipped in 1.5, with the workstream that built it.
 | Connect / disconnect / reorder writes | ✅ | ✅ with position | tags, related ids only | ✅ GraphQL `add…References` / `remove…References` / `move…Reference` with Hygraph's positions; JSON:API `PATCH` of the list; payload-link routes (R8) |
 | Limit on the target side ("each Author on at most 3 Books") † | — | — | ❌ | ✅ `max_sources`, checked under a lock; the picker shows a full target as full (R1b) |
 | Create a new target from the picker and connect it | ✅ | ✅ | ❌ | ✅ "Add new *Type*" (R9) |
-| Fields admin speaks in relationships, not data types † | partial (relational wizard) | ✅ | type + options, plain wording since R1 | partial: every option in plain words, with a summary sentence; the relationship-first flow is [#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025) |
+| Fields admin speaks in relationships, not data types † | partial (relational wizard) | ✅ | type + options, plain wording since R1 | ✅ "A relationship" first, then both sides, then how many on each, read back in one sentence (R9, [#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025)) |
 | Editor UI for all of the above | ✅ | ✅ | `<select>` | ✅ search picker, type badges, drag to reorder, link inputs per row, reverse list (R9 and each workstream) |
 | A real junction table when you need one | auto-created | ❌ | hand-written resource | ✅ `mix kiln.gen.join` and `mix kiln.join.retire`, one target type per field (R10) |
 | Remote / federated sources | ❌ | Remote Sources | ❌ | out of scope, §6 |
@@ -580,18 +580,17 @@ fallback; the spike's outcome is under the JSON:API bullet and in §7 Q1.
 
 ### R9 — Editor UI
 
-**Built in part.** The picker is [#2002](https://github.com/The-Verscienta/kiln_cms/pull/2002) and create-and-connect is
+**Built.** The picker is [#2002](https://github.com/The-Verscienta/kiln_cms/pull/2002) and create-and-connect is
 [#2005](https://github.com/The-Verscienta/kiln_cms/pull/2005). Each of R1b, R2, R3, R4, R4b and R5 added its own piece of
 the picker and the fields admin: the "Full" state, type badges, link inputs,
-the reverse list, and the options' wording. Two parts were not built and are
-open in [#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025):
-
-- the relationship-first fields admin flow, which names both sides first and
-  then asks how many on each. In 1.5 each option is worded in plain language
-  inside the ordinary field form, and the field list sums the field up in a
-  sentence;
-- related content (`related_<type>s`) through the same picker — since
-  built, see "Related content" below.
+the reverse list, and the options' wording. The relationship-first fields
+admin came last, in part 1 of [#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025): the add and edit forms ask
+"A value" or "A relationship" first, and a relationship is then set up in
+four steps — which records connect, how many on each side (`max_sources` as
+any number, only one, or a typed limit), what each side calls it, and the
+delete rule — with the sentence the field list will show under it. Part 2
+of #2025 put related content (`related_<type>s`) through the same picker;
+see "Related content" below.
 
 - Replace the reference `<select>` with a picker component: search-as-you-type
   across the allowed target types (server-side, no 500 cap), type badges,
@@ -692,7 +691,24 @@ resource". What the PR settled beyond the bullets below:
   read-only API key cannot write. Deleting a connection is an edit of its
   source, not a hard delete of content, so editors may do it, as with
   `Tagging`. Purging a record deletes its connections through the foreign
-  keys.
+  keys, except where the field restricted it (next bullet).
+- **The target rules graduate too** ([#2024](https://github.com/The-Verscienta/kiln_cms/issues/2024)).
+  R1b and R5 were built beside R10, so the first generator dropped them: a
+  `:restrict` field became a cascading delete, and `max_sources` was lost.
+  Now `:restrict` becomes `on_delete: :restrict` on the target, and
+  `JoinGraduation.check_restrict/1` (called from
+  `ContentLinks.TargetDelete.check_restrict/1`) refuses the purge first with
+  `Errors.TargetStillConnected`, as the field did. `SkipRestrictedTargets`
+  keeps such targets out of the nightly purge. `:clear` becomes
+  `on_delete: :delete`, which has the same effect. `:keep` also becomes
+  `on_delete: :delete`, since a foreign key cannot keep a broken reference,
+  and the generator says it is a change. `max_sources` becomes
+  `JoinGraduation.SourceCap` on the create, which takes the field's own
+  advisory lock key (`ContentLinks.lock_target/4`), so the field and its
+  join table cannot overfill a target between steps 2 and 3. The generator
+  prints the carried rules as an Igniter warning, so a dry run shows them.
+  A generated resource carries `__kiln_join__/0`, and that is how
+  `JoinGraduation.join_resources/0` finds it.
 - Support module: `KilnCMS.CMS.JoinGraduation`.
 
 The plan as first written:
@@ -832,4 +848,5 @@ What it found:
   label ("A Ingredient …"):
   [#2023](https://github.com/The-Verscienta/kiln_cms/issues/2023).
 - R9's relationship-first admin flow and the related-content picker were
-  never built: [#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025).
+  never built: [#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025). Both were built before the
+  release, in [#2029](https://github.com/The-Verscienta/kiln_cms/pull/2029) and [#2030](https://github.com/The-Verscienta/kiln_cms/pull/2030).

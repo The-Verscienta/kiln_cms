@@ -60,6 +60,9 @@ Every summary line below that was shortened links to its own entry there.
   open, over the record's own type, with the order kept.**
   ([#2030](https://github.com/The-Verscienta/kiln_cms/pull/2030) · [long form](docs/changelog/unreleased.md#related-content-uses-the-reference-picker))
 
+- **The fields admin asks for a relationship as one: "A relationship", then both sides ("Recipe links to Ingredient"), then how many on each side; the field list reads it back from both sides in one sentence.**
+  ([#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025))
+
 - **API clients can connect, disconnect and reorder references: GraphQL's
   `add<Type>References`, `remove<Type>References` and `move<Type>Reference`, and
   payload-link routes at `/api/json/content-links`.**
@@ -146,10 +149,17 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **`mix kiln.gen.join` keeps a reference field's target rules: a graduated
+  `on_target_delete: :restrict` still refuses the purge, and `max_sources` still
+  caps connections.**
+  ([#2024](https://github.com/The-Verscienta/kiln_cms/issues/2024) · [long form](docs/changelog/unreleased.md#gen-join-keeps-target-rules))
+
+- **Messages that name a content type no longer put "a" in front of it ("A Ingredient can't be deleted…", "Connect a Article…").**
+  ([#2023](https://github.com/The-Verscienta/kiln_cms/issues/2023))
+
 - **GraphQL's `referencedBy(inverse:)` lists the connecting records on entries
   of admin-defined types too; it returned an empty list there.**
   ([#2026](https://github.com/The-Verscienta/kiln_cms/pull/2026) · [long form](docs/changelog/unreleased.md#graphql-referenced-by-inverse-on-entries))
-
 
 - **An automation rule for "any content type" no longer fires when a content
   release is published; a rule scoped to `release` still does.**

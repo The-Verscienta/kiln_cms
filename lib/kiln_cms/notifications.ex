@@ -700,7 +700,7 @@ defmodule KilnCMS.Notifications do
   defp push_payload(:submitted_for_review, record),
     do: %{
       "title" => gettext("Review requested"),
-      "body" => gettext("A %{kind} is waiting for review.", kind: kind(record)),
+      "body" => gettext("Waiting for review: one %{kind}.", kind: kind(record)),
       "tag" => "kiln-review",
       "url" => "/editor?status=in_review"
     }
@@ -708,7 +708,7 @@ defmodule KilnCMS.Notifications do
   defp push_payload(:published, record),
     do: %{
       "title" => gettext("Published"),
-      "body" => gettext("A %{kind} you authored is now live.", kind: kind(record)),
+      "body" => gettext("Your %{kind} is now live.", kind: kind(record)),
       "tag" => "kiln-published",
       "url" => "/editor"
     }
@@ -716,7 +716,7 @@ defmodule KilnCMS.Notifications do
   defp push_payload(:returned_to_draft, record),
     do: %{
       "title" => gettext("Changes requested"),
-      "body" => gettext("A %{kind} you authored was returned to draft.", kind: kind(record)),
+      "body" => gettext("Your %{kind} was returned to draft.", kind: kind(record)),
       "tag" => "kiln-returned",
       "url" => "/editor?status=draft"
     }

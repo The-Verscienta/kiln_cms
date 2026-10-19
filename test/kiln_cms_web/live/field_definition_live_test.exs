@@ -163,7 +163,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     list_radio = "#new-field-form input[name='field_definition[multiple]'][value=true]"
     bounds = "#new-field-multiple-bounds"
 
-    lv |> form("#new-field-form", field_definition: %{field_type: "reference"}) |> render_change()
+    lv |> form("#new-field-form", field_definition: %{kind: "relationship"}) |> render_change()
     assert has_element?(lv, list_radio)
     refute has_element?(lv, bounds)
 
@@ -171,7 +171,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     html =
       lv
       |> form("#new-field-form",
-        field_definition: %{field_type: "reference", target_types: ["page"]}
+        field_definition: %{target_types: ["page"]}
       )
       |> render_change()
 
@@ -179,7 +179,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     assert html =~ "Several Page records"
 
     lv
-    |> form("#new-field-form", field_definition: %{field_type: "reference", multiple: "true"})
+    |> form("#new-field-form", field_definition: %{multiple: "true"})
     |> render_change()
 
     assert has_element?(lv, bounds)
@@ -190,7 +190,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
         scopes: ["page"],
         name: "see_also",
         label: "See also",
-        field_type: "reference",
+        kind: "relationship",
         target_types: ["page"],
         multiple: "true",
         min_items: "1",
@@ -208,7 +208,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     assert lv |> element("#field-#{field.id}") |> render() =~ "list"
 
     assert lv |> element("#field-#{field.id}-links") |> render() =~
-             "Connects several Page records — 1 to 5"
+             "Each Page connects several Page records (1 to 5); each Page can be linked from any number of Page records."
 
     lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
     refute has_element?(lv, "#edit-field-multiple-#{field.id}-narrowing")
@@ -242,21 +242,30 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
 
     refute has_element?(lv, "#new-field-rules")
-    lv |> form("#new-field-form", field_definition: %{field_type: "reference"}) |> render_change()
+    lv |> form("#new-field-form", field_definition: %{kind: "relationship"}) |> render_change()
 
     html =
       lv
       |> form("#new-field-form",
-        field_definition: %{field_type: "reference", target_types: ["page"]}
+        field_definition: %{target_types: ["page"]}
       )
       |> render_change()
 
     assert has_element?(lv, "#new-field-rules")
-    assert html =~ "How many records can link to the same Page"
+    assert html =~ "Each Page can be linked from…"
     assert html =~ "When a linked Page is deleted for good…"
     assert has_element?(lv, "#new-field-rules-delete-keep[checked]")
 
     name = "seat_#{System.unique_integer([:positive])}"
+
+    # A limit is typed only once "A limited number" is picked.
+    refute has_element?(lv, "#new-field-counts-sources-limit")
+
+    lv
+    |> form("#new-field-form", field_definition: %{sources_limit: "some"})
+    |> render_change()
+
+    assert has_element?(lv, "#new-field-counts-sources-limit")
 
     lv
     |> form("#new-field-form",
@@ -264,8 +273,9 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
         scopes: ["post"],
         name: name,
         label: "Seat",
-        field_type: "reference",
+        kind: "relationship",
         target_types: ["page"],
+        sources_limit: "some",
         max_sources: "3",
         on_target_delete: "restrict"
       }
@@ -279,13 +289,16 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
 
     assert {field.max_sources, field.on_target_delete} == {3, :restrict}
 
-    summary = lv |> element("#field-#{field.id}-rules") |> render()
-    assert summary =~ "Each Page can be linked from at most 3 records."
-    assert summary =~ "A Page can&#39;t be deleted for good while anything links to it."
+    assert lv |> element("#field-#{field.id}-links") |> render() =~
+             "each Page can be linked from at most 3 Post records"
+
+    assert lv |> element("#field-#{field.id}-rules") |> render() =~
+             "Page records can&#39;t be deleted for good while anything links to them."
 
     # A blank cap clears it; the rule changes to clear.
     lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
     assert has_element?(lv, "#edit-field-rules-#{field.id}-delete-restrict[checked]")
+    assert has_element?(lv, "#edit-field-counts-#{field.id}-sources-some[checked]")
 
     lv
     |> form("#edit-field-#{field.id}",
@@ -297,7 +310,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     assert {field.max_sources, field.on_target_delete} == {nil, :clear}
 
     assert lv |> element("#field-#{field.id}-rules") |> render() =~
-             "Deleting a Page for good removes it from the records linking to it."
+             "Page records deleted for good are removed from the records linking to them."
   end
 
   # R2: ticking several types stores `target_types`; ticking one keeps the
@@ -306,12 +319,12 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     admin = authed_user(:admin)
     {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
 
-    lv |> form("#new-field-form", field_definition: %{field_type: "reference"}) |> render_change()
+    lv |> form("#new-field-form", field_definition: %{kind: "relationship"}) |> render_change()
 
     html =
       lv
       |> form("#new-field-form",
-        field_definition: %{field_type: "reference", target_types: ["page", "post"]}
+        field_definition: %{target_types: ["page", "post"]}
       )
       |> render_change()
 
@@ -325,7 +338,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
         scopes: ["page"],
         name: "mentions",
         label: "Mentions",
-        field_type: "reference",
+        kind: "relationship",
         target_types: ["page", "post"],
         multiple: "true"
       }
@@ -340,7 +353,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     assert {field.target_type, field.target_types} == {nil, ["page", "post"]}
 
     assert lv |> element("#field-#{field.id}-links") |> render() =~
-             "Connects several Page or Post records"
+             "Each Page connects several Page or Post records"
 
     # Unticking down to one type stores it the single-type way.
     lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
@@ -351,6 +364,101 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
 
     field = CMS.get_field_definition!(field.id, authorize?: false)
     assert {field.target_type, field.target_types} == {"post", []}
+  end
+
+  # R9 (#2025): a relationship is asked for as one, Toolset-style — both sides
+  # first, then how many on each — not as a "Reference" data type with
+  # options under it. The stored options are what they were.
+  describe "the relationship-first flow" do
+    test "names both sides, asks how many on each, and reads it back as one sentence", %{
+      conn: conn
+    } do
+      admin = authed_user(:admin)
+      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      # The form starts on a value; "Reference" is not a data type to pick.
+      assert has_element?(lv, "#new-field-kind-value[checked]")
+      refute html =~ ~s|<option value="reference"|
+      refute has_element?(lv, "#new-field-sides")
+
+      lv |> form("#new-field-form", field_definition: %{kind: "relationship"}) |> render_change()
+
+      assert has_element?(lv, "#new-field-kind-relationship[checked]")
+      refute has_element?(lv, "#new-field-form select[name='field_definition[field_type]']")
+      assert has_element?(lv, "#new-field-sides-sentence", "Tick a type on each side.")
+      assert has_element?(lv, "#new-field-counts-sources-any[checked]")
+
+      html =
+        lv
+        |> form("#new-field-form",
+          field_definition: %{scopes: ["post"], target_types: ["page"]}
+        )
+        |> render_change()
+
+      assert has_element?(lv, "#new-field-sides-sentence", "Post links to Page.")
+      assert html =~ "Each Post connects…"
+      assert html =~ "Each Page can be linked from…"
+      assert html =~ "Only one Post"
+      assert html =~ "What Page calls this"
+
+      lv
+      |> form("#new-field-form",
+        field_definition: %{multiple: "true", sources_limit: "one", inverse_label: "Featured in"}
+      )
+      |> render_change()
+
+      assert has_element?(
+               lv,
+               "#new-field-summary",
+               "Each Post connects several Page records (any number); each Page can be linked from only one Post. Each Page lists them as “Featured in”."
+             )
+
+      name = "features_#{System.unique_integer([:positive])}"
+
+      lv
+      |> form("#new-field-form", field_definition: %{label: "Features", name: name})
+      |> render_submit()
+
+      field =
+        :post |> CMS.field_definitions_for!(authorize?: false) |> Enum.find(&(&1.name == name))
+
+      assert {field.field_type, field.target_type, field.multiple, field.max_sources,
+              field.inverse_label} == {:reference, "page", true, 1, "Featured in"}
+
+      assert has_element?(
+               lv,
+               "#field-#{field.id}-links",
+               "Each Post connects several Page records (any number); each Page can be linked from only one Post."
+             )
+
+      # The edit form asks the same way; its own side is fixed.
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+      assert has_element?(lv, "#edit-field-kind-#{field.id}-relationship[checked]")
+      assert has_element?(lv, "#edit-field-sides-#{field.id}-sentence", "Post links to Page.")
+      assert has_element?(lv, "#edit-field-counts-#{field.id}-sources-one[checked]")
+
+      lv
+      |> form("#edit-field-#{field.id}", field_definition: %{sources_limit: "any"})
+      |> render_submit()
+
+      assert CMS.get_field_definition!(field.id, authorize?: false).max_sources == nil
+    end
+
+    test "going back to a value brings back the type picker", %{conn: conn} do
+      admin = authed_user(:admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      lv |> form("#new-field-form", field_definition: %{kind: "relationship"}) |> render_change()
+      lv |> form("#new-field-form", field_definition: %{kind: "value"}) |> render_change()
+
+      assert has_element?(lv, "#new-field-kind-value[checked]")
+      refute has_element?(lv, "#new-field-sides")
+
+      assert has_element?(
+               lv,
+               "#new-field-form select[name='field_definition[field_type]'] option[value=string][selected]"
+             )
+    end
   end
 
   test "non-admins are redirected away", %{conn: conn} do
@@ -862,10 +970,14 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
                ~s|#new-field-form input[type=text][name="field_definition[default]"]|
              )
 
-      for type <- ~w(media reference computed geolocation datetime_range recurrence) do
+      for type <- ~w(media computed geolocation datetime_range recurrence) do
         type_change(lv, type)
         refute has_element?(lv, default), "default shown for #{type}"
       end
+
+      lv |> form("#new-field-form", field_definition: %{kind: "relationship"}) |> render_change()
+      refute has_element?(lv, default), "default shown for a relationship"
+      lv |> form("#new-field-form", field_definition: %{kind: "value"}) |> render_change()
 
       type_change(lv, "integer")
       assert has_element?(lv, ~s|#new-field-form input[type=number][step="1"]#{default_attr()}|)

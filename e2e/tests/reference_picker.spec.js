@@ -66,9 +66,10 @@ test.describe("reference picker", () => {
     await page.locator("#new-type-form").getByRole("button", { name: "Create content type" }).click();
     await expect(page).toHaveURL(/\/editor\/fields\?type=def/);
 
+    // A reference is "A relationship" since #2025: picked first, then named.
+    await page.locator("#new-field-kind-relationship").check();
     await page.fill('#new-field-form input[name="field_definition[label]"]', "See also");
     await page.fill('#new-field-form input[name="field_definition[name]"]', `${name}_see`);
-    await page.selectOption('#new-field-form select[name="field_definition[field_type]"]', "reference");
     // "Links to" is a set of checkboxes since R2 (#2004): one ticked type is
     // saved as `target_type`.
     await page.locator("#new-field-targets-page").check();

@@ -88,22 +88,37 @@ test.describe("relationships journey", () => {
     /** @type {string} */
     let fieldsUrl = "";
 
-    await test.step("fields admin: several target types, multiple, inverse, cap, delete rule", async () => {
+    await test.step("fields admin, relationship first: both sides, how many on each, names, delete rule", async () => {
       await createType(page, "Ingredient", types.ingredient);
       await createType(page, "Spice", types.spice);
       fieldsUrl = await createType(page, "Recipe", types.recipe);
 
       await page.goto(fieldsUrl);
       const form = page.locator("#new-field-form");
-      await form.locator('input[name="field_definition[label]"]').fill("Ingredients");
-      await form.locator('input[name="field_definition[name]"]').fill("ingredients");
-      await form.locator('select[name="field_definition[field_type]"]').selectOption("reference");
+      // R9 (#2025): "A relationship" first, then the two sides. Recipe is
+      // already ticked on the "From" side (the page was opened for it).
+      await page.locator("#new-field-kind-relationship").check();
+      await expect(form.locator('select[name="field_definition[field_type]"]')).toHaveCount(0);
       await page.locator(`#new-field-targets-${types.ingredient}`).check();
       await page.locator(`#new-field-targets-${types.spice}`).check();
+      await expect(page.locator("#new-field-sides-sentence")).toHaveText(
+        `Recipe ${stamp} links to Ingredient ${stamp} or Spice ${stamp}.`,
+      );
+
+      // How many on each side: several per recipe; two recipes per ingredient.
       await page.locator("#new-field-multiple-true").check();
-      await form.locator('input[name="field_definition[inverse_label]"]').fill("Used in recipes");
+      await page.locator("#new-field-counts-sources-some").check();
       await form.locator('input[name="field_definition[max_sources]"]').fill("2");
+
+      // What each side calls it.
+      await form.locator('input[name="field_definition[label]"]').fill("Ingredients");
+      await form.locator('input[name="field_definition[name]"]').fill("ingredients");
+      await form.locator('input[name="field_definition[inverse_label]"]').fill("Used in recipes");
       await page.locator("#new-field-rules-delete-restrict").check();
+
+      await expect(page.locator("#new-field-summary")).toContainText(
+        `each Ingredient ${stamp} or Spice ${stamp} can be linked from at most 2 Recipe ${stamp} records`,
+      );
       await form.locator("button[type=submit]").click();
 
       const field = page
@@ -111,9 +126,9 @@ test.describe("relationships journey", () => {
         .filter({ has: page.locator('code:text-is("ingredients")') })
         // Other runs' archived recipe types list an `ingredients` field too.
         .filter({ hasText: `Ingredient ${stamp}` });
-      await expect(field).toContainText("Connects several");
+      await expect(field).toContainText(`Each Recipe ${stamp} connects several`);
       await expect(field).toContainText("Used in recipes");
-      await expect(field).toContainText("at most 2 records");
+      await expect(field).toContainText(`at most 2 Recipe ${stamp} records`);
       await expect(field).toContainText("can't be deleted for good");
 
       // Details on each connection: a whole-number quantity and a role.
@@ -221,7 +236,7 @@ test.describe("relationships journey", () => {
       await field.locator('button[phx-click="edit"]').click();
       await page.locator('[id^="edit-field-rules-"][id$="-delete-clear"]').check();
       await page.locator('form[id^="edit-field-"] button[type=submit]').click();
-      await expect(field).toContainText("removes it from the records");
+      await expect(field).toContainText("are removed from the records");
 
       await page.goto("/editor/trash");
       page.once("dialog", dialog => dialog.accept());

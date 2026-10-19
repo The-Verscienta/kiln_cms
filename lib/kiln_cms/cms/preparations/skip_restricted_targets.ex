@@ -13,7 +13,8 @@ defmodule KilnCMS.CMS.Preparations.SkipRestrictedTargets do
 
   Two reads, as the cms bookkeeping with `authorize_with: :error`: the site's
   `:restrict` reference fields, then the targets of their edges. A site with
-  no such field pays the first one only.
+  no such field pays the first one only. Plus one read per graduated join
+  resource whose target foreign key restricts, if a project has any.
   """
   use Ash.Resource.Preparation
 
@@ -22,6 +23,7 @@ defmodule KilnCMS.CMS.Preparations.SkipRestrictedTargets do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Bookkeeping
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.JoinGraduation
 
   @impl true
   def prepare(query, _opts, _context) do
@@ -35,10 +37,15 @@ defmodule KilnCMS.CMS.Preparations.SkipRestrictedTargets do
 
   @doc """
   The ids of every record a `:restrict` reference field of `org_id` links to,
-  whatever their type.
+  whatever their type — through `content_links`, or through a graduated
+  field's join table (`KilnCMS.CMS.JoinGraduation.restricted_target_ids/1`).
   """
   @spec restricted_target_ids(Ash.UUID.t()) :: [Ash.UUID.t()]
   def restricted_target_ids(org_id) do
+    Enum.uniq(field_target_ids(org_id) ++ JoinGraduation.restricted_target_ids(org_id))
+  end
+
+  defp field_target_ids(org_id) do
     case restrict_fields(org_id) do
       [] ->
         []

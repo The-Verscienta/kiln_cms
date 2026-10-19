@@ -27,6 +27,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   role of each author. They are added, edited, ordered and deleted in place,
   one small form at a time, and offer only the plain field types
   (`FieldDefinition.link_field_types/0`).
+
+  Both forms first ask what a field holds: a value, or a relationship (R9,
+  #2025, after Toolset's relationship wizard). A relationship is a
+  `:reference` field set up in four steps — which records connect, how many
+  on each side, what each side calls it, and the delete rule — and read back
+  as one sentence from both sides. The steps only reword the stored options
+  (`target_type(s)`, `multiple`, `min_items`/`max_items`, `max_sources`,
+  `inverse_label`/`inverse_name`, `on_target_delete`).
   """
   use KilnCMSWeb, :live_view
 
@@ -102,6 +110,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   @impl true
   def handle_event("validate", %{"field_definition" => params} = event, socket)
       when is_map(params) do
+    params = apply_kind(params)
     scopes = selected_scopes(params)
     name_edited? = name_edited?(event["_target"], params, socket.assigns.name_edited?)
     params = if name_edited?, do: params, else: suggest_name(params)
@@ -124,6 +133,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   end
 
   def handle_event("create", %{"field_definition" => params}, socket) when is_map(params) do
+    params = apply_kind(params)
     scopes = selected_scopes(params)
     # A submit without a preceding change event (or with the name cleared)
     # still gets the name its label suggests.
@@ -185,7 +195,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   def handle_event("validate_edit", %{"field_definition" => params}, socket)
       when is_map(params) do
-    params = drop_default_on_type_change(params, socket.assigns.edit.form)
+    params = params |> apply_kind() |> drop_default_on_type_change(socket.assigns.edit.form)
     {params, builder} = ComputedBuilder.apply_params(params, socket.assigns.edit.builder)
 
     edit = %{
@@ -198,7 +208,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   end
 
   def handle_event("save_edit", %{"field_definition" => params}, socket) when is_map(params) do
-    {params, builder} = ComputedBuilder.apply_params(params, socket.assigns.edit.builder)
+    {params, builder} =
+      params |> apply_kind() |> ComputedBuilder.apply_params(socket.assigns.edit.builder)
 
     case AshPhoenix.Form.submit(socket.assigns.edit.form, params: normalize(params)) do
       {:ok, _definition} ->
@@ -415,6 +426,19 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     do: Map.put(params, "name", FieldDefinition.name_from_label(params["label"]))
 
   defp blank?(value), do: value in [nil, ""]
+
+  # Both forms first ask what the field holds (R9): a value typed into each
+  # record, or a connection to other records. A connection is a `:reference`
+  # field, whose type picker the form then leaves out; going back to a value
+  # starts from plain text. A post with no choice (an API-shaped submit)
+  # keeps the type it names.
+  defp apply_kind(%{"kind" => "relationship"} = params),
+    do: Map.put(params, "field_type", "reference")
+
+  defp apply_kind(%{"kind" => "value", "field_type" => "reference"} = params),
+    do: Map.put(params, "field_type", "string")
+
+  defp apply_kind(params), do: params
 
   # Every scope a type checkbox is rendered for.
   defp scope_values(assigns) do
@@ -899,6 +923,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     |> Map.put("options", options)
     |> Map.put("default", default)
     |> unpack_targets()
+    |> unpack_sources_limit()
     |> unpack_inverse()
     |> unpack_scope(scope)
   end
@@ -909,6 +934,17 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     do: Map.put(params, "inverse_name", nil)
 
   defp unpack_inverse(params), do: params
+
+  # How many records may link to one target, asked as a choice (R1b, R9):
+  # any number, only one, or a number the admin types. Only the last keeps
+  # the typed `max_sources`.
+  defp unpack_sources_limit(%{"sources_limit" => "any"} = params),
+    do: Map.put(params, "max_sources", nil)
+
+  defp unpack_sources_limit(%{"sources_limit" => "one"} = params),
+    do: Map.put(params, "max_sources", "1")
+
+  defp unpack_sources_limit(params), do: params
 
   # The "Links to" checkboxes post one list (`target_types[]`, with a leading
   # blank so unticking them all still posts). One ticked type is stored as the
@@ -1078,6 +1114,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   attr :id, :string, required: true
   # `{label, name}` pairs: every content type on the site, compiled or dynamic.
   attr :target_types, :list, default: []
+  attr :class, :string, default: "sm:col-span-2"
 
   # Which types a `:reference` field links to: one or several (R2). Ticking
   # one is the plain case; ticking more lets an editor connect records of any
@@ -1099,7 +1136,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     <fieldset
       :if={reference?(@form)}
       id={@id}
-      class="sm:col-span-2"
+      class={@class}
       aria-describedby={"#{@id}-hint"}
     >
       <legend class="mb-1 block text-sm font-medium">{gettext("Links to")}</legend>
@@ -1163,8 +1200,10 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # `{label, name}` pairs, to name a reference's target type in the choices.
   attr :target_types, :list, default: []
 
-  # Single item or a list, for a `:media` field (a gallery) or a `:reference`
-  # field (a list of references); with the list's optional item bounds.
+  # Single image or a gallery, for a `:media` field, with the gallery's
+  # optional item bounds. A `:reference` field asks the same question from
+  # both sides in `relationship_counts/1`; this keeps only the warning, shown
+  # whenever a stored list is about to become a single item or another type.
   defp multiple_field(assigns) do
     type = list_type(assigns.form)
     multiple? = assigns.form[:multiple].value in [true, "true"]
@@ -1185,8 +1224,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     # The warning outlives the toggle: retyping a list field to another type
     # narrows it just the same (`SyncFieldValues`), so it shows then too.
     ~H"""
-    <div :if={@type || @narrowing} class="sm:col-span-2">
-      <fieldset :if={@type}>
+    <div :if={@type == :media || @narrowing} class="sm:col-span-2">
+      <fieldset :if={@type == :media}>
         <legend class="mb-1 block text-sm font-medium">{gettext("Holds")}</legend>
         <div class="grid gap-2 sm:grid-cols-2">
           <label
@@ -1271,40 +1310,18 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # `{label, name}` pairs, to name a reference's target type in the wording.
   attr :target_types, :list, default: []
 
-  # A reference's two rules about its *targets* (R1b, R5), asked from the
-  # other side in plain words: how many records may connect to one target,
-  # and what deleting a target for good does to the records connected to it.
+  # What deleting a target for good does to the records connected to it
+  # (R5), asked from the target's side. How many records may connect to one
+  # target (R1b) is asked with the other counts, in `relationship_counts/1`.
   defp target_rules_field(assigns) do
     assigns =
       assigns
-      |> assign(:reference?, list_type(assigns.form) == :reference)
+      |> assign(:reference?, reference?(assigns.form))
       |> assign(:target, target_label(assigns.form, assigns.target_types))
       |> assign(:rule, to_string(assigns.form[:on_target_delete].value || "keep"))
 
     ~H"""
-    <div :if={@reference?} id={@id} class="space-y-3 sm:col-span-2">
-      <fieldset class="rounded-lg border border-base-content/10 bg-base-200/40 p-3">
-        <legend class="px-1 text-sm font-medium">
-          {sources_legend(@target)}
-          <span class="font-normal text-base-content/60">{gettext("(optional)")}</span>
-        </legend>
-        <div class="max-w-xs">
-          <.input
-            field={@form[:max_sources]}
-            type="number"
-            min="1"
-            step="1"
-            inputmode="numeric"
-            label={gettext("At most")}
-            placeholder={gettext("No limit")}
-          />
-        </div>
-        <p class="mt-2 text-xs text-base-content/60">
-          {gettext(
-            "Use this when what you link to is scarce — a seat, a slot, a featured place. Once a record is full, editors see it as full in the picker. Lowering the number later never removes links that already exist."
-          )}
-        </p>
-      </fieldset>
+    <div :if={@reference?} id={@id} class="sm:col-span-2">
       <fieldset>
         <legend class="mb-1 block text-sm font-medium">{delete_legend(@target)}</legend>
         <div class="grid gap-2 sm:grid-cols-3">
@@ -1346,11 +1363,6 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     """
   end
 
-  defp sources_legend(target) when is_binary(target),
-    do: gettext("How many records can link to the same %{type}", type: target)
-
-  defp sources_legend(_target), do: gettext("How many records can link to the same record")
-
   defp delete_legend(target) when is_binary(target),
     do: gettext("When a linked %{type} is deleted for good…", type: target)
 
@@ -1372,8 +1384,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     ]
   end
 
-  # The target-side rules in the list, after the summary: a cap and a
-  # non-default delete rule, in the same voice.
+  # The delete rule in the list, after the summary, when it is not the
+  # default.
   defp target_rules_summary(definition, target_types) do
     target =
       definition
@@ -1381,65 +1393,550 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       |> Enum.map(&type_label_for(target_types, &1))
       |> types_phrase() || gettext("record")
 
-    cap =
-      if is_integer(definition.max_sources),
-        do:
-          ngettext(
-            "Each %{type} can be linked from at most 1 record.",
-            "Each %{type} can be linked from at most %{count} records.",
-            definition.max_sources,
-            type: target
-          )
+    case definition.on_target_delete do
+      :clear ->
+        gettext(
+          "%{type} records deleted for good are removed from the records linking to them.",
+          type: target
+        )
 
-    rule =
-      case definition.on_target_delete do
-        :clear ->
-          gettext("Deleting a %{type} for good removes it from the records linking to it.",
-            type: target
-          )
+      :restrict ->
+        gettext("%{type} records can't be deleted for good while anything links to them.",
+          type: target
+        )
 
-        :restrict ->
-          gettext("A %{type} can't be deleted for good while anything links to it.",
-            type: target
-          )
-
-        _keep ->
-          nil
-      end
-
-    [cap, rule] |> Enum.reject(&is_nil/1) |> Enum.join(" ")
+      _keep ->
+        ""
+    end
   end
 
-  # One plain line under a reference field in the list: what it links to, and
-  # how many — so an admin can scan the fields without opening each one.
-  defp reference_summary(definition, target_types) do
-    target =
-      definition
-      |> FieldDefinition.reference_targets()
-      |> Enum.map(&type_label_for(target_types, &1))
-      |> types_phrase()
+  # One plain line under a reference field in the list: the relationship read
+  # from both sides, so an admin can scan the fields without opening each one.
+  defp reference_summary(definition, target_types, dynamic_types) do
+    relationship_sentence(%{
+      source: group_heading(scope_key(definition), dynamic_types),
+      target:
+        definition
+        |> FieldDefinition.reference_targets()
+        |> Enum.map(&type_label_for(target_types, &1))
+        |> types_phrase(),
+      multiple?: definition.multiple,
+      min: definition.min_items,
+      max: definition.max_items,
+      max_sources: definition.max_sources,
+      inverse: definition.inverse_label
+    })
+  end
 
-    connects =
-      if definition.multiple do
-        gettext("Connects several %{type} records — %{count}",
-          type: target,
-          count: item_bounds_label(definition.min_items, definition.max_items)
-        )
-      else
-        gettext("Connects one %{type}", type: target)
+  # The same sentence for a form being filled in, so the admin reads what
+  # they are about to save.
+  defp form_sentence(form, source, target_types) do
+    relationship_sentence(%{
+      source: source,
+      target: target_label(form, target_types),
+      multiple?: form[:multiple].value in [true, "true"],
+      min: count_value(form[:min_items].value),
+      max: count_value(form[:max_items].value),
+      max_sources: count_value(form[:max_sources].value),
+      inverse: form[:inverse_label].value
+    })
+  end
+
+  # "Each Recipe connects several Ingredient records (up to 5); each
+  # Ingredient can be linked from at most 2 Recipe records." — the stored
+  # options (`multiple`, `min_items`/`max_items`, `max_sources`,
+  # `inverse_label`) in the words of Toolset's relationship wizard.
+  defp relationship_sentence(%{} = parts) do
+    source = parts.source || gettext("record")
+    target = parts.target || gettext("linked record")
+
+    this_side =
+      if parts.multiple?,
+        do:
+          gettext("Each %{source} connects several %{type} records (%{count})",
+            source: source,
+            type: target,
+            count: item_bounds_label(parts.min, parts.max)
+          ),
+        else: gettext("Each %{source} connects one %{type}", source: source, type: target)
+
+    other_side =
+      case parts.max_sources do
+        nil ->
+          gettext("each %{type} can be linked from any number of %{source} records",
+            source: source,
+            type: target
+          )
+
+        count ->
+          ngettext(
+            "each %{type} can be linked from only one %{source}",
+            "each %{type} can be linked from at most %{count} %{source} records",
+            count,
+            source: source,
+            type: target
+          )
       end
 
-    case definition.inverse_label do
+    sentence =
+      gettext("%{this_side}; %{other_side}.", this_side: this_side, other_side: other_side)
+
+    case parts.inverse do
       label when is_binary(label) and label != "" ->
-        gettext("%{connects}. Each %{type} lists them as “%{label}”.",
-          connects: connects,
+        gettext("%{sentence} Each %{type} lists them as “%{label}”.",
+          sentence: sentence,
           type: target,
           label: label
         )
 
       _none ->
-        connects
+        sentence
     end
+  end
+
+  defp count_value(value) when is_integer(value), do: value
+
+  defp count_value(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {count, ""} when count >= 0 -> count
+      _other -> nil
+    end
+  end
+
+  defp count_value(_value), do: nil
+
+  attr :form, :any, required: true
+  attr :id, :string, required: true
+  attr :inverse_id, :string, required: true
+  attr :target_types, :list, default: []
+  attr :source, :string, default: nil
+  # The add form fills the machine name from the label; the edit form keeps it.
+  attr :name?, :boolean, default: false
+
+  # Step 3 of a relationship: what each side calls it. This side's label is
+  # the field's; the other side's is the reverse list (R4).
+  defp relationship_names(assigns) do
+    ~H"""
+    <section id={@id} aria-labelledby={"#{@id}-heading"} class="space-y-3 sm:col-span-2">
+      <.step_heading number={3} id={"#{@id}-heading"}>
+        {gettext("What each side calls it")}
+      </.step_heading>
+      <div class="grid items-start gap-3 lg:grid-cols-2">
+        <fieldset class="rounded-lg border border-base-content/10 bg-base-200/40 p-3">
+          <legend class="px-1 text-sm font-medium">
+            {gettext("What %{type} calls this", type: @source || gettext("the record"))}
+          </legend>
+          <div class="grid gap-3">
+            <.input
+              field={@form[:label]}
+              label={gettext("Label")}
+              placeholder={gettext("Ingredients")}
+            />
+            <.input
+              :if={@name?}
+              field={@form[:name]}
+              label={gettext("Machine name")}
+              placeholder="ingredients"
+              hint={gettext("Filled in from the label until you change it.")}
+            />
+          </div>
+        </fieldset>
+        <.inverse_field form={@form} id={@inverse_id} target_types={@target_types} />
+      </div>
+    </section>
+    """
+  end
+
+  attr :form, :any, required: true
+  attr :id, :string, required: true
+  attr :source, :string, default: nil
+  attr :target_types, :list, default: []
+
+  # What the admin is about to save, as the field list will say it.
+  defp relationship_summary(assigns) do
+    ~H"""
+    <p
+      :if={reference?(@form)}
+      id={@id}
+      role="status"
+      class="rounded-lg bg-base-200/60 p-3 text-sm sm:col-span-2"
+    >
+      <span class="font-medium">{gettext("In one sentence:")}</span>
+      {form_sentence(@form, @source, @target_types)}
+    </p>
+    """
+  end
+
+  # The add form's source side as words: the ticked types, "Recipe or Post".
+  defp scopes_label(scopes, content_types, dynamic_types) do
+    labels =
+      Enum.flat_map(scopes, fn
+        "def:" <> id ->
+          for dt <- dynamic_types, dt.definition.id == id, do: dt.label
+
+        type ->
+          for ct <- content_types, to_string(ct.type) == type, do: ct.label
+      end)
+
+    types_phrase(labels)
+  end
+
+  # The value form's type picker: every type but `:reference`, which is
+  # "A relationship" now.
+  defp value_type_options(field_types),
+    do: for(type <- field_types, type != :reference, do: {type_label(type), type})
+
+  # The step heading over the delete rule, in the relationship form.
+  attr :id, :string, required: true
+  attr :form, :any, required: true
+  attr :target_types, :list, default: []
+
+  defp relationship_rules(assigns) do
+    ~H"""
+    <section aria-labelledby={"#{@id}-heading"} class="space-y-3 sm:col-span-2">
+      <.step_heading number={4} id={"#{@id}-heading"}>
+        {gettext("When one is deleted")}
+      </.step_heading>
+      <.target_rules_field form={@form} id={@id} target_types={@target_types} />
+    </section>
+    """
+  end
+
+  attr :form, :any, required: true
+  attr :id, :string, required: true
+
+  # The first question on both forms (R9): a value, or a connection to other
+  # records. Toolset's relationship wizard starts the same way, so an admin
+  # who means "recipes have ingredients" never has to know that is a
+  # reference field.
+  defp kind_field(assigns) do
+    assigns =
+      assign(assigns, :kind, if(reference?(assigns.form), do: "relationship", else: "value"))
+
+    ~H"""
+    <fieldset id={@id} class="sm:col-span-2">
+      <legend class="mb-1 block text-sm font-medium">{gettext("This field holds")}</legend>
+      <div class="grid gap-2 sm:grid-cols-2">
+        <label
+          :for={{value, title, hint, icon} <- kind_choices()}
+          for={"#{@id}-#{value}"}
+          class={[
+            "flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors",
+            if(@kind == value,
+              do: "border-primary bg-primary/5",
+              else: "border-base-content/15 hover:border-base-content/30"
+            )
+          ]}
+        >
+          <input
+            type="radio"
+            id={"#{@id}-#{value}"}
+            name={"#{@form.name}[kind]"}
+            value={value}
+            checked={@kind == value}
+            class="mt-0.5 size-4 accent-primary"
+          />
+          <span class="min-w-0">
+            <span class="flex items-center gap-1.5 text-sm font-medium">
+              <.icon name={icon} class="size-4 text-base-content/60" />
+              {title}
+            </span>
+            <span class="mt-0.5 block text-xs text-base-content/60">{hint}</span>
+          </span>
+        </label>
+      </div>
+    </fieldset>
+    """
+  end
+
+  defp kind_choices do
+    [
+      {"value", gettext("A value"),
+       gettext("Text, a number, a date, an image — typed or picked on each record."),
+       "hero-pencil-square"},
+      {"relationship", gettext("A relationship"),
+       gettext(
+         "Connects each record to records of another type — a recipe's ingredients, a post's author."
+       ), "hero-arrows-right-left"}
+    ]
+  end
+
+  attr :number, :integer, required: true
+  attr :id, :string, required: true
+  slot :inner_block, required: true
+
+  defp step_heading(assigns) do
+    ~H"""
+    <h3 id={@id} class="flex items-center gap-2 text-sm font-semibold">
+      <span
+        aria-hidden="true"
+        class="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary-ink"
+      >
+        {@number}
+      </span>
+      {render_slot(@inner_block)}
+    </h3>
+    """
+  end
+
+  attr :form, :any, required: true
+  attr :id, :string, required: true
+  attr :target_types, :list, default: []
+  # The add form picks the source types (`scopes`, the same checkboxes the
+  # value form shows as "Content types"); the edit form names its one type.
+  attr :content_types, :list, default: []
+  attr :dynamic_types, :list, default: []
+  attr :scopes, :list, default: nil
+  attr :scope_error, :string, default: nil
+  attr :source, :string, default: nil
+  attr :targets_id, :string, required: true
+
+  # Step 1 of a relationship: both sides, named as a sentence — "Recipe links
+  # to Ingredient" — with as many target types as the admin ticks (R2).
+  defp relationship_sides(assigns) do
+    assigns = assign(assigns, :target, target_label(assigns.form, assigns.target_types))
+
+    ~H"""
+    <section id={@id} aria-labelledby={"#{@id}-heading"} class="space-y-3 sm:col-span-2">
+      <.step_heading number={1} id={"#{@id}-heading"}>
+        {gettext("Which records connect")}
+      </.step_heading>
+      <div class="grid items-start gap-3 rounded-lg border border-base-content/10 p-3 sm:grid-cols-[1fr_auto_1fr]">
+        <fieldset id={"#{@id}-source"}>
+          <legend class="mb-1 block text-sm font-medium">{gettext("From")}</legend>
+          <div :if={@scopes} class="flex flex-wrap gap-2">
+            <input type="hidden" name="field_definition[scopes][]" value="" />
+            <.scope_checkbox
+              :for={ct <- @content_types}
+              value={to_string(ct.type)}
+              label={ct.label}
+              scopes={@scopes}
+              chip
+            />
+            <.scope_checkbox
+              :for={dt <- @dynamic_types}
+              value={"def:#{dt.definition.id}"}
+              label={dt.label}
+              scopes={@scopes}
+              chip
+            />
+          </div>
+          <p :if={!@scopes} class="text-sm">
+            <span class="inline-flex items-center rounded-full border border-primary bg-primary/5 px-3 py-1">
+              {@source}
+            </span>
+          </p>
+          <p :if={@scopes} class="mt-1 text-xs text-base-content/60">
+            {gettext("The records this field is on. Each ticked type gets its own copy.")}
+          </p>
+          <p :if={@scope_error} class="mt-1.5 flex items-center gap-2 text-sm text-error">
+            <.icon name="hero-exclamation-circle" class="size-5" />
+            {@scope_error}
+          </p>
+        </fieldset>
+        <.icon
+          name="hero-arrow-right"
+          class="mx-auto hidden size-5 self-center text-base-content/40 sm:block"
+        />
+        <.target_types_field
+          form={@form}
+          id={@targets_id}
+          target_types={@target_types}
+          class=""
+        />
+      </div>
+      <p id={"#{@id}-sentence"} class="text-sm text-base-content/80">
+        <%= if @source && @target do %>
+          {gettext("%{source} links to %{type}.", source: @source, type: @target)}
+        <% else %>
+          {gettext("Tick a type on each side.")}
+        <% end %>
+      </p>
+    </section>
+    """
+  end
+
+  attr :form, :any, required: true
+  attr :id, :string, required: true
+  # Ids kept from the 1.5 form, so its radios and the bounds keep them.
+  attr :multiple_id, :string, required: true
+  attr :target_types, :list, default: []
+  attr :source, :string, default: nil
+
+  # Step 2 of a relationship: how many on each side, Toolset-style. This side
+  # is `multiple` with its optional item bounds; the other side is
+  # `max_sources` (R1b), as any number, only one, or a typed limit.
+  defp relationship_counts(assigns) do
+    target = target_label(assigns.form, assigns.target_types)
+    multiple? = assigns.form[:multiple].value in [true, "true"]
+
+    assigns =
+      assigns
+      |> assign(:target, target)
+      |> assign(:multiple?, multiple?)
+      |> assign(:choices, multiple_choices(:reference, target))
+      |> assign(:limit, sources_limit(assigns.form))
+      |> assign(:limit_choices, sources_choices(assigns.source))
+
+    ~H"""
+    <section id={@id} aria-labelledby={"#{@id}-heading"} class="space-y-3 sm:col-span-2">
+      <.step_heading number={2} id={"#{@id}-heading"}>
+        {gettext("How many on each side")}
+      </.step_heading>
+      <div class="grid gap-3 lg:grid-cols-2">
+        <fieldset class="rounded-lg border border-base-content/10 p-3">
+          <legend class="px-1 text-sm font-medium">
+            {gettext("Each %{source} connects…", source: @source || gettext("record"))}
+          </legend>
+          <div class="grid gap-2">
+            <label
+              :for={{value, title, hint, icon} <- @choices}
+              for={"#{@multiple_id}-#{value}"}
+              class={[
+                "flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors",
+                if(to_string(@multiple?) == value,
+                  do: "border-primary bg-primary/5",
+                  else: "border-base-content/15 hover:border-base-content/30"
+                )
+              ]}
+            >
+              <input
+                type="radio"
+                id={"#{@multiple_id}-#{value}"}
+                name={@form[:multiple].name}
+                value={value}
+                checked={to_string(@multiple?) == value}
+                class="mt-0.5 size-4 accent-primary"
+              />
+              <span class="min-w-0">
+                <span class="flex items-center gap-1.5 text-sm font-medium">
+                  <.icon name={icon} class="size-4 text-base-content/60" />
+                  {title}
+                </span>
+                <span class="mt-0.5 block text-xs text-base-content/60">{hint}</span>
+              </span>
+            </label>
+          </div>
+          <fieldset
+            :if={@multiple?}
+            id={"#{@multiple_id}-bounds"}
+            class="mt-3 rounded-lg border border-base-content/10 bg-base-200/40 p-3"
+          >
+            <legend class="px-1 text-sm font-medium">
+              {bounds_legend(:reference, @target)}
+              <span class="font-normal text-base-content/60">{gettext("(optional)")}</span>
+            </legend>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <.input
+                field={@form[:min_items]}
+                type="number"
+                min="0"
+                step="1"
+                inputmode="numeric"
+                label={gettext("Minimum")}
+                placeholder={gettext("No minimum")}
+              />
+              <.input
+                field={@form[:max_items]}
+                type="number"
+                min="1"
+                step="1"
+                inputmode="numeric"
+                label={gettext("Maximum")}
+                placeholder={gettext("No limit")}
+              />
+            </div>
+            <p class="mt-2 text-xs text-base-content/60">
+              {gettext(
+                "Leave a box empty for no limit. Editors are told when they save outside these numbers; an empty field is fine unless Required is ticked."
+              )}
+            </p>
+          </fieldset>
+        </fieldset>
+
+        <fieldset class="rounded-lg border border-base-content/10 p-3">
+          <legend class="px-1 text-sm font-medium">
+            {gettext("Each %{type} can be linked from…", type: @target || gettext("linked record"))}
+          </legend>
+          <div class="grid gap-2">
+            <label
+              :for={{value, title, hint, icon} <- @limit_choices}
+              for={"#{@id}-sources-#{value}"}
+              class={[
+                "flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors",
+                if(@limit == value,
+                  do: "border-primary bg-primary/5",
+                  else: "border-base-content/15 hover:border-base-content/30"
+                )
+              ]}
+            >
+              <input
+                type="radio"
+                id={"#{@id}-sources-#{value}"}
+                name={"#{@form.name}[sources_limit]"}
+                value={value}
+                checked={@limit == value}
+                class="mt-0.5 size-4 accent-primary"
+              />
+              <span class="min-w-0">
+                <span class="flex items-center gap-1.5 text-sm font-medium">
+                  <.icon name={icon} class="size-4 text-base-content/60" />
+                  {title}
+                </span>
+                <span class="mt-0.5 block text-xs text-base-content/60">{hint}</span>
+              </span>
+            </label>
+          </div>
+          <div :if={@limit == "some"} id={"#{@id}-sources-limit"} class="mt-3 max-w-xs">
+            <.input
+              field={@form[:max_sources]}
+              type="number"
+              min="1"
+              step="1"
+              inputmode="numeric"
+              label={gettext("At most")}
+              placeholder={gettext("No limit")}
+            />
+          </div>
+          <p class="mt-2 text-xs text-base-content/60">
+            {gettext(
+              "Limit it when what you link to is scarce — a seat, a slot, a featured place. Once a record is full, editors see it as full in the picker. Lowering the number later never removes links that already exist."
+            )}
+          </p>
+        </fieldset>
+      </div>
+    </section>
+    """
+  end
+
+  # Which of the three choices the form is on: the one last picked, else the
+  # one the stored `max_sources` reads as.
+  defp sources_limit(form) do
+    case form.params["sources_limit"] do
+      limit when limit in ["any", "one", "some"] ->
+        limit
+
+      _unpicked ->
+        case count_value(form[:max_sources].value) do
+          nil -> "any"
+          1 -> "one"
+          _count -> "some"
+        end
+    end
+  end
+
+  defp sources_choices(source) do
+    source = source || gettext("record")
+
+    [
+      {"any", gettext("Any number of %{source} records", source: source),
+       gettext("Many-to-many: an ingredient goes in every recipe that uses it."),
+       "hero-squares-plus"},
+      {"one", gettext("Only one %{source}", source: source),
+       gettext("One-to-many: a chapter belongs to a single book."), "hero-link"},
+      {"some", gettext("A limited number"),
+       gettext("At most the number you set — three speakers per panel."), "hero-hashtag"}
+    ]
   end
 
   attr :form, :any, required: true
@@ -1461,13 +1958,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     <fieldset
       :if={reference?(@form)}
       id={@id}
-      class="rounded-lg border border-base-content/10 bg-base-200/40 p-3 sm:col-span-2"
+      class="rounded-lg border border-base-content/10 bg-base-200/40 p-3"
     >
       <legend class="px-1 text-sm font-medium">
         {gettext("What %{type} calls this", type: @target)}
         <span class="font-normal text-base-content/60">{gettext("(optional)")}</span>
       </legend>
-      <div class="grid gap-3 sm:grid-cols-2">
+      <div class="grid gap-3">
         <.input
           field={@form[:inverse_label]}
           label={gettext("Name on the other side")}
@@ -1666,10 +2163,21 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   attr :value, :string, required: true
   attr :label, :string, required: true
   attr :scopes, :list, required: true
+  attr :chip, :boolean, default: false
 
   defp scope_checkbox(assigns) do
     ~H"""
-    <label class="flex items-center gap-2 text-sm">
+    <label class={[
+      "flex items-center gap-2 text-sm",
+      @chip &&
+        [
+          "cursor-pointer rounded-full border px-3 py-1 transition-colors",
+          if(@value in @scopes,
+            do: "border-primary bg-primary/5 text-base-content",
+            else: "border-base-content/15 text-base-content/80 hover:border-base-content/30"
+          )
+        ]
+    ]}>
       <input
         type="checkbox"
         name="field_definition[scopes][]"
@@ -1726,62 +2234,91 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             phx-submit="create"
             class="card card-pad grid gap-4 sm:grid-cols-2"
           >
-            <fieldset class="sm:col-span-2">
-              <legend class="mb-1 block text-sm font-medium">
-                {gettext("Content types")}
-              </legend>
-              <p class="mb-2 text-xs text-base-content/60">
-                {gettext(
-                  "Tick every type that should carry this field. Each gets its own copy under the same machine name, which you can then change on its own."
-                )}
-              </p>
-              <input type="hidden" name="field_definition[scopes][]" value="" />
-              <div class="grid gap-x-4 gap-y-1 sm:grid-cols-3">
-                <.scope_checkbox
-                  :for={ct <- @content_types}
-                  value={to_string(ct.type)}
-                  label={ct.label}
-                  scopes={@scopes}
-                />
-                <.scope_checkbox
-                  :for={dt <- @dynamic_types}
-                  value={"def:#{dt.definition.id}"}
-                  label={dt.label}
-                  scopes={@scopes}
-                />
-              </div>
-              <p :if={@scope_error} class="mt-1.5 flex items-center gap-2 text-sm text-error">
-                <.icon name="hero-exclamation-circle" class="size-5" />
-                {@scope_error}
-              </p>
-            </fieldset>
-            <.input field={@form[:label]} label={gettext("Label")} placeholder="Shoe size" />
-            <.input
-              field={@form[:name]}
-              label={gettext("Machine name")}
-              placeholder="shoe_size"
-              hint={gettext("Filled in from the label until you change it.")}
-            />
-            <.input
-              field={@form[:field_type]}
-              type="select"
-              label={gettext("Field type")}
-              options={Enum.map(@field_types, &{type_label(&1), &1})}
-              hint={type_description(@form[:field_type].value, @field_types)}
-            />
-            <.target_types_field form={@form} id="new-field-targets" target_types={@target_types} />
-            <.compute_builder
-              :if={computed?(@form)}
-              form={@form}
-              builder={@builder}
-              ctx={@builder_ctx}
-              recipes={@recipes}
-              categories={@function_categories}
-              id="new-field"
-            />
-            <.multiple_field form={@form} id="new-field-multiple" target_types={@target_types} />
-            <.inverse_field form={@form} id="new-field-inverse" target_types={@target_types} />
-            <.target_rules_field form={@form} id="new-field-rules" target_types={@target_types} />
+            <.kind_field form={@form} id="new-field-kind" />
+            <%= if reference?(@form) do %>
+              <input type="hidden" name={@form[:field_type].name} value="reference" />
+              <.relationship_sides
+                form={@form}
+                id="new-field-sides"
+                targets_id="new-field-targets"
+                target_types={@target_types}
+                content_types={@content_types}
+                dynamic_types={@dynamic_types}
+                scopes={@scopes}
+                scope_error={@scope_error}
+                source={scopes_label(@scopes, @content_types, @dynamic_types)}
+              />
+              <.relationship_counts
+                form={@form}
+                id="new-field-counts"
+                multiple_id="new-field-multiple"
+                target_types={@target_types}
+                source={scopes_label(@scopes, @content_types, @dynamic_types)}
+              />
+              <.relationship_names
+                form={@form}
+                id="new-field-names"
+                inverse_id="new-field-inverse"
+                target_types={@target_types}
+                source={scopes_label(@scopes, @content_types, @dynamic_types)}
+                name?
+              />
+              <.relationship_rules form={@form} id="new-field-rules" target_types={@target_types} />
+            <% else %>
+              <fieldset class="sm:col-span-2">
+                <legend class="mb-1 block text-sm font-medium">
+                  {gettext("Content types")}
+                </legend>
+                <p class="mb-2 text-xs text-base-content/60">
+                  {gettext(
+                    "Tick every type that should carry this field. Each gets its own copy under the same machine name, which you can then change on its own."
+                  )}
+                </p>
+                <input type="hidden" name="field_definition[scopes][]" value="" />
+                <div class="grid gap-x-4 gap-y-1 sm:grid-cols-3">
+                  <.scope_checkbox
+                    :for={ct <- @content_types}
+                    value={to_string(ct.type)}
+                    label={ct.label}
+                    scopes={@scopes}
+                  />
+                  <.scope_checkbox
+                    :for={dt <- @dynamic_types}
+                    value={"def:#{dt.definition.id}"}
+                    label={dt.label}
+                    scopes={@scopes}
+                  />
+                </div>
+                <p :if={@scope_error} class="mt-1.5 flex items-center gap-2 text-sm text-error">
+                  <.icon name="hero-exclamation-circle" class="size-5" />
+                  {@scope_error}
+                </p>
+              </fieldset>
+              <.input field={@form[:label]} label={gettext("Label")} placeholder="Shoe size" />
+              <.input
+                field={@form[:name]}
+                label={gettext("Machine name")}
+                placeholder="shoe_size"
+                hint={gettext("Filled in from the label until you change it.")}
+              />
+              <.input
+                field={@form[:field_type]}
+                type="select"
+                label={gettext("Field type")}
+                options={value_type_options(@field_types)}
+                hint={type_description(@form[:field_type].value, @field_types)}
+              />
+              <.compute_builder
+                :if={computed?(@form)}
+                form={@form}
+                builder={@builder}
+                ctx={@builder_ctx}
+                recipes={@recipes}
+                categories={@function_categories}
+                id="new-field"
+              />
+              <.multiple_field form={@form} id="new-field-multiple" target_types={@target_types} />
+            <% end %>
             <.input field={@form[:help_text]} label={gettext("Help text")} />
             <.localization_input field={@form[:localization]} />
             <.options_field form={@form} id="new-field-options" />
@@ -1819,6 +2356,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               />
               {gettext("Searchable (search indexes this value as text)")}
             </label>
+            <.relationship_summary
+              form={@form}
+              id="new-field-summary"
+              source={scopes_label(@scopes, @content_types, @dynamic_types)}
+              target_types={@target_types}
+            />
             <div class="sm:col-span-2">
               <.button type="submit" variant="primary">{gettext("Add field")}</.button>
             </div>
@@ -1914,7 +2457,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                       id={"field-#{definition.id}-links"}
                       class="text-xs text-base-content/60"
                     >
-                      {reference_summary(definition, @target_types)}
+                      {reference_summary(definition, @target_types, @dynamic_types)}
                     </p>
                     <p
                       :if={
@@ -1991,44 +2534,66 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                   phx-submit="save_edit"
                   class="grid gap-4 sm:grid-cols-2"
                 >
-                  <.input
-                    field={@edit.form[:field_type]}
-                    type="select"
-                    label={gettext("Field type")}
-                    options={Enum.map(@field_types, &{type_label(&1), &1})}
-                    hint={type_description(@edit.form[:field_type].value, @field_types)}
-                  />
-                  <.input field={@edit.form[:label]} label={gettext("Label")} />
-                  <.target_types_field
-                    form={@edit.form}
-                    id={"edit-field-targets-#{@edit.id}"}
-                    target_types={@target_types}
-                  />
-                  <.compute_builder
-                    :if={computed?(@edit.form)}
-                    form={@edit.form}
-                    builder={@edit.builder}
-                    ctx={@edit.ctx}
-                    recipes={@recipes}
-                    categories={@function_categories}
-                    id={"edit-field-#{@edit.id}"}
-                  />
-                  <.multiple_field
-                    form={@edit.form}
-                    id={"edit-field-multiple-#{@edit.id}"}
-                    stored={definition}
-                    target_types={@target_types}
-                  />
-                  <.inverse_field
-                    form={@edit.form}
-                    id={"edit-field-inverse-#{@edit.id}"}
-                    target_types={@target_types}
-                  />
-                  <.target_rules_field
-                    form={@edit.form}
-                    id={"edit-field-rules-#{@edit.id}"}
-                    target_types={@target_types}
-                  />
+                  <.kind_field form={@edit.form} id={"edit-field-kind-#{@edit.id}"} />
+                  <%= if reference?(@edit.form) do %>
+                    <input type="hidden" name={@edit.form[:field_type].name} value="reference" />
+                    <.relationship_sides
+                      form={@edit.form}
+                      id={"edit-field-sides-#{@edit.id}"}
+                      targets_id={"edit-field-targets-#{@edit.id}"}
+                      target_types={@target_types}
+                      source={group_heading(scope_key(definition), @dynamic_types)}
+                    />
+                    <.relationship_counts
+                      form={@edit.form}
+                      id={"edit-field-counts-#{@edit.id}"}
+                      multiple_id={"edit-field-multiple-#{@edit.id}"}
+                      target_types={@target_types}
+                      source={group_heading(scope_key(definition), @dynamic_types)}
+                    />
+                    <.multiple_field
+                      form={@edit.form}
+                      id={"edit-field-multiple-#{@edit.id}"}
+                      stored={definition}
+                      target_types={@target_types}
+                    />
+                    <.relationship_names
+                      form={@edit.form}
+                      id={"edit-field-names-#{@edit.id}"}
+                      inverse_id={"edit-field-inverse-#{@edit.id}"}
+                      target_types={@target_types}
+                      source={group_heading(scope_key(definition), @dynamic_types)}
+                    />
+                    <.relationship_rules
+                      form={@edit.form}
+                      id={"edit-field-rules-#{@edit.id}"}
+                      target_types={@target_types}
+                    />
+                  <% else %>
+                    <.input
+                      field={@edit.form[:field_type]}
+                      type="select"
+                      label={gettext("Field type")}
+                      options={value_type_options(@field_types)}
+                      hint={type_description(@edit.form[:field_type].value, @field_types)}
+                    />
+                    <.input field={@edit.form[:label]} label={gettext("Label")} />
+                    <.compute_builder
+                      :if={computed?(@edit.form)}
+                      form={@edit.form}
+                      builder={@edit.builder}
+                      ctx={@edit.ctx}
+                      recipes={@recipes}
+                      categories={@function_categories}
+                      id={"edit-field-#{@edit.id}"}
+                    />
+                    <.multiple_field
+                      form={@edit.form}
+                      id={"edit-field-multiple-#{@edit.id}"}
+                      stored={definition}
+                      target_types={@target_types}
+                    />
+                  <% end %>
                   <.input field={@edit.form[:help_text]} label={gettext("Help text")} />
                   <.localization_input field={@edit.form[:localization]} />
                   <.options_field form={@edit.form} id={"edit-field-options-#{@edit.id}"} />
@@ -2044,6 +2609,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     />
                     {gettext("Required")}
                   </label>
+                  <.relationship_summary
+                    form={@edit.form}
+                    id={"edit-field-summary-#{@edit.id}"}
+                    source={group_heading(scope_key(definition), @dynamic_types)}
+                    target_types={@target_types}
+                  />
                   <div class="flex gap-2 sm:col-span-2">
                     <.button type="submit" variant="primary">{gettext("Save")}</.button>
                     <button

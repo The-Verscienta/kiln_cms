@@ -42,10 +42,31 @@ defmodule KilnCMS.CMS.JoinGraduation do
   table has one foreign key per end, and each target type is its own table,
   so a polymorphic field has no single resource to point at. Split the field
   into one field per target type first and graduate each.
+
+  ## Target rules
+
+  A field's rules about its targets (R1b, R5) graduate with it (#2024), read
+  from the same organization's definition as the schema:
+
+    * `on_target_delete: :restrict` becomes `on_delete: :restrict` on the
+      target's foreign key, and `check_restrict/1` refuses the purge first,
+      with the same `KilnCMS.CMS.Errors.TargetStillConnected` the field gave.
+    * `:clear` becomes `on_delete: :delete`: the purged record's connections
+      go with it, which is what taking it out of each referrer did.
+    * `:keep` becomes `on_delete: :delete` too. A foreign key cannot point at
+      nothing, so a broken reference is no longer possible; the generator
+      says so.
+    * `max_sources` becomes `KilnCMS.CMS.JoinGraduation.SourceCap` on the
+      resource's create: the same count, under the same advisory lock, as
+      `KilnCMS.CMS.ContentLinks.reconcile/1`.
+
+  A generated resource says what it graduated from in `__kiln_join__/0`,
+  which is how `join_resources/0` finds it.
   """
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.Errors.TargetStillConnected
   alias KilnCMS.CMS.FieldDefinition
 
   @domain_namespace KilnCMS.CMS
@@ -82,7 +103,9 @@ defmodule KilnCMS.CMS.JoinGraduation do
           module: module(),
           table: String.t(),
           base: String.t(),
-          org_id: Ash.UUID.t()
+          org_id: Ash.UUID.t(),
+          on_target_delete: :keep | :clear | :restrict,
+          max_sources: pos_integer() | nil
         }
 
   @doc """
@@ -134,7 +157,9 @@ defmodule KilnCMS.CMS.JoinGraduation do
          module: module,
          table: "#{type}_#{name}_links",
          base: "#{type}_#{name}_link",
-         org_id: org_id
+         org_id: org_id,
+         on_target_delete: definition.on_target_delete || :keep,
+         max_sources: definition.max_sources
        }}
     end
   end
@@ -604,4 +629,94 @@ defmodule KilnCMS.CMS.JoinGraduation do
   end
 
   defp registry_actor, do: KilnCMS.CMS.Housekeeping.system(:cms_registry)
+
+  # --- Target rules (#2024) ----------------------------------------------
+
+  @doc """
+  Every graduated join resource: the resources of each `:ash_domains` domain
+  that define `__kiln_join__/0`, the metadata `mix kiln.gen.join` writes.
+  """
+  @spec join_resources() :: [module()]
+  def join_resources do
+    :kiln_cms
+    |> Application.get_env(:ash_domains, [])
+    |> Enum.flat_map(&Ash.Domain.Info.resources/1)
+    |> Enum.uniq()
+    |> Enum.filter(&(Code.ensure_loaded?(&1) and function_exported?(&1, :__kiln_join__, 0)))
+  end
+
+  @doc """
+  `:ok`, or the error refusing the purge of `record` because a graduated
+  field whose target foreign key is `on_delete: :restrict` still connects
+  other records to it — the join-table twin of
+  `KilnCMS.CMS.ContentLinks.TargetDelete.check_restrict/1`, with the same
+  error, so the trash says the same thing before and after graduation.
+
+  The rule is read off the foreign key itself, so a resource edited by hand
+  since it was generated is held to what its table does.
+  """
+  @spec check_restrict(struct()) :: :ok | {:error, Exception.t()}
+  def check_restrict(%resource{} = record) do
+    join_resources()
+    |> Enum.filter(&restricts?(&1, resource))
+    |> Enum.sort_by(&{&1.__kiln_join__().source_type, &1.__kiln_join__().field})
+    |> Enum.find_value(:ok, fn join ->
+      case connected_sources(join, record.id, record.org_id) -- [record.id] do
+        [] ->
+          nil
+
+        sources ->
+          {:error,
+           TargetStillConnected.exception(
+             field_label: join.__kiln_join__().label,
+             count: length(sources)
+           )}
+      end
+    end)
+  end
+
+  @doc """
+  The ids of every record of `org_id` that a restricting graduated join
+  resource connects to, for `KilnCMS.CMS.Preparations.SkipRestrictedTargets`
+  — so the nightly purge does not schedule a purge `check_restrict/1` would
+  refuse.
+  """
+  @spec restricted_target_ids(Ash.UUID.t()) :: [Ash.UUID.t()]
+  def restricted_target_ids(org_id) do
+    join_resources()
+    |> Enum.filter(&restricts?(&1, nil))
+    |> Enum.flat_map(fn join ->
+      # authorize?: false — bookkeeping for a purge the caller authorizes,
+      # and the join resource's policies admit editors, not the system.
+      join
+      |> Ash.Query.select([:id, :target_id])
+      |> Ash.read!(authorize?: false, tenant: org_id)
+      |> Enum.map(& &1.target_id)
+    end)
+    |> Enum.uniq()
+  end
+
+  # A join resource whose target foreign key refuses the delete — of a
+  # `resource` record, or of any (nil).
+  defp restricts?(join, resource) do
+    target = Ash.Resource.Info.relationship(join, :target)
+
+    (is_nil(resource) or target.destination == resource) and
+      match?(%{on_delete: :restrict}, AshPostgres.DataLayer.Info.reference(join, :target))
+  end
+
+  @doc false
+  # The distinct sources connected to `target_id` through `join`.
+  @spec connected_sources(module(), Ash.UUID.t(), Ash.UUID.t()) :: [Ash.UUID.t()]
+  def connected_sources(join, target_id, org_id) do
+    join
+    |> Ash.Query.for_read(:to_target, %{target_id: target_id})
+    |> Ash.Query.select([:id, :source_id])
+    # authorize?: false — the purge or create this count guards is the
+    # caller's own authorized action, and a refused read must never pass as
+    # "nothing connects".
+    |> Ash.read!(authorize?: false, tenant: org_id)
+    |> Enum.map(& &1.source_id)
+    |> Enum.uniq()
+  end
 end
