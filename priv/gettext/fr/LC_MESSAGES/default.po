@@ -1111,21 +1111,6 @@ msgstr "404 (%{count})"
 msgid "6-digit code"
 msgstr "Code à 6 chiffres"
 
-#: lib/kiln_cms/notifications.ex
-#, elixir-autogen, elixir-format
-msgid "A %{kind} is waiting for review."
-msgstr "Un %{kind} attend une relecture."
-
-#: lib/kiln_cms/notifications.ex
-#, elixir-autogen, elixir-format
-msgid "A %{kind} you authored is now live."
-msgstr "Un %{kind} que vous avez rédigé est maintenant en ligne."
-
-#: lib/kiln_cms/notifications.ex
-#, elixir-autogen, elixir-format
-msgid "A %{kind} you authored was returned to draft."
-msgstr "Un %{kind} que vous avez rédigé est repassé en brouillon."
-
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "A backup can't run on this deployment."
@@ -4037,13 +4022,13 @@ msgstr "Connecter"
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
-msgid "Connect a %{type}"
-msgstr "Relier un %{type}"
+msgid "Connect %{type} records"
+msgstr "Relier des enregistrements %{type}"
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
-msgid "Connect a %{type}…"
-msgstr "Relier un %{type}…"
+msgid "Connect %{type} records…"
+msgstr "Relier des enregistrements %{type}…"
 
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
@@ -18589,6 +18574,11 @@ msgstr "Visuel"
 msgid "Visual separator between sections"
 msgstr "Séparateur visuel entre les sections"
 
+#: lib/kiln_cms/notifications.ex
+#, elixir-autogen, elixir-format
+msgid "Waiting for review: one %{kind}."
+msgstr "En attente de relecture : un contenu %{kind}."
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Waiting for your device… Follow your browser's prompt to finish."
@@ -19396,6 +19386,16 @@ msgstr "Votre désabonnement a bien été pris en compte."
 #, elixir-autogen, elixir-format
 msgid "You've made too many requests in a short time. Try again in %{seconds} seconds."
 msgstr "Vous avez effectué trop de requêtes en peu de temps. Réessayez dans %{seconds} secondes."
+
+#: lib/kiln_cms/notifications.ex
+#, elixir-autogen, elixir-format
+msgid "Your %{kind} is now live."
+msgstr "Votre contenu %{kind} est maintenant en ligne."
+
+#: lib/kiln_cms/notifications.ex
+#, elixir-autogen, elixir-format
+msgid "Your %{kind} was returned to draft."
+msgstr "Votre contenu %{kind} est repassé en brouillon."
 
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format

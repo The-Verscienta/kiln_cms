@@ -145,6 +145,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Messages that name a content type no longer put "a" in front of it ("A Ingredient can't be deleted…", "Connect a Article…").**
+  ([#2023](https://github.com/The-Verscienta/kiln_cms/issues/2023))
+
 - **GraphQL's `referencedBy(inverse:)` lists the connecting records on entries
   of admin-defined types too; it returned an empty list there.**
   ([#2026](https://github.com/The-Verscienta/kiln_cms/pull/2026) · [long form](docs/changelog/unreleased.md#graphql-referenced-by-inverse-on-entries))

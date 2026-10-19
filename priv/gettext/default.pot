@@ -1111,21 +1111,6 @@ msgstr ""
 msgid "6-digit code"
 msgstr ""
 
-#: lib/kiln_cms/notifications.ex
-#, elixir-autogen, elixir-format
-msgid "A %{kind} is waiting for review."
-msgstr ""
-
-#: lib/kiln_cms/notifications.ex
-#, elixir-autogen, elixir-format
-msgid "A %{kind} you authored is now live."
-msgstr ""
-
-#: lib/kiln_cms/notifications.ex
-#, elixir-autogen, elixir-format
-msgid "A %{kind} you authored was returned to draft."
-msgstr ""
-
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "A backup can't run on this deployment."
@@ -4037,12 +4022,12 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
-msgid "Connect a %{type}"
+msgid "Connect %{type} records"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
-msgid "Connect a %{type}…"
+msgid "Connect %{type} records…"
 msgstr ""
 
 #: lib/kiln_cms_web/live/social_live.ex
@@ -18589,6 +18574,11 @@ msgstr ""
 msgid "Visual separator between sections"
 msgstr ""
 
+#: lib/kiln_cms/notifications.ex
+#, elixir-autogen, elixir-format
+msgid "Waiting for review: one %{kind}."
+msgstr ""
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Waiting for your device… Follow your browser's prompt to finish."
@@ -19395,6 +19385,16 @@ msgstr ""
 #: lib/kiln_cms_web/plugs/rate_limit.ex
 #, elixir-autogen, elixir-format
 msgid "You've made too many requests in a short time. Try again in %{seconds} seconds."
+msgstr ""
+
+#: lib/kiln_cms/notifications.ex
+#, elixir-autogen, elixir-format
+msgid "Your %{kind} is now live."
+msgstr ""
+
+#: lib/kiln_cms/notifications.ex
+#, elixir-autogen, elixir-format
+msgid "Your %{kind} was returned to draft."
 msgstr ""
 
 #: lib/kiln_cms_web/live/account_live.ex

@@ -375,7 +375,7 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
           errors={[]}
           rows={false}
           notify={{__MODULE__, @id}}
-          placeholder={gettext("Connect a %{type}…", type: @reverse.source_label)}
+          placeholder={gettext("Connect %{type} records…", type: @reverse.source_label)}
           actor={@actor}
           tenant={@tenant}
         />
@@ -427,7 +427,7 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
   defp picker_definition(reverse) do
     %FieldDefinition{
       name: "reverse-#{reverse.source_type}-#{reverse.field}",
-      label: gettext("Connect a %{type}", type: reverse.source_label),
+      label: gettext("Connect %{type} records", type: reverse.source_label),
       field_type: :reference,
       target_type: reverse.source_type,
       target_types: [],

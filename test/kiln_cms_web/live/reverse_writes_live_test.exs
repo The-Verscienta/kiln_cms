@@ -106,6 +106,9 @@ defmodule KilnCMSWeb.ReverseWritesLiveTest do
 
     refute has_element?(lv, row(ctx, source))
 
+    # No article before the admin's type label (#2023): "Connect a Article…".
+    assert has_element?(lv, ~s|#{picker(ctx)}-search[placeholder="Connect Post records…"]|)
+
     lv
     |> element("#{picker(ctx)}-search")
     |> render_change(%{"_kiln_ref_q" => %{"reverse-post-#{ctx.field}" => ctx.word}})
