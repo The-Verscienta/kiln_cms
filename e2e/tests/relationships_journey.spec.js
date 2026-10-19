@@ -221,7 +221,7 @@ test.describe("relationships journey", () => {
       await field.locator('button[phx-click="edit"]').click();
       await page.locator('[id^="edit-field-rules-"][id$="-delete-clear"]').check();
       await page.locator('form[id^="edit-field-"] button[type=submit]').click();
-      await expect(field).toContainText("removes it from the records");
+      await expect(field).toContainText("are removed from the records");
 
       await page.goto("/editor/trash");
       page.once("dialog", dialog => dialog.accept());

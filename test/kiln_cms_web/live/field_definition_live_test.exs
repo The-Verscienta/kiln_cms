@@ -281,7 +281,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
 
     summary = lv |> element("#field-#{field.id}-rules") |> render()
     assert summary =~ "Each Page can be linked from at most 3 records."
-    assert summary =~ "A Page can&#39;t be deleted for good while anything links to it."
+    assert summary =~ "Page records can&#39;t be deleted for good while anything links to them."
 
     # A blank cap clears it; the rule changes to clear.
     lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
@@ -297,7 +297,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     assert {field.max_sources, field.on_target_delete} == {nil, :clear}
 
     assert lv |> element("#field-#{field.id}-rules") |> render() =~
-             "Deleting a Page for good removes it from the records linking to it."
+             "Page records deleted for good are removed from the records linking to them."
   end
 
   # R2: ticking several types stores `target_types`; ticking one keeps the

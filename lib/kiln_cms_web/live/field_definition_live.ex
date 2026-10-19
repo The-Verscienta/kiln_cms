@@ -1394,12 +1394,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     rule =
       case definition.on_target_delete do
         :clear ->
-          gettext("Deleting a %{type} for good removes it from the records linking to it.",
+          gettext(
+            "%{type} records deleted for good are removed from the records linking to them.",
             type: target
           )
 
         :restrict ->
-          gettext("A %{type} can't be deleted for good while anything links to it.",
+          gettext("%{type} records can't be deleted for good while anything links to them.",
             type: target
           )
 

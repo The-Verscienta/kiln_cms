@@ -854,6 +854,16 @@ msgstr "%{type} (inconnu)"
 msgid "%{type} content"
 msgstr "un contenu de type %{type}"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{type} records can't be deleted for good while anything links to them."
+msgstr "Les enregistrements %{type} ne peuvent pas être supprimés définitivement tant que quelque chose y est lié."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{type} records deleted for good are removed from the records linking to them."
+msgstr "Les enregistrements %{type} supprimés définitivement sont retirés des enregistrements qui y sont liés."
+
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
 msgid "%{type} records that connect to this one through their %{field} field."
@@ -1090,26 +1100,6 @@ msgstr "404 (%{count})"
 #, elixir-autogen, elixir-format
 msgid "6-digit code"
 msgstr "Code à 6 chiffres"
-
-#: lib/kiln_cms/notifications.ex
-#, elixir-autogen, elixir-format
-msgid "A %{kind} is waiting for review."
-msgstr "Un %{kind} attend une relecture."
-
-#: lib/kiln_cms/notifications.ex
-#, elixir-autogen, elixir-format
-msgid "A %{kind} you authored is now live."
-msgstr "Un %{kind} que vous avez rédigé est maintenant en ligne."
-
-#: lib/kiln_cms/notifications.ex
-#, elixir-autogen, elixir-format
-msgid "A %{kind} you authored was returned to draft."
-msgstr "Un %{kind} que vous avez rédigé est repassé en brouillon."
-
-#: lib/kiln_cms_web/live/field_definition_live.ex
-#, elixir-autogen, elixir-format
-msgid "A %{type} can't be deleted for good while anything links to it."
-msgstr "Un %{type} ne peut pas être supprimé définitivement tant que quelque chose y est lié."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -3997,13 +3987,13 @@ msgstr "Connecter"
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
-msgid "Connect a %{type}"
-msgstr "Relier un %{type}"
+msgid "Connect %{type} records"
+msgstr "Relier des enregistrements %{type}"
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
-msgid "Connect a %{type}…"
-msgstr "Relier un %{type}…"
+msgid "Connect %{type} records…"
+msgstr "Relier des enregistrements %{type}…"
 
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
@@ -5510,11 +5500,6 @@ msgstr "Supprimé, dans la corbeille ou invisible pour vous"
 #, elixir-autogen, elixir-format
 msgid "Deleted."
 msgstr "Supprimé."
-
-#: lib/kiln_cms_web/live/field_definition_live.ex
-#, elixir-autogen, elixir-format
-msgid "Deleting a %{type} for good removes it from the records linking to it."
-msgstr "Supprimer définitivement un %{type} le retire des enregistrements qui y sont liés."
 
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
@@ -18505,6 +18490,11 @@ msgstr "Visuel"
 msgid "Visual separator between sections"
 msgstr "Séparateur visuel entre les sections"
 
+#: lib/kiln_cms/notifications.ex
+#, elixir-autogen, elixir-format
+msgid "Waiting for review: one %{kind}."
+msgstr "En attente de relecture : un contenu %{kind}."
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Waiting for your device… Follow your browser's prompt to finish."
@@ -19297,6 +19287,16 @@ msgstr "Votre désabonnement a bien été pris en compte."
 #, elixir-autogen, elixir-format
 msgid "You've made too many requests in a short time. Try again in %{seconds} seconds."
 msgstr "Vous avez effectué trop de requêtes en peu de temps. Réessayez dans %{seconds} secondes."
+
+#: lib/kiln_cms/notifications.ex
+#, elixir-autogen, elixir-format
+msgid "Your %{kind} is now live."
+msgstr "Votre contenu %{kind} est maintenant en ligne."
+
+#: lib/kiln_cms/notifications.ex
+#, elixir-autogen, elixir-format
+msgid "Your %{kind} was returned to draft."
+msgstr "Votre contenu %{kind} est repassé en brouillon."
 
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
