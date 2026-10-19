@@ -58,7 +58,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Related content uses the reference picker: search, reorder, remove and
   open, over the record's own type, with the order kept.**
-  ([#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025) · [long form](docs/changelog/unreleased.md#related-content-uses-the-reference-picker))
+  ([#2030](https://github.com/The-Verscienta/kiln_cms/pull/2030) · [long form](docs/changelog/unreleased.md#related-content-uses-the-reference-picker))
 
 - **API clients can connect, disconnect and reorder references: GraphQL's
   `add<Type>References`, `remove<Type>References` and `move<Type>Reference`, and

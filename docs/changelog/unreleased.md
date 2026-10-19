@@ -27,7 +27,7 @@ carries the reasoning.
   sorted), so publishing a reorder lands it. Nothing is removed: the
   arguments, relationship and API are unchanged, and links saved before keep
   position 0 until their list is next saved.
-  ([#2025](https://github.com/The-Verscienta/kiln_cms/issues/2025))
+  ([#2030](https://github.com/The-Verscienta/kiln_cms/pull/2030))
 
 <a id="api-clients-can-connect-disconnect-and-reorder-references-graphqls"></a>
 
