@@ -34,8 +34,9 @@ defmodule KilnCMS.CMS.TypeDefinition do
     type "type_definition"
 
     # `?include=field_definitions` hands a client the `custom_fields` schema in
-    # the same call (AshJsonApi 400s on any include not declared here).
-    includes [:field_definitions]
+    # the same call (AshJsonApi 400s on any include not declared here), and
+    # `field_definitions.group_fields` the sub-fields of each group among them.
+    includes field_definitions: [:group_fields]
 
     routes do
       base "/type-definitions"

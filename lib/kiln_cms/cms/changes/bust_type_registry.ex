@@ -89,9 +89,10 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
               content_type = Map.get(record, :content_type) ->
                 to_string(content_type)
 
-              # A link field (R3) re-fires its reference field's type: its
-              # values were moved or purged inside that type's documents.
-              parent_id = Map.get(record, :link_of_id) ->
+              # A link field (R3) re-fires its reference field's type, a group
+              # sub-field its group's: its values were moved or purged inside
+              # that type's documents.
+              parent_id = Map.get(record, :link_of_id) || Map.get(record, :group_of_id) ->
                 link_parent_type(parent_id, record.org_id)
 
               true ->

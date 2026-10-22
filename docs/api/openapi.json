@@ -3679,6 +3679,19 @@
                 "description": "Field included by default.",
                 "type": "string"
               },
+              "group_of_id": {
+                "anyOf": [
+                  {
+                    "format": "uuid",
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
               "help_text": {
                 "anyOf": [
                   {
@@ -3863,6 +3876,62 @@
             "additionalProperties": false,
             "description": "A relationships object for a field_definition",
             "properties": {
+              "group_fields": {
+                "properties": {
+                  "data": {
+                    "description": "Relationship data for group_fields",
+                    "items": {
+                      "additionalProperties": false,
+                      "description": "Resource identifiers for group_fields",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "meta": {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "id"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array",
+                    "uniqueItems": true
+                  }
+                }
+              },
+              "group_of": {
+                "properties": {
+                  "data": {
+                    "additionalProperties": false,
+                    "description": "An identifier for group_of",
+                    "nullable": true,
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "meta": {
+                        "additionalProperties": true,
+                        "type": "object"
+                      },
+                      "type": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
               "link_fields": {
                 "properties": {
                   "data": {
@@ -3981,6 +4050,15 @@
           },
           "field_type": {
             "$ref": "#/components/schemas/field_definition-filter-field_type"
+          },
+          "group_fields": {
+            "$ref": "#/components/schemas/field_definition-filter"
+          },
+          "group_of": {
+            "$ref": "#/components/schemas/field_definition-filter"
+          },
+          "group_of_id": {
+            "$ref": "#/components/schemas/field_definition-filter-group_of_id"
           },
           "help_text": {
             "$ref": "#/components/schemas/field_definition-filter-help_text"
@@ -4239,6 +4317,54 @@
             "type": "string"
           },
           "not_eq": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "field_definition-filter-group_of_id": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "greater_than": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "less_than": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "not_eq": {
+            "format": "uuid",
             "type": "string"
           }
         },
@@ -27903,7 +28029,7 @@
             "name": "include",
             "required": false,
             "schema": {
-              "pattern": "^(field_definitions)(,(field_definitions))*$",
+              "pattern": "^(field_definitions|field_definitions.group_fields)(,(field_definitions|field_definitions.group_fields))*$",
               "type": "string"
             },
             "style": "form"
@@ -27998,7 +28124,7 @@
             "name": "include",
             "required": false,
             "schema": {
-              "pattern": "^(field_definitions)(,(field_definitions))*$",
+              "pattern": "^(field_definitions|field_definitions.group_fields)(,(field_definitions|field_definitions.group_fields))*$",
               "type": "string"
             },
             "style": "form"
@@ -28087,7 +28213,7 @@
             "name": "include",
             "required": false,
             "schema": {
-              "pattern": "^(field_definitions)(,(field_definitions))*$",
+              "pattern": "^(field_definitions|field_definitions.group_fields)(,(field_definitions|field_definitions.group_fields))*$",
               "type": "string"
             },
             "style": "form"

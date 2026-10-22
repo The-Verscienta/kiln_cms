@@ -698,7 +698,9 @@ Each row carries `name` (the permanent machine key), `label`, `plural_label`,
 `default_review_after_days`. Add `?include=field_definitions` to get the type's
 custom-field schema (`name`, `label`, `field_type`, `required`, `options`,
 `default`, `help_text`, `position`, …) — the keys an entry's `custom_fields`
-map takes.
+map takes. `?include=field_definitions.group_fields` adds the sub-fields of
+each `:group` field — the keys each of its rows takes; a sub-field names its
+group in `group_of_id`.
 
 It is the same read as `/mcp`'s `read_type_definitions`, with the same policy:
 the credential must belong to an **editor or admin of the request's org** (a

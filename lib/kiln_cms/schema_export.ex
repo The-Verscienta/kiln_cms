@@ -475,6 +475,30 @@ defmodule KilnCMS.SchemaExport do
     }
   end
 
+  # A group: one object keyed by its sub-fields, or a list of them when it
+  # holds repeating rows. **Closed**, unlike the custom-field map around it:
+  # a write refuses any key no sub-field declares, and `SyncFieldValues`
+  # moves or purges a key when its sub-field is renamed or deleted, so no
+  # stored row carries one. Nothing is `required`, for the reason no custom
+  # field is — a sub-field added later has no value in older rows.
+  # `x-kiln-sub-fields` names them in editor order.
+  defp base_custom_field_schema(:group, %{multiple: true} = d) do
+    %{
+      "type" => ["array", "null"],
+      "items" => group_row_schema(d),
+      "description" => "Rows of this group, in the order the editor arranged them."
+    }
+    |> put_item_bounds(d)
+    |> put_sub_field_names(d)
+  end
+
+  defp base_custom_field_schema(:group, d) do
+    d
+    |> group_row_schema()
+    |> Map.update!("type", &[&1, "null"])
+    |> put_sub_field_names(d)
+  end
+
   defp base_custom_field_schema(type, _d) when type in [:string, :text],
     do: %{"type" => ["string", "null"]}
 
@@ -487,6 +511,23 @@ defmodule KilnCMS.SchemaExport do
       module -> field_type_schema(module, definition)
     end
   end
+
+  defp group_row_schema(definition) do
+    %{
+      "type" => "object",
+      "properties" =>
+        Map.new(FieldDefinition.group_fields(definition), &{&1.name, custom_field_schema(&1)}),
+      "additionalProperties" => false
+    }
+  end
+
+  defp put_sub_field_names(schema, definition),
+    do:
+      Map.put(
+        schema,
+        "x-kiln-sub-fields",
+        Enum.map(FieldDefinition.group_fields(definition), & &1.name)
+      )
 
   defp reference_item_schema do
     %{

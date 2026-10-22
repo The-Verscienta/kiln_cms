@@ -660,6 +660,30 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
+  # A group's rows have no editor yet, so they are shown, not edited — and no
+  # input is rendered, so a save leaves the key out of the params and
+  # `ApplyCustomFields` keeps the stored rows. Rows are written through the
+  # API until then.
+  def custom_field_input(%{definition: %{field_type: :group}} = assigns) do
+    assigns = assign(assigns, :rows, group_row_count(assigns.value))
+
+    ~H"""
+    <div id={cf_id(@definition)}>
+      <p class="mb-1 block text-sm font-medium">{@definition.label}</p>
+      <p class="text-sm text-base-content/70">
+        {ngettext("%{count} row", "%{count} rows", @rows)}
+        <span class="text-base-content/50">
+          — {gettext("rows are edited through the API for now")}
+        </span>
+      </p>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
+        {@definition.help_text}
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </div>
+    """
+  end
+
   # Everything else is registry-driven. A composite field type
   # (`Kiln.FieldType` declaring `input_parts/1`, e.g. `:geolocation`) renders a
   # labelled input per part; anything else renders a single `<input>`.
@@ -686,6 +710,10 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
         """
     end
   end
+
+  defp group_row_count(rows) when is_list(rows), do: length(rows)
+  defp group_row_count(%{} = row) when map_size(row) > 0, do: 1
+  defp group_row_count(_none), do: 0
 
   defp bare_custom_field_input(assigns) do
     case field_type_parts(assigns.definition) do

@@ -32,7 +32,10 @@ defmodule KilnCMS.CMS.FieldTypes do
   # The built-in value types, coerced by `Changes.ApplyCustomFields` itself.
   # Kept JSON-native so values round-trip cleanly through the `custom_fields`
   # jsonb column (dates as ISO-8601 strings; `:media`/`:reference` as small
-  # write-time snapshot maps).
+  # write-time snapshot maps; `:group` as an object, or a list of them, keyed
+  # by its sub-fields). `:group` is core rather than a `Kiln.FieldType`
+  # because coercing it recurses into `ApplyCustomFields` per sub-field,
+  # which only the host can do.
   @core [
     :string,
     :text,
@@ -44,7 +47,8 @@ defmodule KilnCMS.CMS.FieldTypes do
     :url,
     :select,
     :media,
-    :reference
+    :reference,
+    :group
   ]
 
   # The in-tree `Kiln.FieldType` implementations. Listed here rather than

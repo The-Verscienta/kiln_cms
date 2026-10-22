@@ -1,8 +1,8 @@
 defmodule KilnCMS.CMS.Changes.ClearMultiple do
   @moduledoc """
   Clears a `FieldDefinition`'s `multiple` flag whenever its type cannot hold a
-  list — only a `:media` field (a gallery) or a `:reference` field (a list of
-  references) can — and clears the `min_items` / `max_items` bounds whenever
+  list — only a `:media` field (a gallery), a `:reference` field (a list of
+  references) or a `:group` (repeating rows) can — and clears the `min_items` / `max_items` bounds whenever
   the field is not `multiple`.
 
   The same stance as `KilnCMS.CMS.Changes.ClearCompute`: the fields admin shows
@@ -13,7 +13,7 @@ defmodule KilnCMS.CMS.Changes.ClearMultiple do
   """
   use Ash.Resource.Change
 
-  @list_types [:media, :reference]
+  @list_types [:media, :reference, :group]
 
   @doc "The field types that may set `multiple`."
   @spec list_types() :: [atom()]

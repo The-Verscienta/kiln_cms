@@ -12,7 +12,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
   content editor renders an input per definition, so editors add structured
   fields without a code change or migration.
 
-  A definition is scoped to **exactly one** of three owners (D17, R3):
+  A definition is scoped to **exactly one** of four owners (D17, R3):
 
     * `content_type` — a compiled content type's atom (`:page`), the original
       D4 scope;
@@ -27,7 +27,15 @@ defmodule KilnCMS.CMS.FieldDefinition do
       in `link_field_types/0`, and it cannot own link fields itself — nesting
       stops at one level. It is never a field of a content type: `for_type`
       and `for_definition` do not list it, they load it into its parent's
-      `link_fields`.
+      `link_fields`;
+    * `group_of_id` — a `:group` definition, which makes the row a **sub-field**
+      of that group: one key of the object (or of each object in the list, when
+      the group is `multiple`) the group's value holds — "Unit" on each row of
+      a `dosages` group. Values live inside the group's own value, not in a
+      snapshot's `"link"` map, which is why this is a column of its own rather
+      than a second meaning of `link_of_id`. The same rules otherwise: only
+      `link_field_types/0`, no nesting, never listed by `for_type` or
+      `for_definition` — they load it into the group's `group_fields`.
 
   This deliberately does *not* replace hand-declared attributes: core, queryable,
   or strongly-typed fields still belong in the resource. It covers the long tail
@@ -49,6 +57,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
   # this resource's own read policy (editor-or-above).
   json_api do
     type "field_definition"
+    includes [:group_fields]
   end
 
   @doc """
@@ -83,6 +92,26 @@ defmodule KilnCMS.CMS.FieldDefinition do
 
   def link_fields(%{field_type: :reference, link_fields: fields}) when is_list(fields), do: fields
   def link_fields(_definition), do: []
+
+  @doc """
+  The sub-fields a `:group` definition declares: its loaded `group_fields`, or
+  `[]` for any other type. Raises when they were not loaded, for the reason
+  `link_fields/1` does — "no sub-fields" would refuse every key a write sends.
+  """
+  @spec group_fields(t() | map()) :: [t()]
+  def group_fields(%{field_type: :group, group_fields: %Ash.NotLoaded{}} = definition),
+    do: raise(ArgumentError, "group_fields not loaded on field #{inspect(definition.name)}")
+
+  def group_fields(%{field_type: :group, group_fields: fields}) when is_list(fields), do: fields
+  def group_fields(_definition), do: []
+
+  @doc """
+  The definition a sub-field hangs off, if any: its reference (a link field)
+  or its group (a group sub-field).
+  """
+  @spec parent_id(t() | map()) :: Ash.UUID.t() | nil
+  def parent_id(definition),
+    do: Map.get(definition, :link_of_id) || Map.get(definition, :group_of_id)
 
   @doc """
   The machine name a field's label suggests: lowercase ASCII letters, digits
@@ -186,6 +215,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
       # with the parent's key (`Changes.SyncFieldValues`).
       # No index of its own: `unique_link_field` leads with (org_id, link_of_id).
       reference :link_of, on_delete: :delete
+
+      # Deleting a group deletes its sub-fields; their values went with the
+      # group's key. Indexed by `unique_group_field`, as above.
+      reference :group_of, on_delete: :delete
     end
   end
 
@@ -217,6 +250,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :content_type,
       :type_definition_id,
       :link_of_id,
+      :group_of_id,
       :name,
       :label,
       :field_type,
@@ -265,13 +299,14 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # Used by the editor (to render inputs) and the content write change (to
     # coerce/validate values) — both call it with `authorize?: false`.
     #
-    # Each `:reference` definition comes with its link fields (R3) loaded, so
-    # every reader of a type's schema — coercion, edges, filters, the editor,
-    # the schema export — sees the connection data it declares.
+    # Each `:reference` definition comes with its link fields (R3) loaded, and
+    # each `:group` with its sub-fields, so every reader of a type's schema —
+    # coercion, edges, filters, the editor, the schema export — sees the
+    # connection data and the row shape it declares.
     read :for_type do
       argument :content_type, :atom, allow_nil?: false
       filter expr(content_type == ^arg(:content_type))
-      prepare build(sort: [position: :asc, name: :asc], load: [:link_fields])
+      prepare build(sort: [position: :asc, name: :asc], load: [:link_fields, :group_fields])
     end
 
     # The dynamic-type equivalent of `for_type`: all field definitions owned by
@@ -279,7 +314,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
     read :for_definition do
       argument :type_definition_id, :uuid, allow_nil?: false
       filter expr(type_definition_id == ^arg(:type_definition_id))
-      prepare build(sort: [position: :asc, name: :asc], load: [:link_fields])
+      prepare build(sort: [position: :asc, name: :asc], load: [:link_fields, :group_fields])
     end
 
     # The reverse fields a content type shows (R4): every top-level
@@ -345,13 +380,15 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # so switching an existing computed field away isn't a dead end (#429).
     change KilnCMS.CMS.Changes.ClearCompute
 
-    # Same for `multiple`: only a `:media` field (a gallery) or a `:reference`
-    # field (a list of references) can hold a list, so the flag — and the
+    # Same for `multiple`: only a `:media` field (a gallery), a `:reference`
+    # field (a list of references) or a `:group` (repeating rows) can hold a
+    # list, so the flag — and the
     # `min_items`/`max_items` bounds that go with it — drop on any other type
     # rather than lingering on a field they mean nothing to.
     change KilnCMS.CMS.Changes.ClearMultiple
 
-    # A link field (R3) lives inside its connection's value, so the options
+    # A link field (R3) lives inside its connection's value, and a group
+    # sub-field inside its group's, so the options
     # that act on a record-level field — search indexing, naming the record,
     # per-locale behaviour — drop rather than claim something nothing honours.
     change KilnCMS.CMS.Changes.ClearLinkFieldOptions
@@ -379,13 +416,17 @@ defmodule KilnCMS.CMS.FieldDefinition do
   end
 
   validations do
-    # A field belongs to exactly one owner: a compiled type, a dynamic one, or
-    # a reference field (a link field, R3).
+    # A field belongs to exactly one owner: a compiled type, a dynamic one, a
+    # reference field (a link field, R3) or a group (a sub-field).
     validate KilnCMS.CMS.Validations.OneFieldScope
 
     # A link field's parent is a top-level `:reference` field of the same
     # site, and the link field is one of the plain types.
     validate KilnCMS.CMS.Validations.LinkField
+
+    # A sub-field's parent is a top-level `:group` field of the same site, and
+    # the sub-field is one of the plain types.
+    validate KilnCMS.CMS.Validations.GroupField
 
     # When compiled-scoped, the content type must be a real, registered
     # KilnCMS content type (no-op when `content_type` is nil).
@@ -492,8 +533,9 @@ defmodule KilnCMS.CMS.FieldDefinition do
 
     # Whether a `:media` field holds a **gallery** — an ordered list of media
     # snapshots — or a `:reference` field a **list of references** (ordered
-    # `{id, type, slug, title}` snapshots), rather than a single one. Off by
-    # default, so every existing field keeps its single-snapshot shape. Ignored
+    # `{id, type, slug, title}` snapshots), or a `:group` **repeating rows**
+    # (a list of objects), rather than a single one. Off by default, so every
+    # existing field keeps its single-value shape. Ignored
     # (and cleared, see `Changes.ClearMultiple`) on every other type. Flipping
     # it on an existing field reshapes the stored values
     # (`Changes.SyncFieldValues`): a single becomes a one-item list, and a list
@@ -641,6 +683,21 @@ defmodule KilnCMS.CMS.FieldDefinition do
       sort position: :asc, name: :asc
       public? true
     end
+
+    # The `:group` field owning this sub-field — nil for every other field.
+    belongs_to :group_of, __MODULE__ do
+      allow_nil? true
+      public? true
+    end
+
+    # A `:group` field's sub-fields — the keys of each object it holds — in
+    # editor order. Includable through JSON:API
+    # (`/type-definitions?include=field_definitions.group_fields`).
+    has_many :group_fields, __MODULE__ do
+      destination_attribute :group_of_id
+      sort position: :asc, name: :asc
+      public? true
+    end
   end
 
   identities do
@@ -650,5 +707,6 @@ defmodule KilnCMS.CMS.FieldDefinition do
     identity :unique_field, [:content_type, :name]
     identity :unique_definition_field, [:type_definition_id, :name]
     identity :unique_link_field, [:link_of_id, :name]
+    identity :unique_group_field, [:group_of_id, :name]
   end
 end

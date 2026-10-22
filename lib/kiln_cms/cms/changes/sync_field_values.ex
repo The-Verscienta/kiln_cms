@@ -46,6 +46,15 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   two statements, one level down. A connection whose `"link"` map empties
   loses the key, as a write that sets no link value stores none.
 
+  ## Group sub-fields
+
+  A group sub-field (`group_of_id`) has no key of its own either: its values
+  are one key of the object a group holds, or of each object in its list.
+  Destroying one removes that key from every row, renaming one moves it —
+  the link-field statements again, over the rows themselves instead of their
+  `"link"` maps. A row left with no keys is dropped, as a write drops a
+  blank row; flipping a group's `multiple` reshapes it as it does a gallery.
+
   It runs `after_transaction` on success only — a write that rolls back syncs
   nothing — and a failure is logged rather than raised: the definition write
   itself has committed, and `ApplyCustomFields` still drops a stray key (with a
@@ -71,6 +80,19 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
       parent ->
         changeset
         |> link_operations(parent, definition)
+        |> Enum.reduce(result, &run(&1, parent, &2))
+    end
+  end
+
+  defp sync(changeset, {:ok, %{group_of_id: parent_id} = definition} = result)
+       when not is_nil(parent_id) do
+    case parent(parent_id, definition.org_id) do
+      nil ->
+        result
+
+      parent ->
+        changeset
+        |> group_operations(parent, definition)
         |> Enum.reduce(result, &run(&1, parent, &2))
     end
   end
@@ -126,6 +148,17 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   end
 
   defp link_operations(_changeset, _parent, _definition), do: []
+
+  defp group_operations(%{action_type: :destroy}, parent, definition),
+    do: [{:purge_sub_field, parent.name, definition.name}]
+
+  defp group_operations(%{action_type: :update} = changeset, parent, definition) do
+    if changeset.data.name == definition.name,
+      do: [],
+      else: [{:rename_sub_field, parent.name, changeset.data.name, definition.name}]
+  end
+
+  defp group_operations(_changeset, _parent, _definition), do: []
 
   defp parent(id, org_id) do
     case KilnCMS.CMS.get_field_definition(id,
@@ -264,6 +297,67 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     )
   end
 
+  # A group sub-field's key, removed from (or moved within) every row the
+  # group holds — one object or a list of them. `$1` is the group, `$2` the
+  # sub-field, `$3` its new name (rename). A purge that empties a row drops
+  # it from a list, and drops the group's key when it held one object.
+  # sobelow_skip ["SQL.Query"]
+  defp execute({:purge_sub_field, field, name}, table, filter, params) do
+    """
+    UPDATE #{table}
+       SET custom_fields =
+             CASE jsonb_typeof(custom_fields -> $1::text)
+               WHEN 'array' THEN
+                 jsonb_set(custom_fields, ARRAY[$1::text],
+                   (SELECT COALESCE(jsonb_agg(r ORDER BY ord), '[]'::jsonb)
+                      FROM (SELECT CASE WHEN jsonb_typeof(e) = 'object' THEN e - $2::text ELSE e END AS r, ord
+                              FROM jsonb_array_elements(custom_fields -> $1::text)
+                                   WITH ORDINALITY AS x(e, ord)) AS kept
+                     WHERE r <> '{}'::jsonb))
+               WHEN 'object' THEN
+                 CASE WHEN ((custom_fields -> $1::text) - $2::text) = '{}'::jsonb
+                      THEN custom_fields - $1::text
+                      ELSE jsonb_set(custom_fields, ARRAY[$1::text], (custom_fields -> $1::text) - $2::text)
+                 END
+               ELSE custom_fields
+             END
+     WHERE jsonb_path_exists(custom_fields -> $1::text,
+                             'lax $[*].keyvalue() ? (@.key == $k)',
+                             jsonb_build_object('k', $2::text))#{filter.(2)}
+    """
+    |> query(
+      [field, name | params],
+      "purged sub-field #{inspect(name)} of #{inspect(field)} from"
+    )
+  end
+
+  # sobelow_skip ["SQL.Query"]
+  defp execute({:rename_sub_field, field, from, to}, table, filter, params) do
+    item = """
+    CASE WHEN jsonb_typeof(e) = 'object' AND e ? $2::text
+         THEN (e - $2::text) || jsonb_build_object($3::text, e -> $2::text)
+         ELSE e END
+    """
+
+    """
+    UPDATE #{table}
+       SET custom_fields = jsonb_set(custom_fields, ARRAY[$1::text],
+             CASE jsonb_typeof(custom_fields -> $1::text)
+               WHEN 'array' THEN
+                 (SELECT COALESCE(jsonb_agg((#{item}) ORDER BY ord), '[]'::jsonb)
+                    FROM jsonb_array_elements(custom_fields -> $1::text) WITH ORDINALITY AS x(e, ord))
+               ELSE (SELECT (#{item}) FROM (SELECT custom_fields -> $1::text AS e) AS one)
+             END)
+     WHERE jsonb_path_exists(custom_fields -> $1::text,
+                             'lax $[*].keyvalue() ? (@.key == $k)',
+                             jsonb_build_object('k', $2::text))#{filter.(3)}
+    """
+    |> query(
+      [field, from, to | params],
+      "moved sub-field #{inspect(from)} of #{inspect(field)} to #{inspect(to)} on"
+    )
+  end
+
   # `item` rewrites one connection `e`; a list is rebuilt item by item, in
   # its order.
   defp link_statement(_field, item, table, filter_sql) do
@@ -325,6 +419,11 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   end
 
   defp execute_links({:reshape, _name, :to_list}, _table, _filter, _params), do: :ok
+
+  # A group's rows are not edges.
+  defp execute_links({:purge_sub_field, _field, _name}, _table, _filter, _params), do: :ok
+
+  defp execute_links({:rename_sub_field, _field, _from, _to}, _table, _filter, _params), do: :ok
 
   # A link field's copy on the parent field's edges (R3): the edge's
   # `metadata` is the connection's `"link"` map.
