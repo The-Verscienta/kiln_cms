@@ -14,11 +14,28 @@ app work turned up start in Kiln. All three are additive, so they fit the
 |---|-----|-------------|------|--------|
 | 1 | No repeating-rows field, so lists are stored as JSON inside a `:text` field | A `:group` field type that owns typed sub-fields, with `multiple` for repeating rows | L (3 PRs) | 1.6 |
 | 2 | Prose custom fields are HTML fragments | A `plain` rendition delivered next to the HTML, then a real `:rich_text` field type | S, then M | 1.6 / 1.7 |
-| 3 | No Swift client or types | `mix kiln.export.schema --format swift` (Codable), alongside the `.d.ts` emitter | M | 1.7 |
+| 3 | No Swift client or types | `mix kiln.export.schema --format swift` (Codable), alongside the `.d.ts` emitter; Kotlin next | M | 1.7 |
+| 4 | Media custom fields deliver `{id, url, alt}` only | Add dimensions, an explicit variant list and the focal point to the snapshot; placeholder (blurhash) later | M | 1.7 |
+| 5 | No sparse fields on the artifact endpoint, no mobile sync guide | `?fields=` on `GET /api/content/:type/:slug`; a docs page on sync for apps | S each | 1.7 |
+| 6 | No native starter | A SwiftUI example in `examples/` | M | 1.8 |
 
 The fourth item on the app's list, **offline sync**, is a Phoenix change and not
 a Kiln gap. `/api/sync` already exists (#1581). Phoenix has to mirror it or pass
 it through. It is out of scope here.
+
+Some things a mobile team might expect to be missing already exist. They need
+documenting rather than building:
+
+- **Conditional requests.** `ContentETag` and `PublicCache` already send ETags
+  and honour `If-None-Match` on content and artifacts.
+- **Change notification.** Signed outbound webhooks exist
+  ([webhooks.md](../webhooks.md)). An app's backend can use them instead of
+  polling `/api/sync`.
+- **Structured rich text in blocks.** The `rich_text` block body is a Portable
+  Text array. Only custom fields lack structure (§2).
+- **Type generation from one source.** `GET /api/schema` returns JSON Schema
+  2020-12. GraphQL SDL and OpenAPI are also published, so quicktype or
+  openapi-generator work today. §3 makes Swift and Kotlin first-class.
 
 ## 1. Repeating rows: the `:group` field
 
@@ -115,7 +132,8 @@ have this problem.
    to re-enter it.
 2. **`:rich_text` field type (M, 1.7).** A custom field edited in the same
    TipTap editor the `rich_text` block uses and stored in the block's
-   structured form. Delivery offers `html`, `plain`, and the structured tree
+   structured form (the Portable Text array the `rich_text` block body already
+   uses). Delivery offers `html`, `plain`, and the structured tree
    that native renderers walk. Sanitizing reuses
    `HTMLSanitizer.sanitize_rich_text/1`. Existing `:text` fields that hold
    HTML move over with `kiln.fields.convert --to rich_text` from §1.
@@ -142,14 +160,66 @@ cannot disagree. A Swift emitter can do the same:
   package with its own release train. The Verscienta app doesn't need one
   because it reads Phoenix.
 
+**Kotlin** (`--format kotlin`, kotlinx.serialization data classes plus a
+sealed `Block` class with an `Unknown` subclass) uses the same structure and
+comes second. Dart comes only if a Flutter consumer appears. Put the
+JSON-Schema walk the three emitters share into one module, so each language
+file only formats output.
+
 **Do §1 first.** Before groups exist, the emitter would type `dosages` as
 `String?` and fix the wrong shape into every app build.
+
+## 4. Media payload for apps
+
+A `:media` custom field's write-time snapshot is `%{"id", "url", "alt"}`
+(`ApplyCustomFields`, around line 736). An app gets no dimensions, so it cannot
+lay out before the image loads. It gets no variant list, so it cannot choose a
+size. It gets no focal point, so it crops blind. The data exists already:
+`MediaItem` has `focal_x`/`focal_y`, and `Media.Presentation` knows every
+variant and its encoding. Only the shape delivered to apps is missing it.
+
+- Add `width`, `height`, `mime_type`, `focal: {x, y}` and
+  `variants: [%{label, width, height, format, url, bytes}]` to the snapshot.
+  Keep `url` and `alt`, so existing readers are unaffected. Exclude cropped
+  labels (`Presentation.excluded_labels/0`) or mark them `cropped: true`.
+  The width descriptors in a `srcset` are only valid for uncropped variants.
+- Snapshots are taken when a record is saved, so existing records only get
+  the new keys when they are next saved. Add a `mix kiln.media.resnapshot`
+  backfill, or resolve the extra keys at delivery time. **Recommendation:**
+  write the keys into the snapshot (the fired artifacts stay self-contained)
+  and ship the backfill task with the change.
+- Apply the same shape to the `image` block's JSON surface, so an app has one
+  media decoder.
+- **Later:** a blurhash or dominant colour computed in `VariantWorker` when the
+  variants are made. This needs a new column on `MediaItem`.
+
+## 5. Payload size and sync guidance
+
+- **`?fields=`** on the artifact and content JSON endpoints. It takes a
+  comma-separated list of top-level keys and custom-field names. GraphQL
+  already covers selective fetches, so this is for clients that won't run a
+  GraphQL stack. Missing names are ignored, and the ETag is computed over the
+  filtered body.
+- **A "Kiln in a native app" docs page.** It covers how to store the
+  `/api/sync` cursor, when to restart with `initial=true` (a refused cursor), backoff, iOS
+  background-refresh limits, using ETags for single-record refresh, and webhooks
+  as the push path for apps that have their own backend.
+
+## 6. A SwiftUI example
+
+`examples/swiftui-reader`: a list and a detail view over
+`GET /api/content/:type/:slug?surface=json`. It uses types generated by §3 and
+a file cache kept fresh by `/api/sync`. It is smaller than a client SDK, and
+mobile teams evaluating Kiln look for one. Write it after §1 and §3 land, so it
+shows rows and generated types rather than workarounds.
 
 ## Order
 
 1. §2 step 1 (plain rendition): small, helps the apps right away.
 2. §1 PR 1 → PR 2 → PR 3.
 3. §3 Swift emitter, once groups export real shapes.
-4. §2 step 2 (`:rich_text`).
+4. §4 media snapshot, in parallel with §3.
+5. §5 `?fields=` and the sync guide, in any order.
+6. §2 step 2 (`:rich_text`), then §6 the SwiftUI example.
 
 §2 step 1 and §1 PR 1 touch different files and can run at the same time.

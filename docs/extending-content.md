@@ -19,9 +19,9 @@ UI" workflow, scoped to fields.
   (`content_type`, `name`, `label`, `field_type`, `required`, `options`,
   `target_type`, `target_types`, `multiple`, `min_items`, `max_items`,
   `max_sources`, `on_target_delete`, `inverse_label`, `inverse_name`,
-  `link_of_id`, `help_text`, `position`, `default`, `compute`). Field types: `:string`,
+  `link_of_id`, `group_of_id`, `help_text`, `position`, `default`, `compute`). Field types: `:string`,
   `:text`, `:integer`, `:float`, `:boolean`, `:date`, `:datetime`, `:url`,
-  `:select`, `:media`, `:reference`, `:geolocation`, `:datetime_range`,
+  `:select`, `:media`, `:reference`, `:group`, `:geolocation`, `:datetime_range`,
   `:recurrence`, `:computed` — plus
   anything a plugin registers (see
   [plugin-extensibility.md](plugin-extensibility.md)).
@@ -94,6 +94,37 @@ UI" workflow, scoped to fields.
   on them with `custom_filter[ingredients.link.role]=main` (see
   [json-api.md](json-api.md)). The schema export types the `"link"` object
   and lists the names as `x-kiln-link-fields`.
+- **Structured rows (group fields)**: a `:group` field holds an object whose
+  keys are its **sub-fields** — `FieldDefinition` rows whose owner is the
+  group (`group_of_id`) instead of a content type. With `multiple: true` it
+  holds a list of those objects (repeating rows: the dosages of an herb, each
+  with an amount and a unit), bounded by `min_items` / `max_items` like a
+  gallery; without it, one object. Sub-fields take the plain types only (the
+  link-field set, `FieldDefinition.link_field_types/0`), so a group never
+  holds a group, a media item or a reference.
+
+  ```elixir
+  %{"dosages" => [
+    %{"amount" => 1.5, "unit" => "g", "form" => "dried"},
+    %{"amount" => 10.0, "unit" => "ml", "form" => "tincture"}
+  ]}
+  ```
+
+  Each key is coerced by its sub-field with the usual `required` / `default`
+  / `:select` rules; a key no sub-field declares is refused, a row whose
+  values are all blank is dropped, and a lone object sent to a `multiple`
+  group is a one-row list. Errors name their path —
+  `Unit (dosages[2].unit) is not one of the allowed options`, rows counted
+  from 0. Rows have no identity, so a write that names the group replaces
+  all of its rows (leaving the key out keeps them). Renaming a sub-field
+  moves its key in every row, deleting one removes it, and deleting the group
+  deletes its sub-fields; flipping `multiple` reshapes stored values as it
+  does a gallery's. The schema export types a group as a closed object
+  (`additionalProperties: false`), in an array when `multiple`, and lists the
+  sub-fields as `x-kiln-sub-fields`; `custom_filter` answers only `null` on
+  it. Groups are defined through the code interface or the API for now — the
+  fields admin and the editor show an existing group but do not edit its
+  rows yet.
 - **Reverse fields (the other side)**: a `:reference` field may name what
   its targets call it — `inverse_label` ("Recipes using this ingredient")
   and `inverse_name` (`used_in_recipes`, suggested from the label when left

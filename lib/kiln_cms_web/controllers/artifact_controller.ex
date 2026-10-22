@@ -31,6 +31,13 @@ defmodule KilnCMSWeb.ArtifactController do
   `:reference` custom fields under `"expanded"`, each with its own `json`
   artifact — see `KilnCMSWeb.ReferenceExpansion` for the shape, who sees which
   targets, and why this lives here rather than in JSON:API `included`.
+
+  ## Sparse fieldsets
+
+  `?fields=<name>[,<name>…]` (`surface=json` only) keeps just those top-level
+  keys, and `custom_fields.<name>` just one custom field; `id` and `type`
+  always stay. See `KilnCMSWeb.ArtifactFields` for the rules and how the
+  fieldset reaches the `ETag`.
   """
   use KilnCMSWeb, :controller
 
@@ -41,6 +48,7 @@ defmodule KilnCMSWeb.ArtifactController do
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Firing.PointInTime
   alias KilnCMSWeb.ApiError
+  alias KilnCMSWeb.ArtifactFields
   alias KilnCMSWeb.DeliveryLocale
   alias KilnCMSWeb.Params
   alias KilnCMSWeb.ReferenceExpansion
@@ -75,6 +83,7 @@ defmodule KilnCMSWeb.ArtifactController do
     with ct when not is_nil(ct) <- ContentTypes.get(type),
          surface when not is_nil(surface) <- Map.get(@surfaces, params["surface"] || "json"),
          {:ok, expand} <- parse_expand(params, surface),
+         {:ok, fields} <- parse_fields(params, surface),
          {:ok, record} <-
            Delivery.published(org_id, ct.type, slug, locale, grants(conn, params), mode),
          {:ok, body} <- artifact(record, surface),
@@ -110,17 +119,20 @@ defmodule KilnCMSWeb.ArtifactController do
             ),
           else: nil
 
-      serve(
-        conn,
-        record,
-        surface_name,
-        Experiments.Assignment.apply_to_artifact(body, variant),
-        variant,
-        expansion_tag
-      )
+      # The fieldset is cut last: the variant patch writes `blocks` back
+      # whether or not the body still had them.
+      body =
+        body
+        |> Experiments.Assignment.apply_to_artifact(variant)
+        |> ArtifactFields.select(fields)
+
+      serve(conn, record, surface_name, body, variant, {expansion_tag, fields})
     else
       {:invalid_expand, message} ->
         ApiError.send(conn, :bad_request, "invalid_expand", message)
+
+      {:invalid_fields, message} ->
+        ApiError.send(conn, :bad_request, "invalid_fields", message)
 
       :backfilling ->
         backfilling(conn)
@@ -191,6 +203,17 @@ defmodule KilnCMSWeb.ArtifactController do
       {:ok, _fields} when surface != :json -> {:invalid_expand, "`expand` needs `surface=json`."}
       {:ok, fields} -> {:ok, fields}
       {:error, message} -> {:invalid_expand, message}
+    end
+  end
+
+  # Same placement and surface rule as `?expand=`: a 400 whatever the slug, and
+  # only the `json` surface has keys to choose between.
+  defp parse_fields(params, surface) do
+    case ArtifactFields.parse(params) do
+      {:ok, nil} -> {:ok, nil}
+      {:ok, _fields} when surface != :json -> {:invalid_fields, "`fields` needs `surface=json`."}
+      {:ok, fields} -> {:ok, fields}
+      {:error, message} -> {:invalid_fields, message}
     end
   end
 
@@ -362,14 +385,21 @@ defmodule KilnCMSWeb.ArtifactController do
     with {:ok, as_of} <- parse_as_of(params["as_of"]),
          ct when not is_nil(ct) <- ContentTypes.get(type, org_id),
          surface when not is_nil(surface) <- Map.get(@surfaces, params["surface"] || "json"),
+         {:ok, fields} <- parse_fields(params, surface),
          record when not is_nil(record) <-
            published(org_id, ct.type, slug, locale, grants(conn, params), mode),
          {:ok, body, published_at} <-
            PointInTime.read(org_id, record.__struct__, record.id, surface, as_of) do
+      body = ArtifactFields.select(body, fields)
+
       conn
       |> DeliveryLocale.put_served(record.locale)
+      |> put_fields_header(fields)
       |> serve_point_in_time(record, as_of, published_at, params["surface"] || "json", body)
     else
+      {:invalid_fields, message} ->
+        ApiError.send(conn, :bad_request, "invalid_fields", message)
+
       :error ->
         ApiError.send(
           conn,
@@ -459,8 +489,8 @@ defmodule KilnCMSWeb.ArtifactController do
 
   # Serve a fired artifact with CDN/static-build cache headers (#188). Honour a
   # matching `If-None-Match` with a 304 so revalidation skips the body.
-  defp serve(conn, record, surface, body, variant, expansion_tag) do
-    etag = etag(record, surface, variant, expansion_tag)
+  defp serve(conn, record, surface, body, variant, {expansion_tag, fields}) do
+    {etag, body} = validate(record, surface, body, variant, expansion_tag, fields)
     locked? = not is_nil(Map.get(record, :access_password_hash))
 
     conn =
@@ -468,6 +498,7 @@ defmodule KilnCMSWeb.ArtifactController do
       |> put_cache_headers(record, etag, locked?)
       |> DeliveryLocale.put_served(record.locale)
       |> put_variant_headers(variant)
+      |> put_fields_header(fields)
       |> maybe_provenance_header(record, surface)
 
     # No conditional revalidation for a locked document either. The ETag has no
@@ -504,6 +535,12 @@ defmodule KilnCMSWeb.ArtifactController do
     |> send_resp(200, markdown)
   end
 
+  defp respond(conn, _surface, {:encoded, json}) do
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(200, json)
+  end
+
   defp respond(conn, _surface, body), do: json(conn, body)
 
   # Advertise the signed provenance manifest for this artifact (#340) when
@@ -529,9 +566,35 @@ defmodule KilnCMSWeb.ArtifactController do
   # the source does not, so their fingerprint is named as well
   # (`ReferenceExpansion.expand/3`).
   defp etag(record, surface, variant, expansion_tag) do
-    suffix = if variant, do: "-#{variant.id}", else: ""
-    suffix = if expansion_tag, do: "#{suffix}-x#{expansion_tag}", else: suffix
-    ~s("#{record.id}-#{record.locale}-#{surface}-#{DateTime.to_unix(record.updated_at)}#{suffix}")
+    ~s("#{record.id}-#{record.locale}-#{surface}-#{DateTime.to_unix(record.updated_at)}#{variant_suffix(variant)}#{expansion_suffix(expansion_tag)}")
+  end
+
+  defp variant_suffix(nil), do: ""
+  defp variant_suffix(variant), do: "-#{variant.id}"
+
+  defp expansion_suffix(nil), do: ""
+  defp expansion_suffix(tag), do: "-x#{tag}"
+
+  # The validator, and the body as `respond/3` sends it. A `?fields=` response
+  # is tagged by a digest of the filtered body itself, so it outlives a
+  # republish that changed none of the fields it kept — the case a phone
+  # revalidating a list row most wants a `304` for — and every spelling of one
+  # fieldset shares it. The body is encoded once, here, for both. The variant
+  # stays named; the expansion is in the body.
+  defp validate(record, surface, body, variant, expansion_tag, nil),
+    do: {etag(record, surface, variant, expansion_tag), body}
+
+  defp validate(record, surface, body, variant, _expansion_tag, _fields) do
+    json = Jason.encode_to_iodata!(body)
+
+    digest =
+      :sha256
+      |> :crypto.hash(json)
+      |> binary_part(0, 12)
+      |> Base.url_encode64(padding: false)
+
+    {~s("#{record.id}-#{record.locale}-#{surface}-b#{digest}#{variant_suffix(variant)}"),
+     {:encoded, json}}
   end
 
   # No `Vary`. The assignment key is a **query parameter**, so it is already part
@@ -548,6 +611,13 @@ defmodule KilnCMSWeb.ArtifactController do
 
   defp put_variant_headers(conn, variant),
     do: put_resp_header(conn, "x-kiln-variant", variant.id)
+
+  # The canonical spelling of the fieldset that was served, so a client can
+  # send that one and share a CDN entry with every other client that does.
+  defp put_fields_header(conn, nil), do: conn
+
+  defp put_fields_header(conn, fields),
+    do: put_resp_header(conn, "x-kiln-fields", Enum.join(fields, ","))
 
   defp http_date(%DateTime{} = dt) do
     Calendar.strftime(dt, "%a, %d %b %Y %H:%M:%S GMT")

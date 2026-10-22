@@ -102,6 +102,28 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   `KilnCMS.CMS.ContentLinks` copies each connection's `"link"` map onto its
   edge's `metadata` in the same transaction.
 
+  ## Groups: an object, or a list of them
+
+  A `:group` definition holds structured rows whose keys are its sub-fields
+  (`FieldDefinition` rows with `group_of_id`) — `dosages` as a list of
+  `%{"amount" => 2, "unit" => "g"}`. A group that is not `multiple` holds one
+  object; a `multiple` one holds a list (repeating rows), bounded by
+  `min_items`/`max_items` like a gallery. Each key is coerced by the
+  sub-field's own rules — the same types, `required`, `default` and
+  `:select` checks a top-level field gets — and a key no sub-field declares
+  is refused (dropped, in `:drop` mode). A row whose values are all blank is
+  no row at all, the way an emptied gallery slot is no image.
+
+  There is no per-row merge: rows carry no identity to match an earlier row
+  by, so a write that names the group sends all of it. Leaving the group's
+  key out keeps it, as with any field.
+
+  Every problem names its path — `Unit (dosages[2].unit) must be one of the
+  allowed options`, rows counted from 0 as the stored list indexes them — and
+  a write reports every bad key at once rather than the first.
+
+  A group's `default` is not used: a one-line string is not an object.
+
   ## Computed fields are outside all of that
 
   A `:computed` definition (#429) has no editor-supplied value at all. Those
@@ -449,7 +471,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     cond do
       Map.has_key?(supplied, def.name) ->
         def
-        |> resolve(Map.get(supplied, def.name), read_opts)
+        |> resolve_field(Map.get(supplied, def.name), read_opts, mode)
         |> with_links(
           def,
           Map.get(supplied, def.name),
@@ -467,7 +489,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
       true ->
         def
-        |> resolve(nil, read_opts)
+        |> resolve_field(nil, read_opts, mode)
         |> with_links(def, def.default, nil, {read_opts, mode})
         |> fold(def, cleaned, errors)
     end
@@ -583,11 +605,114 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     end)
   end
 
+  # --- groups ------------------------------------------------------------------
+
+  defp resolve_field(%{field_type: :group} = def, raw, _read_opts, mode),
+    do: resolve_group(def, raw, mode)
+
+  defp resolve_field(def, raw, read_opts, _mode), do: resolve(def, raw, read_opts)
+
+  # A group's value from what the caller sent: `:skip` when there are no rows
+  # and none are required, else one coerced object (or a list of them), or
+  # every problem found, each under its path.
+  defp resolve_group(def, raw, mode) do
+    rows =
+      raw
+      |> group_rows()
+      |> Enum.with_index()
+      |> Enum.reject(fn {row, _index} -> blank_row?(row) end)
+
+    cond do
+      rows == [] and def.required -> {:error, "is required"}
+      rows == [] -> :skip
+      def.multiple -> coerce_rows(rows, def, mode)
+      # A single group handed a list (stored while the field was `multiple`)
+      # keeps its first row, as a single media field keeps its first image.
+      true -> rows |> hd() |> elem(0) |> coerce_row(def, def.name, mode) |> one_row()
+    end
+  end
+
+  defp group_rows(rows) when is_list(rows), do: rows
+  defp group_rows(nil), do: []
+  defp group_rows(row), do: [row]
+
+  defp blank_row?(%{} = row) when not is_struct(row),
+    do: row |> Map.values() |> Enum.all?(&blank?/1)
+
+  defp blank_row?(row), do: blank?(row)
+
+  defp coerce_rows(rows, def, mode) do
+    {kept, problems} =
+      Enum.reduce(rows, {[], []}, fn {row, index}, {kept, problems} ->
+        case coerce_row(row, def, "#{def.name}[#{index}]", mode) do
+          {:ok, cleaned} -> {[cleaned | kept], problems}
+          {:errors, found} -> {kept, problems ++ found}
+        end
+      end)
+
+    case problems do
+      [] -> kept |> Enum.reverse() |> within_bounds(def)
+      _ -> {:errors, problems}
+    end
+  end
+
+  defp one_row({:ok, row}), do: {:ok, row}
+  defp one_row(errors), do: errors
+
+  # One object: each sub-field coerced from its key (or its default when the
+  # key is absent), and every key no sub-field declares refused.
+  defp coerce_row(%{} = row, def, path, mode) when not is_struct(row) do
+    given = stringify_keys(row)
+    subs = FieldDefinition.group_fields(def)
+
+    {cleaned, problems} =
+      Enum.reduce(subs, {%{}, []}, fn sub, {cleaned, problems} ->
+        case sub_value(sub, Map.get(given, sub.name)) do
+          :skip -> {cleaned, problems}
+          {:ok, value} -> {Map.put(cleaned, sub.name, value), problems}
+          {:error, message} -> {cleaned, [{"#{path}.#{sub.name}", sub.label, message} | problems]}
+        end
+      end)
+
+    case Enum.reverse(problems) ++ undefined_sub_fields(given, subs, def, path, mode) do
+      [] -> {:ok, cleaned}
+      problems -> {:errors, problems}
+    end
+  end
+
+  defp coerce_row(_row, def, path, _mode), do: {:errors, [{path, def.label, "must be an object"}]}
+
+  # Sub-fields are scalar (`FieldDefinition.link_field_types/0`), so a nested
+  # object or list is refused before it reaches a coercion that would
+  # stringify it.
+  defp sub_value(_sub, value) when is_map(value) or is_list(value),
+    do: {:error, "must be a single value, not an object or a list"}
+
+  defp sub_value(sub, value), do: resolve(sub, value, [])
+
+  # A blank key no sub-field declares asks for nothing, as at the top level.
+  defp undefined_sub_fields(_given, _subs, _def, _path, :drop), do: []
+
+  defp undefined_sub_fields(given, subs, def, path, :strict) do
+    names = Enum.map(subs, & &1.name)
+
+    given
+    |> Enum.reject(fn {key, value} -> key in names or blank?(value) end)
+    |> Enum.sort()
+    |> Enum.map(fn {key, _value} ->
+      {"#{path}.#{key}", def.label,
+       "is not a sub-field of this group (sub-fields: #{Enum.join(Enum.sort(names), ", ")})"}
+    end)
+  end
+
   defp fold(:skip, _def, cleaned, errors), do: {cleaned, errors}
   defp fold({:ok, value}, def, cleaned, errors), do: {Map.put(cleaned, def.name, value), errors}
 
   defp fold({:error, message}, def, cleaned, errors),
     do: {cleaned, [error(def, message) | errors]}
+
+  defp fold({:errors, problems}, def, cleaned, errors),
+    do: {cleaned, Enum.reverse(Enum.map(problems, &path_error(def, &1)), errors)}
 
   # The coerced value for a definition from a supplied `raw` (or its default):
   # `:skip` when blank-and-optional, or an error when blank-and-required.
@@ -1112,6 +1237,17 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
       field: :custom_fields,
       message: "\"#{key}\" is not a defined custom field (#{defined})",
       value: key
+    )
+  end
+
+  # A problem inside a group, named in the message by its path rather than
+  # the field's name. `value` stays the group's name: it is what the editor
+  # files a custom-field error under.
+  defp path_error(def, {path, label, message}) do
+    InvalidAttribute.exception(
+      field: :custom_fields,
+      message: "#{label} (#{path}) #{message}",
+      value: def.name
     )
   end
 

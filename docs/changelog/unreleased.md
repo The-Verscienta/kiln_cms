@@ -50,6 +50,28 @@ carries the reasoning.
   The `:json` artifact `format_version` is now 3, so an older artifact
   re-fires on its next read; `mix kiln.refire_all` gets there faster.
 
+<a id="fields-trims-the-fired-json-artifact-a-guide-to-kiln-in-a-native-app"></a>
+
+- **`?fields=` trims the fired `json` artifact; a guide to Kiln in a native
+  app.** `GET /api/content/:type/:slug?fields=title,slug,custom_fields.price`
+  returns only the named top-level keys and custom fields, for clients on
+  constrained networks that don't run GraphQL. `id` and `type` are always
+  kept, as is `expanded` with `?expand=`; unknown names are ignored; at most
+  50 names; `surface=json` only (`400 invalid_fields` otherwise); works with
+  `?as_of=`. The `ETag` of a fieldset response is a digest of the filtered
+  body, so it moves only when a kept value does — a republish that changed
+  only `blocks` still `304`s a `?fields=title` revalidation — and every
+  spelling of one fieldset shares it. `x-kiln-fields` echoes the canonical
+  spelling (sorted, de-duplicated) so clients can share one CDN entry. A
+  response without `fields` is unchanged, byte for byte and in its `ETag`.
+  `/api/sync` still embeds the whole artifact.
+
+  New page [native-apps.md](../native-apps.md): persisting the sync cursor,
+  restarting with `initial=true` only on `invalid_cursor`, backoff and the
+  per-IP rate limit, iOS/Android background-refresh limits, ETags for
+  single-record refresh, `?fields=`, webhooks as the push path for apps with
+  a backend, and typed models from `GET /api/schema`.
+
 <a id="a-text-custom-field-can-also-be-delivered-as-plain-text"></a>
 
 - **A `:text` custom field can also be delivered as plain text.** A new
@@ -74,3 +96,22 @@ carries the reasoning.
   the public HTML page, feeds and CSV export, and a reference's link fields
   (the toggle is cleared on them, as on every non-`:text` type).
 
+<a id="group-custom-field"></a>
+
+- **A `:group` custom field holds structured rows: one object, or a list of
+  them, keyed by typed sub-fields, with every bad key reported by its path.**
+  Lists of records — an herb's dosages, its drug interactions — used to be
+  JSON strings in `:text` fields, which the schema export called strings and
+  every client parsed on its own. A group's sub-fields are `FieldDefinition`
+  rows owned through the new `group_of_id` (scalar types only, one level
+  deep, like R3 link fields), each key is coerced by its sub-field's rules,
+  an unknown key is refused, and errors name their path
+  (`Unit (dosages[2].unit) is required`). `multiple` makes it repeating rows
+  with `min_items`/`max_items`. Renaming or deleting a sub-field moves or
+  purges its key in every stored row. The schema export types a group as a
+  closed object (an array of them when `multiple`), and
+  `/api/json/type-definitions?include=field_definitions.group_fields` lists
+  the sub-fields. Groups are defined through the code interface or the API
+  for now; the editor shows an existing group read-only, and the row editor
+  follows. The migration adds one nullable column.
+  ([#2036](https://github.com/The-Verscienta/kiln_cms/pull/2036))

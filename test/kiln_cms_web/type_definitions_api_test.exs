@@ -232,4 +232,117 @@ defmodule KilnCMSWeb.TypeDefinitionsApiTest do
 
     assert type_name == d.name
   end
+
+  # A `:group` field (repeating rows): its sub-fields come back through
+  # `include=field_definitions.group_fields`, and an entry's rows round-trip
+  # through `/api/json/entries` in the shape the schema describes.
+  describe "a group field" do
+    setup %{admin: admin, definition: d} do
+      group =
+        CMS.create_field_definition!(
+          %{
+            type_definition_id: d.id,
+            name: "dosages",
+            label: "Dosages",
+            field_type: :group,
+            multiple: true
+          },
+          actor: admin
+        )
+
+      unit =
+        CMS.create_field_definition!(
+          %{
+            group_of_id: group.id,
+            name: "unit",
+            label: "Unit",
+            field_type: :select,
+            options: ["g", "ml"],
+            required: true
+          },
+          actor: admin
+        )
+
+      amount =
+        CMS.create_field_definition!(
+          %{
+            group_of_id: group.id,
+            name: "amount",
+            label: "Amount",
+            field_type: :float,
+            position: 1
+          },
+          actor: admin
+        )
+
+      %{group: group, unit: unit, amount: amount}
+    end
+
+    test "include=field_definitions.group_fields carries the sub-fields",
+         %{definition: d, group: group, unit: unit, amount: amount} do
+      key = mint(user(:editor), :read)
+
+      {200, %{"data" => data, "included" => included}} =
+        req(
+          :get,
+          "/api/json/type-definitions/#{d.id}?include=field_definitions.group_fields",
+          key: key
+        )
+
+      # The type lists the group, never its sub-fields.
+      assert %{"relationships" => %{"field_definitions" => %{"data" => [ref]}}} = data
+      assert ref == %{"type" => "field_definition", "id" => group.id}
+
+      by_id = Map.new(included, &{&1["id"], &1})
+
+      assert %{"attributes" => %{"field_type" => "group", "multiple" => true}} = by_id[group.id]
+
+      assert %{"relationships" => %{"group_fields" => %{"data" => sub_refs}}} = by_id[group.id]
+      assert Enum.map(sub_refs, & &1["id"]) == [unit.id, amount.id]
+
+      assert %{"attributes" => %{"name" => "unit", "group_of_id" => group_id}} = by_id[unit.id]
+      assert group_id == group.id
+    end
+
+    test "rows round-trip through the entries API; a bad row names its path",
+         %{definition: d} do
+      key = mint(user(:editor), :read_write)
+
+      body = fn rows ->
+        %{
+          data: %{
+            type: "entry",
+            attributes: %{
+              title: "Ginger",
+              slug: "td-#{System.unique_integer([:positive])}",
+              type_definition_id: d.id,
+              custom_fields: %{dosages: rows}
+            }
+          }
+        }
+      end
+
+      assert {201, %{"data" => %{"id" => id}}} =
+               req(:post, "/api/json/entries",
+                 key: key,
+                 body: body.([%{unit: "g", amount: "1.5"}, %{unit: "ml"}])
+               )
+
+      assert {200, %{"data" => %{"attributes" => %{"custom_fields" => fields}}}} =
+               req(:get, "/api/json/entries/#{id}", key: key)
+
+      assert fields["dosages"] == [%{"unit" => "g", "amount" => 1.5}, %{"unit" => "ml"}]
+
+      assert {status, %{"errors" => errors}} =
+               req(:post, "/api/json/entries",
+                 key: key,
+                 body: body.([%{unit: "g"}, %{amount: 2, colour: "red"}])
+               )
+
+      assert status in [400, 422]
+      details = Enum.map_join(errors, "\n", &(&1["detail"] || ""))
+      assert details =~ "Unit (dosages[1].unit) is required"
+      assert details =~ "Dosages (dosages[1].colour) is not a sub-field of this group"
+    end
+  end
 end

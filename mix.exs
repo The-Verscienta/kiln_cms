@@ -313,6 +313,7 @@ defmodule KilnCMS.MixProject do
       # APIs & headless
       "docs/api.md": [],
       "docs/headless-consumer-guide.md": [],
+      "docs/native-apps.md": [title: "Kiln in a native app"],
       "docs/json-api.md": [],
       "docs/headless-graphql-api.md": [],
       "docs/mcp.md": [],
@@ -476,6 +477,7 @@ defmodule KilnCMS.MixProject do
       "APIs & headless": [
         "docs/api.md",
         "docs/headless-consumer-guide.md",
+        "docs/native-apps.md",
         "docs/json-api.md",
         "docs/headless-graphql-api.md",
         "docs/mcp.md",

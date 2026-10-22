@@ -822,7 +822,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         query: [sort: [position: :asc, name: :asc]]
       )
       # Link fields (R3) are listed under their reference field, not as fields
-      # of a type.
+      # of a type. A group's sub-fields are not listed here at all yet.
+      |> Enum.filter(&is_nil(&1.group_of_id))
       |> Enum.split_with(&(not is_nil(&1.link_of_id)))
 
     # A definition whose content type no longer exists (#1770) is listed on
@@ -1062,6 +1063,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     do:
       gettext(
         "A link to other content — one record or a list, of the type you pick below. For a related article, an author or a parent product."
+      )
+
+  defp core_type_description(:group),
+    do:
+      gettext(
+        "Structured rows, each with the same typed fields — one, or a list. For dosages with an amount and a unit, or a product's specifications."
       )
 
   defp core_type_description(:geolocation),
@@ -1582,9 +1589,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   end
 
   # The value form's type picker: every type but `:reference`, which is
-  # "A relationship" now.
-  defp value_type_options(field_types),
-    do: for(type <- field_types, type != :reference, do: {type_label(type), type})
+  # "A relationship" now — and but `:group`, whose sub-fields this screen
+  # cannot add yet. A group made through the API still edits here under its
+  # own type, so a save cannot retype it by omission.
+  defp value_type_options(field_types, current \\ nil) do
+    for type <- field_types,
+        type != :reference,
+        type != :group or to_string(current) == "group",
+        do: {type_label(type), type}
+  end
 
   # The step heading over the delete rule, in the relationship form.
   attr :id, :string, required: true
@@ -2616,7 +2629,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                       field={@edit.form[:field_type]}
                       type="select"
                       label={gettext("Field type")}
-                      options={value_type_options(@field_types)}
+                      options={value_type_options(@field_types, @edit.form[:field_type].value)}
                       hint={type_description(@edit.form[:field_type].value, @field_types)}
                     />
                     <.input field={@edit.form[:label]} label={gettext("Label")} />

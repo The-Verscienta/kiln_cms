@@ -59,15 +59,21 @@ Every summary line below that was shortened links to its own entry there.
 - **Optional: run `mix kiln.media.resnapshot --apply` once after deploying**
   so stored `:media` field values gain dimensions, focal point and variants;
   fired artifacts converge by themselves.
-  ([long form](docs/changelog/unreleased.md#media-resnapshot-upgrade))
+  ([#2040](https://github.com/The-Verscienta/kiln_cms/pull/2040) · [long form](docs/changelog/unreleased.md#media-resnapshot-upgrade))
 
 ### Added
 
 - **Media in delivered content carries dimensions, MIME type, focal point and variants.**
-  ([long form](docs/changelog/unreleased.md#media-snapshot-for-apps))
+  ([#2040](https://github.com/The-Verscienta/kiln_cms/pull/2040) · [long form](docs/changelog/unreleased.md#media-snapshot-for-apps))
 
 - **A `:text` custom field can also be delivered as plain text.**
   ([#2037](https://github.com/The-Verscienta/kiln_cms/pull/2037) · [long form](docs/changelog/unreleased.md#a-text-custom-field-can-also-be-delivered-as-plain-text))
+- **`?fields=` trims the fired `json` artifact; a guide to Kiln in a native app.**
+  ([#2039](https://github.com/The-Verscienta/kiln_cms/pull/2039) · [long form](docs/changelog/unreleased.md#fields-trims-the-fired-json-artifact-a-guide-to-kiln-in-a-native-app))
+
+- **A `:group` custom field holds structured rows: one object, or a list of
+  them, keyed by typed sub-fields, with every bad key reported by its path.**
+  ([#2036](https://github.com/The-Verscienta/kiln_cms/pull/2036) · [long form](docs/changelog/unreleased.md#group-custom-field))
 
 ## [1.5.0] - 2026-10-18
 

@@ -27,6 +27,10 @@ generator that emits per-site TypeScript types from `GET /api/schema` (dynamic
 content types and custom fields included). `examples/astro-blog` consumes it
 end to end.
 
+**Building a native app?** [native-apps.md](native-apps.md) covers keeping a
+phone's copy current: storing the sync cursor, backoff, iOS/Android background
+refresh, ETags, `?fields=` for smaller payloads, and webhooks as the push path.
+
 ## Try it live
 
 The project's own site, [kilncms.dev](https://kilncms.dev), is a Kiln
@@ -315,6 +319,9 @@ await save(cursor);
 What sync reports is the **anonymous** view whatever key you configure, so it
 is safe to point a delivery key at it — and a delete never says why a document
 left, or names one you were never sent.
+
+For an app on a phone, see [native-apps.md](native-apps.md#mirroring-with-sync)
+for where to keep the cursor and when (not) to start over.
 
 ## Editorial tooling: version history and releases
 

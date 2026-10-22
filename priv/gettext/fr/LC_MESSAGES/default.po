@@ -392,6 +392,13 @@ msgstr[1] "%{count} résultats, d’autres disponibles"
 msgid "%{count} results for “%{query}”."
 msgstr "%{count} résultats pour « %{query} »."
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} row"
+msgid_plural "%{count} rows"
+msgstr[0] "%{count} ligne"
+msgstr[1] "%{count} lignes"
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} running experiment is not producing usable results."
@@ -15382,6 +15389,11 @@ msgstr "Structure"
 msgid "Structure: %{type}"
 msgstr "Structure : %{type}"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Structured rows, each with the same typed fields — one, or a list. For dosages with an amount and a unit, or a product's specifications."
+msgstr "Des lignes structurées, chacune avec les mêmes champs typés : une seule ou une liste. Pour des posologies avec une quantité et une unité, ou les caractéristiques d’un produit."
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -20598,6 +20610,11 @@ msgstr[1] "réinitialisation dans %{count} minutes"
 #, elixir-autogen, elixir-format
 msgid "review due"
 msgstr "révision attendue"
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "rows are edited through the API for now"
+msgstr "pour l’instant, les lignes se modifient via l’API"
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format

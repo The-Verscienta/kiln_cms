@@ -87,8 +87,8 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Sign-in** | `POST /api/auth/sign_in` | Exchange credentials for a bearer token (JWT). Server-to-server clients use an [API key](#api-keys-third-party-access) instead. | [§ Authentication](#authentication) |
 | **JSON:API** | `/api/json` | Filterable reads of Page, Post and admin-defined types (Entry), media, taxonomy and redirects; per-type search and autocomplete; **writes** — create, update, workflow transitions, soft-delete — with a `read_write` API key. | [json-api.md](json-api.md) |
 | **GraphQL** | `POST /gql`, `/ws/gql` | Delivery reads, search, menus and point-in-time (`contentAsOf`); the same **writes** as mutations; subscriptions over the WebSocket. | [headless-graphql-api.md](headless-graphql-api.md) |
-| **Fired artifacts** | `GET /api/content/:type/:slug` | Pre-rendered output per surface: `json` (default), `json_ld`, `web`, and `llm` (raw `text/markdown`). `?as_of=` reads a document as it stood on a date; `GET /api/content/:type?as_of=` lists what was published then. | [`examples/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/examples/README.md), [point-in-time.md](point-in-time.md) |
-| **Sync (delta)** | `GET /api/sync` | Mirror public content: a snapshot, then upserts **and deletions** since an opaque cursor — the only surface that reports a document *leaving*. | [§ Sync](#sync-delta-api) |
+| **Fired artifacts** | `GET /api/content/:type/:slug` | Pre-rendered output per surface: `json` (default), `json_ld`, `web`, and `llm` (raw `text/markdown`). `?as_of=` reads a document as it stood on a date; `GET /api/content/:type?as_of=` lists what was published then; `?fields=` trims the `json` body ([§ Sparse fieldsets](#sparse-fieldsets-on-artifacts)). | [`examples/README.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/examples/README.md), [point-in-time.md](point-in-time.md) |
+| **Sync (delta)** | `GET /api/sync` | Mirror public content: a snapshot, then upserts **and deletions** since an opaque cursor — the only surface that reports a document *leaving*. | [§ Sync](#sync-delta-api), [native-apps.md](native-apps.md) |
 | **Version history** | `GET /api/content/:type/:id/revisions` | A document's revisions, one revision's snapshot, and restore. Editor-tier credential required. | [§ Version history](#version-history-revisions) |
 | **Hybrid search** | `GET /api/search?q=` | Keyword + semantic + title search across every type, fused and ranked; answers as an anonymous visitor whatever the credential. `503` with `Retry-After` (`temporarily_unavailable`) when the database pool cannot take the search. | [search-roadmap.md](search-roadmap.md) |
 | **Path resolution** | `GET /api/resolve?path=` | "What lives at this URL?" — content, a redirect to follow, or nothing — for a front end's catch-all route. | [json-api.md](json-api.md) (URLs, pathauto & redirects) |
@@ -447,6 +447,40 @@ Values stored before Kiln 1.6 carry only `id`, `url` and `alt` until then.
 Treat every other key as optional; the delivery schema
 ([§ Schema discovery](#schema-discovery-typed-clients)) marks only `id` and
 `url` required.
+
+## Sparse fieldsets on artifacts
+
+`GET /api/content/:type/:slug?fields=<name>[,<name>…]` returns only the named
+keys of the `json` artifact: top-level keys (`title`, `slug`, `blocks`,
+`custom_fields`, …) and `custom_fields.<name>` for a single custom field. It is
+for clients that want a list row or a widget, not the whole document, and do
+not run GraphQL:
+
+```bash
+curl -s 'http://localhost:4000/api/content/recipe/pancakes?fields=title,custom_fields.hero_image'
+# {"id": "…", "type": "recipe", "title": "Pancakes",
+#  "custom_fields": {"hero_image": {"id": "…", "url": "…", "alt": "…"}}}
+```
+
+- `id` and `type` are always kept, and so is `expanded` when `?expand=` is
+  also given. `custom_fields` on its own keeps every custom field.
+- Unknown names are ignored, not refused.
+- The `ETag` is a digest of the **filtered body**. It moves only when a
+  kept value does: after a republish that changed only `blocks`, a
+  `?fields=title` revalidation is still a `304`. Order and repeats don't
+  change the body, so every spelling of one fieldset shares the `ETag`. The
+  canonical spelling (sorted, de-duplicated, without `id`/`type`) comes back
+  as `x-kiln-fields`. Send that one if you want every client to share a CDN
+  entry, because a CDN keys on the full URL.
+- At most 50 names. `fields` needs `surface=json`; otherwise it is a
+  `400 invalid_fields`. It works with `?as_of=` too.
+- `/api/sync` always embeds the whole artifact. For sparse *lists*, use
+  JSON:API's `fields[<type>]=` or GraphQL.
+
+A fieldset response does not satisfy the full document schema from
+[`GET /api/schema`](#schema-discovery-typed-clients), which marks `blocks`,
+`custom_fields` and the other keys required. Decode it into a narrower type.
+[native-apps.md](native-apps.md) covers using it from a mobile app.
 
 ## Uploading media
 
@@ -838,6 +872,9 @@ every published document.
 
 Both official clients wrap the loop: `kiln.sync({ cursor })` in
 `@kiln-cms/client`, `KilnClient.sync(cursor: …)` in `kiln_client`.
+
+Syncing from a phone (where to keep the cursor, backoff, background-refresh
+limits) is covered in [native-apps.md](native-apps.md).
 
 ## Locale discovery
 
