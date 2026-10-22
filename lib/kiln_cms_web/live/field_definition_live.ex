@@ -1065,6 +1065,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         "A link to other content — one record or a list, of the type you pick below. For a related article, an author or a parent product."
       )
 
+  defp core_type_description(:group),
+    do:
+      gettext(
+        "Structured rows, each with the same typed fields — one, or a list. For dosages with an amount and a unit, or a product's specifications."
+      )
+
   defp core_type_description(:geolocation),
     do:
       gettext(
