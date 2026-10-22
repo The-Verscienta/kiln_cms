@@ -397,6 +397,57 @@ through a database outage (it answers `503` then). JSON:API's
 `references(field:)` is the other way to read targets in one request
 ([headless-graphql-api.md](headless-graphql-api.md#relationships-references-and-referencedby)).
 
+## Media in delivered content
+
+A library item reaches a client in one shape, wherever it appears: as the
+value of a `:media` custom field (one object, or a list of them for a gallery
+field with `multiple`), and — in the fired `:json` artifact
+(`GET /api/content/:type/:slug`, `/api/sync`) — under a `media` key on every
+`image` block and on each entry of a `gallery` block's `images`. Write one
+decoder for it.
+
+```json
+{
+  "id": "6f1c…", "url": "https://cdn.example.com/kiln/orig.jpg", "alt": "The kiln at dusk",
+  "width": 1600, "height": 900, "mime_type": "image/jpeg",
+  "focal": { "x": 0.5, "y": 0.3 },
+  "variants": [
+    { "label": "thumb", "width": 400, "height": 225, "format": "image/jpeg",
+      "url": "https://…/thumb.jpg", "bytes": 18204, "cropped": false },
+    { "label": "thumb.webp", "width": 400, "height": 225, "format": "image/webp",
+      "url": "https://…/thumb.webp", "bytes": 12950, "cropped": false },
+    { "label": "medium", "width": 1024, "height": 576, "format": "image/jpeg",
+      "url": "https://…/medium.jpg", "bytes": 96133, "cropped": false },
+    { "label": "card", "width": 800, "height": 450, "format": "image/jpeg",
+      "url": "https://…/card.jpg", "bytes": 51870, "cropped": true }
+  ]
+}
+```
+
+| Key | Meaning |
+|-----|---------|
+| `id`, `url`, `alt` | The item, its original file, and its library alt text. Always present. An `image` block's own `alt` (on the block) is the one to show; `media.alt` is the library default behind it. |
+| `width`, `height` | The original's size in pixels — lay out before the image loads. `null` until the item has been processed (below), and for a document. |
+| `mime_type` | The original's content type. |
+| `focal` | The focal point, as fractions of width and height from the top left. Crop around it (`object-position`, `contentMode` + offset). `null` for anything that is not an image. |
+| `variants` | Every derived rendition, smallest first. `format` is its MIME type: each size exists in the original's format and in each configured alternate (WebP by default, AVIF opt-in). `bytes` is the encoded size, `null` for a rendition made before sizes were recorded or by an external image backend. |
+| `variants[].cropped` | `true` for a rendition that is **not** the same picture at another size — the focal-aware `card` crop (800×450) and a video's poster frame. Choose by width only among `cropped: false` entries, and add the original (`url`, `width`) as the largest; pick a cropped one by `label` when you want that framing. |
+
+**Before processing.** Variants and dimensions are derived in the background
+after an upload, so a document saved in the first seconds after one stores
+`"variants": []` and `null` dimensions. Show `url` in the meantime. When the
+item's processing finishes — or its focal point or alt text changes — every
+published document showing it is re-fired, so the fired artifact catches up
+on its own. The value stored on the record (what JSON:API and GraphQL return
+in `custom_fields`) is refreshed when the record is next saved; an operator
+can refresh every record at once with `mix kiln.media.resnapshot --apply`
+(a dry run without `--apply`).
+
+Values stored before Kiln 1.6 carry only `id`, `url` and `alt` until then.
+Treat every other key as optional; the delivery schema
+([§ Schema discovery](#schema-discovery-typed-clients)) marks only `id` and
+`url` required.
+
 ## Uploading media
 
 Files enter the media library over REST. Every route below runs the **same

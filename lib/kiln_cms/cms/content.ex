@@ -3369,6 +3369,27 @@ defmodule KilnCMS.CMS.Content do
           change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
         end
 
+        # Internal: re-take every stored `:media` custom-field snapshot from
+        # the current library item (`KilnCMS.Media.Snapshot`), written by
+        # `mix kiln.media.resnapshot` as the `:media` system actor — a record
+        # saved before the snapshot grew dimensions and variants, or before its
+        # item's variants were derived, gets them without an editor re-saving.
+        #
+        # Shaped like `:refresh_computed`, for the same reasons: a bulk pass
+        # over rows nobody touched keeps `updated_at` and `lock_version`, sends
+        # no webhook, and loses to an editor's save in between
+        # (`UnchangedSinceRead`). Versioned, because what it writes is
+        # delivered (`custom_fields` on every API surface) and the sync delta
+        # API reads changes from version rows. A published record re-fires.
+        update :resnapshot_media do
+          require_atomic? false
+          accept []
+          change KilnCMS.CMS.Changes.UnchangedSinceRead
+          change {KilnCMS.CMS.Changes.ApplyCustomFields, resnapshot: :media}
+          change KilnCMS.CMS.Changes.KeepUpdatedAt
+          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
+        end
+
         # Internal: advance the materialized "what's on" sort key once an
         # occurrence has gone by (#766), written by `KilnCMS.Events.Sweep`.
         #
@@ -3608,6 +3629,9 @@ defmodule KilnCMS.CMS.Content do
           #     `:reference` fields set to clear on delete (R5,
           #     `ContentLinks.TargetDelete`), as `CMS.Bookkeeping.system/0`.
           #     A content write, versioned and locked like the one above.
+          #   * `:resnapshot_media` — re-takes stored `:media` snapshots from
+          #     the current library item (`mix kiln.media.resnapshot`), as the
+          #     `:media` pipeline actor.
           #
           # None accepts input, and none has a caller that is a person. Keep
           # the list that way: an action anyone else calls does not belong in
@@ -3616,6 +3640,7 @@ defmodule KilnCMS.CMS.Content do
                           :clear_reference_target,
                           :refresh_computed,
                           :reindex_search_text,
+                          :resnapshot_media,
                           :set_embedding,
                           :set_published_version_id,
                           :sync_shared_fields
@@ -3626,6 +3651,8 @@ defmodule KilnCMS.CMS.Content do
 
           authorize_if {KilnCMS.Checks.SystemActor,
                         subsystem: :firing, action: :reindex_search_text}
+
+          authorize_if {KilnCMS.Checks.SystemActor, subsystem: :media, action: :resnapshot_media}
 
           authorize_if {KilnCMS.Checks.SystemActor, subsystem: :search, action: :set_embedding}
 

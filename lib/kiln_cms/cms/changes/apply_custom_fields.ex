@@ -118,20 +118,42 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   alias KilnCMS.CMS.FieldDefinition
 
   @impl true
-  def change(changeset, _opts, context) do
+  def change(changeset, opts, context) do
     # One date for every formula this write evaluates, and for the fire it
     # enqueues (`Computed.Context`, "Pinning today").
     changeset = KilnCMS.CMS.Computed.Context.pin_today(changeset)
 
-    if changeset.action_type == :create or
-         Ash.Changeset.changing_attribute?(changeset, :custom_fields) do
-      apply_definitions(changeset, merge_base(changeset), mode(changeset), context)
-    else
+    cond do
+      opts[:resnapshot] == :media ->
+        resnapshot_media(changeset, context)
+
+      changeset.action_type == :create or
+          Ash.Changeset.changing_attribute?(changeset, :custom_fields) ->
+        apply_definitions(changeset, merge_base(changeset), mode(changeset), context)
+
       # An update that never mentions `custom_fields` still has to refresh
       # computed fields: their inputs are the *document* — a retitled page
       # changes `{{ slugify(title) }}`, a reworded one changes reading time.
-      refresh_computed(changeset)
+      true ->
+        refresh_computed(changeset)
     end
+  end
+
+  # `:resnapshot_media` (`mix kiln.media.resnapshot`): re-resolve every stored
+  # `:media` snapshot through the same coercion an editor's save runs, as if
+  # the caller had re-sent exactly those values. Every other key is absent from
+  # the "payload", so it merges through untouched — the editable pass never
+  # re-resolves a `:reference`, and never re-checks a value nobody sent.
+  defp resnapshot_media(changeset, context) do
+    existing = merge_base(changeset)
+
+    supplied =
+      for %{field_type: :media, name: name} <- definitions_for(changeset),
+          Map.has_key?(existing, name),
+          into: %{},
+          do: {name, existing[name]}
+
+    apply_definitions(changeset, existing, :strict, context, supplied)
   end
 
   @doc """
@@ -179,7 +201,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   defp merge_base(%{action_type: :create}), do: %{}
   defp merge_base(changeset), do: stringify_keys(changeset.data.custom_fields || %{})
 
-  defp apply_definitions(changeset, existing, mode, context) do
+  defp apply_definitions(changeset, existing, mode, context, supplied \\ nil) do
     defs = definitions_for(changeset)
 
     # The writing org (epic #336). `:media`/`:reference` fields resolve a snapshot
@@ -194,7 +216,9 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     # error, never a write.
     read_opts = context |> Ash.Context.to_opts() |> Keyword.put(:tenant, changeset.to_tenant)
 
-    supplied = stringify_keys(Ash.Changeset.get_attribute(changeset, :custom_fields) || %{})
+    supplied =
+      supplied ||
+        stringify_keys(Ash.Changeset.get_attribute(changeset, :custom_fields) || %{})
 
     # Computed fields (#429) are resolved in a second pass, after the editable
     # ones: their formulas reference sibling values, so they must see the
@@ -725,15 +749,16 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   end
 
   # A media field: the editor submits a MediaItem id; the stored value is a
-  # small snapshot (`%{"id", "url", "alt"}`) resolved at write time, so delivery
-  # needs no extra lookup — the same embed-at-write-time stance image blocks
-  # take. Re-saving refreshes the snapshot. Accepts a previously stored map too
+  # snapshot (`KilnCMS.Media.Snapshot`: id, url, alt, dimensions, focal point,
+  # variants) resolved at write time, so delivery needs no extra lookup — the
+  # same embed-at-write-time stance image blocks take. Re-saving refreshes the
+  # snapshot (see that module for what else does). Accepts a previously stored map too
   # (API writers may round-trip the stored shape). Scoped to the writing tenant
   # so a media reference can't point across sites (epic #336).
   defp coerce_media(value, _def, read_opts) do
     with {:ok, id} <- extract_id(value),
          {:ok, media} <- KilnCMS.CMS.get_media_item(id, read_opts) do
-      {:ok, %{"id" => media.id, "url" => media.url, "alt" => media.alt}}
+      {:ok, KilnCMS.Media.Snapshot.of(media)}
     else
       _ -> {:error, "must be an existing media item"}
     end
@@ -756,7 +781,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
        ids
        |> Enum.uniq()
        |> Enum.map(&by_id[&1])
-       |> Enum.map(&%{"id" => &1.id, "url" => &1.url, "alt" => &1.alt})}
+       |> Enum.map(&KilnCMS.Media.Snapshot.of/1)}
     end
   end
 

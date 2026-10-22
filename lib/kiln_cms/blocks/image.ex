@@ -39,8 +39,22 @@ defmodule KilnCMS.Blocks.Image do
 
   # `media_id` is an authoring-side pointer at the library item; the `:json`
   # render resolves it (or the pasted url) into `url` and never projects it.
+  # The fired artifact adds the item itself under `media`
+  # (`KilnCMS.Firing.BlockMedia`) — `null` when the block names none.
   @impl Kiln.Block.Renderer
-  def json_schema, do: %{"x-kiln-drop" => ["media_id"]}
+  def json_schema do
+    %{
+      "x-kiln-drop" => ["media_id"],
+      "properties" => %{"media" => nullable_media()}
+    }
+  end
+
+  @doc false
+  def nullable_media do
+    KilnCMS.Media.Snapshot.json_schema()
+    |> Map.put("type", ["object", "null"])
+    |> Map.put("description", "The library item behind the block, as fired; null when none.")
+  end
 
   @impl Kiln.Block.Renderer
   def search_text(block),

@@ -185,11 +185,7 @@ defmodule KilnCMSWeb.DynamicEntryEditorTest do
 
     saved = ContentTypes.get_record!(definition.name, entry.id, actor: admin)
 
-    assert saved.custom_fields["hero"] == %{
-             "id" => media.id,
-             "url" => media.url,
-             "alt" => media.alt
-           }
+    assert saved.custom_fields["hero"] == KilnCMS.Media.Snapshot.of(media)
 
     assert saved.custom_fields["related_page"]["id"] == page.id
     assert saved.custom_fields["related_page"]["type"] == "page"

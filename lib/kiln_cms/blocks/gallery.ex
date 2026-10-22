@@ -168,7 +168,12 @@ defmodule KilnCMS.Blocks.Gallery do
   def json_schema do
     %{
       "properties" => %{
-        "images" => Kiln.Block.JsonSchema.object_array(~w(media_id url alt caption)),
+        # Each image also carries `media` in the fired artifact
+        # (`KilnCMS.Firing.BlockMedia`): optional, because only firing adds it.
+        "images" =>
+          ~w(media_id url alt caption)
+          |> Kiln.Block.JsonSchema.object_array()
+          |> put_in(["items", "properties", "media"], KilnCMS.Blocks.Image.nullable_media()),
         # `layout` is NOT an enum. The `:json` render emits
         # `block.layout || @default_layout` with no allowlist pass — only the
         # `:web` render resolves it through `@layouts` — and nothing validates

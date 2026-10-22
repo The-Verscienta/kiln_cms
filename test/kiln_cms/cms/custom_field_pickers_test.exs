@@ -1,7 +1,7 @@
 defmodule KilnCMS.CMS.CustomFieldPickersTest do
   @moduledoc """
   Phase 5 (decision D17): `:media` and `:reference` custom field types. Values
-  are resolved at write time into small snapshot maps (media: id/url/alt;
+  are resolved at write time into snapshot maps (media: `KilnCMS.Media.Snapshot`;
   reference: id/type/slug/title), so delivery needs no extra lookups.
   """
   use KilnCMS.DataCase, async: true
@@ -73,7 +73,7 @@ defmodule KilnCMS.CMS.CustomFieldPickersTest do
   end
 
   describe "media fields" do
-    test "an id is snapshotted to %{id, url, alt}; unknown ids error" do
+    test "an id is snapshotted to the delivered media shape; unknown ids error" do
       actor = admin()
       definition = define_type!(actor)
       media = media!()
@@ -90,8 +90,18 @@ defmodule KilnCMS.CMS.CustomFieldPickersTest do
           actor: actor
         )
 
+      # Not processed yet: no dimensions, no variants — what exists now.
       assert entry.custom_fields == %{
-               "hero" => %{"id" => media.id, "url" => media.url, "alt" => media.alt}
+               "hero" => %{
+                 "id" => media.id,
+                 "url" => media.url,
+                 "alt" => media.alt,
+                 "width" => nil,
+                 "height" => nil,
+                 "mime_type" => nil,
+                 "focal" => %{"x" => 0.5, "y" => 0.5},
+                 "variants" => []
+               }
              }
 
       # Round-tripping the stored map re-resolves by its id.
@@ -130,7 +140,7 @@ defmodule KilnCMS.CMS.CustomFieldPickersTest do
       %{actor: actor, definition: definition, field: field}
     end
 
-    defp snapshot(media), do: %{"id" => media.id, "url" => media.url, "alt" => media.alt}
+    defp snapshot(media), do: KilnCMS.Media.Snapshot.of(media)
 
     test "a list of ids is snapshotted in order, blanks dropped and repeats kept once", %{
       actor: actor,

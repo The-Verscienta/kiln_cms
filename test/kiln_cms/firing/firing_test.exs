@@ -51,7 +51,7 @@ defmodule KilnCMS.Firing.FiringTest do
   end
 
   describe "firing on publish" do
-    test "fires every surface with format_version 2" do
+    test "fires every surface at the current format_version (3)" do
       actor = admin()
       page = published_page(actor)
 
@@ -59,7 +59,7 @@ defmodule KilnCMS.Firing.FiringTest do
       surfaces = artifacts |> Enum.map(& &1.surface) |> Enum.sort()
 
       assert surfaces == [:json, :json_ld, :llm, :web]
-      assert Enum.all?(artifacts, &(&1.format_version == 2))
+      assert Enum.all?(artifacts, &(&1.format_version == 3))
     end
 
     test "the web artifact is pre-rendered HTML from the typed serializers" do

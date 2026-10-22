@@ -46,7 +46,11 @@ defmodule KilnCMS.Firing.Engine do
   @surfaces KilnCMS.Firing.Surfaces.all()
   # Bumped when a surface's serialized shape changes (decision A2). v2 added
   # `custom_fields` to `:json` and `contentLocation` to `:json_ld` (#428/#429).
-  @format_version 2
+  # v3 added the media shape (`KilnCMS.Media.Snapshot`) to `:json`: dimensions,
+  # focal point and variants on `:media` custom fields, and a `"media"` key on
+  # `image` blocks and gallery images — so a read of an older artifact re-fires
+  # it (`migrate_if_stale/4`) and it converges without a backfill.
+  @format_version 3
 
   @enqueue_log_key {__MODULE__, :last_refire_enqueue_failure_ms}
   @future_log_key {__MODULE__, :last_future_artifact_ms}
@@ -520,7 +524,10 @@ defmodule KilnCMS.Firing.Engine do
       # the document, and is what makes computed fields (#429) part of what
       # publishing produces.
       "custom_fields" => custom.values,
-      "blocks" => Enum.map(typed, &Blocks.render(&1, :json))
+      "blocks" =>
+        typed
+        |> Enum.map(&Blocks.render(&1, :json))
+        |> KilnCMS.Firing.BlockMedia.put(typed, Map.get(document, :org_id))
     }
     |> put_plain_fields(custom)
   end

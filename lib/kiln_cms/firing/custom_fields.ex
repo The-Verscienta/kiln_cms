@@ -19,6 +19,13 @@ defmodule KilnCMS.Firing.CustomFields do
       re-fire a rename triggers (decision D13, `KilnCMS.Firing.References`)
       actually changes the artifact. The stored snapshot is not rewritten, and
       its shape is unchanged — only the two label values are refreshed.
+    * **media snapshots are re-taken**. A `:media` value is a snapshot of the
+      library item when the document was saved (`KilnCMS.Media.Snapshot`) —
+      possibly before its variants were derived, or before its focal point
+      moved. The fired copy is rebuilt from the item as it is now, so the
+      re-fire a media change triggers (`Changes.RefireMediaReferrers`) brings
+      the artifact up to date. An item gone since keeps its stored snapshot.
+      As with references, the stored value is not rewritten.
     * **unreadable reference targets are left out**. The stored snapshot was
       taken whatever state the target was in, a draft included, and an
       artifact is served to anyone at its URL. So the fired copy keeps only
@@ -43,6 +50,7 @@ defmodule KilnCMS.Firing.CustomFields do
   alias KilnCMS.CMS.Checks.LinkEndsReadable
   alias KilnCMS.CMS.Computed
   alias KilnCMS.CMS.ReferenceSnapshots
+  alias KilnCMS.Media.Snapshot
 
   @typedoc "A document's custom fields, resolved for firing."
   @type t :: %{values: map(), definitions: [struct()]}
@@ -78,6 +86,7 @@ defmodule KilnCMS.Firing.CustomFields do
         definitions
         |> recompute(document, stored, body, today)
         |> refresh_references(definitions, Map.get(document, :org_id))
+        |> refresh_media(definitions, Map.get(document, :org_id))
 
       %{values: values, definitions: definitions}
     else
@@ -151,6 +160,21 @@ defmodule KilnCMS.Firing.CustomFields do
         values
         |> Map.merge(relabelled)
         |> ReferenceSnapshots.mask(current |> Map.keys() |> MapSet.new())
+    end
+  end
+
+  # One read for every media item the document's fields name.
+  defp refresh_media(values, definitions, org_id) do
+    names = for %{field_type: :media, name: name} <- definitions, do: name
+    media = Map.take(values, names)
+
+    case media |> Map.values() |> Enum.flat_map(&Snapshot.ids/1) do
+      [] ->
+        values
+
+      ids ->
+        items = Snapshot.load(org_id, ids)
+        Map.merge(values, Map.new(media, fn {name, v} -> {name, Snapshot.refresh(v, items)} end))
     end
   end
 

@@ -266,6 +266,48 @@ defmodule KilnCMS.SchemaExportTest do
     end
   end
 
+  describe "media" do
+    test "a :media field, a gallery and an image block all declare the one media shape",
+         %{actor: actor, org: org} do
+      for {name, multiple} <- [{"hero", false}, {"shots", true}] do
+        CMS.create_field_definition!(
+          %{content_type: :page, name: name, label: name, field_type: :media, multiple: multiple},
+          actor: actor,
+          tenant: org
+        )
+      end
+
+      schema = SchemaExport.json_schema(org_id: org.id)
+      fields = schema["$defs"]["content_page"]["properties"]["custom_fields"]["properties"]
+      shape = KilnCMS.Media.Snapshot.json_schema()
+
+      assert fields["hero"]["type"] == ["object", "null"]
+      assert fields["hero"]["properties"] == shape["properties"]
+      assert fields["shots"]["items"] == shape
+
+      variant = shape["properties"]["variants"]["items"]["properties"]
+
+      assert Map.keys(variant) |> Enum.sort() ==
+               ~w(bytes cropped format height label url width)
+
+      # A value stored before the shape grew keeps only these until re-saved.
+      assert shape["required"] == ["id", "url"]
+
+      image = schema["$defs"]["block_image"]["properties"]["media"]
+      assert image["type"] == ["object", "null"]
+      assert image["properties"] == shape["properties"]
+
+      gallery_item = schema["$defs"]["block_gallery"]["properties"]["images"]["items"]
+      assert gallery_item["properties"]["media"]["properties"] == shape["properties"]
+      # Only firing adds it, so it is not required of every gallery image.
+      refute "media" in gallery_item["required"]
+
+      ts = SchemaExport.TypeScript.emit(schema)
+      assert ts =~ "variants"
+      assert ts =~ "cropped"
+    end
+  end
+
   describe "dynamic content types" do
     test "are exported with their own field definitions", %{actor: actor, org: org} do
       name = type_name()

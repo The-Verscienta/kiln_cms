@@ -676,6 +676,10 @@ defmodule KilnCMS.CMS.MediaItem do
           else: {:error, "no rendered-media field changed"}
       end
 
+    # Re-fire the published documents whose artifacts embed this item's
+    # delivered shape (dimensions, focal point, variants) when it changes.
+    change KilnCMS.CMS.Changes.RefireMediaReferrers, on: [:update]
+
     # Not atomic: relocates the blob between public/private storage — see the
     # module (#481).
     change KilnCMS.CMS.Changes.MigrateMediaStorage, on: [:update]

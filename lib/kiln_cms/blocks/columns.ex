@@ -171,6 +171,14 @@ defmodule KilnCMS.Blocks.Columns do
   end
 
   @doc """
+  Typed child blocks per column, in column order — the nesting the `:json`
+  render's `"columns"` list has, for a pass that walks the two side by side
+  (`KilnCMS.Firing.BlockMedia`).
+  """
+  @spec column_blocks(struct()) :: [[struct()]]
+  def column_blocks(block), do: block |> columns() |> Enum.map(&child_blocks/1)
+
+  @doc """
   The **raw child maps** of every column, flattened, including nested columns'
   own children.
 

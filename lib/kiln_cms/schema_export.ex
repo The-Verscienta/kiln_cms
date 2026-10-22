@@ -466,20 +466,21 @@ defmodule KilnCMS.SchemaExport do
   # publish anonymously.
   defp base_custom_field_schema(:select, _d), do: %{"type" => ["string", "null"]}
 
+  # The item shape is `Media.Snapshot`'s — the same one an `image` block's
+  # `"media"` key carries, so one decoder reads both.
   defp base_custom_field_schema(:media, %{multiple: true} = d) do
     %{
       "type" => ["array", "null"],
-      "items" => %{"type" => "object"},
-      "description" => "Write-time snapshots of the picked media items, in gallery order."
+      "items" => KilnCMS.Media.Snapshot.json_schema(),
+      "description" => "Snapshots of the picked media items, in gallery order."
     }
     |> put_item_bounds(d)
   end
 
   defp base_custom_field_schema(:media, _d) do
-    %{
-      "type" => ["object", "null"],
-      "description" => "Write-time snapshot of the picked media item."
-    }
+    KilnCMS.Media.Snapshot.json_schema()
+    |> Map.put("type", ["object", "null"])
+    |> Map.put("description", "Snapshot of the picked media item.")
   end
 
   # A list of references: the snapshots in the editor's order. The item shape

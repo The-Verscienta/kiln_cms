@@ -54,7 +54,17 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Optional: run `mix kiln.media.resnapshot --apply` once after deploying**
+  so stored `:media` field values gain dimensions, focal point and variants;
+  fired artifacts converge by themselves.
+  ([long form](docs/changelog/unreleased.md#media-resnapshot-upgrade))
+
 ### Added
+
+- **Media in delivered content carries dimensions, MIME type, focal point and variants.**
+  ([long form](docs/changelog/unreleased.md#media-snapshot-for-apps))
 
 - **A `:text` custom field can also be delivered as plain text.**
   ([#2037](https://github.com/The-Verscienta/kiln_cms/pull/2037) · [long form](docs/changelog/unreleased.md#a-text-custom-field-can-also-be-delivered-as-plain-text))

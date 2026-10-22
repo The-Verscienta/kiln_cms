@@ -5,7 +5,50 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Upgrade notes
+
+<a id="media-resnapshot-upgrade"></a>
+
+- **Optional: run `mix kiln.media.resnapshot --apply` once after deploying.**
+  A `:media` custom field's stored value gains `width`, `height`,
+  `mime_type`, `focal` and `variants` when its record is next saved; this
+  re-takes every stored value now, through the content write path (versioned,
+  `updated_at` and the lock kept, no webhook). Without `--apply` it is a dry
+  run that reports what it would write. In a release, the task's work is
+  `KilnCMS.Media.Resnapshot.run/2` over `bin/kiln_cms rpc`. Fired artifacts
+  need nothing: they re-fire on their next read (`format_version` 3), or at
+  once with `mix kiln.refire_all`.
+
 ## Added
+
+<a id="media-snapshot-for-apps"></a>
+
+- **Media in delivered content carries dimensions, MIME type, focal point and
+  variants.** A `:media` custom field's stored value (single, or each item of
+  a gallery `multiple` field) was `%{"id", "url", "alt"}`: a native app could
+  not lay out before the image loaded, pick a size, or crop around the focal
+  point. It now also carries `width`, `height`, `mime_type`, `focal`
+  (`{"x", "y"}`, or `null` for non-images) and `variants` — each rendition's
+  `label`, `width`, `height`, `format` (MIME type), `url`, `bytes` and
+  `cropped` (`true` for the focal-aware `card` crop and a video poster, which
+  are not interchangeable by width). `id`, `url` and `alt` are unchanged. The
+  fired `:json` artifact adds the same object as `media` on `image` blocks and
+  on each gallery image, so one decoder reads both
+  (`KilnCMS.Media.Snapshot`, documented in `docs/api.md`, "Media in delivered
+  content"). The delivery schema and its `.d.ts` spell the shape out.
+
+  Variants are derived after the upload, so a snapshot taken first holds
+  `"variants": []` and `null` dimensions. Firing now re-reads every item a
+  document shows, and a media write that changes the shape (the variant
+  worker finishing, a moved focal point, new alt text) re-fires the published
+  documents pointing at it; the variant worker now records each rendition's
+  `bytes`. The stored value is refreshed by the next save, or by the new
+  `mix kiln.media.resnapshot` (dry run by default, `--apply` to write; through
+  a new internal `:resnapshot_media` content action, versioned, keeping
+  `updated_at` and the lock, as the `:media` system actor).
+
+  The `:json` artifact `format_version` is now 3, so an older artifact
+  re-fires on its next read; `mix kiln.refire_all` gets there faster.
 
 <a id="a-text-custom-field-can-also-be-delivered-as-plain-text"></a>
 

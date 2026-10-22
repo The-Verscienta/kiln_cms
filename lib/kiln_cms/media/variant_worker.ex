@@ -269,6 +269,9 @@ defmodule KilnCMS.Media.VariantWorker do
     Map.new(files, fn variant ->
       %{label: label, path: tmp, width: w, height: h} = variant
       key = Storage.generate_key("#{label}#{variant.ext}")
+      # The encoded size, for an app weighing a rendition before it downloads
+      # it (`Media.Snapshot`). Read before the store, which may move the file.
+      %File.Stat{size: bytes} = File.stat!(tmp)
       {:ok, ^key} = Storage.store(key, tmp, site)
 
       {label,
@@ -277,7 +280,8 @@ defmodule KilnCMS.Media.VariantWorker do
          "url" => Storage.url(key, site),
          "width" => w,
          "height" => h,
-         "content_type" => variant.content_type
+         "content_type" => variant.content_type,
+         "bytes" => bytes
        }}
     end)
   after
