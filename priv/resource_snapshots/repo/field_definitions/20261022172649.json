@@ -281,6 +281,18 @@
     },
     {
       "allow_nil?": false,
+      "default": "false",
+      "generated?": false,
+      "precision": null,
+      "primary_key?": false,
+      "references": null,
+      "scale": null,
+      "size": null,
+      "source": "deliver_plain",
+      "type": "boolean"
+    },
+    {
+      "allow_nil?": false,
       "default": "\"localized\"",
       "generated?": false,
       "precision": null,
@@ -445,7 +457,7 @@
   "custom_indexes": [],
   "custom_statements": [],
   "has_create_action": true,
-  "hash": "FE96BD8AF0E9C84FC155A5C12CF8948D4CD6766AB51B8F55CA2DC97C7AF803A8",
+  "hash": "FAAB9D5656DC9137C303F2160021057342E7A7D3DF873F40EFAED9444D1987A8",
   "identities": [
     {
       "all_tenants?": false,

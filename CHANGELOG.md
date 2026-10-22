@@ -56,6 +56,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A `:text` custom field can also be delivered as plain text.**
+  ([#2037](https://github.com/The-Verscienta/kiln_cms/pull/2037) · [long form](docs/changelog/unreleased.md#a-text-custom-field-can-also-be-delivered-as-plain-text))
+
 - **A `:group` custom field holds structured rows: one object, or a list of
   them, keyed by typed sub-fields, with every bad key reported by its path.**
   ([#2036](https://github.com/The-Verscienta/kiln_cms/pull/2036) · [long form](docs/changelog/unreleased.md#group-custom-field))

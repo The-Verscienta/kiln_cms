@@ -235,6 +235,7 @@ defmodule KilnCMS.SchemaExport do
     ct
     |> base_content_schema()
     |> put_inherited_fields(ct)
+    |> put_plain_fields(ct)
     |> put_reverse_fields(Map.get(ct, :reverse_fields, []))
   end
 
@@ -276,6 +277,32 @@ defmodule KilnCMS.SchemaExport do
       })
     else
       schema
+    end
+  end
+
+  # `deliver_plain` `:text` fields fire a `custom_fields_plain` sibling of
+  # `custom_fields` (`KilnCMS.CMS.PlainFields`): one key per flagged field,
+  # the value with its markup stripped. **Closed**, unlike `custom_fields` —
+  # it is projected from the current definitions on every fire, a
+  # point-in-time read included. Not `required`: an artifact fired before
+  # the flag was set lacks it until the re-fire the flip enqueues lands.
+  # Declared only on a type that flags a field, so every other type's schema
+  # is unchanged.
+  defp put_plain_fields(schema, ct) do
+    case KilnCMS.CMS.PlainFields.names(ct.field_definitions) do
+      [] ->
+        schema
+
+      names ->
+        put_in(schema, ["properties", "custom_fields_plain"], %{
+          "type" => "object",
+          "description" =>
+            "Plain-text renditions of the `:text` custom fields marked `deliver_plain`: " <>
+              "the stored value with its HTML tags removed, entities decoded and " <>
+              "whitespace collapsed. `null` where the record holds no value.",
+          "properties" => Map.new(names, &{&1, %{"type" => ["string", "null"]}}),
+          "additionalProperties" => false
+        })
     end
   end
 

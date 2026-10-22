@@ -2096,6 +2096,40 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   attr :form, :any, required: true
   attr :id, :string, required: true
 
+  # Whether delivery carries a plain-text rendition beside a `:text` field's
+  # value (`deliver_plain`). Shown only for that type: on any other, nothing
+  # is submitted and `Changes.ClearDeliverPlain` drops a stored `true`.
+  defp deliver_plain_field(assigns) do
+    ~H"""
+    <label
+      :if={to_string(@form[:field_type].value) == "text"}
+      for={@id}
+      class="flex items-start gap-2 self-end text-sm"
+    >
+      <input type="hidden" name={@form[:deliver_plain].name} value="false" />
+      <input
+        type="checkbox"
+        id={@id}
+        name={@form[:deliver_plain].name}
+        value="true"
+        checked={@form[:deliver_plain].value in [true, "true"]}
+        class="mt-0.5 size-4 rounded border border-base-content/30 accent-primary"
+      />
+      <span>
+        {gettext("Also deliver as plain text")}
+        <span class="block text-xs text-base-content/60">
+          {gettext(
+            "APIs add a copy with HTML tags removed under custom_fields_plain, for apps that cannot render HTML."
+          )}
+        </span>
+      </span>
+    </label>
+    """
+  end
+
+  attr :form, :any, required: true
+  attr :id, :string, required: true
+
   # The choices of a `:select` field, shown only for that type (#1819).
   defp options_field(assigns) do
     ~H"""
@@ -2336,6 +2370,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             <.localization_input field={@form[:localization]} />
             <.options_field form={@form} id="new-field-options" />
             <.default_field form={@form} />
+            <.deliver_plain_field form={@form} id="new-field-deliver-plain" />
             <label class="flex items-center gap-2 self-end text-sm">
               <input type="hidden" name="field_definition[required]" value="false" />
               <input
@@ -2448,6 +2483,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                         class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
                       >
                         {gettext("list")}
+                      </span>
+                      <span
+                        :if={definition.field_type == :text and definition.deliver_plain}
+                        title={gettext("Also delivered as plain text (custom_fields_plain)")}
+                        class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
+                      >
+                        {gettext("plain")}
                       </span>
                       <span
                         :if={definition.required}
@@ -2611,6 +2653,10 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                   <.localization_input field={@edit.form[:localization]} />
                   <.options_field form={@edit.form} id={"edit-field-options-#{@edit.id}"} />
                   <.default_field form={@edit.form} />
+                  <.deliver_plain_field
+                    form={@edit.form}
+                    id={"edit-field-deliver-plain-#{@edit.id}"}
+                  />
                   <label class="flex items-center gap-2 self-end text-sm">
                     <input type="hidden" name="field_definition[required]" value="false" />
                     <input

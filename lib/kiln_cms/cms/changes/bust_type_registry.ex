@@ -65,7 +65,8 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
         # new shape — their artifacts, media usage edges and cached responses.
         if Ash.Changeset.changing_attribute?(changeset, :name) or
              Ash.Changeset.changing_attribute?(changeset, :multiple) or
-             reindex_search?(changeset, record) do
+             reindex_search?(changeset, record) or
+             replain?(changeset, record) do
           # Determine which type this field belongs to and sweep it
           type =
             cond do
@@ -143,6 +144,14 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
   defp reindex_search?(changeset, record) do
     Ash.Changeset.changing_attribute?(changeset, :searchable) or
       (changeset.action_type == :destroy and Map.get(record, :searchable) == true)
+  end
+
+  # A `deliver_plain` flip adds or drops `custom_fields_plain.<name>` on the
+  # fired `:json` artifact (`KilnCMS.CMS.PlainFields`), which `/api/content`
+  # and `/api/sync` serve verbatim — and deleting a flagged field drops it.
+  defp replain?(changeset, record) do
+    Ash.Changeset.changing_attribute?(changeset, :deliver_plain) or
+      (changeset.action_type == :destroy and Map.get(record, :deliver_plain) == true)
   end
 
   # The feed *documents* (#719). `has_published_feed` is the other half of

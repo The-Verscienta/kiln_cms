@@ -563,6 +563,7 @@ default. `GET /api/json/open_api` describes each of them on the resource's
 | `effective_seo_description` | string | No — same as above, for `seo_description` |
 | `related_links` | array | No — curated related links, projected to `[{id, title, slug}]` |
 | `inherited_fields` | object | No — what this locale variant inherits along the site's fallback chain for its `:fallback` fields, with the source locale: `{"excerpt": {"value", "locale"}, "custom_fields": {…}}` (#1327). Served only when asked for with `fields[<type>]=…` |
+| `custom_fields_plain` | object | No — the plain-text rendition of the `:text` custom fields marked "Also deliver as plain text" (`deliver_plain`): `{"<name>": "text without tags" \| null}`, `null` when the type marks none. `custom_fields` keeps the stored HTML. Served only when asked for with `fields[<type>]=…`; the fired artifact (`/api/content`, `/api/sync`) carries it whenever the type marks a field |
 
 "No" means exactly that — not merely undocumented as a filter or sort:
 `?filter[path]=…` is a clean `400 invalid_filter`, and `?sort=path` is

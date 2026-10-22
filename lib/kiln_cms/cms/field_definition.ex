@@ -269,6 +269,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :compute,
       :names_record,
       :searchable,
+      :deliver_plain,
       :localization,
       :inverse_label,
       :inverse_name
@@ -396,6 +397,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # `max_sources` and `on_target_delete` speak about a reference's targets,
     # so they drop on any other type — a link field included.
     change KilnCMS.CMS.Changes.ClearReferenceOptions
+
+    # `deliver_plain` speaks about a `:text` field's HTML, so it drops on any
+    # other type — and on a link field, whose value delivery never projects.
+    change KilnCMS.CMS.Changes.ClearDeliverPlain
 
     # The other side's name (R4) belongs to a top-level `:reference` field,
     # and a label alone suggests its machine name, as a field's label does.
@@ -619,6 +624,15 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # deleting a flagged field, re-fires the type's published documents
     # (`Changes.BustTypeRegistry`).
     attribute :searchable, :boolean, allow_nil?: false, default: false, public?: true
+
+    # Whether delivery carries a plain-text rendition of this `:text` field's
+    # value beside the stored one: `custom_fields_plain.<name>`, the value run
+    # through `KilnCMS.PlainText.from_html/1`, for a client that cannot render
+    # the HTML fragments an importer put there (a native app). Off by default,
+    # so every existing payload is unchanged, and `custom_fields` itself is
+    # never rewritten. `:text` only (`Changes.ClearDeliverPlain`). Flipping it
+    # re-fires the type's published documents (`Changes.BustTypeRegistry`).
+    attribute :deliver_plain, :boolean, allow_nil?: false, default: false, public?: true
 
     # Field-level localization (#1327): whether this field's value differs
     # between the locale variants of a document. `:localized` (the default) is

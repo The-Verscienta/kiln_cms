@@ -4254,6 +4254,16 @@ defmodule KilnCMS.CMS.Content do
           sortable? false
         end
 
+        # The plain-text rendition of the `:text` custom fields whose definition
+        # sets `deliver_plain` (`KilnCMS.CMS.PlainFields`), for a client that
+        # cannot render their HTML. Served only on request, like
+        # `inherited_fields`; `custom_fields` itself is untouched.
+        calculate :custom_fields_plain, :map, KilnCMS.CMS.Calculations.CustomFieldsPlain do
+          public? true
+          filterable? false
+          sortable? false
+        end
+
         calculate :block_ids, {:array, :map}, KilnCMS.CMS.Calculations.BlockIds do
           public? true
           # No `expression/2`, so a filter or sort would raise out of AshSql as

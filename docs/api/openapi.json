@@ -1196,6 +1196,17 @@
                 "description": "Field included by default.",
                 "type": "object"
               },
+              "custom_fields_plain": {
+                "anyOf": [
+                  {
+                    "nullable": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "due_at": {
                 "anyOf": [
                   {},
@@ -3675,6 +3686,10 @@
                 ],
                 "description": "Field included by default."
               },
+              "deliver_plain": {
+                "description": "Field included by default.",
+                "type": "boolean"
+              },
               "field_type": {
                 "description": "Field included by default.",
                 "type": "string"
@@ -3865,7 +3880,8 @@
               "on_target_delete",
               "position",
               "names_record",
-              "searchable"
+              "searchable",
+              "deliver_plain"
             ],
             "type": "object"
           },
@@ -4047,6 +4063,9 @@
           },
           "default": {
             "$ref": "#/components/schemas/field_definition-filter-default"
+          },
+          "deliver_plain": {
+            "$ref": "#/components/schemas/field_definition-filter-deliver_plain"
           },
           "field_type": {
             "$ref": "#/components/schemas/field_definition-filter-field_type"
@@ -4279,6 +4298,45 @@
           },
           "string_starts_with": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "field_definition-filter-deliver_plain": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "type": "boolean"
+          },
+          "greater_than": {
+            "type": "boolean"
+          },
+          "greater_than_or_equal": {
+            "type": "boolean"
+          },
+          "in": {
+            "items": {
+              "type": "boolean"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "boolean"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "boolean"
+          },
+          "less_than": {
+            "type": "boolean"
+          },
+          "less_than_or_equal": {
+            "type": "boolean"
+          },
+          "not_eq": {
+            "type": "boolean"
           }
         },
         "type": "object"
@@ -6590,6 +6648,17 @@
                 "description": "Field included by default.",
                 "type": "object"
               },
+              "custom_fields_plain": {
+                "anyOf": [
+                  {
+                    "nullable": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "due_at": {
                 "anyOf": [
                   {},
@@ -8824,6 +8893,17 @@
               "custom_fields": {
                 "description": "Field included by default.",
                 "type": "object"
+              },
+              "custom_fields_plain": {
+                "anyOf": [
+                  {
+                    "nullable": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "due_at": {
                 "anyOf": [

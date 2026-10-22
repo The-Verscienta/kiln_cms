@@ -230,6 +230,42 @@ defmodule KilnCMS.SchemaExportTest do
     end
   end
 
+  describe "deliver_plain" do
+    test "declares a closed custom_fields_plain of nullable strings, and the .d.ts types it",
+         %{actor: actor, org: org} do
+      for {name, plain?} <- [{"properties", true}, {"notes", false}] do
+        CMS.create_field_definition!(
+          %{
+            content_type: :page,
+            name: name,
+            label: name,
+            field_type: :text,
+            deliver_plain: plain?
+          },
+          actor: actor,
+          tenant: org
+        )
+      end
+
+      schema = SchemaExport.json_schema(org_id: org.id)
+      page = schema["$defs"]["content_page"]
+
+      assert page["properties"]["custom_fields_plain"]["properties"] == %{
+               "properties" => %{"type" => ["string", "null"]}
+             }
+
+      assert page["properties"]["custom_fields_plain"]["additionalProperties"] == false
+      # An artifact fired before the flag was set lacks it until the re-fire.
+      refute "custom_fields_plain" in page["required"]
+
+      # Only on the type that flags a field.
+      refute Map.has_key?(schema["$defs"]["content_post"]["properties"], "custom_fields_plain")
+
+      ts = SchemaExport.TypeScript.emit(schema)
+      assert ts =~ "custom_fields_plain?:"
+    end
+  end
+
   describe "dynamic content types" do
     test "are exported with their own field definitions", %{actor: actor, org: org} do
       name = type_name()

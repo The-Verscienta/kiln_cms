@@ -475,6 +475,17 @@ defmodule KilnCMS.Firing.Engine do
     Phoenix.PubSub.broadcast(KilnCMS.PubSub, "firing", {:fired, type, document.id})
   end
 
+  # The plain-text rendition of the `deliver_plain` `:text` fields
+  # (`KilnCMS.CMS.PlainFields`), from the values this fire resolved. Absent
+  # on a type that flags none, so its artifact is byte-identical to what it
+  # was; flipping the flag re-fires the type (`Changes.BustTypeRegistry`).
+  defp put_plain_fields(body, %{values: values, definitions: definitions}) do
+    case KilnCMS.CMS.PlainFields.project(values, definitions) do
+      nil -> body
+      plain -> Map.put(body, "custom_fields_plain", plain)
+    end
+  end
+
   # The `:json` body names the fields it filled along the locale fallback
   # chain, and from which locale (#1327) — additive, and absent unless
   # something was inherited, so an artifact of a type that opted nothing in
@@ -511,6 +522,7 @@ defmodule KilnCMS.Firing.Engine do
       "custom_fields" => custom.values,
       "blocks" => Enum.map(typed, &Blocks.render(&1, :json))
     }
+    |> put_plain_fields(custom)
   end
 
   # Clean chunked Markdown for LLM/answer-engine extraction (#357, GEO).

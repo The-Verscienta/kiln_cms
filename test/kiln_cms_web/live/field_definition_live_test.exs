@@ -110,6 +110,49 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     assert by_name["blurb"].localization == :localized
   end
 
+  test "an admin delivers a text field as plain text too, and only a text field", %{conn: conn} do
+    admin = authed_user(:admin)
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+    toggle = "#new-field-deliver-plain"
+
+    lv |> form("#new-field-form", field_definition: %{field_type: "string"}) |> render_change()
+    refute has_element?(lv, toggle)
+
+    lv |> form("#new-field-form", field_definition: %{field_type: "text"}) |> render_change()
+    assert has_element?(lv, toggle)
+
+    lv
+    |> form("#new-field-form",
+      field_definition: %{
+        scopes: ["page"],
+        name: "properties",
+        label: "Properties",
+        field_type: "text",
+        deliver_plain: "true"
+      }
+    )
+    |> render_submit()
+
+    field =
+      :page
+      |> CMS.field_definitions_for!(authorize?: false)
+      |> Enum.find(&(&1.name == "properties"))
+
+    assert field.deliver_plain
+    assert lv |> element("#field-#{field.id}") |> render() =~ "plain"
+
+    # Retyped away from text, the toggle goes and the flag with it.
+    lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+    assert has_element?(lv, "#edit-field-deliver-plain-#{field.id}[checked]")
+
+    lv
+    |> form("#edit-field-#{field.id}", field_definition: %{field_type: "string"})
+    |> render_submit()
+
+    refute CMS.get_field_definition!(field.id, authorize?: false).deliver_plain
+  end
+
   test "an admin makes a media field a gallery, and is warned before narrowing it back", %{
     conn: conn
   } do
