@@ -10,37 +10,38 @@ defmodule KilnCMS.CMS.Validations.OneFieldScope do
 
   alias Ash.Error.Changes.InvalidAttribute
 
+  @owners [:content_type, :type_definition_id, :link_of_id, :group_of_id]
+
   @impl true
   def validate(changeset, _opts, _context) do
-    content_type = Ash.Changeset.get_attribute(changeset, :content_type)
-    definition_id = Ash.Changeset.get_attribute(changeset, :type_definition_id)
-    link_of = Ash.Changeset.get_attribute(changeset, :link_of_id)
-    group_of = Ash.Changeset.get_attribute(changeset, :group_of_id)
+    owners = Enum.reject(@owners, &is_nil(Ash.Changeset.get_attribute(changeset, &1)))
 
-    case {content_type, definition_id, link_of, group_of} do
-      {nil, nil, nil, nil} ->
-        error(:content_type, "a field must belong to a content type or a type definition")
+    case owners do
+      [] -> error(:content_type, "a field must belong to a content type or a type definition")
+      [_exactly_one] -> :ok
+      several -> conflict(several)
+    end
+  end
 
-      {_ct, _id, link, group} when not is_nil(link) and not is_nil(group) ->
+  defp conflict(owners) do
+    cond do
+      :link_of_id in owners and :group_of_id in owners ->
         error(:group_of_id, "a field cannot be both a link field and a group's sub-field")
 
-      {ct, id, nil, nil} when not is_nil(ct) and not is_nil(id) ->
-        error(
-          :type_definition_id,
-          "a field cannot belong to both a content type and a type definition"
-        )
-
-      {ct, id, link, nil} when not is_nil(link) and (not is_nil(ct) or not is_nil(id)) ->
+      :link_of_id in owners ->
         error(
           :link_of_id,
           "a link field belongs to its reference field, not directly to a content type"
         )
 
-      {ct, id, nil, group} when not is_nil(group) and (not is_nil(ct) or not is_nil(id)) ->
+      :group_of_id in owners ->
         error(:group_of_id, "a sub-field belongs to its group, not directly to a content type")
 
-      _exactly_one ->
-        :ok
+      true ->
+        error(
+          :type_definition_id,
+          "a field cannot belong to both a content type and a type definition"
+        )
     end
   end
 
