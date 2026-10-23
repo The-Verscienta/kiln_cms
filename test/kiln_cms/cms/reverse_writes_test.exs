@@ -234,6 +234,50 @@ defmodule KilnCMS.CMS.ReverseWritesTest do
     assert ids(reload(fresh), ctx.field) == [ctx.target.id]
   end
 
+  # R1b's cap runs inside the source's update (`ContentLinks.reconcile`), so
+  # a connect from the target's side meets it exactly as the source's own
+  # editor would — refused, with the source left as it was.
+  describe "a target full under max_sources" do
+    setup ctx do
+      [definition] =
+        CMS.list_field_definitions!(
+          authorize?: false,
+          query: [filter: [content_type: :post, name: ctx.field]]
+        )
+
+      CMS.update_field_definition!(definition, %{max_sources: 1}, actor: ctx.admin)
+      %{reverse: ReverseFields.find(:page, ctx.reverse.name, nil)}
+    end
+
+    test "refuses a connect from a draft source and leaves it untouched", ctx do
+      first = post!(ctx.admin, "Cake", %{})
+      second = post!(ctx.admin, "Bread", %{ctx.field => [ctx.other.id]})
+
+      assert {:ok, _} = ReverseFields.connect(ctx.target, ctx.reverse, first, actor: ctx.admin)
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               ReverseFields.connect(ctx.target, ctx.reverse, second, actor: ctx.admin)
+
+      assert Exception.message(error) =~ "is full: it already has 1 of 1"
+      assert ids(reload(second), ctx.field) == [ctx.other.id]
+      assert [%{source_id: source_id}] = edges(ctx.target, ctx.field)
+      assert source_id == first.id
+    end
+
+    test "frees a slot when the connected source lets go", ctx do
+      first = post!(ctx.admin, "Cake", %{})
+      second = post!(ctx.admin, "Bread", %{})
+
+      assert {:ok, _} = ReverseFields.connect(ctx.target, ctx.reverse, first, actor: ctx.admin)
+
+      assert {:ok, _} =
+               ReverseFields.disconnect(ctx.target, ctx.reverse, reload(first), actor: ctx.admin)
+
+      assert {:ok, _} = ReverseFields.connect(ctx.target, ctx.reverse, second, actor: ctx.admin)
+      assert ids(reload(second), ctx.field) == [ctx.target.id]
+    end
+  end
+
   test "a source the caller may not update is not editable, and the write is refused", ctx do
     source = post!(ctx.admin, "Cake", %{})
     editor = user(:editor, %{readable_types: ["page", "post"], editable_types: ["page"]})
