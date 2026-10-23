@@ -82,6 +82,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **`related_links` lists curated related content in the order the editor
+  set; the `related_<type>s` relationship itself stays unordered.**
+  ([#TBD](https://github.com/The-Verscienta/kiln_cms/pulls) · [long form](docs/changelog/unreleased.md#related-links-ordered))
+
 - **A single media custom field is picked from the library drawer, with a
   thumbnail, instead of a dropdown of filenames.**
   ([#2055](https://github.com/The-Verscienta/kiln_cms/pull/2055) · [long form](docs/changelog/unreleased.md#single-media-picker))

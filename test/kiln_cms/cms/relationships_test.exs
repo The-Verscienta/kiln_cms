@@ -536,6 +536,34 @@ defmodule KilnCMS.CMS.RelationshipsTest do
       post = CMS.publish_post_changes!(post, %{}, actor: admin)
       assert positions(post) == [{ctx.b.id, 0}, {ctx.a.id, 1}]
     end
+
+    test "related_links lists them in that order, for any reader", ctx do
+      admin = user(:admin)
+      [a, b, c] = for p <- [ctx.a, ctx.b, ctx.c], do: CMS.publish_post!(p, %{}, actor: admin)
+
+      post =
+        ctx.post
+        |> CMS.update_post!(%{related_post_ids: [c.id, a.id, b.id]}, actor: admin)
+        |> CMS.publish_post!(%{}, actor: admin)
+
+      for actor <- [admin, ctx.editor, nil] do
+        links = CMS.get_post!(post.id, actor: actor, load: [:related_links]).related_links
+        assert Enum.map(links, & &1.id) == [c.id, a.id, b.id], inspect(actor && actor.role)
+      end
+
+      # Several records in one read: each in its own order.
+      other =
+        CMS.create_post!(%{title: "Other", slug: slug(), related_post_ids: [b.id, c.id]},
+          actor: admin
+        )
+
+      orders =
+        [actor: admin, query: [filter: [id: [in: [post.id, other.id]]]], load: [:related_links]]
+        |> CMS.list_posts!()
+        |> Map.new(&{&1.id, Enum.map(&1.related_links, fn link -> link.id end)})
+
+      assert orders == %{post.id => [c.id, a.id, b.id], other.id => [b.id, c.id]}
+    end
   end
 
   describe "featured image (many-to-one to MediaItem)" do

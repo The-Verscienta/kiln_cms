@@ -398,16 +398,56 @@ defmodule KilnCMS.CMS.ContentLinks do
   Unloaded, or fewer than two, it is left as it is.
   """
   @spec sort_related(struct(), atom()) :: struct()
-  def sort_related(record, relationship) do
-    case Map.get(record, relationship) do
-      [_, _ | _] = loaded ->
-        by_id = Map.new(loaded, &{&1.id, &1})
-        ordered = in_related_order(record, Enum.map(loaded, & &1.id))
-        Map.put(record, relationship, Enum.map(ordered, &Map.fetch!(by_id, &1)))
+  def sort_related(record, relationship),
+    do: [record] |> sort_related_all(relationship) |> hd()
 
-      _unloaded_or_short ->
-        record
-    end
+  @doc """
+  `sort_related/2` for many records at once: each record's loaded
+  `relationship` in its links' order, with one read of the links per site
+  rather than one per record. Ties (links from before positions were kept)
+  fall back to the target id, as in `related_order/1`; a related record with
+  no link — none should exist — goes last.
+  """
+  @spec sort_related_all([struct()], atom()) :: [struct()]
+  def sort_related_all(records, relationship) do
+    ranks = ranks(records, relationship)
+
+    Enum.map(records, fn record ->
+      case Map.get(record, relationship) do
+        [_, _ | _] = loaded ->
+          rank = Map.get(ranks, record.id, %{})
+
+          Map.put(
+            record,
+            relationship,
+            Enum.sort_by(loaded, &{Map.get(rank, &1.id, :none), to_string(&1.id)})
+          )
+
+        _unloaded_or_short ->
+          record
+      end
+    end)
+  end
+
+  # `%{source id => %{target id => position}}` for the records that have two
+  # or more related records loaded — the only ones an order can change.
+  defp ranks(records, relationship) do
+    records
+    |> Enum.filter(&match?([_, _ | _], Map.get(&1, relationship)))
+    |> Enum.group_by(& &1.org_id, & &1.id)
+    |> Enum.flat_map(fn {org_id, source_ids} ->
+      CMS.list_content_links!(
+        actor: Bookkeeping.system(),
+        authorize_with: :error,
+        tenant: org_id,
+        query: [
+          filter: [source_id: [in: source_ids], kind: :related],
+          select: [:id, :source_id, :target_id, :position]
+        ]
+      )
+    end)
+    |> Enum.group_by(& &1.source_id, &{&1.target_id, &1.position})
+    |> Map.new(fn {source_id, pairs} -> {source_id, Map.new(pairs)} end)
   end
 
   # Read as the cms bookkeeping and failing closed, like `existing/1`: a

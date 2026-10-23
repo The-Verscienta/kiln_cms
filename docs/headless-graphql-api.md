@@ -523,6 +523,10 @@ A list costs its row count times the cost of one row:
   counts five, however many it returns. That makes a list nested inside itself
   (`relatedPosts { relatedPosts { … } }`) expensive quickly.
 
+`relatedPosts` (and every `related<Type>s`) returns its records in no
+particular order. For the order the editor set, select `relatedLinks`: the
+same records as `{id, title, slug}`, in that order.
+
 | Query | Cost |
 |-------|------|
 | [`postBySlug`](#fetch-a-published-post-by-slug) below | 32 |

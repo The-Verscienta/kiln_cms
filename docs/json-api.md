@@ -292,6 +292,11 @@ GET /api/json/posts?custom_filter[tags][has_all][]=<tag id>&custom_filter[tags][
 GET /api/json/posts?custom_filter[related_posts][has_none]=<post id>
 ```
 
+An included `related_<type>s` list comes back in no particular order. The
+order the editor set is each link's `position`: read `related_links`
+(`fields[post]=related_links`), which lists `{id, title, slug}` in that order,
+or include `content_links` and sort the `kind: "related"` rows by `position`.
+
 - They read the relationship's edges (`content_links`, or the taggings),
   through their indexes, rather than the stored snapshot. `eq`/`in` keep the
   snapshot meaning above, and every operator can be combined on one field.
@@ -561,7 +566,7 @@ default. `GET /api/json/open_api` describes each of them on the resource's
 | `reading_time_minutes` | integer | No — `word_count` ÷ the configured words-per-minute rate |
 | `effective_seo_title` | string | No — the author's `seo_title`, else the type's pattern expanded (#1102) |
 | `effective_seo_description` | string | No — same as above, for `seo_description` |
-| `related_links` | array | No — curated related links, projected to `[{id, title, slug}]` |
+| `related_links` | array | No — curated related links, projected to `[{id, title, slug}]`, in the order the editor set |
 | `inherited_fields` | object | No — what this locale variant inherits along the site's fallback chain for its `:fallback` fields, with the source locale: `{"excerpt": {"value", "locale"}, "custom_fields": {…}}` (#1327). Served only when asked for with `fields[<type>]=…` |
 | `custom_fields_plain` | object | No — the plain-text rendition of the `:text` custom fields marked "Also deliver as plain text" (`deliver_plain`): `{"<name>": "text without tags" \| null}`, `null` when the type marks none. `custom_fields` keeps the stored HTML. Served only when asked for with `fields[<type>]=…`; the fired artifact (`/api/content`, `/api/sync`) carries it whenever the type marks a field |
 

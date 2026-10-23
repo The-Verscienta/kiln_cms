@@ -162,6 +162,22 @@ carries the reasoning.
 
 ## Changed
 
+<a id="related-links-ordered"></a>
+
+- **`related_links` lists curated related content in the order the editor
+  set; the `related_<type>s` relationship itself stays unordered.** Since
+  1.5 the editor keeps the related list's order in each `kind: :related`
+  link's `position` (#2025), but only the editor read it back. The
+  `related_links` projection (JSON:API `fields[<type>]=related_links`,
+  GraphQL `relatedLinks`, MCP write echoes) now sorts by it too, with one
+  read of the links per site for a whole page of records. Including
+  `related_<type>s` (JSON:API) or selecting `related<Type>s` (GraphQL) still
+  returns the records in no particular order, now documented: Ash orders a
+  many-to-many by its destination, and `ContentLink` is not unique on
+  `(source_id, target_id)`, which a sort reaching the join row needs. The
+  shape of `related_links` is unchanged.
+  (#TBD)
+
 <a id="single-media-picker"></a>
 
 - **A single media custom field is picked from the library drawer, with a
