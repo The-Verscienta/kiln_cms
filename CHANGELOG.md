@@ -92,9 +92,8 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Security
 
-- **req_llm 1.29.0 for EEF-CVE-2026-107685 (CRITICAL): its WebSocket
-  streaming did not verify TLS certificates. plug_crypto 2.2.1 for
-  CVE-2026-105963.**
+- **req_llm 1.29.0 (CRITICAL EEF-CVE-2026-107685: WebSocket streaming
+  skipped TLS verification) and plug_crypto 2.2.1 (CVE-2026-105963).**
   ([#2057](https://github.com/The-Verscienta/kiln_cms/pull/2057) · [long form](docs/changelog/unreleased.md#req-llm-tls-advisory))
 
 ## [1.5.0] - 2026-10-18
