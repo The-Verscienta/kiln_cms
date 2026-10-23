@@ -206,4 +206,4 @@ carries the reasoning.
   same way). The env var now writes its whole mode (`[ef_search: nil,
   exact: true]` or `[ef_search: N, exact: false]`), so it replaces the
   compiled one. Setting both variables at once is still refused.
-  ([#2019](https://github.com/The-Verscienta/kiln_cms/issues/2019))
+  ([#2019](https://github.com/The-Verscienta/kiln_cms/issues/2019) · [#2060](https://github.com/The-Verscienta/kiln_cms/pull/2060))
