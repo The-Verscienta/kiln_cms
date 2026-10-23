@@ -56,7 +56,7 @@ FROM ${BUILDER_IMAGE} AS builder
 
 # build-essential/git for native deps, libvips for image processing.
 RUN apt-get update -y \
-  && apt-get install -y build-essential git libvips-dev \
+  && apt-get install -y build-essential git libvips-dev curl ca-certificates \
   && apt-get clean && rm -f /var/lib/apt/lists/*_*
 
 # Node and npm, to install the JS deps (TipTap) that esbuild bundles into
@@ -170,6 +170,28 @@ RUN npm --prefix assets ci
 # assets/js/app.js import; otherwise tailwind/esbuild can't resolve it.
 # Same 2-scheduler cap for the app compile (Ash resources are also memory-heavy).
 RUN ERL_FLAGS="+S 2:2" mix compile
+
+# Fetch the tailwind binary with curl before `mix assets.deploy` needs it.
+# The `tailwind` package downloads it with `:httpc`, whose response-header
+# limit is a fixed 10240 bytes, and GitHub's release-download redirect now
+# sends about 10.7 KB of headers (a 9 KB Content-Security-Policy), so the
+# task fails with `{:header_too_long, {:max, 10240}}` on every build. The
+# task skips its own download when the binary is already at its default path,
+# `_build/tailwind-<target>-<version>`. The version is read from
+# config/config.exs, so there is still one place to bump it.
+RUN set -eu; \
+  version="$(sed -n '/^config :tailwind,/,/version:/s/^ *version: "\(.*\)",$/\1/p' config/config.exs)"; \
+  [ -n "$version" ] || { echo "no tailwind version in config/config.exs"; exit 1; }; \
+  case "$(dpkg --print-architecture)" in \
+    amd64) target=linux-x64 ;; \
+    arm64) target=linux-arm64 ;; \
+    *) echo "no tailwind binary for $(dpkg --print-architecture)"; exit 1 ;; \
+  esac; \
+  bin="_build/tailwind-$target-$version"; \
+  curl -fsSL --retry 3 -o "$bin" \
+    "https://github.com/tailwindlabs/tailwindcss/releases/download/v$version/tailwindcss-$target"; \
+  chmod +x "$bin"
+
 RUN mix assets.deploy
 
 # `config/runtime/` holds the per-concern fragments runtime.exs imports (#1322).
