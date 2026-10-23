@@ -90,6 +90,12 @@ Every summary line below that was shortened links to its own entry there.
   `If-None-Match` is compared weakly.**
   ([#2041](https://github.com/The-Verscienta/kiln_cms/pull/2041) · [long form](docs/changelog/unreleased.md#fired-artifacts-are-gzipped))
 
+### Fixed
+
+- **`KILN_VECTOR_SEARCH_EXACT` / `KILN_HNSW_EF_SEARCH` no longer crash-loop a
+  deployment whose compiled config sets the other `vector_scan:` mode.**
+  ([#2019](https://github.com/The-Verscienta/kiln_cms/issues/2019) · [long form](docs/changelog/unreleased.md#vector-scan-env-replaces-compiled-mode))
+
 ## [1.5.0] - 2026-10-18
 
 Long form: [docs/changelog/v1.5.0.md](docs/changelog/v1.5.0.md) —

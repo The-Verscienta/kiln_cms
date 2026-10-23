@@ -217,11 +217,26 @@ defmodule KilnCMS.Search.VectorScan do
     )
   end
 
-  @doc "A mode back as the `vector_scan:` keyword that produces it."
+  @doc """
+  A mode back as the `vector_scan:` keyword that produces it.
+
+  Every key is written, the one the mode turns off included. Runtime config is
+  deep-merged over compiled config key by key, so `[exact: true]` from
+  `KILN_VECTOR_SEARCH_EXACT` over a compiled `[ef_search: 150]` would merge
+  into both and refuse to boot (#2019). Writing the other key as off makes the
+  env var's mode replace the compiled one; `normalize!/1` reads
+  `ef_search: nil` as unset and `exact: false` as off.
+
+      iex> KilnCMS.Search.VectorScan.to_config({:ef_search, 200})
+      [ef_search: 200, exact: false]
+
+      iex> KilnCMS.Search.VectorScan.to_config(:exact)
+      [ef_search: nil, exact: true]
+  """
   @spec to_config(mode()) :: keyword()
   def to_config(:default), do: []
-  def to_config({:ef_search, n}), do: [ef_search: n]
-  def to_config(:exact), do: [exact: true]
+  def to_config({:ef_search, n}), do: [ef_search: n, exact: false]
+  def to_config(:exact), do: [ef_search: nil, exact: true]
 
   @doc """
   What a connection from `repo` actually has in effect — read back from

@@ -13,6 +13,7 @@ defmodule KilnCMS.Config.RuntimeVectorScanEnvTest do
   import ExUnit.CaptureIO
 
   alias KilnCMS.Config.Env
+  alias KilnCMS.Search.VectorScan
 
   @fragment Path.expand("../../config/runtime/search.exs", __DIR__)
   @vars ~w(KILN_HNSW_EF_SEARCH KILN_VECTOR_SEARCH_EXACT)
@@ -59,12 +60,31 @@ defmodule KilnCMS.Config.RuntimeVectorScanEnvTest do
   end
 
   test "a usable value writes vector_scan" do
-    assert read(%{"KILN_HNSW_EF_SEARCH" => " 200 "}) == [ef_search: 200]
+    assert read(%{"KILN_HNSW_EF_SEARCH" => " 200 "}) == [ef_search: 200, exact: false]
     System.delete_env("KILN_HNSW_EF_SEARCH")
-    assert read(%{"KILN_VECTOR_SEARCH_EXACT" => "TRUE"}) == [exact: true]
+    assert read(%{"KILN_VECTOR_SEARCH_EXACT" => "TRUE"}) == [ef_search: nil, exact: true]
     # exact=false beside an ef_search is not "both".
     assert read(%{"KILN_VECTOR_SEARCH_EXACT" => "off", "KILN_HNSW_EF_SEARCH" => "1000"}) ==
-             [ef_search: 1000]
+             [ef_search: 1000, exact: false]
+  end
+
+  # #2019: runtime config is deep-merged over compiled config key by key, so an
+  # env value that wrote only its own key merged with a compiled `vector_scan:`
+  # of the other mode into both keys, and every boot raised.
+  test "the env var's mode replaces a compiled vector_scan of the other mode" do
+    merged = fn compiled, env ->
+      runtime = [kiln_cms: [{KilnCMS.Repo, [vector_scan: read(env)]}]]
+
+      [kiln_cms: [{KilnCMS.Repo, [vector_scan: compiled]}]]
+      |> Config.Reader.merge(runtime)
+      |> get_in([:kiln_cms, KilnCMS.Repo, :vector_scan])
+      |> VectorScan.normalize!()
+    end
+
+    assert merged.([ef_search: 150], %{"KILN_VECTOR_SEARCH_EXACT" => "true"}) == :exact
+    System.delete_env("KILN_VECTOR_SEARCH_EXACT")
+    assert merged.([exact: true], %{"KILN_HNSW_EF_SEARCH" => "200"}) == {:ef_search, 200}
+    assert merged.([ef_search: 150], %{"KILN_HNSW_EF_SEARCH" => "200"}) == {:ef_search, 200}
   end
 
   test "an unusable ef_search refuses to boot" do

@@ -129,7 +129,10 @@ defmodule Mix.Tasks.Kiln.Search.EvalTest do
         Task.run([path, "--org", ctx.org.slug, "--exact"])
       end
 
-      assert Application.get_env(:kiln_cms, KilnCMS.Repo)[:vector_scan] == [exact: true]
+      assert Application.get_env(:kiln_cms, KilnCMS.Repo)[:vector_scan] == [
+               ef_search: nil,
+               exact: true
+             ]
     end
 
     test "unusable values and --url combinations are refused up front", ctx do
