@@ -94,7 +94,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **JSON:API and GraphQL serve a `:reference` field's target under its
   current slug and title, not the ones stored when the referrer was saved.**
-  ([long form](docs/changelog/unreleased.md#fresh-reference-labels))
+  ([#2059](https://github.com/The-Verscienta/kiln_cms/pull/2059) · [long form](docs/changelog/unreleased.md#fresh-reference-labels))
 
 ## [1.5.0] - 2026-10-18
 

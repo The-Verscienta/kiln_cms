@@ -208,3 +208,4 @@ carries the reasoning.
   carries those. No extra queries. The stored value and its shape are
   unchanged, and so are editor, admin and system reads, which keep getting
   the stored value whole because they can write it back.
+  ([#2059](https://github.com/The-Verscienta/kiln_cms/pull/2059))
