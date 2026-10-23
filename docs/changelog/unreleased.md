@@ -191,3 +191,20 @@ carries the reasoning.
   document's tag change once and refetches it one time. ETags are opaque, so
   this is not a contract change. A passphrase-unlocked document still has no
   `ETag` and is never `304`ed. ([#2041](https://github.com/The-Verscienta/kiln_cms/pull/2041))
+
+## Security
+
+<a id="req-llm-tls-advisory"></a>
+
+- **req_llm 1.29.0 and plug_crypto 2.2.1 clear two Hex advisories.**
+  req_llm 1.24.0's WebSocket streaming did not verify TLS certificates, so an
+  on-path attacker could read the API keys and OAuth tokens it sent
+  (EEF-CVE-2026-107685, GHSA-6vww-5m28-f26v, CRITICAL; fixed upstream in
+  agentjido/req_llm#1140). Kiln itself calls only `generate_text` and
+  `generate_object` over HTTP, so its own code never took that path; a plugin
+  or host app streaming through req_llm did. plug_crypto 2.2.0 had
+  CVE-2026-105963 (MEDIUM). Only these two packages and what req_llm 1.29.0
+  requires (`llm_db`, `zoi`) moved. req_llm's own defaults changed between
+  1.24 and 1.29: redirects are off, transient HTTP statuses are retried with
+  backoff, and a release no longer loads a `.env` file, so keys must come
+  from real environment variables (as they already do in Kiln's image).
