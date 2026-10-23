@@ -26,6 +26,12 @@ defmodule KilnCMS.CMS.Preparations.MaskUnreadableReferences do
   So a masked value only ever reaches a reader who cannot write it back. The
   stored value is never changed. The cost is one `id in ^ids` read per
   content resource per read that returned a snapshot, none otherwise.
+
+  The same read answers each readable target's current slug and title, and
+  every snapshot left in carries those instead of the copy stored when the
+  referrer was saved (`ReferenceSnapshots.present/2`), so a renamed target
+  is served under its new name without re-saving its referrers. The skipped
+  reads above get the stored labels.
   """
   use Ash.Resource.Preparation
 
@@ -62,14 +68,14 @@ defmodule KilnCMS.CMS.Preparations.MaskUnreadableReferences do
         records
 
       ids ->
-        readable = LinkEndsReadable.readable_ids(actor, Accounts.org_id(tenant), Enum.uniq(ids))
-        Enum.map(records, &mask_record(&1, readable))
+        labels = LinkEndsReadable.readable_labels(actor, Accounts.org_id(tenant), Enum.uniq(ids))
+        Enum.map(records, &present_record(&1, labels))
     end
   end
 
-  # `mask/2` passes an unselected attribute (`%Ash.NotLoaded{}`) through.
-  defp mask_record(%{custom_fields: custom_fields} = record, readable),
-    do: %{record | custom_fields: ReferenceSnapshots.mask(custom_fields, readable)}
+  # `present/2` passes an unselected attribute (`%Ash.NotLoaded{}`) through.
+  defp present_record(%{custom_fields: custom_fields} = record, labels),
+    do: %{record | custom_fields: ReferenceSnapshots.present(custom_fields, labels)}
 
-  defp mask_record(record, _readable), do: record
+  defp present_record(record, _labels), do: record
 end

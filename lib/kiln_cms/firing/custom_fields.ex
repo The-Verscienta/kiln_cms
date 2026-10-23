@@ -154,8 +154,13 @@ defmodule KilnCMS.Firing.CustomFields do
           |> Enum.flat_map(fn {type, ids} -> readable_labels(org_id, type, Enum.uniq(ids)) end)
           |> Map.new()
 
+        # Only a readable target is relabelled (a draft, gated, trashed or
+        # purged one keeps the stored value, and `mask/2` then drops it), so
+        # firing never copies an unpublished title into a public artifact.
         relabelled =
-          values |> Map.take(names) |> Map.new(fn {name, v} -> {name, relabel(v, current)} end)
+          values
+          |> Map.take(names)
+          |> Map.new(fn {name, v} -> {name, ReferenceSnapshots.relabel(v, current)} end)
 
         values
         |> Map.merge(relabelled)
@@ -184,18 +189,6 @@ defmodule KilnCMS.Firing.CustomFields do
       ids -> ReferenceSnapshots.mask(values, LinkEndsReadable.readable_ids(nil, org_id, ids))
     end
   end
-
-  defp relabel(list, current) when is_list(list), do: Enum.map(list, &relabel(&1, current))
-
-  defp relabel(%{"id" => id} = snapshot, current) when is_map_key(current, id),
-    do: Map.merge(snapshot, Map.fetch!(current, id))
-
-  # Not readable (a draft, gated, trashed, purged) or not a snapshot at all:
-  # keep the stored value here; `ReferenceSnapshots.mask/2` then drops the
-  # unreadable snapshots. A label is only refreshed from a row a reader may
-  # already see — firing never copies an unpublished title into a public
-  # artifact.
-  defp relabel(value, _current), do: value
 
   # Through the type's own list interface, so a dynamic type's read is scoped
   # to its definition. An unknown type (a target type deleted since the value
