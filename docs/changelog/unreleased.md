@@ -176,7 +176,7 @@ carries the reasoning.
   many-to-many by its destination, and `ContentLink` is not unique on
   `(source_id, target_id)`, which a sort reaching the join row needs. The
   shape of `related_links` is unchanged.
-  (#TBD)
+  ([#2061](https://github.com/The-Verscienta/kiln_cms/pull/2061))
 
 <a id="single-media-picker"></a>
 
