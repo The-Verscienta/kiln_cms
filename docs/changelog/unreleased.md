@@ -160,6 +160,27 @@ carries the reasoning.
   every other custom field blank, and the next save posted those blanks.
   ([#2053](https://github.com/The-Verscienta/kiln_cms/pull/2053))
 
+
+<a id="overlay-refire"></a>
+
+- **`KilnCMS.Firing.refire/3` re-fires named records for an overlay (#2048).**
+  An overlay sometimes knows a fired artifact is stale when Kiln doesn't: an
+  article's card was built at fire time from another install's API, and that
+  install's signed webhook says the card's source changed. Until now the only
+  ways in were `mix kiln.refire_all` (operator tooling) and
+  `FireWorker.enqueue_backfill/1` (internal). `KilnCMS.Firing.refire!(type,
+  ids, actor: KilnCMS.SystemActor.new(:overlay), tenant: org_id)` is covered:
+  each id gets the normal fire job, which fires it as a publish would and
+  cascades to every document embedding it through the reference graph, then
+  — as an edit of live content does — drops its delivery cache and dispatches
+  `<type>.updated`, which reaches webhooks, automation, federation and the CDN
+  purge. It dispatches after the fire, so whatever refetches on the event gets
+  the new body. A document that isn't published fires nothing. It is a generic
+  `:refire` action on `Firing.PublishedArtifact` with a code interface on the
+  `Firing` domain, admitting the `:overlay` system actor and the org's editors
+  and admins; it returns how many fires were queued, and a refire already
+  pending for an id is not queued twice.
+
 ## Changed
 
 <a id="related-links-ordered"></a>
