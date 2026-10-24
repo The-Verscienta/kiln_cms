@@ -9,8 +9,6 @@ defmodule KilnCMS.Social.AnnouncerTest do
   """
   use KilnCMS.DataCase, async: false
 
-  require Ash.Query
-
   alias KilnCMS.CMS
   alias KilnCMS.Social
   alias KilnCMS.Social.Announcer

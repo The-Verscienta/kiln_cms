@@ -36,9 +36,15 @@ defmodule KilnCMS.Accounts.OrgIdTest do
     # the shape the loose `%{id: id}` copies happily read as a tenant.
     user = %KilnCMS.Accounts.User{id: Ecto.UUID.generate()}
 
-    assert_raise FunctionClauseError, fn -> Accounts.org_id(user) end
-    assert_raise FunctionClauseError, fn -> Accounts.org_id(%{id: Ecto.UUID.generate()}) end
-    assert_raise FunctionClauseError, fn -> Accounts.org_id(%{}) end
-    assert_raise FunctionClauseError, fn -> Accounts.org_id(:unset) end
+    assert_raise FunctionClauseError, fn -> org_id_opaquely(user) end
+    assert_raise FunctionClauseError, fn -> org_id_opaquely(%{id: Ecto.UUID.generate()}) end
+    assert_raise FunctionClauseError, fn -> org_id_opaquely(%{}) end
+    assert_raise FunctionClauseError, fn -> org_id_opaquely(:unset) end
   end
+
+  # `apply/3` hides the call from the compile-time type checker, which would
+  # otherwise flag it for always hitting a raise — that being the point of the
+  # invalid-input test.
+  # credo:disable-for-next-line Credo.Check.Refactor.Apply
+  defp org_id_opaquely(term), do: apply(Accounts, :org_id, [term])
 end

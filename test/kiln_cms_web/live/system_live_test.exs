@@ -496,7 +496,7 @@ defmodule KilnCMSWeb.SystemLiveTest do
       warm(org, "flush-me")
 
       assert %{published: published, artifacts: artifacts} = KilnCMS.Cache.flush_delivery()
-      assert is_integer(published) and published >= 1
+      assert published >= 1
       assert is_integer(artifacts)
 
       # A second flush on an empty cache is a no-op, not an error — the mix task

@@ -56,7 +56,7 @@ defmodule KilnCMSWeb.TaskLiveBlockFilterTest do
     )
   end
 
-  defp block_id(page, index \\ 0),
+  defp block_id(page, index),
     do: page.blocks |> Enum.at(index) |> Map.fetch!(:value) |> Map.fetch!(:id)
 
   defp assign_task(page, actor, attrs \\ %{}) do

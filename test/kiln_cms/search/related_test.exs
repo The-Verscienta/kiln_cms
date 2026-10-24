@@ -98,7 +98,7 @@ defmodule KilnCMS.Search.RelatedTest do
   # A never-indexed draft: created, never published, and never handed to
   # `BlockIndexer.reindex/1` — so it has no rows in `block_embeddings`, which is
   # the state every real never-published document is in.
-  defp unindexed_draft(actor, text, opts \\ []) do
+  defp unindexed_draft(actor, text, opts) do
     CMS.create_post!(
       %{
         title: Keyword.get(opts, :title, "Doc"),

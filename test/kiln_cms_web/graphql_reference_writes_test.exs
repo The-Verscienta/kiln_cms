@@ -35,7 +35,7 @@ defmodule KilnCMSWeb.GraphqlReferenceWritesTest do
   defp run(query, variables, actor),
     do: Absinthe.run(query, @schema, variables: variables, context: %{actor: actor})
 
-  defp page!(admin, title \\ "Page"),
+  defp page!(admin, title),
     do: CMS.create_page!(%{title: title, slug: slug()}, actor: admin)
 
   defp field!(admin, attrs \\ %{}) do

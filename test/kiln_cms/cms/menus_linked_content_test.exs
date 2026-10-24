@@ -84,7 +84,7 @@ defmodule KilnCMS.CMS.MenusLinkedContentTest do
     target = page(actor)
     m = menu(actor)
     parent = item(actor, m, %{label: "Parent", link_type: :none})
-    child = item(actor, m, %{target_type: "page", target_id: target.id, parent_id: parent.id})
+    _child = item(actor, m, %{target_type: "page", target_id: target.id, parent_id: parent.id})
 
     assert MapSet.member?(linked(target), target.id)
 

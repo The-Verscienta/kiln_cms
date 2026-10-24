@@ -23,7 +23,6 @@ defmodule KilnCMS.Search.RerankerServingTest do
   import ExUnit.CaptureLog
 
   alias KilnCMS.Search.ML
-  alias KilnCMS.Search.Reranker
   alias KilnCMS.Search.RerankerServing
 
   describe "scores_function/1" do

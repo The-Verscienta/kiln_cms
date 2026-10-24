@@ -25,8 +25,6 @@ defmodule KilnCMS.Collab.PublishCheckpointTest do
   # another process, which needs the sandbox in shared mode.
   use KilnCMS.DataCase, async: false
 
-  require Ash.Query
-
   alias KilnCMS.Blocks.PortableText
   alias KilnCMS.CMS
   alias KilnCMS.Collab.Crdt

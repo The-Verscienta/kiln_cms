@@ -12,8 +12,6 @@ defmodule KilnCMS.CMS.WorkingCopyTest do
 
   use Oban.Testing, repo: KilnCMS.Repo
 
-  require Ash.Query
-
   alias KilnCMS.CMS
   alias KilnCMS.CMS.WorkingCopy
 

@@ -17,10 +17,9 @@ defmodule KilnCMSWeb.FormEmbedDefaultTest do
   """
   use KilnCMSWeb.ConnCase, async: false
 
-  alias KilnCMS.CMS
   alias KilnCMSWeb.Embed
 
-  import KilnCMS.FormFixtures, only: [admin: 0, form!: 0, form!: 1, form!: 2]
+  import KilnCMS.FormFixtures, only: [form!: 0]
 
   setup do
     previous = Application.get_env(:kiln_cms, :embed_origins)
