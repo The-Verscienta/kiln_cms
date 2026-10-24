@@ -67,6 +67,10 @@ Every summary line below that was shortened links to its own entry there.
   the last 48 hours, at most 1,000 URLs, listed from `robots.txt`.**
   ([#2077](https://github.com/The-Verscienta/kiln_cms/pull/2077) · [long form](docs/changelog/unreleased.md#news-sitemap))
 
+- **A guide to public author profiles and multiple bylines: an `author` type, a
+  `:reference` byline with roles, and the schema.org `author` mapping.**
+  ([#2076](https://github.com/The-Verscienta/kiln_cms/pull/2076) · [guide](docs/author-profiles.md))
+
 - **A public change feed, server side: `KilnCMS.Delivery.Feed` publishes
   `published` / `updated` / `withdrawn` per site over PubSub.**
   ([#2069](https://github.com/The-Verscienta/kiln_cms/pull/2069) · [long form](docs/changelog/unreleased.md#change-feed-server))

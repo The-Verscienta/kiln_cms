@@ -491,6 +491,11 @@ Payload shape on the wire (JSON:API `?include=content_links`, an
 }
 ```
 
+For a worked example that puts a list of references, a link field and a
+reverse field together, see [Author profiles and bylines](author-profiles.md):
+an `author` type, several authors per article, and the profile's article
+list.
+
 ### When to use a dedicated join resource
 
 ContentLink covers the common case with one table. When one relationship needs
