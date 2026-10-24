@@ -11,6 +11,7 @@ the behaviours and macros a plugin `use`s.
 | `Kiln.Forms.SpamCheck` (+ `Kiln.Forms.SpamCheck.Context`) | A heuristic run on every public form submission |
 | `Kiln.ImageBackend` (`check/0` since 1.2) | An external image service new uploads can go to |
 | `Kiln.Advisory` (+ `Finding`, `Context`, `Body`), since 1.1 | An editorial check shown in the content editor's advice panels |
+| `Kiln.SafeFetch`, since 1.3 | Fetch a URL from content or settings without an SSRF hole: the address is checked and pinned, redirects re-checked, the body capped |
 
 These modules used to live inside the KilnCMS core, which made it impossible
 to compile a plugin as a Mix dependency: Mix compiles a dependency before the
@@ -28,7 +29,7 @@ In the plugin's own `mix.exs`:
 ```elixir
 def deps do
   [
-    {:kiln_plugin, "~> 1.2"}
+    {:kiln_plugin, "~> 1.3"}
   ]
 end
 ```
@@ -85,6 +86,7 @@ has to be a `projects/<name>/` overlay, which is compiled *inside* the core.
 | Admin, editor and public routes | Only for a LiveView that depends on `phoenix_live_view` directly; one that does `use KilnCMSWeb, :live_view` or renders `Layouts.app` needs the core, so it stays an overlay |
 | Content types (`use KilnCMS.CMS.Content`), Ash domains (`domains/0`) | No: they need the core's repo, domains and policies. Overlay only |
 | Advisory checks (`advisories/0`, `Kiln.Advisory`) | Yes, from 1.1 (`{:kiln_plugin, "~> 1.1"}`). The core walks the blocks and fills `%Kiln.Advisory.Body{}`; a check only reads it |
+| Outbound HTTP to a URL the plugin didn't write (`Kiln.SafeFetch`) | Yes, from 1.3 (`{:kiln_plugin, "~> 1.3"}`). The core does the fetch; with no core loaded (a plugin's own test suite) every call is an error unless `config :kiln_plugin, :safe_fetch` names a stand-in |
 
 ## Versioning
 

@@ -88,7 +88,7 @@ defmodule KilnCMSWeb.OrganizeLiveTest do
 
   defp org, do: KilnCMS.Accounts.default_org()
 
-  defp open(conn, user, tab \\ "clusters") do
+  defp open(conn, user, tab) do
     {:ok, view, _html} = conn |> log_in(user) |> live(~p"/editor/organize?#{%{tab: tab}}")
     render_async(view, 2_000)
     view

@@ -274,7 +274,7 @@ defmodule KilnCMSWeb.LiveJoinWithoutUrlTest do
 
       unguarded =
         Enum.reject(views, fn view ->
-          view in @unguarded_views or
+          Enum.member?(@unguarded_views, view) or
             Enum.any?(view.__live__().lifecycle.mount, &(&1.id == {LiveRouteGuard, :default}))
         end)
 

@@ -63,6 +63,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A Google News sitemap at `/news-sitemap.xml` for `NewsArticle` types:
+  the last 48 hours, at most 1,000 URLs, listed from `robots.txt`.**
+  ([#2077](https://github.com/The-Verscienta/kiln_cms/pull/2077) · [long form](docs/changelog/unreleased.md#news-sitemap))
+
 - **A guide to public author profiles and multiple bylines: an `author` type, a
   `:reference` byline with roles, and the schema.org `author` mapping.**
   ([#2076](https://github.com/The-Verscienta/kiln_cms/pull/2076) · [guide](docs/author-profiles.md))
@@ -70,6 +74,9 @@ Every summary line below that was shortened links to its own entry there.
 - **A public change feed, server side: `KilnCMS.Delivery.Feed` publishes
   `published` / `updated` / `withdrawn` per site over PubSub.**
   ([#2069](https://github.com/The-Verscienta/kiln_cms/pull/2069) · [long form](docs/changelog/unreleased.md#change-feed-server))
+
+- **`Kiln.SafeFetch` (`kiln_plugin` 1.3): plugins get a covered, SSRF-safe way to fetch a URL they didn't write.**
+  ([#2070](https://github.com/The-Verscienta/kiln_cms/pull/2070) · [long form](docs/changelog/unreleased.md#plugin-safe-fetch))
 
 - **`mix kiln.fields.convert` moves JSON-in-text values into a `:group` field.**
   ([#2052](https://github.com/The-Verscienta/kiln_cms/pull/2052) · [long form](docs/changelog/unreleased.md#fields-convert))
@@ -87,6 +94,8 @@ Every summary line below that was shortened links to its own entry there.
   ([#2036](https://github.com/The-Verscienta/kiln_cms/pull/2036) · [long form](docs/changelog/unreleased.md#group-custom-field))
 - **Group fields are edited in the fields admin and the content editor: sub-fields under the group, rows added, removed and dragged into order.**
   ([#2053](https://github.com/The-Verscienta/kiln_cms/pull/2053) · [long form](docs/changelog/unreleased.md#group-field-editor))
+- **`KilnCMS.Firing.refire/3`: a covered way for an overlay to re-fire named records, with their dependents, webhooks and CDN purge.**
+  ([#2068](https://github.com/The-Verscienta/kiln_cms/pull/2068) · [long form](docs/changelog/unreleased.md#overlay-refire))
 
 ### Changed
 

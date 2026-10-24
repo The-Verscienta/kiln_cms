@@ -20,7 +20,6 @@ defmodule KilnCMS.Search.IndexAuthorizationTest do
 
   alias KilnCMS.Accounts
   alias KilnCMS.Search.BlockEmbedding
-  alias KilnCMS.Search.TagEmbedding
   alias KilnCMS.SearchIndex
   alias KilnCMS.SystemActor
 

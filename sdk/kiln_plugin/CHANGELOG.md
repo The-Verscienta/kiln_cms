@@ -13,6 +13,22 @@ read for a plugin contract:
 Releases are tagged `kiln_plugin-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## 1.3.0
+
+### Added
+
+- **`Kiln.SafeFetch` (kiln_cms#2047).** A plugin that fetches a URL chosen
+  by content or configuration — a feed poller, a link unfurler — can do it
+  through the SDK: `get/2`, `head/2`, `post/3` and `request/3`, with the
+  core's `KilnCMS.SafeFetch` doing the fetch inside a KilnCMS build. The
+  address is checked and pinned against DNS rebinding, redirects are only
+  followed on request and re-checked per hop, and the body is capped.
+  Options outside the documented set are dropped. With no core loaded every
+  call is an error unless `config :kiln_plugin, :safe_fetch` names a
+  stand-in for the plugin's own tests. A plugin that uses it should require
+  `{:kiln_plugin, "~> 1.3"}` and a KilnCMS core that implements it (the
+  first release after 1.5.1).
+
 ## 1.2.0
 
 ### Added

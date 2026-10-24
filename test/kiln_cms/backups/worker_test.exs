@@ -10,7 +10,6 @@ defmodule KilnCMS.Backups.WorkerTest do
   """
   use KilnCMS.DataCase, async: false
 
-  alias KilnCMS.Backups
   alias KilnCMS.Backups.Manifest
   alias KilnCMS.Backups.Worker
 
