@@ -56,7 +56,7 @@ FROM ${BUILDER_IMAGE} AS builder
 
 # build-essential/git for native deps, libvips for image processing.
 RUN apt-get update -y \
-  && apt-get install -y build-essential git libvips-dev curl ca-certificates \
+  && apt-get install -y build-essential git libvips-dev \
   && apt-get clean && rm -f /var/lib/apt/lists/*_*
 
 # Node and npm, to install the JS deps (TipTap) that esbuild bundles into
@@ -68,6 +68,29 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
   && node --version && npm --version
 
 WORKDIR /app
+
+# Lift `:httpc`'s response-header limit for the build, and only the build.
+# OTP 29.1.1 (inets 9.8) gave `:httpc` a default `max_header_size` of 10240
+# bytes that can only be raised per request, and GitHub's release-download
+# redirects now send ~10.7 KB of headers (a 9 KB Content-Security-Policy).
+# Every Mix tool that fetches a GitHub release asset through `:httpc` and
+# doesn't pass the option then fails with `{:header_too_long, {:max, 10240}}`:
+# tailwind's binary, and the precompiled NIFs of y_ex, lazy_html and vix. No
+# release of those tools passes it yet. Recompiling `httpc` with the default
+# set to `nolimit` (OTP 29.0's behaviour) fixes all of them at once. The
+# stock module is restored before `mix release` below, so the release
+# carries an unmodified OTP. The `grep` fails the build loudly if a later OTP
+# moves the default, so this gets revisited rather than silently skipped.
+RUN set -eu; \
+  inets="$(erl -noshell -eval 'io:format("~s", [code:lib_dir(inets)]), halt().')"; \
+  src="$inets/src/http_client/httpc.erl"; \
+  grep -q '{max_header_size, *?HTTP_MAX_HEADER_SIZE,' "$src" \
+    || { echo "no httpc max_header_size default to patch in $src"; exit 1; }; \
+  mkdir -p /opt/httpc-stock && cp "$inets/ebin/httpc.beam" /opt/httpc-stock/; \
+  sed 's/{max_header_size, *?HTTP_MAX_HEADER_SIZE,/{max_header_size, nolimit,/' "$src" > /tmp/httpc.erl; \
+  erlc -I "$inets/src/http_client" -I "$inets/src/http_lib" -I "$inets/src/inets_app" \
+    -o "$inets/ebin" /tmp/httpc.erl; \
+  rm /tmp/httpc.erl
 
 RUN mix local.hex --force && mix local.rebar --force
 
@@ -170,28 +193,6 @@ RUN npm --prefix assets ci
 # assets/js/app.js import; otherwise tailwind/esbuild can't resolve it.
 # Same 2-scheduler cap for the app compile (Ash resources are also memory-heavy).
 RUN ERL_FLAGS="+S 2:2" mix compile
-
-# Fetch the tailwind binary with curl before `mix assets.deploy` needs it.
-# The `tailwind` package downloads it with `:httpc`, whose response-header
-# limit is a fixed 10240 bytes, and GitHub's release-download redirect now
-# sends about 10.7 KB of headers (a 9 KB Content-Security-Policy), so the
-# task fails with `{:header_too_long, {:max, 10240}}` on every build. The
-# task skips its own download when the binary is already at its default path,
-# `_build/tailwind-<target>-<version>`. The version is read from
-# config/config.exs, so there is still one place to bump it.
-RUN set -eu; \
-  version="$(sed -n '/^config :tailwind,/,/version:/s/^ *version: "\(.*\)",$/\1/p' config/config.exs)"; \
-  [ -n "$version" ] || { echo "no tailwind version in config/config.exs"; exit 1; }; \
-  case "$(dpkg --print-architecture)" in \
-    amd64) target=linux-x64 ;; \
-    arm64) target=linux-arm64 ;; \
-    *) echo "no tailwind binary for $(dpkg --print-architecture)"; exit 1 ;; \
-  esac; \
-  bin="_build/tailwind-$target-$version"; \
-  curl -fsSL --retry 3 -o "$bin" \
-    "https://github.com/tailwindlabs/tailwindcss/releases/download/v$version/tailwindcss-$target"; \
-  chmod +x "$bin"
-
 RUN mix assets.deploy
 
 # `config/runtime/` holds the per-concern fragments runtime.exs imports (#1322).
@@ -206,6 +207,13 @@ COPY rel rel
 # in error reports (config :sentry, enable_source_code_context: true). Must run
 # after `lib` is present and before the release is assembled.
 RUN mix sentry.package_source_code
+
+# Put back the stock `httpc` patched in above: nothing downloads from here
+# on, and the release copies OTP's apps into the image.
+RUN set -eu; \
+  inets="$(erl -noshell -eval 'io:format("~s", [code:lib_dir(inets)]), halt().')"; \
+  cp /opt/httpc-stock/httpc.beam "$inets/ebin/httpc.beam"; \
+  rm -rf /opt/httpc-stock
 
 RUN mix release
 
