@@ -109,6 +109,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **A release that rolls back no longer announces or notifies what it undid; post-publish broadcasts, notifications, audit anchors and cache busts wait for the release to commit, and content and type cache busts now always run after the commit.**
+  ([#2072](https://github.com/The-Verscienta/kiln_cms/pull/2072) · [long form](docs/changelog/unreleased.md#after-commit-effects))
+
 - **`KILN_VECTOR_SEARCH_EXACT` / `KILN_HNSW_EF_SEARCH` no longer crash-loop a
   deployment whose compiled config sets the other `vector_scan:` mode.**
   ([#2060](https://github.com/The-Verscienta/kiln_cms/pull/2060) · [long form](docs/changelog/unreleased.md#vector-scan-env-replaces-compiled-mode))

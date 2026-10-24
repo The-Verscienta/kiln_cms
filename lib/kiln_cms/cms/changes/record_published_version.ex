@@ -54,8 +54,18 @@ defmodule KilnCMS.CMS.Changes.RecordPublishedVersion do
     # Tamper-evident history anchor (#356): fold + sign the full version chain
     # at this publish point. `anchor/2` is config-gated and never raises, so a
     # chain problem can't break the publish.
-    with {:ok, published} <- result,
-         do: KilnCMS.Governance.Chain.anchor(published, actor_id: actor_id)
+    #
+    # After the commit, through `AfterCommit`, where the pointer above is not:
+    # a release publishes inside its own transaction, and the pointer is part of
+    # what it publishes, so it commits or rolls back with the release. The
+    # anchor is not. Its concurrency guard is a unique index whose violation
+    # `anchor/2` rescues as a skip, and inside a release that violation would
+    # already have aborted the release's transaction.
+    with {:ok, published} <- result do
+      KilnCMS.AfterCommit.run(fn ->
+        KilnCMS.Governance.Chain.anchor(published, actor_id: actor_id)
+      end)
+    end
 
     result
   end

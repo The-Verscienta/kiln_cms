@@ -34,6 +34,10 @@ defmodule KilnCMS.CMS.Changes.NotifySubscribersWithdrawn do
   `AshGraphql.Subscription.Notifier` would for a real `:destroy`, to the same
   pubsub and topic, so the batcher, tenant guard and relay-id encoding all
   apply unchanged.
+
+  Through `KilnCMS.AfterCommit.run/1`, because inside a release rollback the
+  hook runs before the release commits: a subscriber told "gone" by a rollback
+  that then aborts would drop a record that is still live.
   """
   use Ash.Resource.Change
 
@@ -46,7 +50,8 @@ defmodule KilnCMS.CMS.Changes.NotifySubscribersWithdrawn do
 
     Ash.Changeset.after_transaction(changeset, fn
       changeset, {:ok, record} ->
-        if withdrawn?(only_when, changeset), do: publish(changeset, record)
+        if withdrawn?(only_when, changeset), do: publish_after_commit(changeset, record)
+
         {:ok, record}
 
       _changeset, other ->
@@ -60,6 +65,9 @@ defmodule KilnCMS.CMS.Changes.NotifySubscribersWithdrawn do
   # on `:archived` from any state, and archiving a draft withdrew nothing.
   defp withdrawn?(nil, _changeset), do: true
   defp withdrawn?(:was_published, changeset), do: changeset.data.state == :published
+
+  defp publish_after_commit(changeset, record),
+    do: KilnCMS.AfterCommit.run(fn -> publish(changeset, record) end)
 
   defp publish(changeset, %resource{} = record) do
     domain = KilnCMS.CMS

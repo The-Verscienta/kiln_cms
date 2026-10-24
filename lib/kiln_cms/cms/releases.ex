@@ -73,9 +73,15 @@ defmodule KilnCMS.CMS.Releases do
   committed when that publish event fires. A subscriber re-reading on it sees
   the final state — strictly better ordering than the normal path, where the
   pointer lands in a second event *after* the first.
+
+  The items' `after_transaction` hooks are the other half of the same problem:
+  they run inside this transaction, before it commits. What they must not do
+  early — broadcast, notify, anchor, evict — they hand to `KilnCMS.AfterCommit`,
+  which runs it after the commit and drops it on a rollback. See `held/1`.
   """
   require Logger
 
+  alias KilnCMS.AfterCommit
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.WorkingCopy
@@ -643,7 +649,22 @@ defmodule KilnCMS.CMS.Releases do
   defp notifying(opts), do: Keyword.put(opts, :return_notifications?, true)
 
   defp acting(opts, actor),
-    do: opts |> content_opts() |> notifying() |> Keyword.put(:actor, actor)
+    do: opts |> content_opts() |> notifying() |> Keyword.put(:actor, actor) |> held()
+
+  # The content actions' `after_transaction` hooks run inside the release's
+  # transaction, as each action returns — before anything commits. Every one is
+  # either a write that belongs inside it (the fire and webhook Oban jobs, the
+  # `published_version_id` pointer, the artifact rows an unpublish destroys:
+  # they go live or vanish with the release) or an effect held by
+  # `KilnCMS.AfterCommit` until `run_transaction/1` commits (the calendar,
+  # collab and task broadcasts, GraphQL retractions, workflow notifications,
+  # audit anchors, cache evictions). That audit is what lets these actions
+  # silence Ash's nested-hook warning; a new hook on `:publish`, `:unpublish`,
+  # `:publish_changes`, `:restore_version` or `:submit_for_review` that is
+  # neither has to be added to one list or the other.
+  defp held(opts),
+    do:
+      Keyword.update(opts, :context, AfterCommit.context(), &Map.merge(&1, AfterCommit.context()))
 
   defp notified({:ok, _record, notifications}), do: {:ok, notifications}
   defp notified({:ok, _record}), do: {:ok, []}
@@ -735,8 +756,14 @@ defmodule KilnCMS.CMS.Releases do
 
   # `check_deadline!/2` is the bound that actually holds; this one only keeps a
   # wedged connection from hanging the worker forever.
+  #
+  # `AfterCommit.deferring/1` holds what the items' hooks must not do before the
+  # commit (see `held/1`), runs it once the whole release has committed, and
+  # drops it when any item rolls the release back.
   defp run_transaction(fun) do
-    Repo.transaction(fun, timeout: transaction_timeout_ms() + @commit_grace_ms)
+    AfterCommit.deferring(fn ->
+      Repo.transaction(fun, timeout: transaction_timeout_ms() + @commit_grace_ms)
+    end)
   end
 
   defp event_payload(release, items) do

@@ -395,7 +395,10 @@ defmodule KilnCMS.Firing.Engine do
     # person, admin included, and admits this actor by name.
     {:ok, artifacts} = Firing.artifacts_for(type, id, actor: system_actor(), tenant: org_id)
     Enum.each(artifacts, &Ash.destroy!(&1, actor: system_actor(), tenant: org_id))
-    Cache.evict(org_id, type, id)
+    # After the commit when there is an outer one to wait for (an unpublish
+    # inside a release): evicted before it, a reader re-caches the artifact the
+    # destroy above has not yet made invisible.
+    KilnCMS.AfterCommit.run(fn -> Cache.evict(org_id, type, id) end)
     :ok
   end
 

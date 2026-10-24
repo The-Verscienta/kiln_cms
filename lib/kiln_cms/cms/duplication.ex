@@ -64,6 +64,7 @@ defmodule KilnCMS.CMS.Duplication do
   require Logger
 
   alias KilnCMS.Accounts.Scoping
+  alias KilnCMS.AfterCommit
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentCopy
   alias KilnCMS.CMS.ContentTypes
@@ -115,19 +116,27 @@ defmodule KilnCMS.CMS.Duplication do
     # tying them together, so a failure on link 12 of 40 left a COMMITTED copy
     # behind while the caller was told the duplicate failed and did not navigate
     # — three clicks, three orphan drafts, each with a partial link set (#925).
+    #
+    # The create's `after_transaction` hooks therefore run before this commits.
+    # The calendar broadcast and any audit anchor go through `AfterCommit`,
+    # which holds them until it does; the `created` webhook is an Oban job that
+    # belongs inside, gone with the copy if a link fails. So the create may
+    # silence Ash's nested-hook warning.
     {:ok, copy} =
-      Ash.transaction(
-        [
-          Slugs.storage_resource(
-            ContentTypes.get!(kind, KilnCMS.Accounts.org_id(Keyword.get(opts, :tenant)))
-          )
-        ],
-        fn ->
-          copy = ContentTypes.create!(kind, attrs, ContentCopy.create_opts(opts))
-          clone_links(source, copy, opts)
-          copy
-        end
-      )
+      AfterCommit.deferring(fn ->
+        Ash.transaction(
+          [
+            Slugs.storage_resource(
+              ContentTypes.get!(kind, KilnCMS.Accounts.org_id(Keyword.get(opts, :tenant)))
+            )
+          ],
+          fn ->
+            copy = ContentTypes.create!(kind, attrs, create_opts(opts))
+            clone_links(source, copy, opts)
+            copy
+          end
+        )
+      end)
 
     {copy, withheld}
   end
@@ -165,6 +174,12 @@ defmodule KilnCMS.CMS.Duplication do
   @spec copy_title(String.t() | nil) :: String.t()
   def copy_title(title) do
     (title || "") |> String.trim() |> Kernel.<>(@copy_suffix) |> String.trim_leading()
+  end
+
+  defp create_opts(opts) do
+    opts
+    |> ContentCopy.create_opts()
+    |> Keyword.update!(:context, &Map.merge(&1, AfterCommit.context()))
   end
 
   defp id(%{id: id}), do: id

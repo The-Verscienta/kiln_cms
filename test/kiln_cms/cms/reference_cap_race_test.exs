@@ -90,11 +90,16 @@ defmodule KilnCMS.CMS.ReferenceCapRaceTest do
         {:ok, second} =
           Repo.transaction(fn ->
             # Its notifications are sent after the outer commit, not missed.
+            # The transaction around it is the point of the test, so its
+            # `after_transaction` hooks running early is too: silenced here
+            # rather than left as noise in the log.
             {:ok, _a, _notifications} =
               CMS.update_post(
                 a,
                 %{custom_fields: %{name => target.id}},
-                Keyword.put(opts, :return_notifications?, true)
+                opts
+                |> Keyword.put(:return_notifications?, true)
+                |> Keyword.put(:context, %{warn_on_transaction_hooks?: false})
               )
 
             second = Task.async(fn -> unboxed(fn -> connect(b, name, target, opts) end) end)

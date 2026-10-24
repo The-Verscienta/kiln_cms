@@ -235,7 +235,9 @@ defmodule KilnCMS.Propagation do
     }
 
     case CMS.complete_propagation(record, attrs, actor: actor, tenant: record.org_id) do
-      {:ok, completed} -> emit(completed)
+      # After the commit when there is an outer one (a release): a rolled-back
+      # transition must not be counted as propagated.
+      {:ok, completed} -> KilnCMS.AfterCommit.run(fn -> emit(completed) end)
       # Another delivery settled it first (the `is_nil(completed_at)` filter).
       {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{} | _]}} -> :ok
       {:error, error} -> raise error

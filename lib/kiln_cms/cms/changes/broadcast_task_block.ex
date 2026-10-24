@@ -34,21 +34,15 @@ defmodule KilnCMS.CMS.Changes.BroadcastTaskBlock do
   A failed write broadcasts nothing — the `{:error, _}` clause falls through
   untouched — so a count never moves for a task that did not save.
 
-  ### The one case that hook cannot cover
+  ### Inside someone else's transaction
 
   `Changes.AutoCompleteTasks` completes a record's open tasks from inside the
-  *publish* action's transaction. An inner action nested in an outer
-  transaction doesn't open one of its own, so this hook runs when the
-  completion finishes rather than when the publish commits — a peer that
-  re-reads on the message can still see the task open, and stays one count
-  behind until the next event.
-
-  Left as-is deliberately: these messages are advisory and at-most-once by
-  design (§7 of the plan), the editor doing the publishing reloads its own
-  tasks on the publish result anyway, and the alternative — threading
-  notifications out of the outer action — would make every task write pay for
-  one path's ordering. Worth knowing before treating a stale peer count after
-  publish as a lost message.
+  *publish* action's transaction, where this hook runs when the completion
+  returns rather than when anything commits. So the broadcast goes through
+  `KilnCMS.AfterCommit.run/1`: `AutoCompleteTasks` captures it and replays it
+  from the publish's own `after_transaction` hook, and a release go-live holds
+  it until the whole release commits. A publish that rolls back moves no
+  count.
   """
   use Ash.Resource.Change
 
@@ -60,17 +54,21 @@ defmodule KilnCMS.CMS.Changes.BroadcastTaskBlock do
   end
 
   defp broadcast(changeset, {:ok, task} = result) do
-    for block_id <- Enum.uniq([task.block_id | previous_block_ids(changeset)]) do
-      Phoenix.PubSub.broadcast(
-        KilnCMS.PubSub,
-        # `content_type` is the string form of the editor's `kind` atom
-        # (`to_string(kind)` at the call site), so it interpolates to the same
-        # topic the editor subscribed with — the assumption `BroadcastComment`
-        # already makes for the preview topic.
-        Collab.topic(task.content_type, task.content_id),
-        {:block_task_changed, block_id}
-      )
-    end
+    block_ids = Enum.uniq([task.block_id | previous_block_ids(changeset)])
+
+    KilnCMS.AfterCommit.run(fn ->
+      for block_id <- block_ids do
+        Phoenix.PubSub.broadcast(
+          KilnCMS.PubSub,
+          # `content_type` is the string form of the editor's `kind` atom
+          # (`to_string(kind)` at the call site), so it interpolates to the same
+          # topic the editor subscribed with — the assumption `BroadcastComment`
+          # already makes for the preview topic.
+          Collab.topic(task.content_type, task.content_id),
+          {:block_task_changed, block_id}
+        )
+      end
+    end)
 
     result
   end

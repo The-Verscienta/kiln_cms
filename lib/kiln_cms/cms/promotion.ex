@@ -36,6 +36,7 @@ defmodule KilnCMS.CMS.Promotion do
 
   require Logger
 
+  alias KilnCMS.AfterCommit
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Governance.Checkpoint
@@ -91,15 +92,17 @@ defmodule KilnCMS.CMS.Promotion do
     # whether a checkpoint is worth minting, and is not something a caller of
     # `promote!/2` asked for — the returned map is a documented shape.
     {:ok, {result, reattested, notifications}} =
-      Repo.transaction(fn ->
-        entry_count = move_rows("entries", target_table, definition.id)
-        version_count = move_versions(target_table)
-        reattested = reattest_anchors(target_table, target, definition.org_id)
-        purge_artifacts_and_edges()
-        rescope_field_definitions(definition, target)
-        notifications = archive_definition(definition)
+      AfterCommit.deferring(fn ->
+        Repo.transaction(fn ->
+          entry_count = move_rows("entries", target_table, definition.id)
+          version_count = move_versions(target_table)
+          reattested = reattest_anchors(target_table, target, definition.org_id)
+          purge_artifacts_and_edges()
+          rescope_field_definitions(definition, target)
+          notifications = archive_definition(definition)
 
-        {%{entries: entry_count, versions: version_count}, reattested, notifications}
+          {%{entries: entry_count, versions: version_count}, reattested, notifications}
+        end)
       end)
 
     # Dispatch the archive's Ash notifications now that the transaction
@@ -350,7 +353,16 @@ defmodule KilnCMS.CMS.Promotion do
     # are admin-only (`forbid_if always()` below the admin bypass); admitting a
     # system actor to `destroy` would let every system caller archive a site's
     # content types.
-    case Ash.destroy(definition, authorize?: false, return_notifications?: true) do
+    #
+    # Its `after_transaction` hooks (`BustTypeRegistry`) run inside this
+    # transaction: the feed bust goes through `AfterCommit`, held by
+    # `promote!/2` until the commit, and the SEO re-fire is an Oban job (and a
+    # no-op for an archive, which changes no pattern). Hence the silence.
+    case Ash.destroy(definition,
+           authorize?: false,
+           return_notifications?: true,
+           context: AfterCommit.context()
+         ) do
       {:ok, notifications} when is_list(notifications) -> notifications
       :ok -> []
     end
