@@ -29,7 +29,7 @@ defmodule KilnCMS.CMS.ContentLifecycleTest do
   defp days_ago(n), do: DateTime.add(DateTime.utc_now(), -n * 86_400, :second)
   defp days_from_now(n), do: DateTime.add(DateTime.utc_now(), n * 86_400, :second)
 
-  defp page(admin, attrs \\ %{}) do
+  defp page(admin, attrs) do
     CMS.create_page!(Map.merge(%{title: "Lifecycle", slug: slug()}, attrs), actor: admin)
   end
 

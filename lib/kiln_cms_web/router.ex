@@ -963,6 +963,8 @@ defmodule KilnCMSWeb.Router do
     pipe_through :probe
 
     get "/sitemap.xml", SitemapController, :index
+    # Google News sitemap (#2045): `NewsArticle` types, last 48 hours.
+    get "/news-sitemap.xml", NewsSitemapController, :index
     get "/robots.txt", SitemapController, :robots
 
     # Where to report a vulnerability in this site (RFC 9116, #1873). Per-org,

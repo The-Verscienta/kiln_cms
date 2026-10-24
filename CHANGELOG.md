@@ -63,6 +63,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A Google News sitemap at `/news-sitemap.xml` for `NewsArticle` types:
+  the last 48 hours, at most 1,000 URLs, listed from `robots.txt`.**
+  ([#2077](https://github.com/The-Verscienta/kiln_cms/pull/2077) · [long form](docs/changelog/unreleased.md#news-sitemap))
+
 - **Headless draft mode: a preview token opens its draft on JSON:API and the fired-artifact read.**
   ([#1887](https://github.com/The-Verscienta/kiln_cms/issues/1887) · [long form](docs/changelog/unreleased.md#headless-draft-mode))
 

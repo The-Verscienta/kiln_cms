@@ -10,10 +10,7 @@ defmodule KilnCMSWeb.ContentLockTest do
   """
   use KilnCMSWeb.ConnCase, async: false
 
-  require Ash.Query
-
   alias KilnCMS.CMS
-  alias KilnCMS.CMS.ContentPassword
   alias KilnCMSWeb.ContentLock
 
   @passphrase "let me in please"

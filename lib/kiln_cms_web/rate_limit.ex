@@ -92,7 +92,7 @@ defmodule KilnCMSWeb.RateLimit do
     # Always-on Swagger UI explorer (#225) — generous for human browsing, caps
     # crawler/abuse traffic against the docs UI.
     docs: {60, :timer.minutes(1)},
-    # Infra/SEO endpoints (`/up`, `/sitemap.xml`, `/robots.txt`). Generous so
+    # Infra/SEO endpoints (`/up`, `/sitemap.xml`, `/news-sitemap.xml`, `/robots.txt`). Generous so
     # legitimate load-balancer probes and crawlers are never throttled, while
     # still bounding a flood that would otherwise run an unthrottled DB query
     # (`/up`) or table scan (sitemap cache-miss) per hit.

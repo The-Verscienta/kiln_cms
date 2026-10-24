@@ -21,6 +21,22 @@ carries the reasoning.
 
 ## Added
 
+<a id="news-sitemap"></a>
+
+- **A Google News sitemap, `/news-sitemap.xml`
+  ([#2045](https://github.com/The-Verscienta/kiln_cms/issues/2045)).** Each
+  `<url>` carries `<news:news>`: the publication name (the site's branding
+  name), its language (the record's locale as an ISO 639 code, `zh-cn` /
+  `zh-tw` for Chinese), `news:publication_date` and `news:title`. Only
+  articles published in the last 48 hours, newest first, at most 1,000 URLs,
+  as Google News asks. A type opts in by declaring the schema.org type
+  `NewsArticle` (the Content macro's `schema_org_type:` or the dynamic type's
+  setting); `robots.txt` lists the route once one has. Like the feeds, only
+  published `audience: :public` records appear. Per org, cached for five
+  minutes under the `:probe` rate limit, and dropped by
+  `KilnCMS.Cache.bust_sitemap/1` with the main sitemap, so an unpublished
+  article is gone on the next request.
+
 <a id="headless-draft-mode"></a>
 
 - **Headless draft mode: a preview token opens its draft on JSON:API and the

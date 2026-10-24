@@ -63,7 +63,9 @@ defmodule KilnCMSWeb.CollabChannelTest do
   defp topic(page), do: "collab:page:#{page.id}"
 
   defp socket!(actor, host \\ nil) do
-    {:ok, socket} = connect(CollabSocket, %{"token" => token(actor)}, connect_info(host))
+    {:ok, socket} =
+      connect(CollabSocket, %{"token" => token(actor)}, connect_info: connect_info(host))
+
     socket
   end
 
@@ -101,12 +103,14 @@ defmodule KilnCMSWeb.CollabChannelTest do
       address = KilnCMS.RateLimitHelpers.client_address()
       connect_info = %{peer_data: %{address: address, port: 111, ssl_cert: nil}, x_headers: []}
 
-      assert {:ok, _socket} = connect(CollabSocket, %{"token" => token(actor)}, connect_info)
+      assert {:ok, _socket} =
+               connect(CollabSocket, %{"token" => token(actor)}, connect_info: connect_info)
 
       # Same address, second attempt: over budget, refused before the token is
       # even verified (a forged token here would also refuse — the budget has
       # to be the reason, so the token stays valid).
-      assert :error = connect(CollabSocket, %{"token" => token(actor)}, connect_info)
+      assert :error =
+               connect(CollabSocket, %{"token" => token(actor)}, connect_info: connect_info)
     end
   end
 
@@ -245,7 +249,9 @@ defmodule KilnCMSWeb.CollabChannelTest do
       on_exit(fn -> Application.put_env(:kiln_cms, :tenant_strict_host, previous) end)
 
       assert :error =
-               connect(CollabSocket, %{"token" => token(actor)}, connect_info("nowhere.example"))
+               connect(CollabSocket, %{"token" => token(actor)},
+                 connect_info: connect_info("nowhere.example")
+               )
     end
   end
 

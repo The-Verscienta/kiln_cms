@@ -58,6 +58,14 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
 
   defp slug, do: "aec-#{System.unique_integer([:positive])}"
 
+  # `apply/3` hides the call from the compile-time type checker, which would
+  # otherwise flag it for always hitting a raise — that being the point of the
+  # wrong-kind test.
+  defp csv_row_opaquely(kind, row, ctx, org) do
+    # credo:disable-for-next-line Credo.Check.Refactor.Apply
+    apply(KilnCMS.Analytics.Export, :csv_row, [kind, row, ctx, org])
+  end
+
   defp seed_bucket(attrs) do
     Ash.Seed.seed!(
       ContentViewDay,
@@ -511,13 +519,13 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
       all_time = %{views: 12, content_type: "post", content_id: Ash.UUID.generate()}
 
       assert_raise FunctionClauseError, fn ->
-        Export.csv_row(:referrer, all_time, %{}, KilnCMS.Accounts.default_org_id())
+        csv_row_opaquely(:referrer, all_time, %{}, KilnCMS.Accounts.default_org_id())
       end
 
       # And the view clause still needs the `:day` a real bucket carries, so the
       # shape mismatch surfaces at the boundary rather than deeper in.
       assert_raise KeyError, fn ->
-        Export.csv_row(:view, all_time, %{}, KilnCMS.Accounts.default_org_id())
+        csv_row_opaquely(:view, all_time, %{}, KilnCMS.Accounts.default_org_id())
       end
     end
   end

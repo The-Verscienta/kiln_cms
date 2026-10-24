@@ -176,7 +176,7 @@ defmodule KilnCMSWeb.Plugs.IdempotencyTest do
     assert get_resp_header(conn, "idempotency-replayed") == []
   end
 
-  test "a refused request is not kept, so fixing the credential and retrying works", ctx do
+  test "a refused request is not kept, so fixing the credential and retrying works" do
     viewer = user(:viewer)
     viewer_key = key(viewer)
     title = "Forbidden #{System.unique_integer([:positive])}"

@@ -17,7 +17,7 @@ defmodule KilnCMSWeb.FormEmbedOriginsTest do
   use KilnCMSWeb.ConnCase, async: true
 
   import KilnCMS.OrgFixtures
-  import KilnCMS.FormFixtures, only: [admin: 0, form!: 1, form!: 2]
+  import KilnCMS.FormFixtures, only: [admin: 0, form!: 2]
 
   alias KilnCMS.CMS
   alias KilnCMSWeb.Embed

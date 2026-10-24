@@ -103,6 +103,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Forms** | `GET /api/forms/:slug`, `POST /api/forms/:slug`, `<script src="…/embed.js">` | A form's schema and JSON submission, or an auto-resizing iframe on any site. | [§ Embeddable forms](#embeddable-forms) |
 | **Visual editing** | `<script src="…/bridge.js">` | In-context edit overlay for an external front end (annotated preview + deep-link + live push). | [visual-editing-bridge.md](visual-editing-bridge.md) |
 | **Sitemap** | `GET /sitemap.xml` | Enumerate published content for crawling/SSG. | — |
+| **News sitemap** | `GET /news-sitemap.xml` | Google News sitemap: `NewsArticle` types published in the last 48 hours. | [seo.md § Google News sitemap](seo.md#google-news-sitemap) |
 | **Feeds** | `GET /feed.xml`, `GET /feed.json` | Atom 1.0 / JSON Feed 1.1 of newly published content. | [§ Feeds](#feeds) |
 | **Outbound webhooks** | (you host the receiver) | Timestamped HMAC-signed push on the content lifecycle. | [webhooks.md](webhooks.md) |
 | **Signed preview** | `GET /preview/:token` | One unpublished document via a short-lived token. | [§ Preview tokens](#preview-tokens) |

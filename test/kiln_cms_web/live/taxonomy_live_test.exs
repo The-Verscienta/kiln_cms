@@ -238,7 +238,7 @@ defmodule KilnCMSWeb.TaxonomyLiveTest do
 
       # Loaded groups keep picker order; the empty one still shows; Ungrouped last.
       assert [
-               {first_id, "First", [in_first]},
+               {first_id, "First", [^in_first]},
                {second_id, "Second", []},
                {nil, ungrouped_label, ungrouped}
              ] =
