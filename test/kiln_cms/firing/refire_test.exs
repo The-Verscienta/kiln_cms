@@ -107,7 +107,9 @@ defmodule KilnCMS.Firing.RefireTest do
     # A publish's own job is pending: the refire still gets one of its own,
     # since only the refire announces `updated`.
     {:ok, _} =
-      %{"org_id" => org_id(), "type" => "page", "id" => herb.id} |> FireWorker.new() |> Oban.insert()
+      %{"org_id" => org_id(), "type" => "page", "id" => herb.id}
+      |> FireWorker.new()
+      |> Oban.insert()
 
     assert Firing.refire!("page", [herb.id, herb.id], actor: overlay(), tenant: org_id()) == 1
     assert Firing.refire!("page", [herb.id], actor: overlay(), tenant: org_id()) == 0
