@@ -306,6 +306,29 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="after-commit-effects"></a>
+
+- **A release that rolls back no longer announces or notifies what it undid;
+  post-publish broadcasts, notifications, audit anchors and cache busts wait
+  for the release to commit.** A release publishes every item inside one
+  transaction, so each item's `after_transaction` hooks ran before anything
+  committed. The calendar, collab-room, task-pin and GraphQL-retraction
+  broadcasts went out early and went out even when a later item rolled the
+  release back. A workflow notification, or an audit anchor that lost a
+  race, could fail the whole go-live: a failed statement aborts the
+  transaction, and the hook's rescue cannot undo that. Cache evictions ran
+  before the commit, so a reader in between could re-cache the old page.
+  Those effects now go through `KilnCMS.AfterCommit`, which holds them until
+  the release commits and drops them when it rolls back. The Oban jobs (fire,
+  webhooks, embeddings) and the `published_version_id` pointer still commit
+  with the release, as before. Duplicating a record with its links, promoting a
+  dynamic type, and the tasks a publish completes get the same treatment.
+  The published-content and type-registry busts (`BustContentCache`,
+  `BustTypeRegistry`) moved from `after_action` to after the commit on every
+  write, not only inside a release: busted inside the transaction, a reader
+  could re-cache the old page or type set for a full TTL.
+  ([#2072](https://github.com/The-Verscienta/kiln_cms/pull/2072))
+
 <a id="vector-scan-env-replaces-compiled-mode"></a>
 
 - **`KILN_VECTOR_SEARCH_EXACT` / `KILN_HNSW_EF_SEARCH` no longer crash-loop a

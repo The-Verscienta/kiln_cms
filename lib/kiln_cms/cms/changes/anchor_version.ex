@@ -76,8 +76,11 @@ defmodule KilnCMS.CMS.Changes.AnchorVersion do
   defp actor_id(%{id: id}), do: id
   defp actor_id(_actor), do: nil
 
+  # Through `AfterCommit` for `RecordPublishedVersion`'s reason: inside a
+  # transaction this action did not open, a rescued unique-index violation in
+  # `extend/2` would already have aborted the caller's transaction.
   defp extend({:ok, record} = result, actor_id) do
-    Chain.extend(record, actor_id: actor_id)
+    KilnCMS.AfterCommit.run(fn -> Chain.extend(record, actor_id: actor_id) end)
     result
   end
 

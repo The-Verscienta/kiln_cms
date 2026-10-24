@@ -44,6 +44,22 @@ defmodule KilnCMS.CMS.ReleasesTest do
     end
   end
 
+  # A page with an author, so a publish has someone to notify.
+  defp authored_page(author) do
+    n = n()
+
+    {:ok, page} =
+      CMS.create_page(%{title: "Authored page #{n}", slug: "authored-page-#{n}"},
+        actor: author,
+        authorize?: false
+      )
+
+    page
+  end
+
+  defp notifications_for(user, org_id),
+    do: KilnCMS.Notifications.notifications_for_user!(user.id, authorize?: false, tenant: org_id)
+
   defp release(admin, attrs \\ %{}) do
     {:ok, release} =
       CMS.create_release(Map.merge(%{name: "Spring campaign"}, attrs), actor: admin)
@@ -395,6 +411,56 @@ defmodule KilnCMS.CMS.ReleasesTest do
       # Nothing published, so nothing may have been recorded for delivery — the
       # ledger row and its Oban job are DB writes inside the same transaction.
       assert [] = CMS.recent_webhook_deliveries!(authorize?: false)
+    end
+
+    # An item's `after_transaction` hooks run inside the release's transaction,
+    # before it commits. Its broadcasts and notifications wait for the commit
+    # (`KilnCMS.AfterCommit`), so a release that rolls back tells no one.
+    test "a failed go-live broadcasts and notifies nothing about the items it rolled back" do
+      admin = user(:admin)
+      author = user(:editor)
+      rel = release(admin)
+      good = authored_page(author)
+      {:ok, _} = add(rel, good, admin)
+      {:ok, _} = add(rel, page(%{state: :archived}), admin)
+
+      Phoenix.PubSub.subscribe(
+        KilnCMS.PubSub,
+        KilnCMS.CMS.Changes.BroadcastCalendar.topic(good.org_id)
+      )
+
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, KilnCMS.Notifications.topic(author.id))
+
+      {:ok, failed} = go_live(rel, admin)
+      assert failed.state == :failed
+
+      good_id = good.id
+      refute_received {:calendar_changed, ^good_id}
+      refute_received :notifications_changed
+      assert [] = notifications_for(author, good.org_id)
+    end
+
+    test "a go-live that commits still broadcasts and notifies, once it has" do
+      admin = user(:admin)
+      author = user(:editor)
+      rel = release(admin)
+      good = authored_page(author)
+      {:ok, _} = add(rel, good, admin)
+
+      Phoenix.PubSub.subscribe(
+        KilnCMS.PubSub,
+        KilnCMS.CMS.Changes.BroadcastCalendar.topic(good.org_id)
+      )
+
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, KilnCMS.Notifications.topic(author.id))
+
+      {:ok, published} = go_live(rel, admin)
+      assert published.state == :published
+
+      good_id = good.id
+      assert_received {:calendar_changed, ^good_id}
+      assert_received :notifications_changed
+      assert [%{event: :published}] = notifications_for(author, good.org_id)
     end
 
     test "an item whose change is already true is skipped, not failed" do
