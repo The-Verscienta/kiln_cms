@@ -13,7 +13,9 @@ defmodule KilnCMS.Firing.SchemaOrg do
 
   # Page-level types the main node may declare. Article-family types carry the
   # body as `articleBody`; the rest (WebPage family) as the generic `text`.
-  @article_types ~w(Article BlogPosting NewsArticle TechArticle)
+  # `LiveBlogPosting` is a `BlogPosting`, so it keeps all of that and gains its
+  # coverage times and updates (`KilnCMS.Firing.LiveBlog`, #2046).
+  @article_types ~w(Article BlogPosting NewsArticle TechArticle LiveBlogPosting)
   @page_types ~w(WebPage AboutPage ContactPage FAQPage MedicalWebPage)
 
   # A third family (#480). An `Event` is not a `CreativeWork`: it has no body in
@@ -31,6 +33,10 @@ defmodule KilnCMS.Firing.SchemaOrg do
   @doc "Whether `type` is one of the schema.org Event family."
   @spec event_type?(String.t()) :: boolean()
   def event_type?(type), do: type in @event_types
+
+  @doc "Whether `type` is `LiveBlogPosting`, whose node carries `liveBlogUpdate` (#2046)."
+  @spec live_blog_type?(String.t()) :: boolean()
+  def live_blog_type?(type), do: type == "LiveBlogPosting"
 
   @doc "Whether `type` is one of the schema.org Article (CreativeWork) family."
   @spec article_type?(String.t()) :: boolean()

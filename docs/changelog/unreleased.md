@@ -21,6 +21,28 @@ carries the reasoning.
 
 ## Added
 
+<a id="live-blog-posting"></a>
+
+- **`LiveBlogPosting` in schema.org output
+  ([#2046](https://github.com/The-Verscienta/kiln_cms/issues/2046)).**
+  `LiveBlogPosting` joins the allowlisted Article family, so a compiled type
+  (`schema_org_type:`) or a dynamic one (`/editor/types`) can declare it. Its
+  node keeps `headline`, `articleBody` and the CreativeWork dates, and gains
+  `coverageStartTime` / `coverageEndTime` from the type's first
+  `datetime_range` field (with none, coverage starts at `published_at` and
+  stays open) and `liveBlogUpdate`: one `BlogPosting` per update, newest
+  first, capped at 50 (`config :kiln_cms, KilnCMS.Firing.LiveBlog,
+  max_updates:`). An update is any record pointing at the story through a
+  `:reference` field with another side (`inverse_label`); the story type's
+  first reverse field is its update stream. No new resource, no migration.
+  Only published, public, unlocked updates are fired, read from their live
+  values, so a members-only update never leaks through a public story and an
+  unpublished one drops out the next time the story fires. The served page's
+  inline JSON-LD (`KilnCMSWeb.StructuredData`) carries the same properties.
+  Publishing an update does not itself re-fire the story yet: the reference
+  edge runs update → story, so the story picks up a new update on its next
+  fire.
+
 <a id="news-sitemap"></a>
 
 - **A Google News sitemap, `/news-sitemap.xml`

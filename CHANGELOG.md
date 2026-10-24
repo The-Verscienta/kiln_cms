@@ -63,6 +63,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A type can fire `LiveBlogPosting`: coverage times plus its published
+  updates as `liveBlogUpdate`, newest first and capped.**
+  ([#2075](https://github.com/The-Verscienta/kiln_cms/pull/2075) · [long form](docs/changelog/unreleased.md#live-blog-posting))
+
 - **A Google News sitemap at `/news-sitemap.xml` for `NewsArticle` types:
   the last 48 hours, at most 1,000 URLs, listed from `robots.txt`.**
   ([#2077](https://github.com/The-Verscienta/kiln_cms/pull/2077) · [long form](docs/changelog/unreleased.md#news-sitemap))
