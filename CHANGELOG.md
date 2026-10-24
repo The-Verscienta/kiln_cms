@@ -63,6 +63,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A type can fire `LiveBlogPosting`: coverage times plus its published
+  updates as `liveBlogUpdate`, newest first and capped.**
+  ([#2046](https://github.com/The-Verscienta/kiln_cms/issues/2046) · [long form](docs/changelog/unreleased.md#live-blog-posting))
+
 - **A public change feed, server side: `KilnCMS.Delivery.Feed` publishes
   `published` / `updated` / `withdrawn` per site over PubSub.**
   ([#2069](https://github.com/The-Verscienta/kiln_cms/pull/2069) · [long form](docs/changelog/unreleased.md#change-feed-server))
