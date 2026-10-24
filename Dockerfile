@@ -69,6 +69,24 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 
 WORKDIR /app
 
+# Lift `:httpc`'s response-header limit for the build, and only the build.
+# OTP 29.1.1 (inets 9.8) gave `:httpc` a default `max_header_size` of 10240
+# bytes that can only be raised per request, and GitHub's release-download
+# redirects now send ~10.7 KB of headers (a 9 KB Content-Security-Policy).
+# Every Mix tool that fetches a GitHub release asset through `:httpc` and
+# doesn't pass the option then fails with `{:header_too_long, {:max, 10240}}`:
+# tailwind's binary, and the precompiled NIFs of y_ex, lazy_html and vix. No
+# release of those tools passes it yet. The escript rebuilds `httpc` from its
+# beam's debug_info (this image ships no OTP source) with the default set to
+# `nolimit`, as OTP 29.0 behaved, and fails the build if it can't find that
+# default. The stock beam is restored before `mix release` below, so the
+# release carries an unmodified OTP.
+COPY rel/docker/httpc_header_limit.escript /opt/httpc_header_limit.escript
+RUN set -eu; \
+  beam="$(erl -noshell -eval 'io:format("~s", [code:which(httpc)]), halt().')"; \
+  mkdir -p /opt/httpc-stock && cp "$beam" /opt/httpc-stock/httpc.beam; \
+  escript /opt/httpc_header_limit.escript
+
 RUN mix local.hex --force && mix local.rebar --force
 
 ENV MIX_ENV="prod"
@@ -184,6 +202,13 @@ COPY rel rel
 # in error reports (config :sentry, enable_source_code_context: true). Must run
 # after `lib` is present and before the release is assembled.
 RUN mix sentry.package_source_code
+
+# Put back the stock `httpc` patched in above: nothing downloads from here
+# on, and the release copies OTP's apps into the image.
+RUN set -eu; \
+  beam="$(erl -noshell -eval 'io:format("~s", [code:which(httpc)]), halt().')"; \
+  cp /opt/httpc-stock/httpc.beam "$beam"; \
+  rm -rf /opt/httpc-stock /opt/httpc_header_limit.escript
 
 RUN mix release
 
