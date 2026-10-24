@@ -19,19 +19,23 @@ defmodule Kiln.Advisory.WalkTest do
 
     # The walk moved off `Body` when `Body` went into kiln_plugin (#1909); the
     # deprecated delegates keep an overlay that called them working. Called
-    # through a variable so the deprecation warning doesn't fail a
-    # --warnings-as-errors build.
+    # through `apply/3` so the deprecation warning doesn't fail a
+    # --warnings-as-errors build (Elixir 1.20 sees through a variable module).
     test "Body's deprecated delegates reach the walk" do
-      body = Body
       blocks = [rich([para("One two three.")])]
 
-      assert body.compute(blocks) == Walk.compute(blocks)
+      assert deprecated(:compute, [blocks]) == Walk.compute(blocks)
 
       typed = TypedBlocks.to_typed(blocks)
-      assert body.from_typed(typed) == Walk.from_typed(typed)
-      assert body.from_indexed([{hd(typed), 3}]) == Walk.from_indexed([{hd(typed), 3}])
+      assert deprecated(:from_typed, [typed]) == Walk.from_typed(typed)
+
+      assert deprecated(:from_indexed, [[{hd(typed), 3}]]) ==
+               Walk.from_indexed([{hd(typed), 3}])
     end
   end
+
+  # credo:disable-for-next-line Credo.Check.Refactor.Apply
+  defp deprecated(fun, args), do: apply(Body, fun, args)
 
   describe "document order" do
     test "first_paragraph is the FIRST paragraph, not the last" do

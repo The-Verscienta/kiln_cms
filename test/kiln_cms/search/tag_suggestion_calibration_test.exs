@@ -23,6 +23,7 @@ defmodule KilnCMS.Search.TagSuggestionCalibrationTest do
   use ExUnit.Case, async: true
 
   alias KilnCMS.Search
+  alias KilnCMS.Search.ML
   alias KilnCMS.TagSuggestionCorpus
 
   defp bands do
@@ -106,107 +107,113 @@ defmodule KilnCMS.Search.TagSuggestionCalibrationTest do
   end
 
   # ── the harness ─────────────────────────────────────────────────────────────
+  #
+  # Compiled only with the ML stack (`KILN_ML=1`): it calls Bumblebee and Nx
+  # directly, and `ML.available?/0` is a compile-time constant, so the branch
+  # lives in the module body (see `KilnCMS.Search.ML`).
 
-  @tag :calibration
-  @tag timeout: :timer.minutes(30)
-  test "re-measure the corpus against the configured embedder" do
-    model = Search.model()
-    IO.puts("\n#{model} — loading (downloads on first run)…")
+  if ML.available?() do
+    @tag :calibration
+    @tag timeout: :timer.minutes(30)
+    test "re-measure the corpus against the configured embedder" do
+      model = Search.model()
+      IO.puts("\n#{model} — loading (downloads on first run)…")
 
-    {:ok, model_info} = Bumblebee.load_model({:hf, model})
-    {:ok, tokenizer} = Bumblebee.load_tokenizer({:hf, model})
+      {:ok, model_info} = Bumblebee.load_model({:hf, model})
+      {:ok, tokenizer} = Bumblebee.load_tokenizer({:hf, model})
 
-    serving =
-      Bumblebee.Text.text_embedding(model_info, tokenizer,
-        compile: [batch_size: 8, sequence_length: 512],
-        defn_options: Search.defn_options(),
-        output_attribute: :hidden_state,
-        output_pool: Search.pooling(),
-        embedding_processor: :l2_norm
-      )
+      serving =
+        Bumblebee.Text.text_embedding(model_info, tokenizer,
+          compile: [batch_size: 8, sequence_length: 512],
+          defn_options: Search.defn_options(),
+          output_attribute: :hidden_state,
+          output_pool: Search.pooling(),
+          embedding_processor: :l2_norm
+        )
 
-    embed = fn text ->
-      %{embedding: t} = Nx.Serving.run(serving, Search.document_prefix() <> text)
-      Nx.to_flat_list(t)
-    end
+      embed = fn text ->
+        %{embedding: t} = Nx.Serving.run(serving, Search.document_prefix() <> text)
+        Nx.to_flat_list(t)
+      end
 
-    vocabulary = TagSuggestionCorpus.vocabulary()
-    tag_vectors = Map.new(vocabulary, &{&1, embed.(&1)})
+      vocabulary = TagSuggestionCorpus.vocabulary()
+      tag_vectors = Map.new(vocabulary, &{&1, embed.(&1)})
 
-    rows =
-      Enum.flat_map(TagSuggestionCorpus.documents(), fn {title, blocks, wanted} ->
-        # The MEAN of per-block embeddings, because that is what
-        # `Related.centroid/1` computes from stored `BlockEmbedding` rows.
-        centroid = blocks |> Enum.map(embed) |> mean()
+      rows =
+        Enum.flat_map(TagSuggestionCorpus.documents(), fn {title, blocks, wanted} ->
+          # The MEAN of per-block embeddings, because that is what
+          # `Related.centroid/1` computes from stored `BlockEmbedding` rows.
+          centroid = blocks |> Enum.map(embed) |> mean()
 
-        Enum.map(vocabulary, fn tag ->
-          {title, tag, if(tag in wanted, do: :good, else: :bad),
-           cosine_distance(centroid, Map.fetch!(tag_vectors, tag))}
+          Enum.map(vocabulary, fn tag ->
+            {title, tag, if(tag in wanted, do: :good, else: :bad),
+             cosine_distance(centroid, Map.fetch!(tag_vectors, tag))}
+          end)
         end)
-      end)
 
-    report(rows, vocabulary)
+      report(rows, vocabulary)
 
-    # An assertion, so this is a test rather than a script: the corpus has to be
-    # separable at all, or the labels are wrong and no ceiling would help.
-    {good, bad} = Enum.split_with(rows, &(elem(&1, 2) == :good))
-    assert Enum.min(Enum.map(good, &elem(&1, 3))) < Enum.min(Enum.map(bad, &elem(&1, 3)))
-  end
-
-  defp report(rows, vocabulary) do
-    f = &:erlang.float_to_binary(&1, decimals: 4)
-    {good, bad} = Enum.split_with(rows, &(elem(&1, 2) == :good))
-    documents = TagSuggestionCorpus.documents()
-
-    for {title, _blocks, wanted} <- documents do
-      IO.puts("\n#{title}   (wanted: #{Enum.join(wanted, ", ")})")
-
-      rows
-      |> Enum.filter(&(elem(&1, 0) == title))
-      |> Enum.sort_by(&elem(&1, 3))
-      |> Enum.take(6)
-      |> Enum.each(fn {_doc, tag, kind, d} ->
-        IO.puts("  #{f.(d)}  #{String.pad_trailing(tag, 16)} #{kind}")
-      end)
+      # An assertion, so this is a test rather than a script: the corpus has to be
+      # separable at all, or the labels are wrong and no ceiling would help.
+      {good, bad} = Enum.split_with(rows, &(elem(&1, 2) == :good))
+      assert Enum.min(Enum.map(good, &elem(&1, 3))) < Enum.min(Enum.map(bad, &elem(&1, 3)))
     end
 
-    IO.puts("\n#{length(documents)} documents x #{length(vocabulary)} tags")
-    IO.puts("wanted     #{f.(min_of(good))} - #{f.(max_of(good))}   (#{length(good)} pairs)")
-    IO.puts("not wanted #{f.(min_of(bad))} - #{f.(max_of(bad))}   (#{length(bad)} pairs)")
-    IO.puts("\nceiling   wanted kept    unwanted admitted   per document")
+    defp report(rows, vocabulary) do
+      f = &:erlang.float_to_binary(&1, decimals: 4)
+      {good, bad} = Enum.split_with(rows, &(elem(&1, 2) == :good))
+      documents = TagSuggestionCorpus.documents()
 
-    for t <- [0.25, 0.30, 0.32, 0.35, 0.38, 0.40, 0.45, 0.50] do
-      kg = kept(good, t)
-      kb = kept(bad, t)
+      for {title, _blocks, wanted} <- documents do
+        IO.puts("\n#{title}   (wanted: #{Enum.join(wanted, ", ")})")
 
-      IO.puts(
-        "#{f.(t)}    #{String.pad_trailing("#{kg}/#{length(good)}", 14)} " <>
-          "#{String.pad_trailing("#{kb}/#{length(bad)}", 19)} " <>
-          "#{Float.round((kg + kb) / length(documents), 2)}"
-      )
+        rows
+        |> Enum.filter(&(elem(&1, 0) == title))
+        |> Enum.sort_by(&elem(&1, 3))
+        |> Enum.take(6)
+        |> Enum.each(fn {_doc, tag, kind, d} ->
+          IO.puts("  #{f.(d)}  #{String.pad_trailing(tag, 16)} #{kind}")
+        end)
+      end
+
+      IO.puts("\n#{length(documents)} documents x #{length(vocabulary)} tags")
+      IO.puts("wanted     #{f.(min_of(good))} - #{f.(max_of(good))}   (#{length(good)} pairs)")
+      IO.puts("not wanted #{f.(min_of(bad))} - #{f.(max_of(bad))}   (#{length(bad)} pairs)")
+      IO.puts("\nceiling   wanted kept    unwanted admitted   per document")
+
+      for t <- [0.25, 0.30, 0.32, 0.35, 0.38, 0.40, 0.45, 0.50] do
+        kg = kept(good, t)
+        kb = kept(bad, t)
+
+        IO.puts(
+          "#{f.(t)}    #{String.pad_trailing("#{kg}/#{length(good)}", 14)} " <>
+            "#{String.pad_trailing("#{kb}/#{length(bad)}", 19)} " <>
+            "#{Float.round((kg + kb) / length(documents), 2)}"
+        )
+      end
+
+      IO.puts("\nshipping #{f.(Search.suggest_tags_threshold())}")
     end
 
-    IO.puts("\nshipping #{f.(Search.suggest_tags_threshold())}")
-  end
+    defp min_of(rows), do: rows |> Enum.map(&elem(&1, 3)) |> Enum.min()
+    defp max_of(rows), do: rows |> Enum.map(&elem(&1, 3)) |> Enum.max()
 
-  defp min_of(rows), do: rows |> Enum.map(&elem(&1, 3)) |> Enum.min()
-  defp max_of(rows), do: rows |> Enum.map(&elem(&1, 3)) |> Enum.max()
+    defp mean(vectors) do
+      count = length(vectors)
+      vectors |> Enum.zip_with(& &1) |> Enum.map(&(Enum.sum(&1) / count))
+    end
 
-  defp mean(vectors) do
-    count = length(vectors)
-    vectors |> Enum.zip_with(& &1) |> Enum.map(&(Enum.sum(&1) / count))
-  end
+    # `Related.cosine_distance/2`'s arithmetic, restated here rather than made
+    # public: this measures the metric, so borrowing the implementation would let
+    # a change to it move the measurement without anything noticing.
+    defp cosine_distance(a, b) do
+      dot = a |> Enum.zip_with(b, &*/2) |> Enum.sum()
 
-  # `Related.cosine_distance/2`'s arithmetic, restated here rather than made
-  # public: this measures the metric, so borrowing the implementation would let
-  # a change to it move the measurement without anything noticing.
-  defp cosine_distance(a, b) do
-    dot = a |> Enum.zip_with(b, &*/2) |> Enum.sum()
+      norm =
+        :math.sqrt(Enum.sum(Enum.map(a, &(&1 * &1)))) *
+          :math.sqrt(Enum.sum(Enum.map(b, &(&1 * &1))))
 
-    norm =
-      :math.sqrt(Enum.sum(Enum.map(a, &(&1 * &1)))) *
-        :math.sqrt(Enum.sum(Enum.map(b, &(&1 * &1))))
-
-    if norm == 0.0, do: 1.0, else: 1.0 - dot / norm
+      if norm == 0.0, do: 1.0, else: 1.0 - dot / norm
+    end
   end
 end

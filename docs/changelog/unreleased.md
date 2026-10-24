@@ -43,6 +43,22 @@ carries the reasoning.
   edge runs update → story, so the story picks up a new update on its next
   fire.
 
+<a id="news-sitemap"></a>
+
+- **A Google News sitemap, `/news-sitemap.xml`
+  ([#2045](https://github.com/The-Verscienta/kiln_cms/issues/2045)).** Each
+  `<url>` carries `<news:news>`: the publication name (the site's branding
+  name), its language (the record's locale as an ISO 639 code, `zh-cn` /
+  `zh-tw` for Chinese), `news:publication_date` and `news:title`. Only
+  articles published in the last 48 hours, newest first, at most 1,000 URLs,
+  as Google News asks. A type opts in by declaring the schema.org type
+  `NewsArticle` (the Content macro's `schema_org_type:` or the dynamic type's
+  setting); `robots.txt` lists the route once one has. Like the feeds, only
+  published `audience: :public` records appear. Per org, cached for five
+  minutes under the `:probe` rate limit, and dropped by
+  `KilnCMS.Cache.bust_sitemap/1` with the main sitemap, so an unpublished
+  article is gone on the next request.
+
 <a id="change-feed-server"></a>
 
 - **A public change feed, server side (2.1 of
@@ -63,6 +79,23 @@ carries the reasoning.
   `[:kiln_cms, :delivery, :feed, :event]`. Subscribe in-process with
   `KilnCMS.Delivery.Feed.subscribe/1`; the SSE and channel transports are
   2.2.
+
+<a id="plugin-safe-fetch"></a>
+
+- **`Kiln.SafeFetch` (`kiln_plugin` 1.3): plugins get a covered, SSRF-safe
+  way to fetch a URL they didn't write (#2047).** A plugin that fetches a URL
+  from content or settings — a feed poller, a link unfurler — had to reach
+  past the overlay contract to `KilnCMS.SafeFetch`, and a plugin shipped as a
+  Hex dependency couldn't reach it at all. `Kiln.SafeFetch` in `kiln_plugin`
+  offers `get/2`, `head/2`, `post/3` and `request/3`; inside a KilnCMS build
+  every call goes to `KilnCMS.SafeFetch`, so the address is checked and
+  pinned, redirects are followed only on request and re-checked per hop, and
+  the body is capped. Only the documented options pass through: `:req_options`,
+  which could replace the pinned connection, is dropped. With no core loaded
+  every call is an error unless `config :kiln_plugin, :safe_fetch` names a
+  stand-in for the plugin's own tests, and that key is ignored whenever the
+  core is present. Covered from this release (`docs/overlay-contract.md`); a
+  plugin should require `{:kiln_plugin, "~> 1.3"}`.
 
 <a id="fields-convert"></a>
 
@@ -202,6 +235,27 @@ carries the reasoning.
   reference list's reorder) on a form no change event had filled yet showed
   every other custom field blank, and the next save posted those blanks.
   ([#2053](https://github.com/The-Verscienta/kiln_cms/pull/2053))
+
+
+<a id="overlay-refire"></a>
+
+- **`KilnCMS.Firing.refire/3` re-fires named records for an overlay (#2048).**
+  An overlay sometimes knows a fired artifact is stale when Kiln doesn't: an
+  article's card was built at fire time from another install's API, and that
+  install's signed webhook says the card's source changed. Until now the only
+  ways in were `mix kiln.refire_all` (operator tooling) and
+  `FireWorker.enqueue_backfill/1` (internal). `KilnCMS.Firing.refire!(type,
+  ids, actor: KilnCMS.SystemActor.new(:overlay), tenant: org_id)` is covered:
+  each id gets the normal fire job, which fires it as a publish would and
+  cascades to every document embedding it through the reference graph, then
+  — as an edit of live content does — drops its delivery cache and dispatches
+  `<type>.updated`, which reaches webhooks, automation, federation and the CDN
+  purge. It dispatches after the fire, so whatever refetches on the event gets
+  the new body. A document that isn't published fires nothing. It is a generic
+  `:refire` action on `Firing.PublishedArtifact` with a code interface on the
+  `Firing` domain, admitting the `:overlay` system actor and the org's editors
+  and admins; it returns how many fires were queued, and a refire already
+  pending for an id is not queued twice.
 
 ## Changed
 

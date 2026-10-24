@@ -72,7 +72,7 @@ defmodule KilnCMSWeb.SettingsPushAndPasskeysTest do
   end
 
   # What the PushToggle hook sends back after the browser subscribes.
-  defp subscription_params(label \\ "iOS · Safari") do
+  defp subscription_params(label) do
     {public, _private} = :crypto.generate_key(:ecdh, :prime256v1)
 
     %{

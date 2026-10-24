@@ -53,6 +53,8 @@ defmodule KilnCMS.SafeFetch do
   `content-length`, which the far end writes.
   """
 
+  @behaviour Kiln.SafeFetch
+
   alias KilnCMS.Webhooks.SafeUrl
 
   @default_max_bytes 256 * 1024
@@ -74,6 +76,7 @@ defmodule KilnCMS.SafeFetch do
           | {:body, iodata()}
           | {:max_redirects, non_neg_integer()}
           | {:truncate_body, boolean()}
+          | {:plug, term()}
           | {:req_options, keyword()}
 
   @type response :: %{status: integer(), headers: map(), body: binary()}
@@ -89,8 +92,13 @@ defmodule KilnCMS.SafeFetch do
   `:receive_timeout` (10s), `:headers`, `:max_redirects` (default 0 — see the
   moduledoc), `:truncate_body` (default false — when true an over-length body
   is cut at the cap and returned as an ordinary response instead of an error,
-  for callers that only want the status), and `:req_options` (merged last, so a
+  for callers that only want the status), `:plug` (a `Req.Test` stub to answer
+  the request instead of the network), and `:req_options` (merged last, so a
   test env can point the request at a `Req.Test` stub).
+
+  Plugins call this through `Kiln.SafeFetch` (#2047), the covered facade in
+  `kiln_plugin`, which passes every option above except `:req_options`: merged
+  last, it could replace the pinned `url:` and `connect_options:`.
   """
   @spec get(String.t(), [option()]) :: {:ok, response()} | {:error, String.t()}
   def get(url, opts \\ []), do: request(:get, url, opts)
@@ -126,7 +134,10 @@ defmodule KilnCMS.SafeFetch do
   `get/2` — for a caller whose far end speaks more than GET and POST, such as a
   site's own Meilisearch instance (`KilnCMS.Search.Meilisearch.ReqClient`),
   which is written to with `PUT`, `PATCH` and `DELETE`. Pass a body as `:body`.
+
+  The `Kiln.SafeFetch` callback: a plugin's call arrives here.
   """
+  @impl Kiln.SafeFetch
   @spec request(:get | :head | :post | :put | :patch | :delete, String.t(), [option()]) ::
           {:ok, response()} | {:error, String.t()}
   def request(method, url, opts) when is_binary(url) do
@@ -251,6 +262,7 @@ defmodule KilnCMS.SafeFetch do
         receive_timeout: Keyword.get(opts, :receive_timeout, @default_receive_timeout)
       ] ++
         body_option(opts) ++
+        plug_option(opts) ++
         collector_option(max_bytes, Keyword.get(opts, :truncate_body, false)) ++
         connect_target(
           url,
@@ -280,6 +292,15 @@ defmodule KilnCMS.SafeFetch do
 
       {:error, reason} ->
         {:error, "request failed: #{inspect(reason)}"}
+    end
+  end
+
+  # `Kiln.SafeFetch`'s test seam. A stub answers the request itself, so no
+  # address is dialled and the pin has nothing to protect.
+  defp plug_option(opts) do
+    case Keyword.fetch(opts, :plug) do
+      {:ok, plug} -> [plug: plug]
+      :error -> []
     end
   end
 

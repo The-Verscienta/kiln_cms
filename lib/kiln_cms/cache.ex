@@ -507,6 +507,13 @@ defmodule KilnCMS.Cache do
   def sitemap_key(org_id), do: "sitemap:#{org_id}:xml"
 
   @doc """
+  Cache key for a site's Google News sitemap (#2045,
+  `KilnCMSWeb.NewsSitemapController`). Per-org, and dropped with the sitemap by
+  `bust_sitemap/1`.
+  """
+  def news_sitemap_key(org_id), do: "news_sitemap:#{org_id}:xml"
+
+  @doc """
   Cache key for a site's running content experiments (#499).
 
   On the delivery hot path for **every** page: a site with no experiments must
@@ -580,10 +587,17 @@ defmodule KilnCMS.Cache do
   Drop a site's cached sitemap XML so a new publish/unpublish is reflected on the
   next request rather than waiting out the sitemap's TTL. Per-record `bust/3`
   doesn't touch this key, so publish hooks call it explicitly.
+
+  The Google News sitemap (#2045) goes with it: it lists a subset of the same
+  URLs, so every caller that drops one has to drop both.
   """
   @spec bust_sitemap(Ash.UUID.t()) :: :ok
   def bust_sitemap(org_id) do
-    if enabled?(), do: Cachex.del(@cache, sitemap_key(org_id))
+    if enabled?() do
+      Cachex.del(@cache, sitemap_key(org_id))
+      Cachex.del(@cache, news_sitemap_key(org_id))
+    end
+
     :ok
   end
 

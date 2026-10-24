@@ -937,7 +937,7 @@ defmodule KilnCMSWeb.AutomationLiveTest do
   describe "Recipes" do
     test "every recipe is a rule the builder can express" do
       recipes = Recipes.all(%{email: "ed@example.com", types: ["post"]})
-      assert recipes != []
+      assert [_ | _] = recipes
       assert recipes |> Enum.map(& &1.id) |> Enum.uniq() |> length() == length(recipes)
 
       triggers = Enum.map(Rule.triggers(), &to_string/1)
