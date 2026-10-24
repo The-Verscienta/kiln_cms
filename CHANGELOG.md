@@ -65,7 +65,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A link-field filter can name the connection it means: `[target]=<id>` beside
   the operators asks whether *that* record has the value.**
-  ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM) · [long form](docs/changelog/unreleased.md#link-filter-target))
+  ([#2081](https://github.com/The-Verscienta/kiln_cms/pull/2081) · [long form](docs/changelog/unreleased.md#link-filter-target))
 
 - **A type can fire `LiveBlogPosting`: coverage times plus its published
   updates as `liveBlogUpdate`, newest first and capped.**
