@@ -131,9 +131,19 @@ defmodule KilnCMS.CMS.Changes.PromoteWorkingCopy do
   def promote_relationships(changeset, relationships) do
     Enum.reduce(relationships, changeset, fn {relationship, ids}, acc ->
       acc
-      |> Ash.Changeset.manage_relationship(relationship, ids, type: :append_and_remove)
+      |> Ash.Changeset.manage_relationship(write_side(relationship), ids,
+        type: :append_and_remove
+      )
       |> order_related(relationship, ids)
     end)
+  end
+
+  # SPIKE: related_<type>s is read-only (sorted); writes use curated_<type>s.
+  defp write_side(relationship) do
+    case to_string(relationship) do
+      "related_" <> rest -> String.to_existing_atom("curated_" <> rest)
+      _tags -> relationship
+    end
   end
 
   # The held related list lands in its held order (#2025); tags have none.

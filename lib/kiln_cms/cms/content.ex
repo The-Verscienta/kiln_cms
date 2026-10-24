@@ -357,7 +357,9 @@ defmodule KilnCMS.CMS.Content do
     # `:autosave` — eight hand-written blocks before, where a relationship added
     # to one and missed in another is a silent asymmetry between explicit Save
     # and autosave rather than a compile error.
-    mergeable = [{:tag_ids, :tags}, {related_arg, related_name}]
+    # SPIKE: writes go through an unsorted private twin of related_<type>s.
+    curated_name = :"curated_#{type}s"
+    mergeable = [{:tag_ids, :tags}, {related_arg, curated_name}]
 
     # `tag_ids` → `add_tag_ids` / `remove_tag_ids`. Derived, not spelled, so the
     # verbs cannot drift from the argument they merge against.
@@ -1813,6 +1815,8 @@ defmodule KilnCMS.CMS.Content do
         # arguments + preparation, which no-op when absent — internal uses of
         # the primary read (relationship loads, policy checks) are unaffected.
         primary_read_warning?: false
+
+      require Ash.Sort
 
       unquote(api_blocks)
 
@@ -4112,10 +4116,25 @@ defmodule KilnCMS.CMS.Content do
         # Self-referential many-to-many: editor-curated "related" content via the
         # shared polymorphic `ContentLink` (new rows default to `kind: :related`).
         many_to_many unquote(related_name), unquote(resource) do
-          through KilnCMS.CMS.ContentLink
+          through KilnCMS.CMS.RelatedLink
           source_attribute_on_join_resource :source_id
           destination_attribute_on_join_resource :target_id
           public? true
+
+          sort [
+            {Ash.Sort.expr_sort(^KilnCMS.CMS.RelatedOrder.position_expr(), :integer),
+             :asc_nils_last},
+            {:id, :asc}
+          ]
+        end
+
+        # SPIKE: the write side of related_<type>s — same join, no sort, so
+        # manage_relationship can look destinations up.
+        many_to_many unquote(curated_name), unquote(resource) do
+          through KilnCMS.CMS.RelatedLink
+          source_attribute_on_join_resource :source_id
+          destination_attribute_on_join_resource :target_id
+          public? false
         end
 
         # The raw outgoing `ContentLink` rows for this record (it as `source`),

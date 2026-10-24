@@ -875,6 +875,9 @@ defmodule KilnCMS.CMS do
     # any two content records without a new join table.
     resource KilnCMS.CMS.Tagging
 
+    # SPIKE: curated related links as their own join resource.
+    resource KilnCMS.CMS.RelatedLink
+
     resource KilnCMS.CMS.ContentLink do
       define :list_content_links, action: :read
       define :create_content_link, action: :create
