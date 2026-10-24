@@ -21,6 +21,27 @@ carries the reasoning.
 
 ## Added
 
+<a id="change-feed-server"></a>
+
+- **A public change feed, server side (2.1 of
+  [#2050](https://github.com/The-Verscienta/kiln_cms/issues/2050)).**
+  `KilnCMS.Delivery.Feed` broadcasts one event per published content change
+  on the site's `feed:<org_id>` topic over native `Phoenix.PubSub`:
+  `published` (a publish, or a restore straight onto the delivery path),
+  `updated` (an edit to live content) and `withdrawn` (an unpublish, an
+  archive of a live document, or a trash of one). It is a consumer of
+  `KilnCMS.Webhooks.dispatch/4`, the funnel the webhooks use, so it hears
+  exactly the transitions webhook receivers do — drafts, `archived`
+  tombstones, taxonomy and release events stay off it. An event carries
+  identifiers only: `type`, `id`, `slug`, `locale`, `published_at`,
+  `affected` (identity of the published documents that embed this one) and
+  `public` (fail-closed: `false` for a members-only or locked document, `nil`
+  when the payload cannot say). Never content: a client fetches through the
+  existing cached delivery routes. Each broadcast emits
+  `[:kiln_cms, :delivery, :feed, :event]`. Subscribe in-process with
+  `KilnCMS.Delivery.Feed.subscribe/1`; the SSE and channel transports are
+  2.2.
+
 <a id="plugin-safe-fetch"></a>
 
 - **`Kiln.SafeFetch` (`kiln_plugin` 1.3): plugins get a covered, SSRF-safe
@@ -230,6 +251,21 @@ carries the reasoning.
   document's tag change once and refetches it one time. ETags are opaque, so
   this is not a contract change. A passphrase-unlocked document still has no
   `ETag` and is never `304`ed. ([#2041](https://github.com/The-Verscienta/kiln_cms/pull/2041))
+
+<a id="ml-stack-nx-1"></a>
+
+- **The opt-in ML stack (`KILN_ML=1`) moves to Bumblebee 0.8, Axon 0.9 and
+  Nx/EXLA 1.0.** Axon 0.8.1 drew two redundant-clause warnings from Elixir
+  1.20's type checker on every ML build (`Axon.pop_node/1`,
+  `Axon.ModelState.transform_to_parameters/1`); Axon 0.9 fixes both, and only
+  Bumblebee 0.8 accepts it, on Nx 1.0. `nx` and `exla` carry
+  `override: true`: `image` (through 0.72.0) still declares optional
+  `~> 0.12` requirements on both, and Kiln uses none of image's Nx functions.
+  Bumblebee 0.8 no longer needs `progress_bar`, so its lock entry and the
+  `decimal` override it forced are gone. The default lean build is unchanged.
+  Checked with the semantic-search suite, plus the real `bge-small-en-v1.5`
+  embedding and `bge-reranker-base` reranker run through `Nx.Serving`.
+  ([#2067](https://github.com/The-Verscienta/kiln_cms/pull/2067))
 
 ## Fixed
 

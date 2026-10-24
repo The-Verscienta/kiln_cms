@@ -145,7 +145,7 @@ COPY config/config.exs config/${MIX_ENV}.exs config/
 #   - unzip: bumblebee/conversion/pytorch_loader.ex pattern-matches
 #     `%Unzip.Entry{}`, which needs the struct's definition at compile time.
 # (Verified against bumblebee's source: `Unzip.Entry` is its only external
-# struct usage; other unlisted deps like jason/progress_bar/castore are only
+# struct usage; other unlisted deps like jason/castore are only
 # called as plain functions, which just warn under this scheme — see the
 # Jason warnings on `safetensors` below — not hard-fail.)
 #

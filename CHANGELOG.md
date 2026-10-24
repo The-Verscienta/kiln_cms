@@ -63,6 +63,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A public change feed, server side: `KilnCMS.Delivery.Feed` publishes
+  `published` / `updated` / `withdrawn` per site over PubSub.**
+  ([#2069](https://github.com/The-Verscienta/kiln_cms/pull/2069) · [long form](docs/changelog/unreleased.md#change-feed-server))
+
 - **`Kiln.SafeFetch` (`kiln_plugin` 1.3): plugins get a covered, SSRF-safe way to fetch a URL they didn't write.**
   ([#2070](https://github.com/The-Verscienta/kiln_cms/pull/2070) · [long form](docs/changelog/unreleased.md#plugin-safe-fetch))
 
@@ -96,6 +100,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Fired artifacts are gzipped: their `ETag` is now weak (`W/"…"`) and
   `If-None-Match` is compared weakly.**
   ([#2041](https://github.com/The-Verscienta/kiln_cms/pull/2041) · [long form](docs/changelog/unreleased.md#fired-artifacts-are-gzipped))
+
+- **The opt-in ML stack (`KILN_ML=1`) moves to Bumblebee 0.8, Axon 0.9 and
+  Nx/EXLA 1.0, clearing Axon's type-checker warnings.**
+  ([#2067](https://github.com/The-Verscienta/kiln_cms/pull/2067) · [long form](docs/changelog/unreleased.md#ml-stack-nx-1))
 
 ### Fixed
 
