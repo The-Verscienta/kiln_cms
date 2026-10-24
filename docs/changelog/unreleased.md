@@ -227,6 +227,7 @@ carries the reasoning.
   `decimal` override it forced are gone. The default lean build is unchanged.
   Checked with the semantic-search suite, plus the real `bge-small-en-v1.5`
   embedding and `bge-reranker-base` reranker run through `Nx.Serving`.
+  ([#2067](https://github.com/The-Verscienta/kiln_cms/pull/2067))
 
 ## Fixed
 

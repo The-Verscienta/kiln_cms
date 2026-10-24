@@ -96,7 +96,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **The opt-in ML stack (`KILN_ML=1`) moves to Bumblebee 0.8, Axon 0.9 and
   Nx/EXLA 1.0, clearing Axon's type-checker warnings.**
-  ([long form](docs/changelog/unreleased.md#ml-stack-nx-1))
+  ([#2067](https://github.com/The-Verscienta/kiln_cms/pull/2067) · [long form](docs/changelog/unreleased.md#ml-stack-nx-1))
 
 ### Fixed
 
