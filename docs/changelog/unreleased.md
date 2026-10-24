@@ -182,7 +182,7 @@ carries the reasoning.
   the same type used to appear among their related records, and no longer
   does, in the relationship or its `has`/`has_all`/`has_none` filters —
   related content is the curated links only.
-  ([#2061](https://github.com/The-Verscienta/kiln_cms/pull/2061), [#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM))
+  ([#2061](https://github.com/The-Verscienta/kiln_cms/pull/2061), [#2064](https://github.com/The-Verscienta/kiln_cms/pull/2064))
 
 <a id="single-media-picker"></a>
 

@@ -84,7 +84,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Related content comes back in the order the editor set: JSON:API
   `include=related_<type>s`, GraphQL `related<Type>s` and `related_links`.**
-  ([#2061](https://github.com/The-Verscienta/kiln_cms/pull/2061) · [#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM) · [long form](docs/changelog/unreleased.md#related-links-ordered))
+  ([#2061](https://github.com/The-Verscienta/kiln_cms/pull/2061) · [#2064](https://github.com/The-Verscienta/kiln_cms/pull/2064) · [long form](docs/changelog/unreleased.md#related-links-ordered))
 
 - **A single media custom field is picked from the library drawer, with a
   thumbnail, instead of a dropdown of filenames.**
