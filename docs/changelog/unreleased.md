@@ -42,6 +42,23 @@ carries the reasoning.
   `KilnCMS.Delivery.Feed.subscribe/1`; the SSE and channel transports are
   2.2.
 
+<a id="plugin-safe-fetch"></a>
+
+- **`Kiln.SafeFetch` (`kiln_plugin` 1.3): plugins get a covered, SSRF-safe
+  way to fetch a URL they didn't write (#2047).** A plugin that fetches a URL
+  from content or settings — a feed poller, a link unfurler — had to reach
+  past the overlay contract to `KilnCMS.SafeFetch`, and a plugin shipped as a
+  Hex dependency couldn't reach it at all. `Kiln.SafeFetch` in `kiln_plugin`
+  offers `get/2`, `head/2`, `post/3` and `request/3`; inside a KilnCMS build
+  every call goes to `KilnCMS.SafeFetch`, so the address is checked and
+  pinned, redirects are followed only on request and re-checked per hop, and
+  the body is capped. Only the documented options pass through: `:req_options`,
+  which could replace the pinned connection, is dropped. With no core loaded
+  every call is an error unless `config :kiln_plugin, :safe_fetch` names a
+  stand-in for the plugin's own tests, and that key is ignored whenever the
+  core is present. Covered from this release (`docs/overlay-contract.md`); a
+  plugin should require `{:kiln_plugin, "~> 1.3"}`.
+
 <a id="fields-convert"></a>
 
 - **`mix kiln.fields.convert` moves JSON-in-text values into a `:group`
