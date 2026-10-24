@@ -71,6 +71,9 @@ Every summary line below that was shortened links to its own entry there.
   `published` / `updated` / `withdrawn` per site over PubSub.**
   ([#2069](https://github.com/The-Verscienta/kiln_cms/pull/2069) · [long form](docs/changelog/unreleased.md#change-feed-server))
 
+- **`Kiln.SafeFetch` (`kiln_plugin` 1.3): plugins get a covered, SSRF-safe way to fetch a URL they didn't write.**
+  ([#2070](https://github.com/The-Verscienta/kiln_cms/pull/2070) · [long form](docs/changelog/unreleased.md#plugin-safe-fetch))
+
 - **`mix kiln.fields.convert` moves JSON-in-text values into a `:group` field.**
   ([#2052](https://github.com/The-Verscienta/kiln_cms/pull/2052) · [long form](docs/changelog/unreleased.md#fields-convert))
 
