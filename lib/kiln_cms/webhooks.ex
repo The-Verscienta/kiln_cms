@@ -264,6 +264,12 @@ defmodule KilnCMS.Webhooks do
     # non-raising, like the two below.
     KilnCMS.CDN.handle_event(event, payload, org)
 
+    # The public change feed (#2050) is the fifth: open pages hear about the
+    # same transitions webhook receivers do, as identifiers only. It decides
+    # which events it carries (taxonomy and domain events are not among
+    # them) and never raises, like the consumers above.
+    KilnCMS.Delivery.Feed.publish(event, payload, org, Keyword.get(opts, :withdraws, true))
+
     :ok
   end
 

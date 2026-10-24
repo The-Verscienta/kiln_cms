@@ -21,6 +21,27 @@ carries the reasoning.
 
 ## Added
 
+<a id="change-feed-server"></a>
+
+- **A public change feed, server side (2.1 of
+  [#2050](https://github.com/The-Verscienta/kiln_cms/issues/2050)).**
+  `KilnCMS.Delivery.Feed` broadcasts one event per published content change
+  on the site's `feed:<org_id>` topic over native `Phoenix.PubSub`:
+  `published` (a publish, or a restore straight onto the delivery path),
+  `updated` (an edit to live content) and `withdrawn` (an unpublish, an
+  archive of a live document, or a trash of one). It is a consumer of
+  `KilnCMS.Webhooks.dispatch/4`, the funnel the webhooks use, so it hears
+  exactly the transitions webhook receivers do — drafts, `archived`
+  tombstones, taxonomy and release events stay off it. An event carries
+  identifiers only: `type`, `id`, `slug`, `locale`, `published_at`,
+  `affected` (identity of the published documents that embed this one) and
+  `public` (fail-closed: `false` for a members-only or locked document, `nil`
+  when the payload cannot say). Never content: a client fetches through the
+  existing cached delivery routes. Each broadcast emits
+  `[:kiln_cms, :delivery, :feed, :event]`. Subscribe in-process with
+  `KilnCMS.Delivery.Feed.subscribe/1`; the SSE and channel transports are
+  2.2.
+
 <a id="fields-convert"></a>
 
 - **`mix kiln.fields.convert` moves JSON-in-text values into a `:group`
