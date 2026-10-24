@@ -214,6 +214,20 @@ carries the reasoning.
   this is not a contract change. A passphrase-unlocked document still has no
   `ETag` and is never `304`ed. ([#2041](https://github.com/The-Verscienta/kiln_cms/pull/2041))
 
+<a id="ml-stack-nx-1"></a>
+
+- **The opt-in ML stack (`KILN_ML=1`) moves to Bumblebee 0.8, Axon 0.9 and
+  Nx/EXLA 1.0.** Axon 0.8.1 drew two redundant-clause warnings from Elixir
+  1.20's type checker on every ML build (`Axon.pop_node/1`,
+  `Axon.ModelState.transform_to_parameters/1`); Axon 0.9 fixes both, and only
+  Bumblebee 0.8 accepts it, on Nx 1.0. `nx` and `exla` carry
+  `override: true`: `image` (through 0.72.0) still declares optional
+  `~> 0.12` requirements on both, and Kiln uses none of image's Nx functions.
+  Bumblebee 0.8 no longer needs `progress_bar`, so its lock entry and the
+  `decimal` override it forced are gone. The default lean build is unchanged.
+  Checked with the semantic-search suite, plus the real `bge-small-en-v1.5`
+  embedding and `bge-reranker-base` reranker run through `Nx.Serving`.
+
 ## Fixed
 
 <a id="vector-scan-env-replaces-compiled-mode"></a>
