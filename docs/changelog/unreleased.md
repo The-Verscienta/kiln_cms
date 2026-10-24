@@ -328,6 +328,23 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="httpc-header-limit-local"></a>
+
+- **`mix setup`, `mix assets.setup` and `mix deps.compile` work on OTP 29.1.1,
+  loading the CI/Docker `httpc` header-limit patch into Mix's VM only.**
+  OTP 29.1.1 (inets 9.8) caps `:httpc` response headers at 10240 bytes by
+  default, and tailwind, rustler_precompiled (y_ex) and elixir_make
+  (lazy_html, vix) download from GitHub without raising it, so a fresh local
+  setup failed with `{:header_too_long, {:max, 10240}}` whenever GitHub's
+  redirect headers ran over. The three aliases now run
+  `rel/docker/httpc_header_limit.escript` (the one #2062 and #2063 use) with
+  `OUT=_build/httpc_patch/<md5 of the stock beam>/`, once per OTP install, and
+  load the result into the running Mix VM. The OTP install is never written
+  to, `iex`/`mix phx.server`/tests run the stock `httpc`, and a release still
+  copies stock inets. On an OTP without the 10240 default the step does
+  nothing.
+  ([#PR](https://github.com/The-Verscienta/kiln_cms/pull/PR))
+
 <a id="after-commit-effects"></a>
 
 - **A release that rolls back no longer announces or notifies what it undid;

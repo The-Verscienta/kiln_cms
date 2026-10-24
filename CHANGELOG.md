@@ -121,6 +121,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **`mix setup`, `mix assets.setup` and `mix deps.compile` work on OTP 29.1.1,
+  loading the CI/Docker `httpc` header-limit patch into Mix's VM only.**
+  ([#PR](https://github.com/The-Verscienta/kiln_cms/pull/PR) · [long form](docs/changelog/unreleased.md#httpc-header-limit-local))
+
 - **A release that rolls back no longer announces or notifies what it undid; post-publish broadcasts, notifications, audit anchors and cache busts wait for the release to commit, and content and type cache busts now always run after the commit.**
   ([#2072](https://github.com/The-Verscienta/kiln_cms/pull/2072) · [long form](docs/changelog/unreleased.md#after-commit-effects))
 
