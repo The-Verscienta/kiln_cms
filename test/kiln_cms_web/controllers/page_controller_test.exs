@@ -189,6 +189,19 @@ defmodule KilnCMSWeb.PageControllerTest do
     assert html =~ "GraphQL"
   end
 
+  test "GET /api temporarily redirects to the developer docs", %{conn: conn} do
+    conn = get(conn, ~p"/api")
+
+    assert redirected_to(conn, 302) == "/developers"
+  end
+
+  test "GET /api still redirects when API docs are disabled", %{conn: conn} do
+    set_api_docs(false)
+    conn = get(conn, ~p"/api")
+
+    assert redirected_to(conn, 302) == "/developers"
+  end
+
   # Production turns `:api_docs` off, and `KilnCMSWeb.Plugs.ApiDocs` then 404s
   # both routes — so the page must not offer links that lead nowhere.
   test "GET /developers drops the explorer links when API docs are off", %{conn: conn} do

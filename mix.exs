@@ -971,20 +971,23 @@ defmodule KilnCMS.MixProject do
         "phx.digest"
       ],
       precommit:
-        ["compile --warnings-as-errors"] ++
+        [
+          # Hex archive tasks must run before compilation prunes archive paths.
+          # Both audits, because they read different databases. mix_audit
+          # reads mirego's mirror, hex.audit reads the advisories Hex itself
+          # serves; on 2026-09-18 the mirror knew none of the 89 advisories
+          # (six CRITICAL, in ash_authentication) that hex.audit listed
+          # against v0.9.0's lock. Advisories with no fixed release are
+          # acknowledged in this file's `:hex` project config, not skipped.
+          "hex.audit",
+          "compile --warnings-as-errors"
+        ] ++
           unlock_unused_step() ++
           [
             "format --check-formatted",
             "credo --strict",
             "sobelow --config",
             "deps.audit",
-            # Both audits, because they read different databases. mix_audit
-            # reads mirego's mirror, hex.audit reads the advisories Hex itself
-            # serves; on 2026-09-18 the mirror knew none of the 89 advisories
-            # (six CRITICAL, in ash_authentication) that hex.audit listed
-            # against v0.9.0's lock. Advisories with no fixed release are
-            # acknowledged in this file's `:hex` project config, not skipped.
-            "hex.audit",
             "kiln.plugins.doctor",
             # Cheap, and says in a second what CI's `image` job takes a full
             # dependency compile to discover: a Dockerfile pin that can't satisfy
