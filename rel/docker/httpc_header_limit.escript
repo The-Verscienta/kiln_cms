@@ -1,5 +1,6 @@
 #!/usr/bin/env escript
-%% Lifts `:httpc`'s default response-header limit, for the Docker builder.
+%% Lifts `:httpc`'s default response-header limit, for the Docker builder
+%% and for every CI job right after `erlef/setup-beam`.
 %%
 %% OTP 29.1.1 (inets 9.8) defaults httpc's `max_header_size` request option
 %% to 10240 bytes, settable per request only, and GitHub's release-download
@@ -11,7 +12,8 @@
 %% `request_options_defaults/0` from the installed beam's own debug_info and
 %% recompiles it in place (or into $OUT): `nolimit`, as OTP 29.0 behaved.
 %% It fails, rather than patching nothing, unless exactly one default is
-%% found. The Dockerfile restores the stock beam before `mix release`.
+%% found. The Dockerfile restores the stock beam before `mix release`; a CI
+%% runner's OTP is thrown away with the job.
 main(_) ->
     Beam = code:which(httpc),
     Out = case os:getenv("OUT") of false -> filename:dirname(Beam); D -> D end,
