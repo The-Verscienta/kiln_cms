@@ -68,17 +68,27 @@ defmodule KilnCMSWeb.SitemapController do
 
   def robots(conn, _params) do
     org = KilnCMSWeb.Tenant.current_org(conn)
+    base_url = KilnCMSWeb.Tenant.base_url(org)
 
     body = """
     User-agent: *
     Allow: /
 
-    Sitemap: #{KilnCMSWeb.Tenant.base_url(org)}/sitemap.xml
+    Sitemap: #{base_url}/sitemap.xml
+    #{news_sitemap_line(org, base_url)}\
     """
 
     conn
     |> put_resp_content_type("text/plain")
     |> send_resp(200, body)
+  end
+
+  # Advertised only once a type has opted in (#2045): an empty news sitemap is
+  # valid, but pointing Google News at one is noise.
+  defp news_sitemap_line(org, base_url) do
+    if KilnCMSWeb.NewsSitemapController.news_types(org.id) == [],
+      do: "",
+      else: "Sitemap: #{base_url}/news-sitemap.xml\n"
   end
 
   defp page_entries(records, prefix, org) do
