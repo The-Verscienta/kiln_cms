@@ -105,6 +105,10 @@ defmodule KilnCMS.Search.RerankerServingTest do
   end
 
   if ML.available?() do
+    # Only this leg calls the adapter; aliased here so the lean build doesn't
+    # warn about an unused alias.
+    alias KilnCMS.Search.Reranker
+
     describe "with the ML stack compiled in (KILN_ML)" do
       setup do
         original_search = Application.get_env(:kiln_cms, KilnCMS.Search)
