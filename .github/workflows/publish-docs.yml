@@ -51,6 +51,15 @@ jobs:
           version-file: .tool-versions
           version-type: strict
 
+      # OTP 29.1.1's `:httpc` caps response headers at 10240 bytes, and GitHub's
+      # release downloads send more, so a deps-cache miss failed fetching
+      # precompiled NIFs (y_ex, lazy_html, vix) and tailwind. Same lift as the
+      # Dockerfile; see the escript. Skipped on a checkout that predates it.
+      - name: Lift httpc's header limit (OTP 29.1.1)
+        run: |
+          script="$GITHUB_WORKSPACE/rel/docker/httpc_header_limit.escript"
+          if [ -f "$script" ]; then escript "$script"; else echo "::notice::no $script in this checkout; httpc left stock"; fi
+
       # Mix.install's build of earmark_parser/req/jason, keyed on the script
       # that pins them.
       - name: Cache Mix.install

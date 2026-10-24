@@ -165,6 +165,54 @@ defmodule KilnCMSWeb.ReferenceSnapshotPrivacyTest do
     end
   end
 
+  # The stored slug/title are a copy taken when the source was saved. A reader
+  # who may read the target gets its current label instead, so renaming the
+  # target needs no re-save of everything that references it.
+  describe "a renamed target" do
+    setup ctx do
+      renamed =
+        CMS.update_page!(ctx.live_page, %{title: "Renamed page", slug: slug()}, actor: ctx.admin)
+
+      KilnCMS.DataCase.drain_oban()
+      %{renamed: renamed}
+    end
+
+    test "JSON:API serves its current slug and title", ctx do
+      assert {200, body} = api_get("/api/json/posts/#{ctx.source.id}")
+
+      assert [%{"id" => id, "type" => "page", "slug" => slug, "title" => "Renamed page"}] =
+               body["data"]["attributes"]["custom_fields"][ctx.field]
+
+      assert id == ctx.live_page.id
+      assert slug == ctx.renamed.slug
+      refute leaks?(body, ctx.draft_page)
+    end
+
+    test "GraphQL serves its current slug and title", ctx do
+      query = """
+      query ($slug: String!) { postBySlug(slug: $slug, locale: "en") { customFields } }
+      """
+
+      assert {:ok, %{data: %{"postBySlug" => %{"customFields" => custom}}}} =
+               Absinthe.run(query, KilnCMSWeb.GraphqlSchema,
+                 variables: %{"slug" => ctx.source.slug},
+                 context: %{tenant: KilnCMS.Accounts.default_org_id()}
+               )
+
+      custom = if is_binary(custom), do: Jason.decode!(custom), else: custom
+
+      assert [%{"slug" => slug, "title" => "Renamed page"}] = custom[ctx.field]
+      assert slug == ctx.renamed.slug
+    end
+
+    test "the stored value keeps the old label, and an editor reads it", ctx do
+      [live, _draft] = CMS.get_post!(ctx.source.id, actor: ctx.admin).custom_fields[ctx.field]
+
+      assert live["title"] == "Live page"
+      assert live["slug"] == ctx.live_page.slug
+    end
+  end
+
   test "an editor reads the stored value whole", ctx do
     custom = CMS.get_post!(ctx.source.id, actor: ctx.admin).custom_fields
 
