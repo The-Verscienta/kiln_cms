@@ -94,6 +94,10 @@ Every summary line below that was shortened links to its own entry there.
   `If-None-Match` is compared weakly.**
   ([#2041](https://github.com/The-Verscienta/kiln_cms/pull/2041) · [long form](docs/changelog/unreleased.md#fired-artifacts-are-gzipped))
 
+- **The opt-in ML stack (`KILN_ML=1`) moves to Bumblebee 0.8, Axon 0.9 and
+  Nx/EXLA 1.0, clearing Axon's type-checker warnings.**
+  ([#2067](https://github.com/The-Verscienta/kiln_cms/pull/2067) · [long form](docs/changelog/unreleased.md#ml-stack-nx-1))
+
 ### Fixed
 
 - **`KILN_VECTOR_SEARCH_EXACT` / `KILN_HNSW_EF_SEARCH` no longer crash-loop a

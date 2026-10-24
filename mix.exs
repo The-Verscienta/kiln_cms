@@ -790,13 +790,6 @@ defmodule KilnCMS.MixProject do
       # whether or not anything embeds, so this is not part of the optional ML
       # stack below (see `ml_deps/0`).
       {:pgvector, "~> 0.3"},
-      # Bumblebee's `progress_bar` still caps `decimal ~> 2.0`, but Ash/ecto 3.14
-      # need `decimal ~> 3.0`. progress_bar only uses decimal for CLI download
-      # progress formatting, so forcing 3.x is safe. Override resolves the clash.
-      # Unconditional even though the clash is Bumblebee's: Ash/ecto want 3.x
-      # regardless, so pinning it here keeps the resolved version the same
-      # whether or not the ML stack is in the tree.
-      {:decimal, "~> 3.0", override: true},
       {:hammer, "~> 7.0"},
       {:remote_ip, "~> 1.2"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
@@ -904,12 +897,19 @@ defmodule KilnCMS.MixProject do
   # the NIF compile. Prod/e2e fall back to Nx.BinaryBackend (see
   # config/config.exs); restore EXLA there via an off-box image build before
   # enabling semantic search in production.
+  #
+  # `override: true` on nx and exla: `image` (through 0.72.0, the latest) still
+  # declares optional `nx ~> 0.12` and `exla ~> 0.12`, and an optional
+  # dependency's requirement binds once the dep is in the tree, so Bumblebee
+  # 0.8's Nx 1.0 cannot resolve without it. Kiln calls none of image's Nx
+  # functions (`Image.to_nx/2`, `Image.Classification`, …); the override goes
+  # once an `image` release accepts Nx 1.0.
   defp ml_deps do
     if ml?() do
       [
-        {:bumblebee, "~> 0.7"},
-        {:nx, "~> 0.12"},
-        {:exla, "~> 0.12", only: [:dev, :test]}
+        {:bumblebee, "~> 0.8"},
+        {:nx, "~> 1.0", override: true},
+        {:exla, "~> 1.0", only: [:dev, :test], override: true}
       ]
     else
       []
@@ -1016,8 +1016,8 @@ defmodule KilnCMS.MixProject do
   # it, and the ML build runs it — CI's `ml` job is the gate that runs the
   # read-only `--check-unused` half on the full tree.
   #
-  # Fourteen lock entries hang on this: bumblebee, nx and exla, plus axon,
-  # complex, nx_image, nx_signal, polaris, progress_bar, safetensors,
+  # Thirteen lock entries hang on this: bumblebee, nx and exla, plus axon,
+  # complex, nx_image, nx_signal, polaris, safetensors,
   # tokenizers, unpickler, unzip and xla.
   defp unlock_unused_step do
     if ml?(), do: ["deps.unlock --unused"], else: []
