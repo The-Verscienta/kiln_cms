@@ -65,7 +65,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A public change feed, server side: `KilnCMS.Delivery.Feed` publishes
   `published` / `updated` / `withdrawn` per site over PubSub.**
-  ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM) · [long form](docs/changelog/unreleased.md#change-feed-server))
+  ([#2069](https://github.com/The-Verscienta/kiln_cms/pull/2069) · [long form](docs/changelog/unreleased.md#change-feed-server))
 
 - **`mix kiln.fields.convert` moves JSON-in-text values into a `:group` field.**
   ([#2052](https://github.com/The-Verscienta/kiln_cms/pull/2052) · [long form](docs/changelog/unreleased.md#fields-convert))
