@@ -94,6 +94,12 @@ Every summary line below that was shortened links to its own entry there.
   `If-None-Match` is compared weakly.**
   ([#2041](https://github.com/The-Verscienta/kiln_cms/pull/2041) · [long form](docs/changelog/unreleased.md#fired-artifacts-are-gzipped))
 
+### Fixed
+
+- **JSON:API and GraphQL serve a `:reference` field's target under its
+  current slug and title, not the ones stored when the referrer was saved.**
+  ([#2059](https://github.com/The-Verscienta/kiln_cms/pull/2059) · [long form](docs/changelog/unreleased.md#fresh-reference-labels))
+
 ### Security
 
 - **req_llm 1.29.0 (CRITICAL EEF-CVE-2026-107685: WebSocket streaming
