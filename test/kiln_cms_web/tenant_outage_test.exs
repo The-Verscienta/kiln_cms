@@ -26,10 +26,24 @@ defmodule KilnCMSWeb.TenantOutageTest do
 
   `async: false`, and not only for the usual reason that `:tenant_strict_host`
   is application env: ExUnit runs sync modules after the async ones and one at a
-  time, which is what guarantees no shared-mode sandbox owner is left standing
-  to hand this process a connection.
+  time, so no other test is running alongside to hand this process a
+  connection.
+
+  That is not quite enough on its own: the previous sync module's `DataCase`
+  leaves the sandbox in `{:shared, owner}` mode, and its owner is stopped from
+  an `on_exit`. If a read here reaches the ownership manager while that owner is
+  still on its way down, the manager hands back the dying owner's connection and
+  the read *exits* (`owner #PID<…> exited`) instead of failing — seen on CI as a
+  red `the harness really has no database`. `setup_all` therefore puts the
+  sandbox back in `:manual` mode, where a process with no checkout of its own is
+  refused outright, whatever the module before this one left behind.
   """
   use ExUnit.Case, async: false
+
+  setup_all do
+    Ecto.Adapters.SQL.Sandbox.mode(KilnCMS.Repo, :manual)
+    :ok
+  end
 
   alias KilnCMS.Accounts
   alias KilnCMSWeb.Tenant
