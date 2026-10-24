@@ -71,13 +71,33 @@ defmodule KilnCMS.CMS.Checks.LinkEndsReadable do
     |> MapSet.new()
   end
 
-  defp readable_in(resource, actor, org_id, ids) do
+  @doc """
+  Like `readable_ids/3`, but answers each readable record's current label:
+  `%{id => %{"slug" => slug, "title" => title}}`. The same reads, so the
+  same rule decides what is readable; an id absent from the map is one
+  `actor` may not read (or that no longer exists).
+  """
+  @spec readable_labels(term(), Ash.UUID.t() | nil, [Ash.UUID.t()]) :: %{
+          optional(Ash.UUID.t()) => %{String.t() => String.t() | nil}
+        }
+  def readable_labels(_actor, _org_id, []), do: %{}
+
+  def readable_labels(actor, org_id, ids) do
+    ContentTypes.blocks_resources()
+    |> Enum.map(&elem(&1, 1))
+    |> Enum.uniq()
+    |> Enum.flat_map(&readable_in(&1, actor, org_id, ids, [:id, :slug, :title]))
+    |> Map.new(&{&1.id, %{"slug" => &1.slug, "title" => &1.title}})
+  end
+
+  defp readable_in(resource, actor, org_id, ids, select \\ [:id]) do
     resource
     |> Ash.Query.filter(id in ^ids)
-    |> Ash.Query.select([:id])
+    |> Ash.Query.select(select)
     |> Ash.read(actor: actor, tenant: org_id, authorize?: true)
     |> case do
-      {:ok, documents} -> Enum.map(documents, & &1.id)
+      {:ok, documents} when select == [:id] -> Enum.map(documents, & &1.id)
+      {:ok, documents} -> documents
       {:error, _reason} -> []
     end
   end

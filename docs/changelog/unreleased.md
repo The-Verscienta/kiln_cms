@@ -194,6 +194,22 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="fresh-reference-labels"></a>
+
+- **JSON:API and GraphQL serve a `:reference` field's target under its
+  current slug and title, not the ones stored when the referrer was saved.**
+  A `:reference` value stores `%{"id", "type", "slug", "title"}`, copied from
+  the target when the referrer is saved. Since 1.5 the fired artifact
+  carries the target's current label (#1998), but `custom_fields` on
+  JSON:API and GraphQL still served the copy, so renaming a target left
+  every API read of its referrers on the old name until each was saved
+  again. The read that already decides which targets the reader may see
+  (#2013) now also returns their slug and title, and every snapshot it keeps
+  carries those. No extra queries. The stored value and its shape are
+  unchanged, and so are editor, admin and system reads, which keep getting
+  the stored value whole because they can write it back.
+  ([#2059](https://github.com/The-Verscienta/kiln_cms/pull/2059))
+
 <a id="vector-scan-env-replaces-compiled-mode"></a>
 
 - **`KILN_VECTOR_SEARCH_EXACT` / `KILN_HNSW_EF_SEARCH` no longer crash-loop a
