@@ -65,7 +65,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A Google News sitemap at `/news-sitemap.xml` for `NewsArticle` types:
   the last 48 hours, at most 1,000 URLs, listed from `robots.txt`.**
-  ([#2045](https://github.com/The-Verscienta/kiln_cms/issues/2045) · [long form](docs/changelog/unreleased.md#news-sitemap))
+  ([#2077](https://github.com/The-Verscienta/kiln_cms/pull/2077) · [long form](docs/changelog/unreleased.md#news-sitemap))
 
 - **A public change feed, server side: `KilnCMS.Delivery.Feed` publishes
   `published` / `updated` / `withdrawn` per site over PubSub.**
