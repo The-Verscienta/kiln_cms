@@ -31,7 +31,7 @@ defmodule KilnCMS.Seo.LinksTest do
 
   # `:tenant` defaults to the default org. Passing another one is how the
   # cross-org cases build the page that must never surface.
-  defp post(actor, text, opts \\ []) do
+  defp post(actor, text, opts) do
     tenant = Keyword.get(opts, :tenant)
     write_opts = if tenant, do: [actor: actor, tenant: tenant], else: [actor: actor]
 

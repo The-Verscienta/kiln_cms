@@ -8,8 +8,6 @@ defmodule KilnCMS.NewsletterTest do
   # outside the test process, so they need the shared sandbox connection.
   use KilnCMS.DataCase, async: false
 
-  require Ash.Query
-
   alias KilnCMS.CMS
   alias KilnCMS.Newsletter
 

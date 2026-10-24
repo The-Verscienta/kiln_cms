@@ -422,9 +422,12 @@ defmodule KilnCMS.CMS.MediaAltTextTest do
       assert References.usage_counts(page.org_id, [img.id], viewer) == %{}
 
       # A MISSING actor must crash, not answer: a well-formed `total: 0` for
-      # an actorless system caller would read as "safe to delete".
+      # an actorless system caller would read as "safe to delete". `apply/3`
+      # hides the call from the compile-time type checker, which would
+      # otherwise flag it for always hitting a raise.
       assert_raise FunctionClauseError, fn ->
-        References.usages(page.org_id, img.id, nil)
+        # credo:disable-for-next-line Credo.Check.Refactor.Apply
+        apply(References, :usages, [page.org_id, img.id, nil])
       end
     end
 

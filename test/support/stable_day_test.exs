@@ -60,7 +60,15 @@ defmodule KilnCMS.Test.StableDayTest do
 
       warning =
         capture_io(:stderr, fn ->
-          result = StableDay.stable_day(fn day -> send(self(), {:ran, day}) && day end, clock)
+          result =
+            StableDay.stable_day(
+              fn day ->
+                send(self(), {:ran, day})
+                day
+              end,
+              clock
+            )
+
           send(self(), {:result, result})
         end)
 

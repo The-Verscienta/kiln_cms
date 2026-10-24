@@ -9,7 +9,6 @@ defmodule KilnCMS.Seo.Checks.ParityTest do
   """
   use ExUnit.Case, async: true
 
-  alias Kiln.Advisory.Body
   alias Kiln.Advisory.Context
   alias Kiln.Advisory.Walk
   alias KilnCMS.Seo.Checks.Keyphrase
