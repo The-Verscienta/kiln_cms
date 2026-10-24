@@ -76,21 +76,16 @@ WORKDIR /app
 # Every Mix tool that fetches a GitHub release asset through `:httpc` and
 # doesn't pass the option then fails with `{:header_too_long, {:max, 10240}}`:
 # tailwind's binary, and the precompiled NIFs of y_ex, lazy_html and vix. No
-# release of those tools passes it yet. Recompiling `httpc` with the default
-# set to `nolimit` (OTP 29.0's behaviour) fixes all of them at once. The
-# stock module is restored before `mix release` below, so the release
-# carries an unmodified OTP. The `grep` fails the build loudly if a later OTP
-# moves the default, so this gets revisited rather than silently skipped.
+# release of those tools passes it yet. The escript rebuilds `httpc` from its
+# beam's debug_info (this image ships no OTP source) with the default set to
+# `nolimit`, as OTP 29.0 behaved, and fails the build if it can't find that
+# default. The stock beam is restored before `mix release` below, so the
+# release carries an unmodified OTP.
+COPY rel/docker/httpc_header_limit.escript /opt/httpc_header_limit.escript
 RUN set -eu; \
-  inets="$(erl -noshell -eval 'io:format("~s", [code:lib_dir(inets)]), halt().')"; \
-  src="$inets/src/http_client/httpc.erl"; \
-  grep -q '{max_header_size, *?HTTP_MAX_HEADER_SIZE,' "$src" \
-    || { echo "no httpc max_header_size default to patch in $src"; exit 1; }; \
-  mkdir -p /opt/httpc-stock && cp "$inets/ebin/httpc.beam" /opt/httpc-stock/; \
-  sed 's/{max_header_size, *?HTTP_MAX_HEADER_SIZE,/{max_header_size, nolimit,/' "$src" > /tmp/httpc.erl; \
-  erlc -I "$inets/src/http_client" -I "$inets/src/http_lib" -I "$inets/src/inets_app" \
-    -o "$inets/ebin" /tmp/httpc.erl; \
-  rm /tmp/httpc.erl
+  beam="$(erl -noshell -eval 'io:format("~s", [code:which(httpc)]), halt().')"; \
+  mkdir -p /opt/httpc-stock && cp "$beam" /opt/httpc-stock/httpc.beam; \
+  escript /opt/httpc_header_limit.escript
 
 RUN mix local.hex --force && mix local.rebar --force
 
@@ -211,9 +206,9 @@ RUN mix sentry.package_source_code
 # Put back the stock `httpc` patched in above: nothing downloads from here
 # on, and the release copies OTP's apps into the image.
 RUN set -eu; \
-  inets="$(erl -noshell -eval 'io:format("~s", [code:lib_dir(inets)]), halt().')"; \
-  cp /opt/httpc-stock/httpc.beam "$inets/ebin/httpc.beam"; \
-  rm -rf /opt/httpc-stock
+  beam="$(erl -noshell -eval 'io:format("~s", [code:which(httpc)]), halt().')"; \
+  cp /opt/httpc-stock/httpc.beam "$beam"; \
+  rm -rf /opt/httpc-stock /opt/httpc_header_limit.escript
 
 RUN mix release
 
