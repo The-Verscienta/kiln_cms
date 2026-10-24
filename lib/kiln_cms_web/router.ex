@@ -142,6 +142,9 @@ defmodule KilnCMSWeb.Router do
   # already go through `KilnCMSWeb.Params` (#751).
   pipeline :ash_json_api do
     plug KilnCMSWeb.Plugs.AshJsonApiParams
+    # Headless draft mode (#1887): a preview token becomes a read grant for the
+    # one record it names. After the auth plugs, so it adds to the actor.
+    plug KilnCMSWeb.Plugs.PreviewGrant
     # `If-Match` on a single-record write → the action's version check (412).
     plug KilnCMSWeb.Plugs.IfMatch
     # `Idempotency-Key` on a write: claim it, or replay what the first attempt
@@ -279,6 +282,12 @@ defmodule KilnCMSWeb.Router do
   end
 
   # Light per-IP ceiling for public HTML delivery (especially cache-miss paths).
+  # Headless draft mode on the fired-artifact read (#1887); `/api/json` takes
+  # the same plug in `:ash_json_api`.
+  pipeline :preview_grant do
+    plug KilnCMSWeb.Plugs.PreviewGrant
+  end
+
   # `/media/:id/t/:ops` — see the scope that uses it.
   pipeline :media_transform do
     plug KilnCMSWeb.Plugs.RateLimit, :media_transform
@@ -779,6 +788,15 @@ defmodule KilnCMSWeb.Router do
     get "/search", SearchApiController, :index
   end
 
+  # The fired-artifact read, in its own scope for `:preview_grant`: with a
+  # preview token it renders the draft the token names (#1887). Declared before
+  # the scope below; the paths do not overlap.
+  scope "/api", KilnCMSWeb do
+    pipe_through [:api, :preview_grant]
+
+    get "/content/:type/:slug", ArtifactController, :show
+  end
+
   # Headless delivery of fired artifacts (Kiln v2 — D9). The v2 content API serves
   # immutable per-surface artifacts, not the raw editable block tree.
   scope "/api", KilnCMSWeb do
@@ -787,8 +805,6 @@ defmodule KilnCMSWeb.Router do
     # Collection view as of a date (#338 phase 2): which documents were
     # published at that instant, reconstructed from version history.
     get "/content/:type", ArtifactController, :index_point_in_time
-
-    get "/content/:type/:slug", ArtifactController, :show
 
     # Embedding-driven related content (#339 phase 2): published documents
     # semantically closest to this one.

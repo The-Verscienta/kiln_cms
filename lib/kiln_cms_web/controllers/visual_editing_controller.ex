@@ -36,18 +36,17 @@ defmodule KilnCMSWeb.VisualEditingController do
   use KilnCMSWeb, :controller
 
   alias KilnCMS.CMS.ContentTypes
-  alias KilnCMS.CMS.PreviewToken
-  alias KilnCMS.CMS.WorkingCopy
+  alias KilnCMS.CMS.PreviewGrant
   alias KilnCMS.Firing.Engine
   alias KilnCMS.VisualEditing
   alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.Params
-
-  @token_header "x-kiln-preview-token"
+  alias KilnCMSWeb.Plugs.PreviewGrant, as: PreviewGrantPlug
+  alias KilnCMSWeb.PreviewDraft
 
   @doc "The request header `show/2` reads a preview token from."
   @spec token_header() :: String.t()
-  def token_header, do: @token_header
+  def token_header, do: PreviewGrantPlug.header()
 
   def show(conn, %{"type" => type, "slug" => slug} = params) do
     org_id = KilnCMSWeb.Tenant.current_org_id(conn)
@@ -93,41 +92,16 @@ defmodule KilnCMSWeb.VisualEditingController do
     end
   end
 
-  # The header first: a query string is what access logs and `Referer`s keep.
-  defp preview_token(conn, params) do
-    case get_req_header(conn, @token_header) do
-      [token | _] when token != "" -> token
-      _ -> Params.string(params, "preview_token", nil)
-    end
-  end
+  # One reading of the token for every route that takes one
+  # (`KilnCMSWeb.Plugs.PreviewGrant`): the header first, then `?preview_token=`.
+  defp preview_token(conn, _params), do: PreviewGrantPlug.token(conn)
 
-  # The token names the record by id; the route still has to agree with it on
-  # everything else it says. The type and the site are the token's own claims
-  # (a token for a post is no key to a page, and one minted on another site is
-  # refused on this host — `KilnCMSWeb.PreviewController` holds the same line),
-  # and the slug — plus the locale, when the caller names one — must be that
-  # record's, so a token cannot be replayed under another document's URL.
+  # The token is verified against this site, then `PreviewDraft` holds the URL
+  # to the record it names (type, slug and, when the caller names one, locale).
   defp fetch_by_token(token, ct, slug, locale, org_id) do
-    with {:ok, %{type: type, id: id, org_id: ^org_id}} <- PreviewToken.verify(token),
-         true <- type == to_string(ct.type),
-         # authorize?: false — the caller holds no actor — the grant is the signature
-         # `PreviewToken.verify/1` checked, which binds this read to the ONE record id
-         # an editor with draft visibility (`PreviewToken.mint/3`) minted it for. The
-         # tenant is the serving org, which the token's `org_id` has just been pinned
-         # to, so the bypassed read cannot reach another site's row.
-         {:ok, record} <-
-           ContentTypes.get_record(ct, id,
-             authorize?: false,
-             tenant: org_id,
-             load: [:featured_image] ++ KilnCMS.Seo.Patterns.loads()
-           ),
-         true <- record.slug == slug,
-         true <- is_nil(locale) or record.locale == locale do
-      # authorize?: false — the verified token is the grant, as on the read
-      # above; this re-reads the held featured image of that same record.
-      {:ok, WorkingCopy.load_view(record, authorize?: false, tenant: org_id)}
-    else
-      _ -> {:error, :invalid_preview}
+    case PreviewGrant.verify(token, org_id) do
+      {:ok, grant} -> PreviewDraft.fetch(grant, ct, slug, locale)
+      {:error, :invalid} -> {:error, :invalid_preview}
     end
   end
 

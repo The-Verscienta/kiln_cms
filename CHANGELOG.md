@@ -63,6 +63,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Headless draft mode: a preview token opens its draft on JSON:API and the fired-artifact read.**
+  ([#1887](https://github.com/The-Verscienta/kiln_cms/issues/1887) · [long form](docs/changelog/unreleased.md#headless-draft-mode))
+
 - **A public change feed, server side: `KilnCMS.Delivery.Feed` publishes
   `published` / `updated` / `withdrawn` per site over PubSub.**
   ([#2069](https://github.com/The-Verscienta/kiln_cms/pull/2069) · [long form](docs/changelog/unreleased.md#change-feed-server))

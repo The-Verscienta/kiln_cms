@@ -200,7 +200,8 @@ defmodule KilnCMSWeb.ExperimentsDeliveryTest do
     # key is a query PARAMETER — every distinct key is a distinct URL, so a
     # shared cache stores one entry per arm with no `Vary` needed. Advertising
     # `Vary: X-Kiln-Variant-Key` would name a header nothing reads and would
-    # clobber any `Vary` set upstream.
+    # clobber any `Vary` set upstream. (The response does vary on the preview
+    # token, #1887 — that is the only `Vary` it carries.)
     test "advertises the variant, and needs no Vary to do it", ctx do
       %{page: page} = experimented_page(ctx)
 
@@ -208,7 +209,7 @@ defmodule KilnCMSWeb.ExperimentsDeliveryTest do
 
       assert [_variant_id] = get_resp_header(conn, "x-kiln-variant")
       assert ["public, max-age=" <> _] = get_resp_header(conn, "cache-control")
-      assert [] = get_resp_header(conn, "vary")
+      assert ["x-kiln-preview-token"] = get_resp_header(conn, "vary")
     end
 
     # Two keys that land on different arms must not share an ETag, or a
@@ -242,7 +243,7 @@ defmodule KilnCMSWeb.ExperimentsDeliveryTest do
 
       assert body["title"] == @headline
       assert [] = get_resp_header(conn, "x-kiln-variant")
-      assert [] = get_resp_header(conn, "vary")
+      assert ["x-kiln-preview-token"] = get_resp_header(conn, "vary")
     end
 
     test "the json_ld surface is never patched", ctx do

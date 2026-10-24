@@ -51,6 +51,7 @@ defmodule KilnCMSWeb.ArtifactController do
   alias KilnCMSWeb.ArtifactFields
   alias KilnCMSWeb.DeliveryLocale
   alias KilnCMSWeb.Params
+  alias KilnCMSWeb.PreviewDraft
   alias KilnCMSWeb.ReferenceExpansion
   alias KilnCMSWeb.ViewTracking
 
@@ -63,6 +64,9 @@ defmodule KilnCMSWeb.ArtifactController do
   @max_age_seconds 300
 
   def show(conn, %{"as_of" => _} = params), do: show_point_in_time(conn, params)
+
+  def show(%{assigns: %{preview_grant: grant}} = conn, params),
+    do: show_preview(conn, grant, params)
 
   def show(conn, %{"type" => type, "slug" => slug} = params) do
     case DeliveryLocale.parse(params) do
@@ -147,6 +151,48 @@ defmodule KilnCMSWeb.ArtifactController do
       # still 404s.
       _ ->
         locked_or_not_found(conn, org_id, type, slug, locale, mode)
+    end
+  end
+
+  # Headless draft mode (#1887): a verified preview token
+  # (`KilnCMSWeb.Plugs.PreviewGrant`) gets the record it names rendered live
+  # from its working copy, on any surface, in the same shape a published
+  # artifact has, so a front end renders it with the templates it already
+  # has. Never stored or cached (`private, no-store`, no `ETag`), not counted
+  # as a view, and no experiment arm — a reviewer sees the document as written.
+  # `?fields=` and `?expand=` apply as on the published read; the locale is
+  # the token's record's, checked against `?locale=` when one is named.
+  defp show_preview(conn, grant, %{"type" => type, "slug" => slug} = params) do
+    surface_name = params["surface"] || "json"
+
+    with ct when not is_nil(ct) <- ContentTypes.get(type, grant.org_id),
+         surface when not is_nil(surface) <- Map.get(@surfaces, surface_name),
+         {:ok, expand} <- parse_expand(params, surface),
+         {:ok, fields} <- parse_fields(params, surface),
+         {:ok, record} <- PreviewDraft.fetch(grant, ct, slug, Params.string(params, "locale")),
+         {:ok, artifacts} <- Engine.fire(record, mode: :preview),
+         {:ok, body} <- Map.fetch(artifacts, surface),
+         {:ok, body, _expansion_tag} <- expand(body, record, expand) do
+      conn
+      |> put_resp_header("cache-control", "private, no-store")
+      |> DeliveryLocale.put_served(record.locale)
+      |> put_fields_header(fields)
+      |> respond(surface_name, ArtifactFields.select(body, fields))
+    else
+      {:invalid_expand, message} ->
+        ApiError.send(conn, :bad_request, "invalid_expand", message)
+
+      {:invalid_fields, message} ->
+        ApiError.send(conn, :bad_request, "invalid_fields", message)
+
+      :unavailable ->
+        unavailable(conn)
+
+      {:error, :invalid_preview} ->
+        ApiError.send(conn, :not_found, "invalid_preview", "Invalid or expired preview token.")
+
+      _ ->
+        ApiError.send(conn, :not_found, "not_found", "Content not found.")
     end
   end
 
@@ -522,6 +568,9 @@ defmodule KilnCMSWeb.ArtifactController do
     |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
     |> put_resp_header("etag", etag)
     |> put_resp_header("last-modified", http_date(record.updated_at))
+    # The same URL with a preview token answers the draft (#1887), so a cache
+    # holding this published body must not hand it to a caller presenting one.
+    |> KilnCMSWeb.Plugs.PublicCache.put_vary(["x-kiln-preview-token"])
     # The site's surrogate key, so the publish purge `KilnCMS.CDN` sends reaches
     # this response as well as the JSON:API/GraphQL/search ones.
     |> KilnCMSWeb.Plugs.PublicCache.put_surrogate_keys()

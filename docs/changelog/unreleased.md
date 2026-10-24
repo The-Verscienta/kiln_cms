@@ -21,6 +21,35 @@ carries the reasoning.
 
 ## Added
 
+<a id="headless-draft-mode"></a>
+
+- **Headless draft mode: a preview token opens its draft on JSON:API and the
+  fired-artifact read
+  ([#1887](https://github.com/The-Verscienta/kiln_cms/issues/1887)).** A
+  front end that renders pages from the plain reads could not render a
+  shared draft in its own templates: a token unlocked only `GET
+  /preview/:token` (a thin JSON) and the stega-annotated visual-editing
+  read, so verscienta.com redirected reviewers to Kiln's generic preview
+  page. Presented as `x-kiln-preview-token` (or `?preview_token=`), the token
+  is now a read grant for its one record on `/api/json` and on `GET
+  /api/content/:type/:slug`. `KilnCMSWeb.Plugs.PreviewGrant` verifies it once,
+  pins it to the serving site and puts a `KilnCMS.CMS.PreviewGrant` in the Ash
+  context's `:shared` key; the new `Checks.PreviewGrant` in both content read
+  policies (the lock one included) admits `id == grant.id` on the primary
+  read only. No `authorize?: false`: `by-slug`, the `/published` twins,
+  search and writes are unchanged, and GraphQL and `/mcp` ignore the token.
+  `LinkEndsReadable` carries the grant into its re-read, so `include=` keeps
+  the draft's edges to published documents and drops those to other drafts.
+  The artifact route renders the working copy live, on any surface, with
+  `?fields=`/`?expand=`, uncounted and without experiments. A presented
+  token that does not verify is a `404 invalid_preview`, never the anonymous
+  read. Responses under a token are `private, no-store`; anonymous ones
+  `Vary` on the header; a token read is also charged to a new `:preview_api`
+  bucket (120/min); `preview_token`, `unlock` and `passphrase` join
+  `password` in Phoenix's `filter_parameters`. The token-to-record checks of
+  the visual-editing read moved to `KilnCMSWeb.PreviewDraft`, shared by both
+  routes. Docs: `docs/api.md` → "Headless draft mode".
+
 <a id="change-feed-server"></a>
 
 - **A public change feed, server side (2.1 of

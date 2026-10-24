@@ -294,6 +294,7 @@ but **not every query returns drafts**. Pick the right surface:
 | Fetch one **by id** | JSON:API `GET /api/json/<type>/:id` | ✅ yes |
 | Fetch one **by slug** | GraphQL `postBySlug`/`pageBySlug`, `categoryBySlug`, `tagBySlug`, `tagGroupBySlug` | ❌ **no — published only** |
 | Share a specific draft | `GET /preview/:token` (signed link) | n/a (no account needed) |
+| Render a shared draft in a front end's own templates | JSON:API by id and `GET /api/content/:type/:slug` with `x-kiln-preview-token` | n/a — the token, see [Headless draft mode](#headless-draft-mode) |
 
 > **GraphQL `*BySlug` never returns drafts.** Those queries run the
 > `:public_by_slug` action, which **hard-filters `state == :published`** inside
@@ -1227,6 +1228,35 @@ the annotated read (`x-kiln-preview-token` on `GET /api/visual-editing/:type/:sl
 and the live socket (`/ws/bridge?preview_token=`). See
 [visual-editing-bridge.md](visual-editing-bridge.md#preview-tokens-and-long-edit-sessions)
 for re-minting through a long edit session.
+
+### Headless draft mode
+
+A front end that renders its pages from the plain reads can render a shared
+draft with the same templates: present the token as `x-kiln-preview-token`
+(or `?preview_token=`, for a caller that cannot set headers) on
+
+| Read | With a token |
+|------|--------------|
+| JSON:API `GET /api/json/<type>/:id` (and `include=`) | The draft's record. Its edges to published documents are included; edges to other drafts are not. |
+| JSON:API `GET /api/json/<type>` | The draft alongside the published records the filter matches. |
+| `GET /api/content/:type/:slug` | The body, rendered live from the working copy, on any surface, in the published artifact's shape. `?fields=` and `?expand=` apply; `?locale=`, when given, must be the record's. Not counted as a view, no experiment arm. |
+
+The token is a read grant for **its one record**, in its own site, on the
+primary read. It changes nothing else: `by-slug`, the `/published` twins,
+search, semantic search and autocomplete stay published-only, writes are
+authorized as before, and GraphQL and `/mcp` ignore it. On the artifact route
+the URL must name the token's record (type, slug).
+
+- A presented token that is malformed, expired or minted on another site is
+  answered `404 invalid_preview`, never with the anonymous read: a front end
+  whose token lapsed must re-mint rather than show the published page as the
+  draft.
+- Every response under a token is `Cache-Control: private, no-store`. The
+  anonymous responses of both routes carry `Vary: X-Kiln-Preview-Token`; a CDN
+  that ignores `Vary` must bypass its cache for requests carrying the header
+  (or use the query-string form, which is part of the URL).
+- A read with a token is also charged to the `:preview_api` rate-limit bucket
+  (120 a minute per address), on top of `:api`.
 
 Who may mint: anyone who sees this document's **drafts** as an editor — an
 admin, or an editor whose read scope covers the type (`readable_types`, see

@@ -20,6 +20,10 @@ defmodule KilnCMSWeb.Plugs.PublicCache do
       These three surfaces never honour one (their read policies exclude
       locked rows for every non-editor), but a caller presenting a grant is
       asking for a per-caller answer and gets a per-caller header;
+    * a preview token (#1887) — the `x-kiln-preview-token` header or
+      `?preview_token=` param. JSON:API honours one
+      (`KilnCMSWeb.Plugs.PreviewGrant`): it adds a draft to what the reader
+      sees, so the answer is the token's, not the URL's;
     * a `Cookie`. Nothing on these surfaces reads one today —
       `KilnCMSWeb.Plugs.SetLocale` puts the session's locale in the assigns,
       but the APIs take their locale from `?locale=`/arguments only — so this
@@ -51,8 +55,8 @@ defmodule KilnCMSWeb.Plugs.PublicCache do
   ## Vary
 
   Every response — anonymous or not, cached or not — gets
-  `Vary: Accept, Authorization, Origin`, **merged** into any `Vary` already
-  present. The anonymous response is the one a cache stores, and it is served
+  `Vary: Accept, Authorization, Origin, X-Kiln-Preview-Token`, **merged** into
+  any `Vary` already present. The anonymous response is the one a cache stores, and it is served
   to later requests that *do* carry a token unless the cache is told the token
   changes the answer. `Accept` because JSON:API negotiates its media type on
   it. `Origin` always, not only when Corsica adds it: Corsica sets
@@ -92,9 +96,10 @@ defmodule KilnCMSWeb.Plugs.PublicCache do
   # that changed it made a decision this plug must not second-guess.
   @plug_default "max-age=0, private, must-revalidate"
 
-  @vary ~w(accept authorization origin)
+  @vary ~w(accept authorization origin x-kiln-preview-token)
 
-  @credential_headers ~w(authorization x-api-key x-kiln-unlock cookie)
+  @credential_headers ~w(authorization x-api-key x-kiln-unlock x-kiln-preview-token cookie)
+  @credential_params ~w(unlock preview_token)
 
   @impl true
   def init(opts), do: %{graphql: Keyword.get(opts, :graphql, false)}
@@ -118,7 +123,7 @@ defmodule KilnCMSWeb.Plugs.PublicCache do
     conn = fetch_query_params(conn)
 
     Enum.all?(@credential_headers, &(get_req_header(conn, &1) == [])) and
-      not Map.has_key?(conn.query_params, "unlock")
+      not Enum.any?(@credential_params, &Map.has_key?(conn.query_params, &1))
   end
 
   @doc """
@@ -238,9 +243,14 @@ defmodule KilnCMSWeb.Plugs.PublicCache do
     |> Enum.any?(&(&1 == tag or &1 == "*"))
   end
 
-  # `put_resp_header/3` replaces only the first `vary` it finds and Corsica
-  # *prepends* its own, so every existing value is folded into one header.
-  defp put_vary(conn) do
+  @doc """
+  Merge `values` (lowercase header names) into the response's `Vary`, keeping
+  every value already there. `put_resp_header/3` replaces only the first
+  `vary` it finds and Corsica *prepends* its own, so every existing value is
+  folded into one header. Public for `KilnCMSWeb.ArtifactController`.
+  """
+  @spec put_vary(Plug.Conn.t(), [String.t()]) :: Plug.Conn.t()
+  def put_vary(conn, extra \\ @vary) do
     {existing, rest} = Enum.split_with(conn.resp_headers, fn {k, _} -> k == "vary" end)
 
     values =
@@ -248,7 +258,7 @@ defmodule KilnCMSWeb.Plugs.PublicCache do
       |> Enum.flat_map(fn {_, v} -> String.split(v, ",") end)
       |> Enum.map(&(&1 |> String.trim() |> String.downcase()))
       |> Enum.reject(&(&1 == ""))
-      |> Kernel.++(@vary)
+      |> Kernel.++(extra)
       |> Enum.uniq()
 
     %{conn | resp_headers: [{"vary", Enum.join(values, ", ")} | rest]}
