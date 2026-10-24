@@ -354,3 +354,21 @@ and a site that moves to a custom domain follows at once.
 
 Only admins can edit it (`KilnCMS.CMS.SiteSecurityTxt`); the file, and the row
 behind it, are public.
+
+## Google News sitemap
+
+`/news-sitemap.xml` is the sitemap Google News reads beside `/sitemap.xml`.
+Every `<url>` carries a `<news:news>` element with the publication name (the
+site name from branding), the language (the record's locale as an ISO 639
+code; `zh-cn` or `zh-tw` for Chinese), the publication date and the title.
+
+A content type is included when its schema.org type is **`NewsArticle`**:
+`schema_org_type: "NewsArticle"` on a compiled type, or the schema.org type
+setting on a dynamic one. That is the whole opt-in, and `robots.txt` lists
+the news sitemap once a type has it.
+
+Google's limits apply: only articles published in the **last 48 hours**,
+newest first, at most **1,000** URLs. Like the feeds, it lists only published
+records whose audience is public. It is cached per site for five minutes and
+dropped on every publish and unpublish, so a retracted article is gone on the
+next request.
