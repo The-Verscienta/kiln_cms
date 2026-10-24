@@ -875,6 +875,15 @@ defmodule KilnCMS.CMS do
     # any two content records without a new join table.
     resource KilnCMS.CMS.Tagging
 
+    # The curated `kind: :related` rows of `content_links`, as the join of
+    # every `related_<type>s` (#2025). App code writes them through the
+    # `related_<type>_ids` arguments, never these interfaces directly.
+    resource KilnCMS.CMS.RelatedLink do
+      define :list_related_links, action: :read
+      define :create_related_link, action: :create
+      define :destroy_related_link, action: :destroy
+    end
+
     resource KilnCMS.CMS.ContentLink do
       define :list_content_links, action: :read
       define :create_content_link, action: :create

@@ -164,19 +164,25 @@ carries the reasoning.
 
 <a id="related-links-ordered"></a>
 
-- **`related_links` lists curated related content in the order the editor
-  set; the `related_<type>s` relationship itself stays unordered.** Since
-  1.5 the editor keeps the related list's order in each `kind: :related`
-  link's `position` (#2025), but only the editor read it back. The
-  `related_links` projection (JSON:API `fields[<type>]=related_links`,
-  GraphQL `relatedLinks`, MCP write echoes) now sorts by it too, with one
-  read of the links per site for a whole page of records. Including
-  `related_<type>s` (JSON:API) or selecting `related<Type>s` (GraphQL) still
-  returns the records in no particular order, now documented: Ash orders a
-  many-to-many by its destination, and `ContentLink` is not unique on
-  `(source_id, target_id)`, which a sort reaching the join row needs. The
-  shape of `related_links` is unchanged.
-  ([#2061](https://github.com/The-Verscienta/kiln_cms/pull/2061))
+- **Related content comes back in the order the editor set: JSON:API
+  `include=related_<type>s`, GraphQL `related<Type>s` and `related_links`.**
+  Since 1.5 the editor keeps the related list's order in each `kind:
+  :related` link's `position` (#2025), but only the editor read it back:
+  Ash sorts a many-to-many by its destination, and a sort that reaches the
+  join row needs the join resource unique on `(source_id, target_id)`, which
+  `ContentLink` is not — reference edges share the table. The curated rows
+  now have a join resource of their own, `RelatedLink`: the same table, no
+  migration, narrowed by a base filter (`kind = 'related' AND field IS
+  NULL`). `related_<type>s` goes through it sorted by `position`, a `limit`
+  takes the first of that order for each parent, and `related_links` (MCP
+  write echoes included) follows. The `related_<type>_ids` arguments are
+  unchanged; they write an unsorted private twin, `curated_<type>s`, over the
+  same join, because `manage_relationship` can't take that sort. One
+  narrowing: a payload link (R8) of another `kind` between two records of
+  the same type used to appear among their related records, and no longer
+  does, in the relationship or its `has`/`has_all`/`has_none` filters —
+  related content is the curated links only.
+  ([#2061](https://github.com/The-Verscienta/kiln_cms/pull/2061), [#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM))
 
 <a id="single-media-picker"></a>
 

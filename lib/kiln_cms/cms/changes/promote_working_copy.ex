@@ -131,7 +131,11 @@ defmodule KilnCMS.CMS.Changes.PromoteWorkingCopy do
   def promote_relationships(changeset, relationships) do
     Enum.reduce(relationships, changeset, fn {relationship, ids}, acc ->
       acc
-      |> Ash.Changeset.manage_relationship(relationship, ids, type: :append_and_remove)
+      |> Ash.Changeset.manage_relationship(
+        KilnCMS.CMS.RelatedLink.write_relationship(relationship),
+        ids,
+        type: :append_and_remove
+      )
       |> order_related(relationship, ids)
     end)
   end

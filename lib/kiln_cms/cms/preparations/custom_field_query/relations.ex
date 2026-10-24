@@ -114,14 +114,13 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Relations do
     end
   end
 
-  # `related_<type>s` is a many-to-many through `ContentLink` with no filter
-  # on `kind`; reference edges share the table and are kept out of it
-  # (`Preparations.RelatedLinksOnly`), so the same rule applies here. Its
-  # destination is the resource itself.
+  # `related_<type>s` is the `kind: :related` rows with no `field`
+  # (`KilnCMS.CMS.RelatedLink`'s base filter), so the same rule applies here.
+  # Its destination is the resource itself.
   def builtin_condition({:related, rel}, op, raw, ctx) when op in ~w(has has_all has_none) do
     edge = fn extra ->
       readable = readable_target([ctx.resource], ctx)
-      expr(kind != :reference and ^readable and ^extra)
+      expr(kind == :related and is_nil(field) and ^readable and ^extra)
     end
 
     operator(op, raw, Atom.to_string(rel), edge)

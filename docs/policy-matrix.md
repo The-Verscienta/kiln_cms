@@ -305,12 +305,13 @@ Taxonomy is world-readable because published content references it on the public
 Destroying a `TagGroup` does not destroy its tags — `tags.tag_group_id` is
 nilified, so they fall back to "Ungrouped" in the editor's picker.
 
-## Join tables — `Tagging`, `ContentLink`
+## Join tables — `Tagging`, `ContentLink`, `RelatedLink`
 
 | Action | admin | editor | viewer | anonymous |
 |--------|:-----:|:------:|:------:|:---------:|
 | `Tagging` read | ✅ | ✅ | ✅ | ✅ |
 | `ContentLink` read (`read`, `backlinks`, `references_from`) | ✅ | ✅ | both ends readable | both ends readable |
+| `RelatedLink` read | ✅ | ✅ | both ends readable | both ends readable |
 | `create`, `update`, `destroy` | ✅ | ✅ | ❌ | ❌ |
 
 `Tagging` read is open so published content can load its tags; linking and
@@ -322,9 +323,15 @@ editor sees one only when they may read **both** its source and its target
 (`Checks.LinkEndsReadable`, which re-reads the ends under the reader's own
 authorization, the way `Checks.DocumentReadable` does for artifacts). It used
 to be world-readable, which let a published page's `incoming_links` name the
-drafts linking to it. The join read Ash runs behind a `related_*`
-many-to-many is admitted as such (`Checks.ThroughRelatedJoin`): it never
-returns a row, and the related records are filtered by their own policy.
+drafts linking to it.
+
+`RelatedLink` (#2025) is not a table of its own: it is `content_links`'
+curated `kind: :related` rows, read through a base filter, as the join of
+every `related_<type>s` relationship and of its write side `curated_<type>s`.
+Its policies are `ContentLink`'s for people. The join read Ash runs behind
+those relationships is admitted as such (`Checks.ThroughRelatedJoin`): it
+never returns a row, and the related records are filtered by their own
+policy. It admits no system actor.
 
 ## Media — `MediaItem`
 
@@ -1028,7 +1035,7 @@ minted on an admin account cannot skip them:
 |---|---|---|---|
 | `Page`, `Post`, `Entry` | forbid `ApiKeyWithoutWriteAccess` | forbid `ApiKeyWithoutWriteAccess` | forbid **any** API key |
 | `MediaItem`, `Tag`, `TagGroup`, `Category` | forbid `ApiKeyWithoutWriteAccess` | forbid **any** API key | — |
-| `Tagging`, `ContentLink` | forbid `ApiKeyWithoutWriteAccess` (all write types) | — | — |
+| `Tagging`, `ContentLink`, `RelatedLink` | forbid `ApiKeyWithoutWriteAccess` (all write types) | — | — |
 
 The net rule: a `:read` key may read whatever its owner may read and write
 nothing; a `:read_write` key may author as its owner; **no** key may hard-delete

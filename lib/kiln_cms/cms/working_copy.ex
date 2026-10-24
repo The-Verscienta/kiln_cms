@@ -502,10 +502,9 @@ defmodule KilnCMS.CMS.WorkingCopy do
     end
   end
 
-  defp ordered_live_ids(record, key) do
-    ids = live_value(record, key)
-    record |> KilnCMS.CMS.ContentLinks.in_related_order(ids) |> Enum.map(&to_string/1)
-  end
+  # `live_value/2` loads `related_<type>s`, which comes back in its links'
+  # order (#2025).
+  defp ordered_live_ids(record, key), do: record |> live_value(key) |> Enum.map(&to_string/1)
 
   @doc "The recorded base fingerprints, by held key."
   @spec base_fingerprints(content()) :: %{key() => String.t()}

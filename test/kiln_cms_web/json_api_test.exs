@@ -278,10 +278,8 @@ defmodule KilnCMSWeb.JsonApiTest do
     end
   end
 
-  # `related_<type>s` itself loads in no particular order (a many-to-many is
-  # ordered by its destination); `related_links` carries the editor's order
-  # (#2025).
-  describe "related_links" do
+  # Both carry the order the editor set (#2025): each link's `position`.
+  describe "related content order" do
     test "lists the curated related posts in the editor's order" do
       admin = user(:admin)
       cat = category(admin)
@@ -298,6 +296,13 @@ defmodule KilnCMSWeb.JsonApiTest do
 
       assert [%{"attributes" => %{"related_links" => links}}] = body["data"]
       assert Enum.map(links, & &1["title"]) == ["RC", "RA", "RB"]
+
+      # The included relationship lists them in the same order.
+      assert {200, body} =
+               api_get("/api/json/posts?filter[id]=#{source.id}&include=related_posts")
+
+      assert [%{"relationships" => %{"related_posts" => %{"data" => linkage}}}] = body["data"]
+      assert Enum.map(linkage, & &1["id"]) == [c.id, a.id, b.id]
     end
   end
 

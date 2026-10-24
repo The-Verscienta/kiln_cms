@@ -358,7 +358,8 @@ defmodule KilnCMS.CMS.ContentLinks do
   @doc """
   The target ids of `record`'s curated related links, in their order:
   position, then id, so links from before positions were kept (all 0) still
-  come back the same way every time.
+  come back the same way every time — the order `related_<type>s` loads in
+  (`KilnCMS.CMS.RelatedOrder`), read as the cms bookkeeping.
   """
   @spec related_order(struct()) :: [Ash.UUID.t()]
   def related_order(record) do
@@ -366,88 +367,6 @@ defmodule KilnCMS.CMS.ContentLinks do
     |> related_links()
     |> Enum.sort_by(&{&1.position, &1.target_id})
     |> Enum.map(& &1.target_id)
-  end
-
-  @doc """
-  `ids` — targets `record` relates as curated related content — in the order
-  of their links' positions (`related_order/1`). An id with no related link
-  goes last, in the order given.
-  """
-  @spec in_related_order(struct(), [Ash.UUID.t()]) :: [Ash.UUID.t()]
-  def in_related_order(_record, []), do: []
-
-  def in_related_order(record, ids) do
-    rank =
-      record
-      |> related_order()
-      |> Enum.with_index()
-      |> Map.new(fn {id, i} -> {to_string(id), i} end)
-
-    last = map_size(rank)
-
-    ids
-    |> Enum.with_index()
-    |> Enum.sort_by(fn {id, i} -> {Map.get(rank, to_string(id), last), i} end)
-    |> Enum.map(&elem(&1, 0))
-  end
-
-  @doc """
-  `record` with its loaded related-content relationship (`related_<type>s`)
-  in its links' order. A load of the many-to-many does not follow `position`,
-  so a caller that shows the list in order — the editor — sorts it here.
-  Unloaded, or fewer than two, it is left as it is.
-  """
-  @spec sort_related(struct(), atom()) :: struct()
-  def sort_related(record, relationship),
-    do: [record] |> sort_related_all(relationship) |> hd()
-
-  @doc """
-  `sort_related/2` for many records at once: each record's loaded
-  `relationship` in its links' order, with one read of the links per site
-  rather than one per record. Ties (links from before positions were kept)
-  fall back to the target id, as in `related_order/1`; a related record with
-  no link — none should exist — goes last.
-  """
-  @spec sort_related_all([struct()], atom()) :: [struct()]
-  def sort_related_all(records, relationship) do
-    ranks = ranks(records, relationship)
-
-    Enum.map(records, fn record ->
-      case Map.get(record, relationship) do
-        [_, _ | _] = loaded ->
-          rank = Map.get(ranks, record.id, %{})
-
-          Map.put(
-            record,
-            relationship,
-            Enum.sort_by(loaded, &{Map.get(rank, &1.id, :none), to_string(&1.id)})
-          )
-
-        _unloaded_or_short ->
-          record
-      end
-    end)
-  end
-
-  # `%{source id => %{target id => position}}` for the records that have two
-  # or more related records loaded — the only ones an order can change.
-  defp ranks(records, relationship) do
-    records
-    |> Enum.filter(&match?([_, _ | _], Map.get(&1, relationship)))
-    |> Enum.group_by(& &1.org_id, & &1.id)
-    |> Enum.flat_map(fn {org_id, source_ids} ->
-      CMS.list_content_links!(
-        actor: Bookkeeping.system(),
-        authorize_with: :error,
-        tenant: org_id,
-        query: [
-          filter: [source_id: [in: source_ids], kind: :related],
-          select: [:id, :source_id, :target_id, :position]
-        ]
-      )
-    end)
-    |> Enum.group_by(& &1.source_id, &{&1.target_id, &1.position})
-    |> Map.new(fn {source_id, pairs} -> {source_id, Map.new(pairs)} end)
   end
 
   # Read as the cms bookkeeping and failing closed, like `existing/1`: a

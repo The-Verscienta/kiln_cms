@@ -1462,9 +1462,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
       # (docs/content-lifecycles.md).
       load: [:category, :featured_image, :tags, :health, :due_at, related_name(kind)]
     )
-    # In the editor's order (#2025): the links' positions, which a load of
-    # the many-to-many does not follow.
-    |> ContentLinks.sort_related(related_name(kind))
     # The pickers show the working copy's tags and related content (#1815);
     # the attributes stay the row's, which every save is judged against.
     |> WorkingCopy.with_held_relationships(actor: actor, tenant: org)

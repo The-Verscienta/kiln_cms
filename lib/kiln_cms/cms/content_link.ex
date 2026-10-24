@@ -192,14 +192,12 @@ defmodule KilnCMS.CMS.ContentLink do
     # which it still can — but the rows also named the drafts on the other
     # end. Editors see every edge of their site (simple checks first, so the
     # runtime check's queries are only paid by everyone else); the cms
-    # bookkeeping reads a record's own edges to reconcile them; and the join
-    # read behind a `related_*` many-to-many never hands a row to anyone
-    # (`Checks.ThroughRelatedJoin`).
+    # bookkeeping reads a record's own edges to reconcile them. The join read
+    # behind `related_<type>s` is `KilnCMS.CMS.RelatedLink`'s since #2025.
     policy action_type(:read) do
       access_type :runtime
       authorize_if {KilnCMS.Checks.SystemActor, subsystem: :cms_bookkeeping}
       authorize_if KilnCMS.CMS.Checks.OrgEditor
-      authorize_if KilnCMS.CMS.Checks.ThroughRelatedJoin
       authorize_if KilnCMS.CMS.Checks.LinkEndsReadable
     end
 
@@ -223,11 +221,6 @@ defmodule KilnCMS.CMS.ContentLink do
     policy action([:create_link, :update_link, :destroy_link]) do
       authorize_if KilnCMS.CMS.Checks.SourceUpdatable
     end
-  end
-
-  preparations do
-    # Reference edges are not "related content" (#1594) — see the module.
-    prepare KilnCMS.CMS.Preparations.RelatedLinksOnly
   end
 
   # Multi-tenancy (epic #336): a link belongs to the same site as the records it

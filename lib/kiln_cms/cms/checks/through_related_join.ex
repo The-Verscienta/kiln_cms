@@ -1,7 +1,8 @@
 defmodule KilnCMS.CMS.Checks.ThroughRelatedJoin do
   @moduledoc """
-  Matches a `ContentLink` read that Ash runs **as the join** of a content
-  resource's `related_<type>s` many-to-many (#1594).
+  Matches a join-row read that Ash runs **as the join** of a content
+  resource's `related_<type>s` many-to-many (#1594), or of its write side
+  `curated_<type>s` — reads of `KilnCMS.CMS.RelatedLink` since #2025.
 
   Those reads never hand a link row to the caller: a load uses the rows only to
   find destination ids, and the destinations are then read under their own
@@ -29,7 +30,11 @@ defmodule KilnCMS.CMS.Checks.ThroughRelatedJoin do
   @spec related_join?(map() | nil) :: boolean()
   def related_join?(%{accessing_from: %{name: name}}) when is_atom(name) do
     name = Atom.to_string(name)
-    String.starts_with?(name, "related_") and String.ends_with?(name, "_join_assoc")
+
+    # `curated_<type>s` is the write side of `related_<type>s` over the same
+    # join (`KilnCMS.CMS.RelatedLink`): its managed unrelate reads the row.
+    (String.starts_with?(name, "related_") or String.starts_with?(name, "curated_")) and
+      String.ends_with?(name, "_join_assoc")
   end
 
   def related_join?(_context), do: false

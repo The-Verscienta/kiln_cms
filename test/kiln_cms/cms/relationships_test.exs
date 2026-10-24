@@ -564,6 +564,128 @@ defmodule KilnCMS.CMS.RelationshipsTest do
 
       assert orders == %{post.id => [c.id, a.id, b.id], other.id => [b.id, c.id]}
     end
+
+    defp related_titles(record, actor),
+      do:
+        record
+        |> Ash.load!(:related_posts, actor: actor)
+        |> Map.fetch!(:related_posts)
+        |> titles()
+
+    defp titles(records), do: Enum.map(records, & &1.title)
+
+    test "related_posts itself loads in that order, for any reader", ctx do
+      admin = user(:admin)
+      [a, b, c] = for p <- [ctx.a, ctx.b, ctx.c], do: CMS.publish_post!(p, %{}, actor: admin)
+
+      post =
+        ctx.post
+        |> CMS.update_post!(%{related_post_ids: [c.id, a.id, b.id]}, actor: admin)
+        |> CMS.publish_post!(%{}, actor: admin)
+
+      for actor <- [admin, ctx.editor, nil] do
+        loaded = CMS.get_post!(post.id, actor: actor, load: [:related_posts]).related_posts
+        assert titles(loaded) == [c.title, a.title, b.title], inspect(actor && actor.role)
+      end
+
+      # A reorder of the same set is read back reordered.
+      post = CMS.update_post!(post, %{related_post_ids: [b.id, c.id, a.id]}, actor: admin)
+      assert related_titles(post, admin) == [b.title, c.title, a.title]
+    end
+
+    test "several sources in one read, each in its own order, a limit per source", ctx do
+      s1 =
+        CMS.update_post!(ctx.post, %{related_post_ids: [ctx.c.id, ctx.a.id, ctx.b.id]},
+          actor: ctx.editor
+        )
+
+      s2 =
+        CMS.create_post!(
+          %{title: "S2", slug: slug(), related_post_ids: [ctx.b.id, ctx.c.id, ctx.a.id]},
+          actor: ctx.editor
+        )
+
+      read = fn load ->
+        [
+          actor: ctx.editor,
+          query: [filter: [id: [in: [s1.id, s2.id]]]],
+          load: [related_posts: load]
+        ]
+        |> CMS.list_posts!()
+        |> Map.new(&{&1.id, titles(&1.related_posts)})
+      end
+
+      assert read.(Ash.Query.new(KilnCMS.CMS.Post)) == %{
+               s1.id => [ctx.c.title, ctx.a.title, ctx.b.title],
+               s2.id => [ctx.b.title, ctx.c.title, ctx.a.title]
+             }
+
+      assert read.(Ash.Query.limit(KilnCMS.CMS.Post, 2)) == %{
+               s1.id => [ctx.c.title, ctx.a.title],
+               s2.id => [ctx.b.title, ctx.c.title]
+             }
+    end
+
+    test "a target the reader can't see drops out; the rest keep their order", ctx do
+      admin = user(:admin)
+      [a, c] = for p <- [ctx.a, ctx.c], do: CMS.publish_post!(p, %{}, actor: admin)
+
+      post =
+        ctx.post
+        |> CMS.update_post!(%{related_post_ids: [c.id, ctx.b.id, a.id]}, actor: admin)
+        |> CMS.publish_post!(%{}, actor: admin)
+
+      assert titles(CMS.get_post!(post.id, actor: nil, load: [:related_posts]).related_posts) ==
+               [c.title, a.title]
+
+      assert related_titles(post, admin) == [c.title, ctx.b.title, a.title]
+    end
+
+    # `related_posts` is the curated `kind: :related` links only
+    # (`KilnCMS.CMS.RelatedLink`): a payload link of another kind between two
+    # posts is not related content, and a reference edge to a related record
+    # outlives its removal from the list.
+    test "only curated links are related content", ctx do
+      admin = user(:admin)
+      post = CMS.update_post!(ctx.post, %{related_post_ids: [ctx.a.id]}, actor: admin)
+
+      CMS.create_content_link!(
+        %{source_id: post.id, target_id: ctx.b.id, kind: :see_also},
+        actor: admin,
+        tenant: post.org_id
+      )
+
+      assert related_titles(post, admin) == [ctx.a.title]
+
+      CMS.create_field_definition!(
+        %{
+          content_type: :post,
+          name: "buddy_#{System.unique_integer([:positive])}",
+          label: "Buddy",
+          field_type: :reference,
+          target_type: "post"
+        },
+        actor: admin
+      )
+      |> then(fn field ->
+        post = CMS.update_post!(post, %{custom_fields: %{field.name => ctx.a.id}}, actor: admin)
+        post = CMS.update_post!(post, %{remove_related_post_ids: [ctx.a.id]}, actor: admin)
+
+        assert related_titles(post, admin) == []
+
+        kinds =
+          [
+            actor: KilnCMS.CMS.Bookkeeping.system(),
+            tenant: post.org_id,
+            query: [filter: [source_id: post.id]]
+          ]
+          |> CMS.list_content_links!()
+          |> Enum.map(&{&1.kind, &1.target_id})
+
+        assert {:reference, ctx.a.id} in kinds
+        refute {:related, ctx.a.id} in kinds
+      end)
+    end
   end
 
   describe "featured image (many-to-one to MediaItem)" do

@@ -292,10 +292,9 @@ GET /api/json/posts?custom_filter[tags][has_all][]=<tag id>&custom_filter[tags][
 GET /api/json/posts?custom_filter[related_posts][has_none]=<post id>
 ```
 
-An included `related_<type>s` list comes back in no particular order. The
-order the editor set is each link's `position`: read `related_links`
-(`fields[post]=related_links`), which lists `{id, title, slug}` in that order,
-or include `content_links` and sort the `kind: "related"` rows by `position`.
+An included `related_<type>s` list comes back in the order the editor set
+(each link's `position`), as does the `related_links` projection
+(`fields[post]=related_links`, `{id, title, slug}` per record).
 
 - They read the relationship's edges (`content_links`, or the taggings),
   through their indexes, rather than the stored snapshot. `eq`/`in` keep the

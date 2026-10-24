@@ -17,19 +17,14 @@ defmodule KilnCMS.CMS.Calculations.RelatedLinks do
   A calculation is serialized as its own value, so this returns exactly three
   fields and cannot widen when a content attribute is added.
 
-  The list is in the editor's order (#2025): each link's `position`. The
-  `related_<type>s` relationship itself is not — Ash orders a many-to-many
-  load by its destination, and `ContentLink` is not unique on
-  `(source_id, target_id)`, which a sort reaching the join row would need —
-  so this is the read that carries the order to API and MCP callers.
+  The list is in the editor's order (#2025): each link's `position`, the
+  order `related_<type>s` itself loads in (`KilnCMS.CMS.RelatedOrder`).
 
   Takes the relationship name because the shared `Content` macro mints a
   different one per type (`related_pages` / `related_posts` / `related_entries`)
   — passing it beats three near-identical modules.
   """
   use Ash.Resource.Calculation
-
-  alias KilnCMS.CMS.ContentLinks
 
   @impl true
   def init(opts) do
@@ -52,11 +47,8 @@ defmodule KilnCMS.CMS.Calculations.RelatedLinks do
   def calculate(records, opts, _context) do
     relationship = opts[:relationship]
 
-    # In the editor's order (#2025): a load of the many-to-many does not
-    # follow the links' `position`, so the projection sorts by it.
-    records
-    |> ContentLinks.sort_related_all(relationship)
-    |> Enum.map(fn record ->
+    # In the editor's order (#2025): `related_<type>s` loads that way.
+    Enum.map(records, fn record ->
       record
       |> Map.get(relationship)
       |> List.wrap()

@@ -357,7 +357,12 @@ defmodule KilnCMS.CMS.Content do
     # `:autosave` — eight hand-written blocks before, where a relationship added
     # to one and missed in another is a silent asymmetry between explicit Save
     # and autosave rather than a compile error.
-    mergeable = [{:tag_ids, :tags}, {related_arg, related_name}]
+    #
+    # The related arguments manage `curated_<type>s`, the unsorted write side
+    # of `related_<type>s` over the same join: `manage_relationship` can't
+    # take a relationship sorted with `parent()` (`KilnCMS.CMS.RelatedLink`).
+    curated_name = :"curated_#{type}s"
+    mergeable = [{:tag_ids, :tags}, {related_arg, curated_name}]
 
     # `tag_ids` → `add_tag_ids` / `remove_tag_ids`. Derived, not spelled, so the
     # verbs cannot drift from the argument they merge against.
@@ -1813,6 +1818,9 @@ defmodule KilnCMS.CMS.Content do
         # arguments + preparation, which no-op when absent — internal uses of
         # the primary read (relationship loads, policy checks) are unaffected.
         primary_read_warning?: false
+
+      # `Ash.Sort.expr_sort/2` in `related_<type>s`'s sort.
+      require Ash.Sort
 
       unquote(api_blocks)
 
@@ -4109,13 +4117,33 @@ defmodule KilnCMS.CMS.Content do
           public? true
         end
 
-        # Self-referential many-to-many: editor-curated "related" content via the
-        # shared polymorphic `ContentLink` (new rows default to `kind: :related`).
+        # Self-referential many-to-many: editor-curated "related" content, the
+        # `kind: :related` rows of the shared `content_links` table read through
+        # `KilnCMS.CMS.RelatedLink`. In the editor's order — each link's
+        # `position` (#2025, `KilnCMS.CMS.RelatedOrder`) — with the id breaking
+        # ties among links saved before positions were kept. Read-only: the
+        # `related_<type>_ids` arguments write `curated_<type>s` below.
         many_to_many unquote(related_name), unquote(resource) do
-          through KilnCMS.CMS.ContentLink
+          through KilnCMS.CMS.RelatedLink
           source_attribute_on_join_resource :source_id
           destination_attribute_on_join_resource :target_id
           public? true
+
+          sort [
+            {Ash.Sort.expr_sort(^KilnCMS.CMS.RelatedOrder.position_expr(), :integer),
+             :asc_nils_last},
+            {:id, :asc}
+          ]
+        end
+
+        # The write side of `related_<type>s`: the same join, unsorted, so
+        # `manage_relationship` can look up the records it relates (see
+        # `KilnCMS.CMS.RelatedLink`). Not public — read `related_<type>s`.
+        many_to_many unquote(curated_name), unquote(resource) do
+          through KilnCMS.CMS.RelatedLink
+          source_attribute_on_join_resource :source_id
+          destination_attribute_on_join_resource :target_id
+          public? false
         end
 
         # The raw outgoing `ContentLink` rows for this record (it as `source`),

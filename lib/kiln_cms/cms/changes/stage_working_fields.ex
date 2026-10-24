@@ -27,7 +27,6 @@ defmodule KilnCMS.CMS.Changes.StageWorkingFields do
 
   require Ash.Query
 
-  alias KilnCMS.CMS.ContentLinks
   alias KilnCMS.CMS.WorkingCopy
 
   @impl true
@@ -211,6 +210,7 @@ defmodule KilnCMS.CMS.Changes.StageWorkingFields do
     if ordered?, do: ids, else: Enum.sort(ids)
   end
 
+  # `related_<type>s` loads in its links' order (#2025); a set is sorted.
   defp live_ids(live, relationship, ordered?) do
     ids =
       live
@@ -221,9 +221,7 @@ defmodule KilnCMS.CMS.Changes.StageWorkingFields do
       |> Map.fetch!(relationship)
       |> Enum.map(&to_string(&1.id))
 
-    if ordered?,
-      do: live |> ContentLinks.in_related_order(ids) |> Enum.map(&to_string/1),
-      else: Enum.sort(ids)
+    if ordered?, do: ids, else: Enum.sort(ids)
   end
 
   defp stringify(map), do: Map.new(map, fn {key, value} -> {to_string(key), value} end)
