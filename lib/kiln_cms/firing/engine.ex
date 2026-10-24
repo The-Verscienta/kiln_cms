@@ -571,6 +571,9 @@ defmodule KilnCMS.Firing.Engine do
       # A live blog's coverage times and its published updates (#2046), from
       # the records that reference it — newest first, capped.
       |> put_live_blog(document)
+      # A byline (#2044): the `:reference` fields whose definition names a
+      # schema.org property, one `Person` per readable target.
+      |> put_bylines(custom, document)
 
     # Structured data falls out of the typed blocks (decision D9): each block that
     # has a schema.org representation contributes a node to the document @graph. A
@@ -600,6 +603,18 @@ defmodule KilnCMS.Firing.Engine do
     if KilnCMS.Firing.SchemaOrg.live_blog_type?(type),
       do: Map.merge(node, KilnCMS.Firing.LiveBlog.properties(document)),
       else: node
+  end
+
+  # `author` and `contributor` are CreativeWork properties, so an Event — which
+  # is not one — carries neither, by the same rule as `articleBody`.
+  defp put_bylines(%{"@type" => type} = node, custom, document) do
+    if KilnCMS.Firing.SchemaOrg.event_type?(type),
+      do: node,
+      else:
+        KilnCMS.Firing.Bylines.put(
+          node,
+          KilnCMS.Firing.Bylines.people(custom, Map.get(document, :org_id))
+        )
   end
 
   # The document's plain text, from the already-typed blocks. `:json_ld` wants

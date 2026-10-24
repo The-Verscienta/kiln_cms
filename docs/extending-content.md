@@ -19,6 +19,7 @@ UI" workflow, scoped to fields.
   (`content_type`, `name`, `label`, `field_type`, `required`, `options`,
   `target_type`, `target_types`, `multiple`, `min_items`, `max_items`,
   `max_sources`, `on_target_delete`, `inverse_label`, `inverse_name`,
+  `schema_org_property`,
   `link_of_id`, `group_of_id`, `help_text`, `position`, `default`, `compute`,
   `private`). Field types: `:string`,
   `:text`, `:integer`, `:float`, `:boolean`, `:date`, `:datetime`, `:url`,
@@ -80,6 +81,13 @@ UI" workflow, scoped to fields.
   field is next written, when an item of a type no longer allowed is refused
   by name. The schema export reports the allowed types of every reference
   field as `x-kiln-target-types`.
+- **Bylines (`schema_org_property`)**: a `:reference` field may say what its
+  targets are to the page in schema.org terms, `:author` or `:contributor`.
+  The fired `:json_ld` main node then carries one `Person` per readable
+  target under that property, in the field's order, and Kiln's own pages
+  name them in their JSON-LD and "By" line. Setting or clearing it re-fires
+  the type's published documents. Nil by default; cleared on any other type.
+  See [Author profiles and bylines](author-profiles.md).
 - **Details on each connection (link fields)**: a `:reference` field may
   declare **link fields** — data that belongs to the connection rather than
   to either record: the quantity of each ingredient a recipe connects, the

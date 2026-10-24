@@ -3836,6 +3836,22 @@
                 "description": "Field included by default.",
                 "type": "boolean"
               },
+              "schema_org_property": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "author",
+                      "contributor"
+                    ],
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
               "searchable": {
                 "description": "Field included by default.",
                 "type": "boolean"
@@ -4147,6 +4163,9 @@
           },
           "required": {
             "$ref": "#/components/schemas/field_definition-filter-required"
+          },
+          "schema_org_property": {
+            "$ref": "#/components/schemas/field_definition-filter-schema_org_property"
           },
           "searchable": {
             "$ref": "#/components/schemas/field_definition-filter-searchable"
@@ -5179,6 +5198,69 @@
           },
           "not_eq": {
             "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "field_definition-filter-schema_org_property": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "enum": [
+              "author",
+              "contributor"
+            ],
+            "type": "string"
+          },
+          "greater_than": {
+            "enum": [
+              "author",
+              "contributor"
+            ],
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "enum": [
+              "author",
+              "contributor"
+            ],
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "string"
+          },
+          "less_than": {
+            "enum": [
+              "author",
+              "contributor"
+            ],
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "enum": [
+              "author",
+              "contributor"
+            ],
+            "type": "string"
+          },
+          "not_eq": {
+            "enum": [
+              "author",
+              "contributor"
+            ],
+            "type": "string"
           }
         },
         "type": "object"

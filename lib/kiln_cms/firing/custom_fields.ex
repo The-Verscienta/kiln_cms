@@ -258,7 +258,12 @@ defmodule KilnCMS.Firing.CustomFields do
 
   # The definitions in scope: the owning dynamic type's (D17) or the compiled
   # content type's, under the document's own org (epic #336).
-  defp definitions(%{org_id: org_id} = document) do
+  @doc """
+  The field definitions behind a document's custom fields: its compiled
+  type's, or its dynamic type's (D17). `[]` for a document with neither.
+  """
+  @spec definitions(struct()) :: [struct()]
+  def definitions(%{org_id: org_id} = document) do
     case {Map.get(document, :type_definition_id), content_type(document)} do
       {nil, nil} ->
         # A dynamic entry whose type definition isn't set yet, or a resource
@@ -273,7 +278,7 @@ defmodule KilnCMS.Firing.CustomFields do
     end
   end
 
-  defp definitions(_document), do: []
+  def definitions(_document), do: []
 
   # Only compiled types export `__kiln_content_type__/0` — the dynamic entry
   # tier deliberately does not (see the Content macro's `markers`). Guard the

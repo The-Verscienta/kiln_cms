@@ -21,6 +21,28 @@ carries the reasoning.
 
 ## Added
 
+<a id="bylines"></a>
+
+- **Public bylines
+  ([#2044](https://github.com/The-Verscienta/kiln_cms/issues/2044)).** A
+  `:reference` custom field can say what its targets are to the page in
+  schema.org terms: `schema_org_property: :author` or `:contributor`, the
+  *What they are to the page* step of a relationship in the fields admin
+  (additive migration: one nullable column on `field_definitions`). The
+  fired `:json_ld` main node then carries one `Person` (`name`, profile
+  `url`) per target under that property, in the field's order, from the
+  resolved values: a renamed target is named by its current title, and one
+  an anonymous reader could not open is left out. Kiln's own pages read the
+  same byline (`KilnCMS.Firing.Bylines`): their inline JSON-LD names those
+  people, and the "By" line links them ("By Ada Lovelace and Alan Turing ·
+  With Grace Hopper", `public-byline` classes); without an `author` field
+  they keep naming the console user. An Event carries neither property.
+  Setting or clearing the option re-fires the type's published documents.
+  `ProfilePage` joins the schema.org allowlist and fires with its person as
+  `mainEntity`. The guide is
+  [docs/author-profiles.md](../author-profiles.md): an `author` type,
+  authors and contributors fields, and the profile's article lists.
+
 <a id="private-fields"></a>
 
 - **Private custom fields and a `:user` field type

@@ -61,6 +61,7 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
              Ash.Changeset.changing_attribute?(changeset, :multiple) or
              reindex_search?(changeset, record) or
              replain?(changeset, record) or
+             rebyline?(changeset, record) or
              Ash.Changeset.changing_attribute?(changeset, :private) do
           # Determine which type this field belongs to and sweep it
           type =
@@ -147,6 +148,14 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
   defp replain?(changeset, record) do
     Ash.Changeset.changing_attribute?(changeset, :deliver_plain) or
       (changeset.action_type == :destroy and Map.get(record, :deliver_plain) == true)
+  end
+
+  # A `schema_org_property` change adds or drops `author` / `contributor` on
+  # the fired `:json_ld` artifact (`KilnCMS.Firing.Bylines`, #2044) — and
+  # deleting a flagged field drops them.
+  defp rebyline?(changeset, record) do
+    Ash.Changeset.changing_attribute?(changeset, :schema_org_property) or
+      (changeset.action_type == :destroy and not is_nil(Map.get(record, :schema_org_property)))
   end
 
   # The feed *documents* (#719). `has_published_feed` is the other half of

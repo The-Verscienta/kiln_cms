@@ -13,26 +13,32 @@ defmodule KilnCMSWeb.StructuredData do
   a `<script type="application/ld+json">` block.
   """
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Firing.Bylines
   alias KilnCMS.Firing.SchemaOrg
 
   @doc """
   The JSON-LD for a content page: the main entity (`BlogPosting`/`WebPage`) plus
   a `BreadcrumbList`, as a list of schema.org objects.
   """
-  @spec document(struct(), ContentTypes.t(), term()) :: [map()]
-  def document(record, ct, org \\ nil) do
+  @spec document(struct(), ContentTypes.t(), term(), Bylines.t()) :: [map()]
+  def document(record, ct, org \\ nil, bylines \\ %{}) do
     # Reuse the main node's already-computed url for the trail's last crumb
     # instead of having breadcrumbs/4 re-derive it via a second `url/3` call.
-    built = build(record, ct, org)
+    built = build(record, ct, org, bylines)
     [built, breadcrumbs(record, ct, org, built["url"])]
   end
 
   @doc """
   Returns the schema.org map for `record` (a published content struct) given its
   `ContentTypes` entry `ct`. Empty/nil fields are omitted.
+
+  `bylines` is the record's public byline (`KilnCMS.Firing.Bylines.for_document/1`,
+  #2044), the same people the fired `:json_ld` artifact names. When it names
+  any author they are the `author`; otherwise the console user who created the
+  record is, as before.
   """
-  @spec build(struct(), ContentTypes.t(), term()) :: map()
-  def build(record, ct, org \\ nil) do
+  @spec build(struct(), ContentTypes.t(), term(), Bylines.t()) :: map()
+  def build(record, ct, org \\ nil, bylines \\ %{}) do
     url = url(record, ct, org)
     type = SchemaOrg.resolve(record)
 
@@ -49,8 +55,9 @@ defmodule KilnCMSWeb.StructuredData do
     }
     |> maybe_put("description", record.seo_description)
     |> maybe_put("image", record.seo_image)
-    |> maybe_put("author", author(record))
     |> maybe_creative_work_fields(type, record)
+    |> maybe_bylines(type, record, bylines)
+    |> maybe_put("mainEntity", SchemaOrg.main_entity(type, record))
     |> maybe_event_schedule(type, record)
     |> maybe_live_blog(type, record)
     |> maybe_paywalled(record)
@@ -68,6 +75,24 @@ defmodule KilnCMSWeb.StructuredData do
       |> maybe_put("keywords", record.seo_keywords)
       |> maybe_put("datePublished", iso8601(record.published_at))
       |> maybe_put("dateModified", iso8601(record.updated_at))
+    end
+  end
+
+  # A byline that names authors replaces the console user; one that names only
+  # contributors keeps the console user as the author beside them. An Event
+  # gets no byline — `author`/`contributor` are CreativeWork properties, as in
+  # `Firing.Engine`'s `put_bylines/3` — and keeps the console user it always
+  # had here.
+  defp maybe_bylines(node, type, record, bylines) do
+    cond do
+      SchemaOrg.event_type?(type) ->
+        maybe_put(node, "author", author(record))
+
+      Map.has_key?(bylines, :author) ->
+        Bylines.put(node, bylines)
+
+      true ->
+        node |> maybe_put("author", author(record)) |> Bylines.put(bylines)
     end
   end
 

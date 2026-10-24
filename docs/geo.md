@@ -83,6 +83,12 @@ the citation-relevant metadata answer engines key on: `datePublished` /
 `dateModified`, `inLanguage`, and the SEO description; Article-family types
 carry the body as `articleBody`, the rest as `text`.
 
+**Bylines** (#2044). A `:reference` field whose definition sets
+`schema_org_property` (`:author` or `:contributor`) adds one `Person` per
+readable target to the main node under that property, and a `ProfilePage`
+names its person as `mainEntity` — see
+[Author profiles and bylines](author-profiles.md).
+
 **Structured-data blocks.** Four first-party blocks whose `:json_ld` renders
 expand the `@graph` (and which render meaningfully on *every* surface):
 
