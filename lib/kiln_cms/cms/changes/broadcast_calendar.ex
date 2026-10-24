@@ -29,6 +29,10 @@ defmodule KilnCMS.CMS.Changes.BroadcastCalendar do
 
   A failed write broadcasts nothing — the `{:error, _}` clause falls through
   untouched — so a chip never moves for a schedule that did not save.
+
+  Inside a transaction the action did not open (a release go-live, a
+  duplicate), the hook runs before anything has committed, so the broadcast
+  goes through `KilnCMS.AfterCommit.run/1` and waits for the outer commit.
   """
   use Ash.Resource.Change
 
@@ -42,11 +46,13 @@ defmodule KilnCMS.CMS.Changes.BroadcastCalendar do
   end
 
   defp broadcast(_changeset, {:ok, record} = result) do
-    Phoenix.PubSub.broadcast(
-      KilnCMS.PubSub,
-      topic(record.org_id),
-      {:calendar_changed, record.id}
-    )
+    KilnCMS.AfterCommit.run(fn ->
+      Phoenix.PubSub.broadcast(
+        KilnCMS.PubSub,
+        topic(record.org_id),
+        {:calendar_changed, record.id}
+      )
+    end)
 
     result
   end

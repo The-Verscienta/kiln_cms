@@ -164,8 +164,12 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
   # that runs before COMMIT can be undone by a concurrent reader re-caching the
   # pre-write answer (see `BustFeedSettings`), and `bust_all_feeds/1` walks the
   # keyspace, which has no business happening with a Postgres transaction open.
+  #
+  # Through `AfterCommit` because "after the transaction" is not after the
+  # commit when the write runs inside an outer one (`Promotion.promote!/2`
+  # archives the definition inside its row-move transaction).
   defp bust_feeds(_changeset, {:ok, record} = result) do
-    KilnCMS.Cache.bust_all_feeds(record.org_id)
+    KilnCMS.AfterCommit.run(fn -> KilnCMS.Cache.bust_all_feeds(record.org_id) end)
     result
   end
 

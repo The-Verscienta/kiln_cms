@@ -51,30 +51,61 @@ defmodule KilnCMS.CMS.Changes.AutoCompleteTasks do
   """
   use Ash.Resource.Change
 
+  alias KilnCMS.AfterCommit
   alias KilnCMS.CMS
   alias KilnCMS.CMS.TaskSettings
+
+  @effects :auto_complete_tasks_after_commit
 
   @impl true
   def change(changeset, _opts, _context) do
     site_default = resolve_default(changeset)
 
-    Ash.Changeset.after_action(changeset, fn _changeset, record ->
-      content_type = KilnCMS.Firing.Engine.public_type(record)
-
-      actor = KilnCMS.CMS.Bookkeeping.system()
-
-      content_type
-      |> CMS.list_tasks_for!(record.id,
-        actor: actor,
-        authorize_with: :error,
-        tenant: record.org_id
-      )
-      |> Enum.filter(&(&1.status == :open and TaskSettings.auto_complete?(&1, site_default)))
-      |> Enum.each(&CMS.complete_task(&1, %{}, actor: actor, tenant: record.org_id))
-
-      {:ok, record}
+    changeset
+    |> Ash.Changeset.after_action(fn _changeset, record ->
+      {:ok, effects} = AfterCommit.capture(fn -> complete_open_tasks(record, site_default) end)
+      {:ok, Ash.Resource.put_metadata(record, @effects, effects)}
     end)
+    |> Ash.Changeset.after_transaction(&replay/2)
   end
+
+  defp complete_open_tasks(record, site_default) do
+    content_type = KilnCMS.Firing.Engine.public_type(record)
+
+    actor = KilnCMS.CMS.Bookkeeping.system()
+
+    content_type
+    |> CMS.list_tasks_for!(record.id,
+      actor: actor,
+      authorize_with: :error,
+      tenant: record.org_id
+    )
+    |> Enum.filter(&(&1.status == :open and TaskSettings.auto_complete?(&1, site_default)))
+    |> Enum.each(
+      &CMS.complete_task(&1, %{},
+        actor: actor,
+        tenant: record.org_id,
+        context: AfterCommit.context()
+      )
+    )
+
+    :ok
+  end
+
+  # The completions above run inside the publish's transaction, so their
+  # `after_transaction` hooks (`BroadcastTaskBlock`) run before it commits.
+  # They go through `AfterCommit.run/1`, so `capture/1` holds them, and they
+  # ride the record's metadata to here — the publish's own hook — which
+  # replays them: now if the publish committed, or behind a release go-live
+  # still open around it. A publish that rolled back carries no record, and
+  # its effects are simply dropped. This is also why the completions may pass
+  # `AfterCommit.context/0`: nothing they reach outruns the commit.
+  defp replay(_changeset, {:ok, record}) do
+    record.__metadata__ |> Map.get(@effects, []) |> AfterCommit.replay()
+    {:ok, %{record | __metadata__: Map.delete(record.__metadata__, @effects)}}
+  end
+
+  defp replay(_changeset, other), do: other
 
   # `changeset.data.org_id` rather than the resolved record's: the record only
   # exists after the action, and `org_id` is not writable, so the two agree.
