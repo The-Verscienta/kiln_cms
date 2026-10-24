@@ -94,6 +94,12 @@ Every summary line below that was shortened links to its own entry there.
   `If-None-Match` is compared weakly.**
   ([#2041](https://github.com/The-Verscienta/kiln_cms/pull/2041) · [long form](docs/changelog/unreleased.md#fired-artifacts-are-gzipped))
 
+### Security
+
+- **req_llm 1.29.0 (CRITICAL EEF-CVE-2026-107685: WebSocket streaming
+  skipped TLS verification) and plug_crypto 2.2.1 (CVE-2026-105963).**
+  ([#2057](https://github.com/The-Verscienta/kiln_cms/pull/2057) · [long form](docs/changelog/unreleased.md#req-llm-tls-advisory))
+
 ## [1.5.0] - 2026-10-18
 
 Long form: [docs/changelog/v1.5.0.md](docs/changelog/v1.5.0.md) —
