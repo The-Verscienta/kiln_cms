@@ -343,7 +343,7 @@ carries the reasoning.
   to, `iex`/`mix phx.server`/tests run the stock `httpc`, and a release still
   copies stock inets. On an OTP without the 10240 default the step does
   nothing.
-  ([#PR](https://github.com/The-Verscienta/kiln_cms/pull/PR))
+  ([#2080](https://github.com/The-Verscienta/kiln_cms/pull/2080))
 
 <a id="after-commit-effects"></a>
 
