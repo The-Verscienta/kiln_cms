@@ -77,9 +77,48 @@ defmodule KilnCMS.Firing.PublishedArtifact do
         :fired_at
       ]
     end
+
+    # Re-fire named documents on request (#2048) — `KilnCMS.Firing.refire/3`,
+    # which documents it. Generic rather than a write on this resource: it
+    # queues the normal fire job, and the engine writes the artifacts as
+    # `:firing` exactly as it does for a publish.
+    action :refire, :integer do
+      description "Queue a re-fire of published documents; returns how many were queued."
+      argument :document_type, :string, allow_nil?: false
+      argument :document_ids, {:array, :uuid}, allow_nil?: false
+
+      run fn input, context ->
+        case context.tenant do
+          nil ->
+            {:error, "refire needs a tenant: pass `tenant:` the org whose documents to fire"}
+
+          tenant ->
+            KilnCMS.Firing.Refire.run(
+              Ash.ToTenant.to_tenant(tenant, __MODULE__),
+              input.arguments.document_type,
+              input.arguments.document_ids
+            )
+            |> case do
+              {:ok, count} -> {:ok, count}
+              {:error, {:unknown_type, type}} -> {:error, "no content type #{inspect(type)}"}
+            end
+        end
+      end
+    end
   end
 
   policies do
+    # A requested re-fire (#2048). An overlay's own code calls it with no
+    # person behind it — a webhook from another install, say — so it runs as
+    # the `:overlay` system actor; an editor may ask too, since an edit of the
+    # same document would fire it anyway. It reads and writes nothing itself
+    # beyond queueing jobs: the fire runs later, as `:firing`, under the
+    # policies above.
+    policy action(:refire) do
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :overlay}
+      authorize_if KilnCMS.CMS.Checks.OrgEditor
+    end
+
     # Writes happen only via the firing engine, which is the system: the engine
     # fires a document and persists what it rendered. Nobody else has ever had a
     # write path here, and #1402 replaced the engine's `authorize?: false` with

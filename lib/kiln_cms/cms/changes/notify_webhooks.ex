@@ -86,6 +86,22 @@ defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
     end)
   end
 
+  @doc """
+  Dispatch `<type>.<event>` for a published `record` with the full payload,
+  from outside an action — for `KilnCMS.Firing.FireWorker` announcing a
+  requested re-fire (`KilnCMS.Firing.refire/3`) the way an edit of live content
+  announces itself.
+  """
+  @spec notify(struct(), String.t()) :: :ok
+  def notify(%{state: :published} = record, event) do
+    Webhooks.dispatch(
+      "#{event_prefix(record)}.#{event}",
+      payload(:full, record),
+      record.org_id,
+      withdraws: true
+    )
+  end
+
   defp payload(:tombstone, record), do: ContentSerializer.tombstone(record)
 
   defp payload(:full_when_published, %{state: :published} = record),
