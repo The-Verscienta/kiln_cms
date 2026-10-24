@@ -12,6 +12,16 @@ defmodule KilnCMS.CMS.Changes.BustContentCache do
   Invalidation is **per record**, not a full clear: only the affected
   `{type, slug}` keys are dropped (`Cache.bust/2`). A slug edit busts both the
   old and new slug so neither the stale nor the renamed entry lingers.
+
+  ## After the commit
+
+  It used to run in `after_action`, inside the write's transaction, so a
+  reader between the bust and the COMMIT missed the cache, read the pre-write
+  row and re-cached it for a full TTL — the race `BustFeedSettings` documents.
+  Now it runs in `after_transaction`, through `KilnCMS.AfterCommit.run/1`:
+  after this write's own commit, or, for a write inside a release go-live,
+  after the whole release commits. That window used to be as long as the
+  go-live.
   """
   use Ash.Resource.Change
 
@@ -23,17 +33,31 @@ defmodule KilnCMS.CMS.Changes.BustContentCache do
   # `:publish_changes`, which busts like any live edit.
   @working_copy_actions [:save_working_copy, :discard_changes]
 
+  # Only ever run from inside a publish or an unpublish (`RecordPublishedVersion`,
+  # `ClearPublishedVersion`), whose own bust drops the same keys after it
+  # commits. Busting here too would be redundant, and early: the pointer write
+  # runs inside the enclosing action's transaction (or the release's), so its
+  # `after_transaction` hook would fire before that commits.
+  @pointer_actions [:set_published_version_id]
+
   @impl true
   def change(%{action: %{name: name}} = changeset, _opts, _context)
-      when name in @working_copy_actions,
+      when name in @working_copy_actions or name in @pointer_actions,
       do: changeset
 
   def change(changeset, _opts, _context) do
-    Ash.Changeset.after_action(changeset, fn changeset, record ->
-      if published_involved?(changeset, record), do: bust(changeset, record)
-      {:ok, record}
+    Ash.Changeset.after_transaction(changeset, fn
+      changeset, {:ok, record} = result ->
+        if published_involved?(changeset, record), do: bust_after_commit(changeset, record)
+        result
+
+      _changeset, result ->
+        result
     end)
   end
+
+  defp bust_after_commit(changeset, record),
+    do: KilnCMS.AfterCommit.run(fn -> bust(changeset, record) end)
 
   # Drop the keys for this record's slug(s). `changeset.data` carries the
   # pre-change slug, `record` the post-change one — busting both covers a slug
@@ -69,8 +93,8 @@ defmodule KilnCMS.CMS.Changes.BustContentCache do
   # one dynamic type's invalidation can't touch another's keys.
   defp cache_type(resource, record) do
     if function_exported?(resource, :__kiln_dynamic_entry__, 0) do
-      # authorize?: false — a system read inside the write's `after_action`
-      # (still within the transaction): no actor, and `tenant: record.org_id`
+      # authorize?: false — a system read after the write committed: no
+      # actor, and `tenant: record.org_id`
       # because `TypeDefinition` is org-scoped — a tenant-less read errors under
       # strict tenancy and the entry's cache would then be busted under the
       # wrong key (#1309).

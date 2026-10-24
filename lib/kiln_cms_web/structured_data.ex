@@ -52,6 +52,7 @@ defmodule KilnCMSWeb.StructuredData do
     |> maybe_put("author", author(record))
     |> maybe_creative_work_fields(type, record)
     |> maybe_event_schedule(type, record)
+    |> maybe_live_blog(type, record)
     |> maybe_paywalled(record)
   end
 
@@ -77,6 +78,16 @@ defmodule KilnCMSWeb.StructuredData do
   defp maybe_event_schedule(node, type, record) do
     if SchemaOrg.event_type?(type) do
       Map.merge(node, KilnCMS.Events.schema_org_schedule(record))
+    else
+      node
+    end
+  end
+
+  # Coverage times and published updates (#2046), same as the fired `:json_ld`
+  # artifact, so a crawler reading the served page sees the same updates.
+  defp maybe_live_blog(node, type, record) do
+    if SchemaOrg.live_blog_type?(type) do
+      Map.merge(node, KilnCMS.Firing.LiveBlog.properties(record))
     else
       node
     end

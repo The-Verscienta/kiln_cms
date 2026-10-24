@@ -74,7 +74,11 @@ Content macro (`use KilnCMS.CMS.Content, type: :page, schema_org_type:
 definition (editable at `/editor/types`), so a documentation type can fire a
 **`TechArticle`**. Values are allowlisted (`SchemaOrg.types/0`: the
 `Article` family plus the `WebPage` family); unknown values fall back to
-`Article`. Pages fire `WebPage`, posts `BlogPosting`. The node also carries
+`Article`. A **`LiveBlogPosting`** (#2046) also carries `coverageStartTime`
+/ `coverageEndTime` (from its first `datetime_range` field) and
+`liveBlogUpdate`: the published, public records that reference it through
+its type's first reverse field, newest first, capped
+(`KilnCMS.Firing.LiveBlog`). Pages fire `WebPage`, posts `BlogPosting`. The node also carries
 the citation-relevant metadata answer engines key on: `datePublished` /
 `dateModified`, `inLanguage`, and the SEO description; Article-family types
 carry the body as `articleBody`, the rest as `text`.

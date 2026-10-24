@@ -63,9 +63,17 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A type can fire `LiveBlogPosting`: coverage times plus its published
+  updates as `liveBlogUpdate`, newest first and capped.**
+  ([#2075](https://github.com/The-Verscienta/kiln_cms/pull/2075) · [long form](docs/changelog/unreleased.md#live-blog-posting))
+
 - **A Google News sitemap at `/news-sitemap.xml` for `NewsArticle` types:
   the last 48 hours, at most 1,000 URLs, listed from `robots.txt`.**
   ([#2077](https://github.com/The-Verscienta/kiln_cms/pull/2077) · [long form](docs/changelog/unreleased.md#news-sitemap))
+
+- **A guide to public author profiles and multiple bylines: an `author` type, a
+  `:reference` byline with roles, and the schema.org `author` mapping.**
+  ([#2076](https://github.com/The-Verscienta/kiln_cms/pull/2076) · [guide](docs/author-profiles.md))
 
 - **Headless draft mode: a preview token opens its draft on JSON:API and the fired-artifact read.**
   ([#1887](https://github.com/The-Verscienta/kiln_cms/issues/1887) · [long form](docs/changelog/unreleased.md#headless-draft-mode))
@@ -115,6 +123,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2067](https://github.com/The-Verscienta/kiln_cms/pull/2067) · [long form](docs/changelog/unreleased.md#ml-stack-nx-1))
 
 ### Fixed
+
+- **A release that rolls back no longer announces or notifies what it undid; post-publish broadcasts, notifications, audit anchors and cache busts wait for the release to commit, and content and type cache busts now always run after the commit.**
+  ([#2072](https://github.com/The-Verscienta/kiln_cms/pull/2072) · [long form](docs/changelog/unreleased.md#after-commit-effects))
 
 - **`KILN_VECTOR_SEARCH_EXACT` / `KILN_HNSW_EF_SEARCH` no longer crash-loop a
   deployment whose compiled config sets the other `vector_scan:` mode.**

@@ -248,6 +248,60 @@ defmodule KilnCMS.CMS.TaskAutoCompleteTest do
     end
   end
 
+  # The completion runs inside the publish's transaction, so its
+  # `BroadcastTaskBlock` hook would announce it before the publish commits.
+  # `AutoCompleteTasks` holds that broadcast for the publish's own commit.
+  describe "the task panel broadcast" do
+    defp subscribe(page),
+      do: Phoenix.PubSub.subscribe(KilnCMS.PubSub, KilnCMS.Collab.topic(:page, page.id))
+
+    test "arrives once the publish commits, and leaves nothing on the record" do
+      editor = user(:editor)
+      admin = user(:admin)
+      {page, task} = page_with_task(editor)
+      :ok = subscribe(page)
+
+      published = CMS.publish_page!(page, %{}, actor: admin)
+
+      assert_received {:block_task_changed, nil}
+      refute Map.has_key?(published.__metadata__, :auto_complete_tasks_after_commit)
+      drain()
+      assert CMS.get_task!(task.id, authorize?: false).status == :done
+    end
+
+    test "is never sent for a completion a failed release rolled back" do
+      editor = user(:editor)
+      admin = user(:admin)
+      {page, task} = page_with_task(editor)
+      archived = CMS.create_page!(%{title: "Archived", slug: slug()}, actor: editor)
+      archived = Ash.Seed.update!(archived, %{state: :archived})
+
+      {:ok, release} =
+        CMS.create_release(%{name: "Batch #{System.unique_integer([:positive])}"}, actor: admin)
+
+      for record <- [page, archived] do
+        {:ok, _item} =
+          CMS.add_release_item(
+            %{
+              release_id: release.id,
+              content_type: "page",
+              content_id: record.id,
+              action: :publish
+            },
+            actor: admin
+          )
+      end
+
+      :ok = subscribe(page)
+      {:ok, _claimed} = CMS.start_release(release, %{}, actor: admin)
+      drain()
+
+      assert CMS.get_release!(release.id, authorize?: false).state == :failed
+      assert CMS.get_task!(task.id, authorize?: false).status == :open
+      refute_received {:block_task_changed, _}
+    end
+  end
+
   describe "authorization" do
     test "an editor may read the setting but not change it" do
       editor = user(:editor)

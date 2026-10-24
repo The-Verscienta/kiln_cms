@@ -21,6 +21,28 @@ carries the reasoning.
 
 ## Added
 
+<a id="live-blog-posting"></a>
+
+- **`LiveBlogPosting` in schema.org output
+  ([#2046](https://github.com/The-Verscienta/kiln_cms/issues/2046)).**
+  `LiveBlogPosting` joins the allowlisted Article family, so a compiled type
+  (`schema_org_type:`) or a dynamic one (`/editor/types`) can declare it. Its
+  node keeps `headline`, `articleBody` and the CreativeWork dates, and gains
+  `coverageStartTime` / `coverageEndTime` from the type's first
+  `datetime_range` field (with none, coverage starts at `published_at` and
+  stays open) and `liveBlogUpdate`: one `BlogPosting` per update, newest
+  first, capped at 50 (`config :kiln_cms, KilnCMS.Firing.LiveBlog,
+  max_updates:`). An update is any record pointing at the story through a
+  `:reference` field with another side (`inverse_label`); the story type's
+  first reverse field is its update stream. No new resource, no migration.
+  Only published, public, unlocked updates are fired, read from their live
+  values, so a members-only update never leaks through a public story and an
+  unpublished one drops out the next time the story fires. The served page's
+  inline JSON-LD (`KilnCMSWeb.StructuredData`) carries the same properties.
+  Publishing an update does not itself re-fire the story yet: the reference
+  edge runs update → story, so the story picks up a new update on its next
+  fire.
+
 <a id="news-sitemap"></a>
 
 - **A Google News sitemap, `/news-sitemap.xml`
@@ -334,6 +356,29 @@ carries the reasoning.
   ([#2067](https://github.com/The-Verscienta/kiln_cms/pull/2067))
 
 ## Fixed
+
+<a id="after-commit-effects"></a>
+
+- **A release that rolls back no longer announces or notifies what it undid;
+  post-publish broadcasts, notifications, audit anchors and cache busts wait
+  for the release to commit.** A release publishes every item inside one
+  transaction, so each item's `after_transaction` hooks ran before anything
+  committed. The calendar, collab-room, task-pin and GraphQL-retraction
+  broadcasts went out early and went out even when a later item rolled the
+  release back. A workflow notification, or an audit anchor that lost a
+  race, could fail the whole go-live: a failed statement aborts the
+  transaction, and the hook's rescue cannot undo that. Cache evictions ran
+  before the commit, so a reader in between could re-cache the old page.
+  Those effects now go through `KilnCMS.AfterCommit`, which holds them until
+  the release commits and drops them when it rolls back. The Oban jobs (fire,
+  webhooks, embeddings) and the `published_version_id` pointer still commit
+  with the release, as before. Duplicating a record with its links, promoting a
+  dynamic type, and the tasks a publish completes get the same treatment.
+  The published-content and type-registry busts (`BustContentCache`,
+  `BustTypeRegistry`) moved from `after_action` to after the commit on every
+  write, not only inside a release: busted inside the transaction, a reader
+  could re-cache the old page or type set for a full TTL.
+  ([#2072](https://github.com/The-Verscienta/kiln_cms/pull/2072))
 
 <a id="vector-scan-env-replaces-compiled-mode"></a>
 

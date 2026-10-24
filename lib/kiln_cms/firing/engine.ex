@@ -395,7 +395,10 @@ defmodule KilnCMS.Firing.Engine do
     # person, admin included, and admits this actor by name.
     {:ok, artifacts} = Firing.artifacts_for(type, id, actor: system_actor(), tenant: org_id)
     Enum.each(artifacts, &Ash.destroy!(&1, actor: system_actor(), tenant: org_id))
-    Cache.evict(org_id, type, id)
+    # After the commit when there is an outer one to wait for (an unpublish
+    # inside a release): evicted before it, a reader re-caches the artifact the
+    # destroy above has not yet made invisible.
+    KilnCMS.AfterCommit.run(fn -> Cache.evict(org_id, type, id) end)
     :ok
   end
 
@@ -551,6 +554,9 @@ defmodule KilnCMS.Firing.Engine do
       # (#480). Only for the Event family: `startDate` on an Article is not a
       # property schema.org defines.
       |> put_event_schedule(document)
+      # A live blog's coverage times and its published updates (#2046), from
+      # the records that reference it — newest first, capped.
+      |> put_live_blog(document)
 
     # Structured data falls out of the typed blocks (decision D9): each block that
     # has a schema.org representation contributes a node to the document @graph. A
@@ -575,6 +581,12 @@ defmodule KilnCMS.Firing.Engine do
   end
 
   defp put_event_schedule(node, _document), do: node
+
+  defp put_live_blog(%{"@type" => type} = node, document) do
+    if KilnCMS.Firing.SchemaOrg.live_blog_type?(type),
+      do: Map.merge(node, KilnCMS.Firing.LiveBlog.properties(document)),
+      else: node
+  end
 
   # The document's plain text, from the already-typed blocks. `:json_ld` wants
   # paragraph separation; the computed-field context (`word_count`,

@@ -36,6 +36,15 @@ defmodule KilnCMS.CMS.Changes.NotifyWorkflowEmail do
   `Oban.insert!`) would crash the LiveView or API request whose publish had
   *already committed* — reporting a failure for a write that succeeded. The
   rescue returns the committed result, exactly as `NotifyComment` does.
+
+  ## Inside a release
+
+  A release publishes every item inside one transaction, so this hook runs
+  before anything has committed — and the rescue above cannot help there: a
+  failed query has already aborted the release's transaction, and the whole
+  go-live fails over a notification. `KilnCMS.AfterCommit.run/1` holds the
+  dispatch until the release commits, and drops it when the release rolls
+  back, so nobody is told about a publish that did not happen.
   """
   use Ash.Resource.Change
 
@@ -54,13 +63,15 @@ defmodule KilnCMS.CMS.Changes.NotifyWorkflowEmail do
   end
 
   defp dispatch({:ok, record} = result, event, actor) do
-    Notifications.dispatch(event, record, actor)
+    KilnCMS.AfterCommit.run(fn -> deliver(event, record, actor) end)
     result
-  rescue
-    error ->
-      Logger.error("workflow notification #{event} failed: #{Exception.message(error)}")
-      result
   end
 
   defp dispatch(other, _event, _actor), do: other
+
+  defp deliver(event, record, actor) do
+    Notifications.dispatch(event, record, actor)
+  rescue
+    error -> Logger.error("workflow notification #{event} failed: #{Exception.message(error)}")
+  end
 end

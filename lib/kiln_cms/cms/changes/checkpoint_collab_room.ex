@@ -72,23 +72,25 @@ defmodule KilnCMS.CMS.Changes.CheckpointCollabRoom do
 
   # After the transaction, so the room is never told about a publish that then
   # rolled back — `after_action` would broadcast before the commit (the trap
-  # this codebase has hit before). Best-effort: an editor who misses this still
-  # has their prose, because the write above already took it.
+  # this codebase has hit before). Through `AfterCommit` for the same reason: a
+  # publish inside a release has committed nothing when this hook runs.
+  # Best-effort: an editor who misses this still has their prose, because the
+  # write above already took it.
   defp announce({:ok, record} = result, kind) do
     if Crdt.enabled?() and not is_nil(kind) do
-      KilnCMSWeb.Endpoint.broadcast(Crdt.doc_key(kind, record.id), "published", %{})
+      KilnCMS.AfterCommit.run(fn -> broadcast_published(kind, record) end)
     end
 
     result
-  rescue
-    # `result`, never a reconstruction of it: returning `changeset.data` here
-    # would hand the caller the PRE-publish record as the publish's result.
-    error ->
-      Logger.warning("Collab publish announcement failed: #{inspect(error)}")
-      result
   end
 
   defp announce(result, _kind), do: result
+
+  defp broadcast_published(kind, record) do
+    KilnCMSWeb.Endpoint.broadcast(Crdt.doc_key(kind, record.id), "published", %{})
+  rescue
+    error -> Logger.warning("Collab publish announcement failed: #{inspect(error)}")
+  end
 
   defp merge_converged_prose(changeset, kind) do
     with true <- Crdt.enabled?(),
