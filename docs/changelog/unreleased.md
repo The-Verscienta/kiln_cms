@@ -233,7 +233,7 @@ carries the reasoning.
   webhooks, embeddings) and the `published_version_id` pointer still commit
   with the release, as before. Duplicating a record with its links, promoting a
   dynamic type, and the tasks a publish completes get the same treatment.
-  ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM))
+  ([#2072](https://github.com/The-Verscienta/kiln_cms/pull/2072))
 
 <a id="vector-scan-env-replaces-compiled-mode"></a>
 
