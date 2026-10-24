@@ -86,6 +86,8 @@ Every summary line below that was shortened links to its own entry there.
   ([#2036](https://github.com/The-Verscienta/kiln_cms/pull/2036) · [long form](docs/changelog/unreleased.md#group-custom-field))
 - **Group fields are edited in the fields admin and the content editor: sub-fields under the group, rows added, removed and dragged into order.**
   ([#2053](https://github.com/The-Verscienta/kiln_cms/pull/2053) · [long form](docs/changelog/unreleased.md#group-field-editor))
+- **`KilnCMS.Firing.refire/3`: a covered way for an overlay to re-fire named records, with their dependents, webhooks and CDN purge.**
+  ([#2068](https://github.com/The-Verscienta/kiln_cms/pull/2068) · [long form](docs/changelog/unreleased.md#overlay-refire))
 
 ### Changed
 

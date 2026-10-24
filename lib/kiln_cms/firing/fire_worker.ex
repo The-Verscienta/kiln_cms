@@ -105,7 +105,7 @@ defmodule KilnCMS.Firing.FireWorker do
   def perform(%Oban.Job{args: %{"org_id" => org_id, "type" => type_str, "id" => id} = args}) do
     case References.type_atom(type_str) do
       nil -> {:cancel, "no content type answers to #{inspect(type_str)}"}
-      type -> fire(org_id, type, id, fire_opts(args))
+      type -> fire(org_id, type, id, fire_opts(args), args["refire"] == true)
     end
   end
 
@@ -119,7 +119,7 @@ defmodule KilnCMS.Firing.FireWorker do
 
   # One clause per outcome of the load, because they are four different
   # situations and used to be one (#664).
-  defp fire(org_id, type, id, opts) do
+  defp fire(org_id, type, id, opts, refire?) do
     case References.load_published(org_id, type, id) do
       {:ok, document} ->
         # `fire/2` reads the tenant off `document.org_id`; the wave + indexing carry
@@ -127,6 +127,7 @@ defmodule KilnCMS.Firing.FireWorker do
         Engine.fire(document, opts)
         References.invalidate(org_id, type, id, [References.key(type, id)])
         enqueue_indexing(org_id, type, id, document)
+        if refire?, do: announce_refire(org_id, document)
         :ok
 
       :absent ->
@@ -166,6 +167,17 @@ defmodule KilnCMS.Firing.FireWorker do
   end
 
   defp fire_opts(_args), do: []
+
+  # A requested re-fire (`KilnCMS.Firing.refire/3`, #2048) changed what delivery
+  # serves without an edit, so it does here what an edit's own changes would
+  # have: drop the delivery cache memoized under the document's slug, and
+  # dispatch `<type>.updated` — the webhooks, automation, federation and the
+  # CDN purge. After the fire, so whatever refetches on the event gets the new
+  # body. A publish's job carries no flag: its action has dispatched already.
+  defp announce_refire(org_id, document) do
+    KilnCMS.Cache.bust(org_id, Engine.public_type(document), document.slug)
+    KilnCMS.CMS.Changes.NotifyWebhooks.notify(document, "updated")
+  end
 
   # The document is settled-gone, so its artifacts are garbage: this is exactly
   # what `KilnCMS.CMS.Changes.DeleteArtifacts` intends on unpublish, and rows
