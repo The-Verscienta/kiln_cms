@@ -799,7 +799,7 @@ defmodule KilnCMS.MixProject do
       {:lazy_html, ">= 0.1.0", only: :test},
       {:phoenix_live_dashboard, "~> 0.8.3"},
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
-      {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
+      {:tailwind, "~> 0.5.2", runtime: Mix.env() == :dev},
       {:heroicons,
        github: "tailwindlabs/heroicons",
        tag: "v2.2.0",
@@ -969,6 +969,7 @@ defmodule KilnCMS.MixProject do
       "assets.setup": [
         &lift_httpc_header_limit/1,
         "tailwind.install --if-missing",
+        &resign_tailwind_on_macos/1,
         "esbuild.install --if-missing",
         "cmd --cd assets npm install"
       ],
@@ -1029,6 +1030,36 @@ defmodule KilnCMS.MixProject do
   # tokenizers, unpickler, unzip and xla.
   defp unlock_unused_step do
     if ml?(), do: ["deps.unlock --unused"], else: []
+  end
+
+  # `assets.setup`'s step after `tailwind.install`. The macOS tailwind binary is
+  # a Bun executable whose ad-hoc linker signature does not cover the payload
+  # Bun appends after linking, so `codesign --verify` fails for every release
+  # (4.3.0 to 4.3.3 checked). macOS 27.2 SIGKILLs some of them at launch: 4.3.0
+  # exits 137 with no output, even for `--help`, and `mix assets.build` fails
+  # with "`mix tailwind kiln_cms` exited with 137". Which versions it kills
+  # depends on the kernel's page checks, not on anything a version pin settles.
+  # An ad-hoc re-sign makes the signature valid. It runs on macOS only, and only
+  # while verification fails, so a re-signed binary is left alone; a missing
+  # binary or `codesign` skips it, and a failed re-sign is a warning.
+  defp resign_tailwind_on_macos(_args) do
+    bin = Tailwind.bin_path()
+
+    with {:unix, :darwin} <- :os.type(),
+         true <- File.exists?(bin),
+         codesign when is_binary(codesign) <- System.find_executable("codesign"),
+         {_, status} when status != 0 <-
+           System.cmd(codesign, ["--verify", bin], stderr_to_stdout: true) do
+      case System.cmd(codesign, ["--force", "--sign", "-", bin], stderr_to_stdout: true) do
+        {_, 0} ->
+          Mix.shell().info("Re-signed #{Path.relative_to_cwd(bin)} ad hoc (invalid signature)")
+
+        {out, _} ->
+          Mix.shell().info([:yellow, "Could not re-sign #{bin}: ", out])
+      end
+    end
+
+    :ok
   end
 
   # `mix setup`'s first step (#1321). One dependency cannot build under a path

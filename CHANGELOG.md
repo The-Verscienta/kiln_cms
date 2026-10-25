@@ -124,6 +124,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **`mix setup` and `mix assets.build` work on macOS 27.2: tailwind 4.3.3, and
+  `mix assets.setup` re-signs the binary ad hoc when its signature is invalid.**
+  ([#2082](https://github.com/The-Verscienta/kiln_cms/pull/2082) · [long form](docs/changelog/unreleased.md#tailwind-macos-resign))
+
 - **`mix setup`, `mix assets.setup` and `mix deps.compile` work on OTP 29.1.1,
   loading the CI/Docker `httpc` header-limit patch into Mix's VM only.**
   ([#2080](https://github.com/The-Verscienta/kiln_cms/pull/2080) · [long form](docs/changelog/unreleased.md#httpc-header-limit-local))

@@ -24,7 +24,7 @@ Two Mix-managed runners produce exactly two artifacts:
   [`config/config.exs:858`](../config/config.exs). The `--alias:@=.` flag lets
   app.js import npm packages (e.g. `@tiptap/core`) resolved through
   `NODE_PATH`/`assets/node_modules`.
-- **tailwind** (`4.3.0`, via the `:tailwind` hex package) compiles
+- **tailwind** (`4.3.3`, via the `:tailwind` hex package) compiles
   `assets/css/app.css` → `priv/static/assets/css/app.css`. Config:
   [`config/config.exs:871`](../config/config.exs).
 
