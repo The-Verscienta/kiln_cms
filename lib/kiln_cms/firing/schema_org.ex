@@ -16,7 +16,7 @@ defmodule KilnCMS.Firing.SchemaOrg do
   # `LiveBlogPosting` is a `BlogPosting`, so it keeps all of that and gains its
   # coverage times and updates (`KilnCMS.Firing.LiveBlog`, #2046).
   @article_types ~w(Article BlogPosting NewsArticle TechArticle LiveBlogPosting)
-  @page_types ~w(WebPage AboutPage ContactPage FAQPage MedicalWebPage)
+  @page_types ~w(WebPage AboutPage ContactPage FAQPage MedicalWebPage ProfilePage)
 
   # A third family (#480). An `Event` is not a `CreativeWork`: it has no body in
   # the schema.org sense, so it carries neither `articleBody` nor `text`, and it
@@ -98,7 +98,24 @@ defmodule KilnCMS.Firing.SchemaOrg do
     |> base_node(document, body)
     |> put_if("description", KilnCMS.Seo.Patterns.effective(document, :seo_description))
     |> put_if("inLanguage", Map.get(document, :locale))
+    |> put_if("mainEntity", main_entity(type, document))
   end
+
+  @doc """
+  The `mainEntity` of a `ProfilePage` (#2044): the `Person` the page is about,
+  named by the document's title. A profile is a page *about* someone, so the
+  person is the page's subject rather than its type — schema.org's and
+  Google's model for author pages. `nil` for every other type.
+  """
+  @spec main_entity(String.t(), struct()) :: map() | nil
+  def main_entity("ProfilePage", document) do
+    case Map.get(document, :title) do
+      title when is_binary(title) and title != "" -> %{"@type" => "Person", "name" => title}
+      _ -> nil
+    end
+  end
+
+  def main_entity(_type, _document), do: nil
 
   # An Event's headline is its `name`, and it has no body — `articleBody` on an
   # Event is not a property schema.org defines, and emitting it makes the node

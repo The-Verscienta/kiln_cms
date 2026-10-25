@@ -52,6 +52,7 @@ for this purpose. The hooks have no styles of their own:
 | `public-article`, `public-masthead`, `public-title`, `public-meta`, `public-lede`, `public-body` | The document templates (`show*`), the editor's live preview and the shared preview link |
 | `public-article`, `public-title` | The in-context editor, which leaves `public-body` off its drag-to-reorder list: a preset that sets it to `display: contents` would take away the box the drag needs |
 | `public-title` | Every other public page's `<h1>` (blog, events, search, lock, teaser) |
+| `public-byline`, `public-byline-name` | A document's public byline inside `public-meta` (`show*`, #2044): each "By …" / "With …" run, and each person's name or profile link |
 | `public-index` | The blog index list |
 | `public-search-submit` | The search form's submit button |
 

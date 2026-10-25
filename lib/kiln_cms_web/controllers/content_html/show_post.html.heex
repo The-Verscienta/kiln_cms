@@ -3,11 +3,12 @@
     <header class="public-masthead mb-6">
       <h1 class="public-title text-3xl font-bold tracking-tight">{@record.title}</h1>
       <p class="public-meta mt-2 text-sm text-base-content/70">
-        <span :if={@record.author && is_binary(@record.author.name) && @record.author.name != ""}>
-          {gettext("By %{author}", author: @record.author.name)}
-        </span>
+        <.byline
+          bylines={assigns[:bylines] || %{}}
+          fallback={@record.author && @record.author.name}
+        />
         <span :if={
-          @record.author && is_binary(@record.author.name) && @record.author.name != "" &&
+          byline?(assigns[:bylines], @record.author && @record.author.name) &&
             @record.published_at
         }>
           ·

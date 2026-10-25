@@ -67,6 +67,10 @@ Every summary line below that was shortened links to its own entry there.
   with its approver, CDN purge, each endpoint's delivery, `?as_of=` and chain.**
   ([#2086](https://github.com/The-Verscienta/kiln_cms/pull/2086) · [long form](docs/changelog/unreleased.md#governance-what-readers-saw))
 
+- **Public bylines: a `:reference` field can be the page's schema.org `author`
+  or `contributor`, on the fired JSON-LD and Kiln's own pages; `ProfilePage`.**
+  ([#2087](https://github.com/The-Verscienta/kiln_cms/pull/2087) · [long form](docs/changelog/unreleased.md#bylines))
+
 - **A link-field filter can name the connection it means: `[target]=<id>` beside
   the operators asks whether *that* record has the value.**
   ([#2081](https://github.com/The-Verscienta/kiln_cms/pull/2081) · [long form](docs/changelog/unreleased.md#link-filter-target))
@@ -82,10 +86,6 @@ Every summary line below that was shortened links to its own entry there.
 - **A Google News sitemap at `/news-sitemap.xml` for `NewsArticle` types:
   the last 48 hours, at most 1,000 URLs, listed from `robots.txt`.**
   ([#2077](https://github.com/The-Verscienta/kiln_cms/pull/2077) · [long form](docs/changelog/unreleased.md#news-sitemap))
-
-- **A guide to public author profiles and multiple bylines: an `author` type, a
-  `:reference` byline with roles, and the schema.org `author` mapping.**
-  ([#2076](https://github.com/The-Verscienta/kiln_cms/pull/2076) · [guide](docs/author-profiles.md))
 
 - **Headless draft mode: a preview token opens its draft on JSON:API and the fired-artifact read.**
   ([#1887](https://github.com/The-Verscienta/kiln_cms/issues/1887) · [long form](docs/changelog/unreleased.md#headless-draft-mode))

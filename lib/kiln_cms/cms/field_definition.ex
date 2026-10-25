@@ -273,7 +273,8 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :localization,
       :inverse_label,
       :inverse_name,
-      :private
+      :private,
+      :schema_org_property
     ]
 
     create :create, primary?: true
@@ -613,6 +614,19 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # field (`Changes.PrivateUserField`). Flipping it re-fires the type's
     # published documents (`Changes.BustTypeRegistry`).
     attribute :private, :boolean, allow_nil?: false, default: false, public?: true
+
+    # What a `:reference` field's targets are to the document in schema.org
+    # terms (#2044): `:author` or `:contributor`. The fired `:json_ld` main
+    # node, and the JSON-LD inlined in Kiln's own pages, then carry one
+    # `Person` per readable target, in the field's order
+    # (`KilnCMS.Firing.Bylines`). Nil — no structured-data meaning — by
+    # default, and cleared on anything but a top-level `:reference`
+    # (`Changes.ClearReferenceOptions`). Setting or clearing it re-fires the
+    # type's published documents (`Changes.BustTypeRegistry`).
+    attribute :schema_org_property, :atom do
+      constraints one_of: [:author, :contributor]
+      public? true
+    end
 
     # Optional helper text rendered under the input.
     attribute :help_text, :string,

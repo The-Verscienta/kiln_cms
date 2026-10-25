@@ -2926,6 +2926,11 @@ msgstr "Autor: un antiguo miembro"
 msgid "Author: me"
 msgstr "Autor: yo"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Authors"
+msgstr "Autores"
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Auto from name"
@@ -3297,7 +3302,12 @@ msgstr "Botón"
 msgid "Button label"
 msgstr "Texto del botón"
 
-#: lib/kiln_cms_web/controllers/content_html/show_post.html.heex
+#: lib/kiln_cms_web/controllers/content_html.ex
+#, elixir-autogen, elixir-format
+msgid "By"
+msgstr "Por"
+
+#: lib/kiln_cms_web/controllers/content_html.ex
 #, elixir-autogen, elixir-format
 msgid "By %{author}"
 msgstr "Por %{author}"
@@ -4405,6 +4415,11 @@ msgstr[1] "Continuar (quedan %{count})"
 #, elixir-autogen, elixir-format
 msgid "Continue editing"
 msgstr "Continuar editando"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Contributors"
+msgstr "Colaboradores"
 
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
@@ -7457,6 +7472,11 @@ msgstr "Para una opinión externa sobre la entregabilidad (puntuación SPF/DKIM/
 msgid "For dividers, textures, and images that only repeat nearby text."
 msgstr "Para separadores, texturas e imágenes que solo repiten el texto cercano."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "For search engines, the linked records are"
+msgstr "Para los buscadores, los registros enlazados son"
+
 #: lib/kiln_cms_web/live/form_live.ex
 #, elixir-autogen, elixir-format
 msgid "Form created — add its fields."
@@ -9886,6 +9906,16 @@ msgstr "Nombre, logotipo, colores y el tema público."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
+msgid "Named as the page's authors in its structured data."
+msgstr "Figuran como autores de la página en sus datos estructurados."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Named as the page's contributors in its structured data."
+msgstr "Figuran como colaboradores de la página en sus datos estructurados."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
 msgid "Names the record (search finds it by this value)"
 msgstr "Da nombre al registro (la búsqueda lo encuentra por este valor)"
 
@@ -10984,6 +11014,11 @@ msgstr "Todavía no se ha escrito %{path}. O no se ha ejecutado ninguna copia, o
 msgid "Nothing here matches “%{query}”."
 msgstr "Aquí no hay nada que coincida con «%{query}»."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing in particular"
+msgstr "Nada en particular"
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing in this release"
@@ -11997,6 +12032,11 @@ msgstr "Las expresiones del contenido de este sitio que un regulador, su equipo 
 #, elixir-autogen, elixir-format
 msgid "Phrases to flag"
 msgstr "Expresiones que señalar"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Pick Authors for a byline: each linked record is then named as an author of the page in its structured data, and in the By line on the site's own pages."
+msgstr "Elige Autores para una firma: cada registro enlazado figura entonces como autor de la página en sus datos estructurados y en la línea «Por» de las páginas del propio sitio."
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
@@ -19051,6 +19091,11 @@ msgstr "¿Qué debe hacer el modelo?"
 msgid "What the colours mean"
 msgstr "Qué significan los colores"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "What they are to the page"
+msgstr "Qué son para la página"
+
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
 msgid "What they had typed stays in their editor, unsaved, until they save it."
@@ -19284,6 +19329,11 @@ msgstr "Se despublicará cuando se lance el lanzamiento."
 #, elixir-autogen, elixir-format
 msgid "Winner promoted — the document now carries the winning copy."
 msgstr "Ganadora promovida: el documento ahora lleva el texto ganador."
+
+#: lib/kiln_cms_web/controllers/content_html.ex
+#, elixir-autogen, elixir-format
+msgid "With"
+msgstr "Con"
 
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
@@ -19969,6 +20019,11 @@ msgstr "un tiempo desconocido"
 #, elixir-autogen, elixir-format
 msgid "anchored, not attested"
 msgstr "anclado, sin atestar"
+
+#: lib/kiln_cms_web/controllers/content_html.ex
+#, elixir-autogen, elixir-format
+msgid "and"
+msgstr "y"
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/media_live.ex

@@ -1435,6 +1435,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     end
   end
 
+  # The structured-data meaning in the list (#2044), when it has one.
+  defp schema_org_summary(%{schema_org_property: :author}),
+    do: gettext("Named as the page's authors in its structured data.")
+
+  defp schema_org_summary(%{schema_org_property: :contributor}),
+    do: gettext("Named as the page's contributors in its structured data.")
+
+  defp schema_org_summary(_definition), do: ""
+
   # The delete rule in the list, after the summary, when it is not the
   # default.
   defp target_rules_summary(definition, target_types) do
@@ -1650,7 +1659,31 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       </.step_heading>
       <.target_rules_field form={@form} id={@id} target_types={@target_types} />
     </section>
+    <section aria-labelledby={"#{@id}-meaning-heading"} class="space-y-3 sm:col-span-2">
+      <.step_heading number={5} id={"#{@id}-meaning-heading"}>
+        {gettext("What they are to the page")}
+      </.step_heading>
+      <.input
+        field={@form[:schema_org_property]}
+        id={"#{@id}-schema-org-property"}
+        type="select"
+        label={gettext("For search engines, the linked records are")}
+        prompt={gettext("Nothing in particular")}
+        options={schema_org_property_options()}
+        hint={
+          gettext(
+            "Pick Authors for a byline: each linked record is then named as an author of the page in its structured data, and in the By line on the site's own pages."
+          )
+        }
+      />
+    </section>
     """
+  end
+
+  # The schema.org meaning of a reference's targets (#2044), as the select
+  # offers it.
+  defp schema_org_property_options do
+    [{gettext("Authors"), "author"}, {gettext("Contributors"), "contributor"}]
   end
 
   attr :form, :any, required: true
@@ -2646,6 +2679,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                       class="text-xs text-base-content/60"
                     >
                       {target_rules_summary(definition, @target_types)}
+                    </p>
+                    <p
+                      :if={
+                        definition.field_type == :reference and schema_org_summary(definition) != ""
+                      }
+                      id={"field-#{definition.id}-schema-org"}
+                      class="text-xs text-base-content/60"
+                    >
+                      {schema_org_summary(definition)}
                     </p>
                     <p :if={definition.compute} class="text-xs text-base-content/60">
                       {gettext("Formula")}: <code>{definition.compute}</code>
