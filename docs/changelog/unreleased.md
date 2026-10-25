@@ -5,4 +5,25 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Security
 
+<a id="ash-tenancy-advisories"></a>
+
+- **ash 3.37.1 and ash_postgres 2.15.2 fix EEF-CVE-2026-115627,
+  EEF-CVE-2026-115635 and EEF-CVE-2026-114214; Kiln was not exposed.**
+  The three advisories, published 2026-10-25, failed the dependency audit
+  on every PR. EEF-CVE-2026-115627: a lateral-joined `many_to_many` (one
+  with a sort or limit) built its join-resource query without the read
+  action, so attribute multitenancy never filtered the join rows. The sorted
+  `related_<type>s` relationships load that way, but the destination read
+  kept its tenant filter, so another site's records never appeared. A
+  foreign-org join row could only add records of the reader's own site, and
+  Kiln's writes can't produce one: `manage_relationship` resolves both ends
+  under the tenant, and payload links locate both ends in the writing site.
+  A test now plants such a row and checks it is ignored (it fails on
+  ash_postgres 2.13.1). EEF-CVE-2026-115635 needs `return_skipped_upsert?`
+  and EEF-CVE-2026-114214 needs a `through:` relationship, and Kiln uses
+  neither. ash_sql moves to 0.8.4. The bump adds one migration, ash
+  functions v7, which redefines `ash_required/2` in place (same signature
+  and return type), so it is safe under expand/contract.
+  ([#2091](https://github.com/The-Verscienta/kiln_cms/pull/2091))
