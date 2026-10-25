@@ -65,7 +65,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **The governance trail shows what readers saw: each publish and withdrawal
   with its approver, CDN purge, each endpoint's delivery, `?as_of=` and chain.**
-  ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM) · [long form](docs/changelog/unreleased.md#governance-what-readers-saw))
+  ([#2086](https://github.com/The-Verscienta/kiln_cms/pull/2086) · [long form](docs/changelog/unreleased.md#governance-what-readers-saw))
 
 - **A type can fire `LiveBlogPosting`: coverage times plus its published
   updates as `liveBlogUpdate`, newest first and capped.**
