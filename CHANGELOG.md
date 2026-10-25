@@ -54,11 +54,17 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+## [1.5.2] - 2026-10-25
+
+Long form: [docs/changelog/v1.5.2.md](docs/changelog/v1.5.2.md) —
+the 1.5.2 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
 ### Security
 
 - **ash 3.37.1 and ash_postgres 2.15.2 fix three tenancy advisories
   (EEF-CVE-2026-115627, -115635, -114214); Kiln was not exposed.**
-  ([#2091](https://github.com/The-Verscienta/kiln_cms/pull/2091) · [long form](docs/changelog/unreleased.md#ash-tenancy-advisories))
+  ([#2091](https://github.com/The-Verscienta/kiln_cms/pull/2091) · [long form](docs/changelog/v1.5.2.md#ash-tenancy-advisories))
 
 ## [1.5.1] - 2026-10-24
 
@@ -2824,7 +2830,8 @@ that `mix kiln.update` compares against.
   one that can't be described by a changelog diff.
   ([long form](docs/changelog/v0.1.0.md#if-your-project-pins-a-sha-from-before-this-tag-your-first-update-is-the-only))
 
-[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v1.5.1...HEAD
+[Unreleased]: https://github.com/The-Verscienta/kiln_cms/compare/v1.5.2...HEAD
+[1.5.2]: https://github.com/The-Verscienta/kiln_cms/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/The-Verscienta/kiln_cms/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/The-Verscienta/kiln_cms/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/The-Verscienta/kiln_cms/compare/v1.3.0...v1.4.0
