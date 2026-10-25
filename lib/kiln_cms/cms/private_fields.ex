@@ -79,6 +79,9 @@ defmodule KilnCMS.CMS.PrivateFields do
   @spec drop_for(term(), struct(), term()) :: term()
   def drop_for(values, document, tenant \\ nil)
 
+  # Nothing to drop, so nothing to look up: an empty map costs no read.
+  def drop_for(values, _document, _tenant) when values == %{}, do: values
+
   def drop_for(values, document, tenant) when is_map(values) and not is_struct(values) do
     case names_for(document, tenant) do
       [] -> values
