@@ -32,8 +32,23 @@ defmodule KilnCMS.Firing.PointInTime do
   # that moment. (Hard purges are filtered at entry time: their version rows
   # survive, but re-exposing deliberately erased content would be a privacy
   # regression.)
-  @unpublish_actions [:unpublish, :unpublish_scheduled, :archive, :destroy]
+  # `:archive_scheduled` (an embargo end whose expiry action is `:archive`)
+  # withdraws exactly as `:archive` does; leaving it out served the last publish
+  # as live from the moment the document was taken down (#1928).
+  @unpublish_actions [:unpublish, :unpublish_scheduled, :archive, :archive_scheduled, :destroy]
   @state_actions @publish_actions ++ @unpublish_actions
+
+  @doc """
+  The version actions that put a document on the delivery path. With
+  `withdraw_actions/0`, the one definition of a state transition that
+  point-in-time delivery and the governance trail (#1928) both read.
+  """
+  @spec publish_actions() :: [atom()]
+  def publish_actions, do: @publish_actions
+
+  @doc "The version actions that take a document off the delivery path."
+  @spec withdraw_actions() :: [atom()]
+  def withdraw_actions, do: @unpublish_actions
   # The one audience an anonymous reader holds, as stored: the `audience`
   # column is text, and a version's `changes` map carries it as a string.
   @anonymous_audience "public"

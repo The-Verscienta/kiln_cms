@@ -452,7 +452,7 @@ defmodule KilnCMS.Webhooks do
         endpoint_url: row.endpoint_url,
         attempts: row.attempts,
         last_error: row.last_error,
-        failed_at: row.updated_at,
+        failed_at: CMS.WebhookDelivery.given_up_at(row),
         recovered_at: row.recovered_at
       }
     end)

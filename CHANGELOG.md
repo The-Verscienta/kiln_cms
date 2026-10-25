@@ -63,6 +63,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **The governance trail shows what readers saw: each publish and withdrawal
+  with its approver, CDN purge, each endpoint's delivery, `?as_of=` and chain.**
+  ([#2086](https://github.com/The-Verscienta/kiln_cms/pull/2086) · [long form](docs/changelog/unreleased.md#governance-what-readers-saw))
+
 - **Public bylines: a `:reference` field can be the page's schema.org `author`
   or `contributor`, on the fired JSON-LD and Kiln's own pages; `ProfilePage`.**
   ([#2087](https://github.com/The-Verscienta/kiln_cms/pull/2087) · [long form](docs/changelog/unreleased.md#bylines))

@@ -183,12 +183,7 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   defp settle(delivery, job, {:error, reason}, final?) do
     delivery
     |> CMS.record_webhook_delivery_attempt(
-      %{
-        status: if(final?, do: :failed, else: :pending),
-        attempts: job.attempt,
-        last_status: parse_status(reason),
-        last_error: reason
-      },
+      failure_attrs(job, reason, final?),
       actor: Webhooks.system(),
       tenant: delivery.org_id
     )
@@ -221,6 +216,16 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
       true ->
         :ok
     end
+  end
+
+  # A failed attempt; the last one gives the delivery up, and stamps when
+  # (#1928): `updated_at` moves again on a later recovery or payload scrub.
+  defp failure_attrs(job, reason, final?) do
+    base = %{attempts: job.attempt, last_status: parse_status(reason), last_error: reason}
+
+    if final?,
+      do: Map.merge(base, %{status: :failed, failed_at: DateTime.utc_now()}),
+      else: Map.put(base, :status, :pending)
   end
 
   defp log_unrecorded({:ok, _record}, _delivery, _what), do: :ok

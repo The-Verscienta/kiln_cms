@@ -21,6 +21,34 @@ carries the reasoning.
 
 ## Added
 
+<a id="governance-what-readers-saw"></a>
+
+- **"What readers saw" on the governance trail
+  ([#1928](https://github.com/The-Verscienta/kiln_cms/issues/1928)).** The
+  detail view at `/editor/governance/:type/:id` gains one row per publish or
+  withdrawal, newest first: its approver (for a scheduled transition, whoever
+  last set the schedule), its propagation record from 1.4 (the CDN purge's
+  enqueue and acknowledgement or failure, and every webhook endpoint's
+  delivery time or terminal failure, each with its gap from the transition),
+  its `?as_of=` link and the history chain's verdict on that version. The
+  JSON export carries the rows as `transitions`; the CSV export as rows of
+  kind `transition`, with six columns appended (`cdn_purge`,
+  `cdn_enqueued_at`, `cdn_settled_at`, `endpoints`, `as_of`, `chain`) that
+  every other row leaves empty, so a sheet reading the first eight by
+  position still lines up. A propagation record carries no version id; each
+  transition takes the first record of its kind opened between its own write
+  and the next transition's (`KilnCMS.Propagation.for_document/3`, read as the
+  webhooks system actor and failing closed). A restore of a document trashed
+  while live is a row too. Past the delivery ledger's 30 days the row counts
+  the endpoints whose rows were pruned instead of claiming there were none.
+  Alongside: `webhook_deliveries` gains a nullable `failed_at`, stamped when a
+  delivery is given up on, so a later recovery stamp or the payload scrub no
+  longer moves the reported give-up time (`WebhookDelivery.given_up_at/1`,
+  also used by the lost-retractions panel); and point-in-time delivery now
+  treats `archive_scheduled` as a withdrawal, where it used to keep serving
+  the last publish. The guide's end-to-end screenshot of one real correction
+  is still to come: it needs staging data.
+
 <a id="bylines"></a>
 
 - **Public bylines
