@@ -548,4 +548,4 @@ carries the reasoning.
   neither. ash_sql moves to 0.8.4. The bump adds one migration, ash
   functions v7, which redefines `ash_required/2` in place (same signature
   and return type), so it is safe under expand/contract.
-  ([#PR](https://github.com/The-Verscienta/kiln_cms/pull/PR))
+  ([#2091](https://github.com/The-Verscienta/kiln_cms/pull/2091))
