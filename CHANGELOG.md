@@ -65,7 +65,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Private custom fields: a value only the site's editors and admins see; and
   a `:user` field type that names a person on the site, always private.**
-  ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM) · [long form](docs/changelog/unreleased.md#private-fields))
+  ([#2085](https://github.com/The-Verscienta/kiln_cms/pull/2085) · [long form](docs/changelog/unreleased.md#private-fields))
 
 - **A type can fire `LiveBlogPosting`: coverage times plus its published
   updates as `liveBlogUpdate`, newest first and capped.**
