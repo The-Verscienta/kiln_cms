@@ -63,6 +63,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Public bylines: a `:reference` field can be the page's schema.org `author`
+  or `contributor`, on the fired JSON-LD and Kiln's own pages; `ProfilePage`.**
+  ([#2087](https://github.com/The-Verscienta/kiln_cms/pull/2087) · [long form](docs/changelog/unreleased.md#bylines))
+
 - **Private custom fields: a value only the site's editors and admins see; and
   a `:user` field type that names a person on the site, always private.**
   ([#2085](https://github.com/The-Verscienta/kiln_cms/pull/2085) · [long form](docs/changelog/unreleased.md#private-fields))
@@ -74,10 +78,6 @@ Every summary line below that was shortened links to its own entry there.
 - **A Google News sitemap at `/news-sitemap.xml` for `NewsArticle` types:
   the last 48 hours, at most 1,000 URLs, listed from `robots.txt`.**
   ([#2077](https://github.com/The-Verscienta/kiln_cms/pull/2077) · [long form](docs/changelog/unreleased.md#news-sitemap))
-
-- **Public bylines: a `:reference` field can be the page's schema.org `author`
-  or `contributor`, on the fired JSON-LD and Kiln's own pages; `ProfilePage`.**
-  ([#2076](https://github.com/The-Verscienta/kiln_cms/pull/2076) · [long form](docs/changelog/unreleased.md#bylines))
 
 - **Headless draft mode: a preview token opens its draft on JSON:API and the fired-artifact read.**
   ([#1887](https://github.com/The-Verscienta/kiln_cms/issues/1887) · [long form](docs/changelog/unreleased.md#headless-draft-mode))
