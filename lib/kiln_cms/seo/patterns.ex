@@ -302,7 +302,13 @@ defmodule KilnCMS.Seo.Patterns do
       excerpt: Map.get(record, :excerpt),
       category_name: category_name(record),
       site_name: site_name(record, org),
-      custom_fields: loaded(Map.get(record, :custom_fields)),
+      # Without its private fields (#2044): an SEO title or description is
+      # public, so `[field:<name>]` on a private field reads as empty.
+      custom_fields:
+        record
+        |> Map.get(:custom_fields)
+        |> loaded()
+        |> KilnCMS.CMS.PrivateFields.drop_for(record),
       date:
         loaded(Map.get(record, :published_at)) || loaded(Map.get(record, :scheduled_at)) ||
           loaded(Map.get(record, :inserted_at))

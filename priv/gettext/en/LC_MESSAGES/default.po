@@ -1307,6 +1307,16 @@ msgstr ""
 msgid "A passphrase is set. Leave blank to keep it."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A person field is always private: only editors and admins see it."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A person with an account on this site — an admin, editor or viewer. Always private: only editors and admins see it."
+msgstr ""
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "A piece of content belongs to one category."
@@ -11269,6 +11279,21 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
+msgid "Only editors and admins see the value"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only editors and admins see the value. It is left out of the site, every API, feeds and search."
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Only editors and admins see this"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
 msgid "Only one %{source}"
 msgstr ""
 
@@ -12202,6 +12227,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
 msgid "Privacy-first content views — aggregate counts only, no visitor tracking."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Private"
 msgstr ""
 
 #: lib/kiln_cms_web/live/site_storage_live.ex
@@ -20681,6 +20711,12 @@ msgstr ""
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "post, page — empty = all"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "private"
 msgstr ""
 
 #: lib/kiln_cms_web/live/calendar_live.ex

@@ -3460,6 +3460,10 @@ defmodule KilnCMS.CMS.Content do
         # the ones the actor could not read directly. Read-side only; the
         # stored value is untouched, and editors read it whole.
         prepare KilnCMS.CMS.Preparations.MaskUnreadableReferences
+
+        # A private custom field (#2044) is for the site's editors and admins:
+        # leave its value out for every other reader. Same skips as above.
+        prepare KilnCMS.CMS.Preparations.MaskPrivateFields
       end
 
       # Invalidate the public delivery cache whenever published content changes

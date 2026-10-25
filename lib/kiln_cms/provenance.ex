@@ -93,8 +93,11 @@ defmodule KilnCMS.Provenance do
   """
   @spec disclosure_for(struct()) :: String.t()
   def disclosure_for(document) do
+    # A private `ai_disclosure` field (#2044) declares nothing: the manifest
+    # is public, so it falls to the default like an absent one.
     document
     |> Map.get(:custom_fields)
+    |> KilnCMS.CMS.PrivateFields.drop_for(document)
     |> case do
       %{"ai_disclosure" => value} -> normalize_disclosure(to_string(value))
       _ -> default_disclosure()

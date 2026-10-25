@@ -265,6 +265,10 @@ defmodule KilnCMS.Cache do
   """
   def type_registry_key(org_id), do: "content_types:dynamic:#{org_id}"
 
+  @doc "Cache key for a site's private fields (`KilnCMS.CMS.PrivateFields`) — busted with the type registry."
+  @spec private_fields_key(Ash.UUID.t()) :: String.t()
+  def private_fields_key(org_id), do: "content_types:private_fields:#{org_id}"
+
   @doc "Cache key for a site's name fields (`KilnCMS.CMS.NameFields`) — busted with the type registry."
   @spec name_fields_key(Ash.UUID.t()) :: String.t()
   def name_fields_key(org_id), do: "content_types:name_fields:#{org_id}"
@@ -280,6 +284,7 @@ defmodule KilnCMS.Cache do
     if enabled?() do
       Cachex.del(@cache, type_registry_key(org_id))
       Cachex.del(@cache, name_fields_key(org_id))
+      Cachex.del(@cache, private_fields_key(org_id))
       Cachex.del(@cache, calendar_types_key(org_id))
       Cachex.del(@cache, delivery_schema_key(org_id))
       # `has_published_feed` is half of `KilnCMS.Feeds.syndicated?/2`, so a type

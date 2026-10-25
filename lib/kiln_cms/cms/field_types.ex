@@ -48,7 +48,10 @@ defmodule KilnCMS.CMS.FieldTypes do
     :select,
     :media,
     :reference,
-    :group
+    :group,
+    # A console account of the site (#2044): stored as the user's id, and
+    # always private (`KilnCMS.CMS.PrivateFields`).
+    :user
   ]
 
   # The in-tree `Kiln.FieldType` implementations. Listed here rather than
