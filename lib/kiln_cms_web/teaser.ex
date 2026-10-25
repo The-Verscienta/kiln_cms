@@ -110,7 +110,10 @@ defmodule KilnCMSWeb.Teaser do
       org_id: record.org_id,
       updated_at: record.updated_at,
       type: type,
-      custom_fields: Map.get(record, :custom_fields) || %{},
+      # Shown to a reader who is not entitled, from an `authorize?: false`
+      # read the private-field mask skips: drop them here (#2044).
+      custom_fields:
+        KilnCMS.CMS.PrivateFields.drop_for(Map.get(record, :custom_fields) || %{}, record),
       event_schedule:
         if(SchemaOrg.event_type?(type), do: Events.schema_org_schedule(record), else: %{})
     }
