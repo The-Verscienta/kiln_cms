@@ -338,7 +338,12 @@ defmodule KilnCMS.SchemaExport do
   # Nothing is `required`, including definitions marked required. A definition
   # added after existing content was last saved has no stored value, and firing
   # does not invent one — so "required" describes the editor, not the payload.
+  #
+  # A private field (#2044) is not described at all: it is never in a
+  # delivered payload (`KilnCMS.CMS.PrivateFields`), and this schema is public.
   defp custom_fields_schema(definitions) do
+    definitions = Enum.reject(definitions, &(Map.get(&1, :private) == true))
+
     %{
       "type" => "object",
       "description" =>

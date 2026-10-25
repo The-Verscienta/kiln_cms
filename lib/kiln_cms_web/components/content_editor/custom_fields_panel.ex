@@ -29,6 +29,8 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
   attr :localization, :map, required: true
   attr :kind, :atom, required: true
   attr :media, :list, required: true
+  # `{label, id}` for a `:user` field's picker (#2044).
+  attr :people, :list, default: []
   attr :actor, :any, required: true
   attr :tenant, :any, required: true
   attr :broken_references, :list, required: true
@@ -89,7 +91,12 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
             name={"#{@form.name}[custom_fields][#{definition.name}]"}
             value={input_value(@form, definition)}
             errors={custom_field_errors(@form, definition.name)}
-            options={custom_field_options(definition, @media)}
+            options={
+              if(definition.field_type == :user,
+                do: @people,
+                else: custom_field_options(definition, @media)
+              )
+            }
           />
           <Localization.localization_note
             localization={@localization}

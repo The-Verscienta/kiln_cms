@@ -3828,6 +3828,10 @@
                 "description": "Field included by default.",
                 "type": "integer"
               },
+              "private": {
+                "description": "Field included by default.",
+                "type": "boolean"
+              },
               "required": {
                 "description": "Field included by default.",
                 "type": "boolean"
@@ -3878,6 +3882,7 @@
               "target_types",
               "multiple",
               "on_target_delete",
+              "private",
               "position",
               "names_record",
               "searchable",
@@ -4136,6 +4141,9 @@
           },
           "position": {
             "$ref": "#/components/schemas/field_definition-filter-position"
+          },
+          "private": {
+            "$ref": "#/components/schemas/field_definition-filter-private"
           },
           "required": {
             "$ref": "#/components/schemas/field_definition-filter-required"
@@ -5093,6 +5101,45 @@
           },
           "not_eq": {
             "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "field_definition-filter-private": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "type": "boolean"
+          },
+          "greater_than": {
+            "type": "boolean"
+          },
+          "greater_than_or_equal": {
+            "type": "boolean"
+          },
+          "in": {
+            "items": {
+              "type": "boolean"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "boolean"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "boolean"
+          },
+          "less_than": {
+            "type": "boolean"
+          },
+          "less_than_or_equal": {
+            "type": "boolean"
+          },
+          "not_eq": {
+            "type": "boolean"
           }
         },
         "type": "object"

@@ -675,6 +675,52 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
+  # A console account (#2044): one of the site's people, by id. The field is
+  # always private, which the label says, so a writer knows the choice stays
+  # in the console. An id that is no longer on the roster (someone who left
+  # the site) is still shown, as itself, so saving without touching the
+  # field is what tells the writer.
+  def custom_field_input(%{definition: %{field_type: :user}} = assigns) do
+    assigns =
+      assign(
+        assigns,
+        :stray,
+        is_binary(assigns.value) and assigns.value != "" and
+          not Enum.any?(assigns.options, fn {_label, id} -> id == assigns.value end)
+      )
+
+    ~H"""
+    <div>
+      <label for={cf_id(@definition)} class="mb-1 flex items-center gap-1.5 text-sm font-medium">
+        {@definition.label}
+        <span
+          title={gettext("Only editors and admins see this")}
+          class="inline-flex items-center gap-1 text-xs font-normal text-base-content/60"
+        >
+          <.icon name="hero-lock-closed" class="size-3" />{gettext("private")}
+        </span>
+      </label>
+      <select
+        id={cf_id(@definition)}
+        name={@name}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && cf_errors_id(@definition)}
+        class="field-select"
+      >
+        <option value="">{gettext("— None —")}</option>
+        <option :if={@stray} value={@value} selected>{@value}</option>
+        <option :for={{label, id} <- @options} value={id} selected={to_string(@value) == id}>
+          {label}
+        </option>
+      </select>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
+        {@definition.help_text}
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </div>
+    """
+  end
+
   def custom_field_input(%{definition: %{field_type: :text}} = assigns) do
     ~H"""
     <div>
