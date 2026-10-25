@@ -91,6 +91,41 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     assert KilnCMS.CMS.NameFields.for_resource(KilnCMS.CMS.Page, nil) == ["latin_name"]
   end
 
+  # #2044: a private field is marked so in the list; a person field always is.
+  test "an admin makes a field private", %{conn: conn} do
+    admin = authed_user(:admin)
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+    assert has_element?(lv, "#new-field-private")
+
+    lv
+    |> form("#new-field-form",
+      field_definition: %{
+        scopes: ["page"],
+        name: "internal_note",
+        label: "Internal note",
+        field_type: "string",
+        private: "true"
+      }
+    )
+    |> render_submit()
+
+    definition =
+      :page
+      |> CMS.field_definitions_for!(authorize?: false)
+      |> Enum.find(&(&1.name == "internal_note"))
+
+    assert definition.private == true
+    assert has_element?(lv, "#field-#{definition.id}-private", "private")
+
+    # A person field says it is always private instead of asking.
+    html =
+      lv |> form("#new-field-form", field_definition: %{field_type: "user"}) |> render_change()
+
+    assert html =~ "A person field is always private"
+    refute has_element?(lv, "input#new-field-private")
+  end
+
   test "an admin shares a field across locales (#1327); the default is per locale", %{conn: conn} do
     admin = authed_user(:admin)
     {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")

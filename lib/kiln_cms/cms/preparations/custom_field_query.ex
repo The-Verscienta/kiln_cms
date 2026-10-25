@@ -47,7 +47,8 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   closed — a refused registry read raises rather than resolving to "no
   fields" (which would already 400, never widen the result). No index backs
   these predicates — promote a hot field to a compiled attribute when that
-  starts to matter (D4/D17).
+  starts to matter (D4/D17). A private field (#2044) is unknown to anyone
+  below editor, here as everywhere else.
   """
   use Ash.Resource.Preparation
 
@@ -68,7 +69,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     if filter == %{} and sort == "" do
       query
     else
-      defs = definitions(query)
+      defs = query |> definitions() |> visible_to(query, context)
 
       # What the relationship operators gate targets with (`Relations`).
       ctx = %{
@@ -96,6 +97,23 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       entry_definitions(query, tenant)
     else
       KilnCMS.CMS.field_definitions_for!(resource.__kiln_content_type__(), registry_opts(tenant))
+    end
+  end
+
+  # A private field (#2044) is not there for anyone below editor: filtering or
+  # sorting on it would answer questions about a value they may not read, so
+  # its name is an unknown field. Decided by the caller's own tier even on an
+  # `authorize?: false` read — delivery reads run that way with no actor, and
+  # are exactly the callers this keeps out.
+  defp visible_to(defs, query, context) do
+    case Map.get(context, :actor) do
+      %KilnCMS.SystemActor{} ->
+        defs
+
+      actor ->
+        if KilnCMS.Accounts.Scoping.effective_tier(actor, query) in [:editor, :admin],
+          do: defs,
+          else: Enum.reject(defs, &(Map.get(&1, :private) == true))
     end
   end
 

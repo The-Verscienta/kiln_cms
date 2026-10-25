@@ -67,6 +67,10 @@ Every summary line below that was shortened links to its own entry there.
   the operators asks whether *that* record has the value.**
   ([#2081](https://github.com/The-Verscienta/kiln_cms/pull/2081) · [long form](docs/changelog/unreleased.md#link-filter-target))
 
+- **Private custom fields: a value only the site's editors and admins see; and
+  a `:user` field type that names a person on the site, always private.**
+  ([#2085](https://github.com/The-Verscienta/kiln_cms/pull/2085) · [long form](docs/changelog/unreleased.md#private-fields))
+
 - **A type can fire `LiveBlogPosting`: coverage times plus its published
   updates as `liveBlogUpdate`, newest first and capped.**
   ([#2075](https://github.com/The-Verscienta/kiln_cms/pull/2075) · [long form](docs/changelog/unreleased.md#live-blog-posting))
@@ -78,6 +82,9 @@ Every summary line below that was shortened links to its own entry there.
 - **A guide to public author profiles and multiple bylines: an `author` type, a
   `:reference` byline with roles, and the schema.org `author` mapping.**
   ([#2076](https://github.com/The-Verscienta/kiln_cms/pull/2076) · [guide](docs/author-profiles.md))
+
+- **Headless draft mode: a preview token opens its draft on JSON:API and the fired-artifact read.**
+  ([#1887](https://github.com/The-Verscienta/kiln_cms/issues/1887) · [long form](docs/changelog/unreleased.md#headless-draft-mode))
 
 - **A public change feed, server side: `KilnCMS.Delivery.Feed` publishes
   `published` / `updated` / `withdrawn` per site over PubSub.**
@@ -124,6 +131,14 @@ Every summary line below that was shortened links to its own entry there.
   ([#2067](https://github.com/The-Verscienta/kiln_cms/pull/2067) · [long form](docs/changelog/unreleased.md#ml-stack-nx-1))
 
 ### Fixed
+
+- **`mix setup` and `mix assets.build` work on macOS 27.2: tailwind 4.3.3, and
+  `mix assets.setup` re-signs the binary ad hoc when its signature is invalid.**
+  ([#2082](https://github.com/The-Verscienta/kiln_cms/pull/2082) · [long form](docs/changelog/unreleased.md#tailwind-macos-resign))
+
+- **`mix setup`, `mix assets.setup` and `mix deps.compile` work on OTP 29.1.1,
+  loading the CI/Docker `httpc` header-limit patch into Mix's VM only.**
+  ([#2080](https://github.com/The-Verscienta/kiln_cms/pull/2080) · [long form](docs/changelog/unreleased.md#httpc-header-limit-local))
 
 - **A release that rolls back no longer announces or notifies what it undid; post-publish broadcasts, notifications, audit anchors and cache busts wait for the release to commit, and content and type cache busts now always run after the commit.**
   ([#2072](https://github.com/The-Verscienta/kiln_cms/pull/2072) · [long form](docs/changelog/unreleased.md#after-commit-effects))

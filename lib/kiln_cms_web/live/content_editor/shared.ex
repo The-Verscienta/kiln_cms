@@ -120,6 +120,23 @@ defmodule KilnCMSWeb.ContentEditor.Shared do
     |> Enum.map(&{user_label(&1), &1.id})
   end
 
+  @doc """
+  The people a `:user` custom field may name (#2044): everyone with a role on
+  the site, admins, editors and viewers alike — the roster
+  `Changes.ApplyCustomFields` validates a value against. `[]`, with no read,
+  when none of `field_definitions` is a `:user` field.
+  """
+  def site_people(org, field_definitions) do
+    if Enum.any?(field_definitions, &(&1.field_type == :user)) do
+      org
+      |> KilnCMS.Accounts.Scoping.users_with_tier([:admin, :editor, :viewer])
+      |> Enum.sort_by(&user_label/1)
+      |> Enum.map(&{user_label(&1), &1.id})
+    else
+      []
+    end
+  end
+
   def changeset_errors(%Phoenix.HTML.Form{source: source}), do: changeset_errors(source)
   def changeset_errors(%AshPhoenix.Form{source: source}), do: changeset_errors(source)
   def changeset_errors(%Ash.Changeset{errors: errors}), do: errors

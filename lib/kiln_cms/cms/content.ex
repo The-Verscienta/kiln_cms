@@ -3455,11 +3455,20 @@ defmodule KilnCMS.CMS.Content do
       preparations do
         prepare KilnCMS.CMS.Preparations.RejectUnsortableCalculations
 
+        # Under a preview grant (#1887), the record it names comes back as its
+        # working copy. Ahead of the masking below, so the snapshots it masks
+        # are the ones the copy holds.
+        prepare KilnCMS.CMS.Preparations.PreviewWorkingCopy
+
         # A `:reference` snapshot names its target's id, slug and title as
         # they were when this record was saved, a draft's included: leave out
         # the ones the actor could not read directly. Read-side only; the
         # stored value is untouched, and editors read it whole.
         prepare KilnCMS.CMS.Preparations.MaskUnreadableReferences
+
+        # A private custom field (#2044) is for the site's editors and admins:
+        # leave its value out for every other reader. Same skips as above.
+        prepare KilnCMS.CMS.Preparations.MaskPrivateFields
       end
 
       # Invalidate the public delivery cache whenever published content changes
@@ -3591,10 +3600,16 @@ defmodule KilnCMS.CMS.Content do
         # (the default). A restricted editor reading an out-of-scope type falls
         # through to the published/audience filters below, i.e. reads it like
         # any signed-in consumer.
+        #
+        # A verified preview token (#1887) adds the one record it names, on the
+        # primary read only (`Checks.PreviewGrant`): what an editor with draft
+        # visibility chose to share, readable by a headless front end through
+        # the same JSON:API reads it uses for published content.
         policy action_type(:read) do
           authorize_if KilnCMS.CMS.Checks.ReadableContentType
           authorize_if expr(^ref(:state) == :published and ^ref(:audience) == :public)
           authorize_if KilnCMS.CMS.Checks.InAudience
+          authorize_if KilnCMS.CMS.Checks.PreviewGrant
         end
 
         # Passphrase-locked content (#496) is invisible to every authorized
@@ -3616,10 +3631,13 @@ defmodule KilnCMS.CMS.Content do
         # Editors still see everything through `ReadableContentType` (and admins
         # through the bypass above); a *restricted* editor reading an
         # out-of-scope type reads it as a consumer does, which here means they
-        # need the passphrase too.
+        # need the passphrase too. A preview token passes the lock as well: it
+        # shares the minter's own view of the record, and `GET /preview/:token`
+        # has always shown a locked draft.
         policy action_type(:read) do
           authorize_if KilnCMS.CMS.Checks.ReadableContentType
           authorize_if expr(is_nil(^ref(:access_password_hash)))
+          authorize_if KilnCMS.CMS.Checks.PreviewGrant
         end
 
         # Authoring and workflow transitions are reserved for editors (and admins

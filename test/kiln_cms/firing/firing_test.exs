@@ -400,6 +400,25 @@ defmodule KilnCMS.Firing.FiringTest do
       assert artifacts.web["html"] =~ "<h2>Hi</h2>"
       assert {:ok, []} = Firing.artifacts_for(:page, page.id, authorize?: false)
     end
+
+    test "surfaces: renders only the named surfaces, and only for a preview (#1887)" do
+      page =
+        CMS.create_page!(
+          %{
+            title: "Draft",
+            slug: slug(),
+            blocks:
+              KilnCMS.TypedFixtures.typed_blocks([%{type: :heading, content: "Hi", order: 0}])
+          },
+          actor: admin()
+        )
+
+      assert {:ok, artifacts} = Engine.fire(page, mode: :preview, surfaces: [:json])
+      assert Map.keys(artifacts) == [:json]
+
+      assert_raise ArgumentError, fn -> Engine.fire(page, surfaces: [:json]) end
+      assert {:ok, []} = Firing.artifacts_for(:page, page.id, authorize?: false)
+    end
   end
 
   describe "document_type/1" do

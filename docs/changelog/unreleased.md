@@ -36,6 +36,31 @@ carries the reasoning.
   matches nothing for an anonymous reader. GraphQL's `customFilter` takes
   the same shape. Without `target`, link filters mean what they did.
 
+<a id="private-fields"></a>
+
+- **Private custom fields and a `:user` field type
+  ([#2044](https://github.com/The-Verscienta/kiln_cms/issues/2044)).** A
+  `FieldDefinition` with `private: true` (additive migration: one boolean
+  column, default false) holds a value for the site's editors and admins
+  only. It is left out of every fired artifact
+  (`KilnCMS.Firing.CustomFields`, for every caller, visual-editing previews
+  included) and out of every content read below editor
+  (`Preparations.MaskPrivateFields`, beside the reference mask and skipped by
+  the same rule). Nothing public is derived from it: computed fields cannot
+  read it, slug and SEO patterns read `[field:<name>]` as empty, the
+  provenance manifest ignores a private `ai_disclosure`, and the schema
+  export leaves it out. Below editor, `custom_filter` / `custom_sort` treat
+  it as unknown (decided by the caller's tier even on `authorize?: false`
+  delivery reads), so a value cannot be probed. Only plain top-level types
+  can be private, and `searchable`, `names_record`, `deliver_plain` and a
+  `:fallback` localization are refused beside it. Flipping it re-fires the
+  type; the per-site map of private names (`PrivateFields.all/1`) is cached
+  with the type registry and dropped with it after commit. The new core
+  `:user` type stores a console account's id, validated against the site's
+  people (`Scoping.users_with_tier/2`), and is always private; the editor
+  picks from the same roster, and the fields admin offers *Private* on every
+  type that can be.
+
 <a id="live-blog-posting"></a>
 
 - **`LiveBlogPosting` in schema.org output
@@ -73,6 +98,46 @@ carries the reasoning.
   minutes under the `:probe` rate limit, and dropped by
   `KilnCMS.Cache.bust_sitemap/1` with the main sitemap, so an unpublished
   article is gone on the next request.
+
+<a id="headless-draft-mode"></a>
+
+- **Headless draft mode: a preview token opens its draft on JSON:API and the
+  fired-artifact read
+  ([#1887](https://github.com/The-Verscienta/kiln_cms/issues/1887)).** A
+  front end that renders pages from the plain reads could not render a
+  shared draft in its own templates: a token unlocked only `GET
+  /preview/:token` (a thin JSON) and the stega-annotated visual-editing
+  read, so verscienta.com redirected reviewers to Kiln's generic preview
+  page. Presented as `x-kiln-preview-token` (or `?preview_token=`), the token
+  is now a read grant for its one record on `/api/json` and on `GET
+  /api/content/:type/:slug`. `KilnCMSWeb.Plugs.PreviewGrant` verifies it once,
+  pins it to the serving site and puts a `KilnCMS.CMS.PreviewGrant` in the Ash
+  context's `:shared` key; the new `Checks.PreviewGrant` in both content read
+  policies (the lock one included) admits `id == grant.id` on the primary
+  read only. No `authorize?: false`: `by-slug`, the `/published` twins,
+  search and writes are unchanged, and GraphQL and `/mcp` ignore the token.
+  `LinkEndsReadable` carries the grant into its re-read, so `include=` keeps
+  the draft's edges to published documents and drops those to other drafts.
+  The artifact route renders the working copy live, on any surface, with
+  `?fields=`/`?expand=`, uncounted and without experiments. A presented
+  token that does not verify is a `404 invalid_preview`, never the anonymous
+  read. For a live document with unpublished edits, JSON:API under the token
+  answers the working copy (`Preparations.PreviewWorkingCopy`), the
+  reference masking honours the grant, and `?expand=` follows the working
+  copy's references. The token is read on `GET`/`HEAD` only; a write ignores
+  it. Responses under a token are `private, no-store` and every response of
+  an honouring route `Vary`s on the header, while GraphQL and search, which
+  ignore the token, keep their caching. A token read is charged to a new
+  `:preview_api` bucket (120/min), the visual-editing read included, which
+  now goes through the same plug. `preview_token`, `unlock` and `passphrase`
+  join `password` in Phoenix's `filter_parameters`, and Sentry events drop
+  the token and grant headers and mask them in the raw query string, which
+  `Sentry.PlugContext` copied verbatim (`SentryFilter`). `/preview/:token`,
+  its live view and the bridge socket verify through the same
+  `PreviewGrant.verify/2`. `Engine.fire/2` takes `surfaces:` for a preview,
+  so a live read renders only the surface it serves. A database outage under
+  a token is a `503`, not `invalid_preview`. Docs: `docs/api.md` →
+  "Headless draft mode".
 
 <a id="change-feed-server"></a>
 
@@ -342,6 +407,38 @@ carries the reasoning.
   ([#2067](https://github.com/The-Verscienta/kiln_cms/pull/2067))
 
 ## Fixed
+
+<a id="tailwind-macos-resign"></a>
+
+- **`mix setup` and `mix assets.build` work on macOS 27.2.** macOS 27.2
+  (arm64) SIGKILLed the tailwind 4.3.0 standalone binary at launch: exit 137
+  with no output, even for `--help`, so `mix assets.build` failed with
+  "`mix tailwind kiln_cms` exited with 137". The binary is a Bun executable
+  whose ad-hoc linker signature does not cover the payload Bun appends, and
+  `codesign --verify` rejects every release from 4.3.0 to 4.3.3, but 4.3.1
+  and later happen to launch. tailwind moves to 4.3.3 (and the `:tailwind`
+  hex package to 0.5.2, which also lifts `:httpc`'s header limit for its own
+  download), and `mix assets.setup` now re-signs the binary ad hoc
+  (`codesign --force --sign -`) on macOS when `codesign --verify` fails, so
+  a later release that macOS kills is covered too. Linux, CI and the Docker
+  build are untouched.
+
+<a id="httpc-header-limit-local"></a>
+
+- **`mix setup`, `mix assets.setup` and `mix deps.compile` work on OTP 29.1.1,
+  loading the CI/Docker `httpc` header-limit patch into Mix's VM only.**
+  OTP 29.1.1 (inets 9.8) caps `:httpc` response headers at 10240 bytes by
+  default, and tailwind, rustler_precompiled (y_ex) and elixir_make
+  (lazy_html, vix) download from GitHub without raising it, so a fresh local
+  setup failed with `{:header_too_long, {:max, 10240}}` whenever GitHub's
+  redirect headers ran over. The three aliases now run
+  `rel/docker/httpc_header_limit.escript` (the one #2062 and #2063 use) with
+  `OUT=_build/httpc_patch/<md5 of the stock beam>/`, once per OTP install, and
+  load the result into the running Mix VM. The OTP install is never written
+  to, `iex`/`mix phx.server`/tests run the stock `httpc`, and a release still
+  copies stock inets. On an OTP without the 10240 default the step does
+  nothing.
+  ([#2080](https://github.com/The-Verscienta/kiln_cms/pull/2080))
 
 <a id="after-commit-effects"></a>
 

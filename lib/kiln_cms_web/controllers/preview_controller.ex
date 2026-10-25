@@ -8,7 +8,7 @@ defmodule KilnCMSWeb.PreviewController do
 
   alias KilnCMS.CMS.ContentSerializer
   alias KilnCMS.CMS.ContentTypes
-  alias KilnCMS.CMS.PreviewToken
+  alias KilnCMS.CMS.PreviewGrant
   alias KilnCMS.CMS.WorkingCopy
   alias KilnCMSWeb.ApiError
 
@@ -19,8 +19,8 @@ defmodule KilnCMSWeb.PreviewController do
   end
 
   def show(conn, %{"token" => token}) do
-    with {:ok, %{type: type, id: id, org_id: org_id}} <- PreviewToken.verify(token),
-         :ok <- same_site(org_id, conn.assigns[:current_org]),
+    with {:ok, %{type: type, id: id, org_id: org_id}} <-
+           PreviewGrant.verify(token, serving_org_id(conn.assigns[:current_org])),
          {:ok, record} <- fetch(type, id, org_id) do
       # The draft the editor is looking at: for a live document with unpublished
       # edits that is the working copy, not the row readers get.
@@ -42,8 +42,9 @@ defmodule KilnCMSWeb.PreviewController do
   # A token minted on one site and presented on another's host is refused
   # (same as `ReleasePreviewLive`): the record must belong to the site that
   # serves it, or a draft would be served under another tenant's name.
-  defp same_site(org_id, %{id: org_id}), do: :ok
-  defp same_site(_org_id, _org), do: :error
+  # `PreviewGrant.verify/2` pins it; no resolved site pins nothing.
+  defp serving_org_id(%{id: org_id}), do: org_id
+  defp serving_org_id(_org), do: nil
 
   defp fetch(type, id, org_id) do
     case ContentTypes.get(type, org_id) do
@@ -53,11 +54,11 @@ defmodule KilnCMSWeb.PreviewController do
       ct ->
         # authorize?: false — (moduledoc) the caller is anonymous, with no
         # actor, and the grant is the `Phoenix.Token` signature
-        # `PreviewToken.verify/1` checked above, which binds the read to the
+        # `PreviewGrant.verify/2` checked above, which binds the read to the
         # ONE record id an editor minted it for. The token's `org_id` is the
         # tenant (#1309): content is org-scoped, so a tenant-less read would be
-        # refused under strict tenancy, and `same_site/2` has already pinned it
-        # to the serving org.
+        # refused under strict tenancy, and `PreviewGrant.verify/2` has already
+        # pinned it to the serving org.
         ContentTypes.get_record(ct, id,
           authorize?: false,
           tenant: org_id,

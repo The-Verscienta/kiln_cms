@@ -29,6 +29,17 @@ defmodule KilnCMSWeb.SentryScrubber do
   keep useful. The trade is deliberate and is why the two lists are separate
   rather than one regex.
 
+  ## Headers and the query string carry bearer grants too (#1887)
+
+  A preview token (`x-kiln-preview-token`, `?preview_token=`) and a passphrase
+  grant (`x-kiln-unlock`, `?unlock=`) are credentials a caller may present on
+  any headless read, and `Sentry.PlugContext` attaches every request header
+  and the **raw** query string to an error event. `scrub_headers/1` drops the
+  credential headers, and `scrub_query_string/1` — called from
+  `KilnCMS.SentryFilter.before_send/1`, because `PlugContext` takes no
+  scrubber for that field — masks the sensitive parameters with the same rule
+  as the body.
+
   ## The update feed carries no client address (#1877)
 
   Every Kiln instance's update check reads kilncms.dev's
@@ -59,11 +70,18 @@ defmodule KilnCMSWeb.SentryScrubber do
 
   # Matched anywhere in the key, case-insensitively.
   @sensitive_substrings ~w(
-    password passwd secret token credential authorization cookie signature private_key
+    password passwd passphrase secret token credential authorization cookie signature private_key
   )
 
-  # Matched as the whole key, case-insensitively — see the moduledoc.
-  @sensitive_exact ~w(code otp pin api_key apikey)
+  # Matched as the whole key, case-insensitively — see the moduledoc. `unlock`
+  # is the passphrase grant's query parameter (#496).
+  @sensitive_exact ~w(code otp pin api_key apikey unlock)
+
+  # Credential headers beyond Sentry's own three (`authorization`,
+  # `authentication`, `cookie`): the API key's alternative header and the two
+  # grants a headless read takes. Any header whose name is otherwise sensitive
+  # (`x-csrf-token`, …) is dropped by the same rule as a body key.
+  @credential_headers ~w(x-api-key x-kiln-unlock x-kiln-preview-token)
 
   @doc """
   `Sentry.PlugContext`'s `:body_scrubber`. Returns the request params with every
@@ -107,13 +125,32 @@ defmodule KilnCMSWeb.SentryScrubber do
   end
 
   @doc """
+  Masks the sensitive parameters of a raw query string (the rule `scrub_params/1`
+  applies to keys), keeping the rest as sent. Anything that is not a string is
+  returned as it is.
+  """
+  @spec scrub_query_string(term()) :: term()
+  def scrub_query_string(query) when is_binary(query) and query != "" do
+    query
+    |> URI.query_decoder()
+    |> Enum.map(fn {key, value} -> if sensitive?(key), do: {key, @mask}, else: {key, value} end)
+    |> URI.encode_query()
+  end
+
+  def scrub_query_string(query), do: query
+
+  @doc """
   `Sentry.PlugContext`'s `:header_scrubber`: Sentry's default (which drops
-  `authorization`, `authentication` and `cookie`), plus the client-address
-  headers on a read of the update-feed route.
+  `authorization`, `authentication` and `cookie`), minus every other credential
+  header (see the moduledoc), plus the client-address headers on a read of the
+  update-feed route.
   """
   @spec scrub_headers(Plug.Conn.t()) :: map()
   def scrub_headers(%Plug.Conn{} = conn) do
-    headers = Sentry.PlugContext.default_header_scrubber(conn)
+    headers =
+      conn
+      |> Sentry.PlugContext.default_header_scrubber()
+      |> Map.reject(fn {name, _} -> name in @credential_headers or sensitive?(name) end)
 
     if update_feed_read?(conn),
       do: Map.drop(headers, @client_address_headers),

@@ -36,6 +36,10 @@ defmodule KilnCMS.Firing.CustomFields do
       target's publish re-fires this document (D13), which brings it back.
       A point-in-time read masks too: today's policy decides what may be
       shown, even of what was stored then.
+    * **private fields are left out** (#2044, `KilnCMS.CMS.PrivateFields`),
+      for every surface and every caller — visual editing fires a preview
+      for anyone holding the page — and before computed fields read their
+      siblings.
     * **geolocation fields become structured data** (#428). A
       `%{"lat", "lng"}` value is a schema.org `Place` with `GeoCoordinates`,
       contributed to the document's `contentLocation` — a property
@@ -49,6 +53,7 @@ defmodule KilnCMS.Firing.CustomFields do
   """
   alias KilnCMS.CMS.Checks.LinkEndsReadable
   alias KilnCMS.CMS.Computed
+  alias KilnCMS.CMS.PrivateFields
   alias KilnCMS.CMS.ReferenceSnapshots
   alias KilnCMS.Media.Snapshot
 
@@ -78,7 +83,14 @@ defmodule KilnCMS.Firing.CustomFields do
       # the stored map whole would keep publishing a value whose definition has
       # since been deleted or renamed — the row survives the destroy, and an
       # ordinary title-only edit never rewrites it.
-      stored = Map.take(stored, Enum.map(definitions, & &1.name))
+      #
+      # A private field (#2044) goes too, before anything reads it: an artifact
+      # is served to anyone at its URL, and a computed field derived from a
+      # private value would publish what it computes.
+      stored =
+        stored
+        |> Map.take(Enum.map(definitions, & &1.name))
+        |> PrivateFields.drop(definitions)
 
       today = Keyword.get_lazy(opts, :today, &Computed.Context.today/0)
 
@@ -94,7 +106,13 @@ defmodule KilnCMS.Firing.CustomFields do
       # formulas nor the field registry of today may edit it — but what an
       # anonymous reader may see of it is today's question, so the unreadable
       # references are left out all the same (labels are not refreshed).
-      %{values: mask_unreadable(stored, Map.get(document, :org_id)), definitions: definitions}
+      # Private fields (#2044) are today's question too.
+      values =
+        stored
+        |> PrivateFields.drop(definitions)
+        |> mask_unreadable(Map.get(document, :org_id))
+
+      %{values: values, definitions: definitions}
     end
   end
 

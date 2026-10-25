@@ -799,7 +799,7 @@ defmodule KilnCMS.MixProject do
       {:lazy_html, ">= 0.1.0", only: :test},
       {:phoenix_live_dashboard, "~> 0.8.3"},
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
-      {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
+      {:tailwind, "~> 0.5.2", runtime: Mix.env() == :dev},
       {:heroicons,
        github: "tailwindlabs/heroicons",
        tag: "v2.2.0",
@@ -939,6 +939,7 @@ defmodule KilnCMS.MixProject do
       # needs to outlive. A task that prints a line and returns does not.
       setup: [
         &refuse_a_spaced_checkout/1,
+        &lift_httpc_header_limit/1,
         "deps.get",
         "ash.setup",
         "assets.setup",
@@ -961,8 +962,14 @@ defmodule KilnCMS.MixProject do
         "run priv/repo/seeds.exs"
       ],
       "e2e.reset": ["ecto.drop --quiet", "e2e.setup"],
+      # `deps.compile` is where y_ex, lazy_html and vix fetch their precompiled
+      # NIFs, so a bare `mix deps.compile` gets the httpc patch too (see
+      # `lift_httpc_header_limit/1`). An alias may run the task it shadows.
+      "deps.compile": [&lift_httpc_header_limit/1, "deps.compile"],
       "assets.setup": [
+        &lift_httpc_header_limit/1,
         "tailwind.install --if-missing",
+        &resign_tailwind_on_macos/1,
         "esbuild.install --if-missing",
         "cmd --cd assets npm install"
       ],
@@ -1025,6 +1032,36 @@ defmodule KilnCMS.MixProject do
     if ml?(), do: ["deps.unlock --unused"], else: []
   end
 
+  # `assets.setup`'s step after `tailwind.install`. The macOS tailwind binary is
+  # a Bun executable whose ad-hoc linker signature does not cover the payload
+  # Bun appends after linking, so `codesign --verify` fails for every release
+  # (4.3.0 to 4.3.3 checked). macOS 27.2 SIGKILLs some of them at launch: 4.3.0
+  # exits 137 with no output, even for `--help`, and `mix assets.build` fails
+  # with "`mix tailwind kiln_cms` exited with 137". Which versions it kills
+  # depends on the kernel's page checks, not on anything a version pin settles.
+  # An ad-hoc re-sign makes the signature valid. It runs on macOS only, and only
+  # while verification fails, so a re-signed binary is left alone; a missing
+  # binary or `codesign` skips it, and a failed re-sign is a warning.
+  defp resign_tailwind_on_macos(_args) do
+    bin = Tailwind.bin_path()
+
+    with {:unix, :darwin} <- :os.type(),
+         true <- File.exists?(bin),
+         codesign when is_binary(codesign) <- System.find_executable("codesign"),
+         {_, status} when status != 0 <-
+           System.cmd(codesign, ["--verify", bin], stderr_to_stdout: true) do
+      case System.cmd(codesign, ["--force", "--sign", "-", bin], stderr_to_stdout: true) do
+        {_, 0} ->
+          Mix.shell().info("Re-signed #{Path.relative_to_cwd(bin)} ad hoc (invalid signature)")
+
+        {out, _} ->
+          Mix.shell().info([:yellow, "Could not re-sign #{bin}: ", out])
+      end
+    end
+
+    :ok
+  end
+
   # `mix setup`'s first step (#1321). One dependency cannot build under a path
   # that contains a space: picosat_elixir, Ash's policy SAT solver. Its Makefile
   # (0.2.3, the latest release) uses absolute paths as make targets, and make
@@ -1053,6 +1090,66 @@ defmodule KilnCMS.MixProject do
 
       Upstream fix, not yet released: https://github.com/bitwalker/picosat_elixir/pull/14
       """)
+    end
+  end
+
+  # `mix setup`'s second step, and the first of `assets.setup` and
+  # `deps.compile`. OTP 29.1.1 (inets 9.8) defaults `:httpc`'s
+  # `max_header_size` to 10240 bytes, settable per request only, and GitHub's
+  # release-download redirects have sent ~10.7 KB of headers (on 2026-10-24;
+  # they vary, and were 5.4 KB later that day). tailwind,
+  # rustler_precompiled (y_ex) and elixir_make (lazy_html, vix) fetch through
+  # `:httpc` without the option and fail with `{:header_too_long, {:max, 10240}}`.
+  #
+  # The Docker builder and CI patch their throwaway OTP with
+  # rel/docker/httpc_header_limit.escript (#2062, #2063). Here the same escript
+  # writes its beam to `_build/httpc_patch/<stock beam md5>/` instead, and this
+  # step loads it into the running Mix VM only: the developer's OTP install is
+  # never written to, and nothing outside this Mix command sees the patch. A
+  # release copies inets from the OTP install, so it ships stock `httpc`.
+  #
+  # An OTP without the 10240 default (29.0 and older, or a release that fixes
+  # it) makes the escript find nothing to patch, and this step does nothing.
+  # Any other failure is a warning, not a stop: the downloads may not be needed.
+  # Delete this step, the aliases above and the escript once tailwind,
+  # rustler_precompiled and elixir_make pass `max_header_size` themselves.
+  defp lift_httpc_header_limit(_args) do
+    with stock when is_list(stock) <- :code.where_is_file(~c"httpc.beam"),
+         dir = httpc_patch_dir(stock),
+         :ok <- build_httpc_patch(dir) do
+      :code.purge(:httpc)
+      {:module, :httpc} = :code.load_abs(String.to_charlist(Path.join(dir, "httpc")))
+    end
+
+    :ok
+  end
+
+  defp httpc_patch_dir(stock) do
+    digest = stock |> File.read!() |> :erlang.md5() |> Base.encode16(case: :lower)
+    Path.join([Path.dirname(Mix.Project.build_path()), "httpc_patch", digest])
+  end
+
+  defp build_httpc_patch(dir) do
+    if File.exists?(Path.join(dir, "httpc.beam")) do
+      :ok
+    else
+      File.mkdir_p!(dir)
+      escript = Path.join([:code.root_dir(), "bin", "escript"])
+      script = Path.join(__DIR__, "rel/docker/httpc_header_limit.escript")
+
+      case System.cmd(escript, [script], env: [{"OUT", dir}], stderr_to_stdout: true) do
+        {_, 0} ->
+          :ok
+
+        {out, _} ->
+          File.rm_rf!(dir)
+
+          if not String.contains?(out, "found 0") do
+            Mix.shell().info([:yellow, "Left :httpc's header limit as it is: ", out])
+          end
+
+          :skip
+      end
     end
   end
 end

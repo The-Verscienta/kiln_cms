@@ -308,7 +308,8 @@ defmodule KilnCMS.CMS.Slugs do
       seo_keywords: Map.get(record, :seo_keywords),
       category_slug: record_category_slug(record),
       slug: record.slug,
-      custom_fields: Map.get(record, :custom_fields),
+      # Without its private fields (#2044): a slug or alias is public.
+      custom_fields: KilnCMS.CMS.PrivateFields.drop_for(Map.get(record, :custom_fields), record),
       # Supplied by the caller rather than walked here (#1597): a bulk alias
       # regeneration over a subtree can build every chain from ONE read of the
       # type's `(id, parent_id, slug)` rows, where walking per record would cost
@@ -493,7 +494,12 @@ defmodule KilnCMS.CMS.Slugs do
   # (An editable-only `[field:…]` pattern still pays one definitions read to
   # learn it has no computed fields; the value it reads is unchanged.)
   defp changeset_custom_fields(changeset, pattern) do
-    raw = changeset_attribute(changeset, :custom_fields)
+    # Without its private fields (#2044), before a computed field can read
+    # them: what a pattern expands to is stored in a public column.
+    raw =
+      changeset
+      |> changeset_attribute(:custom_fields)
+      |> KilnCMS.CMS.PrivateFields.drop_for(changeset_document(changeset), changeset.to_tenant)
 
     case KilnCMS.Slug.Pattern.field_names(pattern) do
       [] -> raw
@@ -526,6 +532,15 @@ defmodule KilnCMS.CMS.Slugs do
         cleared = Map.drop(base, Enum.map(defs, & &1.name))
         context = KilnCMS.CMS.Computed.Context.from_changeset(changeset, cleared)
         KilnCMS.CMS.Computed.derive(defs, context, cleared)
+    end
+  end
+
+  # The record a changeset writes, as `PrivateFields.names_for/2` reads it: an
+  # entry being created carries its type definition on the changeset only.
+  defp changeset_document(changeset) do
+    case Ash.Changeset.get_attribute(changeset, :type_definition_id) do
+      id when is_binary(id) -> Map.put(changeset.data, :type_definition_id, id)
+      _ -> changeset.data
     end
   end
 

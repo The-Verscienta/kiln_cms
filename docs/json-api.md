@@ -233,6 +233,11 @@ order (overriding it usually defeats the point — but it is not an error).
 
 ## Custom fields (`custom_filter` / `custom_sort`)
 
+A **private** custom field (`private: true`, see
+[extending-content.md](extending-content.md)) is not in `custom_fields` for a
+caller below editor, and naming it in `custom_filter` or `custom_sort` is a
+`400` for them, as for a field that does not exist.
+
 Admin-defined custom fields (see
 [extending-content.md](extending-content.md)) live in one `custom_fields`
 JSONB map, so the derived `filter[...]`/`sort=` machinery above can't reach

@@ -65,6 +65,7 @@ the router so preflights are answered before route matching).
 | Public forms | `GET /api/forms/:slug`, `POST /forms/:slug`, `POST /api/forms/:slug` | none (no CSRF by design) | `:form` |
 | Form embed | `GET /forms/:slug/embed` | none | `:delivery` (framing CSP) |
 | Preview | `/preview/:token`, `/preview/:token/live`, `/preview/release/:token` | signed token *is* the credential | `:preview` |
+| Headless draft mode | `GET /api/json/*`, `GET /api/content/:type/:slug` and `GET /api/visual-editing/:type/:slug` with `x-kiln-preview-token` / `?preview_token=` (#1887) | signed token, pinned to the serving site, admits its one record on the primary read only; never read on a write | `:api` + `:preview_api` |
 | Newsletter | `POST /newsletter/subscribe`, `/newsletter/confirm/:token`, `/newsletter/unsubscribe/:token` | honeypot / opaque token; the confirm and unsubscribe GETs only render a page, the POST changes the subscription (#1664) — confirm's POST is also CSRF-checked | `:form` |
 | Billing webhook | `POST /billing/webhooks/stripe` | HMAC over raw body | `:billing_webhook` |
 | ActivityPub | `GET /.well-known/webfinger`, `/actor`, `/actor/outbox`, `/actor/followers`, `/ap/object/:id`; `POST /actor/inbox` | none (GET) / HTTP Signature over the raw body (inbox) | `:probe` (GET) / `:api` (inbox) |
@@ -604,6 +605,18 @@ build if a resource is ever registered without that authorizer.
   access to that record in whatever state it is in. Tokens are the sharing
   mechanism for unpublished work; treat a leaked preview URL as a content leak.
   See residual risk 6.
+- **Headless draft mode (#1887)** — the same token on `/api/json` and the
+  fired-artifact read. It does *not* bypass authorization there:
+  `KilnCMSWeb.Plugs.PreviewGrant` verifies it, pins it to the serving site and
+  puts a grant in the Ash context, and `Checks.PreviewGrant` adds
+  `id == grant.id` to the content read policy for the **primary read** only.
+  The published-only actions, search and every write are unchanged, and an
+  edge to another draft stays hidden (`LinkEndsReadable`). A presented token
+  that does not verify is a 404, never a fall back to the anonymous read.
+  A write never reads the token. Responses are `private, no-store`; every
+  response of an honouring route `Vary`s on the header; the query-string form
+  is filtered from the request log, and Sentry events drop the header and mask
+  the parameter (`KilnCMSWeb.SentryScrubber`).
 
 ### Media (`/uploads/*`)
 - **Unauthenticated access** — local blobs are served by `Plug.Static` with no
