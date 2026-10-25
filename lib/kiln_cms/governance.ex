@@ -93,7 +93,7 @@ defmodule KilnCMS.Governance do
 
   @typedoc """
   One state transition on a document's trail (#1928). `chain` is
-  `KilnCMS.Governance.Chain.verdict/0` for this version, or `:unattested`
+  `t:KilnCMS.Governance.Chain.verdict/0` for this version, or `:unattested`
   when it is anchored past the attested prefix. `propagation` is nil when no
   record matched, and `propagation_missing` then says why: `:pruned` (older
   than `KilnCMS.CMS.Propagation.retention_days/0`) or `:none`.
