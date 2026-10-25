@@ -70,6 +70,22 @@ defmodule KilnCMS.Propagation do
 
   @event [:kiln_cms, :propagation, :complete]
 
+  # What `for_document/3` reads of each delivery: what the trail shows, and
+  # what `KilnCMS.CMS.WebhookDelivery.given_up_at/1` decides from.
+  @trail_delivery_fields [
+    :propagation_id,
+    :endpoint_url,
+    :status,
+    :attempts,
+    :last_error,
+    :delivered_at,
+    :failed_at,
+    :recovered_at,
+    :payload_scrubbed_at,
+    :inserted_at,
+    :updated_at
+  ]
+
   @doc "The telemetry event a settled record emits."
   def telemetry_event, do: @event
 
@@ -300,7 +316,14 @@ defmodule KilnCMS.Propagation do
         CMS.Propagation
         |> Ash.Query.filter(document_type == ^type and document_id == ^id)
         |> Ash.Query.sort(transitioned_at: :asc)
-        |> Ash.Query.load(deliveries: Ash.Query.sort(CMS.WebhookDelivery, inserted_at: :asc))
+        |> Ash.Query.load(
+          deliveries:
+            CMS.WebhookDelivery
+            |> Ash.Query.sort(inserted_at: :asc)
+            # Not `payload`: the document body as sent, once per endpoint, and
+            # nothing the trail shows.
+            |> Ash.Query.select(@trail_delivery_fields)
+        )
     )
   end
 

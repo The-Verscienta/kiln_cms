@@ -16,7 +16,8 @@ history (#338) together per content item. Admin-only.
   - **What readers saw** ([#1928](https://github.com/The-Verscienta/kiln_cms/issues/1928))
     — one row per publish or withdrawal (`publish`, `publish_scheduled`,
     `unpublish`, `unpublish_scheduled`, `archive`, `archive_scheduled`,
-    `destroy`), newest first. Each row carries:
+    `destroy`, and a `restore` of a document that was live when it was
+    trashed), newest first. Times are UTC. Each row carries:
     - **Approver** — the admin on the write. A scheduled transition runs as
       the scheduler, so its approver is whoever last set the schedule it ran
       on (`scheduled_at`, or `unpublish_at` for an embargo end).
@@ -24,9 +25,15 @@ history (#338) together per content item. Admin-only.
       (`KilnCMS.CMS.Propagation`, #1927): not configured, or enqueued at, then
       acknowledged or given up at, each with its gap from the transition.
     - **Webhook endpoints** — every endpoint the transition was sent to, with
-      its delivery time or its terminal failure and error.
+      its delivery time or its terminal failure and error, and, when a later
+      retraction did reach a lost endpoint, when the consumer was told. The
+      delivery ledger keeps 30 days and the records 90, so past 30 days the
+      row counts the endpoints whose delivery rows were pruned and says what
+      the record still knows of them: when the last one answered, or how
+      many were given up on.
     - **Point in time** — the `?as_of=` link at that instant, on withdrawals
-      as well as publishes.
+      as well as publishes. Not on a restore: point-in-time delivery does not
+      model one, and the link would call a live document withdrawn.
     - **Chain** — the history chain's verdict on that version: the document's
       verdict while the version is inside the attested prefix, *anchored, not
       attested* past it (#811), *not yet anchored* past the newest anchor.
@@ -35,9 +42,11 @@ history (#338) together per content item. Admin-only.
     Records carry no version id: the webhook fan-out opens one from the event,
     just after the write commits. Each transition takes the first record of
     its kind opened between its own write and the next transition's. A row
-    with no record says why: nothing was live to update (an archived draft),
-    or the record was pruned (records are kept
-    `KilnCMS.CMS.Propagation.retention_days/0`, 90 by default).
+    with no record says why: nothing was live to take down (an archived
+    draft); a restore, which opens none; the record was pruned (records are
+    kept `KilnCMS.CMS.Propagation.retention_days/0`, 90 by default); or the
+    transition was made before propagation was recorded (1.4), or its record
+    could not be opened.
 
     > **One correction traced end to end.** *Screenshot to come:* it needs a
     > real correction on staging (publish, withdraw, republish) with a CDN
@@ -69,7 +78,8 @@ history (#338) together per content item. Admin-only.
     `reference`, when the record settled in `note`) and six trailing columns
     every other row leaves empty: `cdn_purge`, `cdn_enqueued_at`,
     `cdn_settled_at`, `endpoints` (`<url> delivered <at>` /
-    `<url> failed <at> (<error>)`, `; `-separated), `as_of` and `chain`.
+    `<url> failed <at> (<error>)`, `; `-separated, led by a count of the endpoints whose delivery rows were
+    pruned), `as_of` and `chain`.
 
 ## How it's built
 

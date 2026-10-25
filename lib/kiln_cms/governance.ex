@@ -35,10 +35,9 @@ defmodule KilnCMS.Governance do
   require Ash.Query
 
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Firing.PointInTime
   alias KilnCMS.Governance.Checkpoint
   alias KilnCMS.Governance.Witness
-
-  @publish_actions [:publish, :publish_scheduled]
 
   # See `with_actor/2`.
   @actor_override {__MODULE__, :actor_override}
@@ -95,8 +94,8 @@ defmodule KilnCMS.Governance do
   One state transition on a document's trail (#1928). `chain` is
   `t:KilnCMS.Governance.Chain.verdict/0` for this version, or `:unattested`
   when it is anchored past the attested prefix. `propagation` is nil when no
-  record matched, and `propagation_missing` then says why: `:pruned` (older
-  than `KilnCMS.CMS.Propagation.retention_days/0`) or `:none`.
+  record matched, and `propagation_missing` then says why (`missing_reason/4`).
+  `as_of_url` is nil on a restore, which point-in-time delivery does not model.
   """
   @type transition :: %{
           at: DateTime.t(),
@@ -105,10 +104,10 @@ defmodule KilnCMS.Governance do
           position: pos_integer(),
           scheduled?: boolean(),
           approver: String.t() | nil,
-          as_of_url: String.t(),
+          as_of_url: String.t() | nil,
           chain: atom() | {:tampered, String.t()},
           propagation: map() | nil,
-          propagation_missing: :pruned | :none | nil
+          propagation_missing: :not_measured | :not_live | :pruned | :unrecorded | nil
         }
 
   @doc """
@@ -651,7 +650,7 @@ defmodule KilnCMS.Governance do
             changes
             |> Enum.map(fn {field, new} -> {field, {Map.get(last_known, field), new}} end)
             |> Enum.sort_by(&elem(&1, 0)),
-          publish?: version.version_action_name in @publish_actions
+          publish?: version.version_action_name in PointInTime.publish_actions()
         }
 
         {event, Map.merge(last_known, changes)}
@@ -668,19 +667,10 @@ defmodule KilnCMS.Governance do
   def as_of_url(item, %DateTime{} = at),
     do: "/api/content/#{item.type}/#{item.slug}?as_of=#{DateTime.to_iso8601(at)}"
 
-  # The version actions that move a document onto or off the delivery path,
-  # and the propagation kind each would open (`KilnCMS.Propagation.kind/2`).
-  # An archive or a trash of a draft is a transition too, and opens no record:
-  # nothing was being served.
-  @transition_kinds %{
-    publish: :publish,
-    publish_scheduled: :publish,
-    unpublish: :withdraw,
-    unpublish_scheduled: :withdraw,
-    archive: :withdraw,
-    archive_scheduled: :withdraw,
-    destroy: :withdraw
-  }
+  # Restoring a trashed document that was live when it was trashed puts it back
+  # on the delivery path. It fires `restored`, not `published`, so it opens no
+  # propagation record, and point-in-time delivery does not model it either.
+  @restore_action :restore
 
   # The field a scheduled transition was set up through: whoever last set it
   # approved the transition the scheduler later ran.
@@ -704,15 +694,16 @@ defmodule KilnCMS.Governance do
   # of its kind opened between its own write and the next transition's.
   defp transitions(timeline, records, chain, item) do
     events_asc = Enum.reverse(timeline)
-    transitions_asc = Enum.filter(events_asc, &Map.has_key?(@transition_kinds, &1.action))
-    nexts = Enum.drop(transitions_asc, 1) ++ [nil]
+    transitions_asc = transition_events(events_asc)
+    # Each transition's successor bounds its record window; only its event matters.
+    nexts = Enum.map(Enum.drop(transitions_asc, 1), &elem(&1, 0)) ++ [nil]
 
     {rows, _unclaimed} =
       transitions_asc
       |> Enum.zip(nexts)
-      |> Enum.map_reduce(records, fn {event, next}, unclaimed ->
-        kind = Map.fetch!(@transition_kinds, event.action)
-        record = Enum.find(unclaimed, &claims?(&1, kind, event, next))
+      |> Enum.map_reduce(records, fn {{event, kind, was_live?}, next}, unclaimed ->
+        restore? = event.action == @restore_action
+        record = if not restore?, do: Enum.find(unclaimed, &claims?(&1, kind, event, next))
 
         row = %{
           at: event.at,
@@ -721,19 +712,52 @@ defmodule KilnCMS.Governance do
           position: event.position,
           scheduled?: Map.has_key?(@schedule_fields, event.action),
           approver: approver(event, events_asc),
-          as_of_url: as_of_url(item, event.at),
+          # Point-in-time delivery does not model a restore (see above), so a
+          # link would answer "withdrawn" for a document readers could see.
+          as_of_url: if(not restore?, do: as_of_url(item, event.at)),
           chain: row_verdict(event.position, chain),
           propagation: record && describe_propagation(record),
-          # Why there is no record, when there is none: pruned by the nightly
-          # trigger, or never opened (nothing was live, or the transition
-          # predates propagation records).
-          propagation_missing: if(is_nil(record), do: missing_reason(event.at))
+          propagation_missing:
+            if(is_nil(record), do: missing_reason(event, kind, was_live?, DateTime.utc_now()))
         }
 
         {row, if(record, do: List.delete(unclaimed, record), else: unclaimed)}
       end)
 
     Enum.reverse(rows)
+  end
+
+  # The transitions among the versions, ascending, each as `{event, kind,
+  # was_live?}`: whether the document was on the delivery path just before.
+  # A restore counts only when the document was live as it went into the
+  # trash; restoring a trashed draft puts nothing in front of readers.
+  defp transition_events(events_asc) do
+    {transitions, _state} =
+      Enum.flat_map_reduce(events_asc, {false, false}, fn event, {live?, trashed_live?} ->
+        case transition_kind(event.action) do
+          :publish ->
+            {[{event, :publish, live?}], {true, false}}
+
+          :withdraw ->
+            {[{event, :withdraw, live?}], {false, event.action == :destroy and live?}}
+
+          nil when event.action == @restore_action and trashed_live? ->
+            {[{event, :publish, live?}], {true, false}}
+
+          nil ->
+            {[], {live?, trashed_live?}}
+        end
+      end)
+
+    transitions
+  end
+
+  defp transition_kind(action) do
+    cond do
+      action in PointInTime.publish_actions() -> :publish
+      action in PointInTime.withdraw_actions() -> :withdraw
+      true -> nil
+    end
   end
 
   defp claims?(record, kind, event, next) do
@@ -761,14 +785,35 @@ defmodule KilnCMS.Governance do
   defp sets?(event, field),
     do: Enum.any?(event.diffs, &match?({^field, {_old, new}} when not is_nil(new), &1))
 
-  defp missing_reason(at) do
-    retention = KilnCMS.CMS.Propagation.retention_days()
-
-    if DateTime.diff(DateTime.utc_now(), at, :day) >= retention, do: :pruned, else: :none
+  @doc false
+  # Why a transition has no propagation record. Public for its test.
+  #
+  #   * `:not_measured` — a restore, which opens none;
+  #   * `:not_live` — a withdrawal of a document that was not live: nothing to
+  #     take down, so nothing to measure;
+  #   * `:pruned` — older than the records are kept;
+  #   * `:unrecorded` — anything else: the transition predates propagation
+  #     records (1.4), or its record could not be opened. Never "nothing was
+  #     live": a publish always opens one.
+  @spec missing_reason(map(), :publish | :withdraw, boolean(), DateTime.t()) ::
+          :not_measured | :not_live | :pruned | :unrecorded
+  def missing_reason(event, kind, was_live?, now) do
+    cond do
+      event.action == @restore_action -> :not_measured
+      kind == :withdraw and not was_live? -> :not_live
+      DateTime.diff(now, event.at, :day) >= KilnCMS.CMS.Propagation.retention_days() -> :pruned
+      true -> :unrecorded
+    end
   end
 
   # The record flattened for display and export: the CDN purge, then each
   # endpoint's delivery or terminal failure.
+  #
+  # The delivery ledger is pruned sooner than the records are (30 days against
+  # 90, failed retractions kept), so `endpoints` can list fewer endpoints than
+  # the transition went to: `endpoints_pruned` counts the missing ones, and
+  # the settle-time `endpoint_latency_ms` / `endpoints_failed` still say how
+  # they all fared.
   defp describe_propagation(record) do
     %{
       id: record.id,
@@ -778,6 +823,13 @@ defmodule KilnCMS.Governance do
       endpoint_latency_ms: record.endpoint_latency_ms,
       cdn_latency_ms: record.cdn_latency_ms,
       endpoints_expected: record.endpoints_expected,
+      endpoints_failed: record.endpoints_failed,
+      endpoints_pruned: max(record.endpoints_expected - length(record.deliveries), 0),
+      # When the last endpoint answered, from the latency stamped at settle:
+      # it outlives the deliveries it was measured from.
+      all_delivered_at:
+        record.endpoint_latency_ms &&
+          DateTime.add(record.transitioned_at, record.endpoint_latency_ms, :millisecond),
       cdn: %{
         status: record.cdn_status,
         enqueued_at: record.cdn_enqueued_at,
@@ -790,25 +842,33 @@ defmodule KilnCMS.Governance do
             status: delivery.status,
             attempts: delivery.attempts,
             delivered_at: delivery.delivered_at,
-            # A delivery is given up on by its last attempt, the row's last write.
-            failed_at: if(delivery.status == :failed, do: delivery.updated_at),
+            failed_at: KilnCMS.CMS.WebhookDelivery.given_up_at(delivery),
+            # A later retraction of the document reached this endpoint after
+            # all (#1926): the consumer was told, late.
+            recovered_at: delivery.recovered_at,
             error: if(delivery.status == :failed, do: delivery.last_error)
           }
         end)
     }
   end
 
+  @doc false
   # The chain's verdict on ONE version (#1928): the document's own verdict
   # while the version sits inside the attested prefix, and a weaker statement
-  # past it. A tampered chain vouches for none of its rows.
-  defp row_verdict(_position, %{verdict: {:tampered, _reason}}), do: :tampered
-  defp row_verdict(_position, %{head: nil}), do: :unanchored
+  # past it. A tampered chain vouches for none of its rows. Public for its test.
+  @spec row_verdict(pos_integer(), map()) :: atom()
+  def row_verdict(_position, %{verdict: {:tampered, _reason}}), do: :tampered
+  def row_verdict(_position, %{head: nil}), do: :unanchored
 
-  defp row_verdict(position, %{head: head}) when position > head.version_count,
+  def row_verdict(position, %{head: head}) when position > head.version_count,
     do: :unanchored
 
-  defp row_verdict(position, %{gap: {:gap, attested, _head}}) when position > attested,
+  def row_verdict(position, %{gap: {:gap, attested, _head}}) when position > attested,
     do: :unattested
 
-  defp row_verdict(_position, %{verdict: verdict}), do: verdict
+  # Inside the attested prefix of a chain with a gap (#811): the document's
+  # verdict is the weaker one its unattested head earns, but this version is
+  # covered by an anchor whose signature verifies.
+  def row_verdict(_position, %{gap: {:gap, _attested, _head}}), do: :verified
+  def row_verdict(_position, %{verdict: verdict}), do: verdict
 end

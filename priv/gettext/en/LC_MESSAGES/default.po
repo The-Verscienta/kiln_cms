@@ -168,6 +168,13 @@ msgstr ""
 msgid "%{count} editing"
 msgstr ""
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} endpoint given up on"
+msgid_plural "%{count} endpoints given up on"
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} failing"
@@ -281,6 +288,11 @@ msgid "%{count} more on %{date} — show the week"
 msgid_plural "%{count} more on %{date} — show the week"
 msgstr[0] ""
 msgstr[1] ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} ms"
+msgstr ""
 
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -410,6 +422,11 @@ msgid "%{count} running experiment is not producing usable results."
 msgid_plural "%{count} running experiments are not producing usable results."
 msgstr[0] ""
 msgstr[1] ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} s"
+msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -606,6 +623,11 @@ msgstr ""
 msgid "%{forms} form allowlist(s) and %{sites} site-wide embed default(s) name sites outside EMBED_ORIGINS, which caps which sites may frame forms on this deployment. Those sites are dropped from what is served, so an iframe of the form on them is blank. The saved lists are unchanged."
 msgstr ""
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{hours} h %{min} min"
+msgstr ""
+
 #: lib/kiln_cms_web/components/block_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{label}: %{message}"
@@ -619,6 +641,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{meaning} Review date: %{date}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{min} min %{sec} s"
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -1350,6 +1377,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "A request whose Host header matches no organization is served the default organization's content, branding and analytics — including a bare hostname, an IP address, or a Host a caller made up. With one organization that is the same site either way. With more than one it is another tenant's."
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "A restore puts the document back without a propagation record"
 msgstr ""
 
 #: lib/kiln_cms_web/live/experiment_live.ex
@@ -2188,6 +2220,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "All content types"
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "All endpoints delivered by"
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -6184,7 +6221,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
-msgid "Each publish and withdrawal, who approved it, and when the CDN and every webhook endpoint caught up."
+msgid "Each publish and withdrawal, who approved it, and when the CDN and every webhook endpoint caught up. Times are UTC."
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -10547,7 +10584,12 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
-msgid "No propagation record — nothing was live to update"
+msgid "No propagation record — made before propagation was recorded (1.4), or its record could not be opened"
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "No propagation record — nothing was live to take down"
 msgstr ""
 
 #: lib/kiln_cms_web/live/feed_settings_live.ex
@@ -14659,6 +14701,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Sent for review — an admin will publish when ready."
 msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sent to %{count} endpoint whose delivery detail was pruned (kept %{days} days)."
+msgid_plural "Sent to %{count} endpoints whose delivery detail was pruned (kept %{days} days)."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -19983,6 +20032,11 @@ msgstr ""
 msgid "at least %{min}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "back from the trash, live again"
+msgstr ""
+
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "block %{index}"
@@ -21168,6 +21222,11 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "today"
 msgstr "today"
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "told later"
+msgstr ""
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex

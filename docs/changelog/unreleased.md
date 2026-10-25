@@ -38,9 +38,16 @@ carries the reasoning.
   position still lines up. A propagation record carries no version id; each
   transition takes the first record of its kind opened between its own write
   and the next transition's (`KilnCMS.Propagation.for_document/3`, read as the
-  webhooks system actor and failing closed). No new resource, no migration.
-  The guide's end-to-end screenshot of one real correction is still to come:
-  it needs staging data.
+  webhooks system actor and failing closed). A restore of a document trashed
+  while live is a row too. Past the delivery ledger's 30 days the row counts
+  the endpoints whose rows were pruned instead of claiming there were none.
+  Alongside: `webhook_deliveries` gains a nullable `failed_at`, stamped when a
+  delivery is given up on, so a later recovery stamp or the payload scrub no
+  longer moves the reported give-up time (`WebhookDelivery.given_up_at/1`,
+  also used by the lost-retractions panel); and point-in-time delivery now
+  treats `archive_scheduled` as a withdrawal, where it used to keep serving
+  the last publish. The guide's end-to-end screenshot of one real correction
+  is still to come: it needs staging data.
 
 <a id="private-fields"></a>
 

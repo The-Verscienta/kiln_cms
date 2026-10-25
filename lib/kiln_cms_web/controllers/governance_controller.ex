@@ -175,7 +175,7 @@ defmodule KilnCMSWeb.GovernanceController do
         Enum.map(trail.lost_retractions, fn lost ->
           [
             "retraction_lost",
-            DateTime.to_iso8601(lost.failed_at),
+            iso(lost.failed_at),
             lost.event,
             nil,
             nil,
@@ -206,7 +206,7 @@ defmodule KilnCMSWeb.GovernanceController do
           to_string(propagation.cdn.status),
           iso(propagation.cdn.enqueued_at),
           iso(propagation.cdn.settled_at),
-          Enum.map_join(propagation.endpoints, "; ", &endpoint_cell/1),
+          endpoints_cell(propagation),
           transition.as_of_url,
           chain_status(transition.chain)
         ]
@@ -220,17 +220,46 @@ defmodule KilnCMSWeb.GovernanceController do
 
   defp propagation_note(%{propagation: %{}}), do: "not yet settled"
   defp propagation_note(%{propagation_missing: :pruned}), do: "propagation record pruned"
-  defp propagation_note(_transition), do: "no propagation record"
+  defp propagation_note(%{propagation_missing: :not_live}), do: "nothing was live to take down"
+  defp propagation_note(%{propagation_missing: :not_measured}), do: "restores are not measured"
 
-  # `<url> delivered <at>`, `<url> failed <at> (<error>)` or `<url> pending`.
+  defp propagation_note(_transition),
+    do: "no propagation record (made before 1.4, or not recorded)"
+
+  # One entry per endpoint still in the ledger, `; `-separated, led by what the
+  # record says of the ones whose delivery rows were pruned (#1928).
+  defp endpoints_cell(propagation) do
+    pruned =
+      if propagation.endpoints_pruned > 0 do
+        [
+          "#{propagation.endpoints_pruned} endpoint(s) pruned from the ledger" <>
+            pruned_outcome(propagation)
+        ]
+      else
+        []
+      end
+
+    Enum.join(pruned ++ Enum.map(propagation.endpoints, &endpoint_cell/1), "; ")
+  end
+
+  defp pruned_outcome(%{all_delivered_at: %DateTime{} = at}),
+    do: ", all delivered by #{iso(at)}"
+
+  defp pruned_outcome(%{endpoints_failed: failed}) when is_integer(failed) and failed > 0,
+    do: ", #{failed} given up on"
+
+  defp pruned_outcome(_propagation), do: ""
+
+  # `<url> delivered <at>`, `<url> failed <at> (<error>)[ recovered <at>]` or
+  # `<url> pending`.
   defp endpoint_cell(%{status: :succeeded} = endpoint),
     do: "#{endpoint.url} delivered #{iso(endpoint.delivered_at)}"
 
-  defp endpoint_cell(%{status: :failed, error: nil} = endpoint),
-    do: "#{endpoint.url} failed #{iso(endpoint.failed_at)}"
-
-  defp endpoint_cell(%{status: :failed} = endpoint),
-    do: "#{endpoint.url} failed #{iso(endpoint.failed_at)} (#{endpoint.error})"
+  defp endpoint_cell(%{status: :failed} = endpoint) do
+    "#{endpoint.url} failed #{iso(endpoint.failed_at) || "at an unrecorded time"}" <>
+      if(endpoint.error, do: " (#{endpoint.error})", else: "") <>
+      if(endpoint.recovered_at, do: " recovered #{iso(endpoint.recovered_at)}", else: "")
+  end
 
   defp endpoint_cell(endpoint), do: "#{endpoint.url} #{endpoint.status}"
 

@@ -62,6 +62,27 @@ defmodule KilnCMS.Firing.PointInTimeTest do
              PointInTime.read(org, CMS.Post, post.id, :json, before_publish)
   end
 
+  # #1928: an embargo end whose expiry action is `:archive` takes the document
+  # down exactly as `:archive` does. Left out of the state actions, the read
+  # answered with the publish before it, as if the document were still live.
+  test "an archive by the scheduler withdraws it from that moment" do
+    admin = admin()
+    org = KilnCMS.Accounts.default_org_id()
+    post = CMS.create_post!(%{title: "Embargoed", slug: slug()}, actor: admin)
+    post = CMS.publish_post!(post, %{}, actor: admin)
+    while_live = DateTime.utc_now()
+
+    CMS.archive_scheduled_post!(post, %{}, authorize?: false)
+
+    assert {:ok, %{"title" => "Embargoed"}, _} =
+             PointInTime.read(org, CMS.Post, post.id, :json, while_live)
+
+    assert {:error, :withdrawn} =
+             PointInTime.read(org, CMS.Post, post.id, :json, DateTime.utc_now())
+
+    assert :archive_scheduled in PointInTime.withdraw_actions()
+  end
+
   # #692. `replay/4` used to sort on `version_inserted_at` alone. Two versions
   # written in one transaction share an instant, and `id` is a random v4 UUID, so
   # the merge order of that pair was whatever Postgres happened to return — and

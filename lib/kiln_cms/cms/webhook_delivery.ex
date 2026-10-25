@@ -41,6 +41,21 @@ defmodule KilnCMS.CMS.WebhookDelivery do
   @spec retention_days() :: pos_integer()
   def retention_days, do: @retention_days
 
+  @doc """
+  When `delivery` was given up on, or nil when it was not (or when it cannot
+  be told). `failed_at` where the row has it; on a row given up on before
+  that column existed, `updated_at`, but only while nothing has written to
+  the row since: a recovery stamp (`recovered_at`) or the payload scrub moves
+  `updated_at` to their own time, and a wrong give-up time is worse than none.
+  """
+  @spec given_up_at(struct()) :: DateTime.t() | nil
+  def given_up_at(%{status: :failed, failed_at: %DateTime{} = at}), do: at
+
+  def given_up_at(%{status: :failed, recovered_at: nil, payload_scrubbed_at: nil} = delivery),
+    do: delivery.updated_at
+
+  def given_up_at(_delivery), do: nil
+
   admin do
     resource_group :system
     table_columns [:event, :status, :attempts, :last_status, :inserted_at]
@@ -187,7 +202,7 @@ defmodule KilnCMS.CMS.WebhookDelivery do
     # One worker attempt's outcome: bump the attempt counter, record what came
     # back, and (on success / exhaustion) settle the status.
     update :record_attempt do
-      accept [:status, :attempts, :last_status, :last_error, :delivered_at]
+      accept [:status, :attempts, :last_status, :last_error, :delivered_at, :failed_at]
     end
 
     # Recent history for the admin panel, newest first.
@@ -289,6 +304,11 @@ defmodule KilnCMS.CMS.WebhookDelivery do
 
     # When the delivery finally succeeded: the 2xx time at this row's endpoint.
     attribute :delivered_at, :utc_datetime_usec, public?: true
+
+    # When the delivery was given up on: its last attempt failed (#1928). Not
+    # `updated_at`, which a later recovery stamp or the payload scrub moves.
+    # Nil on rows given up on before this column existed.
+    attribute :failed_at, :utc_datetime_usec, public?: true
 
     timestamps()
   end

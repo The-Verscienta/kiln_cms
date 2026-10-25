@@ -260,6 +260,10 @@ defmodule KilnCMS.CMS do
       define :discard_post_changes, action: :discard_changes
       define :unpublish_post, action: :unpublish
       define :archive_post, action: :archive
+      # The scheduler's embargo-end transitions, run by AshOban; interfaces so a
+      # test can run one as the scheduler would (#1928).
+      define :unpublish_scheduled_post, action: :unpublish_scheduled
+      define :archive_scheduled_post, action: :archive_scheduled
       # Freshness attestation (#500) — its own interface, not a `update_post` call
       # with a timestamp, because `last_reviewed_at` is not acceptable input.
       define :mark_post_reviewed, action: :mark_reviewed

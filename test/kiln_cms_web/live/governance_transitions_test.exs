@@ -13,11 +13,13 @@ defmodule KilnCMSWeb.GovernanceTransitionsTest do
 
   @moduletag :capture_log
 
+  import Ecto.Query
   import Phoenix.LiveViewTest
 
   alias KilnCMS.Accounts.User
   alias KilnCMS.CDN
   alias KilnCMS.CMS
+  alias KilnCMS.Governance
 
   @password "password123456"
 
@@ -108,8 +110,12 @@ defmodule KilnCMSWeb.GovernanceTransitionsTest do
         assert has_element?(view, "#{row} [data-role=cdn]", "enqueued")
         assert has_element?(view, "#{row} [data-role=endpoints]", "https://good.test/hook")
         assert has_element?(view, "#{row} [data-role=endpoints]", "delivered")
-        assert has_element?(view, "#{row} [data-role=row-chain]")
       end
+
+      # The publish minted the anchor that covers it (unsigned: no key in the
+      # test build); nothing has anchored the withdrawal after it yet.
+      assert has_element?(view, "#transition-2 [data-role=row-chain]", "intact (unsigned)")
+      assert has_element?(view, "#transition-3 [data-role=row-chain]", "not yet anchored")
 
       # The endpoint that never answered is a terminal failure, with its error.
       assert has_element?(view, "#transition-3 [data-role=endpoints]", "https://dead.test/hook")
@@ -140,7 +146,7 @@ defmodule KilnCMSWeb.GovernanceTransitionsTest do
       assert has_element?(
                view,
                "#transition-2 [data-role=no-propagation]",
-               "No propagation record"
+               "nothing was live to take down"
              )
 
       assert has_element?(view, "#transition-2 [data-role=approver]", to_string(admin.email))
@@ -172,6 +178,246 @@ defmodule KilnCMSWeb.GovernanceTransitionsTest do
       {:ok, view, _html} = live(log_in(conn, admin), ~p"/editor/governance/post/#{post.id}")
       assert has_element?(view, "#transitions", "Never published or withdrawn.")
       refute has_element?(view, "#transitions tbody tr")
+    end
+  end
+
+  describe "what the row says when the ledger has moved on" do
+    test "endpoints whose deliveries were pruned are counted, with how they fared", %{conn: conn} do
+      admin = authed_user(:admin)
+      post = published_then_withdrawn!(admin)
+
+      # The ledger keeps 30 days, the records 90: delete what the nightly prune
+      # would, which keeps a failed retraction.
+      KilnCMS.Repo.delete_all(
+        from(d in "webhook_deliveries", where: d.status != "failed" or d.retraction == false)
+      )
+
+      {:ok, view, _html} = live(log_in(conn, admin), ~p"/editor/governance/post/#{post.id}")
+
+      # The publish: both rows gone, one of them a failure.
+      refute has_element?(view, "#transition-2 [data-role=endpoints]", "No endpoints subscribed")
+
+      assert has_element?(
+               view,
+               "#transition-2 [data-role=endpoints-pruned]",
+               "Sent to 2 endpoints whose delivery detail was pruned"
+             )
+
+      assert has_element?(
+               view,
+               "#transition-2 [data-role=endpoints-pruned]",
+               "1 endpoint given up on"
+             )
+
+      # The withdrawal: the kept failed retraction is still listed by name.
+      assert has_element?(
+               view,
+               "#transition-3 [data-role=endpoints-pruned]",
+               "Sent to 1 endpoint"
+             )
+
+      assert has_element?(view, "#transition-3 [data-role=endpoints]", "https://dead.test/hook")
+
+      csv =
+        conn
+        |> log_in(admin)
+        |> get(~p"/editor/governance/post/#{post.id}/export.csv")
+        |> response(200)
+
+      assert csv =~ "2 endpoint(s) pruned from the ledger, 1 given up on"
+    end
+
+    test "a transition every endpoint received still says when, once its rows are pruned",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      Req.Test.stub(KilnCMS.Webhooks, &Plug.Conn.send_resp(&1, 200, "{}"))
+      CMS.create_webhook_endpoint!(%{url: "https://good.test/hook"}, actor: admin)
+
+      post = CMS.create_post!(%{title: "Quiet Success", slug: slug()}, actor: admin)
+      CMS.publish_post!(post, %{}, actor: admin)
+      drain()
+      KilnCMS.Repo.delete_all("webhook_deliveries")
+
+      {:ok, view, _html} = live(log_in(conn, admin), ~p"/editor/governance/post/#{post.id}")
+
+      assert has_element?(
+               view,
+               "#transition-2 [data-role=endpoints-pruned]",
+               "All endpoints delivered by"
+             )
+    end
+
+    test "a lost retraction later delivered shows when the consumer was told", %{conn: conn} do
+      admin = authed_user(:admin)
+      post = published_then_withdrawn!(admin)
+
+      lost =
+        Enum.find(
+          CMS.list_webhook_deliveries!(authorize?: false),
+          &(&1.event == "post.unpublished" and &1.status == :failed)
+        )
+
+      assert %DateTime{} = gave_up = lost.failed_at
+
+      # The consumer is back; the admin replays the retraction.
+      Req.Test.stub(KilnCMS.Webhooks, &Plug.Conn.send_resp(&1, 200, "{}"))
+      KilnCMS.Webhooks.redeliver(lost)
+      drain()
+
+      recovered = CMS.get_webhook_delivery!(lost.id, authorize?: false)
+      assert recovered.recovered_at
+      # The recovery stamp moved `updated_at`; the give-up time is its own.
+      assert DateTime.compare(recovered.updated_at, gave_up) == :gt
+      assert CMS.WebhookDelivery.given_up_at(recovered) == gave_up
+
+      {:ok, view, _html} = live(log_in(conn, admin), ~p"/editor/governance/post/#{post.id}")
+      assert has_element?(view, "#transition-3 [data-role=recovered]", "told later")
+    end
+  end
+
+  describe "transitions the propagation records do not cover" do
+    test "restoring a document trashed while live is a row of its own", %{conn: conn} do
+      admin = authed_user(:admin)
+      post = CMS.create_post!(%{title: "Back Again", slug: slug()}, actor: admin)
+      post = CMS.publish_post!(post, %{}, actor: admin)
+      CMS.destroy_post!(post, actor: admin)
+      [trashed] = CMS.list_trashed_posts!(actor: admin, query: [filter: [id: post.id]])
+      CMS.restore_post!(trashed, %{}, actor: admin)
+
+      {:ok, view, _html} = live(log_in(conn, admin), ~p"/editor/governance/post/#{post.id}")
+
+      assert has_element?(view, "#transition-3", "destroy")
+      assert has_element?(view, "#transition-4", "restore")
+      assert has_element?(view, "#transition-4", "back from the trash, live again")
+      assert has_element?(view, "#transition-4 [data-role=approver]", to_string(admin.email))
+
+      assert has_element?(
+               view,
+               "#transition-4 [data-role=no-propagation]",
+               "without a propagation record"
+             )
+
+      # Point-in-time delivery does not model a restore: no link that would
+      # call the document withdrawn while readers could see it.
+      refute has_element?(view, "#transition-4 a", "View as of then")
+    end
+
+    test "restoring a trashed draft is not a transition", %{conn: conn} do
+      admin = authed_user(:admin)
+      post = CMS.create_post!(%{title: "Never Live", slug: slug()}, actor: admin)
+      CMS.destroy_post!(post, actor: admin)
+      [trashed] = CMS.list_trashed_posts!(actor: admin, query: [filter: [id: post.id]])
+      CMS.restore_post!(trashed, %{}, actor: admin)
+
+      {:ok, view, _html} = live(log_in(conn, admin), ~p"/editor/governance/post/#{post.id}")
+
+      assert has_element?(view, "#transition-2", "destroy")
+      refute has_element?(view, "#transition-3")
+    end
+
+    test "an embargo end run by the scheduler names whoever set it", %{conn: conn} do
+      admin = authed_user(:admin)
+      post = CMS.create_post!(%{title: "Embargo", slug: slug()}, actor: admin)
+      post = CMS.publish_post!(post, %{}, actor: admin)
+
+      post =
+        CMS.update_post!(post, %{unpublish_at: DateTime.add(DateTime.utc_now(), 3600)},
+          actor: admin
+        )
+
+      CMS.archive_scheduled_post!(post, %{}, authorize?: false)
+
+      {:ok, view, _html} = live(log_in(conn, admin), ~p"/editor/governance/post/#{post.id}")
+
+      assert has_element?(view, "#transition-4", "archive_scheduled")
+      assert has_element?(view, "#transition-4", "run by the scheduler")
+      assert has_element?(view, "#transition-4 [data-role=approver]", to_string(admin.email))
+      assert has_element?(view, "#transition-4 a", "View as of then")
+    end
+  end
+
+  describe "the chain verdict on a row" do
+    test "a tampered chain vouches for none of its rows", %{conn: conn} do
+      admin = authed_user(:admin)
+      post = CMS.create_post!(%{title: "Doctored Row", slug: slug()}, actor: admin)
+      CMS.publish_post!(post, %{}, actor: admin)
+
+      KilnCMS.Repo.update_all(
+        from(v in "posts_versions",
+          where: v.version_source_id == type(^post.id, :binary_id),
+          update: [set: [changes: type(^%{"title" => "Doctored"}, :map)]]
+        ),
+        []
+      )
+
+      {:ok, view, _html} = live(log_in(conn, admin), ~p"/editor/governance/post/#{post.id}")
+      assert has_element?(view, "#transition-2 [data-role=row-chain]", "tampered")
+    end
+
+    test "row_verdict/2 tells the attested prefix from what lies past it" do
+      head = %{version_count: 7}
+      gap = %{verdict: :unsigned, gap: {:gap, 4, 7}, head: head}
+
+      assert Governance.row_verdict(3, gap) == :verified
+      assert Governance.row_verdict(4, gap) == :verified
+      assert Governance.row_verdict(5, gap) == :unattested
+      assert Governance.row_verdict(8, gap) == :unanchored
+
+      assert Governance.row_verdict(2, %{verdict: :unsigned, gap: :none, head: head}) == :unsigned
+
+      assert Governance.row_verdict(2, %{verdict: :unanchored, gap: :none, head: nil}) ==
+               :unanchored
+
+      assert Governance.row_verdict(2, %{verdict: {:tampered, "x"}, gap: gap.gap, head: head}) ==
+               :tampered
+    end
+
+    test "missing_reason/4 never says \"nothing was live\" of a publish" do
+      now = DateTime.utc_now()
+      recent = %{action: :publish, at: now}
+      old = %{action: :publish, at: DateTime.add(now, -91, :day)}
+
+      assert Governance.missing_reason(recent, :publish, false, now) == :unrecorded
+      assert Governance.missing_reason(old, :publish, false, now) == :pruned
+
+      assert Governance.missing_reason(%{action: :unpublish, at: now}, :withdraw, true, now) ==
+               :unrecorded
+
+      assert Governance.missing_reason(%{action: :archive, at: now}, :withdraw, false, now) ==
+               :not_live
+
+      assert Governance.missing_reason(%{action: :restore, at: now}, :publish, false, now) ==
+               :not_measured
+    end
+  end
+
+  describe "WebhookDelivery.given_up_at/1" do
+    test "never reads a later write as the give-up time" do
+      at = ~U[2026-10-01 10:00:00.000000Z]
+      later = ~U[2026-10-02 10:00:00.000000Z]
+
+      row = %{
+        status: :failed,
+        failed_at: nil,
+        recovered_at: nil,
+        payload_scrubbed_at: nil,
+        updated_at: at
+      }
+
+      assert CMS.WebhookDelivery.given_up_at(%{row | failed_at: at, updated_at: later}) == at
+      assert CMS.WebhookDelivery.given_up_at(row) == at
+
+      assert CMS.WebhookDelivery.given_up_at(%{row | recovered_at: later, updated_at: later}) ==
+               nil
+
+      assert CMS.WebhookDelivery.given_up_at(%{
+               row
+               | payload_scrubbed_at: later,
+                 updated_at: later
+             }) ==
+               nil
+
+      assert CMS.WebhookDelivery.given_up_at(%{row | status: :succeeded}) == nil
     end
   end
 
