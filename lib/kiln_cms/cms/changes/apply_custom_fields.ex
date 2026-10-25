@@ -138,6 +138,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   alias Ash.Error.Changes.InvalidAttribute
   alias KilnCMS.CMS.FieldDefinition
+  alias KilnCMS.CMS.PrivateFields
   alias KilnCMS.CMS.WorkingCopy
 
   @impl true
@@ -475,10 +476,27 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   #
   # In dependency order (`Computed.derive/3`), so a formula over another
   # computed field sees the value it derives on this same write.
+  #
+  # A private field (#2044) is out of the formulas' sight: a computed value is
+  # delivered, so one derived from a private value would publish it. The
+  # private values are put back for storage, untouched.
   defp apply_computed(defs, changeset, cleaned, errors) do
-    context = KilnCMS.CMS.Computed.Context.from_changeset(changeset, cleaned)
+    private =
+      Map.take(cleaned, PrivateFields.names_for(written_document(changeset), changeset.to_tenant))
 
-    {KilnCMS.CMS.Computed.derive(defs, context, cleaned), errors}
+    visible = Map.drop(cleaned, Map.keys(private))
+    context = KilnCMS.CMS.Computed.Context.from_changeset(changeset, visible)
+
+    {defs |> KilnCMS.CMS.Computed.derive(context, visible) |> Map.merge(private), errors}
+  end
+
+  # The record a changeset writes, as `PrivateFields.names_for/2` reads it: an
+  # entry being created carries its type definition on the changeset only.
+  defp written_document(changeset) do
+    case Ash.Changeset.get_attribute(changeset, :type_definition_id) do
+      id when is_binary(id) -> Map.put(changeset.data, :type_definition_id, id)
+      _ -> changeset.data
+    end
   end
 
   # The definitions in scope: a compiled content type's (by its type atom) or,
@@ -888,7 +906,30 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   defp coerce(value, %{field_type: :reference} = def, read_opts),
     do: coerce_reference(value, def, read_opts)
 
+  defp coerce(value, %{field_type: :user}, read_opts), do: coerce_user(value, read_opts)
+
   defp coerce(value, def, _read_opts), do: coerce(value, def)
+
+  # A console account (#2044): the user's id, which must name one of the
+  # writing site's people — an admin, or a member with any role
+  # (`Scoping.users_with_tier/2`, the roster the editor's picker offers).
+  # Stored as the bare id; the field is private, so it is never delivered.
+  # A stored id round-trips; an account removed from the site since is
+  # refused on the next write of the field, as a deleted reference target is.
+  defp coerce_user(value, read_opts) do
+    with {:ok, id} <- extract_id(value),
+         true <- site_person?(id, read_opts[:tenant]) do
+      {:ok, id}
+    else
+      _ -> {:error, "must be a person on this site"}
+    end
+  end
+
+  defp site_person?(id, tenant) do
+    tenant
+    |> KilnCMS.Accounts.Scoping.users_with_tier([:admin, :editor, :viewer])
+    |> Enum.any?(&(&1.id == id))
+  end
 
   # --- coercion to JSON-native values ----------------------------------------
 

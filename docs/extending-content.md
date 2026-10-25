@@ -19,12 +19,32 @@ UI" workflow, scoped to fields.
   (`content_type`, `name`, `label`, `field_type`, `required`, `options`,
   `target_type`, `target_types`, `multiple`, `min_items`, `max_items`,
   `max_sources`, `on_target_delete`, `inverse_label`, `inverse_name`,
-  `link_of_id`, `group_of_id`, `help_text`, `position`, `default`, `compute`). Field types: `:string`,
+  `link_of_id`, `group_of_id`, `help_text`, `position`, `default`, `compute`,
+  `private`). Field types: `:string`,
   `:text`, `:integer`, `:float`, `:boolean`, `:date`, `:datetime`, `:url`,
-  `:select`, `:media`, `:reference`, `:group`, `:geolocation`, `:datetime_range`,
-  `:recurrence`, `:computed` — plus
+  `:select`, `:media`, `:reference`, `:group`, `:user`, `:geolocation`,
+  `:datetime_range`, `:recurrence`, `:computed` — plus
   anything a plugin registers (see
   [plugin-extensibility.md](plugin-extensibility.md)).
+- **Private fields (`private: true`)**: a value for the site's editors and
+  admins only. It is edited like any other field and stored with the rest,
+  but it is left out of every fired artifact (so the delivery API,
+  `/api/sync`, `?expand=`, static export and webhooks never carry it) and
+  out of every read by anyone below editor — anonymous callers, viewers, API
+  keys without editor rights — over JSON:API, GraphQL and MCP. Nothing public
+  is derived from it either: a computed field cannot read it, and a slug or
+  SEO pattern's `[field:<name>]` reads it as empty. Below editor,
+  `custom_filter` and `custom_sort` treat it as an unknown field, so a value
+  cannot be probed, and the schema export does not describe it. Only the
+  plain top-level types can be private (`KilnCMS.CMS.PrivateFields.types/0`),
+  and a private field cannot also be `searchable`, `names_record`,
+  `deliver_plain` or `:fallback`-localized: each of those copies the value
+  somewhere public, so the combination is refused. Flipping it re-fires the
+  type's published documents.
+- **A person on the site (`:user`)**: a console account — an admin, or a
+  member with any role — stored as the user's id and picked in the editor
+  from the site's people. It is always private, as Kiln never delivers a
+  console account. A value must name someone on the site when it is written.
 - **Single image or gallery**: a `:media` field holds one image by default
   (stored as an `%{"id", "url", "alt"}` snapshot). With `multiple: true` it
   is a **gallery**: an ordered list of those snapshots, filled in the editor

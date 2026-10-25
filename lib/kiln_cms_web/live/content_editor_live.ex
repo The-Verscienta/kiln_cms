@@ -596,6 +596,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:tag_sections_seen, MapSet.new())
     |> assign(:audiences, audience_options())
     |> assign(:field_definitions, field_definitions)
+    # Who a `:user` field may name (#2044); read only when the type has one.
+    |> assign(:site_people, site_people(org, field_definitions))
     # CRDT collab prototype: when enabled, rich-text blocks sync live
     # between editors over the collab channel (see KilnCMS.Collab.Crdt).
     |> assign(:collab_token, collab_token(actor))
@@ -7220,6 +7222,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               localization={@localization}
               kind={@kind}
               media={@media}
+              people={@site_people}
               actor={@actor}
               tenant={@current_org}
               broken_references={@broken_references}

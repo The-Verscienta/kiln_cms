@@ -1083,6 +1083,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         "A link to other content — one record or a list, of the type you pick below. For a related article, an author or a parent product."
       )
 
+  defp core_type_description(:user),
+    do:
+      gettext(
+        "A person with an account on this site — an admin, editor or viewer. Always private: only editors and admins see it."
+      )
+
   defp core_type_description(:group),
     do:
       gettext(
@@ -2184,6 +2190,53 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   attr :form, :any, required: true
   attr :id, :string, required: true
 
+  # Whether the value is for editors and admins only (#2044,
+  # `KilnCMS.CMS.PrivateFields`). Offered for the types that can be private;
+  # a `:user` field always is, so it says so instead of asking.
+  defp private_field(assigns) do
+    assigns = assign(assigns, :type, to_string(assigns.form[:field_type].value))
+
+    ~H"""
+    <p :if={@type == "user"} id={@id} class="flex items-start gap-2 self-end text-sm">
+      <.icon name="hero-lock-closed" class="mt-0.5 size-4 text-base-content/60" />
+      <span>
+        {gettext("Private")}
+        <span class="block text-xs text-base-content/60">
+          {gettext("A person field is always private: only editors and admins see it.")}
+        </span>
+      </span>
+    </p>
+    <label
+      :if={@type != "user" and @type in private_types()}
+      for={@id}
+      class="flex items-start gap-2 self-end text-sm"
+    >
+      <input type="hidden" name={@form[:private].name} value="false" />
+      <input
+        type="checkbox"
+        id={@id}
+        name={@form[:private].name}
+        value="true"
+        checked={@form[:private].value in [true, "true"]}
+        class="mt-0.5 size-4 rounded border border-base-content/30 accent-primary"
+      />
+      <span>
+        {gettext("Private")}
+        <span class="block text-xs text-base-content/60">
+          {gettext(
+            "Only editors and admins see the value. It is left out of the site, every API, feeds and search."
+          )}
+        </span>
+      </span>
+    </label>
+    """
+  end
+
+  defp private_types, do: Enum.map(KilnCMS.CMS.PrivateFields.types(), &to_string/1)
+
+  attr :form, :any, required: true
+  attr :id, :string, required: true
+
   # The choices of a `:select` field, shown only for that type (#1819).
   defp options_field(assigns) do
     ~H"""
@@ -2425,6 +2478,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             <.options_field form={@form} id="new-field-options" />
             <.default_field form={@form} />
             <.deliver_plain_field form={@form} id="new-field-deliver-plain" />
+            <.private_field form={@form} id="new-field-private" />
             <label class="flex items-center gap-2 self-end text-sm">
               <input type="hidden" name="field_definition[required]" value="false" />
               <input
@@ -2550,6 +2604,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                         class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
                       >
                         {gettext("plain")}
+                      </span>
+                      <span
+                        :if={definition.private}
+                        id={"field-#{definition.id}-private"}
+                        title={gettext("Only editors and admins see the value")}
+                        class="inline-flex items-center gap-1 rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
+                      >
+                        <.icon name="hero-lock-closed" class="size-3" />
+                        {gettext("private")}
                       </span>
                       <span
                         :if={definition.required}
@@ -2734,6 +2797,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     form={@edit.form}
                     id={"edit-field-deliver-plain-#{@edit.id}"}
                   />
+                  <.private_field form={@edit.form} id={"edit-field-private-#{@edit.id}"} />
                   <label class="flex items-center gap-2 self-end text-sm">
                     <input type="hidden" name="field_definition[required]" value="false" />
                     <input

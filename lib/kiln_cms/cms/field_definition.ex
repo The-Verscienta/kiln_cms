@@ -272,7 +272,8 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :deliver_plain,
       :localization,
       :inverse_label,
-      :inverse_name
+      :inverse_name,
+      :private
     ]
 
     create :create, primary?: true
@@ -406,6 +407,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # and a label alone suggests its machine name, as a field's label does.
     change KilnCMS.CMS.Changes.ClearInverse
 
+    # A `:user` field names a console account, which Kiln never delivers
+    # (#2044): it is private whatever was submitted.
+    change KilnCMS.CMS.Changes.PrivateUserField
+
     # Whether a type is event-shaped (#480) is decided by whether it carries a
     # `datetime_range` field, so the cached answer has to drop on a field write,
     # not only on a type write.
@@ -463,6 +468,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # A :computed field must carry a `compute` formula that parses — and no
     # other type may carry one.
     validate KilnCMS.CMS.Validations.ComputeExpression
+
+    # A private field (#2044) is a plain top-level type, and nothing copies
+    # its value somewhere public.
+    validate KilnCMS.CMS.Validations.PrivateField
   end
 
   # Multi-tenancy (epic #336): a field belongs to the same site as the content
@@ -595,6 +604,15 @@ defmodule KilnCMS.CMS.FieldDefinition do
     attribute :inverse_name, :string,
       public?: true,
       constraints: [max_length: KilnCMS.Limits.line()]
+
+    # Whether the value is for the site's editors and admins only (#2044):
+    # kept out of every fired artifact and every read below editor
+    # (`KilnCMS.CMS.PrivateFields`). Plain top-level types only, and never
+    # with `searchable`, `names_record`, `deliver_plain` or a `:fallback`
+    # localization (`Validations.PrivateField`). Always on for a `:user`
+    # field (`Changes.PrivateUserField`). Flipping it re-fires the type's
+    # published documents (`Changes.BustTypeRegistry`).
+    attribute :private, :boolean, allow_nil?: false, default: false, public?: true
 
     # Optional helper text rendered under the input.
     attribute :help_text, :string,

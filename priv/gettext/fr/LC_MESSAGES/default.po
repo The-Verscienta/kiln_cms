@@ -1307,6 +1307,16 @@ msgstr "Une page est atteinte"
 msgid "A passphrase is set. Leave blank to keep it."
 msgstr "Une phrase secrète est définie. Laissez vide pour la conserver."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A person field is always private: only editors and admins see it."
+msgstr "Un champ de personne est toujours privé : seuls les éditeurs et les administrateurs le voient."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A person with an account on this site — an admin, editor or viewer. Always private: only editors and admins see it."
+msgstr "Une personne ayant un compte sur ce site : administrateur, éditeur ou lecteur. Toujours privé : seuls les éditeurs et les administrateurs le voient."
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "A piece of content belongs to one category."
@@ -11269,6 +11279,21 @@ msgstr "À faire uniquement si le lancement est bloqué et qu'aucune publication
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
+msgid "Only editors and admins see the value"
+msgstr "Seuls les éditeurs et les administrateurs voient la valeur"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only editors and admins see the value. It is left out of the site, every API, feeds and search."
+msgstr "Seuls les éditeurs et les administrateurs voient la valeur. Elle est exclue du site, de toutes les API, des flux et de la recherche."
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Only editors and admins see this"
+msgstr "Seuls les éditeurs et les administrateurs voient ceci"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
 msgid "Only one %{source}"
 msgstr "Un seul enregistrement %{source}"
 
@@ -12203,6 +12228,11 @@ msgstr "Couleur primaire"
 #, elixir-autogen, elixir-format
 msgid "Privacy-first content views — aggregate counts only, no visitor tracking."
 msgstr "Vues respectueuses de la vie privée — comptages agrégés uniquement, aucun suivi des visiteurs."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Private"
+msgstr "Privé"
 
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
@@ -20682,6 +20712,12 @@ msgstr "article — vide = tous"
 #, elixir-autogen, elixir-format
 msgid "post, page — empty = all"
 msgstr "article, page — vide = tous"
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "private"
+msgstr "privé"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format

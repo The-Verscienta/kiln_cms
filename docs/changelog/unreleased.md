@@ -21,6 +21,31 @@ carries the reasoning.
 
 ## Added
 
+<a id="private-fields"></a>
+
+- **Private custom fields and a `:user` field type
+  ([#2044](https://github.com/The-Verscienta/kiln_cms/issues/2044)).** A
+  `FieldDefinition` with `private: true` (additive migration: one boolean
+  column, default false) holds a value for the site's editors and admins
+  only. It is left out of every fired artifact
+  (`KilnCMS.Firing.CustomFields`, for every caller, visual-editing previews
+  included) and out of every content read below editor
+  (`Preparations.MaskPrivateFields`, beside the reference mask and skipped by
+  the same rule). Nothing public is derived from it: computed fields cannot
+  read it, slug and SEO patterns read `[field:<name>]` as empty, the
+  provenance manifest ignores a private `ai_disclosure`, and the schema
+  export leaves it out. Below editor, `custom_filter` / `custom_sort` treat
+  it as unknown (decided by the caller's tier even on `authorize?: false`
+  delivery reads), so a value cannot be probed. Only plain top-level types
+  can be private, and `searchable`, `names_record`, `deliver_plain` and a
+  `:fallback` localization are refused beside it. Flipping it re-fires the
+  type; the per-site map of private names (`PrivateFields.all/1`) is cached
+  with the type registry and dropped with it after commit. The new core
+  `:user` type stores a console account's id, validated against the site's
+  people (`Scoping.users_with_tier/2`), and is always private; the editor
+  picks from the same roster, and the fields admin offers *Private* on every
+  type that can be.
+
 <a id="live-blog-posting"></a>
 
 - **`LiveBlogPosting` in schema.org output
