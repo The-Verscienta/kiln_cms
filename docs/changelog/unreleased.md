@@ -328,6 +328,21 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="tailwind-macos-resign"></a>
+
+- **`mix setup` and `mix assets.build` work on macOS 27.2.** macOS 27.2
+  (arm64) SIGKILLed the tailwind 4.3.0 standalone binary at launch: exit 137
+  with no output, even for `--help`, so `mix assets.build` failed with
+  "`mix tailwind kiln_cms` exited with 137". The binary is a Bun executable
+  whose ad-hoc linker signature does not cover the payload Bun appends, and
+  `codesign --verify` rejects every release from 4.3.0 to 4.3.3, but 4.3.1
+  and later happen to launch. tailwind moves to 4.3.3 (and the `:tailwind`
+  hex package to 0.5.2, which also lifts `:httpc`'s header limit for its own
+  download), and `mix assets.setup` now re-signs the binary ad hoc
+  (`codesign --force --sign -`) on macOS when `codesign --verify` fails, so
+  a later release that macOS kills is covered too. Linux, CI and the Docker
+  build are untouched.
+
 <a id="after-commit-effects"></a>
 
 - **A release that rolls back no longer announces or notifies what it undid;
