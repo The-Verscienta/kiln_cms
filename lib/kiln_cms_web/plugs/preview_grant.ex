@@ -11,7 +11,11 @@ defmodule KilnCMSWeb.Plugs.PreviewGrant do
   `?preview_token=` for a caller that cannot set headers (the header first: a
   query string is what access logs and `Referer`s keep).
 
-  With no token the plug does nothing. With one, it:
+  Every response through it says it varies on `x-kiln-preview-token`: the same
+  URL answers the draft to a caller presenting one, so a cache holding the
+  anonymous answer must not hand it on. Beyond that, only a `GET` or `HEAD`
+  reads a token — a write is never widened by one, so on a write it is not
+  consulted at all. With a token on a read, the plug:
 
     * charges the `:preview_api` rate-limit bucket, on top of the pipeline's
       own — a preview read renders live, never from a cache;
@@ -21,14 +25,18 @@ defmodule KilnCMSWeb.Plugs.PreviewGrant do
       invalid_preview`, never a silent fall back to the anonymous read: a
       front end whose token lapsed must learn it has to re-mint, rather than
       quietly render the published page as if it were the draft;
-    * assigns `:preview_grant` (for `KilnCMSWeb.ArtifactController`) and puts
-      the grant in the Ash context's `:shared` key (for the JSON:API reads,
-      where `KilnCMS.CMS.Checks.PreviewGrant` applies it);
-    * marks the response `private, no-store`, whatever a later plug or the
-      handler chose: the body is a function of the token, not of the URL.
+    * assigns `:preview_grant` (for `KilnCMSWeb.ArtifactController` and
+      `KilnCMSWeb.VisualEditingController`) and puts the grant in the Ash
+      context's `:shared` key (for the JSON:API reads, where
+      `KilnCMS.CMS.Checks.PreviewGrant` applies it);
+    * marks the conn as carrying a credential (`credential?/1`), which
+      `KilnCMSWeb.Plugs.PublicCache` reads, and the response
+      `private, no-store` whatever a later plug or the handler chose: the body
+      is a function of the token, not of the URL.
 
-  Mounted on `/api/json` and on the fired-artifact read only. GraphQL and
-  `/mcp` do not take a preview token.
+  Mounted on `/api/json`, the fired-artifact read and the visual-editing read.
+  GraphQL, search and `/mcp` do not take a preview token, so a token sent
+  there changes nothing about their answer or its caching.
   """
   @behaviour Plug
 
@@ -36,6 +44,7 @@ defmodule KilnCMSWeb.Plugs.PreviewGrant do
 
   alias KilnCMS.CMS.PreviewGrant
   alias KilnCMSWeb.ApiError
+  alias KilnCMSWeb.Plugs.PublicCache
 
   @header "x-kiln-preview-token"
   @param "preview_token"
@@ -53,11 +62,17 @@ defmodule KilnCMSWeb.Plugs.PreviewGrant do
 
   @impl true
   def call(conn, _opts) do
-    case token(conn) do
-      nil -> conn
-      token -> grant(conn, token)
+    conn = register_before_send(conn, &PublicCache.put_vary(&1, [@header]))
+
+    case conn.method in ["GET", "HEAD"] and token(conn) do
+      token when is_binary(token) -> grant(conn, token)
+      _no_token_or_a_write -> conn
     end
   end
+
+  @doc "Whether the plug admitted a preview token on `conn` — a per-caller answer."
+  @spec credential?(Plug.Conn.t()) :: boolean()
+  def credential?(conn), do: Map.has_key?(conn.assigns, :preview_grant)
 
   @doc "The preview token `conn` presents, or `nil`."
   @spec token(Plug.Conn.t()) :: String.t() | nil

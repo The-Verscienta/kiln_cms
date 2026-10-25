@@ -24,9 +24,11 @@ defmodule KilnCMSWeb.VisualEditingController do
       route can't leak drafts.
 
   A presented token is the *only* credential consulted: one that does not
-  verify, or names another document, another site, another slug or another
-  locale, is answered `404 invalid_preview` rather than falling back to the
-  bearer or to an anonymous read. A front end whose token lapsed then learns
+  verify or was minted on another site is refused by
+  `KilnCMSWeb.Plugs.PreviewGrant` (which also charges it to the `:preview_api`
+  bucket), and one naming another document, slug or locale here; both are
+  answered `404 invalid_preview` rather than falling back to the bearer or to
+  an anonymous read. A front end whose token lapsed then learns
   it has to re-mint, instead of quietly rendering the published page.
 
   Cross-origin access is governed by `KilnCMSWeb.Plugs.ApiCORS` (the `/api`
@@ -36,17 +38,11 @@ defmodule KilnCMSWeb.VisualEditingController do
   use KilnCMSWeb, :controller
 
   alias KilnCMS.CMS.ContentTypes
-  alias KilnCMS.CMS.PreviewGrant
   alias KilnCMS.Firing.Engine
   alias KilnCMS.VisualEditing
   alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.Params
-  alias KilnCMSWeb.Plugs.PreviewGrant, as: PreviewGrantPlug
   alias KilnCMSWeb.PreviewDraft
-
-  @doc "The request header `show/2` reads a preview token from."
-  @spec token_header() :: String.t()
-  def token_header, do: PreviewGrantPlug.header()
 
   def show(conn, %{"type" => type, "slug" => slug} = params) do
     org_id = KilnCMSWeb.Tenant.current_org_id(conn)
@@ -54,7 +50,7 @@ defmodule KilnCMSWeb.VisualEditingController do
     with true <- VisualEditing.enabled?(),
          ct when not is_nil(ct) <- ContentTypes.get(type, org_id),
          {:ok, record} <- fetch(conn, ct, slug, params, org_id),
-         {:ok, %{json: json}} <- Engine.fire(record, mode: :preview) do
+         {:ok, %{json: json}} <- Engine.fire(record, mode: :preview, surfaces: [:json]) do
       # `custom_fields` now rides on the `:json` artifact itself (#428/#429), so
       # the fired map is used as-is. It is strictly fresher than the record's
       # stored one — computed fields are recomputed at fire time — and
@@ -72,36 +68,32 @@ defmodule KilnCMSWeb.VisualEditingController do
       {:error, :invalid_preview} ->
         ApiError.send(conn, :not_found, "invalid_preview", "Invalid or expired preview token.")
 
+      :unavailable ->
+        conn
+        |> put_resp_header("retry-after", "2")
+        |> ApiError.send(
+          :service_unavailable,
+          "temporarily_unavailable",
+          "Content is temporarily unavailable; retry shortly."
+        )
+
       _ ->
         not_found(conn, "Content not found.")
     end
   end
 
+  # A token the plug admitted is the only credential consulted; it names the
+  # record, and `PreviewDraft` holds the URL to it (type, slug and, when the
+  # caller names one, locale). Without one, the actor's own read policy.
+  defp fetch(%{assigns: %{preview_grant: grant}}, ct, slug, params, _org_id),
+    do: PreviewDraft.fetch(grant, ct, slug, Params.string(params, "locale"))
+
   defp fetch(conn, ct, slug, params, org_id) do
-    case preview_token(conn, params) do
-      nil ->
-        locale = Params.string(params, "locale", KilnCMS.I18n.default_locale())
+    locale = Params.string(params, "locale", KilnCMS.I18n.default_locale())
 
-        case fetch_by_slug(ct.type, slug, locale, Ash.PlugHelpers.get_actor(conn), org_id) do
-          nil -> :error
-          record -> {:ok, record}
-        end
-
-      token ->
-        fetch_by_token(token, ct, slug, Params.string(params, "locale", nil), org_id)
-    end
-  end
-
-  # One reading of the token for every route that takes one
-  # (`KilnCMSWeb.Plugs.PreviewGrant`): the header first, then `?preview_token=`.
-  defp preview_token(conn, _params), do: PreviewGrantPlug.token(conn)
-
-  # The token is verified against this site, then `PreviewDraft` holds the URL
-  # to the record it names (type, slug and, when the caller names one, locale).
-  defp fetch_by_token(token, ct, slug, locale, org_id) do
-    case PreviewGrant.verify(token, org_id) do
-      {:ok, grant} -> PreviewDraft.fetch(grant, ct, slug, locale)
-      {:error, :invalid} -> {:error, :invalid_preview}
+    case fetch_by_slug(ct.type, slug, locale, Ash.PlugHelpers.get_actor(conn), org_id) do
+      nil -> :error
+      record -> {:ok, record}
     end
   end
 

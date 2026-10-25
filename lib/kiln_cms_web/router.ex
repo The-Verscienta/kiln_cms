@@ -282,8 +282,8 @@ defmodule KilnCMSWeb.Router do
   end
 
   # Light per-IP ceiling for public HTML delivery (especially cache-miss paths).
-  # Headless draft mode on the fired-artifact read (#1887); `/api/json` takes
-  # the same plug in `:ash_json_api`.
+  # Headless draft mode on the fired-artifact and visual-editing reads (#1887);
+  # `/api/json` takes the same plug in `:ash_json_api`.
   pipeline :preview_grant do
     plug KilnCMSWeb.Plugs.PreviewGrant
   end
@@ -788,13 +788,17 @@ defmodule KilnCMSWeb.Router do
     get "/search", SearchApiController, :index
   end
 
-  # The fired-artifact read, in its own scope for `:preview_grant`: with a
-  # preview token it renders the draft the token names (#1887). Declared before
-  # the scope below; the paths do not overlap.
+  # The reads that render a draft for a preview token (#1887), in their own
+  # scope for `:preview_grant`: the fired-artifact read, and the visual-editing
+  # bridge's annotated read (#355) — the live working copy, stega-annotated so
+  # an external front end's overlay maps a rendered value back to its Kiln
+  # field; draft-visible to a token or an editor/admin API key, `no-store`,
+  # per-actor. Declared before the scope below; the paths do not overlap.
   scope "/api", KilnCMSWeb do
     pipe_through [:api, :preview_grant]
 
     get "/content/:type/:slug", ArtifactController, :show
+    get "/visual-editing/:type/:slug", VisualEditingController, :show
   end
 
   # Headless delivery of fired artifacts (Kiln v2 — D9). The v2 content API serves
@@ -823,11 +827,6 @@ defmodule KilnCMSWeb.Router do
     get "/content/:type/:id/revisions", RevisionController, :index
     get "/content/:type/:id/revisions/:version_id", RevisionController, :show
     post "/content/:type/:id/revisions/:version_id/restore", RevisionController, :restore
-
-    # Visual-editing bridge (#355): the live working copy, stega-annotated so an
-    # external front end's overlay maps a rendered value back to its Kiln field.
-    # Draft-visible only to an editor/admin API key; `no-store`, per-actor.
-    get "/visual-editing/:type/:slug", VisualEditingController, :show
 
     # Delta sync (Contentful-style): the public corpus once, then upserts and
     # tombstones since a signed cursor — so a mirror can see what was taken

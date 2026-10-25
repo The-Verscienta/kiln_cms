@@ -212,7 +212,8 @@ defmodule KilnCMSWeb.VisualEditingControllerTest do
       assert id == post.id
       assert Stega.clean(title) == "Live title"
       assert %{"field" => "text", "id" => ^id} = Stega.decode(text)
-      assert get_resp_header(conn, "cache-control") == ["no-store"]
+      # The token's answer, marked per-caller by `Plugs.PreviewGrant` (#1887).
+      assert get_resp_header(conn, "cache-control") == ["private, no-store"]
     end
 
     test "a token reads a live document's pending working copy, as /preview/:token does",

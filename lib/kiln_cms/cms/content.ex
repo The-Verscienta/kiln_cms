@@ -3455,6 +3455,11 @@ defmodule KilnCMS.CMS.Content do
       preparations do
         prepare KilnCMS.CMS.Preparations.RejectUnsortableCalculations
 
+        # Under a preview grant (#1887), the record it names comes back as its
+        # working copy. Ahead of the masking below, so the snapshots it masks
+        # are the ones the copy holds.
+        prepare KilnCMS.CMS.Preparations.PreviewWorkingCopy
+
         # A `:reference` snapshot names its target's id, slug and title as
         # they were when this record was saved, a draft's included: leave out
         # the ones the actor could not read directly. Read-side only; the

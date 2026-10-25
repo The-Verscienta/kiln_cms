@@ -81,12 +81,23 @@ carries the reasoning.
   The artifact route renders the working copy live, on any surface, with
   `?fields=`/`?expand=`, uncounted and without experiments. A presented
   token that does not verify is a `404 invalid_preview`, never the anonymous
-  read. Responses under a token are `private, no-store`; anonymous ones
-  `Vary` on the header; a token read is also charged to a new `:preview_api`
-  bucket (120/min); `preview_token`, `unlock` and `passphrase` join
-  `password` in Phoenix's `filter_parameters`. The token-to-record checks of
-  the visual-editing read moved to `KilnCMSWeb.PreviewDraft`, shared by both
-  routes. Docs: `docs/api.md` → "Headless draft mode".
+  read. For a live document with unpublished edits, JSON:API under the token
+  answers the working copy (`Preparations.PreviewWorkingCopy`), the
+  reference masking honours the grant, and `?expand=` follows the working
+  copy's references. The token is read on `GET`/`HEAD` only; a write ignores
+  it. Responses under a token are `private, no-store` and every response of
+  an honouring route `Vary`s on the header, while GraphQL and search, which
+  ignore the token, keep their caching. A token read is charged to a new
+  `:preview_api` bucket (120/min), the visual-editing read included, which
+  now goes through the same plug. `preview_token`, `unlock` and `passphrase`
+  join `password` in Phoenix's `filter_parameters`, and Sentry events drop
+  the token and grant headers and mask them in the raw query string, which
+  `Sentry.PlugContext` copied verbatim (`SentryFilter`). `/preview/:token`,
+  its live view and the bridge socket verify through the same
+  `PreviewGrant.verify/2`. `Engine.fire/2` takes `surfaces:` for a preview,
+  so a live read renders only the surface it serves. A database outage under
+  a token is a `503`, not `invalid_preview`. Docs: `docs/api.md` →
+  "Headless draft mode".
 
 <a id="change-feed-server"></a>
 

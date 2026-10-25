@@ -86,22 +86,23 @@ defmodule KilnCMS.CMS.Checks.LinkEndsReadable do
   Like `readable_ids/3`, but answers each readable record's current label:
   `%{id => %{"slug" => slug, "title" => title}}`. The same reads, so the
   same rule decides what is readable; an id absent from the map is one
-  `actor` may not read (or that no longer exists).
+  `actor` may not read (or that no longer exists). `grant` as for
+  `readable_ids/4`.
   """
-  @spec readable_labels(term(), Ash.UUID.t() | nil, [Ash.UUID.t()]) :: %{
-          optional(Ash.UUID.t()) => %{String.t() => String.t() | nil}
-        }
-  def readable_labels(_actor, _org_id, []), do: %{}
+  @spec readable_labels(term(), Ash.UUID.t() | nil, [Ash.UUID.t()], PreviewGrant.t() | nil) ::
+          %{optional(Ash.UUID.t()) => %{String.t() => String.t() | nil}}
+  def readable_labels(actor, org_id, ids, grant \\ nil)
+  def readable_labels(_actor, _org_id, [], _grant), do: %{}
 
-  def readable_labels(actor, org_id, ids) do
+  def readable_labels(actor, org_id, ids, grant) do
     ContentTypes.blocks_resources()
     |> Enum.map(&elem(&1, 1))
     |> Enum.uniq()
-    |> Enum.flat_map(&readable_in(&1, actor, org_id, ids, [:id, :slug, :title]))
+    |> Enum.flat_map(&readable_in(&1, actor, org_id, ids, [:id, :slug, :title], grant))
     |> Map.new(&{&1.id, %{"slug" => &1.slug, "title" => &1.title}})
   end
 
-  defp readable_in(resource, actor, org_id, ids, select, grant \\ nil) do
+  defp readable_in(resource, actor, org_id, ids, select, grant) do
     resource
     |> Ash.Query.filter(id in ^ids)
     |> Ash.Query.select(select)

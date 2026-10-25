@@ -1238,26 +1238,40 @@ draft with the same templates: present the token as `x-kiln-preview-token`
 
 | Read | With a token |
 |------|--------------|
-| JSON:API `GET /api/json/<type>/:id` (and `include=`) | The draft's record. Its edges to published documents are included; edges to other drafts are not. |
+| JSON:API `GET /api/json/<type>/:id` (and `include=`) | The draft's record — for a live document with unpublished edits, its **working copy** (title, slug, custom fields and every other held attribute). Its edges to published documents are included; edges to other drafts are not. A `:reference` to the draft from another document is shown, not masked. |
 | JSON:API `GET /api/json/<type>` | The draft alongside the published records the filter matches. |
-| `GET /api/content/:type/:slug` | The body, rendered live from the working copy, on any surface, in the published artifact's shape. `?fields=` and `?expand=` apply; `?locale=`, when given, must be the record's. Not counted as a view, no experiment arm. |
+| `GET /api/content/:type/:slug` | The body, rendered live from the working copy, on any surface, in the published artifact's shape. `?fields=` applies; `?expand=` follows the working copy's own `:reference` values. Not counted as a view, no experiment arm. |
+| `GET /api/visual-editing/:type/:slug` | The annotated working copy, as before ([visual-editing-bridge.md](visual-editing-bridge.md)). |
 
 The token is a read grant for **its one record**, in its own site, on the
 primary read. It changes nothing else: `by-slug`, the `/published` twins,
-search, semantic search and autocomplete stay published-only, writes are
-authorized as before, and GraphQL and `/mcp` ignore it. On the artifact route
-the URL must name the token's record (type, slug).
+search, semantic search and autocomplete stay published-only, and GraphQL and
+`/mcp` ignore it — a token sent there changes neither the answer nor its
+caching. A token is read on `GET`/`HEAD` only: a write ignores it and is
+authorized as before. On the artifact and visual-editing routes the URL must
+name the token's record: its type, its slug (the live one or the one its
+working copy holds) and, when `?locale=` is given, its locale. `?locale=` is
+validated as on the published read (`400 unsupported_locale`); the fallback
+options have no chain to walk, since the token names one variant.
+
+JSON:API includes of held **to-many** links (tags, curated related content)
+show the live set; the artifact body shows the working copy's.
 
 - A presented token that is malformed, expired or minted on another site is
   answered `404 invalid_preview`, never with the anonymous read: a front end
   whose token lapsed must re-mint rather than show the published page as the
   draft.
-- Every response under a token is `Cache-Control: private, no-store`. The
-  anonymous responses of both routes carry `Vary: X-Kiln-Preview-Token`; a CDN
-  that ignores `Vary` must bypass its cache for requests carrying the header
-  (or use the query-string form, which is part of the URL).
+- A database outage is a retryable `503` with `Retry-After`, not
+  `invalid_preview`.
+- Every response under a token is `Cache-Control: private, no-store`. Every
+  response of the routes that honour one (JSON:API, the artifact and
+  visual-editing reads) carries `Vary: X-Kiln-Preview-Token`; a CDN that
+  ignores `Vary` must bypass its cache for requests carrying the header (or
+  use the query-string form, which is part of the URL).
 - A read with a token is also charged to the `:preview_api` rate-limit bucket
   (120 a minute per address), on top of `:api`.
+- The token stays out of the request log (`filter_parameters`) and out of
+  error reports: Sentry events drop the header and mask the parameter.
 
 Who may mint: anyone who sees this document's **drafts** as an editor — an
 admin, or an editor whose read scope covers the type (`readable_types`, see

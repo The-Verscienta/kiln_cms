@@ -191,7 +191,9 @@ defmodule KilnCMSWeb.HeadlessDraftModeTest do
           data: %{type: "post", id: post.id, attributes: %{title: "Hijacked"}}
         })
 
-      assert conn.status in [403, 404]
+      # A write never consults the token, so the draft stays as invisible to
+      # it as to any anonymous caller.
+      assert conn.status == 404
       assert CMS.get_post!(post.id, authorize?: false, tenant: post.org_id).title == "Draft title"
     end
   end
@@ -252,7 +254,13 @@ defmodule KilnCMSWeb.HeadlessDraftModeTest do
 
       assert_invalid_preview(artifact("post", theirs.slug, tok))
       assert_invalid_preview(artifact("page", mine.slug, tok))
-      assert_invalid_preview(artifact("post", mine.slug, tok, %{"locale" => "zz"}))
+      # A supported locale that is not the record's names another document…
+      assert_invalid_preview(artifact("post", mine.slug, tok, %{"locale" => "fr"}))
+      # …while an unsupported one is the same 400 the published read answers,
+      # not a lapsed token.
+      assert %{"errors" => [%{"code" => "unsupported_locale"}]} =
+               json_response(artifact("post", mine.slug, tok, %{"locale" => "zz"}), 400)
+
       assert_invalid_preview(artifact("post", mine.slug, expired_token(mine)))
     end
 
@@ -265,6 +273,188 @@ defmodule KilnCMSWeb.HeadlessDraftModeTest do
       assert conn.status == 200
       assert [vary] = get_resp_header(conn, "vary")
       assert vary =~ "x-kiln-preview-token"
+    end
+  end
+
+  describe "a live document's pending working copy" do
+    defp pending(admin) do
+      post = published_post(admin)
+
+      Ash.Seed.update!(post, %{
+        working_title: "Pending title",
+        working_blocks: post.blocks,
+        working_fields: %{"slug" => post.slug <> "-renamed"},
+        working_copy_at: DateTime.utc_now()
+      })
+
+      post
+    end
+
+    test "JSON:API under the token answers the working copy; without it, the live row" do
+      post = pending(user(:admin))
+
+      attrs = fn token ->
+        "/api/json/posts/#{post.id}"
+        |> json_api(token)
+        |> Map.fetch!(:resp_body)
+        |> Jason.decode!()
+        |> get_in(["data", "attributes"])
+      end
+
+      assert %{"title" => "Pending title", "slug" => renamed} = attrs.(token(post))
+      assert renamed == post.slug <> "-renamed"
+      assert %{"title" => "Draft title"} = attrs.(nil)
+
+      # A sparse fieldset still sees the copy: its columns are selected anyway.
+      sparse =
+        "/api/json/posts/#{post.id}?fields[post]=title"
+        |> json_api(token(post))
+        |> Map.fetch!(:resp_body)
+        |> Jason.decode!()
+
+      assert sparse["data"]["attributes"] == %{"title" => "Pending title"}
+    end
+
+    test "the artifact route answers at the live slug and at the held one" do
+      post = pending(user(:admin))
+      tok = token(post)
+
+      for slug <- [post.slug, post.slug <> "-renamed"] do
+        assert json_response(artifact("post", slug, tok), 200)["title"] == "Pending title"
+      end
+    end
+  end
+
+  describe "a passphrase-locked draft" do
+    test "the token passes the lock on JSON:API; nothing else does" do
+      post = draft_post(user(:admin))
+      Ash.Seed.update!(post, %{access_password_hash: Bcrypt.hash_pwd_salt("open sesame")})
+
+      assert json_api("/api/json/posts/#{post.id}").status == 404
+
+      conn = json_api("/api/json/posts/#{post.id}", token(post))
+      assert %{"data" => %{"id" => id}} = Jason.decode!(conn.resp_body)
+      assert id == post.id
+    end
+  end
+
+  describe "surfaces" do
+    test "json_ld renders, and llm is raw Markdown" do
+      post = draft_post(user(:admin))
+      tok = token(post)
+
+      assert %{"@context" => _} =
+               json_response(artifact("post", post.slug, tok, %{"surface" => "json_ld"}), 200)
+
+      llm = artifact("post", post.slug, tok, %{"surface" => "llm"})
+      assert ["text/markdown" <> _] = get_resp_header(llm, "content-type")
+      assert llm.resp_body =~ "Draft heading"
+      refute llm.resp_body =~ ~s("markdown")
+    end
+
+    test "an admin-defined type previews on both routes" do
+      admin = user(:admin)
+      name = "hdm_type_#{System.unique_integer([:positive])}"
+
+      definition =
+        CMS.create_type_definition!(%{name: name, label: "HDM"}, actor: admin)
+
+      entry =
+        CMS.create_entry!(
+          %{title: "Entry draft", slug: slug(), type_definition_id: definition.id},
+          actor: admin
+        )
+
+      tok = token(entry)
+
+      assert json_api("/api/json/entries/#{entry.id}").status == 404
+      conn = json_api("/api/json/entries/#{entry.id}", tok)
+      assert %{"data" => %{"id" => id}} = Jason.decode!(conn.resp_body)
+      assert id == entry.id
+
+      assert json_response(artifact(name, entry.slug, tok), 200)["title"] == "Entry draft"
+    end
+  end
+
+  describe ":reference fields" do
+    setup do
+      admin = user(:admin)
+      field = "hdm_ref_#{System.unique_integer([:positive])}"
+
+      CMS.create_field_definition!(
+        %{
+          content_type: :post,
+          name: field,
+          label: "Ref",
+          field_type: :reference,
+          target_types: ["post"],
+          multiple: true
+        },
+        actor: admin
+      )
+
+      %{admin: admin, field: field}
+    end
+
+    test "a published document's reference to the shared draft is not masked under its token",
+         %{admin: admin, field: field} do
+      draft = draft_post(admin, %{title: "Shared draft"})
+
+      referrer =
+        published_post(admin, %{
+          custom_fields: %{field => [%{"id" => draft.id, "type" => "post"}]}
+        })
+
+      refs = fn token ->
+        "/api/json/posts/#{referrer.id}"
+        |> json_api(token)
+        |> Map.fetch!(:resp_body)
+        |> Jason.decode!()
+        |> get_in(["data", "attributes", "custom_fields", field])
+      end
+
+      assert [%{"id" => id, "title" => "Shared draft"}] = refs.(token(draft))
+      assert id == draft.id
+      assert refs.(nil) in [nil, []]
+    end
+
+    test "?expand= follows the working copy's references, not the live row's edges",
+         %{admin: admin, field: field} do
+      live_target = published_post(admin, %{title: "Live target"})
+      pending_target = published_post(admin, %{title: "Pending target"})
+
+      post =
+        published_post(admin, %{
+          custom_fields: %{field => [%{"id" => live_target.id, "type" => "post"}]}
+        })
+
+      Ash.Seed.update!(post, %{
+        working_title: post.title,
+        working_blocks: post.blocks,
+        working_fields: %{
+          "custom_fields" => %{field => [%{"id" => pending_target.id, "type" => "post"}]}
+        },
+        working_copy_at: DateTime.utc_now()
+      })
+
+      KilnCMS.DataCase.drain_oban()
+
+      body = json_response(artifact("post", post.slug, token(post), %{"expand" => field}), 200)
+      assert [%{"id" => id}] = body["expanded"][field]
+      assert id == pending_target.id
+    end
+  end
+
+  describe "surfaces that ignore the token" do
+    test "search keeps its public caching when a token is presented" do
+      post = draft_post(user(:admin))
+
+      conn =
+        build_conn()
+        |> with_token(token(post))
+        |> get("/api/search", %{"q" => "anything"})
+
+      refute get_resp_header(conn, "cache-control") == ["private, no-store"]
     end
   end
 end

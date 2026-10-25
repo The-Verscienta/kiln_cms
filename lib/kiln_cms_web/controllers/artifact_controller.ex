@@ -160,25 +160,31 @@ defmodule KilnCMSWeb.ArtifactController do
   # artifact has, so a front end renders it with the templates it already
   # has. Never stored or cached (`private, no-store`, no `ETag`), not counted
   # as a view, and no experiment arm — a reviewer sees the document as written.
-  # `?fields=` and `?expand=` apply as on the published read; the locale is
-  # the token's record's, checked against `?locale=` when one is named.
+  # `?fields=` and `?expand=` apply as on the published read, the expansion
+  # following the working copy's own `:reference` values rather than the live
+  # row's edges. The locale is the token's record's: `?locale=` is validated
+  # as on the published read and, when named, must be that record's; the
+  # fallback options have nothing to walk, since the token names one variant.
   defp show_preview(conn, grant, %{"type" => type, "slug" => slug} = params) do
     surface_name = params["surface"] || "json"
 
-    with ct when not is_nil(ct) <- ContentTypes.get(type, grant.org_id),
+    with {:ok, _request} <- DeliveryLocale.parse(params),
+         ct when not is_nil(ct) <- ContentTypes.get(type, grant.org_id),
          surface when not is_nil(surface) <- Map.get(@surfaces, surface_name),
          {:ok, expand} <- parse_expand(params, surface),
          {:ok, fields} <- parse_fields(params, surface),
          {:ok, record} <- PreviewDraft.fetch(grant, ct, slug, Params.string(params, "locale")),
-         {:ok, artifacts} <- Engine.fire(record, mode: :preview),
-         {:ok, body} <- Map.fetch(artifacts, surface),
-         {:ok, body, _expansion_tag} <- expand(body, record, expand) do
+         {:ok, %{^surface => body}} <- Engine.fire(record, mode: :preview, surfaces: [surface]),
+         {:ok, body, _expansion_tag} <- expand(body, record, expand, edges: :from_record) do
       conn
       |> put_resp_header("cache-control", "private, no-store")
       |> DeliveryLocale.put_served(record.locale)
       |> put_fields_header(fields)
       |> respond(surface_name, ArtifactFields.select(body, fields))
     else
+      {:error, _code, _message} = error ->
+        DeliveryLocale.send_error(conn, error)
+
       {:invalid_expand, message} ->
         ApiError.send(conn, :bad_request, "invalid_expand", message)
 
@@ -263,10 +269,12 @@ defmodule KilnCMSWeb.ArtifactController do
     end
   end
 
-  defp expand(body, _record, nil), do: {:ok, body, nil}
+  defp expand(body, record, fields, opts \\ [])
 
-  defp expand(body, record, fields) do
-    case ReferenceExpansion.expand(record, fields, record.org_id) do
+  defp expand(body, _record, nil, _opts), do: {:ok, body, nil}
+
+  defp expand(body, record, fields, opts) do
+    case ReferenceExpansion.expand(record, fields, record.org_id, opts) do
       {:ok, expanded, tag} -> {:ok, Map.put(body, "expanded", expanded), tag}
       :unavailable -> :unavailable
     end
@@ -568,9 +576,6 @@ defmodule KilnCMSWeb.ArtifactController do
     |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
     |> put_resp_header("etag", etag)
     |> put_resp_header("last-modified", http_date(record.updated_at))
-    # The same URL with a preview token answers the draft (#1887), so a cache
-    # holding this published body must not hand it to a caller presenting one.
-    |> KilnCMSWeb.Plugs.PublicCache.put_vary(["x-kiln-preview-token"])
     # The site's surrogate key, so the publish purge `KilnCMS.CDN` sends reaches
     # this response as well as the JSON:API/GraphQL/search ones.
     |> KilnCMSWeb.Plugs.PublicCache.put_surrogate_keys()

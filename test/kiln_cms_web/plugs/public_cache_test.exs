@@ -314,7 +314,7 @@ defmodule KilnCMSWeb.Plugs.PublicCacheTest do
       assert [single] = header(conn, "vary")
 
       assert single |> String.split(", ") |> Enum.sort() ==
-               ~w(accept authorization origin x-kiln-preview-token x-thing)
+               ~w(accept authorization origin x-thing)
 
       assert length(String.split(single, "origin")) == 2
     end
