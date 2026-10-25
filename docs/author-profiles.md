@@ -14,9 +14,11 @@ that is published, world-readable content, so it lives in a content type.
 
 This page builds that type from parts Kiln already has: a content type,
 [custom fields](extending-content.md), and the 1.5 relationships (a
-`:reference` field with `multiple`, link fields and a reverse field). Nothing
-here needs a core change. The [last section](#what-kiln-does-not-do-yet)
-lists what still has to happen outside Kiln.
+`:reference` field with `multiple`, link fields and a reverse field). One
+setting on the reference field, `schema_org_property`, makes its targets the
+page's `author` or `contributor` in structured data and in the "By" line of
+Kiln's own pages. The [last section](#what-kiln-does-not-do-yet) lists what
+still has to happen outside Kiln.
 
 ## The author type
 
@@ -29,9 +31,8 @@ alias KilnCMS.CMS
   CMS.create_type_definition(%{
     name: "author", label: "Author", plural_label: "Authors",
     path_segment: "authors",
-    # Kiln has no `ProfilePage` or `Person` in its allowlist yet; `WebPage`
-    # keeps a profile from firing as the default `Article`.
-    schema_org_type: "WebPage"
+    # A page about a person: its JSON-LD names the person as `mainEntity`.
+    schema_org_type: "ProfilePage"
   }, actor: admin)
 ```
 
@@ -72,23 +73,26 @@ CMS.create_field_definition!(%{
 
 ### Linking an author to a console user
 
-The issue behind this recipe asks for an optional link to a `User`, for a
-staff writer who also has an account. Kiln has no field type that points at
-a `User`, and every custom field is delivered publicly with the record. So
-the link is a plain field holding the user's **id**, never the email:
+A staff writer often also has a Kiln account. Link the two with a `:user`
+field, which names one of the site's people (an admin, or a member with any
+role) by their account id:
 
 ```elixir
 CMS.create_field_definition!(%{
-  type_definition_id: author_type.id, name: "console_user_id",
-  label: "Console account (user id)", field_type: :string,
-  help_text: "Optional. The id of this author's Kiln account. Delivered publicly."
+  type_definition_id: author_type.id, name: "account",
+  label: "Kiln account", field_type: :user,
+  help_text: "Optional. The account this author signs in with."
 }, actor: admin)
 ```
 
-Kiln does not resolve, check or act on this value. It is a note your own
-code can use, for example an overlay that fills a new article's `authors`
-from the signed-in editor. If an opaque id on a public payload is still too
-much, keep the mapping in that overlay instead and leave the field out.
+A `:user` field is always **private**. Editors and admins see it, and pick
+from the site's people in the editor. Everyone else never does: it is left out
+of the author's artifacts, out of every API read below editor, and out of
+filters, the same as a `User` is never delivered. Kiln checks that the value
+names someone on the site when it is written. It does nothing else with the
+value. Your own code can use it, for example an overlay that fills a new
+article's `authors` from the signed-in editor. A contributor with no account
+simply leaves the field empty.
 
 ### As a compiled type
 
@@ -103,7 +107,7 @@ mix ash.codegen add_authors && mix ash.migrate
 
 Then declare the schema.org type on the generated resource by hand, the way
 `KilnCMS.CMS.Page` does (`use KilnCMS.CMS.Content, type: :author,
-schema_org_type: "WebPage"`), and create the fields with
+schema_org_type: "ProfilePage"`), and create the fields with
 `content_type: :author` instead of `type_definition_id:`. A dynamic `author`
 type that has already collected entries is promoted with
 `mix kiln.gen.content --from author` and `mix kiln.promote_data author`
@@ -111,59 +115,76 @@ type that has already collected entries is promoted with
 survive the promotion, so every byline that points at an author keeps
 pointing at it.
 
-## The byline field
+## The byline fields
 
-A byline is a list of references from the article to its authors. The
-examples below put it on the built-in `post` type. On an overlay's own
+A byline is a list of references from the article to the people on it. Use
+two fields: one for the authors and one for everyone else who worked on the
+piece. The examples put them on the built-in `post` type. On an overlay's own
 `article` type, use `content_type: :article`.
 
 ```elixir
-authors =
+CMS.create_field_definition!(%{
+  content_type: :post, name: "authors", label: "Authors",
+  field_type: :reference, target_type: "author", multiple: true,
+  # Its targets are the page's schema.org `author`, and its "By" line.
+  schema_org_property: :author,
+  # The other side: every author's editor lists the articles it is on,
+  # and GraphQL answers `referencedBy(inverse: "articles")`.
+  inverse_label: "Articles", inverse_name: "articles",
+  # An author who still has bylines cannot be purged.
+  on_target_delete: :restrict
+}, actor: admin)
+
+contributors =
   CMS.create_field_definition!(%{
-    content_type: :post, name: "authors", label: "Authors",
+    content_type: :post, name: "contributors", label: "Contributors",
     field_type: :reference, target_type: "author", multiple: true,
-    # The other side: every author's editor lists the articles it is on,
-    # and GraphQL answers `referencedBy(inverse: "articles")`.
-    inverse_label: "Articles", inverse_name: "articles",
-    # An author who still has bylines cannot be purged.
+    schema_org_property: :contributor,
+    inverse_label: "Contributions", inverse_name: "contributions",
     on_target_delete: :restrict
   }, actor: admin)
 
-# What each person did on this article, stored on the connection.
+# What each contributor did on this article, stored on the connection.
 CMS.create_field_definition!(%{
-  link_of_id: authors.id, name: "role", label: "Role",
-  field_type: :select, options: ~w(author contributor photographer illustrator),
-  default: "author"
+  link_of_id: contributors.id, name: "role", label: "Role",
+  field_type: :select, options: ~w(photographer illustrator editor researcher)
 }, actor: admin)
 ```
 
 What each setting buys:
 
-- **`multiple: true`** makes the field an ordered list. The order the editor
-  arranges is the order of the names in the byline. The same author cannot
+- **`multiple: true`** makes a field an ordered list. The order the editor
+  arranges is the order of the names in the byline. The same person cannot
   appear twice in one list.
+- **`schema_org_property`** says what the targets are to the page:
+  `:author` or `:contributor`. It is the *What they are to the page* step
+  of a relationship in the fields admin. Setting it, changing it or clearing
+  it re-fires every published document of the type.
 - **`role`** is a link field: data about this person *on this article*, not
-  about the person. Ada can be the author of one piece and the photographer
-  on another.
-- **`inverse_name`** gives the author's profile its list of articles with no
-  second field to maintain. There is one source of truth, the article's
-  `authors` list.
+  about the person. Grace can be the photographer on one piece and the
+  illustrator on another.
+- **`inverse_name`** gives each profile its list of articles with no field
+  to maintain on the author. There is one source of truth, the article's
+  lists.
 - **`on_target_delete: :restrict`** refuses to purge an author while any
   article still names them. `:clear` would instead remove them from every
   byline. Trashing an author purges nothing, so a trashed author can be
   restored with every byline intact.
 
-Editors fill the field from the reference picker. In code, a write names each
-author by id, with the link values under `"link"`:
+Keeping the two kinds of credit in two fields, rather than one field with a
+role that says "author", is what lets Kiln tell them apart: the schema.org
+meaning belongs to the field, and each list filters on its own
+(`custom_filter[authors][has][]=…` and `custom_filter[contributors][has][]=…`).
+
+Editors fill the fields from the reference picker. In code, a write names
+each person by id, with the link values under `"link"`:
 
 ```elixir
 CMS.create_post!(%{
   title: "What the trial found", slug: "what-the-trial-found",
   custom_fields: %{
-    "authors" => [
-      %{"id" => ada.id, "link" => %{"role" => "author"}},
-      %{"id" => grace.id, "link" => %{"role" => "photographer"}}
-    ]
+    "authors" => [%{"id" => ada.id}, %{"id" => alan.id}],
+    "contributors" => [%{"id" => grace.id, "link" => %{"role" => "photographer"}}]
   }
 }, actor: editor)
 ```
@@ -179,8 +200,10 @@ editor's order, with each connection's role:
 {
   "custom_fields": {
     "authors": [
-      {"id": "…", "type": "author", "slug": "ada-lovelace", "title": "Ada Lovelace",
-       "link": {"role": "author"}},
+      {"id": "…", "type": "author", "slug": "ada-lovelace", "title": "Ada Lovelace"},
+      {"id": "…", "type": "author", "slug": "alan-turing", "title": "Alan Turing"}
+    ],
+    "contributors": [
       {"id": "…", "type": "author", "slug": "grace-hopper", "title": "Grace Hopper",
        "link": {"role": "photographer"}}
     ]
@@ -188,7 +211,8 @@ editor's order, with each connection's role:
 }
 ```
 
-Two rules keep that byline honest without any work on your side:
+Two rules keep that byline honest without any work on your side, here and
+in the structured data and "By" line below:
 
 - **A rename reaches every article.** The stored snapshot is taken when the
   article is saved, but firing reads the author's *current* title and slug.
@@ -205,7 +229,7 @@ field. Each author comes back with its own fired `json` artifact (bio, photo,
 links):
 
 ```bash
-curl -s 'http://localhost:4000/api/content/post/what-the-trial-found?expand=authors'
+curl -s 'http://localhost:4000/api/content/post/what-the-trial-found?expand=authors,contributors'
 ```
 
 See [api.md](api.md#expanding-references) for the limits.
@@ -213,14 +237,17 @@ See [api.md](api.md#expanding-references) for the limits.
 ### The profile page
 
 The author's own artifact is at `GET /api/content/author/ada-lovelace`. Its
-article list comes from the reverse field. In GraphQL, ask for it by name:
+article lists come from the reverse fields. In GraphQL, ask for them by name:
 
 ```graphql
 query ($slug: String!, $type: ID!) {
   entryBySlug(slug: $slug, locale: "en", typeDefinitionId: $type) {
     title
     customFields
-    referencedBy(inverse: "articles", limit: 20) {
+    written: referencedBy(inverse: "articles", limit: 20) {
+      source { title slug publishedAt }
+    }
+    contributed: referencedBy(inverse: "contributions", limit: 20) {
       link
       source { title slug publishedAt }
     }
@@ -228,39 +255,31 @@ query ($slug: String!, $type: ID!) {
 }
 ```
 
-`link` carries the role, so the page can say "Photography by Ada Lovelace".
-An anonymous reader sees only published articles. A compiled `Author` type
-answers the same field on `authorBySlug(slug:, locale:)`.
+`link` carries the role, so the page can say "Photography for *What the
+trial found*". An anonymous reader sees only published articles. A compiled
+`Author` type answers the same fields on `authorBySlug(slug:, locale:)`.
 
-Over JSON:API, the same list is a filter on the articles:
+Over JSON:API, the same lists are filters on the articles:
 
 ```
 GET /api/json/posts/published?custom_filter[authors][has][]=<author id>
+GET /api/json/posts/published?custom_filter[contributors][has][]=<author id>
 ```
 
-This filter cannot narrow by role. `custom_filter[authors.link.role]=author`
-is a separate condition, met by *any* connection on the article, so adding
-it to `has` for a photographer still returns the articles where somebody
-else is the author. To split a profile's list into "written" and
-"photographed", read the roles: GraphQL's `referencedBy` above returns each
-connection's `link`, and so does the article's own `authors` list.
+To list only the pieces a contributor photographed, tie the role to that
+person with `target`. Without it, the role condition is met by *any*
+contributor on the article:
+
+```
+GET /api/json/posts/published?custom_filter[contributors.link.role][eq]=photographer&custom_filter[contributors.link.role][target]=<author id>
+```
+
+See [json-api.md](json-api.md) for the link-field operators.
 
 ## Structured data
 
-schema.org's `author` takes a list of `Person` nodes. A byline maps onto it
-one to one:
-
-| Byline | schema.org |
-|---|---|
-| each item of `authors`, in order | one `Person` in `author` |
-| the item's `title` | `name` |
-| `/<path_segment>/<slug>` (`/authors/ada-lovelace`) | `url` |
-| the author's `photo` | `image` |
-| the author's `job_title` | `jobTitle` |
-| the author's `same_as[].url` | `sameAs` |
-| an item whose role is not `author` | `contributor` instead of `author` |
-
-So the article's main node should carry:
+With `schema_org_property` set, the fired `:json_ld` artifact's main node
+carries the byline, one `Person` per person in each list, in order:
 
 ```json
 {
@@ -268,7 +287,9 @@ So the article's main node should carry:
   "headline": "What the trial found",
   "author": [
     {"@type": "Person", "name": "Ada Lovelace",
-     "url": "https://news.example.com/authors/ada-lovelace"}
+     "url": "https://news.example.com/authors/ada-lovelace"},
+    {"@type": "Person", "name": "Alan Turing",
+     "url": "https://news.example.com/authors/alan-turing"}
   ],
   "contributor": [
     {"@type": "Person", "name": "Grace Hopper",
@@ -277,35 +298,49 @@ So the article's main node should carry:
 }
 ```
 
-The profile page is a `ProfilePage` whose `mainEntity` is the same `Person`,
-with `description` from the bio and `image`, `jobTitle` and `sameAs` from
-the fields.
+The JSON-LD inlined in Kiln's own pages carries the same nodes, and their
+"By" line names the same people, linked to their profiles: "By Ada Lovelace
+and Alan Turing · With Grace Hopper" (`KilnCMSWeb.ContentHTML.byline/1`,
+styled through the `public-byline` and `public-byline-name` classes). All
+three read the byline through `KilnCMS.Firing.Bylines`, so they cannot
+disagree. Without an `author` field, Kiln's pages keep naming the console
+user who created the post, as before.
 
-**Kiln does not emit this mapping yet.** The fired `:json_ld` surface
-(`KilnCMS.Firing.SchemaOrg`) carries no `author` at all, and the JSON-LD
-inlined in Kiln's own article pages (`KilnCMSWeb.StructuredData`) names the
-console `User`. Until it does, a headless front end builds these nodes from
-the `json` artifact above, which has everything the table needs. A front end
-that also serves Kiln's own article pages should know that those pages say
-"By" the console user, and that their inline JSON-LD does too.
+Some details of that output:
+
+- `name` is the person's current title and `url` their page in the site's
+  default locale, `/<path_segment>/<slug>`. A snapshot does not carry the
+  person's locale or path alias.
+- When two fields name the same property, their people are joined in field
+  order, and someone listed in both is named once.
+- An Event carries neither property. `author` and `contributor` are
+  `CreativeWork` properties, and an Event is not one; the same rule keeps
+  `articleBody` off it.
+
+The author's own page fires as a `ProfilePage` whose `mainEntity` is the
+person:
+
+```json
+{"@type": "ProfilePage", "headline": "Ada Lovelace",
+ "mainEntity": {"@type": "Person", "name": "Ada Lovelace"}}
+```
+
+Kiln names the person and nothing more. A front end that wants a richer
+`Person` adds the rest from the author's `json` artifact:
+
+| Author field | `Person` property |
+|---|---|
+| `bio` | `description` |
+| `photo` | `image` |
+| `job_title` | `jobTitle` |
+| `same_as[].url` | `sameAs` |
 
 ## What Kiln does not do yet
 
 Each of these is a gap in the code, not in the recipe:
 
-- **No `author` on the fired `:json_ld` surface.** There is no covered way
-  for a reference field to contribute a property to the main node. A block's
-  `:json_ld` render adds a node to the `@graph`; it cannot set the article's
-  `author`.
-- **No `ProfilePage` or `Person` in the schema.org allowlist**
-  (`KilnCMS.Firing.SchemaOrg.types/0`). The nearest allowed type for a
-  profile is `WebPage`.
-- **Kiln's own templates render the console `User`**, both the "By" line on
-  `/blog/:slug` and the inline `author` in its JSON-LD, and they do not
-  render custom fields. An author's profile page is a front end's or an
-  overlay's page, not one Kiln serves with its bio and article list.
-- **No field type points at a `User`, and no custom field is private.** The
-  optional account link above is an id in a public string field.
-- **A link-field filter is not tied to one target.** `custom_filter` cannot
-  ask for "articles where *this* author has role `author`"; the role is
-  read client-side from `link`.
+- **Kiln's own templates do not render custom fields.** An author's profile
+  page, with its bio and article lists, is a front end's or an overlay's
+  page, not one Kiln serves.
+- **The `Person` nodes carry a name and a URL only.** A profile's bio, photo
+  and other profiles are not read into them.

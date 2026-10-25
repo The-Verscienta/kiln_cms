@@ -1,7 +1,8 @@
 defmodule KilnCMS.CMS.Changes.ClearReferenceOptions do
   @moduledoc """
-  Resets a `FieldDefinition`'s target-side options — `max_sources` (R1b) and
-  `on_target_delete` (R5) — whenever the field is not a `:reference`.
+  Resets a `FieldDefinition`'s target-side options — `max_sources` (R1b),
+  `on_target_delete` (R5) and `schema_org_property` (#2044) — whenever the
+  field is not a `:reference`.
 
   The same stance as `KilnCMS.CMS.Changes.ClearMultiple`: the fields admin
   shows those controls only for a reference, so retyping one to another type
@@ -19,6 +20,7 @@ defmodule KilnCMS.CMS.Changes.ClearReferenceOptions do
       changeset
       |> Ash.Changeset.force_change_attribute(:max_sources, nil)
       |> Ash.Changeset.force_change_attribute(:on_target_delete, :keep)
+      |> Ash.Changeset.force_change_attribute(:schema_org_property, nil)
     end
   end
 end

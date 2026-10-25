@@ -883,7 +883,11 @@ defmodule KilnCMSWeb.ContentController do
         %{
           record: record,
           blocks: blocks(record, org_id, audiences),
-          translations: translations(ct, record.slug, org_id, audiences)
+          translations: translations(ct, record.slug, org_id, audiences),
+          # The public byline (#2044): the people its flagged `:reference`
+          # fields name, resolved as firing resolves them. Cached with the
+          # rest; a target's re-fire wave busts this record's keys.
+          bylines: KilnCMS.Firing.Bylines.for_document(record)
         }
     end
   end
@@ -902,11 +906,14 @@ defmodule KilnCMSWeb.ContentController do
   defp render_content(
          conn,
          template,
-         %{record: record, blocks: blocks, translations: translations},
+         %{record: record, blocks: blocks, translations: translations} = payload,
          ct,
          audiences,
          variant
        ) do
+    # A payload cached by a build from before #2044 has no `:bylines`.
+    bylines = Map.get(payload, :bylines, %{})
+
     # Resolve the type's SEO patterns (#805) here, ahead of the cache headers,
     # so `etag/1` below hashes the values a visitor will actually be served.
     # Applied later, a pattern change was invisible to every client holding a
@@ -956,7 +963,7 @@ defmodule KilnCMSWeb.ContentController do
       if not private? and delivery_fresh?(conn, record) do
         send_resp(conn, :not_modified, "")
       else
-        render_content_body(conn, template, record, blocks, translations, ct, variant)
+        render_content_body(conn, template, record, blocks, translations, bylines, ct, variant)
       end
 
     # Delivery-render duration telemetry (#206), tagged by content type and
@@ -975,7 +982,7 @@ defmodule KilnCMSWeb.ContentController do
   # all built from them. Only the final `render/3` sees the variant. That is
   # invariant 3 (`KilnCMS.Experiments`): a variant changes what a human reads,
   # never what a machine indexes.
-  defp render_content_body(conn, template, record, blocks, translations, ct, variant) do
+  defp render_content_body(conn, template, record, blocks, translations, bylines, ct, variant) do
     org = KilnCMSWeb.Tenant.current_org(conn)
     base_url = KilnCMSWeb.Tenant.base_url(org)
 
@@ -1000,7 +1007,8 @@ defmodule KilnCMSWeb.ContentController do
       feed_alternates(ct, org, base_url, record.locale) ++
         calendar_alternates(ct, org, base_url)
     )
-    |> assign(:json_ld, json_ld_script(StructuredData.document(record, ct, org)))
+    |> assign(:json_ld, json_ld_script(StructuredData.document(record, ct, org, bylines)))
+    |> assign(:bylines, bylines)
     |> assign(:experiment_variant, variant && variant.id)
     |> render(template,
       record: Experiments.Assignment.apply_to_record(record, variant),

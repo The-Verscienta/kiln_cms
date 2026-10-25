@@ -391,6 +391,61 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
              "Page records deleted for good are removed from the records linking to them."
   end
 
+  # #2044: a relationship's targets can be the page's authors (or
+  # contributors) in its structured data — set when adding, cleared when
+  # editing, and said in the list.
+  test "an admin marks a relationship as the page's authors", %{conn: conn} do
+    admin = authed_user(:admin)
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+    lv |> form("#new-field-form", field_definition: %{kind: "relationship"}) |> render_change()
+    assert has_element?(lv, "#new-field-rules-schema-org-property")
+
+    name = "byline_#{System.unique_integer([:positive])}"
+
+    lv
+    |> form("#new-field-form",
+      field_definition: %{
+        scopes: ["post"],
+        name: name,
+        label: "Byline",
+        kind: "relationship",
+        target_types: ["page"],
+        schema_org_property: "author"
+      }
+    )
+    |> render_submit()
+
+    field =
+      :post
+      |> CMS.field_definitions_for!(authorize?: false)
+      |> Enum.find(&(&1.name == name))
+
+    assert field.schema_org_property == :author
+
+    assert lv |> element("#field-#{field.id}-schema-org") |> render() =~
+             "Named as the page&#39;s authors in its structured data."
+
+    lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+
+    assert has_element?(
+             lv,
+             ~s(#edit-field-rules-#{field.id}-schema-org-property option[value="author"][selected])
+           )
+
+    lv
+    |> form("#edit-field-#{field.id}", field_definition: %{schema_org_property: ""})
+    |> render_submit()
+
+    field =
+      :post
+      |> CMS.field_definitions_for!(authorize?: false)
+      |> Enum.find(&(&1.name == name))
+
+    assert field.schema_org_property == nil
+    refute has_element?(lv, "#field-#{field.id}-schema-org")
+  end
+
   # R2: ticking several types stores `target_types`; ticking one keeps the
   # documented single `target_type`.
   test "an admin lets a reference field link to several types", %{conn: conn} do

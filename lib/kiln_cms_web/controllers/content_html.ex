@@ -25,6 +25,73 @@ defmodule KilnCMSWeb.ContentHTML do
   end
 
   @doc """
+  The public byline of a document (#2044): the people its flagged
+  `:reference` fields name (`KilnCMS.Firing.Bylines`), each linked to their
+  profile — "By Ada Lovelace and Grace Hopper · With Alan Turing".
+
+  `fallback` names the author when the byline names none: the console user,
+  on the templates that always showed one. The same rule as the page's
+  JSON-LD (`KilnCMSWeb.StructuredData.build/4`). Renders nothing when there
+  is no one to name.
+  """
+  attr :bylines, :map, default: %{}
+  attr :fallback, :string, default: nil
+
+  def byline(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :fallback,
+        if(blank?(assigns.bylines[:author]), do: present(assigns.fallback))
+      )
+
+    ~H"""
+    <span :if={@bylines[:author]} class="public-byline">
+      {gettext("By")} <.people people={@bylines[:author]} />
+    </span>
+    <span :if={@fallback} class="public-byline">
+      {gettext("By %{author}", author: @fallback)}
+    </span>
+    <span :if={(@bylines[:author] || @fallback) && @bylines[:contributor]}>·</span>
+    <span :if={@bylines[:contributor]} class="public-byline">
+      {gettext("With")} <.people people={@bylines[:contributor]} />
+    </span>
+    """
+  end
+
+  @doc "Whether `byline/1` would render anything for these assigns."
+  @spec byline?(map() | nil, String.t() | nil) :: boolean()
+  def byline?(bylines, fallback),
+    do:
+      not blank?((bylines || %{})[:author]) or not blank?((bylines || %{})[:contributor]) or
+        not is_nil(present(fallback))
+
+  attr :people, :list, required: true
+
+  defp people(assigns) do
+    assigns = assign(assigns, :last, length(assigns.people) - 1)
+
+    ~H"""
+    <%= for {person, index} <- Enum.with_index(@people) do %>
+      <.link :if={person.url} href={person.url} class="public-byline-name">{person.name}</.link><span
+        :if={!person.url}
+        class="public-byline-name"
+      >{person.name}</span>{separator(index, @last)}
+    <% end %>
+    """
+  end
+
+  # "A", "A and B", "A, B and C".
+  defp separator(index, last) when index == last, do: ""
+  defp separator(index, last) when index == last - 1, do: " " <> gettext("and") <> " "
+  defp separator(_index, _last), do: ", "
+
+  defp blank?(value), do: value in [nil, []]
+
+  defp present(name) when is_binary(name) and name != "", do: name
+  defp present(_name), do: nil
+
+  @doc """
   The line under a page hit on `/search` (#1766): the search highlight — why
   it matched, escaped except for its `<mark>` tags — or, when the match gave
   none, the page's meta description. `nil` when there is neither.
