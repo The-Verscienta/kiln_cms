@@ -266,6 +266,16 @@ GET /api/json/posts/published?custom_filter[authors][has][]=<author id>
 GET /api/json/posts/published?custom_filter[contributors][has][]=<author id>
 ```
 
+To list only the pieces a contributor photographed, tie the role to that
+person with `target`. Without it, the role condition is met by *any*
+contributor on the article:
+
+```
+GET /api/json/posts/published?custom_filter[contributors.link.role][eq]=photographer&custom_filter[contributors.link.role][target]=<author id>
+```
+
+See [json-api.md](json-api.md) for the link-field operators.
+
 ## Structured data
 
 With `schema_org_property` set, the fired `:json_ld` artifact's main node
@@ -334,7 +344,3 @@ Each of these is a gap in the code, not in the recipe:
   page, not one Kiln serves.
 - **The `Person` nodes carry a name and a URL only.** A profile's bio, photo
   and other profiles are not read into them.
-- **A link-field filter is not tied to one target.**
-  `custom_filter[contributors][has][]=<id>&custom_filter[contributors.link.role]=photographer`
-  matches an article where *anyone* is the photographer, not only that
-  person. Read the role from `link` instead.
