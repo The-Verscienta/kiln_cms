@@ -2611,6 +2611,11 @@ msgstr ""
 msgid "Approve & publish"
 msgstr ""
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Approver"
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/content_html.ex
 #, elixir-autogen, elixir-format
 msgid "April"
@@ -3252,6 +3257,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
+msgid "CDN purge"
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
 msgid "CHECKPOINT TAMPERED: %{reason}"
 msgstr ""
 
@@ -3392,6 +3402,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Category: a deleted category"
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Chain"
 msgstr ""
 
 #: lib/kiln_cms_web/live/release_live.ex
@@ -6155,6 +6170,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Each page and post gets an audit trail here once it exists."
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Each publish and withdrawal, who approved it, and when the CDN and every webhook endpoint caught up."
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -9879,6 +9899,11 @@ msgstr ""
 msgid "Network"
 msgstr ""
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Never published or withdrawn."
+msgstr ""
+
 #: lib/kiln_cms_web/live/editor_live/filters.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -10285,6 +10310,11 @@ msgstr ""
 msgid "No enabled %{network} account — nothing would be posted. It would read:"
 msgstr ""
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "No endpoints subscribed"
+msgstr ""
+
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "No existing tag fits closely."
@@ -10503,6 +10533,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
 msgid "No preview URL configured."
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "No propagation record — nothing was live to update"
 msgstr ""
 
 #: lib/kiln_cms_web/live/feed_settings_live.ex
@@ -12245,6 +12280,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "Promote winner into document"
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Propagation record pruned (kept %{days} days)"
 msgstr ""
 
 #: lib/kiln_cms_web/live/organize_live.ex
@@ -17833,6 +17873,11 @@ msgstr ""
 msgid "Trail for %{title}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Transition"
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Translated per locale"
@@ -18814,6 +18859,11 @@ msgstr ""
 msgid "Webhook deleted."
 msgstr ""
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "Webhook endpoints"
+msgstr ""
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "Webhook signing secret"
@@ -18900,6 +18950,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "What other servers show for this actor. Peers refetch it on their own schedule."
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "What readers saw"
 msgstr ""
 
 #: lib/kiln_cms_web/live/compliance_live.ex
@@ -19791,6 +19846,11 @@ msgstr ""
 msgid "a task's deadline."
 msgstr ""
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "acknowledged"
+msgstr ""
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "active"
@@ -19826,11 +19886,21 @@ msgstr ""
 msgid "an unknown time"
 msgstr ""
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "anchored, not attested"
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "and %{count} more"
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "answered"
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
@@ -20090,6 +20160,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
+msgid "delivered"
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
 msgid "delivered later, %{at}"
 msgstr ""
 
@@ -20191,6 +20266,16 @@ msgstr ""
 msgid "enabled"
 msgstr ""
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "enqueued"
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "enqueued, not yet answered"
+msgstr ""
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "erased"
@@ -20216,6 +20301,7 @@ msgstr "expires"
 msgid "fail"
 msgstr ""
 
+#: lib/kiln_cms_web/live/governance_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "failed"
@@ -20248,10 +20334,16 @@ msgstr ""
 msgid "gallery"
 msgstr ""
 
+#: lib/kiln_cms_web/live/governance_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "gave up"
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "given up"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
@@ -20305,6 +20397,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "instance"
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "intact (retired key)"
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "intact (unsigned)"
 msgstr ""
 
 #: lib/kiln_cms/cms/computed/recipes.ex
@@ -20592,6 +20694,7 @@ msgstr ""
 msgid "not checked"
 msgstr ""
 
+#: lib/kiln_cms_web/live/governance_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "not configured"
@@ -20611,6 +20714,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "not yet"
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "not yet anchored"
 msgstr ""
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex
@@ -20784,6 +20892,11 @@ msgstr[1] ""
 msgid "review due"
 msgstr "review due"
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "run by the scheduler"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
 msgid "saved %{time}"
@@ -20895,6 +21008,11 @@ msgstr ""
 msgid "source format only"
 msgstr ""
 
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "still retrying"
+msgstr ""
+
 #: lib/kiln_cms_web/live/code_injection_live.ex
 #, elixir-autogen, elixir-format
 msgid "styles for the public site"
@@ -20918,6 +21036,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "tag group"
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "tampered"
 msgstr ""
 
 #: lib/kiln_cms_web/live/redirect_live.ex
@@ -21109,6 +21232,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "upload failed"
+msgstr ""
+
+#: lib/kiln_cms_web/live/governance_live.ex
+#, elixir-autogen, elixir-format
+msgid "verified"
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex

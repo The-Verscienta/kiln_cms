@@ -135,11 +135,42 @@ defmodule KilnCMSWeb.GovernanceLive do
   defp presence(_), do: nil
 
   # Point-in-time delivery URL (#338) for one publish instant.
-  defp point_in_time_url(item, %DateTime{} = at) do
-    "/api/content/#{item.type}/#{item.slug}?as_of=#{DateTime.to_iso8601(at)}"
-  end
+  defp point_in_time_url(item, %DateTime{} = at), do: Governance.as_of_url(item, at)
 
   defp when_str(%DateTime{} = dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M")
+
+  # To the second, with the gap from the transition: the propagation columns
+  # are about how long readers kept seeing the old version (#1928).
+  defp stamp(nil, _from), do: "—"
+
+  defp stamp(%DateTime{} = at, %DateTime{} = from) do
+    "#{Calendar.strftime(at, "%H:%M:%S")} (+#{elapsed(DateTime.diff(at, from, :millisecond))})"
+  end
+
+  defp elapsed(ms) when ms < 1_000, do: "#{max(ms, 0)} ms"
+  defp elapsed(ms) when ms < 60_000, do: "#{Float.round(ms / 1_000, 1)} s"
+  defp elapsed(ms), do: "#{div(ms, 60_000)} min #{rem(div(ms, 1_000), 60)} s"
+
+  defp cdn_label(:not_configured), do: gettext("not configured")
+  defp cdn_label(:pending), do: gettext("enqueued, not yet answered")
+  defp cdn_label(:acknowledged), do: gettext("acknowledged")
+  defp cdn_label(:failed), do: gettext("failed")
+
+  defp row_chain_label(:verified), do: gettext("verified")
+  defp row_chain_label(:unsigned), do: gettext("intact (unsigned)")
+  defp row_chain_label(:unverifiable), do: gettext("intact (retired key)")
+  defp row_chain_label(:unattested), do: gettext("anchored, not attested")
+  defp row_chain_label(:unanchored), do: gettext("not yet anchored")
+  defp row_chain_label(:tampered), do: gettext("tampered")
+
+  defp row_chain_tone(verdict) when verdict in [:verified, :unsigned],
+    do: "bg-success/15 text-success-ink"
+
+  defp row_chain_tone(verdict) when verdict in [:unverifiable, :unattested],
+    do: "bg-warning/15 text-warning-ink"
+
+  defp row_chain_tone(:tampered), do: "bg-error/15 text-error-ink"
+  defp row_chain_tone(_unanchored), do: "bg-base-200 text-base-content/60"
 
   # Compact display of a version value: strings verbatim, everything else
   # inspected and capped (block trees can be huge).
@@ -769,6 +800,138 @@ defmodule KilnCMSWeb.GovernanceLive do
     """
   end
 
+  attr :transitions, :list, required: true
+
+  # "What readers saw" (#1928): one row per publish or withdrawal, with when
+  # each surface actually changed. The version timeline below says what was
+  # published; this says when readers stopped seeing the old version.
+  defp transitions_panel(assigns) do
+    ~H"""
+    <section id="transitions" class="space-y-3">
+      <div>
+        <h2 class="text-lg font-medium">{gettext("What readers saw")}</h2>
+        <p class="text-sm text-base-content/60">
+          {gettext(
+            "Each publish and withdrawal, who approved it, and when the CDN and every webhook endpoint caught up."
+          )}
+        </p>
+      </div>
+      <p :if={@transitions == []} class="text-sm text-base-content/60">
+        {gettext("Never published or withdrawn.")}
+      </p>
+      <div :if={@transitions != []} class="overflow-x-auto">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>{gettext("When")}</th>
+              <th>{gettext("Transition")}</th>
+              <th>{gettext("Approver")}</th>
+              <th>{gettext("CDN purge")}</th>
+              <th>{gettext("Webhook endpoints")}</th>
+              <th>{gettext("Point in time")}</th>
+              <th>{gettext("Chain")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr :for={t <- @transitions} id={"transition-#{t.position}"} class="align-top">
+              <td class="whitespace-nowrap text-base-content/70">{when_str(t.at)}</td>
+              <td>
+                <span class={[
+                  "rounded px-1.5 py-0.5 text-xs font-medium",
+                  t.kind == :publish && "bg-primary/15 text-primary-ink",
+                  t.kind == :withdraw && "bg-base-200 text-base-content/70"
+                ]}>
+                  {t.action}
+                </span>
+                <span :if={t.scheduled?} class="mt-1 block text-xs text-base-content/60">
+                  {gettext("run by the scheduler")}
+                </span>
+              </td>
+              <td class="whitespace-nowrap text-xs text-base-content/70" data-role="approver">
+                {t.approver || "—"}
+              </td>
+              <%= if t.propagation do %>
+                <td class="whitespace-nowrap text-xs" data-role="cdn">
+                  <span class={[
+                    t.propagation.cdn.status == :failed && "font-medium text-error-ink",
+                    t.propagation.cdn.status == :pending && "text-warning-ink"
+                  ]}>
+                    {cdn_label(t.propagation.cdn.status)}
+                  </span>
+                  <span
+                    :if={t.propagation.cdn.enqueued_at}
+                    class="block text-base-content/60"
+                  >
+                    {gettext("enqueued")} {stamp(t.propagation.cdn.enqueued_at, t.at)}
+                  </span>
+                  <span
+                    :if={t.propagation.cdn.settled_at}
+                    class="block text-base-content/60"
+                  >
+                    {if t.propagation.cdn.status == :failed,
+                      do: gettext("gave up"),
+                      else: gettext("answered")} {stamp(t.propagation.cdn.settled_at, t.at)}
+                  </span>
+                </td>
+                <td class="text-xs" data-role="endpoints">
+                  <span
+                    :if={t.propagation.endpoints == []}
+                    class="text-base-content/60"
+                  >
+                    {gettext("No endpoints subscribed")}
+                  </span>
+                  <ul :if={t.propagation.endpoints != []} class="space-y-1">
+                    <li :for={e <- t.propagation.endpoints} class="min-w-0">
+                      <span class="block max-w-xs truncate font-medium">{e.url}</span>
+                      <span :if={e.status == :succeeded} class="text-success-ink">
+                        {gettext("delivered")} {stamp(e.delivered_at, t.at)}
+                      </span>
+                      <span :if={e.status == :failed} class="text-error-ink">
+                        {gettext("given up")} {stamp(e.failed_at, t.at)}
+                        <span :if={e.error} class="block text-base-content/60">{e.error}</span>
+                      </span>
+                      <span :if={e.status == :pending} class="text-warning-ink">
+                        {gettext("still retrying")}
+                      </span>
+                    </li>
+                  </ul>
+                </td>
+              <% else %>
+                <td colspan="2" class="text-xs text-base-content/60" data-role="no-propagation">
+                  {if t.propagation_missing == :pruned,
+                    do:
+                      gettext("Propagation record pruned (kept %{days} days)",
+                        days: KilnCMS.CMS.Propagation.retention_days()
+                      ),
+                    else: gettext("No propagation record — nothing was live to update")}
+                </td>
+              <% end %>
+              <td>
+                <a
+                  href={t.as_of_url}
+                  class="text-xs text-primary-ink hover:underline"
+                  target="_blank"
+                  rel="noopener"
+                >
+                  {gettext("View as of then")}
+                </a>
+              </td>
+              <td>
+                <span
+                  class={["rounded px-1.5 py-0.5 text-xs font-medium", row_chain_tone(t.chain)]}
+                  data-role="row-chain"
+                >
+                  {row_chain_label(t.chain)}
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    """
+  end
+
   attr :trail, :map, required: true
   attr :consent_form, :any, required: true
 
@@ -867,6 +1030,8 @@ defmodule KilnCMSWeb.GovernanceLive do
           </.form>
         </details>
       </section>
+
+      <.transitions_panel transitions={@trail.transitions} />
 
       <section class="space-y-3">
         <h2 class="text-lg font-medium">{gettext("Version timeline")}</h2>

@@ -87,7 +87,28 @@ defmodule KilnCMS.Governance do
           at: DateTime.t(),
           changed: [String.t()],
           publish?: boolean(),
-          actor: String.t() | nil
+          actor: String.t() | nil,
+          position: pos_integer()
+        }
+
+  @typedoc """
+  One state transition on a document's trail (#1928). `chain` is
+  `KilnCMS.Governance.Chain.verdict/0` for this version, or `:unattested`
+  when it is anchored past the attested prefix. `propagation` is nil when no
+  record matched, and `propagation_missing` then says why: `:pruned` (older
+  than `KilnCMS.CMS.Propagation.retention_days/0`) or `:none`.
+  """
+  @type transition :: %{
+          at: DateTime.t(),
+          action: atom(),
+          kind: :publish | :withdraw,
+          position: pos_integer(),
+          scheduled?: boolean(),
+          approver: String.t() | nil,
+          as_of_url: String.t(),
+          chain: atom() | {:tampered, String.t()},
+          propagation: map() | nil,
+          propagation_missing: :pruned | :none | nil
         }
 
   @doc """
@@ -368,6 +389,7 @@ defmodule KilnCMS.Governance do
         timeline: [event],           # newest first
         lost_retractions: [map],     # KilnCMS.Webhooks.lost_retractions/3 (#1926)
         publishes: [DateTime],       # publish points, newest first (for #338 links)
+        transitions: [transition],   # one row per state transition, newest first (#1928)
         chain: verdict,              # KilnCMS.Governance.Chain.verdict/0
         chain_gap: attested_gap,     # how far attestation reaches (#811)
         chain_gap_range: %{attested, next, head} | nil,   # the same, for display
@@ -402,23 +424,35 @@ defmodule KilnCMS.Governance do
       anchor = List.first(anchors)
       timeline = timeline(versions, actor_names(versions))
 
+      item = %{
+        type: to_string(ct.type),
+        id: record.id,
+        title: record.title,
+        slug: record.slug,
+        state: record.state,
+        org_id: record.org_id,
+        published_at: Map.get(record, :published_at),
+        # In the trash (soft-deleted). Still has a trail: a `deleted`
+        # retraction that never reached a consumer is reported here (#1926).
+        trashed?: not is_nil(Map.get(record, :archived_at)),
+        # Whether this item lives on the shared entry tier (D17). Point-in-time
+        # delivery (#338) covers dynamic types now, so this no longer gates
+        # the "view as of then" links — it stays as trail metadata.
+        dynamic?: ct.source == :dynamic
+      }
+
+      # Tamper-evidence (#356): does the anchored history still reproduce the
+      # signed chain hash minted at the last publish? One key resolution for
+      # the whole verification, not one per anchor signature checked (#643).
+      chain =
+        KilnCMS.Provenance.KeyRegistry.with_cache(fn ->
+          KilnCMS.Governance.Chain.verify_loaded(versions, storage, id, record.org_id)
+        end)
+
+      gap = KilnCMS.Governance.Chain.attested_gap(anchors)
+
       %{
-        item: %{
-          type: to_string(ct.type),
-          id: record.id,
-          title: record.title,
-          slug: record.slug,
-          state: record.state,
-          org_id: record.org_id,
-          published_at: Map.get(record, :published_at),
-          # In the trash (soft-deleted). Still has a trail: a `deleted`
-          # retraction that never reached a consumer is reported here (#1926).
-          trashed?: not is_nil(Map.get(record, :archived_at)),
-          # Whether this item lives on the shared entry tier (D17). Point-in-time
-          # delivery (#338) covers dynamic types now, so this no longer gates
-          # the "view as of then" links — it stays as trail metadata.
-          dynamic?: ct.source == :dynamic
-        },
+        item: item,
         timeline: timeline,
         # Retraction webhooks (`unpublished` / `archived` / `deleted`) that
         # exhausted their retries for this document (#1926): a consumer that
@@ -428,25 +462,30 @@ defmodule KilnCMS.Governance do
         lost_retractions:
           KilnCMS.Webhooks.lost_retractions(to_string(ct.type), record.id, record.org_id),
         publishes: for(e <- timeline, e.publish?, do: e.at),
-        # Tamper-evidence (#356): does the anchored history still reproduce the
-        # signed chain hash minted at the last publish? One key resolution for
-        # the whole verification, not one per anchor signature checked (#643).
-        chain:
-          KilnCMS.Provenance.KeyRegistry.with_cache(fn ->
-            KilnCMS.Governance.Chain.verify_loaded(versions, storage, id, record.org_id)
-          end),
+        # One row per state transition with what became of it on the delivery
+        # path (#1928): its approver, its propagation record, its `?as_of=`
+        # link and whether the chain vouches for it. Keyed on the PUBLIC type
+        # name, the event namespace the records were opened under.
+        transitions:
+          transitions(
+            timeline,
+            KilnCMS.Propagation.for_document(to_string(ct.type), record.id, record.org_id),
+            %{verdict: chain, gap: gap, head: anchor},
+            item
+          ),
+        chain: chain,
         # How far the ATTESTED prefix reaches (#811). A chain can have anchors
         # that verify and a newer one that does not, in which case `chain` above
         # reads `:unsigned`/`:unverifiable` — and calling that "history intact"
         # claims more than is known, because versions past the attested prefix
         # are anchored by a row nothing attests.
-        chain_gap: KilnCMS.Governance.Chain.attested_gap(anchors),
+        chain_gap: gap,
         # The same fact pre-resolved for rendering: `%{attested, next, head}` or
         # nil. Done here, in plain Elixir, because a function component that
         # pattern-matches the `{:gap, …}` tuple inside HEEx is opaque enough that
         # dialyzer cannot see the clause is reachable.
         chain_gap_range:
-          case KilnCMS.Governance.Chain.attested_gap(anchors) do
+          case gap do
             {:gap, attested, head} -> %{attested: attested, next: attested + 1, head: head}
             _no_gap -> nil
           end,
@@ -596,11 +635,16 @@ defmodule KilnCMS.Governance do
   # set before), accumulated in one ascending pass.
   defp timeline(versions_asc, actor_names) do
     {events, _last_known} =
-      Enum.map_reduce(versions_asc, %{}, fn version, last_known ->
+      versions_asc
+      |> Enum.with_index(1)
+      |> Enum.map_reduce(%{}, fn {version, position}, last_known ->
         changes = version.changes || %{}
 
         event = %{
           action: version.version_action_name,
+          # 1-based place in the fold order: what an anchor's `version_count`
+          # counts, so a transition can be told apart as attested or not (#1928).
+          position: position,
           at: version.version_inserted_at,
           actor: version.user_id && Map.get(actor_names, version.user_id),
           diffs:
@@ -615,4 +659,156 @@ defmodule KilnCMS.Governance do
 
     Enum.reverse(events)
   end
+
+  @doc """
+  The point-in-time delivery URL (#338) for `item` at instant `at`: what the
+  public API served for it then.
+  """
+  @spec as_of_url(map(), DateTime.t()) :: String.t()
+  def as_of_url(item, %DateTime{} = at),
+    do: "/api/content/#{item.type}/#{item.slug}?as_of=#{DateTime.to_iso8601(at)}"
+
+  # The version actions that move a document onto or off the delivery path,
+  # and the propagation kind each would open (`KilnCMS.Propagation.kind/2`).
+  # An archive or a trash of a draft is a transition too, and opens no record:
+  # nothing was being served.
+  @transition_kinds %{
+    publish: :publish,
+    publish_scheduled: :publish,
+    unpublish: :withdraw,
+    unpublish_scheduled: :withdraw,
+    archive: :withdraw,
+    archive_scheduled: :withdraw,
+    destroy: :withdraw
+  }
+
+  # The field a scheduled transition was set up through: whoever last set it
+  # approved the transition the scheduler later ran.
+  @schedule_fields %{
+    publish_scheduled: "scheduled_at",
+    unpublish_scheduled: "unpublish_at",
+    archive_scheduled: "unpublish_at"
+  }
+
+  # A record is opened just after its transition's write commits, so its
+  # `transitioned_at` trails the version's. The slack only absorbs clock
+  # granularity; the upper bound is the next transition, whose record is its own.
+  @match_slack_ms 1_000
+
+  # One row per state transition, newest first (#1928): the approver, the
+  # propagation record it opened (CDN purge and each webhook endpoint), its
+  # `?as_of=` link and the chain's verdict on that version.
+  #
+  # Records carry no version id: the webhook fan-out opens them from the
+  # event, after the write. Each transition takes the first unclaimed record
+  # of its kind opened between its own write and the next transition's.
+  defp transitions(timeline, records, chain, item) do
+    events_asc = Enum.reverse(timeline)
+    transitions_asc = Enum.filter(events_asc, &Map.has_key?(@transition_kinds, &1.action))
+    nexts = Enum.drop(transitions_asc, 1) ++ [nil]
+
+    {rows, _unclaimed} =
+      transitions_asc
+      |> Enum.zip(nexts)
+      |> Enum.map_reduce(records, fn {event, next}, unclaimed ->
+        kind = Map.fetch!(@transition_kinds, event.action)
+        record = Enum.find(unclaimed, &claims?(&1, kind, event, next))
+
+        row = %{
+          at: event.at,
+          action: event.action,
+          kind: kind,
+          position: event.position,
+          scheduled?: Map.has_key?(@schedule_fields, event.action),
+          approver: approver(event, events_asc),
+          as_of_url: as_of_url(item, event.at),
+          chain: row_verdict(event.position, chain),
+          propagation: record && describe_propagation(record),
+          # Why there is no record, when there is none: pruned by the nightly
+          # trigger, or never opened (nothing was live, or the transition
+          # predates propagation records).
+          propagation_missing: if(is_nil(record), do: missing_reason(event.at))
+        }
+
+        {row, if(record, do: List.delete(unclaimed, record), else: unclaimed)}
+      end)
+
+    Enum.reverse(rows)
+  end
+
+  defp claims?(record, kind, event, next) do
+    record.kind == kind and
+      DateTime.diff(record.transitioned_at, event.at, :millisecond) >= -@match_slack_ms and
+      (is_nil(next) or DateTime.compare(record.transitioned_at, next.at) == :lt)
+  end
+
+  # The admin who made the transition. A scheduled one runs as the scheduler,
+  # so its approver is whoever last set the schedule it ran on.
+  defp approver(event, events_asc) do
+    case Map.fetch(@schedule_fields, event.action) do
+      {:ok, field} ->
+        events_asc
+        |> Enum.take_while(&(&1.position < event.position))
+        |> Enum.reverse()
+        |> Enum.find(&sets?(&1, field))
+        |> then(&(&1 && &1.actor))
+
+      :error ->
+        event.actor
+    end
+  end
+
+  defp sets?(event, field),
+    do: Enum.any?(event.diffs, &match?({^field, {_old, new}} when not is_nil(new), &1))
+
+  defp missing_reason(at) do
+    retention = KilnCMS.CMS.Propagation.retention_days()
+
+    if DateTime.diff(DateTime.utc_now(), at, :day) >= retention, do: :pruned, else: :none
+  end
+
+  # The record flattened for display and export: the CDN purge, then each
+  # endpoint's delivery or terminal failure.
+  defp describe_propagation(record) do
+    %{
+      id: record.id,
+      event: record.event,
+      transitioned_at: record.transitioned_at,
+      completed_at: record.completed_at,
+      endpoint_latency_ms: record.endpoint_latency_ms,
+      cdn_latency_ms: record.cdn_latency_ms,
+      endpoints_expected: record.endpoints_expected,
+      cdn: %{
+        status: record.cdn_status,
+        enqueued_at: record.cdn_enqueued_at,
+        settled_at: record.cdn_settled_at
+      },
+      endpoints:
+        Enum.map(record.deliveries, fn delivery ->
+          %{
+            url: delivery.endpoint_url,
+            status: delivery.status,
+            attempts: delivery.attempts,
+            delivered_at: delivery.delivered_at,
+            # A delivery is given up on by its last attempt, the row's last write.
+            failed_at: if(delivery.status == :failed, do: delivery.updated_at),
+            error: if(delivery.status == :failed, do: delivery.last_error)
+          }
+        end)
+    }
+  end
+
+  # The chain's verdict on ONE version (#1928): the document's own verdict
+  # while the version sits inside the attested prefix, and a weaker statement
+  # past it. A tampered chain vouches for none of its rows.
+  defp row_verdict(_position, %{verdict: {:tampered, _reason}}), do: :tampered
+  defp row_verdict(_position, %{head: nil}), do: :unanchored
+
+  defp row_verdict(position, %{head: head}) when position > head.version_count,
+    do: :unanchored
+
+  defp row_verdict(position, %{gap: {:gap, attested, _head}}) when position > attested,
+    do: :unattested
+
+  defp row_verdict(_position, %{verdict: verdict}), do: verdict
 end

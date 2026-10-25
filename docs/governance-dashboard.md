@@ -13,6 +13,36 @@ history (#338) together per content item. Admin-only.
 - **Detail** (`/editor/governance/:type/:id`):
   - **Consent records** (#356) — each linked consent's kind, grantor, when, and
     reference.
+  - **What readers saw** ([#1928](https://github.com/The-Verscienta/kiln_cms/issues/1928))
+    — one row per publish or withdrawal (`publish`, `publish_scheduled`,
+    `unpublish`, `unpublish_scheduled`, `archive`, `archive_scheduled`,
+    `destroy`), newest first. Each row carries:
+    - **Approver** — the admin on the write. A scheduled transition runs as
+      the scheduler, so its approver is whoever last set the schedule it ran
+      on (`scheduled_at`, or `unpublish_at` for an embargo end).
+    - **CDN purge** — from the transition's propagation record
+      (`KilnCMS.CMS.Propagation`, #1927): not configured, or enqueued at, then
+      acknowledged or given up at, each with its gap from the transition.
+    - **Webhook endpoints** — every endpoint the transition was sent to, with
+      its delivery time or its terminal failure and error.
+    - **Point in time** — the `?as_of=` link at that instant, on withdrawals
+      as well as publishes.
+    - **Chain** — the history chain's verdict on that version: the document's
+      verdict while the version is inside the attested prefix, *anchored, not
+      attested* past it (#811), *not yet anchored* past the newest anchor.
+      A tampered chain marks every row tampered.
+
+    Records carry no version id: the webhook fan-out opens one from the event,
+    just after the write commits. Each transition takes the first record of
+    its kind opened between its own write and the next transition's. A row
+    with no record says why: nothing was live to update (an archived draft),
+    or the record was pruned (records are kept
+    `KilnCMS.CMS.Propagation.retention_days/0`, 90 by default).
+
+    > **One correction traced end to end.** *Screenshot to come:* it needs a
+    > real correction on staging (publish, withdraw, republish) with a CDN
+    > purge and live endpoints, so every column carries a real time.
+
   - **Version timeline** — the PaperTrail history newest-first: what action
     (`create` / `update` / `submit_for_review` / `publish` / …), when, **who**
     (the acting user on the write — versions from before attribution landed
@@ -33,7 +63,13 @@ history (#338) together per content item. Admin-only.
     timeline + consents: JSON carries the full structure (diffs, chain
     verdict); CSV is the flat spreadsheet-friendly twin
     (`/editor/governance/:type/:id/export.json` and `…/export.csv`,
-    admin-only).
+    admin-only). Both carry the *What readers saw* rows (#1928): JSON as
+    `transitions`, each with its full `propagation` record; CSV as rows of
+    kind `transition` (approver in `who`, the dispatched event in
+    `reference`, when the record settled in `note`) and six trailing columns
+    every other row leaves empty: `cdn_purge`, `cdn_enqueued_at`,
+    `cdn_settled_at`, `endpoints` (`<url> delivered <at>` /
+    `<url> failed <at> (<error>)`, `; `-separated), `as_of` and `chain`.
 
 ## How it's built
 
@@ -128,7 +164,7 @@ Phase 3 (closing #352):
   storage tier). Point-in-time delivery now covers them too, so every publish
   row links to its snapshot — the earlier suppression is gone.
 - **CSV export** — the flat spreadsheet twin of the JSON export: one row per
-  timeline event or consent, formula-escaped against CSV injection.
+  transition, timeline event or consent, formula-escaped against CSV injection.
 
 Later phases:
 

@@ -281,6 +281,30 @@ defmodule KilnCMS.Propagation do
   end
 
   @doc """
+  Every propagation record of one document, oldest first, each with its
+  webhook deliveries loaded (oldest first): what the governance trail lays
+  beside each transition (#1928). `type` is the public type name, the event
+  namespace the record was opened under.
+
+  Read as `KilnCMS.Webhooks.system/0`, whose ledger the deliveries are.
+  **Fails closed**: a lost grant raises rather than reading as a document
+  whose transitions reached nobody.
+  """
+  @spec for_document(String.t(), Ash.UUID.t(), Ash.ToTenant.t()) :: [struct()]
+  def for_document(type, id, org) do
+    CMS.list_propagations!(
+      actor: KilnCMS.Webhooks.system(),
+      authorize_with: :error,
+      tenant: org,
+      query:
+        CMS.Propagation
+        |> Ash.Query.filter(document_type == ^type and document_id == ^id)
+        |> Ash.Query.sort(transitioned_at: :asc)
+        |> Ash.Query.load(deliveries: Ash.Query.sort(CMS.WebhookDelivery, inserted_at: :asc))
+    )
+  end
+
+  @doc """
   The propagation numbers for `org` over a window:
 
       %{kind, since, count, p50_ms, p95_ms, max_ms, lost, no_endpoints, open}
