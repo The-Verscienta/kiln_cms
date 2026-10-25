@@ -54,6 +54,7 @@ defmodule KilnCMSWeb.ReferenceExpansion do
   """
 
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.ContentLinks
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Firing.Delivery
   alias KilnCMS.Firing.Engine
@@ -93,11 +94,15 @@ defmodule KilnCMSWeb.ReferenceExpansion do
   list (empty when the field has no readable targets) and `tag` changes
   whenever any expanded target does, for the response's ETag. `:unavailable`
   when the database cannot be reached.
+
+  `edges: :from_record` derives the edges from `record`'s own `:reference`
+  values instead of the stored ones — for a working copy, whose values may
+  run ahead of the edges the live row wrote.
   """
-  @spec expand(struct(), [String.t()], Ash.UUID.t()) ::
+  @spec expand(struct(), [String.t()], Ash.UUID.t(), keyword()) ::
           {:ok, %{String.t() => [map()]}, non_neg_integer()} | :unavailable
-  def expand(record, fields, org_id) do
-    edges = edges(record, fields, org_id)
+  def expand(record, fields, org_id, opts \\ []) do
+    edges = edges(record, fields, org_id, Keyword.get(opts, :edges, :stored))
     targets = readable_targets(edges, org_id)
 
     expanded =
@@ -118,7 +123,18 @@ defmodule KilnCMSWeb.ReferenceExpansion do
       if Delivery.db_unavailable?(error), do: :unavailable, else: reraise(error, __STACKTRACE__)
   end
 
-  defp edges(record, fields, org_id) do
+  # A preview read (#1887) renders a working copy whose `:reference` values may
+  # run ahead of the stored edges, which follow the live row. Its edges are
+  # derived from the values it carries instead, in the stored edges' order.
+  defp edges(record, fields, _org_id, :from_record) do
+    record
+    |> Map.get(:custom_fields)
+    |> ContentLinks.desired(ContentLinks.reference_definitions(record))
+    |> Enum.filter(&(&1.field in fields))
+    |> Enum.sort_by(&{&1.field, &1.position})
+  end
+
+  defp edges(record, fields, org_id, :stored) do
     CMS.list_content_links!(
       query: [
         filter: [source_id: record.id, kind: :reference, field: [in: fields]],

@@ -14,14 +14,14 @@ defmodule KilnCMSWeb.TokenPreviewLive do
   Guests are anonymous: they join as "Guest N" and may pick a display name
   (never an email — nothing account-related exists to leak). The signed token
   authorizes the read exactly like the JSON surface (`authorize?: false` after
-  `PreviewToken.verify/1`), the tight `:preview` rate limit still fronts the
+  `PreviewGrant.verify/2`), the tight `:preview` rate limit still fronts the
   route, and an invalid/expired token renders a dead-link notice — never
   content.
   """
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.CMS.ContentTypes
-  alias KilnCMS.CMS.PreviewToken
+  alias KilnCMS.CMS.PreviewGrant
   alias KilnCMS.CMS.WorkingCopy
   alias KilnCMSWeb.BlockComponents
   alias KilnCMSWeb.Presence
@@ -29,15 +29,15 @@ defmodule KilnCMSWeb.TokenPreviewLive do
 
   @impl true
   def mount(%{"token" => token}, _session, socket) do
-    with {:ok, %{type: type, id: id, org_id: org_id}} <- PreviewToken.verify(token),
-         :ok <- same_site(org_id, socket.assigns[:current_org]),
+    with {:ok, %{type: type, id: id, org_id: org_id}} <-
+           PreviewGrant.verify(token, serving_org_id(socket.assigns[:current_org])),
          # Resolved under the token's org: an admin-defined type lives there.
          %{} = ct <- ContentTypes.get(type, org_id),
          kind = to_string(ct.type),
          # authorize?: false — the signed token IS the grant (anonymous guests
          # hold no actor); type, id and the tenant come from the token, never
          # the URL — content is org-scoped, so the read carries `tenant:`, and
-         # `same_site/2` has pinned it to the serving org (#1309).
+         # `PreviewGrant.verify/2` has pinned it to the serving org (#1309).
          {:ok, record} <-
            ContentTypes.get_record(ct, id, authorize?: false, tenant: org_id) do
       # What the editor sees: a live document's pending working copy, not the
@@ -96,9 +96,10 @@ defmodule KilnCMSWeb.TokenPreviewLive do
   # A token minted on one site and opened on another's host is refused, as
   # `ReleasePreviewLive` does: the draft must belong to the site whose layout
   # (#680) wraps it, or one tenant's unpublished content is served under
-  # another's name.
-  defp same_site(org_id, %{id: org_id}), do: :ok
-  defp same_site(_org_id, _org), do: :error
+  # another's name. `PreviewGrant.verify/2` pins it; no resolved site pins
+  # nothing.
+  defp serving_org_id(%{id: org_id}), do: org_id
+  defp serving_org_id(_org), do: nil
 
   defp content_blocks(record) do
     BlockComponents.view_blocks(record.blocks)

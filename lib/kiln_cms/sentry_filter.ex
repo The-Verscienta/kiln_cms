@@ -101,9 +101,19 @@ defmodule KilnCMS.SentryFilter do
       event
       | extra: scrub_extra(event.extra),
         message: scrub_message(event.message),
-        exception: scrub_exceptions(event.exception)
+        exception: scrub_exceptions(event.exception),
+        request: scrub_request(event.request)
     }
   end
+
+  # `Sentry.PlugContext` copies the raw query string into the event and takes
+  # no scrubber for it, so a credential presented as `?preview_token=` or
+  # `?unlock=` (#1887) would reach Sentry verbatim. Masked here, with the body
+  # scrubber's own rule.
+  defp scrub_request(%Sentry.Interfaces.Request{query_string: query} = request),
+    do: %{request | query_string: KilnCMSWeb.SentryScrubber.scrub_query_string(query)}
+
+  defp scrub_request(request), do: request
 
   defp scrub_extra(%{} = extra) do
     Map.new(extra, fn

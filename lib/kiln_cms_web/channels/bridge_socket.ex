@@ -86,7 +86,7 @@ defmodule KilnCMSWeb.BridgeSocket do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.SessionEviction
   alias KilnCMS.CMS.ContentTypes
-  alias KilnCMS.CMS.PreviewToken
+  alias KilnCMS.CMS.PreviewGrant
   alias KilnCMSWeb.PreviewLive
   alias KilnCMSWeb.SocketReauth
 
@@ -238,17 +238,19 @@ defmodule KilnCMSWeb.BridgeSocket do
   # The token must verify (signature and 15-minute age) and name this document
   # — its public type name and id — on this host's org; a token for another
   # document, or one minted on another site, admits nothing here.
-  defp authorize_token(ct, id, token, org) do
-    with {:ok, claims} <- PreviewToken.verify(token),
-         true <- names?(claims, to_string(ct.type), id, org) do
+  defp authorize_token(ct, id, token, %{id: org_id} = org) do
+    with {:ok, grant} <- PreviewGrant.verify(token, org_id),
+         true <- names?(grant, to_string(ct.type), id) do
       token_read(ct, id, org)
     else
       _ -> :error
     end
   end
 
-  defp names?(%{type: type, id: id, org_id: org_id}, type, id, %{id: org_id}), do: true
-  defp names?(_claims, _type, _id, _org), do: false
+  defp authorize_token(_ct, _id, _token, _org), do: :error
+
+  defp names?(%PreviewGrant{type: type, id: id}, type, id), do: true
+  defp names?(_grant, _type, _id), do: false
 
   # The document must still exist (a trashed or deleted one stops the stream,
   # exactly as it does for an actor).

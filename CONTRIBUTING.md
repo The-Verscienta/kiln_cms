@@ -39,6 +39,15 @@ environment notes that bite people:
   is not released yet. Every other native dependency builds under a spaced
   path. iCloud Drive's folder (`~/Library/Mobile Documents/…`) fails only
   because its name has a space.
+- **OTP 29.1.1's `:httpc` header limit is lifted for Mix only.** inets 9.8
+  caps response headers at 10240 bytes, which GitHub's release redirects have
+  exceeded, so tailwind and the precompiled NIFs of y_ex, lazy_html and vix
+  failed to download with `{:header_too_long, {:max, 10240}}`. `mix setup`,
+  `mix assets.setup` and `mix deps.compile` build a patched `httpc` from
+  `rel/docker/httpc_header_limit.escript` into `_build/httpc_patch/` and load
+  it into that Mix VM only; your OTP install is never written to. A plain
+  `mix compile` or `mix tailwind.install` on a fresh tree does not get it, so
+  run `mix setup` (or `mix deps.compile`) first.
 - **`igniter` is a real dependency.** `mix kiln.gen.content` and
   `mix kiln.gen.plugin` are Igniter tasks. Removing it does not crash the
   compiler; it removes those two generators.
