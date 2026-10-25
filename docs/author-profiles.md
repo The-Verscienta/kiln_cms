@@ -73,23 +73,26 @@ CMS.create_field_definition!(%{
 
 ### Linking an author to a console user
 
-The issue behind this recipe asks for an optional link to a `User`, for a
-staff writer who also has an account. Kiln has no field type that points at
-a `User`, and every custom field is delivered publicly with the record. So
-the link is a plain field holding the user's **id**, never the email:
+A staff writer often also has a Kiln account. Link the two with a `:user`
+field, which names one of the site's people (an admin, or a member with any
+role) by their account id:
 
 ```elixir
 CMS.create_field_definition!(%{
-  type_definition_id: author_type.id, name: "console_user_id",
-  label: "Console account (user id)", field_type: :string,
-  help_text: "Optional. The id of this author's Kiln account. Delivered publicly."
+  type_definition_id: author_type.id, name: "account",
+  label: "Kiln account", field_type: :user,
+  help_text: "Optional. The account this author signs in with."
 }, actor: admin)
 ```
 
-Kiln does not resolve, check or act on this value. It is a note your own
-code can use, for example an overlay that fills a new article's `authors`
-from the signed-in editor. If an opaque id on a public payload is still too
-much, keep the mapping in that overlay instead and leave the field out.
+A `:user` field is always **private**. Editors and admins see it, and pick
+from the site's people in the editor. Everyone else never does: it is left out
+of the author's artifacts, out of every API read below editor, and out of
+filters, the same as a `User` is never delivered. Kiln checks that the value
+names someone on the site when it is written. It does nothing else with the
+value. Your own code can use it, for example an overlay that fills a new
+article's `authors` from the signed-in editor. A contributor with no account
+simply leaves the field empty.
 
 ### As a compiled type
 
@@ -331,8 +334,6 @@ Each of these is a gap in the code, not in the recipe:
   page, not one Kiln serves.
 - **The `Person` nodes carry a name and a URL only.** A profile's bio, photo
   and other profiles are not read into them.
-- **No field type points at a `User`, and no custom field is private.** The
-  optional account link above is an id in a public string field.
 - **A link-field filter is not tied to one target.**
   `custom_filter[contributors][has][]=<id>&custom_filter[contributors.link.role]=photographer`
   matches an article where *anyone* is the photographer, not only that
