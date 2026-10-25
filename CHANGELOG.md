@@ -151,6 +151,12 @@ Every summary line below that was shortened links to its own entry there.
   deployment whose compiled config sets the other `vector_scan:` mode.**
   ([#2060](https://github.com/The-Verscienta/kiln_cms/pull/2060) · [long form](docs/changelog/unreleased.md#vector-scan-env-replaces-compiled-mode))
 
+### Security
+
+- **ash 3.37.1 and ash_postgres 2.15.2 fix three tenancy advisories
+  (EEF-CVE-2026-115627, -115635, -114214); Kiln was not exposed.**
+  ([#PR](https://github.com/The-Verscienta/kiln_cms/pull/PR) · [long form](docs/changelog/unreleased.md#ash-tenancy-advisories))
+
 ## [1.5.1] - 2026-10-24
 
 Long form: [docs/changelog/v1.5.1.md](docs/changelog/v1.5.1.md) —
