@@ -198,4 +198,42 @@ defmodule KilnCMS.MultitenancyTaxonomyMediaTest do
       assert tagging.org_id == a.id
     end
   end
+
+  # EEF-CVE-2026-115627: ash_postgres < 2.15.2 built the join-resource query of
+  # a lateral-joined many_to_many without its read action, so attribute
+  # multitenancy never filtered the join rows. `related_<type>s` is sorted, so
+  # it loads by lateral join. Kiln's writes keep a join row in the org of both
+  # its ends, so a row like the planted one below can't arise through the app;
+  # this pins the data layer's half of the guarantee all the same.
+  describe "a join row of another org (lateral-joined many_to_many)" do
+    test "never relates two records of this org", %{a: a, b: b, actor: actor} do
+      [a1, a2, a3] =
+        for n <- 1..3 do
+          CMS.create_page!(%{title: "A#{n}", slug: uniq("a"), blocks: []},
+            actor: actor,
+            tenant: a
+          )
+        end
+
+      # The control: A's own link, so an empty result can't pass vacuously.
+      CMS.create_related_link!(%{source_id: a1.id, target_id: a3.id},
+        tenant: a,
+        authorize?: false
+      )
+
+      # Org B's row between two of A's records.
+      CMS.create_related_link!(%{source_id: a1.id, target_id: a2.id},
+        tenant: b,
+        authorize?: false
+      )
+
+      page = CMS.get_page!(a1.id, actor: actor, tenant: a, load: [:related_pages])
+      assert Enum.map(page.related_pages, & &1.id) == [a3.id]
+
+      # And loaded for several sources at once.
+      [loaded_a1, loaded_a2] = Ash.load!([a1, a2], :related_pages, actor: actor, tenant: a)
+      assert Enum.map(loaded_a1.related_pages, & &1.id) == [a3.id]
+      assert loaded_a2.related_pages == []
+    end
+  end
 end
