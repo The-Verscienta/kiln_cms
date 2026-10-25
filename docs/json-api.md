@@ -343,9 +343,21 @@ GET /api/json/posts?custom_filter[ingredients.link.quantity][gte]=100
   map), under the same read rule as the relationship operators: a
   connection to a target you may not read is not there, so a link value
   cannot be used to learn that a draft target exists.
+- **`target`** ties the condition to particular records: beside the
+  operators, it narrows them to the connections pointing at those ids. "Is
+  *this* person the photographer?" rather than "is anyone?":
+
+  ```
+  GET /api/json/posts?custom_filter[contributors.link.role][eq]=photographer&custom_filter[contributors.link.role][target]=<author id>
+  ```
+
+  It takes one id or a list (`[target][]=…`, at most 100), and needs an
+  operator beside it (a bare value can't carry one, so write `[eq]`).
+  Several targets match a record where any one of them has the value.
 - An unknown link field, or a field that is not a reference, is a **400**.
   `customFilter` in GraphQL takes the same key: `{"ingredients.link.role":
-  "main"}`.
+  "main"}`, and `{"contributors.link.role": {"eq": "photographer",
+  "target": "<id>"}}`.
 
 In the response a reference's snapshot carries its link values as an added
 `"link"` map — `{"id", "type", "slug", "title", "link": {"role": "main"}}`

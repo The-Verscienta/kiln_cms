@@ -49,6 +49,21 @@ carries the reasoning.
   the last publish. The guide's end-to-end screenshot of one real correction
   is still to come: it needs staging data.
 
+<a id="link-filter-target"></a>
+
+- **A link-field filter tied to particular targets
+  ([#2044](https://github.com/The-Verscienta/kiln_cms/issues/2044)).**
+  `custom_filter[<field>.link.<name>]` matched a record when *some*
+  connection of the field carried the value, so asking for the posts where
+  an author is the photographer also returned the posts where anyone else
+  was. A `target` key beside the operators now narrows every operator in
+  that condition to the connections pointing at the given ids:
+  `custom_filter[contributors.link.role][eq]=photographer&custom_filter[contributors.link.role][target]=<id>`.
+  It takes one id or a list (at most 100, each a UUID), needs an operator
+  beside it, and keeps the both-ends read gate, so a draft target still
+  matches nothing for an anonymous reader. GraphQL's `customFilter` takes
+  the same shape. Without `target`, link filters mean what they did.
+
 <a id="private-fields"></a>
 
 - **Private custom fields and a `:user` field type

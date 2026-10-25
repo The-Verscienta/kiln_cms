@@ -67,6 +67,10 @@ Every summary line below that was shortened links to its own entry there.
   with its approver, CDN purge, each endpoint's delivery, `?as_of=` and chain.**
   ([#2086](https://github.com/The-Verscienta/kiln_cms/pull/2086) · [long form](docs/changelog/unreleased.md#governance-what-readers-saw))
 
+- **A link-field filter can name the connection it means: `[target]=<id>` beside
+  the operators asks whether *that* record has the value.**
+  ([#2081](https://github.com/The-Verscienta/kiln_cms/pull/2081) · [long form](docs/changelog/unreleased.md#link-filter-target))
+
 - **Private custom fields: a value only the site's editors and admins see; and
   a `:user` field type that names a person on the site, always private.**
   ([#2085](https://github.com/The-Verscienta/kiln_cms/pull/2085) · [long form](docs/changelog/unreleased.md#private-fields))
