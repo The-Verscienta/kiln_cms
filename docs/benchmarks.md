@@ -89,7 +89,7 @@ Propagation records are kept for 90 days
 
 A live blog publishes many small records related to one parent, one every few
 seconds (#2049, U6 in the
-[verscienta-news plan](plans/2026-10-19-verscienta-news.md)). This measures
+[verscienta-news plan](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/plans/2026-10-19-verscienta-news.md)). This measures
 what that write pattern costs: each update's fire and feed event, whether the
 parent re-fires, the Oban queues, the database, and the change feed (#2050)
 with 0, 1,000 and 10,000 subscribers.
