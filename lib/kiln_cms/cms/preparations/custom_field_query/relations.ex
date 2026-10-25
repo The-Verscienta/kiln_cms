@@ -100,25 +100,14 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Relations do
   @spec link(map(), term(), map(), [Ash.UUID.t()] | nil) :: term()
   def link(%{name: name} = definition, condition, ctx, targets \\ nil) do
     readable = readable_target(target_resources(definition, ctx), ctx)
+    on_targets = if targets, do: expr(target_id in ^targets), else: expr(true)
 
-    case targets do
-      nil ->
-        expr(
-          exists(
-            content_links,
-            kind == :reference and field == ^name and ^readable and ^condition
-          )
-        )
-
-      ids ->
-        expr(
-          exists(
-            content_links,
-            kind == :reference and field == ^name and target_id in ^ids and ^readable and
-              ^condition
-          )
-        )
-    end
+    expr(
+      exists(
+        content_links,
+        kind == :reference and field == ^name and ^on_targets and ^readable and ^condition
+      )
+    )
   end
 
   @doc """
