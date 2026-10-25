@@ -123,18 +123,26 @@ defmodule KilnCMS.Events.IndexTest do
       anchor = Index.anchor(now)
       this_morning = DateTime.add(anchor, div(DateTime.diff(now, anchor, :second), 2), :second)
 
-      assert DateTime.compare(this_morning, anchor) in [:gt, :eq]
-      assert DateTime.compare(this_morning, now) in [:lt, :eq]
+      wall = local(this_morning, @london)
 
-      record =
-        event!(ctx, %{
-          "when" => %{"start" => local(this_morning, @london), "time_zone" => @london}
-        })
+      # The field stores wall time, and wall time cannot always name the instant
+      # it came from: in the repeated hour of an autumn-back day, `this_morning`
+      # may be the SECOND 01:05, and the field reads 01:05 as the first (see
+      # "the DST changeover days" below). So the expectation is the instant the
+      # stored wall time means, not `this_morning` itself. It still lies between
+      # the anchor and now — the first of a pair is earlier, never before the
+      # local midnight — so the claim this guards is unchanged.
+      {:ok, starts_at} = Events.to_utc(NaiveDateTime.from_iso8601!(wall), @london)
+
+      assert DateTime.compare(starts_at, anchor) in [:gt, :eq]
+      assert DateTime.compare(starts_at, now) in [:lt, :eq]
+
+      record = event!(ctx, %{"when" => %{"start" => wall, "time_zone" => @london}})
 
       # Its own start, not nil and not some later instant: a one-off that began
       # this morning is materialized as exactly when it began.
       assert record.next_occurrence_at
-      assert DateTime.compare(record.next_occurrence_at, this_morning) == :eq
+      assert DateTime.compare(record.next_occurrence_at, starts_at) == :eq
     end
 
     test "a recurring event whose series started in the past points at its NEXT date", ctx do
@@ -237,11 +245,81 @@ defmodule KilnCMS.Events.IndexTest do
       assert Events.default_time_zone() == @auckland
     end
 
+    test "on a changeover day is local midnight in the offset midnight had" do
+      Application.put_env(:kiln_cms, KilnCMS.Events, time_zone: @london)
+
+      # Autumn back: midnight on 2026-10-25 is still BST, so the day began at
+      # 23:00Z the evening before, not at 00:00Z.
+      assert Index.anchor(~U[2026-10-25 02:10:00Z]) == ~U[2026-10-24 23:00:00Z]
+      # Spring forward: midnight on 2026-03-29 is still GMT.
+      assert Index.anchor(~U[2026-03-29 10:00:00Z]) == ~U[2026-03-29 00:00:00Z]
+    end
+
     test "sits at or before now, and no more than a day back" do
       anchor = Index.anchor()
 
       assert DateTime.compare(anchor, DateTime.utc_now()) in [:lt, :eq]
       assert DateTime.diff(DateTime.utc_now(), anchor, :second) < 86_400 + 3600
+    end
+  end
+
+  # Pinned instants on Europe/London's 2026 changeovers, so these run the same
+  # whatever day the suite does. `next_occurrence_at/3` takes `from`, and the
+  # record's own saved value (computed against the real clock) is ignored.
+  describe "the DST changeover days" do
+    setup do
+      original = Application.get_env(:kiln_cms, KilnCMS.Events, [])
+      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Events, original) end)
+      :ok
+    end
+
+    test "a wall time in the repeated autumn hour is the FIRST of the pair", ctx do
+      Application.put_env(:kiln_cms, KilnCMS.Events, time_zone: @london)
+      from = Index.anchor(~U[2026-10-25 02:10:00Z])
+
+      record =
+        event!(ctx, %{"when" => %{"start" => "2026-10-25T01:30:00", "time_zone" => @london}})
+
+      # 01:30 BST (00:30Z), not 01:30 GMT (01:30Z) — the rule `docs/events.md`
+      # states and `KilnCMS.Events.Recurrence` applies to every occurrence.
+      assert Index.next_occurrence_at(record, ctx.org, from) == ~U[2026-10-25 00:30:00Z]
+    end
+
+    test "an event in the second 01:xx of the autumn-back day is still today's", ctx do
+      # The suite failure of 2026-10-25, pinned. A UTC deployment at 02:10Z: the day
+      # began at 00:00Z, and halfway to now is 01:05Z — 01:05 GMT in London,
+      # the SECOND 01:05. Stored as wall time it reads back as the first
+      # (00:05Z): an hour earlier than the instant the test started from, and
+      # still after the anchor, so still on today's listing.
+      Application.put_env(:kiln_cms, KilnCMS.Events, time_zone: "Etc/UTC")
+      from = Index.anchor(~U[2026-10-25 02:10:00Z])
+      assert from == ~U[2026-10-25 00:00:00Z]
+
+      record =
+        event!(ctx, %{"when" => %{"start" => "2026-10-25T01:05:00", "time_zone" => @london}})
+
+      assert Index.next_occurrence_at(record, ctx.org, from) == ~U[2026-10-25 00:05:00Z]
+    end
+
+    test "a wall time in the spring-forward gap moves past it rather than vanishing", ctx do
+      Application.put_env(:kiln_cms, KilnCMS.Events, time_zone: @london)
+      from = Index.anchor(~U[2026-03-29 10:00:00Z])
+
+      # 01:30 does not exist on 2026-03-29: clocks jump from 01:00 GMT to 02:00
+      # BST. The event lands at the far edge of the gap, 02:00 BST (01:00Z).
+      gap = event!(ctx, %{"when" => %{"start" => "2026-03-29T01:30:00", "time_zone" => @london}})
+      assert Index.next_occurrence_at(gap, ctx.org, from) == ~U[2026-03-29 01:00:00Z]
+
+      # Either side of the gap is an ordinary wall time in its own offset.
+      before =
+        event!(ctx, %{"when" => %{"start" => "2026-03-29T00:30:00", "time_zone" => @london}})
+
+      assert Index.next_occurrence_at(before, ctx.org, from) == ~U[2026-03-29 00:30:00Z]
+
+      later =
+        event!(ctx, %{"when" => %{"start" => "2026-03-29T02:30:00", "time_zone" => @london}})
+
+      assert Index.next_occurrence_at(later, ctx.org, from) == ~U[2026-03-29 01:30:00Z]
     end
   end
 end
