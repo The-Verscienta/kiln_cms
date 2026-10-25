@@ -92,15 +92,30 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Relations do
   `:reference` edge of `definition`'s field whose target the reader may read
   and whose `metadata` satisfies `condition` (built over the edge by
   `CustomFieldQuery`). The same edge and the same gate as `has`.
+
+  `targets` ties the condition to the edges pointing at those ids (#2044):
+  "this person is the photographer", rather than "someone is". `nil` — any
+  edge of the field — is what a link filter always meant.
   """
-  @spec link(map(), term(), map()) :: term()
-  def link(%{name: name} = definition, condition, ctx) do
+  @spec link(map(), term(), map(), [Ash.UUID.t()] | nil) :: term()
+  def link(%{name: name} = definition, condition, ctx, targets \\ nil) do
     readable = readable_target(target_resources(definition, ctx), ctx)
+    on_targets = if targets, do: expr(target_id in ^targets), else: expr(true)
 
     expr(
-      exists(content_links, kind == :reference and field == ^name and ^readable and ^condition)
+      exists(
+        content_links,
+        kind == :reference and field == ^name and ^on_targets and ^readable and ^condition
+      )
     )
   end
+
+  @doc """
+  The ids of a link filter's `target` (#2044): one id or a list, at most
+  `max_ids/0`, each a UUID. `label` names the filter in the error.
+  """
+  @spec link_targets(term(), String.t()) :: {:ok, [Ash.UUID.t()]} | {:error, String.t()}
+  def link_targets(raw, label), do: ids(raw, label, "target")
 
   @doc """
   The expression for one relationship operator on a built-in relationship

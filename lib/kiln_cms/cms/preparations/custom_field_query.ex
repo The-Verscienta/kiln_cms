@@ -39,7 +39,9 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   `custom_filter[ingredients.link.role]=main` — with the scalar operators:
   a record matches when **some** connection of that field carries a
   matching value, read from the edges' `metadata` under the same both-ends
-  gate as the relationship operators. Definitions are read
+  gate as the relationship operators. A `target` beside the operators
+  (`custom_filter[credits.link.role][eq]=photo&custom_filter[credits.link.role][target]=<id>`)
+  narrows that to the connections pointing at those ids (#2044). Definitions are read
   as the system (`KilnCMS.CMS.Housekeeping`, #1659): registry metadata, not
   user data, and the public API's anonymous callers filter too. The read fails
   closed — a refused registry read raises rather than resolving to "no
@@ -253,6 +255,27 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     conditions(target, %{"eq" => condition}, ctx)
   end
 
+  # A link filter's `target` (#2044) is not an operator: it narrows the
+  # edges every operator beside it reads to those pointing at the given ids,
+  # so `[eq]=photographer&[target]=<id>` asks whether *that* record is the
+  # photographer. Taken out before the operators are read.
+  defp conditions({:link, parent, link}, condition, ctx) when is_map(condition) do
+    label = "#{parent.name}.link.#{link.name}"
+
+    case Map.pop(stringify_keys(condition), "target") do
+      {nil, rest} ->
+        link_conditions(parent, link, rest, ctx, nil)
+
+      {_raw, rest} when map_size(rest) == 0 ->
+        {:error, "target for link field #{inspect(label)} needs a condition beside it"}
+
+      {raw, rest} ->
+        with {:ok, ids} <- Relations.link_targets(raw, label) do
+          link_conditions(parent, link, rest, ctx, ids)
+        end
+    end
+  end
+
   defp conditions(target, condition, ctx) do
     Enum.reduce_while(condition, {:ok, []}, fn {op, raw}, {:ok, acc} ->
       case relation_or_condition(target, to_string(op), raw, ctx) do
@@ -264,12 +287,6 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
   defp relation_or_condition({:builtin, builtin}, op, raw, ctx),
     do: Relations.builtin_condition(builtin, op, raw, ctx)
-
-  defp relation_or_condition({:link, parent, link}, op, raw, ctx) do
-    with {:ok, condition} <- link_condition(link, op, raw, "#{parent.name}.link.#{link.name}") do
-      {:ok, Relations.link(parent, condition, ctx)}
-    end
-  end
 
   # The relationship operators run over the reference's `content_links`
   # edges, single or `multiple` alike (R6).
@@ -285,6 +302,22 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   end
 
   defp relation_or_condition(definition, op, raw, _ctx), do: condition(definition, op, raw)
+
+  defp link_conditions(parent, link, condition, ctx, targets) do
+    label = "#{parent.name}.link.#{link.name}"
+
+    Enum.reduce_while(condition, {:ok, []}, fn {op, raw}, {:ok, acc} ->
+      case link_condition(link, op, raw, label) do
+        {:ok, condition} ->
+          {:cont, {:ok, [Relations.link(parent, condition, ctx, targets) | acc]}}
+
+        {:error, message} ->
+          {:halt, {:error, message}}
+      end
+    end)
+  end
+
+  defp stringify_keys(map), do: Map.new(map, fn {key, value} -> {to_string(key), value} end)
 
   # One link field's value on an edge's `metadata` (R3) — the condition
   # `Relations.link/3` wraps in the edge `exists`. Link fields are scalar
