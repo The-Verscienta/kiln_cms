@@ -468,7 +468,15 @@ defmodule KilnCMS.CMS.LinkFieldsTest do
           publish: true
         )
 
-      %{bread: bread, soup: soup, hidden: hidden, scope: [bread, soup, hidden]}
+      %{
+        bread: bread,
+        soup: soup,
+        hidden: hidden,
+        flour: flour,
+        salt: salt,
+        secret: secret,
+        scope: [bread, soup, hidden]
+      }
     end
 
     defp matching(filter, actor, scope) do
@@ -494,6 +502,47 @@ defmodule KilnCMS.CMS.LinkFieldsTest do
       # Two conditions on the same link field may be met by different
       # connections: each is its own `exists`.
       assert m.("quantity", %{"gt" => 400, "lt" => 6}) == [ctx.bread.id]
+    end
+
+    # #2044: "is *this* record the garnish?", not "is anything?".
+    test "target ties the condition to the connections pointing at those ids", ctx do
+      m = &matching(%{"#{ctx.name}.link.#{&1}" => &2}, ctx.admin, ctx.scope)
+
+      # Bread has a garnish, but it is the salt, not the flour.
+      assert m.("role", %{"eq" => "garnish", "target" => ctx.flour.id}) == []
+      assert m.("role", %{"eq" => "garnish", "target" => ctx.salt.id}) == [ctx.bread.id]
+
+      # Without `target`, the flour's post still matches through the salt.
+      assert m.("role", %{"eq" => "garnish"}) == sorted([ctx.bread, ctx.hidden])
+
+      # A list matches when any one of them carries the value; every operator
+      # beside `target` is narrowed by it.
+      assert m.("quantity", %{"gte" => 10, "target" => [ctx.flour.id, ctx.salt.id]}) ==
+               sorted([ctx.bread, ctx.soup])
+
+      assert m.("quantity", %{"gte" => 10, "lte" => 100, "target" => [ctx.salt.id]}) ==
+               [ctx.soup.id]
+
+      # The both-ends gate still holds: a draft target names nothing to an
+      # anonymous reader.
+      assert matching(
+               %{"#{ctx.name}.link.role" => %{"eq" => "garnish", "target" => ctx.secret.id}},
+               nil,
+               ctx.scope
+             ) == []
+    end
+
+    test "a target without an operator, or not an id, is a 400", ctx do
+      error = fn condition ->
+        assert {:error, error} =
+                 CMS.list_posts(%{custom_filter: %{"#{ctx.name}.link.role" => condition}})
+
+        Exception.message(error)
+      end
+
+      assert error.(%{"target" => ctx.salt.id}) =~ "needs a condition beside it"
+      assert error.(%{"eq" => "garnish", "target" => "nope"}) =~ ~s("nope" is not an id)
+      assert error.(%{"eq" => "garnish", "target" => []}) =~ "needs at least one id"
     end
 
     test "a draft target is invisible to an anonymous reader, visible to an editor", ctx do
