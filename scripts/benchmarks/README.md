@@ -117,3 +117,70 @@ server through `KilnCMSWeb.Endpoint.call/2`, with
 - **Leftovers.** If the script is killed with `SIGKILL`, its trap does not run:
   drop `kiln_cms_bench_<pid>` yourself, and look for a BEAM started with
   `--sname kiln_bench_srv_<pid>`.
+
+# Live-blog firing benchmark
+
+The write-side benchmark for a live blog (#2049): one small published update
+every few seconds, each related to one parent story. The results are in
+[`docs/benchmarks.md`](../../docs/benchmarks.md#live-blog-an-update-every-few-seconds).
+
+```bash
+export PATH="/opt/homebrew/opt/erlang/bin:/opt/homebrew/bin:$PATH"
+scripts/benchmarks/live_blog.sh                                   # ~105 min: three 30-minute legs
+BENCH_DURATION=120 BENCH_SUBSCRIBERS=0 scripts/benchmarks/live_blog.sh   # a smoke run
+```
+
+Same prerequisites and the same throwaway database as `api_latency.sh`, and the
+same corpus (`seed.exs`, with its knobs). There is no HTTP server: `live_blog.exs`
+runs in one `MIX_ENV=prod` BEAM with the application started, so the Oban
+queues that fire each update run beside it, with the production queue sizes
+and `POOL_SIZE=10`.
+
+## The model
+
+The verscienta-news plan's `LiveStory` and `LiveUpdate`
+([N3](../../docs/plans/2026-10-19-verscienta-news.md)), on the compiled types:
+
+- the **story** is a published page in a "Live" category (the section front);
+- each **update** is a published post in that category whose `:reference`
+  custom field `live_story` points at the story, with an inverse
+  (`live_updates`), so the story's reverse field lists its updates.
+
+Each leg (one per `BENCH_SUBSCRIBERS` value) starts a fresh story, then:
+
+1. publishes an update every `BENCH_INTERVAL_MIN`–`BENCH_INTERVAL_MAX` ms for
+   `BENCH_DURATION` seconds, each through `CMS.create_post!/2` and
+   `CMS.publish_post!/3` as an admin;
+2. waits for every update to fire;
+3. edits the story once (a live title change, which fires it in place) and
+   waits for the re-fire wave that reaches its updates.
+
+## What is measured
+
+| Number | How |
+|---|---|
+| Fire latency | publish start → the update's `{:fired, :post, id}` on the `"firing"` PubSub topic, which `KilnCMS.Firing.Engine` broadcasts once the artifacts are persisted. "After publish" starts the clock when the publish action returns instead |
+| Re-fires | every `"firing"` broadcast during the leg, by type and id: the story's, anything else's, and any update fired twice |
+| Oban queue depth | `available` + `executing` rows by queue, sampled every second |
+| DB load | `[:kiln_cms, :repo, :query]` count and total time (the sampler's own queries excluded), and the `pg_stat_database` counters for the benchmark database |
+| Feed event | publish start → the update's `published` event on the change feed (`KilnCMS.Delivery.Feed`, #2050), timed by its `[:kiln_cms, :delivery, :feed, :event]` telemetry, which fires once the PubSub broadcast is sent. Also the count of feed events per leg and per story edit |
+| Last subscriber | with N subscribers, N processes on the site's feed topic (`Feed.topic/1`); the time from publish start until the last of them has received the update's event |
+| Idle baseline | `BENCH_BASELINE` seconds with nothing published, after the legs. The per-update DB figures are net of it |
+
+The subscribers are in-BEAM processes: the feed's server side (2.1) with
+nothing in front of it. The SSE and channel transports, sockets and the
+network are 2.2 and are not measured here.
+
+## Knobs
+
+| Variable | Default | |
+|---|---|---|
+| `BENCH_DURATION` | 1800 | seconds of updates per leg |
+| `BENCH_INTERVAL_MIN`, `BENCH_INTERVAL_MAX` | 2000, 5000 | ms between updates, uniform |
+| `BENCH_SUBSCRIBERS` | `0,1000,10000` | one leg per value |
+| `BENCH_WAVE_TIMEOUT` | 600 | seconds to wait for the story-edit wave |
+| `BENCH_BASELINE` | 300 | seconds of the idle baseline |
+| `BENCH_SEED` | 2049 | RNG seed for the update text and intervals |
+| `BENCH_WORK` | a `mktemp -d` | where logs, `results.json` and `results.md` go |
+| `POOL_SIZE` | 10 | the Repo pool |
+| corpus | as `api_latency.sh` | `BENCH_PAGES`, `BENCH_POSTS`, `BENCH_DRAFTS` |

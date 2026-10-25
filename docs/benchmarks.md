@@ -85,6 +85,134 @@ telemetry event. `KilnCMSWeb.Telemetry` reports it as
 Propagation records are kept for 90 days
 (`config :kiln_cms, :propagation, retention_days:`).
 
+## Live blog: an update every few seconds
+
+A live blog publishes many small records related to one parent, one every few
+seconds (#2049, U6 in the
+[verscienta-news plan](plans/2026-10-19-verscienta-news.md)). This measures
+what that write pattern costs: each update's fire and feed event, whether the
+parent re-fires, the Oban queues, the database, and the change feed (#2050)
+with 0, 1,000 and 10,000 subscribers.
+
+Measured on 2026-10-24 against `main` at `c4946b059` (the feed's server side,
+2.1, merged), with
+[`scripts/benchmarks/live_blog.sh`](https://github.com/The-Verscienta/kiln_cms/blob/main/scripts/benchmarks/README.md#live-blog-firing-benchmark).
+
+**In short:**
+
+- **The parent does not re-fire.** Across 1,502 updates the story fired 0
+  times, and nothing else did either. Each update cost exactly one fire and
+  one feed event. An update references its story, so the edge points
+  update → story, and publishing an update re-fires nobody.
+- **Firing keeps up.** Publish start to fired artifact p95 was 60–63 ms
+  with up to 1,000 feed subscribers. The firing queue never held more than
+  one job.
+- **10,000 feed subscribers slow the publish itself**: publish p95
+  went from 36 ms to 357 ms, and p99 from 81 ms to 1.5 s. The feed broadcasts
+  from the publisher's own process, so the editor's request pays for the
+  fan-out. Filed as #2083, for 2.2.
+- **The fan-out goes the other way.** One live edit of the story re-fires
+  every update that references it: 486–513 re-fires, drained in 1.4–1.7 s,
+  at about 30 queries and 20 commits each. Its single feed event lists all
+  of them in `affected`. That is bounded, not a storm (`RefireWorker`
+  dedupes pending jobs per document). It would become one if the story were
+  edited with every update, so the live-blog design must not do that (see
+  below).
+
+### How it was measured
+
+| | |
+|---|---|
+| Machine | Apple M5 Pro, 18 cores, 24 GB, macOS; Kiln and PostgreSQL 17 on the same machine |
+| Other load | Shared with other work. Load average 4–19 at the start of a leg (in the table) |
+| Build | `MIX_ENV=prod`, Erlang/OTP 29, Elixir 1.20.4, `POOL_SIZE=10`, `firing` queue 5 wide (the production defaults), lean build (no ML) |
+| Database | Its own, created for the run and dropped after it. The same corpus as the API benchmark: 500 pages, 1,500 posts, 200 drafts, 8,000 fired artifacts |
+| Model | The story is a published page in a "Live" category (the section front). Each update is a published post in that category with a `:reference` field to the story, which has an inverse, so the story's reverse field lists its updates. The overlay's `LiveStory`/`LiveUpdate` types fire through the same engine and the same reference edges |
+| Load | One update every 2–5 s (uniform) for 30 minutes per leg, each created and published through the domain actions as an admin. A fresh story per leg |
+| Subscribers | N processes in the same BEAM on the site's feed topic. No SSE, socket or network: those are 2.2 |
+
+### Results
+
+Milliseconds. "Fire" runs from publish start to the update's `{:fired, …}`
+broadcast, which is sent once its artifacts are persisted. "Feed event" runs
+from publish start to the feed's `published` event (its telemetry, which
+fires once the broadcast has been sent). "Last subscriber" is when the last
+of the N subscribers received that event. Query and commit figures are per
+update, net of an idle baseline taken over 300 s after the legs (13.1
+queries/s, 9.7 commits/s).
+
+| Feed subscribers | Updates | Publish p95 | Fire p50 | Fire p95 | Fire p99 | Feed event p95 | Last subscriber p95 | Story re-fires | Other fires | Load average |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 513 | 35.9 | 36.2 | 59.5 | 136.5 | 52.6 | – | 0 | 0 | 18.8 |
+| 1,000 | 503 | 41.5 | 49.2 | 62.7 | 128.8 | 54.4 | 57.6 | 0 | 0 | 4.3 |
+| 10,000 | 486 | 356.8 | 128.6 | 376.7 | 1,493.1 | 398.3 | 405.6 | 0 | 0 | 7.2 |
+
+| Feed subscribers | Firing queue depth p99 / max | All queues p99 / max | Queries / update | Query ms / update | Commits / update |
+|---|---|---|---|---|---|
+| 0 | 0 / 1 | 5 / 223 | 142 | 37 | 84 |
+| 1,000 | 0 / 1 | 0 / 2 | 111 | 32 | 60 |
+| 10,000 | 1 / 1 | 2 / 266 | 124 | 197 | 70 |
+
+Queue depth is `available` + `executing` jobs, sampled every second. The
+two spikes in the "all queues" column are a periodic job in another queue;
+`firing`, `search` and `webhooks` never went past 1. Query time is the Repo's
+`total_time`, which includes waiting for a pool connection. The jump at
+10,000 subscribers is mostly that wait, because the subscribers take CPU
+from everything else.
+
+Where an update's queries go (1,000-subscriber leg, before subtracting the
+baseline): `oban_jobs` 30, `field_definitions` 24, `posts` 7, `posts_versions`
+6, `reference_edges` 5, `published_artifacts` 4, `propagations` 3, plus about
+53 raw SQL statements with no Ecto source. The `field_definitions`
+reads, 24 per update, are the largest share that is Kiln's own and not
+Oban's.
+
+**The story edit.** After each leg, one live title edit of the story:
+
+| Updates referencing the story | Re-fired | Edit (ms) | Last re-fire (ms) | Firing queue max | Feed events | Queries | Commits |
+|---|---|---|---|---|---|---|---|
+| 513 | 513 | 51.6 | 1,723.7 | 214 | 1 | 15,323 | 10,507 |
+| 503 | 503 | 29.0 | 1,556.9 | 181 | 1 | 15,004 | 9,559 |
+| 486 | 486 | 32.7 | 1,440.5 | 141 | 1 | 14,505 | 10,407 |
+
+Every update embeds a snapshot of the story (its title and slug) through
+the reference, so every update re-fires. The feed carries one `updated`
+event for the story, whose `affected` list names all of them.
+`References.affected/1` does not cap that list, so one event carries every
+update.
+
+### What it means for a live blog
+
+- **Publishing updates is cheap.** One fire and one feed event per update,
+  with the parent untouched: there is no re-fire storm to coalesce. The
+  parent's reverse field is read at delivery time, not fired into its
+  artifact.
+- **Don't touch the story per update.** If an editor (or a plugin) edits the
+  story every time it posts, say to bump a "last updated" field, each edit
+  re-fires every update so far: 500 updates means about 500 fires and
+  10,000 commits per edit. At one edit every 3 s that would keep the firing
+  queue continuously busy. Put "latest update" state on the updates, or read
+  it at delivery time. If the plan does need a per-update parent write, it
+  needs the re-fire wave coalesced first.
+- **The feed event can arrive before the artifact.** The feed is sent when
+  the publish commits; the fire runs afterwards in Oban (p50 about 7 ms
+  later in these runs). A client that fetches the artifact as soon as it
+  sees the event can get the live-render fallback, which serves the same
+  content.
+- **Fan-out to many subscribers belongs off the publish path** (#2083).
+  With 1,000 in-BEAM subscribers the cost is lost in the noise. With
+  10,000 it multiplies publish latency by ten. A bare `Phoenix.PubSub`
+  broadcast to 10,000 idle processes takes about 20 ms, and about 90 ms when
+  each does a little work per event. Real transports do more per event than
+  these subscribers do.
+
+### Rerunning
+
+```bash
+scripts/benchmarks/live_blog.sh                                         # ~1 h 45 min
+BENCH_DURATION=120 BENCH_SUBSCRIBERS=0,1000 scripts/benchmarks/live_blog.sh   # a smoke run
+```
+
 ## Headless API p95 under 50 ms
 
 **Partly met.** Measured on 2026-09-27 against `main` at `1cc4d3c83`
