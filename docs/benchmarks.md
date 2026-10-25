@@ -22,7 +22,15 @@ endpoint, p95**.
 
 | Measurement | Site and endpoints | Window | Withdrawals measured | p50 | p95 | Lost | Measured on |
 |---|---|---|---|---|---|---|---|
-| Unpublish to last webhook endpoint | Verscienta.com staging, its production endpoint set | *not yet run* | | | | | |
+| Unpublish to last webhook endpoint | Verscienta.com staging, its production endpoint set: 1 endpoint (`verscienta.com/webhooks/kiln`, self-hosted) | 24 h to 2026-10-25 23:00 UTC | 6 | 0.17 s | 0.48 s | 0 | 2026-10-25, Kiln 1.5.1 |
+
+**About this first row.** Six withdrawals is a small sample: with nearest-rank
+percentiles, the p95 of six values is simply the slowest one (481 ms, which is
+also the maximum). The number is real, but it says little about the tail yet.
+The site has a single webhook endpoint, on its own server, so this is also the
+slowest-endpoint time for one receiver rather than across several. None of the
+six was lost, sent to no endpoint, or still open when it was read. A larger
+batch (20 to 30 withdrawals spread over the window) replaces this row.
 
 ### What is measured
 
