@@ -193,6 +193,23 @@ must not hold your API key. Mint on the server, redeem in the page:
 3. The page reads `GET /preview/:token` — no credential — until it expires 15
    minutes later; mint again on the next render.
 
+To render the draft **in your own templates** (headless draft mode, #1887),
+present the same token on the reads your published pages already make, as
+`x-kiln-preview-token: <token>` (or `?preview_token=`):
+
+- `GET /api/json/<type>/:id?include=content_links,incoming_links,tags` — the
+  draft's record (a live document's working copy), with its edges to
+  published documents. The id is the minting response's `id` (or
+  `GET /preview/:token`'s);
+- `GET /api/content/:type/:slug?surface=json|web|json_ld|llm` — the body,
+  rendered live from the working copy in the published artifact's shape.
+
+The token adds that one record to what the read returns; everything else is
+answered as for an anonymous reader. Search, `by-slug` and the `/published`
+twins stay published-only, GraphQL and `/mcp` ignore the token, writes never
+read it, and a token that lapsed is a `404 invalid_preview` rather than the
+published page.
+
 See [api.md → Preview tokens](api.md#preview-tokens) for the response shape and
 who may mint.
 

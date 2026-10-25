@@ -62,10 +62,16 @@ defmodule KilnCMS.Firing.Engine do
   `today:` pins the date computed fields' `today()` answers
   (`KilnCMS.Firing.CustomFields.resolve/3`); without it, the site's current
   date.
+
+  `surfaces:` renders only the named surfaces, for a `mode: :preview` caller
+  that serves one (a live preview read, #1887) — the others would be composed
+  and thrown away. A persisting fire always renders every surface, since it
+  replaces the document's stored artifacts.
   """
   @spec fire(struct(), keyword()) :: {:ok, %{atom() => map()}}
   def fire(document, opts \\ []) do
     mode = Keyword.get(opts, :mode, :persist)
+    surfaces = surfaces(mode, Keyword.get(opts, :surfaces))
     type = document_type(document)
     # The tenant rides on the document itself (epic #336): every content struct
     # carries `org_id`, so firing is scoped to the document's own org with no
@@ -137,7 +143,7 @@ defmodule KilnCMS.Firing.Engine do
       )
 
     artifacts =
-      Map.new(@surfaces, fn surface ->
+      Map.new(surfaces, fn surface ->
         {surface, document |> compose(expanded, custom, surface) |> annotate(surface, inherited)}
       end)
 
@@ -160,6 +166,14 @@ defmodule KilnCMS.Firing.Engine do
 
     {:ok, artifacts}
   end
+
+  defp surfaces(_mode, nil), do: @surfaces
+
+  defp surfaces(:persist, _only),
+    do:
+      raise(ArgumentError, "a persisting fire renders every surface; `surfaces:` is preview-only")
+
+  defp surfaces(_mode, only) when is_list(only), do: Enum.filter(@surfaces, &(&1 in only))
 
   # The gated tiers a document's own artifact may carry: its own, when gated.
   # A `:public` document carries public fragments only.

@@ -59,6 +59,46 @@ carries the reasoning.
   `KilnCMS.Cache.bust_sitemap/1` with the main sitemap, so an unpublished
   article is gone on the next request.
 
+<a id="headless-draft-mode"></a>
+
+- **Headless draft mode: a preview token opens its draft on JSON:API and the
+  fired-artifact read
+  ([#1887](https://github.com/The-Verscienta/kiln_cms/issues/1887)).** A
+  front end that renders pages from the plain reads could not render a
+  shared draft in its own templates: a token unlocked only `GET
+  /preview/:token` (a thin JSON) and the stega-annotated visual-editing
+  read, so verscienta.com redirected reviewers to Kiln's generic preview
+  page. Presented as `x-kiln-preview-token` (or `?preview_token=`), the token
+  is now a read grant for its one record on `/api/json` and on `GET
+  /api/content/:type/:slug`. `KilnCMSWeb.Plugs.PreviewGrant` verifies it once,
+  pins it to the serving site and puts a `KilnCMS.CMS.PreviewGrant` in the Ash
+  context's `:shared` key; the new `Checks.PreviewGrant` in both content read
+  policies (the lock one included) admits `id == grant.id` on the primary
+  read only. No `authorize?: false`: `by-slug`, the `/published` twins,
+  search and writes are unchanged, and GraphQL and `/mcp` ignore the token.
+  `LinkEndsReadable` carries the grant into its re-read, so `include=` keeps
+  the draft's edges to published documents and drops those to other drafts.
+  The artifact route renders the working copy live, on any surface, with
+  `?fields=`/`?expand=`, uncounted and without experiments. A presented
+  token that does not verify is a `404 invalid_preview`, never the anonymous
+  read. For a live document with unpublished edits, JSON:API under the token
+  answers the working copy (`Preparations.PreviewWorkingCopy`), the
+  reference masking honours the grant, and `?expand=` follows the working
+  copy's references. The token is read on `GET`/`HEAD` only; a write ignores
+  it. Responses under a token are `private, no-store` and every response of
+  an honouring route `Vary`s on the header, while GraphQL and search, which
+  ignore the token, keep their caching. A token read is charged to a new
+  `:preview_api` bucket (120/min), the visual-editing read included, which
+  now goes through the same plug. `preview_token`, `unlock` and `passphrase`
+  join `password` in Phoenix's `filter_parameters`, and Sentry events drop
+  the token and grant headers and mask them in the raw query string, which
+  `Sentry.PlugContext` copied verbatim (`SentryFilter`). `/preview/:token`,
+  its live view and the bridge socket verify through the same
+  `PreviewGrant.verify/2`. `Engine.fire/2` takes `surfaces:` for a preview,
+  so a live read renders only the surface it serves. A database outage under
+  a token is a `503`, not `invalid_preview`. Docs: `docs/api.md` →
+  "Headless draft mode".
+
 <a id="change-feed-server"></a>
 
 - **A public change feed, server side (2.1 of

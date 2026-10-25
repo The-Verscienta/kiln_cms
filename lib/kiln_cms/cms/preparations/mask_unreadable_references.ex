@@ -38,13 +38,16 @@ defmodule KilnCMS.CMS.Preparations.MaskUnreadableReferences do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS.Checks.LinkEndsReadable
+  alias KilnCMS.CMS.PreviewGrant
   alias KilnCMS.CMS.ReferenceSnapshots
 
   @impl true
   def prepare(query, _opts, context) do
     if mask?(query, context) do
+      grant = PreviewGrant.from_context(query.context)
+
       Ash.Query.after_action(query, fn query, records ->
-        {:ok, mask(records, context.actor, query.tenant)}
+        {:ok, mask(records, context.actor, query.tenant, grant)}
       end)
     else
       query
@@ -62,13 +65,19 @@ defmodule KilnCMS.CMS.Preparations.MaskUnreadableReferences do
   # The targets are read under the read's own tenant: a content read is
   # tenant-scoped (epic #336), and `org_id` is not selected when the caller
   # did not ask for it (GraphQL selects only the requested fields).
-  defp mask(records, actor, tenant) do
+  #
+  # A preview grant on the read (#1887) is carried into the targets' read, as
+  # `LinkEndsReadable` carries it into the edges' — a snapshot of the shared
+  # draft is shown wherever the draft itself is.
+  defp mask(records, actor, tenant, grant) do
     case records |> Enum.flat_map(&ReferenceSnapshots.ids(Map.get(&1, :custom_fields))) do
       [] ->
         records
 
       ids ->
-        labels = LinkEndsReadable.readable_labels(actor, Accounts.org_id(tenant), Enum.uniq(ids))
+        labels =
+          LinkEndsReadable.readable_labels(actor, Accounts.org_id(tenant), Enum.uniq(ids), grant)
+
         Enum.map(records, &present_record(&1, labels))
     end
   end

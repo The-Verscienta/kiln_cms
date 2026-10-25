@@ -29,6 +29,18 @@ defmodule KilnCMS.SentryFilterTest do
     assert SentryFilter.before_send(no_exception) == no_exception
   end
 
+  test "masks a preview token or unlock grant in the request's raw query string (#1887)" do
+    request = %Sentry.Interfaces.Request{
+      query_string: "preview_token=SFMyNTY.secret&surface=json"
+    }
+
+    event = event(original_exception: %RuntimeError{message: "boom"}, request: request)
+
+    assert %Sentry.Event{request: %{query_string: query}} = SentryFilter.before_send(event)
+    refute query =~ "SFMyNTY"
+    assert URI.decode_query(query)["surface"] == "json"
+  end
+
   describe "malformed LiveView joins (#700)" do
     # The *real* exception, raised by the dependency, rather than a struct built
     # to match the filter. That is the whole value of this test: the filter names
