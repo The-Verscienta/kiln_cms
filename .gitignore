@@ -57,9 +57,6 @@ err.log
 # Locally-stored user uploads (KilnCMS.Storage.Local)
 /priv/uploads/
 
-# Local Claude Code settings (launch.json is shared; settings.local.json is not)
-/.claude/settings.local.json
-
 # Downstream project overlay config (never committed to the reusable core).
 /config/project.exs
 # ...and its dependency list and the lock Mix keeps for it (#1967). The overlay
