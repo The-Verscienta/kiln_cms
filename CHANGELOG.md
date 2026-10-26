@@ -159,7 +159,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **bandit 1.14.0, jose 1.11.13 and ash 3.37.2 fix twenty advisories,
   bandit's HTTP/2, HTTP/1 and WebSocket issues among them.**
-  ([#PR](https://github.com/The-Verscienta/kiln_cms/pull/PR) · [long form](docs/changelog/unreleased.md#bandit-jose-ash-advisories))
+  ([#2094](https://github.com/The-Verscienta/kiln_cms/pull/2094) · [long form](docs/changelog/unreleased.md#bandit-jose-ash-advisories))
 
 ## [1.5.1] - 2026-10-24
 
