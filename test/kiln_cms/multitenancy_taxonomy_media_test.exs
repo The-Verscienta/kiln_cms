@@ -201,10 +201,11 @@ defmodule KilnCMS.MultitenancyTaxonomyMediaTest do
 
   # EEF-CVE-2026-115627: ash_postgres < 2.15.2 built the join-resource query of
   # a lateral-joined many_to_many without its read action, so attribute
-  # multitenancy never filtered the join rows. `related_<type>s` is sorted, so
-  # it loads by lateral join. Kiln's writes keep a join row in the org of both
-  # its ends, so a row like the planted one below can't arise through the app;
-  # this pins the data layer's half of the guarantee all the same.
+  # multitenancy never filtered the join rows. On main the sorted
+  # `related_<type>s` (through `RelatedLink`, 1.6) reached that path; on 1.5.x
+  # the relationship is unsorted and this load passes on 2.13.1 too, so here it
+  # guards isolation rather than pinning the fix. Kiln's writes keep a join row
+  # in the org of both its ends, so the planted row can't arise through the app.
   describe "a join row of another org (lateral-joined many_to_many)" do
     test "never relates two records of this org", %{a: a, b: b, actor: actor} do
       [a1, a2, a3] =
@@ -216,22 +217,27 @@ defmodule KilnCMS.MultitenancyTaxonomyMediaTest do
         end
 
       # The control: A's own link, so an empty result can't pass vacuously.
-      CMS.create_related_link!(%{source_id: a1.id, target_id: a3.id},
+      CMS.create_content_link!(%{source_id: a1.id, target_id: a3.id},
         tenant: a,
         authorize?: false
       )
 
       # Org B's row between two of A's records.
-      CMS.create_related_link!(%{source_id: a1.id, target_id: a2.id},
+      CMS.create_content_link!(%{source_id: a1.id, target_id: a2.id},
         tenant: b,
         authorize?: false
       )
 
-      page = CMS.get_page!(a1.id, actor: actor, tenant: a, load: [:related_pages])
+      # A sorted, limited load, as an API client can ask for.
+      related = KilnCMS.CMS.Page |> Ash.Query.sort(:title) |> Ash.Query.limit(10)
+
+      page = CMS.get_page!(a1.id, actor: actor, tenant: a, load: [related_pages: related])
       assert Enum.map(page.related_pages, & &1.id) == [a3.id]
 
       # And loaded for several sources at once.
-      [loaded_a1, loaded_a2] = Ash.load!([a1, a2], :related_pages, actor: actor, tenant: a)
+      [loaded_a1, loaded_a2] =
+        Ash.load!([a1, a2], [related_pages: related], actor: actor, tenant: a)
+
       assert Enum.map(loaded_a1.related_pages, & &1.id) == [a3.id]
       assert loaded_a2.related_pages == []
     end
