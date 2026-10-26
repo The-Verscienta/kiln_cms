@@ -128,9 +128,24 @@ defmodule KilnCMSWeb.ContentI18nTest do
   end
 
   describe "the blog index follows the fallback chain (#1765)" do
-    test "a post with no French variant is listed on /fr/blog, and says so", %{conn: conn} do
+    # Each test on a site of its own (#1951). The index reads two per-site
+    # caches — the site's fallback chains (`Fallback.chains/1`) and the host's
+    # site (`KilnCMS.Cache.Hosts`) — and on the shared default site an async
+    # neighbour could leave either holding an answer from its own sandbox.
+    # `/fr/blog` once rendered with no posts at all, which the index's own
+    # read cannot produce for these rows: only a chain without `en` or the
+    # wrong site can. A fresh site has no entry for anyone else to fill.
+    setup %{conn: conn} do
+      org = KilnCMS.OrgFixtures.org("i18n-blog")
+      %{conn: org_conn(conn, org), org: org}
+    end
+
+    test "a post with no French variant is listed on /fr/blog, and says so", %{
+      conn: conn,
+      org: org
+    } do
       s = slug()
-      post(%{title: "Hello, World", slug: s, locale: "en"})
+      post(%{org_id: org.id, title: "Hello, World", slug: s, locale: "en"})
 
       html = conn |> get("/fr/blog") |> html_response(200)
       assert html =~ "Hello, World"
@@ -140,10 +155,10 @@ defmodule KilnCMSWeb.ContentI18nTest do
       refute html =~ "Aucun article pour le moment."
     end
 
-    test "a translated post is listed once, in the requested locale", %{conn: conn} do
+    test "a translated post is listed once, in the requested locale", %{conn: conn, org: org} do
       s = slug()
-      post(%{title: "Hello EN #{s}", slug: s, locale: "en"})
-      post(%{title: "Bonjour FR #{s}", slug: s, locale: "fr"})
+      post(%{org_id: org.id, title: "Hello EN #{s}", slug: s, locale: "en"})
+      post(%{org_id: org.id, title: "Bonjour FR #{s}", slug: s, locale: "fr"})
 
       html = conn |> get("/fr/blog") |> html_response(200)
       assert html =~ "Bonjour FR #{s}"
@@ -154,11 +169,12 @@ defmodule KilnCMSWeb.ContentI18nTest do
       refute html =~ "Bonjour FR #{s}"
     end
 
-    test "a locked French variant does not hide the English one", %{conn: conn} do
+    test "a locked French variant does not hide the English one", %{conn: conn, org: org} do
       s = slug()
-      post(%{title: "Open EN #{s}", slug: s, locale: "en"})
+      post(%{org_id: org.id, title: "Open EN #{s}", slug: s, locale: "en"})
 
       post(%{
+        org_id: org.id,
         title: "Locked FR #{s}",
         slug: s,
         locale: "fr",

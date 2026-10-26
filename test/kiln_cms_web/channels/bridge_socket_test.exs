@@ -422,21 +422,26 @@ defmodule KilnCMSWeb.BridgeSocketTest do
     end
 
     test "the stream survives the check while its token is live, and closes once it lapses" do
-      # A token with two seconds left: it passes the connect and the first
-      # re-check, then lapses under the open stream — and the stream stops.
-      # Without the re-check a leaked token would stream until the tab closed.
+      # A live token passes the connect and the re-check; once the token the
+      # stream holds has lapsed, the next re-check stops it. Without the
+      # re-check a leaked token would stream until the tab closed.
+      #
+      # The lapse is driven, not waited for (#1892): the stream's held token is
+      # replaced by one for the same document already past its age, which is
+      # what the re-check sees when the clock runs out. An earlier version
+      # minted a token with "two seconds left" and slept into the lapse, which
+      # left as little as one second for the connect and first re-check and
+      # failed under a loaded suite.
       post = draft(user(:admin))
-      signed_at = System.system_time(:second) - PreviewToken.max_age_seconds() + 2
-      token = token_signed_at(post, signed_at)
 
-      assert {:ok, state} = connect_with_token("post", post.id, token)
+      assert {:ok, state} = connect_with_token("post", post.id, PreviewToken.sign(post))
       assert {:ok, state} = BridgeSocket.init(state)
 
       assert_receive :reauthorize, 1_000
       assert {:ok, state} = BridgeSocket.handle_info(:reauthorize, state)
 
-      lapses_at_ms = (signed_at + PreviewToken.max_age_seconds()) * 1_000
-      Process.sleep(max(lapses_at_ms - System.system_time(:millisecond), 0) + 50)
+      lapsed = expired_token(post)
+      state = %{state | preview_token: fn -> lapsed end}
 
       assert_receive :reauthorize, 1_000
       assert {:stop, :normal, _state} = BridgeSocket.handle_info(:reauthorize, state)
