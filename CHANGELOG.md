@@ -54,7 +54,7 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
-## [1.5.2] - 2026-10-25
+## [1.5.2] - 2026-10-26
 
 Long form: [docs/changelog/v1.5.2.md](docs/changelog/v1.5.2.md) —
 the 1.5.2 entries as they were written when each change merged.
@@ -65,6 +65,10 @@ Every summary line below that was shortened links to its own entry there.
 - **ash 3.37.1 and ash_postgres 2.15.2 fix three tenancy advisories
   (EEF-CVE-2026-115627, -115635, -114214); Kiln was not exposed.**
   ([#2091](https://github.com/The-Verscienta/kiln_cms/pull/2091) · [long form](docs/changelog/v1.5.2.md#ash-tenancy-advisories))
+
+- **bandit 1.14.0, jose 1.11.13 and ash 3.37.2 fix twenty advisories,
+  bandit's HTTP/2, HTTP/1 and WebSocket issues among them.**
+  ([#2094](https://github.com/The-Verscienta/kiln_cms/pull/2094) · [long form](docs/changelog/v1.5.2.md#bandit-jose-ash-advisories))
 
 ## [1.5.1] - 2026-10-24
 
