@@ -44,7 +44,19 @@ ARG NODE_VERSION=22.23.3
 # the reverse would not. The one thing ERTS needs from the runner is
 # `libtinfo.so.6` (verified with `ldd` on the builder's `beam.smp`), which
 # trixie's `libncurses6` provides.
-ARG RUNNER_DEBIAN_VERSION=trixie-20261005-slim
+#
+# The dated tag is NOT what keeps the shipped packages current. Debian's
+# security fixes land in trixie-security daily; the dated tag is only the base
+# they upgrade from. Two things below do the work: the runner's first RUN
+# upgrades everything the base already ships (`apt-get install` alone leaves an
+# installed `libssl3t64` or `ca-certificates` at the base's version), and the
+# release workflow rebuilds this stage without the layer cache
+# (`no-cache-filters: runner`), since a cached apt layer replays whatever the
+# mirror served the first time it ran — which is how v1.6.0-rc.1 shipped 87
+# fixable Debian findings (curl, expat, libvips, librsvg, libheif, …) that a
+# fresh build has none of. Bump the date anyway when a new one is out: it keeps
+# the upgrade small and the base's own vulnerability count honest.
+ARG RUNNER_DEBIAN_VERSION=trixie-20261020-slim
 
 ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="debian:${RUNNER_DEBIAN_VERSION}"
@@ -230,7 +242,9 @@ RUN elixir -e ' \
   IO.puts("release wiring verified: API routers present in .app :modules")'
 
 # ---- Runtime stage ----
-FROM ${RUNNER_IMAGE}
+# Named so release.yml can rebuild it uncached (`no-cache-filters: runner`); it
+# is still the last stage, so a plain `docker build` targets it as before.
+FROM ${RUNNER_IMAGE} AS runner
 
 # curl is here for the HEALTHCHECK below — it probes the HTTP endpoint, which
 # is the only thing that proves this container is actually serving (#647).
@@ -258,7 +272,12 @@ FROM ${RUNNER_IMAGE}
 # break, not a warning: `libncurses5` does not exist in trixie (ERTS wants
 # `libtinfo.so.6`, which `libncurses6` provides), and the 64-bit `time_t`
 # transition renamed `libvips42` to `libvips42t64`.
+#
+# `apt-get upgrade` first: the base image's own packages (libssl3t64, liblzma5,
+# ca-certificates, …) are as old as its dated tag, and installing new packages
+# does not move them. See RUNNER_DEBIAN_VERSION above.
 RUN apt-get update -y \
+  && apt-get upgrade -y --no-install-recommends \
   && apt-get install -y --no-install-recommends \
      libstdc++6 openssl libncurses6 locales ca-certificates libvips42t64 curl gnupg qpdf \
   && apt-get clean && rm -f /var/lib/apt/lists/*_*
