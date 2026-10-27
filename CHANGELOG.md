@@ -161,6 +161,10 @@ Every summary line below that was shortened links to its own entry there.
   bandit's HTTP/2, HTTP/1 and WebSocket issues among them.**
   ([#2094](https://github.com/The-Verscienta/kiln_cms/pull/2094) · [long form](docs/changelog/unreleased.md#bandit-jose-ash-advisories))
 
+- **The release image upgrades its Debian packages and rebuilds them every
+  release; v1.6.0-rc.1 had shipped 87 fixable findings from a cached layer.**
+  ([#2097](https://github.com/The-Verscienta/kiln_cms/pull/2097) · [long form](docs/changelog/unreleased.md#image-debian-packages))
+
 ## [1.5.1] - 2026-10-24
 
 Long form: [docs/changelog/v1.5.1.md](docs/changelog/v1.5.1.md) —
