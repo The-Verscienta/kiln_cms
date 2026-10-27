@@ -586,3 +586,25 @@ carries the reasoning.
   accepts the primary key, and the two runtime upserts target
   `OrgMembership`, which is not multitenant.
   ([#2094](https://github.com/The-Verscienta/kiln_cms/pull/2094))
+
+<a id="image-debian-packages"></a>
+
+- **The release image's Debian packages are current again, and stay so.**
+  The runner stage is pinned to a dated `debian:trixie-*-slim` tag, and the
+  release workflow builds with the GitHub Actions layer cache. With the
+  runner's instructions unchanged, every release replayed the cached
+  `apt-get` layer from the first build after the last tag bump, so
+  v1.6.0-rc.1 shipped weeks-old packages: Trivy counts 87 fixable OS
+  findings, 20 of them HIGH (curl, expat, libvips, librsvg, libheif, liblzma,
+  ca-certificates). Three changes. The runner moves to
+  `trixie-20261020-slim`. Its first `RUN` now `apt-get upgrade`s, since
+  `apt-get install` never moves a package the base already ships
+  (`libssl3t64`, `liblzma5`, `ca-certificates`). And the stage is named
+  `runner` so `release.yml` rebuilds it with `no-cache-filters: runner`:
+  the builder, where the cost is, stays cached. A fresh runner scans at zero
+  fixable findings. The builder stays on `bookworm-20261005-slim`, the
+  newest date `hexpm/elixir` publishes for Elixir 1.20.4 / OTP 29.1.1; it
+  ships nothing but the release tarball. Self-built images get the same
+  fix on their next uncached build (`docker build --no-cache`, or
+  `--no-cache-filter runner`).
+  ([#2097](https://github.com/The-Verscienta/kiln_cms/pull/2097))

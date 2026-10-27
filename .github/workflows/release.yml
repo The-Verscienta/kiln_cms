@@ -168,6 +168,13 @@ jobs:
           # `mode=max` on the full dep tree would evict the entries the PR
           # jobs live on (same reasoning as `ci.yml`'s image job).
           cache-from: type=gha
+          # ...except the runner stage, which is rebuilt every release. Its
+          # layers are the Debian packages the image ships, and a cache hit
+          # replays the apt run that first produced them: with an unchanged
+          # runner, v1.6.0-rc.1 shipped weeks-old packages and missed every
+          # Debian security fix since. The builder stays cached — it is the
+          # expensive part and none of it ships but the release tarball.
+          no-cache-filters: runner
 
       - name: Summarize
         # Both values reach the script through `env`, not through `${{ }}`
