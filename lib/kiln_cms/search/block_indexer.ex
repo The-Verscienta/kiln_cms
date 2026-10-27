@@ -5,7 +5,10 @@ defmodule KilnCMS.Search.BlockIndexer do
 
   Walks the typed block tree, projects each block's `search_text` plus its
   ancestor context (the document title — hierarchical embeddings), and upserts a
-  `BlockEmbedding`. Blocks whose `content_hash` is unchanged are skipped, so
+  `BlockEmbedding`. The document's **searchable** custom fields
+  (`KilnCMS.CMS.SearchableFields`) are one more such input, after the blocks,
+  under the key `"custom-fields"` — so near-duplicates and tag suggestions
+  read what the record says in its fields, not only in its body. Blocks whose `content_hash` is unchanged are skipped, so
   re-indexing only embeds what actually changed. Assumes semantic search is
   enabled (the worker guards that).
 
@@ -18,12 +21,17 @@ defmodule KilnCMS.Search.BlockIndexer do
 
   alias KilnCMS.{Blocks, Search, SearchIndex}
   alias KilnCMS.CMS.Fragments
+  alias KilnCMS.CMS.SearchableFields
   alias KilnCMS.CMS.TypedBlocks
   alias KilnCMS.Firing.Engine
   alias KilnCMS.Search.VectorCache
   alias KilnCMS.SystemActor
 
   require Logger
+
+  # The pseudo-block the searchable custom fields are embedded under. Not a
+  # UUID and not `idx-N`, so no real block's key can collide with it.
+  @custom_fields_key "custom-fields"
 
   # See the moduledoc: the indexer is the system, and says so.
   defp system_actor, do: SystemActor.new(:search)
@@ -51,11 +59,13 @@ defmodule KilnCMS.Search.BlockIndexer do
       # Locking a published document re-fires it, and firing is what enqueues
       # block indexing — so this runs on the edit that sets the passphrase, and
       # again (re-indexing for real) on the edit that removes it.
+      #
+      # The custom fields go with the blocks: they are the same document's text.
       _blocks when not is_nil(:erlang.map_get(:access_password_hash, document)) ->
-        reindex_blocks(document, [], opts)
+        reindex_blocks(document, [], [], opts)
 
       blocks when is_list(blocks) ->
-        reindex_blocks(document, blocks, opts)
+        reindex_blocks(document, blocks, custom_fields_text(document), opts)
 
       # Not loaded (a select-limited read) or NULL (the column is nullable, and
       # an import can leave it so). Both used to be harmless; they are not any
@@ -67,7 +77,7 @@ defmodule KilnCMS.Search.BlockIndexer do
     end
   end
 
-  defp reindex_blocks(document, blocks, opts) do
+  defp reindex_blocks(document, blocks, custom_text, opts) do
     type = Engine.document_type(document)
     # Block embeddings are tenant-scoped (epic #336); the tenant rides on the
     # document's own `org_id`.
@@ -95,6 +105,20 @@ defmodule KilnCMS.Search.BlockIndexer do
       |> Enum.map(fn {block, index} ->
         index_block(org_id, type, document.id, block, index, context, hashes)
       end)
+
+    indexed = [
+      index_text(
+        org_id,
+        type,
+        document.id,
+        @custom_fields_key,
+        :custom,
+        custom_text,
+        context,
+        hashes
+      )
+      | indexed
+    ]
 
     prune_stale(org_id, existing, indexed)
 
@@ -240,6 +264,7 @@ defmodule KilnCMS.Search.BlockIndexer do
         |> TypedBlocks.to_typed()
         |> Fragments.expand(org_id, audiences: audiences_for(document), ancestry: ancestry)
         |> Enum.flat_map(&embedding_input(&1, context))
+        |> Kernel.++(text_input(custom_fields_text(document), context))
 
       _unloaded_or_absent ->
         []
@@ -252,10 +277,25 @@ defmodule KilnCMS.Search.BlockIndexer do
     _ -> nil
   end
 
-  defp embedding_input(block, context) do
-    case Blocks.search_text(block) do
-      "" -> []
-      text -> ["#{context}\n\n#{text}"]
+  defp embedding_input(block, context), do: text_input(Blocks.search_text(block), context)
+
+  defp text_input("", _context), do: []
+  defp text_input(text, context), do: ["#{context}\n\n#{text}"]
+
+  # The searchable custom fields as one block's worth of text — the same values
+  # `search_text` carries (#1585), so a field is in the vector exactly when it
+  # is in the keyword index. Opt-in per field for the same reason: an
+  # unflagged number, enum or snapshot would only pull the centroid towards
+  # noise. A private field is never searchable (`Validations.PrivateField`),
+  # so none reaches the index. `""` for a document without custom fields, or
+  # whose `custom_fields` was not loaded.
+  defp custom_fields_text(document) do
+    case Map.get(document, :custom_fields) do
+      fields when is_map(fields) and not is_struct(fields) and map_size(fields) > 0 ->
+        document |> SearchableFields.record_texts() |> Enum.join("\n\n")
+
+      _none ->
+        ""
     end
   end
 
@@ -264,27 +304,38 @@ defmodule KilnCMS.Search.BlockIndexer do
   # text — deliberately, so a block whose body was emptied has its row deleted
   # rather than left describing what used to be there.
   defp index_block(org_id, type, document_id, %module{} = block, index, context, hashes) do
-    text = Blocks.search_text(block)
+    block_type = Kiln.Block.Info.name(module)
 
-    if text == "" do
-      {nil, :skip}
+    index_text(
+      org_id,
+      type,
+      document_id,
+      block_key(block, index),
+      block_type,
+      Blocks.search_text(block),
+      context,
+      hashes
+    )
+  end
+
+  defp index_text(_org_id, _type, _document_id, _block_key, _block_type, "", _context, _hashes),
+    do: {nil, :skip}
+
+  defp index_text(org_id, type, document_id, block_key, block_type, text, context, hashes) do
+    hash = hash(text, context)
+
+    if hashes[block_key] == hash do
+      {block_key, :unchanged}
     else
-      block_key = block_key(block, index)
-      hash = hash(text, context)
-
-      if hashes[block_key] == hash do
-        {block_key, :unchanged}
-      else
-        {block_key,
-         embed_and_store(org_id, type, document_id, block_key, module, hash, context, text)}
-      end
+      {block_key,
+       embed_and_store(org_id, type, document_id, block_key, block_type, hash, context, text)}
     end
   end
 
-  defp embed_and_store(org_id, type, document_id, block_key, module, hash, context, text) do
+  defp embed_and_store(org_id, type, document_id, block_key, block_type, hash, context, text) do
     case Search.embed_document("#{context}\n\n#{text}") do
       {:ok, vector} ->
-        store(org_id, type, document_id, block_key, module, hash, context, vector)
+        store(org_id, type, document_id, block_key, block_type, hash, context, vector)
 
       _embed_failed ->
         :error
@@ -298,13 +349,13 @@ defmodule KilnCMS.Search.BlockIndexer do
   # which is exactly how `:entry` failing the `document_type` constraint stayed
   # invisible (#1012). A failed write is an `:error` for the same reason a failed
   # embed is: the run cannot say what this document's index should contain.
-  defp store(org_id, type, document_id, block_key, module, hash, context, vector) do
+  defp store(org_id, type, document_id, block_key, block_type, hash, context, vector) do
     SearchIndex.upsert_block_embedding(
       %{
         document_type: type,
         document_id: document_id,
         block_key: block_key,
-        block_type: Kiln.Block.Info.name(module),
+        block_type: block_type,
         content_hash: hash,
         ancestor_context: context,
         embedding: vector,

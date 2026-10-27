@@ -136,6 +136,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Similar content (near-duplicates, tag suggestions) reads a page's searchable
+  custom fields, not only its blocks; a fields-only page is no longer "empty".**
+  ([#2096](https://github.com/The-Verscienta/kiln_cms/pull/2096) · [long form](docs/changelog/unreleased.md#similar-content-custom-fields))
+
 - **`mix setup` and `mix assets.build` work on macOS 27.2: tailwind 4.3.3, and
   `mix assets.setup` re-signs the binary ad hoc when its signature is invalid.**
   ([#2082](https://github.com/The-Verscienta/kiln_cms/pull/2082) · [long form](docs/changelog/unreleased.md#tailwind-macos-resign))

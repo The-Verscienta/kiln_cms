@@ -458,6 +458,19 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="similar-content-custom-fields"></a>
+
+- **Similar content reads a page's searchable custom fields.** The editor's
+  Similar content panel (near-duplicates and tag suggestions) built its
+  vectors from the block tree only, so a record's custom fields never reached
+  it, and a page whose text lived in its fields was told to "add some
+  content". `KilnCMS.Search.BlockIndexer` now embeds the fields flagged
+  `searchable` (the same text `search_text` carries, #1585) as one more input
+  under the key `"custom-fields"`, on both the in-memory draft path and the
+  stored index. Unflagged and private fields stay out. Drafts see it at once;
+  published documents on their next fire (`mix kiln.refire_all` sweeps them).
+  ([#2096](https://github.com/The-Verscienta/kiln_cms/pull/2096))
+
 <a id="tailwind-macos-resign"></a>
 
 - **`mix setup` and `mix assets.build` work on macOS 27.2.** macOS 27.2
