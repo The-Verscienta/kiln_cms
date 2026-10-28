@@ -58,7 +58,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Overlays: run `mix ash.codegen` for your content types. Every content table
   gains a nullable `path_alias_derived` column; reads fail until it exists.**
-  ([#1890](https://github.com/The-Verscienta/kiln_cms/issues/1890) · [long form](docs/changelog/unreleased.md#alias-derivation-overlays))
+  ([#2118](https://github.com/The-Verscienta/kiln_cms/pull/2118) · [long form](docs/changelog/unreleased.md#alias-derivation-overlays))
 
 - **Optional: run `mix kiln.media.resnapshot --apply` once after deploying**
   so stored `:media` field values gain dimensions, focal point and variants;
@@ -154,7 +154,7 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Whether a path alias was derived is recorded when it is written, so a move
   rewrites a stale derived path beneath it instead of mistaking it for a pinned one.**
-  ([#1890](https://github.com/The-Verscienta/kiln_cms/issues/1890) · [long form](docs/changelog/unreleased.md#alias-derivation-recorded))
+  ([#2118](https://github.com/The-Verscienta/kiln_cms/pull/2118) · [long form](docs/changelog/unreleased.md#alias-derivation-recorded))
 
 - **Moving a section in the content tree reads only its subtree (recursive CTE),
   not the whole type: a 10,000-document move peaks at 27 MB, not 180 MB.**
