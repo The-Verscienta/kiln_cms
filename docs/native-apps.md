@@ -249,7 +249,12 @@ adds a sibling map beside `custom_fields`, which never changes:
   the option re-fires the type's published documents.
 - Render it with the same code that renders a `rich_text` block's `body`. In
   `GET /api/schema` each value is the type `body` has, an array of
-  `#/$defs/portable_text_block`, so generated models share one type.
+  `#/$defs/portable_text_block`, so generated models share one type. That
+  definition declares the standard keys (`style`, `listItem`, `level`,
+  `children` spans with `text` and `marks`, `markDefs` with `href`), all
+  optional and the node still open, so a Swift or Kotlin model decodes the
+  text itself. A node of a `_type` you don't render (an extension, a
+  hand-written node) decodes with those keys `nil`: skip it.
 - A link with an unsafe scheme keeps its text, but its `href` is `""`. An
   `<img>` inside the prose is dropped, as in a block's body (images are their
   own block in Kiln). The HTML in `custom_fields` is always the full value.
@@ -358,7 +363,11 @@ package. What it contains:
 What Swift can't state is dropped, as in the TypeScript emitter. A `uuid` or
 `date-time` is a `String`: pick a date strategy where you decode. Numeric
 bounds and `const` pins are dropped. Unknown keys on an open object are
-ignored rather than kept.
+ignored rather than kept. The Portable Text node (`PortableTextBlock`) keeps
+`style`, `listItem`, `level`, `children` (`PortableTextBlock.ChildrenItem`:
+`text`, `marks`) and `markDefs` (`PortableTextBlock.MarkDefsItem`: `href`),
+which is all a native renderer needs. See
+[Rich text without a web view](#rich-text-without-a-web-view).
 
 Decode a delivery with `JSONDecoder`:
 

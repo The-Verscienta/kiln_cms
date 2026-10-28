@@ -243,6 +243,23 @@ carries the reasoning.
 
 ## Changed
 
+<a id="portable-text-node-keys"></a>
+
+- **The Portable Text node declares its standard keys (#PR).** The
+  `portable_text_block` definition that a `rich_text` block's `body` and every
+  `custom_fields_portable` value point at declared only `_type` and `_key`.
+  That is lenient enough for TypeScript, whose index signature keeps the rest,
+  but the Swift and Kotlin emitters decode declared properties only, so a
+  generated `PortableTextBlock` kept two strings and dropped every span. It
+  now declares `style`, `listItem`, `level`, `children` (spans: `_type`,
+  `_key`, `text`, `marks`) and `markDefs` (`_type`, `_key`, `href`). Every
+  one is optional and every object stays `additionalProperties: true`, since
+  a headless write can still store any node and the schema describes what is
+  served. The definition is built in the SDK
+  (`Kiln.Block.JsonSchema`), so kiln_plugin gets a patch entry; no plugin
+  callback changed, and the core builds it from its path dependency, so no
+  SDK release is needed for KilnCMS itself.
+
 <a id="alias-derivation-recorded"></a>
 
 - **Whether a path alias was derived is recorded, not inferred (#1890).**

@@ -109,6 +109,11 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Generated Swift and Kotlin models keep Portable Text's text:
+  `#/$defs/portable_text_block` now declares `style`, `listItem`, `level`,
+  `children` and `markDefs`, all optional, the node still open.**
+  ([#PR](https://github.com/The-Verscienta/kiln_cms/pull/PR) · [long form](docs/changelog/unreleased.md#portable-text-node-keys))
+
 - **Whether a path alias was derived is recorded when it is written, so a move
   rewrites a stale derived path beneath it instead of mistaking it for a pinned one.**
   ([#2118](https://github.com/The-Verscienta/kiln_cms/pull/2118) · [long form](docs/changelog/unreleased.md#alias-derivation-recorded))

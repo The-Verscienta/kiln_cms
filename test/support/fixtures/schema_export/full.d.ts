@@ -24,6 +24,11 @@ export interface MediaSnapshot {
 export interface PortableTextBlock {
   _key?: string;
   _type?: string;
+  children?: Array<{ _key?: string; _type?: string; marks?: Array<string>; text?: string }>;
+  level?: number;
+  listItem?: string;
+  markDefs?: Array<{ _key?: string; _type?: string; href?: string }>;
+  style?: string;
   [k: string]: unknown;
 }
 

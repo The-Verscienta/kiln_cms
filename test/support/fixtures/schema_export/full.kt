@@ -63,7 +63,33 @@ public data class MediaSnapshot(
 public data class PortableTextBlock(
     @SerialName("_key") public val key: String? = null,
     @SerialName("_type") public val type: String? = null,
-)
+    /** The block's inline nodes — `span`s, in order. */
+    public val children: List<ChildrenItem>? = null,
+    /** The list item's nesting depth, from 1. */
+    public val level: Long? = null,
+    /** `bullet` or `number` when the block is a list item. */
+    public val listItem: String? = null,
+    /** Annotations a span's `marks` reference by `_key` (a link's `href`). */
+    public val markDefs: List<MarkDefsItem>? = null,
+    /** `normal`, `h1`–`h6` or `blockquote` on a `block` node. */
+    public val style: String? = null,
+) {
+    @Serializable
+    public data class ChildrenItem(
+        @SerialName("_key") public val key: String? = null,
+        @SerialName("_type") public val type: String? = null,
+        /** Decorators (`strong`, `em`, …) and `markDefs` `_key`s. */
+        public val marks: List<String>? = null,
+        public val text: String? = null,
+    )
+
+    @Serializable
+    public data class MarkDefsItem(
+        @SerialName("_key") public val key: String? = null,
+        @SerialName("_type") public val type: String? = null,
+        public val href: String? = null,
+    )
+}
 
 // endregion
 
@@ -485,7 +511,7 @@ public data class PostDocument(
     public val blocks: List<Block>,
     /** Admin-defined custom fields (`KilnCMS.CMS.FieldDefinition`). Open: a point-in-time read (`?as_of=`) serves the values stored at that instant, which may include fields since removed from the registry. */
     @SerialName("custom_fields") public val customFields: CustomFields,
-    /** Plain-text renditions of the `:text` custom fields marked `deliver_plain`: the stored value with its HTML tags removed, entities decoded and whitespace collapsed. `null` where the record holds no value. */
+    /** Plain-text renditions of the `:text` custom fields marked `deliver_plain`: the stored value with its HTML tags removed, entities decoded and whitespace collapsed (to one line, unless the field keeps its breaks). `null` where the record holds no value. */
     @SerialName("custom_fields_plain") public val customFieldsPlain: CustomFieldsPlain? = null,
     public val id: String,
     /** Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited. */
