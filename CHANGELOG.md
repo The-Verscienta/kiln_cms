@@ -148,6 +148,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Moving a section in the content tree reads only its subtree (recursive CTE),
+  not the whole type: a 10,000-document move peaks at 27 MB, not 180 MB.**
+  ([#1903](https://github.com/The-Verscienta/kiln_cms/issues/1903) · [benchmark](docs/benchmarks.md#content-tree-moving-a-large-subtree))
+
 - **The schema export states the media snapshot once, as `$defs.media_snapshot`;
   nullable uses are `anyOf: [$ref, null]`, so generated clients get one type.**
   ([#2106](https://github.com/The-Verscienta/kiln_cms/pull/2106) · [long form](docs/changelog/unreleased.md#media-snapshot-def))
