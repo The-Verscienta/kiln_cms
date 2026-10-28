@@ -1033,7 +1033,16 @@ defmodule KilnCMS.CMS.Content do
           read :public_by_slug do
             get? true
             argument :slug, :string, allow_nil?: false
-            argument :locale, :string, allow_nil?: false
+            # Optional (#1884): a missing `?locale=` starts the walk at the
+            # site's default locale, as the delivery API's `DeliveryLocale.parse/1`
+            # already did. It used to be a 400 on JSON:API and GraphQL only.
+            # `allow_nil?: true` because AshJsonApi requires a non-nil argument
+            # on the query string whatever its default; an explicit nil still
+            # fails `Preparations.LocaleFallback`'s supported-locale check.
+            argument :locale, :string,
+              allow_nil?: true,
+              default: &KilnCMS.I18n.default_locale/0
+
             argument :type_definition_id, :uuid, allow_nil?: false
 
             # Audiences the CALLER has already established the reader holds.
@@ -1171,7 +1180,15 @@ defmodule KilnCMS.CMS.Content do
           read :public_by_slug do
             get? true
             argument :slug, :string, allow_nil?: false
-            argument :locale, :string, allow_nil?: false
+            # Optional (#1884): a missing `?locale=` starts the walk at the
+            # site's default locale, as the delivery API's `DeliveryLocale.parse/1`
+            # already did. It used to be a 400 on JSON:API and GraphQL only.
+            # `allow_nil?: true` because AshJsonApi requires a non-nil argument
+            # on the query string whatever its default; an explicit nil still
+            # fails `Preparations.LocaleFallback`'s supported-locale check.
+            argument :locale, :string,
+              allow_nil?: true,
+              default: &KilnCMS.I18n.default_locale/0
 
             # See the dynamic tier above: default `[]` keeps every existing
             # caller unchanged, and the argument is hidden from GraphQL.

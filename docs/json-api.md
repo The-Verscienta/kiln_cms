@@ -73,6 +73,8 @@ Authorization: Bearer <token>
 
 `GET /api/json/<plural>/by-slug/:slug?locale=fr-CA` is the single published
 document for a slug, resolved through the site's **locale fallback chain** —
+`?locale=` is where the walk starts and defaults to the site's default locale
+when left out (it was required, a `400`, before 1.7),
 `?fallback=false` and `?fallback_locale=` narrow it, the served locale is
 `attributes.locale` and the `x-kiln-locale` / `Content-Language` headers, and a
 locale the site does not run is a `400`. See
