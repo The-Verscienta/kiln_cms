@@ -250,6 +250,11 @@ defmodule KilnCMS.Release do
   cannot run for real. The report prints in the `rpc` terminal. Returns
   `{:ok, report}` or `{:error, message}`; see
   `KilnCMS.Portability.Commands`.
+
+  `rpc` exits 0 whatever the call returns. A script that must fail on a failed
+  import matches the result, which makes `rpc` exit 1 and leaves the node up:
+
+      bin/kiln_cms rpc '{:ok, _} = KilnCMS.Release.import_wordpress("/data/wordpress.xml")'
   """
   @spec import_wordpress(Path.t(), keyword()) :: {:ok, map()} | {:error, String.t()}
   def import_wordpress(path, opts \\ []) do
