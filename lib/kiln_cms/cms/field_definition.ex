@@ -304,6 +304,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :on_target_delete,
       :help_text,
       :position,
+      :section,
       :default,
       :compute,
       :names_record,
@@ -718,6 +719,21 @@ defmodule KilnCMS.CMS.FieldDefinition do
 
     # Display order within a content type's custom-field section.
     attribute :position, :integer, allow_nil?: false, default: 0, public?: true
+
+    # The heading this field is filed under in the content editor's Custom
+    # fields panel ("Identity", "TCM properties", "Safety") — a type with a
+    # hundred fields reads as a few collapsible sections rather than one long
+    # scroll. Free text, shared by name: every field naming the same section
+    # sits under one heading, which takes the place of its first field in
+    # `position` order. `nil` files the field under no heading. Editor-only:
+    # it changes nothing about the value, its delivery or its validation, and
+    # the schema export reports it as `x-kiln-section`. Record-level fields
+    # only — a link field or group sub-field sits inside its parent
+    # (`Changes.ClearLinkFieldOptions`).
+    attribute :section, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
+
     # Whether this field's value is another *name* for the record — a Latin
     # name, a pinyin spelling, a trade name — so that a query containing it
     # finds the record the way a query containing the title does. Search's

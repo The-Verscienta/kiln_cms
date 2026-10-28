@@ -108,9 +108,23 @@ defmodule KilnClientTest do
       assert params["page"] == %{"limit" => "1"}
     end
 
-    test "returns :not_found when nothing matches" do
+    test "returns a :not_found error when nothing matches" do
       stub_doc(empty_doc())
-      assert {:error, :not_found} = KilnClient.one("posts", %{slug: "missing"})
+
+      assert {:error,
+              %KilnClient.Error{
+                reason: :not_found,
+                status: 404,
+                method: :get,
+                path: "/api/json/posts/published"
+              }} = KilnClient.one("posts", %{slug: "missing"})
+    end
+
+    test "the not-found error names the route it read" do
+      stub_doc(empty_doc())
+
+      assert {:error, %KilnClient.Error{reason: :not_found, path: "/api/json/posts"}} =
+               KilnClient.one("posts", %{slug: "missing"}, published: false)
     end
   end
 
@@ -270,7 +284,7 @@ defmodule KilnClientTest do
         |> Plug.Conn.send_resp(503, "{}")
       end)
 
-      assert {:error, {:http_status, 503, _}} =
+      assert {:error, %KilnClient.Error{reason: :server, status: 503}} =
                KilnClient.artifact("posts", "hello", retry: false)
     end
   end
@@ -321,7 +335,7 @@ defmodule KilnClientTest do
         |> Plug.Conn.send_resp(503, "{}")
       end)
 
-      assert {:error, {:http_status, 503, _}} =
+      assert {:error, %KilnClient.Error{reason: :server, status: 503, path: "/api/sync"}} =
                KilnClient.sync(cursor: "c1", retries: 2, retry_delay_ms: 0)
 
       for _ <- 1..3, do: assert_received({:request, "/api/sync", %{"cursor" => "c1"}})
@@ -394,7 +408,7 @@ defmodule KilnClientTest do
         |> Plug.Conn.send_resp(403, ~s({"errors":[{"code":"forbidden"}]}))
       end)
 
-      assert {:error, {:http_status, 403, %{"errors" => [%{"code" => "forbidden"}]}}} =
+      assert {:error, %KilnClient.Error{reason: :forbidden, status: 403, code: "forbidden"}} =
                KilnClient.restore_revision("page", "p1", "v1")
     end
   end
@@ -484,14 +498,56 @@ defmodule KilnClientTest do
       assert_received {:headers, [], ["application/vnd.api+json"]}
     end
 
-    test "non-2xx responses come back as {:error, {:http_status, status, body}}" do
+    test "non-2xx responses come back as {:error, %KilnClient.Error{}}" do
       Req.Test.stub(KilnClient, fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
         |> Plug.Conn.send_resp(500, ~s({"errors":[]}))
       end)
 
-      assert {:error, {:http_status, 500, %{"errors" => []}}} = KilnClient.list("posts")
+      assert {:error,
+              %KilnClient.Error{
+                reason: :server,
+                status: 500,
+                errors: [],
+                body: %{"errors" => []},
+                method: :get,
+                path: "/api/json/posts/published"
+              }} = KilnClient.list("posts")
+    end
+
+    test "a read's 429 carries retry-after, as a write's does" do
+      Req.Test.stub(KilnClient, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.put_resp_header("retry-after", "7")
+        |> Plug.Conn.send_resp(429, ~s({"errors":[{"code":"rate_limited"}]}))
+      end)
+
+      assert {:error,
+              %KilnClient.Error{reason: :rate_limited, retry_after: 7, code: "rate_limited"}} =
+               KilnClient.search("kiln", req: [retry: false])
+    end
+
+    test "a read with no response is a :transport error carrying the exception" do
+      Req.Test.stub(KilnClient, &Req.Test.transport_error(&1, :econnrefused))
+
+      assert {:error,
+              %KilnClient.Error{
+                reason: :transport,
+                exception: %Req.TransportError{reason: :econnrefused}
+              }} = KilnClient.list("posts", req: [retry: false])
+    end
+
+    test "an invalid sync cursor is a :validation error with its code" do
+      Req.Test.stub(KilnClient, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.send_resp(400, ~s({"errors":[{"code":"invalid_cursor"}]}))
+      end)
+
+      assert {:error, %KilnClient.Error{reason: :validation, code: "invalid_cursor"}} =
+               KilnClient.sync(cursor: "stale")
     end
 
     test "404 is an error, not a crash" do
@@ -501,7 +557,8 @@ defmodule KilnClientTest do
         |> Plug.Conn.send_resp(404, ~s({"errors":[{"code":"not_found"}]}))
       end)
 
-      assert {:error, {:http_status, 404, _}} = KilnClient.artifact("posts", "gone")
+      assert {:error, %KilnClient.Error{reason: :not_found, status: 404, code: "not_found"}} =
+               KilnClient.artifact("posts", "gone")
     end
 
     # Per-call :req rides Req.merge/2 AFTER the configured req_options, so it

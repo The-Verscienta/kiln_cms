@@ -79,11 +79,12 @@ defmodule KilnClient do
 
   ## Errors
 
-  Writes and `graphql/3` return `{:error, %KilnClient.Error{}}` with a
-  `:reason` atom (`:forbidden`, `:validation`, `:conflict`, `:rate_limited`, …
-  — see `KilnClient.Error`). The read functions keep their original
-  `{:error, {:http_status, status, body}}` shape; `KilnClient.Error.normalize/1`
-  converts one when a caller wants a single error handler for both.
+  Every function returns `{:error, %KilnClient.Error{}}` on failure, reads and
+  writes alike, with a `:reason` atom (`:not_found`, `:forbidden`,
+  `:validation`, `:conflict`, `:rate_limited`, … see `KilnClient.Error`).
+  Before 0.5.0 the reads returned `{:http_status, status, body}`, a bare
+  transport exception, or `:not_found`; `KilnClient.Error.normalize/1` still
+  converts those, for code that stored or wrapped them.
   """
 
   require Logger
@@ -132,26 +133,24 @@ defmodule KilnClient do
 
   Returns `{:ok, %{items:, included:, total:}}`.
   """
-  @spec list(String.t(), keyword()) :: {:ok, list_result()} | {:error, term()}
+  @spec list(String.t(), keyword()) :: {:ok, list_result()} | {:error, Error.t()}
   def list(plural, opts \\ []) do
-    path =
-      if published?(opts),
-        do: "/api/json/#{plural}/published",
-        else: "/api/json/#{plural}"
-
-    case request(:get, path, params: query_params(opts), req: opts[:req]) do
+    case request(:get, list_path(plural, opts), params: query_params(opts), req: opts[:req]) do
       {:ok, doc} -> {:ok, flatten_doc(doc)}
       {:error, reason} -> {:error, reason}
     end
   end
 
   @doc """
-  Fetch the first record matching `filter`, or `{:error, :not_found}`.
+  Fetch the first record matching `filter`, or
+  `{:error, %KilnClient.Error{reason: :not_found, status: 404}}` when nothing
+  matches. The list answered 200 with no rows, so `:body` is `nil`; 404 is
+  reported so a "no such record" handler covers this and a real 404 alike.
 
   Same options as `list/2`. The included lookup is merged into the result
   under `"included"` so detail callers get their joins in one value.
   """
-  @spec one(String.t(), map(), keyword()) :: {:ok, item()} | {:error, term()}
+  @spec one(String.t(), map(), keyword()) :: {:ok, item()} | {:error, Error.t()}
   def one(plural, filter, opts \\ []) do
     opts = opts |> Keyword.put(:filter, filter) |> Keyword.merge(limit: 1, count: false)
 
@@ -160,7 +159,8 @@ defmodule KilnClient do
         {:ok, Map.put(item, "included", included)}
 
       {:ok, %{items: []}} ->
-        {:error, :not_found}
+        {:error,
+         %Error{reason: :not_found, status: 404, method: :get, path: list_path(plural, opts)}}
 
       {:error, reason} ->
         {:error, reason}
@@ -178,7 +178,7 @@ defmodule KilnClient do
   without that, records past the clamp would be silently indistinguishable
   from misses.
   """
-  @spec by_ids(String.t(), [String.t()], keyword()) :: {:ok, [item()]} | {:error, term()}
+  @spec by_ids(String.t(), [String.t()], keyword()) :: {:ok, [item()]} | {:error, Error.t()}
   def by_ids(plural, ids, opts \\ [])
 
   def by_ids(_plural, [], _opts), do: {:ok, []}
@@ -224,7 +224,7 @@ defmodule KilnClient do
   own maximum), `:include`, `:fields`, `:published`, `:req`.
   """
   @spec text_search(String.t(), String.t(), keyword()) ::
-          {:ok, list_result()} | {:error, term()}
+          {:ok, list_result()} | {:error, Error.t()}
   def text_search(plural, query, opts \\ []) do
     search_request(plural, "search", [{"query", query}], opts)
   end
@@ -240,7 +240,7 @@ defmodule KilnClient do
   doc) — a degraded embedding backend stalls rather than fails.
   """
   @spec semantic_search(String.t(), String.t(), keyword()) ::
-          {:ok, list_result()} | {:error, term()}
+          {:ok, list_result()} | {:error, Error.t()}
   def semantic_search(plural, query, opts \\ []) do
     search_request(plural, "semantic-search", [{"query", query}], opts)
   end
@@ -254,7 +254,7 @@ defmodule KilnClient do
   suggestions, best match first.
   """
   @spec autocomplete(String.t(), String.t(), keyword()) ::
-          {:ok, list_result()} | {:error, term()}
+          {:ok, list_result()} | {:error, Error.t()}
   def autocomplete(plural, prefix, opts \\ []) do
     search_request(plural, "autocomplete", [{"prefix", prefix}], opts)
   end
@@ -302,7 +302,7 @@ defmodule KilnClient do
   > minting account can see. Mint delivery keys on a `:viewer` account
   > (see Kiln's `docs/api.md` → "API keys").
   """
-  @spec search(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec search(String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def search(q, opts \\ []) do
     params =
       [q: q]
@@ -322,7 +322,7 @@ defmodule KilnClient do
   A cold cache answers 503; this retries once after `:retry_delay_ms`
   (default 2000) before giving up. Pass `retry: false` to fail fast.
   """
-  @spec artifact(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec artifact(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def artifact(plural, slug, opts \\ []) do
     params =
       []
@@ -332,7 +332,7 @@ defmodule KilnClient do
     path = "/api/content/#{plural}/#{slug}"
 
     case request(:get, path, params: params, req: opts[:req]) do
-      {:error, {:http_status, 503, _}} = error ->
+      {:error, %Error{status: 503}} = error ->
         if opts[:retry] == false do
           error
         else
@@ -371,11 +371,11 @@ defmodule KilnClient do
   (default 2000) for a page answering 503 while a just-published document's
   artifact compiles; `:req`.
 
-  `{:error, {:http_status, 400, %{"errors" => [%{"code" => "invalid_cursor"} | _]}}}`
-  means the cursor can no longer be honoured (the server's secret was
+  `{:error, %KilnClient.Error{code: "invalid_cursor"}}` (a 400, so `reason:
+  :validation`) means the cursor can no longer be honoured (the server's secret was
   rotated, or it came from another site): start over without `:cursor`.
   """
-  @spec sync(keyword()) :: {:ok, %{items: [map()], cursor: String.t()}} | {:error, term()}
+  @spec sync(keyword()) :: {:ok, %{items: [map()], cursor: String.t()}} | {:error, Error.t()}
   def sync(opts \\ []), do: sync_pages(opts[:cursor], opts, [])
 
   defp sync_pages(cursor, opts, acc) do
@@ -405,7 +405,7 @@ defmodule KilnClient do
       |> put_param(:limit, opts[:limit])
 
     case request(:get, "/api/sync", params: params, req: opts[:req]) do
-      {:error, {:http_status, 503, _}} when retries > 0 ->
+      {:error, %Error{status: 503}} when retries > 0 ->
         Process.sleep(Keyword.get(opts, :retry_delay_ms, 2_000))
         sync_page(cursor, opts, retries - 1)
 
@@ -501,7 +501,7 @@ defmodule KilnClient do
   the set, `:add_tag_ids`/`:remove_tag_ids` merge (don't combine the two).
   """
   @spec update_media(String.t(), keyword() | map(), keyword()) ::
-          {:ok, item()} | {:error, term()}
+          {:ok, item()} | {:error, Error.t()}
   def update_media(id, changes, opts \\ []) do
     attributes =
       Map.new(changes, fn {key, value} -> {key, value} end)
@@ -521,7 +521,7 @@ defmodule KilnClient do
   presign (it needs S3 with a private bucket); use `upload_media/2` instead.
   """
   @spec begin_direct_upload(String.t(), pos_integer(), keyword()) ::
-          {:ok, map()} | {:error, term()}
+          {:ok, map()} | {:error, Error.t()}
   def begin_direct_upload(filename, byte_size, opts \\ []) do
     :post
     |> write_request("/api/media/uploads", %{filename: filename, byte_size: byte_size},
@@ -651,7 +651,7 @@ defmodule KilnClient do
   Returns `{:ok, %{"data" => [revision], "meta" => %{"limit" => n,
   "next_cursor" => cursor | nil}}}` — page until `next_cursor` is `nil`.
   """
-  @spec list_revisions(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec list_revisions(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def list_revisions(type, id, opts \\ []) do
     params =
       []
@@ -668,7 +668,7 @@ defmodule KilnClient do
   `{:ok, revision}`.
   """
   @spec revision(String.t(), String.t(), String.t(), keyword()) ::
-          {:ok, map()} | {:error, term()}
+          {:ok, map()} | {:error, Error.t()}
   def revision(type, id, version_id, opts \\ []) do
     path = revisions_path(type, id) <> "/" <> segment(version_id)
 
@@ -683,12 +683,12 @@ defmodule KilnClient do
   `POST /api/content/:type/:id/revisions/:version_id/restore`.
 
   Needs a `:read_write` key — a read-only key gets
-  `{:error, {:http_status, 403, body}}`. Workflow state is untouched; the
+  `{:error, %KilnClient.Error{reason: :forbidden}}`. Workflow state is untouched; the
   restore is itself recorded as a new revision, returned under `"revision"`
   with `"id"`, `"type"`, `"state"` and `"restored_version_id"`.
   """
   @spec restore_revision(String.t(), String.t(), String.t(), keyword()) ::
-          {:ok, map()} | {:error, term()}
+          {:ok, map()} | {:error, Error.t()}
   def restore_revision(type, id, version_id, opts \\ []) do
     path = revisions_path(type, id) <> "/" <> segment(version_id) <> "/restore"
 
@@ -707,7 +707,7 @@ defmodule KilnClient do
   `:fields`, `:limit`, `:offset`, `:count`, `:req`); there is no
   `/published` feed here. Returns `{:ok, %{items:, included:, total:}}`.
   """
-  @spec list_releases(keyword()) :: {:ok, list_result()} | {:error, term()}
+  @spec list_releases(keyword()) :: {:ok, list_result()} | {:error, Error.t()}
   def list_releases(opts \\ []), do: json_api_index("/api/json/releases", opts)
 
   @doc """
@@ -715,7 +715,7 @@ defmodule KilnClient do
   and `:fields` as for `list_releases/1`; the included lookup is merged into
   the result under `"included"`, as `one/3` does.
   """
-  @spec release(String.t(), keyword()) :: {:ok, item()} | {:error, term()}
+  @spec release(String.t(), keyword()) :: {:ok, item()} | {:error, Error.t()}
   def release(id, opts \\ []) do
     params =
       []
@@ -737,7 +737,7 @@ defmodule KilnClient do
   for one release's. Each names its document as `"content_type"` +
   `"content_id"`. Same options as `list_releases/1`.
   """
-  @spec list_release_items(keyword()) :: {:ok, list_result()} | {:error, term()}
+  @spec list_release_items(keyword()) :: {:ok, list_result()} | {:error, Error.t()}
   def list_release_items(opts \\ []), do: json_api_index("/api/json/release-items", opts)
 
   defp json_api_index(path, opts) do
@@ -1083,6 +1083,10 @@ defmodule KilnClient do
   # alternative (opting *in* per call site) re-arms the moment someone adds one.
   defp published?(opts), do: Keyword.get(opts, :published, true)
 
+  defp list_path(plural, opts) do
+    if published?(opts), do: "/api/json/#{plural}/published", else: "/api/json/#{plural}"
+  end
+
   # --- internal: write shapes ---
 
   # The singular JSON:API `type` the server validates `data.type` against.
@@ -1114,24 +1118,20 @@ defmodule KilnClient do
 
   # --- internal: transport ---
 
-  # Reads: the original return contract, `{:ok, body}` or
-  # `{:error, {:http_status, status, body}}` / `{:error, exception}` — kept
-  # as-is so existing callers' pattern matches hold.
+  # Reads: `{:ok, body}` or `{:error, %Error{}}`, the same struct the writes
+  # return (0.5.0; before that a read returned `{:http_status, status, body}`
+  # or the bare exception). A 404 isn't logged: a missing slug is an expected
+  # answer for a read, not a fault.
   defp request(method, path, opts) do
     case do_request(method, path, opts, Application.get_env(:kiln_client, :api_key)) do
       {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
         {:ok, body}
 
-      {:ok, %Req.Response{status: 404, body: body}} ->
-        {:error, {:http_status, 404, body}}
+      {:ok, %Req.Response{status: 404, body: body, headers: headers}} ->
+        {:error, Error.from_response(404, body, headers, method: method, path: path)}
 
-      {:ok, %Req.Response{status: status, body: body}} ->
-        Logger.warning("Kiln #{method} #{path} returned #{status}: #{inspect(body)}")
-        {:error, {:http_status, status, body}}
-
-      {:error, exception} ->
-        Logger.error("Kiln #{method} #{path} failed: #{inspect(exception)}")
-        {:error, exception}
+      other ->
+        to_error(other, method, path)
     end
   end
 

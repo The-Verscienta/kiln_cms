@@ -17,7 +17,7 @@ UI" workflow, scoped to fields.
 
 - **Define**: `KilnCMS.CMS.FieldDefinition` rows describe each field
   (`content_type`, `name`, `label`, `field_type`, `required`, `options`,
-  `allow_custom`, `format`, `option_labels`,
+  `allow_custom`, `format`, `option_labels`, `section`,
   `target_type`, `target_types`, `multiple`, `min_items`, `max_items`,
   `max_sources`, `on_target_delete`, `inverse_label`, `inverse_name`,
   `schema_org_property`,
@@ -53,6 +53,20 @@ UI" workflow, scoped to fields.
   from the library drawer's multi-select and reordered tile by tile. Flipping
   the setting reshapes stored values: a single image becomes a one-image
   gallery, and a gallery keeps only its first image.
+- **Sections**: a field's `section` files it under a heading in the content
+  editor's Custom fields panel ("Identity", "TCM properties", "Safety"), so a
+  type with many fields reads as a few collapsible sections instead of one
+  long scroll. Every field naming the same section sits under one heading,
+  at the place of the section's first field in `position` order; a field
+  with no section renders bare where it falls. A section starts open when its
+  fields already hold a stored value (on a record with none, the first
+  section does), always when one of its fields has an error, and closed
+  otherwise; each heading counts its filled fields, and *Expand all* /
+  *Collapse all* act on every section. A collapsed section's inputs still
+  submit. Editor-only: the value, its delivery and its validation are
+  unchanged, and the schema export reports the section as `x-kiln-section`.
+  Record-level fields only — a link field or group sub-field sits inside its
+  parent.
 - **Option labels**: a `:select` field's `options` are the stored values —
   often codes such as `transforming_phlegm` — and `option_labels` maps any of
   them to what an editor reads (`%{"transforming_phlegm" => "Transforming
