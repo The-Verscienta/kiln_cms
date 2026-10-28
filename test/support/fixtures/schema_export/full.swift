@@ -1123,10 +1123,12 @@ public struct PostDocument: Codable, Hashable, Sendable {
         public let seo: Seo?
         public let subtitle: String?
         public let summary: String?
+        /// The items, in the order the editor arranged them.
+        public let synonyms: [String]?
         public let tier: String?
         public let `where`: Where?
 
-        public init(codeSample: String? = nil, dosages: [DosagesItem]? = nil, featured: Bool? = nil, gallery: [GalleryItem]? = nil, hero: Hero? = nil, homepage: String? = nil, launchDate: String? = nil, parent: [String: JSONValue]? = nil, properties: [String]? = nil, publishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, related: [RelatedItem]? = nil, seo: Seo? = nil, subtitle: String? = nil, summary: String? = nil, tier: String? = nil, `where`: Where? = nil) {
+        public init(codeSample: String? = nil, dosages: [DosagesItem]? = nil, featured: Bool? = nil, gallery: [GalleryItem]? = nil, hero: Hero? = nil, homepage: String? = nil, launchDate: String? = nil, parent: [String: JSONValue]? = nil, properties: [String]? = nil, publishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, related: [RelatedItem]? = nil, seo: Seo? = nil, subtitle: String? = nil, summary: String? = nil, synonyms: [String]? = nil, tier: String? = nil, `where`: Where? = nil) {
             self.codeSample = codeSample
             self.dosages = dosages
             self.featured = featured
@@ -1143,6 +1145,7 @@ public struct PostDocument: Codable, Hashable, Sendable {
             self.seo = seo
             self.subtitle = subtitle
             self.summary = summary
+            self.synonyms = synonyms
             self.tier = tier
             self.`where` = `where`
         }
@@ -1164,6 +1167,7 @@ public struct PostDocument: Codable, Hashable, Sendable {
             case seo
             case subtitle
             case summary
+            case synonyms
             case tier
             case `where`
         }

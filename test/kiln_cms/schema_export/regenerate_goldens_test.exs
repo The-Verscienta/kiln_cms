@@ -6,7 +6,7 @@ defmodule KilnCMS.SchemaExport.RegenerateGoldensTest do
 
   The fixture is a real `KilnCMS.SchemaExport.json_schema/1` export: every
   registered block plus `post` and `page`, with a `post` custom field of each
-  kind (both `:text` formats with `deliver_plain`, single and multiple
+  kind (a `:string` list, both `:text` formats with `deliver_plain`, single and multiple
   `:select`/`:media`/`:reference`, a single and a repeating `:group`, a
   `Kiln.FieldType`). Checked in rather than built per run, so the goldens
   change only when someone regenerates them and the diff shows what moved.
@@ -26,6 +26,7 @@ defmodule KilnCMS.SchemaExport.RegenerateGoldensTest do
 
   @fields [
     {"subtitle", :string, %{}},
+    {"synonyms", :string, %{multiple: true}},
     {"summary", :text, %{deliver_plain: true}},
     {"code_sample", :text, %{format: :plain}},
     {"read_time", :integer, %{}},

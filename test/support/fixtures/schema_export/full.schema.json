@@ -1836,6 +1836,17 @@
                 "null"
               ]
             },
+            "synonyms": {
+              "description": "The items, in the order the editor arranged them.",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ],
+              "uniqueItems": true
+            },
             "tier": {
               "type": [
                 "string",
