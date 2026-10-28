@@ -207,7 +207,7 @@ Decisions after D16 live in the plan that argued them.
 
 - **D17** — dynamic content types alongside compiled ones: [`docs/dynamic-content-types-plan.md`](docs/dynamic-content-types-plan.md).
 - **D18** — the `Kiln.Plugin` behaviour: [`docs/plugin-system-plan.md`](docs/plugin-system-plan.md).
-- **D19–D21** — content organization: one hierarchical term vocabulary (D19, proposed, #1595), references as edges (D20, adopted in capability), and **D21, content gets a tree** (locked, shipped 1.1: `parent_id`/`position`, `[ancestors]` aliases, subtree moves re-derived in a job): [`docs/content-organization-plan.md` §7](docs/content-organization-plan.md#7-workstream-e--the-structure-decision-1597). The subtree-move cost D21 asked to have measured is in [`docs/benchmarks.md`](docs/benchmarks.md#content-tree-moving-a-large-subtree).
+- **D19–D21** — content organization: one hierarchical term vocabulary (D19, proposed, #1595), references as edges (D20, adopted in capability), and **D21, content gets a tree** (locked, shipped 1.1: `parent_id`/`position`, `[ancestors]` aliases, subtree moves re-derived in a job): [`docs/content-organization-plan.md`](docs/content-organization-plan.md), §7. The subtree-move cost D21 asked to have measured is in [`docs/benchmarks.md`](docs/benchmarks.md#content-tree-moving-a-large-subtree).
 
 ---
 
