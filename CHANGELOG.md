@@ -65,11 +65,11 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A `:select` field can hold several terms, in a tag picker; `allow_custom`
   opens its vocabulary. `mix kiln.fields.convert` moves JSON-string lists in.**
-  ([long form](docs/changelog/unreleased.md#multiple-select))
+  ([#2099](https://github.com/The-Verscienta/kiln_cms/pull/2099) · [long form](docs/changelog/unreleased.md#multiple-select))
 
 - **`:text` custom fields get the TipTap editor (bold, italic, links, lists),
   sanitized on write; `format: :plain` keeps the textarea.**
-  ([long form](docs/changelog/unreleased.md#rich-text-fields))
+  ([#2099](https://github.com/The-Verscienta/kiln_cms/pull/2099) · [long form](docs/changelog/unreleased.md#rich-text-fields))
 
 - **The governance trail shows what readers saw: each publish and withdrawal
   with its approver, CDN purge, each endpoint's delivery, `?as_of=` and chain.**
