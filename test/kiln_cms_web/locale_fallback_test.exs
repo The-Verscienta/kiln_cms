@@ -371,6 +371,28 @@ defmodule KilnCMSWeb.LocaleFallbackTest do
       assert json_api("/api/json/pages/by-slug/#{s}?locale=de").status == 400
     end
 
+    # #1884: leaving `?locale=` out was a 400 here while the delivery API
+    # defaulted it. It now starts the walk at the default locale, chain and all.
+    test "a missing ?locale= starts at the default locale and still walks its chain", %{
+      actor: actor
+    } do
+      s = slug()
+      published(actor, s, "en")
+
+      conn = json_api("/api/json/pages/by-slug/#{s}")
+
+      assert conn.status == 200
+      assert %{"data" => %{"attributes" => %{"locale" => "en"}}} = Jason.decode!(conn.resp_body)
+      assert served(conn) == {["en"], ["en"]}
+
+      chains!(%{"en" => ["fr"]})
+      s2 = slug()
+      published(actor, s2, "fr")
+
+      conn = json_api("/api/json/pages/by-slug/#{s2}")
+      assert %{"data" => %{"attributes" => %{"locale" => "fr"}}} = Jason.decode!(conn.resp_body)
+    end
+
     # AshJsonApi reads every public read argument off the query string, the
     # action's delivery-widening `audiences`/`unlocks` included. The route
     # authorizes, so the `Content` read policies must still keep a gated
@@ -417,6 +439,18 @@ defmodule KilnCMSWeb.LocaleFallbackTest do
                run(query, %{"slug" => s, "locale" => "es", "fallback" => false})
 
       assert {:ok, %{errors: [_ | _]}} = run(query, %{"slug" => s, "locale" => "de"})
+    end
+
+    test "pageBySlug without a locale starts at the default locale (#1884)", %{actor: actor} do
+      s = slug()
+      published(actor, s, "en")
+
+      query = """
+      query ($slug: String!) { pageBySlug(slug: $slug) { title locale } }
+      """
+
+      assert {:ok, %{data: %{"pageBySlug" => %{"locale" => "en", "title" => "en title"}}}} =
+               run(query, %{"slug" => s})
     end
 
     test "menu follows a configured chain", %{} do
