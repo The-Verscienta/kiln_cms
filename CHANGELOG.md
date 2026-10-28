@@ -75,6 +75,10 @@ Every summary line below that was shortened links to its own entry there.
   class per type, block and group row, and `Block`/`Document` interfaces with `Unknown`.**
   ([#2109](https://github.com/The-Verscienta/kiln_cms/pull/2109) · [long form](docs/changelog/unreleased.md#kotlin-schema-export))
 
+- **Sections in the Custom fields panel: a field's `section` files it under a
+  collapsible heading; only sections already holding values start open.**
+  ([#2116](https://github.com/The-Verscienta/kiln_cms/pull/2116) · [long form](docs/changelog/unreleased.md#field-sections))
+
 - **`:select` options can carry labels (`option_labels`): editors see
   "Transforming phlegm" while `transforming_phlegm` stays the stored value.**
   ([#2107](https://github.com/The-Verscienta/kiln_cms/pull/2107) · [long form](docs/changelog/unreleased.md#option-labels))
@@ -151,6 +155,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Moving a section in the content tree reads only its subtree (recursive CTE),
   not the whole type: a 10,000-document move peaks at 27 MB, not 180 MB.**
   ([#2117](https://github.com/The-Verscienta/kiln_cms/pull/2117) · [benchmark](docs/benchmarks.md#content-tree-moving-a-large-subtree))
+
+- **A bare `GET /api` redirects (302) to `/developers`, the API summary,
+  instead of answering 404; every `/api/*` route is unchanged.**
+  ([#2114](https://github.com/The-Verscienta/kiln_cms/pull/2114))
 
 - **The schema export states the media snapshot once, as `$defs.media_snapshot`;
   nullable uses are `anyOf: [$ref, null]`, so generated clients get one type.**

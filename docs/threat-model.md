@@ -54,6 +54,7 @@ the router so preflights are answered before route matching).
 | First-run bootstrap | `/setup` | none — the `:bootstrap_admin` policy (`Checks.NoAdminExists`) + advisory lock in `KilnCMS.Accounts.Bootstrap` are the gate | none |
 | GraphQL | `/gql` (GET + POST), `/ws/gql` | optional JWT / API key | `:gql` (per operation, on both transports), `:gql_join` (socket connects) |
 | JSON:API | `/api/json/**` (GET/POST/PATCH/DELETE) | optional JWT / API key | `:api` |
+| API landing | `GET /api` (302 to `/developers`) | none | none (`:browser` pipeline) |
 | Headless REST | `/api/content/**`, `/api/resolve`, `/api/locales`, `/api/search`, `/api/ask`, `/api/provenance/**`, `/api/visual-editing/:type/:slug`, `/api/sync`, `/api/schema`, `/api/menus/**`, `/api/content/:type/:id/revisions/**` | optional JWT / API key | `:api` |
 | OpenAPI & explorer | `/api/json/open_api`, `/api/json/swaggerui` | none — and **not served in prod** unless `API_DOCS_ENABLED` (#567); the document (never the explorer) also answers any valid API key | `:docs` |
 | GraphQL SDL | `GET /api/graphql/schema.graphql` | none where introspection is on; **API key required** in prod unless `GRAPHQL_INTROSPECTION_ENABLED` | `:docs` |

@@ -1,0 +1,143 @@
+name: Kotlin models
+
+# The Kotlin emitter's compile-and-decode test (#2109), on its own so it runs
+# only when what it checks can have changed: the emitter and the walker it
+# shares with Swift and TypeScript, the task, the test and its fixtures. A
+# block or field change that alters the schema shows up here too, because the
+# golden test makes that PR regenerate `full.schema.json` and `full.kt` under
+# test/support/fixtures/schema_export. Run it by hand from the Actions tab
+# (workflow_dispatch) for anything the filter misses, such as a compiler bump.
+on:
+  push:
+    branches: [main]
+    # Keep the two lists the same.
+    paths:
+      - "lib/kiln_cms/schema_export.ex"
+      - "lib/kiln_cms/schema_export/**"
+      - "lib/mix/tasks/kiln.export.schema.ex"
+      - "test/kiln_cms/schema_export/kotlin_compile_test.exs"
+      - "test/support/fixtures/schema_export/**"
+      - "clients/js/test/fixtures/schema.json"
+      - "test/test_helper.exs"
+      - ".github/workflows/kotlin-models.yml"
+  pull_request:
+    paths:
+      - "lib/kiln_cms/schema_export.ex"
+      - "lib/kiln_cms/schema_export/**"
+      - "lib/mix/tasks/kiln.export.schema.ex"
+      - "test/kiln_cms/schema_export/kotlin_compile_test.exs"
+      - "test/support/fixtures/schema_export/**"
+      - "clients/js/test/fixtures/schema.json"
+      - "test/test_helper.exs"
+      - ".github/workflows/kotlin-models.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  MIX_ENV: test
+
+jobs:
+  # `:kotlinc` is excluded from ci.yml's shards: `kotlinc` ships the
+  # kotlinx.serialization compiler plugin but not its runtime, so
+  # `test_helper.exs` only includes the tag when
+  # `KOTLINX_SERIALIZATION_CLASSPATH` names the jars. This job pins a compiler
+  # and the two jars, each checked against the SHA-256 its publisher lists
+  # (GitHub release `.sha256` for the compiler, Maven Central `.sha1`
+  # cross-checked locally for the jars), and runs just that file. The runner
+  # image's own Kotlin isn't used: its version moves when GitHub rolls the
+  # image.
+  #
+  # Never make this a required check: a path-filtered workflow that does not
+  # run never reports, and a required check that never reports blocks the
+  # merge of every PR outside these paths.
+  kotlin_models:
+    name: Kotlin models (kotlinc)
+    runs-on: ubuntu-24.04
+
+    services:
+      postgres:
+        # pgvector rather than plain postgres — see `build` in ci.yml. The test fires a
+        # real post, so it needs the database, not just `test_helper.exs`.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      MIX_TEST_PARTITION: kotlin
+      # Bump all of these together: a new compiler can need a newer runtime.
+      KOTLIN_VERSION: 2.4.21
+      KOTLIN_SHA256: 7cc140e76daf416a0424a5557f99afd7ca89ebd463ea1101261e3e01c33e75cd
+      KOTLINX_SERIALIZATION_VERSION: 1.12.0
+      KOTLINX_SERIALIZATION_CORE_SHA256: bcfddcac76159058ba0953af05938c17111d238cd41be7191874656454d62f1a
+      KOTLINX_SERIALIZATION_JSON_SHA256: 879eb73e46cb63253ab0fa7cca4448f5c96bca1a16ff377abcb71ebab60e0631
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Mix (toolchain, cache, deps, compile)
+        uses: ./.github/actions/setup-mix
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Cache the Kotlin compiler and serialization runtime
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/kiln-kotlin
+          key: kotlin-${{ env.KOTLIN_VERSION }}-${{ env.KOTLIN_SHA256 }}-serialization-${{ env.KOTLINX_SERIALIZATION_VERSION }}-${{ env.KOTLINX_SERIALIZATION_CORE_SHA256 }}-${{ env.KOTLINX_SERIALIZATION_JSON_SHA256 }}
+
+      - name: Install kotlinc and the kotlinx.serialization jars
+        # Checksums are verified on every run, cache hit or not: a restored
+        # cache is still a download someone else made.
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          dir="$HOME/.cache/kiln-kotlin"
+          mkdir -p "$dir"
+          fetch() {
+            [ -f "$2" ] || curl -fsSL --retry 3 --retry-all-errors --max-time 300 -o "$2" "$1"
+          }
+          zip="$dir/kotlin-compiler-$KOTLIN_VERSION.zip"
+          fetch "https://github.com/JetBrains/kotlin/releases/download/v$KOTLIN_VERSION/kotlin-compiler-$KOTLIN_VERSION.zip" "$zip"
+          maven="https://repo1.maven.org/maven2/org/jetbrains/kotlinx"
+          v="$KOTLINX_SERIALIZATION_VERSION"
+          core="$dir/kotlinx-serialization-core-jvm-$v.jar"
+          json="$dir/kotlinx-serialization-json-jvm-$v.jar"
+          fetch "$maven/kotlinx-serialization-core-jvm/$v/kotlinx-serialization-core-jvm-$v.jar" "$core"
+          fetch "$maven/kotlinx-serialization-json-jvm/$v/kotlinx-serialization-json-jvm-$v.jar" "$json"
+          sha256sum -c - <<SUMS
+          $KOTLIN_SHA256  $zip
+          $KOTLINX_SERIALIZATION_CORE_SHA256  $core
+          $KOTLINX_SERIALIZATION_JSON_SHA256  $json
+          SUMS
+          rm -rf "$RUNNER_TEMP/kotlinc"
+          unzip -q "$zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/kotlinc/bin" >> "$GITHUB_PATH"
+          echo "KOTLIN_HOME=$RUNNER_TEMP/kotlinc" >> "$GITHUB_ENV"
+          echo "KOTLINX_SERIALIZATION_CLASSPATH=$core:$json" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/kotlinc/bin/kotlinc" -version
+
+      - name: Compile and decode the generated Kotlin
+        # `--only`, so the tag cannot be excluded quietly: if the setup above
+        # stopped reaching `test_helper.exs`, the tests would fail on the
+        # missing variable, and a run that selected no test fails too.
+        run: mix test test/kiln_cms/schema_export/kotlin_compile_test.exs --only kotlinc
+
